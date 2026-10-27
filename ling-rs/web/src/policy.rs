@@ -46,11 +46,12 @@ pub trait PromptSource: Send + Sync {
     /// a `!` command asks for its thread. An implementation that cannot tell answers true.
     fn airgapped_on(&self, thread_id: Option<&str>) -> bool;
     /// Whether `cwd` is an existing checkout recorded in `$CODEX_HOME/chat-repos/index.json` under
-    /// `$CODEX_HOME/chat-repos/`.
-    fn repo_checkout(&self, cwd: &str) -> bool;
-    /// Whether `thread_id` is the `app_thread` of a checkout in `$CODEX_HOME/chat-repos/index.json`.
-    fn repo_thread(&self, thread_id: &str) -> bool;
-    /// Whether the caller is a paired phone bridge device rather than the owner's browser session or desktop app.
+    /// `$CODEX_HOME/chat-repos/`: `Some(read_only)` when recorded, `None` otherwise.
+    fn repo_checkout(&self, cwd: &str) -> Option<bool>;
+    /// The recorded checkout `cwd` when `thread_id` is in `app_threads` of a checkout in
+    /// `$CODEX_HOME/chat-repos/index.json`, or `None` otherwise.
+    fn repo_thread_cwd(&self, thread_id: &str) -> Option<String>;
+    /// Whether the caller is a paired phone bridge device or bridge session rather than the owner's browser session or desktop app.
     fn is_bridge(&self) -> bool;
 }
 
@@ -67,6 +68,8 @@ pub struct Policy {
     pub scratch_prompts: BTreeSet<String>,
     pub repo_prompts: BTreeSet<String>,
     pub repo_thread_params: Map<String, Value>,
+    pub repo_read_only_thread_params: Map<String, Value>,
+    pub pinned_turn_fields: Vec<String>,
     pub scratch_fields: Vec<String>,
     pub scratch_sandbox: String,
     pub import_request: String,
@@ -130,6 +133,12 @@ impl Policy {
                 .and_then(Value::as_object)
                 .cloned()
                 .ok_or_else(|| "policy.json: `repoThreadParams` must be an object".to_string())?,
+            repo_read_only_thread_params: value
+                .get("repoReadOnlyThreadParams")
+                .and_then(Value::as_object)
+                .cloned()
+                .ok_or_else(|| "policy.json: `repoReadOnlyThreadParams` must be an object".to_string())?,
+            pinned_turn_fields: strings(&value, "pinnedTurnFields")?,
             scratch_fields: strings(&value, "scratchFields")?,
             scratch_sandbox: string(&value, "scratchSandbox")?,
             import_request: string(&value, "importRequest")?,
@@ -252,6 +261,19 @@ impl Policy {
                         object.insert("params".to_string(), Value::Object(params));
                     }
                 }
+                if method == "turn/start"
+                    && let Some(Value::Object(params)) = object.get_mut("params")
+                {
+                    let is_repo = params
+                        .get("threadId")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| prompts.repo_thread_cwd(id).is_some());
+                    if prompts.is_bridge() || is_repo {
+                        for field in &self.pinned_turn_fields {
+                            params.remove(field);
+                        }
+                    }
+                }
                 if method == self.import_request {
                     let params = object.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
                     object.insert("params".to_string(), Value::Object(self.vet_import_params(params, prompts.airgapped_on(None))?));
@@ -291,10 +313,16 @@ impl Policy {
         if let Some(folder) = existing.clone() {
             self.confine(&mut params, folder);
         }
-        // A resumed or forked chat-work thread keeps its workspace-write sandbox and on-request approvals.
-        let existing_repo = params.get("threadId").and_then(Value::as_str).is_some_and(|id| prompts.repo_thread(id));
-        if existing_repo {
-            for (k, v) in &self.repo_thread_params {
+        // A resumed or forked chat-work thread stays in its recorded checkout with its sandbox and on-request approvals.
+        let existing_repo_cwd = params.get("threadId").and_then(Value::as_str).and_then(|id| prompts.repo_thread_cwd(id));
+        if let Some(ref repo_cwd) = existing_repo_cwd {
+            for field in &self.scratch_fields {
+                params.remove(field);
+            }
+            params.insert("cwd".to_string(), Value::String(repo_cwd.clone()));
+            let read_only = prompts.repo_checkout(repo_cwd).unwrap_or(false);
+            let pinned = if read_only { &self.repo_read_only_thread_params } else { &self.repo_thread_params };
+            for (k, v) in pinned {
                 params.insert(k.clone(), v.clone());
             }
         }
@@ -325,7 +353,7 @@ impl Policy {
         if let Some(prompt) = existing.as_deref().and_then(|folder| self.prompt_of_folder(folder)) {
             config.extend(self.prompt_thread_config[prompt].clone());
         }
-        if existing_repo {
+        if existing_repo_cwd.is_some() {
             for prompt in &self.repo_prompts {
                 if let Some(prompt_config) = self.prompt_thread_config.get(prompt) {
                     config.extend(prompt_config.clone());
@@ -353,6 +381,13 @@ impl Policy {
         {
             return Err("a phone bridge starts only Ask threads or chat-work threads in a forge checkout".to_string());
         }
+        if !self.prompt_openers.contains(method)
+            && prompts.is_bridge()
+            && existing.is_none()
+            && existing_repo_cwd.is_none()
+        {
+            return Err("a phone bridge resumes only Ask threads or chat-work threads".to_string());
+        }
         if let Some(prompt_config) = name.as_ref().and_then(|name| self.prompt_thread_config.get(name)) {
             config.extend(prompt_config.clone());
         }
@@ -361,10 +396,11 @@ impl Policy {
         }
         let Some(name) = name else { return Ok(params) };
         if self.repo_prompts.contains(&name) {
-            if !params.get("cwd").and_then(Value::as_str).is_some_and(|cwd| prompts.repo_checkout(cwd)) {
+            let Some(read_only) = params.get("cwd").and_then(Value::as_str).and_then(|cwd| prompts.repo_checkout(cwd)) else {
                 return Err("a chat-work thread starts only in a checkout ling web made for it".to_string());
-            }
-            for (k, v) in &self.repo_thread_params {
+            };
+            let pinned = if read_only { &self.repo_read_only_thread_params } else { &self.repo_thread_params };
+            for (k, v) in pinned {
                 params.insert(k.clone(), v.clone());
             }
         }
@@ -510,8 +546,8 @@ mod tests {
     struct Stub {
         made: Mutex<u32>,
         airgapped: std::sync::atomic::AtomicBool,
-        repo_checkouts: Mutex<HashSet<String>>,
-        repo_threads: Mutex<HashSet<String>>,
+        repo_checkouts: Mutex<BTreeMap<String, bool>>,
+        repo_threads: Mutex<BTreeMap<String, String>>,
         bridge: std::sync::atomic::AtomicBool,
     }
 
@@ -530,11 +566,11 @@ mod tests {
         fn airgapped_on(&self, _thread_id: Option<&str>) -> bool {
             self.airgapped.load(std::sync::atomic::Ordering::Relaxed)
         }
-        fn repo_checkout(&self, cwd: &str) -> bool {
-            self.repo_checkouts.lock().unwrap().contains(cwd)
+        fn repo_checkout(&self, cwd: &str) -> Option<bool> {
+            self.repo_checkouts.lock().unwrap().get(cwd).copied()
         }
-        fn repo_thread(&self, thread_id: &str) -> bool {
-            self.repo_threads.lock().unwrap().contains(thread_id)
+        fn repo_thread_cwd(&self, thread_id: &str) -> Option<String> {
+            self.repo_threads.lock().unwrap().get(thread_id).cloned()
         }
         fn is_bridge(&self) -> bool {
             self.bridge.load(std::sync::atomic::Ordering::Relaxed)
@@ -563,6 +599,10 @@ mod tests {
         assert_eq!(chat_work.get("approval_policy"), Some(&Value::String("on-request".to_string())));
         assert_eq!(policy.repo_thread_params.get("sandbox"), Some(&Value::String("workspace-write".to_string())));
         assert_eq!(policy.repo_thread_params.get("approvalPolicy"), Some(&Value::String("on-request".to_string())));
+        assert_eq!(policy.repo_read_only_thread_params.get("sandbox"), Some(&Value::String("read-only".to_string())));
+        assert_eq!(policy.repo_read_only_thread_params.get("approvalPolicy"), Some(&Value::String("on-request".to_string())));
+        assert_eq!(policy.pinned_turn_fields, vec!["cwd", "approvalPolicy", "sandboxPolicy", "approvalsReviewer"]);
+        assert_eq!(policy.repo_thread_params.get("approvalsReviewer"), Some(&Value::String("user".to_string())));
         assert!(policy.prompt_thread_config.keys().all(|name| policy.named_prompts.contains(name)));
         for refused in ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"] {
             assert!(!policy.allowed_requests.contains(refused), "{refused}");
@@ -576,8 +616,8 @@ mod tests {
         let stub = Stub {
             made: Mutex::new(0),
             airgapped: Default::default(),
-            repo_checkouts: Mutex::new(HashSet::new()),
-            repo_threads: Mutex::new(HashSet::new()),
+            repo_checkouts: Mutex::new(BTreeMap::new()),
+            repo_threads: Mutex::new(BTreeMap::new()),
             bridge: Default::default(),
         };
         let cases = vectors["cases"].as_array().unwrap();
@@ -594,13 +634,13 @@ mod tests {
             stub.airgapped.store(level == "on", std::sync::atomic::Ordering::Relaxed);
             *stub.repo_checkouts.lock().unwrap() = case
                 .get("repoCheckouts")
-                .and_then(Value::as_array)
-                .map(|items| items.iter().map(|v| v.as_str().unwrap().to_string()).collect())
+                .and_then(Value::as_object)
+                .map(|items| items.iter().map(|(k, v)| (k.clone(), v.as_bool().unwrap())).collect())
                 .unwrap_or_default();
             *stub.repo_threads.lock().unwrap() = case
                 .get("repoThreads")
-                .and_then(Value::as_array)
-                .map(|items| items.iter().map(|v| v.as_str().unwrap().to_string()).collect())
+                .and_then(Value::as_object)
+                .map(|items| items.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string())).collect())
                 .unwrap_or_default();
             stub.bridge.store(case.get("bridge").and_then(Value::as_bool).unwrap_or(false), std::sync::atomic::Ordering::Relaxed);
             let result = policy.vet_outgoing(&case["message"], &mut pending, &stub);
@@ -645,11 +685,11 @@ mod tests {
             fn airgapped_on(&self, thread_id: Option<&str>) -> bool {
                 thread_id == Some("sealed")
             }
-            fn repo_checkout(&self, _cwd: &str) -> bool {
-                false
+            fn repo_checkout(&self, _cwd: &str) -> Option<bool> {
+                None
             }
-            fn repo_thread(&self, _thread_id: &str) -> bool {
-                false
+            fn repo_thread_cwd(&self, _thread_id: &str) -> Option<String> {
+                None
             }
             fn is_bridge(&self) -> bool {
                 false

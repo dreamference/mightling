@@ -129,13 +129,13 @@ export class MessagePrompts implements PromptSource {
   }
 
   /** The desktop app has no phone repository checkouts. */
-  repoCheckout(_cwd: string): boolean {
-    return false;
+  repoCheckout(_cwd: string): boolean | null {
+    return null;
   }
 
   /** The desktop app has no phone repository threads. */
-  repoThread(_threadId: string): boolean {
-    return false;
+  repoThreadCwd(_threadId: string): string | null {
+    return null;
   }
 
   /** The desktop app is never a phone bridge. */

@@ -269,17 +269,20 @@ impl Budget {
     }
 
     /// Records a thread token-usage notification's cumulative total for `(chat, thread)` at `now`,
-    /// adding the increase since the last cumulative total seen for `thread`.
+    /// adding the increase since the last cumulative total seen for `thread`. The first usage
+    /// notification seen for `thread` after start-up sets its baseline and charges nothing.
     pub fn add(&mut self, chat: &str, thread: &str, cumulative_total: u64, now: u64) -> u64 {
-        let prev = self.thread_totals.get(thread).copied().unwrap_or(0);
+        let next_reset = self.resets_at(now);
+        let Some(prev) = self.thread_totals.insert(thread.to_string(), cumulative_total) else {
+            let entry = self.entry_mut(chat, now, next_reset);
+            return entry.used;
+        };
         let delta = if cumulative_total >= prev {
             cumulative_total - prev
         } else {
             cumulative_total
         };
-        self.thread_totals.insert(thread.to_string(), cumulative_total);
 
-        let next_reset = self.resets_at(now);
         let entry = self.entry_mut(chat, now, next_reset);
         entry.used = entry.used.saturating_add(delta);
         entry.used
@@ -511,6 +514,10 @@ mod tests {
         assert_eq!(budget.reset_time_hm(day1_morning), "00:00");
         assert!(midnight > day1_morning && midnight - day1_morning == 14 * 3_600);
 
+        // First usage notification seen for each thread sets its baseline and charges nothing.
+        assert_eq!(budget.add("signal:c1", "thread-a", 0, day1_morning), 0);
+        assert_eq!(budget.add("signal:c1", "thread-b", 0, day1_morning), 0);
+
         // Cumulative totals on thread-a and thread-b of chat "signal:c1".
         assert_eq!(budget.add("signal:c1", "thread-a", 1_000_000, day1_morning), 1_000_000);
         assert!(!budget.crossed_80("signal:c1"));
@@ -549,5 +556,20 @@ mod tests {
         assert_eq!(budget.add("signal:c1", "thread-a", 4_000_000, midnight + 60), 2_400_000);
         assert!(budget.crossed_80("signal:c1"));
         assert!(!budget.crossed_80("signal:c1"));
+    }
+
+    #[test]
+    fn first_usage_notification_after_restart_sets_baseline_and_charges_nothing() {
+        let now = 1_792_483_200u64;
+        let mut budget = Budget::with_utc_offset(DEFAULT_TOKENS_PER_DAY, 0);
+        // After a restart, a resumed thread reports its lifetime total (e.g. 9,500,000 tokens).
+        assert_eq!(budget.add("signal:c1", "resumed-thread", 9_500_000, now), 0);
+        assert_eq!(budget.used("signal:c1", now), 0);
+        assert!(!budget.crossed_80("signal:c1"));
+        assert!(!budget.exhausted("signal:c1", now));
+
+        // Subsequent notification charges only the delta since the baseline (+200,000).
+        assert_eq!(budget.add("signal:c1", "resumed-thread", 9_700_000, now + 5), 200_000);
+        assert_eq!(budget.used("signal:c1", now + 5), 200_000);
     }
 }

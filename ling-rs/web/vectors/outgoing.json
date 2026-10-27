@@ -485,21 +485,21 @@
     {
       "name": "a bridge thread/start with prompt chat-work and a cwd in repoCheckouts passes with approval policy on-request and workspace-write sandbox",
       "bridge": true,
-      "repoCheckouts": ["/codex/chat-repos/org_widget/deadbeef"],
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
       "message": {"id": 109, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef", "approvalPolicy": "never"}},
       "accept": true,
-      "out": {"id": 109, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "approvalPolicy": "on-request", "sandbox": "workspace-write", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
+      "out": {"id": 109, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "workspace-write", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
     },
     {
       "name": "a bridge thread/start with prompt chat-work and a cwd not in repoCheckouts is refused",
       "bridge": true,
-      "repoCheckouts": ["/codex/chat-repos/org_widget/deadbeef"],
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
       "message": {"id": 110, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/work/other"}},
       "accept": false
     },
     {
       "name": "a chat-work thread/start with no cwd is refused",
-      "repoCheckouts": ["/codex/chat-repos/org_widget/deadbeef"],
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
       "message": {"id": 111, "method": "thread/start", "params": {"prompt": "chat-work"}},
       "accept": false
     },
@@ -524,39 +524,119 @@
     },
     {
       "name": "a non-bridge chat-work thread/start in a checkout passes",
-      "repoCheckouts": ["/codex/chat-repos/org_widget/deadbeef"],
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
       "message": {"id": 115, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef"}},
       "accept": true,
-      "out": {"id": 115, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
+      "out": {"id": 115, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
     },
     {
       "name": "a chat-work thread/start asking for danger-full-access ends up workspace-write",
       "bridge": true,
-      "repoCheckouts": ["/codex/chat-repos/org_widget/deadbeef"],
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
       "message": {"id": 116, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "danger-full-access", "approvalPolicy": "never"}},
       "accept": true,
-      "out": {"id": 116, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
+      "out": {"id": 116, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
     },
     {
-      "name": "thread/resume of a thread in repoThreads gets on-request and workspace-write",
-      "repoThreads": ["repo-t1"],
+      "name": "thread/resume of a thread in repoThreads gets on-request and workspace-write and pins cwd",
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
       "message": {"id": 117, "method": "thread/resume", "params": {"threadId": "repo-t1", "sandbox": "danger-full-access"}},
       "accept": true,
-      "out": {"id": 117, "method": "thread/resume", "params": {"threadId": "repo-t1", "sandbox": "workspace-write", "approvalPolicy": "on-request", "config": {"approval_policy": "on-request"}}}
+      "out": {"id": 117, "method": "thread/resume", "params": {"threadId": "repo-t1", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "config": {"approval_policy": "on-request"}}}
     },
     {
       "name": "thread/resume of another thread not in repoThreads is unchanged",
-      "repoThreads": ["repo-t1"],
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
       "message": {"id": 118, "method": "thread/resume", "params": {"threadId": "other-t2", "cwd": "/work/repo"}},
       "accept": true,
       "out": {"id": 118, "method": "thread/resume", "params": {"threadId": "other-t2", "cwd": "/work/repo"}}
     },
     {
-      "name": "thread/fork of a thread in repoThreads gets on-request and workspace-write",
-      "repoThreads": ["repo-t1"],
+      "name": "thread/fork of a thread in repoThreads gets on-request and workspace-write and pins cwd",
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
       "message": {"id": 119, "method": "thread/fork", "params": {"threadId": "repo-t1"}},
       "accept": true,
-      "out": {"id": 119, "method": "thread/fork", "params": {"threadId": "repo-t1", "sandbox": "workspace-write", "approvalPolicy": "on-request", "config": {"approval_policy": "on-request"}}}
+      "out": {"id": 119, "method": "thread/fork", "params": {"threadId": "repo-t1", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "a bridge turn/start with a sandboxPolicy override has pinnedTurnFields removed",
+      "bridge": true,
+      "message": {"id": 120, "method": "turn/start", "params": {"threadId": "chat-1", "input": [{"type": "text", "text": "hi"}], "sandboxPolicy": {"type": "dangerFullAccess"}, "approvalPolicy": "never", "cwd": "/tmp"}},
+      "accept": true,
+      "out": {"id": 120, "method": "turn/start", "params": {"threadId": "chat-1", "input": [{"type": "text", "text": "hi"}]}}
+    },
+    {
+      "name": "a page turn/start on a repo thread with an approvalPolicy override has pinnedTurnFields removed",
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 121, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "hi"}], "approvalPolicy": "never", "sandboxPolicy": {"type": "dangerFullAccess"}, "cwd": "/tmp"}},
+      "accept": true,
+      "out": {"id": 121, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "hi"}]}}
+    },
+    {
+      "name": "a page turn/start on an ordinary thread keeps its overrides",
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 122, "method": "turn/start", "params": {"threadId": "work-t2", "input": [{"type": "text", "text": "hi"}], "approvalPolicy": "never", "cwd": "/work/repo"}},
+      "accept": true,
+      "out": {"id": 122, "method": "turn/start", "params": {"threadId": "work-t2", "input": [{"type": "text", "text": "hi"}], "approvalPolicy": "never", "cwd": "/work/repo"}}
+    },
+    {
+      "name": "thread/resume of a repo thread removes scratch fields and pins cwd to the recorded checkout",
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 123, "method": "thread/resume", "params": {"threadId": "repo-t1", "cwd": "/other", "permissions": "all", "runtimeWorkspaceRoots": ["/other"], "sandbox": "danger-full-access"}},
+      "accept": true,
+      "out": {"id": 123, "method": "thread/resume", "params": {"threadId": "repo-t1", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "a bridge thread/resume of a thread that is neither Ask nor chat-work is refused",
+      "bridge": true,
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 124, "method": "thread/resume", "params": {"threadId": "work-t2"}},
+      "accept": false
+    },
+    {
+      "name": "a bridge thread/fork of a thread that is neither Ask nor chat-work is refused",
+      "bridge": true,
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 125, "method": "thread/fork", "params": {"threadId": "work-t2"}},
+      "accept": false
+    },
+    {
+      "name": "a bridge thread/resume of a recorded repo thread passes and pins cwd to the checkout",
+      "bridge": true,
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 126, "method": "thread/resume", "params": {"threadId": "repo-t1", "cwd": "/tmp", "sandbox": "danger-full-access"}},
+      "accept": true,
+      "out": {"id": 126, "method": "thread/resume", "params": {"threadId": "repo-t1", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "a chat-work thread/start in a read-only checkout gets read-only sandbox and on-request approvals",
+      "bridge": true,
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": true},
+      "message": {"id": 127, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "never"}},
+      "accept": true,
+      "out": {"id": 127, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "read-only", "approvalPolicy": "on-request", "approvalsReviewer": "user", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "thread/resume of a repo thread in a read-only checkout gets read-only sandbox",
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": true},
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 128, "method": "thread/resume", "params": {"threadId": "repo-t1", "sandbox": "workspace-write"}},
+      "accept": true,
+      "out": {"id": 128, "method": "thread/resume", "params": {"threadId": "repo-t1", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "read-only", "approvalPolicy": "on-request", "approvalsReviewer": "user", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "a bridge's turn/start cannot choose an automated approvals reviewer",
+      "bridge": true,
+      "message": {"id": 129, "method": "turn/start", "params": {"threadId": "t-any", "input": [], "approvalsReviewer": "auto_review"}},
+      "accept": true,
+      "out": {"id": 129, "method": "turn/start", "params": {"threadId": "t-any", "input": []}}
+    },
+    {
+      "name": "a page's chat-work thread/start cannot choose an automated approvals reviewer",
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
+      "message": {"id": 130, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef", "approvalsReviewer": "auto_review"}},
+      "accept": true,
+      "out": {"id": 130, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
     }
   ]
 }

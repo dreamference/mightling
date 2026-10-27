@@ -153,12 +153,12 @@ impl PromptSource for MessagePrompts<'_> {
         }
     }
 
-    fn repo_checkout(&self, cwd: &str) -> bool {
-        crate::chat_repos::is_repo_checkout(self.codex_home(), Path::new(cwd))
+    fn repo_checkout(&self, cwd: &str) -> Option<bool> {
+        crate::chat_repos::repo_checkout(self.codex_home(), Path::new(cwd))
     }
 
-    fn repo_thread(&self, thread_id: &str) -> bool {
-        crate::chat_repos::is_repo_thread(self.codex_home(), thread_id)
+    fn repo_thread_cwd(&self, thread_id: &str) -> Option<String> {
+        crate::chat_repos::repo_thread_cwd(self.codex_home(), thread_id)
     }
 
     fn is_bridge(&self) -> bool {
@@ -183,12 +183,12 @@ impl PromptSource for TabPrompts<'_> {
         self.inner.airgapped_on(thread_id)
     }
 
-    fn repo_checkout(&self, cwd: &str) -> bool {
+    fn repo_checkout(&self, cwd: &str) -> Option<bool> {
         self.inner.repo_checkout(cwd)
     }
 
-    fn repo_thread(&self, thread_id: &str) -> bool {
-        self.inner.repo_thread(thread_id)
+    fn repo_thread_cwd(&self, thread_id: &str) -> Option<String> {
+        self.inner.repo_thread_cwd(thread_id)
     }
 
     fn is_bridge(&self) -> bool {
@@ -275,7 +275,7 @@ mod tests {
             dir: checkout.to_string_lossy().into_owned(),
             branch: Some("phone/deadbeef".to_string()),
             base: "main".to_string(),
-            app_thread: None,
+            app_threads: Vec::new(),
             read_only: false,
             created: 1,
             last_used: 1,
@@ -291,12 +291,16 @@ mod tests {
         }
         .with_bridge(true);
 
+        let canonical_checkout = checkout.canonicalize().unwrap().to_string_lossy().into_owned();
         assert!(prompts.is_bridge());
-        assert!(prompts.repo_checkout(&checkout.to_string_lossy()));
-        assert!(!prompts.repo_checkout(&outside.to_string_lossy()));
-        assert!(!prompts.repo_thread("app-t1"));
+        assert_eq!(prompts.repo_checkout(&checkout.to_string_lossy()), Some(false));
+        assert_eq!(prompts.repo_checkout(&outside.to_string_lossy()), None);
+        assert_eq!(prompts.repo_thread_cwd("app-t1"), None);
         assert!(crate::chat_repos::record_app_thread(&home, &checkout, "app-t1").unwrap());
-        assert!(prompts.repo_thread("app-t1"));
+        assert_eq!(prompts.repo_thread_cwd("app-t1"), Some(canonical_checkout.clone()));
+        assert!(crate::chat_repos::record_app_thread(&home, &checkout, "app-t2").unwrap());
+        assert_eq!(prompts.repo_thread_cwd("app-t1"), Some(canonical_checkout.clone()));
+        assert_eq!(prompts.repo_thread_cwd("app-t2"), Some(canonical_checkout));
 
         let _ = std::fs::remove_dir_all(&home);
     }

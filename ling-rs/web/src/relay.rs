@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicI64;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -47,31 +48,27 @@ use crate::server::Server;
 pub const INTERNAL_REQUEST_ID_BASE: i64 = 9_000_000_000;
 
 static NEXT_INTERNAL_ID: AtomicI64 = AtomicI64::new(INTERNAL_REQUEST_ID_BASE);
+static NEXT_SHARED_TAB_ID: AtomicU64 = AtomicU64::new(1_000_000);
 
 /// Generates a unique request ID in ling web's internal range.
 pub fn next_internal_id() -> i64 {
     NEXT_INTERNAL_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Whether `value` is a response to one of ling web's own internal requests.
-pub fn is_internal_id(value: &Value) -> bool {
-    let id_val = value.get("id");
-    if let Some(n) = id_val.and_then(Value::as_i64) {
-        if n >= INTERNAL_REQUEST_ID_BASE {
-            return true;
-        }
+/// Checks whether `value` is a response to an internal request issued on `shared`, removing the
+/// request ID from `shared.internal_ids` on match.
+pub fn take_internal_id(shared: &Shared, value: &Value) -> bool {
+    if value.get("method").is_some() {
+        return false;
     }
-    if let Some(s) = id_val.and_then(Value::as_str) {
-        if let Ok(n) = s.parse::<i64>() {
-            if n >= INTERNAL_REQUEST_ID_BASE {
-                return true;
-            }
-        }
-        if s.starts_with("lw-internal-") {
-            return true;
-        }
-    }
-    false
+    let Some(id) = value.get("id").and_then(Value::as_i64) else {
+        return false;
+    };
+    shared
+        .internal_ids
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&id)
 }
 
 /// An active turn watch on a `chat-work` thread.
@@ -81,26 +78,49 @@ pub struct ActiveTurnWatch {
     pub thread_id: String,
     pub chat_key: String,
     pub repo: String,
+    pub owner_tab: u64,
     pub watch: RepoWatch,
 }
 
 /// What a tab's connection shares with the task reading the app-server.
-#[derive(Default)]
 pub struct Shared {
+    /// Identifier of this relay tab, used to own and hand over turn watches in `ChatRepos`.
+    pub tab_id: u64,
     /// Server requests waiting for this tab's answer.
     pub pending: Mutex<HashSet<String>>,
+    /// Internal request IDs (`turn/steer`, `turn/interrupt`) issued by this tab and awaiting a response.
+    pub internal_ids: Mutex<HashSet<i64>>,
     /// Thread openers whose new thread works in an Ask folder, by request id: answered, the folder
     /// is named after the thread.
     pub openers: Mutex<HashMap<String, PathBuf>>,
-    /// Thread openers for `chat-work` threads in a repository checkout, by request id: answered,
-    /// the checkout's `app_thread` is recorded in `$CODEX_HOME/chat-repos/index.json`.
+    /// Thread openers for `chat-work` threads (and forks of `chat-work` threads) in a repository
+    /// checkout, by request id: answered, the checkout's `app_threads` list is updated in
+    /// `$CODEX_HOME/chat-repos/index.json`.
     pub repo_openers: Mutex<HashMap<String, PathBuf>>,
     /// The folder each thread works in, as the server named it (`thread_place`).
     pub places: Mutex<HashMap<String, PathBuf>>,
-    /// Active turn watches on chat-work threads for bounds and budget enforcement.
-    pub repo_watches: Mutex<HashMap<String, ActiveTurnWatch>>,
     /// Turn starters by request id, so failed turn/start responses can record a busy notice.
     pub turn_start_threads: Mutex<HashMap<String, String>>,
+}
+
+impl Default for Shared {
+    fn default() -> Self {
+        Self::for_tab(NEXT_SHARED_TAB_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl Shared {
+    pub fn for_tab(tab_id: u64) -> Self {
+        Self {
+            tab_id,
+            pending: Mutex::new(HashSet::new()),
+            internal_ids: Mutex::new(HashSet::new()),
+            openers: Mutex::new(HashMap::new()),
+            repo_openers: Mutex::new(HashMap::new()),
+            places: Mutex::new(HashMap::new()),
+            turn_start_threads: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 struct Tab {
@@ -120,10 +140,20 @@ fn event(channel: &str, payload: Value) -> Value {
 }
 
 pub async fn run_tab(socket: WebSocket, server: Arc<Server>) {
-    run_tab_for_device(socket, server, None).await;
+    run_tab_with_bridge(socket, server, None, false).await;
 }
 
 pub async fn run_tab_for_device(socket: WebSocket, server: Arc<Server>, device_name: Option<String>) {
+    let bridge = device_name.as_deref().is_some_and(ask::is_bridge_device);
+    run_tab_with_bridge(socket, server, device_name, bridge).await;
+}
+
+pub async fn run_tab_with_bridge(
+    socket: WebSocket,
+    server: Arc<Server>,
+    _device_name: Option<String>,
+    bridge: bool,
+) {
     let (mut to_browser, mut from_browser) = socket.split();
     let (out, mut outgoing) = mpsc::unbounded_channel::<Value>();
     let writer = tokio::spawn(async move {
@@ -147,16 +177,16 @@ pub async fn run_tab_for_device(socket: WebSocket, server: Arc<Server>, device_n
             }
         }
     });
-    let bridge = device_name.as_deref().is_some_and(ask::is_bridge_device);
+    let tab_id = server.new_tab_id();
     let mut tab = Tab {
-        id: server.new_tab_id(),
+        id: tab_id,
         server,
         out: out.clone(),
         upstream_tx: None,
         upstream_writer: None,
         timer_task: None,
         reader: None,
-        shared: Arc::default(),
+        shared: Arc::new(Shared::for_tab(tab_id)),
         bridge,
     };
     while let Some(Ok(frame)) = from_browser.next().await {
@@ -255,7 +285,7 @@ impl Tab {
                 deliver(&server, &shared, &out, tab, &text, &tx_deliver);
             }
             shared.pending.lock().unwrap_or_else(|p| p.into_inner()).clear();
-            shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner()).clear();
+            shared.internal_ids.lock().unwrap_or_else(|p| p.into_inner()).clear();
             server.forget_tab(tab);
             let _ = out.send(event("work://exit", Value::Null));
         }));
@@ -289,7 +319,7 @@ impl Tab {
             .pointer("/params/cwd")
             .and_then(Value::as_str)
             .map(PathBuf::from)
-            .filter(|cwd| crate::chat_repos::is_repo_checkout(&self.server.config.codex_home, cwd))
+            .filter(|cwd| crate::chat_repos::repo_checkout(&self.server.config.codex_home, cwd).is_some())
             .unwrap_or_else(|| ask_root.clone());
         let is_repo_prompt = named.as_ref().is_some_and(|name| policy.repo_prompts.contains(name));
         let composed = match named {
@@ -317,18 +347,27 @@ impl Tab {
             let mut pending = self.shared.pending.lock().unwrap_or_else(|p| p.into_inner());
             policy.vet_outgoing(&message, &mut pending, &prompts)?
         };
+        if let Some(thread_id) = vetted.pointer("/params/threadId").and_then(Value::as_str) {
+            self.server.chat_repos.note_tab_thread(self.shared.tab_id, thread_id);
+        }
         // A thread that will work in an Ask folder: once the server names it, so is the folder.
-        let opener = vetted.get("method").and_then(Value::as_str).is_some_and(|method| policy.thread_openers.contains(method));
+        let method = vetted.get("method").and_then(Value::as_str);
+        let opener = method.is_some_and(|m| policy.thread_openers.contains(m));
+        let is_repo_fork = method == Some("thread/fork")
+            && vetted
+                .pointer("/params/threadId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| crate::chat_repos::repo_thread_cwd(&self.server.config.codex_home, id).is_some());
         if opener
             && let (Some(id), Some(cwd)) = (vetted.get("id"), vetted.get("params").and_then(|p| p.get("cwd")).and_then(Value::as_str))
         {
             if ask::is_folder(&ask_root, std::path::Path::new(cwd)) {
                 self.shared.openers.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string(), PathBuf::from(cwd));
-            } else if is_repo_prompt {
+            } else if is_repo_prompt || is_repo_fork {
                 self.shared.repo_openers.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string(), PathBuf::from(cwd));
             }
         }
-        if vetted.get("method").and_then(Value::as_str) == Some("turn/start") {
+        if method == Some("turn/start") {
             if let Some(thread_id) = vetted.pointer("/params/threadId").and_then(Value::as_str) {
                 if let Some(record) = self.server.chat_repos.find_by_app_thread(&self.server.config.codex_home, thread_id) {
                     let settings = ChatReposSettings::load_from(self.server.config.user_config.as_deref());
@@ -361,7 +400,7 @@ impl Tab {
             reader.abort();
             let _ = reader.await;
             self.shared.pending.lock().unwrap_or_else(|p| p.into_inner()).clear();
-            self.shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner()).clear();
+            self.shared.internal_ids.lock().unwrap_or_else(|p| p.into_inner()).clear();
             self.server.forget_tab(self.id);
             if announce {
                 let _ = self.out.send(event("work://exit", Value::Null));
@@ -370,8 +409,15 @@ impl Tab {
     }
 }
 
-fn send_steer(upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>, thread_id: &str, turn_id: &str, text: &str) {
+fn send_steer(
+    shared: &Shared,
+    upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>,
+    thread_id: &str,
+    turn_id: &str,
+    text: &str,
+) {
     let id = next_internal_id();
+    shared.internal_ids.lock().unwrap_or_else(|p| p.into_inner()).insert(id);
     let msg = json!({
         "id": id,
         "method": "turn/steer",
@@ -390,8 +436,14 @@ fn send_steer(upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>, thread_id: &
     let _ = upstream_tx.send(UpstreamMessage::Text(msg.to_string().into()));
 }
 
-fn send_interrupt(upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>, thread_id: &str, turn_id: &str) {
+fn send_interrupt(
+    shared: &Shared,
+    upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>,
+    thread_id: &str,
+    turn_id: &str,
+) {
     let id = next_internal_id();
+    shared.internal_ids.lock().unwrap_or_else(|p| p.into_inner()).insert(id);
     let msg = json!({
         "id": id,
         "method": "turn/interrupt",
@@ -403,32 +455,21 @@ fn send_interrupt(upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>, thread_i
     let _ = upstream_tx.send(UpstreamMessage::Text(msg.to_string().into()));
 }
 
-/// Evaluates live turn watches and issues `turn/steer` or `turn/interrupt` to the app-server as needed.
+/// Evaluates live turn watches owned by `shared.tab_id` and issues `turn/steer` or `turn/interrupt`
+/// to the app-server as needed.
 pub fn check_repo_watches(
     server: &Server,
     shared: &Shared,
     upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>,
 ) {
-    let now_ms = server.chat_repos.now_ms();
-    let mut actions = Vec::new();
-    {
-        let mut watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
-        if watches.is_empty() {
-            return;
-        }
-        for entry in watches.values_mut() {
-            if let Some(verdict) = entry.watch.check(now_ms) {
-                actions.push((entry.thread_id.clone(), entry.turn_id.clone(), verdict));
-            }
-        }
-    }
+    let actions = server.chat_repos.check_watches_for_tab(shared.tab_id);
     for (thread_id, turn_id, verdict) in actions {
         match verdict {
             RepoVerdict::Steer(text) => {
-                send_steer(upstream_tx, &thread_id, &turn_id, &text);
+                send_steer(shared, upstream_tx, &thread_id, &turn_id, &text);
             }
             RepoVerdict::Interrupt(_) => {
-                send_interrupt(upstream_tx, &thread_id, &turn_id);
+                send_interrupt(shared, upstream_tx, &thread_id, &turn_id);
             }
         }
     }
@@ -443,6 +484,9 @@ pub fn handle_notification_repo_limits(
     upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>,
 ) {
     let Some(params) = params else { return };
+    if let Some(thread_id) = params.get("threadId").and_then(Value::as_str) {
+        server.chat_repos.note_tab_thread(shared.tab_id, thread_id);
+    }
     match method {
         "turn/started" => {
             if let (Some(thread_id), Some(turn_id)) = (
@@ -450,83 +494,37 @@ pub fn handle_notification_repo_limits(
                 params.pointer("/turn/id").and_then(Value::as_str),
             ) {
                 if let Some(record) = server.chat_repos.find_by_app_thread(&server.config.codex_home, thread_id) {
-                    server.chat_repos.note_turn_started(&server.config.codex_home, &record);
                     let settings = ChatReposSettings::load_from(server.config.user_config.as_deref());
                     let limits = RepoLimits::from_settings(&settings);
                     let now_ms = server.chat_repos.now_ms();
                     let watch = RepoWatch::new(now_ms, limits);
-                    shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner()).insert(
-                        thread_id.to_string(),
-                        ActiveTurnWatch {
-                            turn_id: turn_id.to_string(),
-                            thread_id: thread_id.to_string(),
-                            chat_key: record.chat_key(),
-                            repo: record.repo.clone(),
-                            watch,
-                        },
-                    );
-                    check_repo_watches(server, shared, upstream_tx);
+                    if server.chat_repos.register_turn_watch(
+                        &server.config.codex_home,
+                        &record,
+                        turn_id,
+                        thread_id,
+                        shared.tab_id,
+                        watch,
+                    ) {
+                        check_repo_watches(server, shared, upstream_tx);
+                    }
                 }
             }
         }
         "item/started" => {
-            let thread_id = params
-                .get("threadId")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    let watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
-                    if watches.len() == 1 {
-                        watches.keys().next().cloned().unwrap_or_default()
-                    } else {
-                        String::new()
-                    }
-                });
+            let thread_id = params.get("threadId").and_then(Value::as_str);
+            let turn_id = params.get("turnId").and_then(Value::as_str);
             let kind = params.pointer("/item/type").and_then(Value::as_str).unwrap_or_default();
             let item_id = params.pointer("/item/id").and_then(Value::as_str).unwrap_or_default();
-            let now_ms = server.chat_repos.now_ms();
-            let has_watch = {
-                let mut watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
-                if let Some(entry) = watches.get_mut(&thread_id) {
-                    if crate::repo_limits::is_tool(kind) {
-                        entry.watch.on_tool_started();
-                    }
-                    if kind == "commandExecution" {
-                        entry.watch.on_command_started_at(item_id, now_ms);
-                    }
-                    true
-                } else {
-                    false
-                }
-            };
-            if has_watch {
+            if server.chat_repos.on_item_started_for_tab(shared.tab_id, thread_id, turn_id, kind, item_id) {
                 check_repo_watches(server, shared, upstream_tx);
             }
         }
         "item/completed" => {
-            let thread_id = params
-                .get("threadId")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    let watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
-                    if watches.len() == 1 {
-                        watches.keys().next().cloned().unwrap_or_default()
-                    } else {
-                        String::new()
-                    }
-                });
+            let thread_id = params.get("threadId").and_then(Value::as_str);
+            let turn_id = params.get("turnId").and_then(Value::as_str);
             let item_id = params.pointer("/item/id").and_then(Value::as_str).unwrap_or_default();
-            let has_watch = {
-                let mut watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
-                if let Some(entry) = watches.get_mut(&thread_id) {
-                    entry.watch.on_command_finished(item_id);
-                    true
-                } else {
-                    false
-                }
-            };
-            if has_watch {
+            if server.chat_repos.on_item_completed_for_tab(shared.tab_id, thread_id, turn_id, item_id) {
                 check_repo_watches(server, shared, upstream_tx);
             }
         }
@@ -539,28 +537,22 @@ pub fn handle_notification_repo_limits(
                     .and_then(Value::as_u64)
                     .unwrap_or(0);
                 let settings = ChatReposSettings::load_from(server.config.user_config.as_deref());
-                let exhausted = server.chat_repos.add_token_usage(&record, settings.tokens_per_day, cumulative);
-                if exhausted {
-                    let now_ms = server.chat_repos.now_ms();
-                    let mut steer_action = None;
-                    {
-                        let mut watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
-                        if let Some(entry) = watches.get_mut(thread_id) {
-                            if let Some(RepoVerdict::Steer(text)) = entry.watch.steer_for_budget(now_ms) {
-                                steer_action = Some((entry.thread_id.clone(), entry.turn_id.clone(), text));
-                            }
-                        }
-                    }
-                    if let Some((t_id, turn_id, text)) = steer_action {
-                        send_steer(upstream_tx, &t_id, &turn_id, &text);
-                    }
+                if let Some((t_id, turn_id, text)) = server.chat_repos.on_token_usage_for_tab(
+                    shared.tab_id,
+                    &record,
+                    thread_id,
+                    settings.tokens_per_day,
+                    cumulative,
+                ) {
+                    send_steer(shared, upstream_tx, &t_id, &turn_id, &text);
                 }
                 check_repo_watches(server, shared, upstream_tx);
             }
         }
         "turn/completed" => {
             let thread_id = params.get("threadId").and_then(Value::as_str).unwrap_or_default();
-            shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner()).remove(thread_id);
+            let turn_id = params.pointer("/turn/id").and_then(Value::as_str);
+            server.chat_repos.remove_turn_watch(turn_id, thread_id);
             let err_msg = params.pointer("/turn/error/message").and_then(Value::as_str).unwrap_or("");
             let details = params.pointer("/turn/error/additionalDetails").and_then(Value::as_str).unwrap_or("");
             let err_str = params.pointer("/turn/error").and_then(Value::as_str).unwrap_or("");
@@ -588,7 +580,7 @@ pub fn handle_notification_repo_limits(
         }
         "thread/closed" => {
             let thread_id = params.get("threadId").and_then(Value::as_str).unwrap_or_default();
-            shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner()).remove(thread_id);
+            server.chat_repos.remove_thread_watches(thread_id);
         }
         _ => {}
     }
@@ -611,12 +603,13 @@ pub fn deliver(
         let _ = out.send(event("work://protocol-error", Value::String(text.to_string())));
         return;
     };
-    if is_internal_id(&value) {
+    if take_internal_id(shared, &value) {
         return;
     }
     if let Some((thread, cwd)) = thread_place(&value) {
         shared.places.lock().unwrap_or_else(|p| p.into_inner()).insert(thread.clone(), PathBuf::from(&cwd));
         server.chat_repos.record_thread_place(&thread, PathBuf::from(cwd));
+        server.chat_repos.note_tab_thread(shared.tab_id, &thread);
     }
     match kind {
         Incoming::ServerRequest { key, .. } => {
@@ -634,11 +627,24 @@ pub fn deliver(
             {
                 let _ = ask::link_thread(&server.ask_root(), thread, &folder);
             }
-            let repo_folder = shared.repo_openers.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
-            if let Some(folder) = repo_folder
-                && let Some(thread) = value.pointer("/result/thread/id").and_then(Value::as_str)
-            {
-                let _ = server.chat_repos.record_app_thread(&server.config.codex_home, &folder, thread);
+            let repo_folder = shared
+                .repo_openers
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .remove(&key)
+                .or_else(|| {
+                    value
+                        .pointer("/result/thread/parentThreadId")
+                        .and_then(Value::as_str)
+                        .and_then(|parent| crate::chat_repos::repo_thread_cwd(&server.config.codex_home, parent))
+                        .map(PathBuf::from)
+                });
+            if let Some(folder) = repo_folder {
+                if let Some((thread, _)) = thread_place(&value) {
+                    let _ = server.chat_repos.record_app_thread(&server.config.codex_home, &folder, &thread);
+                } else if let Some(thread) = value.pointer("/result/thread/id").and_then(Value::as_str) {
+                    let _ = server.chat_repos.record_app_thread(&server.config.codex_home, &folder, thread);
+                }
             }
             let turn_thread = shared.turn_start_threads.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
             if let Some(err_msg) = value.pointer("/error/message").and_then(Value::as_str) {
@@ -654,4 +660,31 @@ pub fn deliver(
         Incoming::NotProtocol => {}
     }
     let _ = out.send(event("work://message", value));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_ids_match_only_issued_set_and_do_not_drop_client_timestamps() {
+        let shared = Shared::default();
+        // A client response with a timestamp ID >= 9e9 or "lw-internal-..." that was NOT issued by
+        // this relay must not be dropped.
+        assert!(!take_internal_id(&shared, &json!({ "id": 9_500_000_000i64, "result": {} })));
+        assert!(!take_internal_id(&shared, &json!({ "id": "9500000000", "result": {} })));
+        assert!(!take_internal_id(&shared, &json!({ "id": "lw-internal-1", "result": {} })));
+
+        // An ID issued via send_steer is recorded in `shared.internal_ids`, matched once, and removed.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        send_steer(&shared, &tx, "t1", "turn-1", "stop");
+        let sent = rx.try_recv().unwrap();
+        let UpstreamMessage::Text(text) = sent else { panic!("expected text") };
+        let parsed: Value = serde_json::from_str(text.as_str()).unwrap();
+        let issued = parsed["id"].as_i64().unwrap();
+        assert!(issued >= INTERNAL_REQUEST_ID_BASE);
+        assert!(take_internal_id(&shared, &json!({ "id": issued, "result": {} })));
+        // Once removed, a second response with the same ID is no longer in the set.
+        assert!(!take_internal_id(&shared, &json!({ "id": issued, "result": {} })));
+    }
 }

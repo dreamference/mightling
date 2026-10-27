@@ -35,11 +35,11 @@ export interface PromptSource {
    * thread. An implementation that cannot tell answers true.
    */
   airgappedOn(threadId: string | null): boolean;
-  /** Whether `cwd` is an existing checkout recorded in `$CODEX_HOME/chat-repos/index.json` under `$CODEX_HOME/chat-repos/`. */
-  repoCheckout(cwd: string): boolean;
-  /** Whether `threadId` is the `app_thread` of a checkout in `$CODEX_HOME/chat-repos/index.json`. */
-  repoThread(threadId: string): boolean;
-  /** Whether the caller is a paired phone bridge device rather than the owner's browser session or desktop app. */
+  /** Whether `cwd` is an existing checkout recorded in `$CODEX_HOME/chat-repos/index.json` under `$CODEX_HOME/chat-repos/`: `readOnly` when recorded, `null` otherwise. */
+  repoCheckout(cwd: string): boolean | null;
+  /** The recorded checkout `cwd` when `threadId` is in `app_threads` of a checkout in `$CODEX_HOME/chat-repos/index.json`, or `null` otherwise. */
+  repoThreadCwd(threadId: string): string | null;
+  /** Whether the caller is a paired phone bridge device or bridge session rather than the owner's browser session or desktop app. */
   isBridge(): boolean;
 }
 
@@ -55,6 +55,8 @@ export interface Policy {
   scratchPrompts: ReadonlySet<string>;
   repoPrompts: ReadonlySet<string>;
   repoThreadParams: Readonly<JsonObject>;
+  repoReadOnlyThreadParams: Readonly<JsonObject>;
+  pinnedTurnFields: readonly string[];
   scratchFields: readonly string[];
   scratchSandbox: string;
   importRequest: string;
@@ -114,6 +116,8 @@ export function parsePolicy(value: unknown): Policy {
     scratchPrompts: new Set(strings(value, "scratchPrompts")),
     repoPrompts: new Set(strings(value, "repoPrompts")),
     repoThreadParams: isObject(value.repoThreadParams) ? value.repoThreadParams : (() => { throw new Error("policy.json: `repoThreadParams` must be an object"); })(),
+    repoReadOnlyThreadParams: isObject(value.repoReadOnlyThreadParams) ? value.repoReadOnlyThreadParams : (() => { throw new Error("policy.json: `repoReadOnlyThreadParams` must be an object"); })(),
+    pinnedTurnFields: strings(value, "pinnedTurnFields"),
     scratchFields: strings(value, "scratchFields"),
     scratchSandbox: string(value, "scratchSandbox"),
     importRequest: string(value, "importRequest"),
@@ -225,9 +229,14 @@ function vetThreadParams(policy: Policy, method: string, original: JsonObject, p
   // A resumed or forked Ask thread stays where it was started.
   const existing = typeof params.threadId === "string" ? prompts.scratchFolderOf(params.threadId) : null;
   if (existing !== null) confine(policy, params, existing);
-  // A resumed or forked chat-work thread keeps its workspace-write sandbox and on-request approvals.
-  const existingRepo = typeof params.threadId === "string" && prompts.repoThread(params.threadId);
-  if (existingRepo) Object.assign(params, policy.repoThreadParams);
+  // A resumed or forked chat-work thread stays in its recorded checkout with its sandbox and on-request approvals.
+  const existingRepoCwd = typeof params.threadId === "string" ? prompts.repoThreadCwd(params.threadId) : null;
+  if (existingRepoCwd !== null) {
+    for (const field of policy.scratchFields) delete params[field];
+    params.cwd = existingRepoCwd;
+    const readOnly = prompts.repoCheckout(existingRepoCwd) === true;
+    Object.assign(params, readOnly ? policy.repoReadOnlyThreadParams : policy.repoThreadParams);
+  }
   if (policy.windowToolsField in params) {
     const names = params[policy.windowToolsField];
     delete params[policy.windowToolsField];
@@ -244,7 +253,7 @@ function vetThreadParams(policy: Policy, method: string, original: JsonObject, p
   // A resumed thread of a prompt with a config of its own is known by its folder's name.
   const resumedAs = existing === null ? undefined : promptOfFolder(policy, existing);
   if (resumedAs !== undefined) config = { ...config, ...policy.promptThreadConfig.get(resumedAs) };
-  if (existingRepo) {
+  if (existingRepoCwd !== null) {
     for (const prompt of policy.repoPrompts) {
       if (policy.promptThreadConfig.has(prompt)) config = { ...config, ...policy.promptThreadConfig.get(prompt) };
     }
@@ -263,14 +272,23 @@ function vetThreadParams(policy: Policy, method: string, original: JsonObject, p
   ) {
     throw new Error("a phone bridge starts only Ask threads or chat-work threads in a forge checkout");
   }
+  if (
+    !policy.promptOpeners.has(method) &&
+    prompts.isBridge() &&
+    existing === null &&
+    existingRepoCwd === null
+  ) {
+    throw new Error("a phone bridge resumes only Ask threads or chat-work threads");
+  }
   if (typeof name === "string" && policy.promptThreadConfig.has(name)) config = { ...config, ...policy.promptThreadConfig.get(name) };
   if (Object.keys(config).length) params.config = config;
   if (typeof name !== "string") return params;
   if (policy.repoPrompts.has(name)) {
-    if (typeof params.cwd !== "string" || !prompts.repoCheckout(params.cwd)) {
+    const readOnly = typeof params.cwd === "string" ? prompts.repoCheckout(params.cwd) : null;
+    if (readOnly === null) {
       throw new Error("a chat-work thread starts only in a checkout ling web made for it");
     }
-    Object.assign(params, policy.repoThreadParams);
+    Object.assign(params, readOnly ? policy.repoReadOnlyThreadParams : policy.repoThreadParams);
   }
   // `default` is what the launcher's catalog already carries: setting it again would only freeze
   // today's text into the thread.
@@ -328,6 +346,14 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
     }
     if (policy.threadOpeners.has(method) && isObject(object.params)) {
       object.params = vetThreadParams(policy, method, object.params, prompts);
+    }
+    if (method === "turn/start" && isObject(object.params)) {
+      const params: JsonObject = { ...object.params };
+      const isRepo = typeof params.threadId === "string" && prompts.repoThreadCwd(params.threadId) !== null;
+      if (prompts.isBridge() || isRepo) {
+        for (const field of policy.pinnedTurnFields) delete params[field];
+      }
+      object.params = params;
     }
     if (method === policy.importRequest) {
       object.params = vetImportParams(policy, isObject(object.params) ? object.params : {}, prompts.airgappedOn(null));

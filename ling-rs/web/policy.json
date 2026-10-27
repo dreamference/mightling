@@ -115,8 +115,20 @@
   ],
   "repoThreadParams": {
     "sandbox": "workspace-write",
-    "approvalPolicy": "on-request"
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "user"
   },
+  "repoReadOnlyThreadParams": {
+    "sandbox": "read-only",
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "user"
+  },
+  "pinnedTurnFields": [
+    "cwd",
+    "approvalPolicy",
+    "sandboxPolicy",
+    "approvalsReviewer"
+  ],
   "scratchFields": [
     "cwd",
     "sandbox",

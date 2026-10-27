@@ -71,6 +71,16 @@ pub const CONFIRM_TTL: Duration = Duration::from_secs(10 * 60);
 pub const VALID_INTENTS: &[&str] = &["commit", "push", "update", "merge", "pr", "main", "budget"];
 /// Maximum length (in Unicode scalar values) of a commit message in `POST /api/repos/commit`.
 pub const MAX_COMMIT_MESSAGE_CHARS: usize = 5_000;
+/// Maximum size in bytes of an untracked regular file for line counting or diffing (8 MiB).
+pub const MAX_UNTRACKED_STAT_BYTES: u64 = 8 * 1024 * 1024;
+/// Maximum diff output size in bytes before truncation (1 MiB).
+pub const MAX_DIFF_OUTPUT_BYTES: usize = 1024 * 1024;
+/// Suffix appended when a diff output is truncated at `MAX_DIFF_OUTPUT_BYTES`.
+pub const DIFF_CUT_SUFFIX: &str = "\n(cut: open the file to see all)";
+/// Timeout for network-bound `git` commands (`clone`, `fetch`, `push`).
+pub const GIT_NET_TIMEOUT: Duration = Duration::from_secs(300);
+/// Timeout for local `git` commands.
+pub const GIT_LOCAL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Settings from the `[chat_repos]` table of `~/.config/dreamference/config.toml`
 /// (`specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md` §14).
@@ -193,6 +203,13 @@ pub trait HostProbe: Send + Sync {
     fn utc_offset_seconds(&self) -> Option<i64> {
         None
     }
+    /// Timeout for `run_git` on `subcommand` (`300s` for `clone`/`fetch`/`push`, `60s` otherwise; overridable by tests).
+    fn git_timeout(&self, subcommand: &str) -> Duration {
+        match subcommand {
+            "clone" | "fetch" | "push" => GIT_NET_TIMEOUT,
+            _ => GIT_LOCAL_TIMEOUT,
+        }
+    }
 }
 
 /// Production host probe using `libc::statvfs` and `systemctl --user`.
@@ -293,13 +310,17 @@ pub struct CheckoutRecord {
     pub dir: String,
     pub branch: Option<String>,
     pub base: String,
-    pub app_thread: Option<String>,
+    pub app_threads: Vec<String>,
     pub read_only: bool,
     pub created: u64,
     pub last_used: u64,
 }
 
 impl CheckoutRecord {
+    pub fn has_app_thread(&self, thread_id: &str) -> bool {
+        !thread_id.is_empty() && self.app_threads.iter().any(|t| t == thread_id)
+    }
+
     pub fn to_json(&self) -> Value {
         json!({
             "thread": self.thread,
@@ -310,7 +331,8 @@ impl CheckoutRecord {
             "dir": self.dir,
             "branch": self.branch,
             "base": self.base,
-            "app_thread": self.app_thread,
+            "app_threads": self.app_threads,
+            "app_thread": self.app_threads.last(),
             "read_only": self.read_only,
             "created": self.created,
             "last_used": self.last_used,
@@ -318,6 +340,22 @@ impl CheckoutRecord {
     }
 
     pub fn from_json(value: &Value) -> Option<Self> {
+        let mut app_threads: Vec<String> = value
+            .get("app_threads")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(old) = value.get("app_thread").and_then(Value::as_str).filter(|s| !s.is_empty())
+            && !app_threads.iter().any(|t| t == old)
+        {
+            app_threads.push(old.to_string());
+        }
         Some(Self {
             thread: value.get("thread")?.as_str()?.to_string(),
             repo: value.get("repo")?.as_str()?.to_string(),
@@ -327,7 +365,7 @@ impl CheckoutRecord {
             dir: value.get("dir")?.as_str()?.to_string(),
             branch: value.get("branch").and_then(Value::as_str).map(str::to_string),
             base: value.get("base")?.as_str()?.to_string(),
-            app_thread: value.get("app_thread").and_then(Value::as_str).map(str::to_string),
+            app_threads,
             read_only: value.get("read_only")?.as_bool()?,
             created: value.get("created")?.as_u64()?,
             last_used: value.get("last_used")?.as_u64()?,
@@ -345,7 +383,7 @@ impl CheckoutRecord {
     }
 }
 
-/// A pending notice queued by `ChatRepos` for phone bridges to drain (`budget80` or `busy`).
+/// A pending notice queued by `ChatRepos` for phone bridges to drain (`budget80`, `busy`, or `unbounded`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingNotice {
     pub chat: String,
@@ -379,16 +417,19 @@ struct ConfirmNonce {
 
 /// Runtime state held by `Server` for `/api/repos`: the 60-second listing cache, per-repository
 /// git locks, `index.json` lock, single-use confirmation nonces, host probe, daily per-chat token
-/// budget, pending notices, and running-thread tracking for concurrency warnings.
+/// budget, pending notices, server-wide turn watches, and running-thread tracking for concurrency warnings.
 pub struct ChatRepos {
     listing: tokio::sync::Mutex<Option<CachedListing>>,
     repo_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    index_lock: Mutex<()>,
+    index_lock: tokio::sync::Mutex<()>,
+    index_io_lock: Mutex<()>,
     nonces: Mutex<HashMap<String, ConfirmNonce>>,
     probe: Mutex<Arc<dyn HostProbe>>,
     allow_file_protocol: std::sync::atomic::AtomicBool,
     budget: Mutex<crate::repo_limits::Budget>,
     notices: Mutex<Vec<PendingNotice>>,
+    watches: Mutex<HashMap<String, crate::relay::ActiveTurnWatch>>,
+    tab_threads: Mutex<HashMap<u64, std::collections::HashSet<String>>>,
     running_threads: Mutex<HashMap<String, bool>>,
     thread_places: Mutex<HashMap<String, PathBuf>>,
     turn_warnings: Mutex<HashMap<String, Vec<String>>>,
@@ -406,12 +447,15 @@ impl ChatRepos {
         Self {
             listing: tokio::sync::Mutex::new(None),
             repo_locks: Mutex::new(HashMap::new()),
-            index_lock: Mutex::new(()),
+            index_lock: tokio::sync::Mutex::new(()),
+            index_io_lock: Mutex::new(()),
             nonces: Mutex::new(HashMap::new()),
             probe: Mutex::new(Arc::new(SystemHostProbe)),
             allow_file_protocol: std::sync::atomic::AtomicBool::new(cfg!(test)),
             budget: Mutex::new(crate::repo_limits::Budget::default()),
             notices: Mutex::new(Vec::new()),
+            watches: Mutex::new(HashMap::new()),
+            tab_threads: Mutex::new(HashMap::new()),
             running_threads: Mutex::new(HashMap::new()),
             thread_places: Mutex::new(HashMap::new()),
             turn_warnings: Mutex::new(HashMap::new()),
@@ -488,9 +532,10 @@ impl ChatRepos {
         }
     }
 
-    /// Records the `app_thread` id on the checkout record matching `cwd` under `index_lock`.
+    /// Appends `thread_id` to `app_threads` on the checkout record matching `cwd` under the index lock.
     pub fn record_app_thread(&self, codex_home: &Path, cwd: &Path, thread_id: &str) -> std::io::Result<bool> {
-        let _guard = self.index_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _async_try = self.index_lock.try_lock();
+        let _io_guard = self.index_io_lock.lock().unwrap_or_else(|p| p.into_inner());
         let ok = record_app_thread(codex_home, cwd, thread_id)?;
         if ok {
             self.record_thread_place(thread_id, cwd.to_path_buf());
@@ -498,14 +543,31 @@ impl ChatRepos {
         Ok(ok)
     }
 
-    /// Looks up the checkout record in `$CODEX_HOME/chat-repos/index.json` whose `app_thread` is
-    /// `app_thread` and whose worktree directory is a valid checkout under `chat-repos/`.
+    /// Async counterpart to `record_app_thread` that awaits the global `index_lock`.
+    pub async fn record_app_thread_async(
+        &self,
+        codex_home: &Path,
+        cwd: &Path,
+        thread_id: &str,
+    ) -> std::io::Result<bool> {
+        let _idx_guard = self.index_lock.lock().await;
+        let _io_guard = self.index_io_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let ok = record_app_thread(codex_home, cwd, thread_id)?;
+        if ok {
+            self.record_thread_place(thread_id, cwd.to_path_buf());
+        }
+        Ok(ok)
+    }
+
+    /// Looks up the checkout record in `$CODEX_HOME/chat-repos/index.json` whose `app_threads`
+    /// contains `app_thread` (or whose `thread` equals `app_thread`) and whose worktree directory
+    /// is a valid checkout under `chat-repos/`.
     pub fn find_by_app_thread(&self, codex_home: &Path, app_thread: &str) -> Option<CheckoutRecord> {
         if app_thread.is_empty() {
             return None;
         }
         load_index(codex_home).into_iter().find(|r| {
-            (r.app_thread.as_deref() == Some(app_thread) || r.thread == app_thread)
+            (r.has_app_thread(app_thread) || r.thread == app_thread)
                 && is_repo_checkout(codex_home, Path::new(&r.dir))
         })
     }
@@ -522,10 +584,224 @@ impl ChatRepos {
             });
     }
 
-    /// Drains and returns all pending notices (`budget80`, `busy`).
+    /// Drains and returns all pending notices (`budget80`, `busy`, `unbounded`).
     pub fn take_notices(&self) -> Vec<PendingNotice> {
         let mut notices = self.notices.lock().unwrap_or_else(|p| p.into_inner());
         std::mem::take(&mut *notices)
+    }
+
+    /// Records that relay tab `tab` is connected to `thread_id`.
+    pub fn note_tab_thread(&self, tab: u64, thread_id: &str) {
+        if !thread_id.is_empty() {
+            self.tab_threads
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .entry(tab)
+                .or_default()
+                .insert(thread_id.to_string());
+        }
+    }
+
+    /// Registers a server-wide turn watch keyed by `turn_id` and owned by `tab` if none exists yet
+    /// for `turn_id`. Returns `true` when `tab` became the owner of the new watch.
+    pub fn register_turn_watch(
+        &self,
+        codex_home: &Path,
+        record: &CheckoutRecord,
+        turn_id: &str,
+        thread_id: &str,
+        tab: u64,
+        watch: crate::repo_limits::RepoWatch,
+    ) -> bool {
+        if turn_id.is_empty() || thread_id.is_empty() {
+            return false;
+        }
+        self.note_tab_thread(tab, thread_id);
+        {
+            let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
+            if watches.contains_key(turn_id) {
+                return false;
+            }
+            watches.insert(
+                turn_id.to_string(),
+                crate::relay::ActiveTurnWatch {
+                    turn_id: turn_id.to_string(),
+                    thread_id: thread_id.to_string(),
+                    chat_key: record.chat_key(),
+                    repo: record.repo.clone(),
+                    owner_tab: tab,
+                    watch,
+                },
+            );
+        }
+        self.note_turn_started(codex_home, record);
+        true
+    }
+
+    /// Evaluates all active turn watches owned by `tab` at `now_ms()`.
+    pub fn check_watches_for_tab(&self, tab: u64) -> Vec<(String, String, crate::repo_limits::RepoVerdict)> {
+        let now_ms = self.now_ms();
+        let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
+        let mut out = Vec::new();
+        for entry in watches.values_mut() {
+            if entry.owner_tab == tab
+                && let Some(verdict) = entry.watch.check(now_ms)
+            {
+                out.push((entry.thread_id.clone(), entry.turn_id.clone(), verdict));
+            }
+        }
+        out
+    }
+
+    /// Updates the turn watch when `tab` is its owner and a tool/command item starts; returns `true` if updated.
+    pub fn on_item_started_for_tab(
+        &self,
+        tab: u64,
+        thread_id: Option<&str>,
+        turn_id: Option<&str>,
+        kind: &str,
+        item_id: &str,
+    ) -> bool {
+        let now_ms = self.now_ms();
+        let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
+        let single_turn = (watches.len() == 1).then(|| watches.keys().next().cloned()).flatten();
+        let entry = if let Some(t_id) = turn_id {
+            watches.get_mut(t_id)
+        } else if let Some(th_id) = thread_id {
+            watches.values_mut().find(|w| w.thread_id == th_id)
+        } else if let Some(t_id) = single_turn {
+            watches.get_mut(&t_id)
+        } else {
+            None
+        };
+        let Some(entry) = entry else { return false };
+        if entry.owner_tab != tab {
+            return false;
+        }
+        if crate::repo_limits::is_tool(kind) {
+            entry.watch.on_tool_started();
+        }
+        if kind == "commandExecution" && !item_id.is_empty() {
+            entry.watch.on_command_started_at(item_id, now_ms);
+        }
+        true
+    }
+
+    /// Updates the turn watch when `tab` is its owner and a command item completes; returns `true` if updated.
+    pub fn on_item_completed_for_tab(
+        &self,
+        tab: u64,
+        thread_id: Option<&str>,
+        turn_id: Option<&str>,
+        item_id: &str,
+    ) -> bool {
+        if item_id.is_empty() {
+            return false;
+        }
+        let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
+        let single_turn = (watches.len() == 1).then(|| watches.keys().next().cloned()).flatten();
+        let entry = if let Some(t_id) = turn_id {
+            watches.get_mut(t_id)
+        } else if let Some(th_id) = thread_id {
+            watches.values_mut().find(|w| w.thread_id == th_id)
+        } else if let Some(t_id) = single_turn {
+            watches.get_mut(&t_id)
+        } else {
+            None
+        };
+        let Some(entry) = entry else { return false };
+        if entry.owner_tab != tab {
+            return false;
+        }
+        entry.watch.on_command_finished(item_id);
+        true
+    }
+
+    /// Feeds cumulative token usage from `tab`; if a watch is active on `thread_id`, only its
+    /// `owner_tab` processes the notification and receives any resulting budget steer.
+    pub fn on_token_usage_for_tab(
+        &self,
+        tab: u64,
+        record: &CheckoutRecord,
+        thread_id: &str,
+        tokens_per_day: u64,
+        cumulative: u64,
+    ) -> Option<(String, String, String)> {
+        {
+            let watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(w) = watches.values().find(|w| w.thread_id == thread_id)
+                && w.owner_tab != tab
+            {
+                return None;
+            }
+        }
+        let exhausted = self.add_token_usage_for_thread(record, thread_id, tokens_per_day, cumulative);
+        if !exhausted {
+            return None;
+        }
+        let now_ms = self.now_ms();
+        let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(entry) = watches.values_mut().find(|w| w.thread_id == thread_id && w.owner_tab == tab)
+            && let Some(crate::repo_limits::RepoVerdict::Steer(text)) = entry.watch.steer_for_budget(now_ms)
+        {
+            return Some((entry.thread_id.clone(), entry.turn_id.clone(), text));
+        }
+        None
+    }
+
+    /// Removes the watch for `turn_id` (or all watches for `thread_id` if `turn_id` is `None`).
+    pub fn remove_turn_watch(&self, turn_id: Option<&str>, thread_id: &str) {
+        let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(t_id) = turn_id {
+            watches.remove(t_id);
+        } else {
+            watches.retain(|_, w| w.thread_id != thread_id);
+        }
+    }
+
+    /// Removes all watches and tab associations for `thread_id`.
+    pub fn remove_thread_watches(&self, thread_id: &str) {
+        self.watches
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|_, w| w.thread_id != thread_id);
+        let mut tabs = self.tab_threads.lock().unwrap_or_else(|p| p.into_inner());
+        for set in tabs.values_mut() {
+            set.remove(thread_id);
+        }
+    }
+
+    /// Handles a relay tab closing: hands any turn watch owned by `tab` to another open tab
+    /// connected to the same thread, or drops the watch and records an `"unbounded"` notice.
+    pub fn forget_tab(&self, tab: u64) {
+        let other_tabs: Vec<(u64, std::collections::HashSet<String>)> = {
+            let mut tabs = self.tab_threads.lock().unwrap_or_else(|p| p.into_inner());
+            tabs.remove(&tab);
+            let mut list: Vec<_> = tabs.iter().map(|(&id, set)| (id, set.clone())).collect();
+            list.sort_by_key(|(id, _)| *id);
+            list
+        };
+        let mut unbounded = Vec::new();
+        {
+            let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
+            let mut to_remove = Vec::new();
+            for (turn_id, entry) in watches.iter_mut() {
+                if entry.owner_tab == tab {
+                    if let Some((next_tab, _)) = other_tabs.iter().find(|(_, set)| set.contains(&entry.thread_id)) {
+                        entry.owner_tab = *next_tab;
+                    } else {
+                        to_remove.push(turn_id.clone());
+                        unbounded.push((entry.chat_key.clone(), entry.repo.clone()));
+                    }
+                }
+            }
+            for turn_id in to_remove {
+                watches.remove(&turn_id);
+            }
+        }
+        for (chat, repo) in unbounded {
+            self.record_notice(&chat, &repo, "unbounded");
+        }
     }
 
     /// Returns `(used, limit, resets_at)` for `record`'s chat at the current node time.
@@ -574,10 +850,22 @@ impl ChatRepos {
     /// `budget80` notice when 80% is crossed for the first time today, and returns `true` when the
     /// chat's budget is now exhausted (100%).
     pub fn add_token_usage(&self, record: &CheckoutRecord, tokens_per_day: u64, cumulative_total: u64) -> bool {
+        let thread = record.app_threads.last().map(String::as_str).unwrap_or(&record.thread);
+        self.add_token_usage_for_thread(record, thread, tokens_per_day, cumulative_total)
+    }
+
+    /// Feeds a cumulative token-usage total for a specific `thread_id` into `record`'s chat budget.
+    pub fn add_token_usage_for_thread(
+        &self,
+        record: &CheckoutRecord,
+        thread_id: &str,
+        tokens_per_day: u64,
+        cumulative_total: u64,
+    ) -> bool {
         let probe = self.probe();
         let now = probe.now_secs();
         let chat = record.chat_key();
-        let thread = record.app_thread.as_deref().unwrap_or(&record.thread);
+        let thread = if thread_id.is_empty() { &record.thread } else { thread_id };
         let (crossed_80, exhausted) = {
             let mut budget = self.budget.lock().unwrap_or_else(|p| p.into_inner());
             budget.set_tokens_per_day(tokens_per_day);
@@ -673,14 +961,14 @@ impl ChatRepos {
         let record_dir = Path::new(&record.dir);
 
         let same_checkout = running.iter().any(|(tid, &is_running)| {
-            if !is_running || Some(tid.as_str()) == record.app_thread.as_deref() || tid.as_str() == record.thread.as_str() {
+            if !is_running || record.has_app_thread(tid) || tid.as_str() == record.thread.as_str() {
                 return false;
             }
             if places.get(tid).is_some_and(|cwd| same_worktree_dir(cwd, record_dir)) {
                 return true;
             }
             load_index(codex_home).iter().any(|r| {
-                (r.app_thread.as_deref() == Some(tid) || r.thread == *tid)
+                (r.has_app_thread(tid) || r.thread == *tid)
                     && same_worktree_dir(Path::new(&r.dir), record_dir)
             })
         });
@@ -693,11 +981,10 @@ impl ChatRepos {
                 && !same_worktree_dir(Path::new(&other.dir), record_dir)
             {
                 let is_other_running = other
-                    .app_thread
-                    .as_deref()
-                    .and_then(|id| running.get(id))
-                    .copied()
-                    .unwrap_or_else(|| running.get(&other.thread).copied().unwrap_or(false));
+                    .app_threads
+                    .iter()
+                    .any(|id| running.get(id).copied().unwrap_or(false))
+                    || running.get(&other.thread).copied().unwrap_or(false);
                 if is_other_running {
                     let other_branch = other.branch.as_deref().unwrap_or(&other.base);
                     let msg = format!(
@@ -716,8 +1003,8 @@ impl ChatRepos {
             warnings.push("Another thread is running in this checkout.".to_string());
         }
         warnings.extend(other_checkout_warnings);
-        let on_main = record.branch.as_deref() == Some("main") || this_branch == "main";
-        if !warnings.is_empty() && on_main {
+        let on_default = record.branch.as_deref() == Some(record.base.as_str()) || this_branch == record.base;
+        if !warnings.is_empty() && on_default {
             warnings.push("Both may push main; /push refuses a non-fast-forward.".to_string());
         }
         warnings
@@ -792,47 +1079,80 @@ pub fn save_index(codex_home: &Path, records: &[CheckoutRecord]) -> std::io::Res
     auth::write_private(&index_path(codex_home), &text)
 }
 
-/// Whether `cwd` is an existing checkout recorded in `$CODEX_HOME/chat-repos/index.json`: its
-/// canonical path must lie strictly under canonical `$CODEX_HOME/chat-repos/` and equal the
-/// canonical `dir` of a record in `index.json`.
-pub fn is_repo_checkout(codex_home: &Path, cwd: &Path) -> bool {
+/// Checks whether `cwd` is an existing checkout recorded in `$CODEX_HOME/chat-repos/index.json`:
+/// its canonical path must lie strictly under canonical `$CODEX_HOME/chat-repos/` and equal the
+/// canonical `dir` of a record in `index.json`. Returns `Some(read_only)` when matched.
+pub fn repo_checkout(codex_home: &Path, cwd: &Path) -> Option<bool> {
     let (Ok(root), Ok(cwd)) = (root_dir(codex_home).canonicalize(), cwd.canonicalize()) else {
-        return false;
+        return None;
     };
     if !cwd.is_dir() || !cwd.starts_with(&root) || cwd == root {
-        return false;
+        return None;
     }
     load_index(codex_home)
-        .iter()
-        .any(|record| Path::new(&record.dir).canonicalize().ok().as_ref() == Some(&cwd))
+        .into_iter()
+        .find(|record| Path::new(&record.dir).canonicalize().ok().as_ref() == Some(&cwd))
+        .map(|record| record.read_only)
 }
 
-/// Whether `thread_id` is recorded as `app_thread` on a checkout in `$CODEX_HOME/chat-repos/index.json`.
+/// Whether `cwd` is an existing checkout recorded in `$CODEX_HOME/chat-repos/index.json`.
+pub fn is_repo_checkout(codex_home: &Path, cwd: &Path) -> bool {
+    repo_checkout(codex_home, cwd).is_some()
+}
+
+/// Returns the recorded checkout `dir` for `thread_id` when `thread_id` is in `app_threads` of a
+/// valid checkout under `$CODEX_HOME/chat-repos/`.
+pub fn repo_thread_cwd(codex_home: &Path, thread_id: &str) -> Option<String> {
+    if thread_id.is_empty() {
+        return None;
+    }
+    let root = root_dir(codex_home).canonicalize().ok()?;
+    for record in load_index(codex_home) {
+        if record.has_app_thread(thread_id) {
+            let dir = Path::new(&record.dir);
+            if let Ok(canon) = dir.canonicalize()
+                && canon.is_dir()
+                && canon.starts_with(&root)
+                && canon != root
+            {
+                return Some(record.dir);
+            }
+        }
+    }
+    None
+}
+
+/// Whether `thread_id` is recorded in `app_threads` on a checkout in `$CODEX_HOME/chat-repos/index.json`.
 pub fn is_repo_thread(codex_home: &Path, thread_id: &str) -> bool {
-    !thread_id.is_empty() && load_index(codex_home).iter().any(|record| record.app_thread.as_deref() == Some(thread_id))
+    repo_thread_cwd(codex_home, thread_id).is_some()
+        || (!thread_id.is_empty() && load_index(codex_home).iter().any(|record| record.has_app_thread(thread_id)))
 }
 
-/// Sets `app_thread` on the checkout record in `$CODEX_HOME/chat-repos/index.json` whose `dir`
-/// matches `cwd` (after canonicalisation when the folder exists on disk), writing the index whole.
+/// Appends `thread_id` to `app_threads` on the checkout record in `$CODEX_HOME/chat-repos/index.json`
+/// whose `dir` matches `cwd` (after canonicalisation when the folder exists on disk), writing the index whole.
 pub fn record_app_thread(codex_home: &Path, cwd: &Path, thread_id: &str) -> std::io::Result<bool> {
-    if !is_repo_checkout(codex_home, cwd) {
+    if thread_id.is_empty() || !is_repo_checkout(codex_home, cwd) {
         return Ok(false);
     }
     let canonical = cwd.canonicalize().ok();
     let mut records = load_index(codex_home);
-    let mut updated = false;
+    let mut matched = false;
+    let mut changed = false;
     for record in &mut records {
         let matches = Path::new(&record.dir) == cwd
             || (canonical.is_some() && Path::new(&record.dir).canonicalize().ok() == canonical);
         if matches {
-            record.app_thread = Some(thread_id.to_string());
-            updated = true;
+            matched = true;
+            if !record.has_app_thread(thread_id) {
+                record.app_threads.push(thread_id.to_string());
+                changed = true;
+            }
         }
     }
-    if updated {
+    if changed {
         save_index(codex_home, &records)?;
     }
-    Ok(updated)
+    Ok(matched)
 }
 
 /// Checks whether `name` has the syntax `<org>/<repo>` and is not a URL or filesystem path.
@@ -1228,16 +1548,23 @@ async fn get_or_fetch_listing(server: &Server, base_url: &str, token: &str) -> R
     Ok(repos)
 }
 
-/// Prepares the `0700` `GIT_ASKPASS` script and empty hooks folder in `state_dir`.
-/// The script reads `<state_dir>/forge-phone-token` at runtime and never embeds the token.
+/// Prepares the `0700` `GIT_ASKPASS` script and empty hooks folder in `state_dir` for `DEFAULT_FORGE_URL`.
 pub fn ensure_git_helpers(state_dir: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
+    ensure_git_helpers_for_forge(state_dir, DEFAULT_FORGE_URL)
+}
+
+/// Prepares the `0700` `GIT_ASKPASS` script and empty hooks folder in `state_dir` restricted to `forge_url`.
+/// The script reads `<state_dir>/forge-phone-token` at runtime, never embeds the token, and answers
+/// only prompts that contain the forge's exact `http://host:port`.
+pub fn ensure_git_helpers_for_forge(state_dir: &Path, forge_url: &str) -> std::io::Result<(PathBuf, PathBuf)> {
     auth::private_dir(state_dir)?;
     let hooks_dir = state_dir.join(EMPTY_HOOKS_DIR);
     auth::private_dir(&hooks_dir)?;
 
+    let forge_base = forge_url.trim().trim_end_matches('/');
     let askpass_path = state_dir.join(ASKPASS_SCRIPT);
     let script = format!(
-        "#!/bin/sh\ncase \"$1\" in\nUsername*) printf 'mightling-phone\\n' ;;\n*) tr -d '\\r\\n' < \"$(dirname \"$0\")/{TOKEN_FILE}\"; printf '\\n' ;;\nesac\n"
+        "#!/bin/sh\ncase \"$1\" in\n*\"{forge_base}\"*) ;;\n*) exit 1 ;;\nesac\ncase \"$1\" in\nUsername*) printf 'mightling-phone\\n' ;;\n*) tr -d '\\r\\n' < \"$(dirname \"$0\")/{TOKEN_FILE}\"; printf '\\n' ;;\nesac\n"
     );
     if std::fs::read_to_string(&askpass_path).ok().as_deref() != Some(script.as_str()) {
         auth::write_private(&askpass_path, &script)?;
@@ -1250,15 +1577,35 @@ pub fn ensure_git_helpers(state_dir: &Path) -> std::io::Result<(PathBuf, PathBuf
     Ok((askpass_path, hooks_dir))
 }
 
-/// Runs `git` with a clean environment (`PATH`, `HOME`, `LANG=C`, `GIT_TERMINAL_PROMPT=0`,
-/// `GIT_ASKPASS`), `-c core.hooksPath=<empty>`, and no inherited `GIT_*` variables.
-async fn run_git(
+fn git_subcommand_name<'a>(args: &'a [&'a str]) -> &'a str {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i];
+        if matches!(
+            arg,
+            "-c" | "-C" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--config-env"
+        ) {
+            i += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            i += 1;
+            continue;
+        }
+        return arg;
+    }
+    "git"
+}
+
+fn build_git_command(
     server: &Server,
     cwd: Option<&Path>,
     args: &[&str],
     with_askpass: bool,
-) -> Result<std::process::Output, String> {
-    let (askpass, hooks_dir) = ensure_git_helpers(&server.config.state_dir).map_err(|e| e.to_string())?;
+) -> Result<Command, String> {
+    let base_url = forge_base_url(server);
+    let (askpass, hooks_dir) =
+        ensure_git_helpers_for_forge(&server.config.state_dir, &base_url).map_err(|e| e.to_string())?;
     let hooks_arg = format!("core.hooksPath={}", hooks_dir.display());
 
     let mut cmd = Command::new("git");
@@ -1283,8 +1630,30 @@ async fn run_git(
     }
     cmd.args(args);
     cmd.stdin(std::process::Stdio::null());
-    let output = cmd.output().await.map_err(|e| format!("failed to run git: {e}"))?;
-    Ok(output)
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.kill_on_drop(true);
+    Ok(cmd)
+}
+
+/// Runs `git` with a clean environment (`PATH`, `HOME`, `LANG=C`, `GIT_TERMINAL_PROMPT=0`,
+/// `GIT_ASKPASS`), `-c core.hooksPath=<empty>`, no inherited `GIT_*` variables, and a per-command
+/// timeout (300 s for `clone`/`fetch`/`push`, 60 s otherwise; killed on expiry).
+async fn run_git(
+    server: &Server,
+    cwd: Option<&Path>,
+    args: &[&str],
+    with_askpass: bool,
+) -> Result<std::process::Output, String> {
+    let subcommand = git_subcommand_name(args);
+    let timeout_dur = server.chat_repos.probe().git_timeout(subcommand);
+    let mut cmd = build_git_command(server, cwd, args, with_askpass)?;
+    let child = cmd.spawn().map_err(|e| format!("failed to run git {subcommand}: {e}"))?;
+    match tokio::time::timeout(timeout_dur, child.wait_with_output()).await {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(e)) => Err(format!("failed to run git {subcommand}: {e}")),
+        Err(_) => Err(format!("git {subcommand} timed out after {}s", timeout_dur.as_secs())),
+    }
 }
 
 fn sanitize_error(text: &str, state_dir: &Path) -> String {
@@ -1310,6 +1679,75 @@ async fn run_git_checked(
         return Err(sanitize_error(detail, &server.config.state_dir));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Runs a `git diff` command while reading at most `MAX_DIFF_OUTPUT_BYTES` (1 MiB) of stdout.
+/// If the output exceeds 1 MiB, stops reading, kills the child process, and appends
+/// `"(cut: open the file to see all)"`.
+async fn run_git_diff_capped(
+    server: &Server,
+    cwd: &Path,
+    args: &[&str],
+    require_zero_exit: bool,
+) -> Result<String, String> {
+    let subcommand = git_subcommand_name(args);
+    let timeout_dur = server.chat_repos.probe().git_timeout(subcommand);
+    let mut cmd = build_git_command(server, Some(cwd), args, false)?;
+    let mut child = cmd.spawn().map_err(|e| format!("failed to run git {subcommand}: {e}"))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("missing stdout from git {subcommand}"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("missing stderr from git {subcommand}"))?;
+
+    let read_res = tokio::time::timeout(timeout_dur, async {
+        let mut buf = Vec::new();
+        (&mut stdout)
+            .take((MAX_DIFF_OUTPUT_BYTES + 1) as u64)
+            .read_to_end(&mut buf)
+            .await
+            .map_err(|e| format!("failed to read git {subcommand} output: {e}"))?;
+        if buf.len() > MAX_DIFF_OUTPUT_BYTES {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            buf.truncate(MAX_DIFF_OUTPUT_BYTES);
+            while !buf.is_empty() && std::str::from_utf8(&buf).is_err() {
+                buf.pop();
+            }
+            let mut text = String::from_utf8_lossy(&buf).into_owned();
+            text.push_str(DIFF_CUT_SUFFIX);
+            return Ok(text);
+        }
+        let mut err_buf = Vec::new();
+        let _ = (&mut stderr).take(65_536).read_to_end(&mut err_buf).await;
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| format!("failed to wait for git {subcommand}: {e}"))?;
+        if require_zero_exit && !status.success() {
+            let stderr_s = String::from_utf8_lossy(&err_buf);
+            let stdout_s = String::from_utf8_lossy(&buf);
+            let detail = if !stderr_s.trim().is_empty() {
+                stderr_s.trim()
+            } else {
+                stdout_s.trim()
+            };
+            return Err(sanitize_error(detail, &server.config.state_dir));
+        }
+        Ok(String::from_utf8_lossy(&buf).into_owned())
+    })
+    .await;
+
+    match read_res {
+        Ok(res) => res,
+        Err(_) => {
+            let _ = child.kill().await;
+            Err(format!("git {subcommand} timed out after {}s", timeout_dur.as_secs()))
+        }
+    }
 }
 
 /// `GET /api/repos`: the forge's repositories visible to the phone token, cached for 60 seconds.
@@ -1420,6 +1858,7 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
         );
     };
 
+    // Lock order is always per-repo mutex first, then `index_lock` (never holding `index_lock` across clone/fetch).
     let repo_lock = server.chat_repos.repo_mutex(&forge_repo.repo);
     let _repo_guard = repo_lock.lock().await;
 
@@ -1428,23 +1867,24 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
         return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err.to_string() }));
     }
 
-    let mut records = load_index(&server.config.codex_home);
-    let existing_idx = if let Some(tid) = requested_thread {
-        let Some(idx) = records.iter().position(|r| r.thread == tid && r.repo == forge_repo.repo) else {
+    let snapshot = load_index(&server.config.codex_home);
+    let existing_snapshot = if let Some(tid) = requested_thread {
+        let Some(rec) = snapshot.iter().find(|r| r.thread == tid && r.repo == forge_repo.repo).cloned() else {
             return json_response(
                 StatusCode::NOT_FOUND,
                 json!({ "error": format!("No checkout `{tid}` for `{}`.", forge_repo.repo) }),
             );
         };
-        Some(idx)
+        Some(rec)
     } else {
-        records
+        snapshot
             .iter()
-            .position(|r| r.repo == forge_repo.repo && r.bridge == bridge && r.chat == chat)
+            .find(|r| r.repo == forge_repo.repo && r.bridge == bridge && r.chat == chat)
+            .cloned()
     };
 
-    if existing_idx.is_none() {
-        if records.len() >= settings.max_checkouts {
+    if existing_snapshot.is_none() {
+        if snapshot.len() >= settings.max_checkouts {
             return json_response(
                 StatusCode::CONFLICT,
                 json!({ "error": format!("Maximum checkouts ({}) reached on this node.", settings.max_checkouts) }),
@@ -1482,63 +1922,169 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
         return json_response(StatusCode::BAD_GATEWAY, json!({ "error": err }));
     }
 
-    let now = now_secs();
-    let record = if let Some(idx) = existing_idx {
-        let mut rec = records[idx].clone();
-        rec.last_used = now;
-        rec.read_only = forge_repo.read_only;
-        rec.base = forge_repo.default_branch.clone();
-        if forge_repo.read_only {
-            rec.branch = None;
-        }
-        let worktree_dir = PathBuf::from(&rec.dir);
-        if !worktree_dir.join(".git").exists() {
-            if let Err(err) = ensure_worktree(&server, &base_git, &worktree_dir, &rec.thread, &forge_repo, rec.branch.as_deref()).await {
+    let (created_new_worktree, candidate_thread, candidate_worktree_dir, candidate_branch) =
+        if let Some(existing) = &existing_snapshot {
+            let branch = if forge_repo.read_only {
+                None
+            } else {
+                existing.branch.clone()
+            };
+            let wt_dir = PathBuf::from(&existing.dir);
+            if !wt_dir.join(".git").exists() {
+                if let Err(err) = ensure_worktree(
+                    &server,
+                    &base_git,
+                    &wt_dir,
+                    &existing.thread,
+                    &forge_repo,
+                    branch.as_deref(),
+                )
+                .await
+                {
+                    return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }));
+                }
+            }
+            (false, existing.thread.clone(), wt_dir, branch)
+        } else {
+            let thread = unique_thread_id(&snapshot);
+            let wt_dir = chat_repos_root
+                .join(&forge_repo.repo)
+                .join(format!("{bridge}-{thread}"));
+            let branch = if forge_repo.read_only {
+                None
+            } else {
+                Some(format!("phone/{thread}"))
+            };
+            if let Err(err) = ensure_worktree(&server, &base_git, &wt_dir, &thread, &forge_repo, branch.as_deref()).await
+            {
                 return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }));
             }
-        }
-        records[idx] = rec.clone();
-        rec
-    } else {
-        let thread = unique_thread_id(&records);
-        let worktree_dir = chat_repos_root
-            .join(&forge_repo.repo)
-            .join(format!("{bridge}-{thread}"));
-        let branch = if forge_repo.read_only {
-            None
-        } else {
-            Some(format!("phone/{thread}"))
+            (true, thread, wt_dir, branch)
         };
-        if let Err(err) = ensure_worktree(&server, &base_git, &worktree_dir, &thread, &forge_repo, branch.as_deref()).await {
+
+    let candidate_dir_str = candidate_worktree_dir.to_string_lossy().into_owned();
+    let now = now_secs();
+
+    enum OpenIndexOutcome {
+        Saved(CheckoutRecord),
+        LostRace {
+            winner: CheckoutRecord,
+            remove_dir: PathBuf,
+            remove_branch: Option<String>,
+        },
+        MaxCheckouts {
+            remove_dir: PathBuf,
+            remove_branch: Option<String>,
+        },
+        NotFound(String),
+        SaveErr(String),
+    }
+
+    let outcome = {
+        let _idx_guard = server.chat_repos.index_lock.lock().await;
+        let _io_guard = server.chat_repos.index_io_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut records = load_index(&server.config.codex_home);
+        if let Some(tid) = requested_thread {
+            if let Some(item) = records.iter_mut().find(|r| r.thread == tid && r.repo == forge_repo.repo) {
+                item.last_used = now;
+                item.read_only = forge_repo.read_only;
+                item.base = forge_repo.default_branch.clone();
+                if forge_repo.read_only {
+                    item.branch = None;
+                }
+                let rec = item.clone();
+                match save_index(&server.config.codex_home, &records) {
+                    Ok(()) => OpenIndexOutcome::Saved(rec),
+                    Err(e) => OpenIndexOutcome::SaveErr(e.to_string()),
+                }
+            } else {
+                OpenIndexOutcome::NotFound(format!("No checkout `{tid}` for `{}`.", forge_repo.repo))
+            }
+        } else if let Some(item) = records
+            .iter_mut()
+            .find(|r| r.repo == forge_repo.repo && r.bridge == bridge && r.chat == chat)
+        {
+            item.last_used = now;
+            item.read_only = forge_repo.read_only;
+            item.base = forge_repo.default_branch.clone();
+            if forge_repo.read_only {
+                item.branch = None;
+            }
+            let winner = item.clone();
+            match save_index(&server.config.codex_home, &records) {
+                Ok(()) => {
+                    if created_new_worktree && winner.dir != candidate_dir_str {
+                        OpenIndexOutcome::LostRace {
+                            winner,
+                            remove_dir: candidate_worktree_dir.clone(),
+                            remove_branch: candidate_branch.clone(),
+                        }
+                    } else {
+                        OpenIndexOutcome::Saved(winner)
+                    }
+                }
+                Err(e) => OpenIndexOutcome::SaveErr(e.to_string()),
+            }
+        } else if records.len() >= settings.max_checkouts {
+            OpenIndexOutcome::MaxCheckouts {
+                remove_dir: candidate_worktree_dir.clone(),
+                remove_branch: candidate_branch.clone(),
+            }
+        } else {
+            let rec = CheckoutRecord {
+                thread: candidate_thread,
+                repo: forge_repo.repo.clone(),
+                bridge: bridge.to_string(),
+                chat: chat.to_string(),
+                device: caller_device,
+                dir: candidate_dir_str,
+                branch: candidate_branch,
+                base: forge_repo.default_branch.clone(),
+                app_threads: Vec::new(),
+                read_only: forge_repo.read_only,
+                created: now,
+                last_used: now,
+            };
+            records.push(rec.clone());
+            match save_index(&server.config.codex_home, &records) {
+                Ok(()) => OpenIndexOutcome::Saved(rec),
+                Err(e) => OpenIndexOutcome::SaveErr(e.to_string()),
+            }
+        }
+    };
+
+    let record = match outcome {
+        OpenIndexOutcome::Saved(rec) => rec,
+        OpenIndexOutcome::LostRace {
+            winner,
+            remove_dir,
+            remove_branch,
+        } => {
+            cleanup_losing_worktree(&server, &base_git, &remove_dir, remove_branch.as_deref()).await;
+            winner
+        }
+        OpenIndexOutcome::MaxCheckouts {
+            remove_dir,
+            remove_branch,
+        } => {
+            if created_new_worktree {
+                cleanup_losing_worktree(&server, &base_git, &remove_dir, remove_branch.as_deref()).await;
+            }
+            return json_response(
+                StatusCode::CONFLICT,
+                json!({ "error": format!("Maximum checkouts ({}) reached on this node.", settings.max_checkouts) }),
+            );
+        }
+        OpenIndexOutcome::NotFound(msg) => {
+            return json_response(StatusCode::NOT_FOUND, json!({ "error": msg }));
+        }
+        OpenIndexOutcome::SaveErr(err) => {
             return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }));
         }
-        let rec = CheckoutRecord {
-            thread,
-            repo: forge_repo.repo.clone(),
-            bridge: bridge.to_string(),
-            chat: chat.to_string(),
-            device: caller_device,
-            dir: worktree_dir.to_string_lossy().into_owned(),
-            branch,
-            base: forge_repo.default_branch.clone(),
-            app_thread: None,
-            read_only: forge_repo.read_only,
-            created: now,
-            last_used: now,
-        };
-        records.push(rec.clone());
-        rec
     };
 
     let worktree_path = PathBuf::from(&record.dir);
     let notes = inspect_and_init_submodules_and_lfs(&server, &worktree_path, &base_url, &forge_repo).await;
-
-    {
-        let _idx_guard = server.chat_repos.index_lock.lock().unwrap_or_else(|p| p.into_inner());
-        if let Err(err) = save_index(&server.config.codex_home, &records) {
-            return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err.to_string() }));
-        }
-    }
 
     json_response(
         StatusCode::OK,
@@ -1550,6 +2096,16 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
             "notes": notes,
         }),
     )
+}
+
+async fn cleanup_losing_worktree(server: &Server, base_git: &Path, worktree_dir: &Path, branch: Option<&str>) {
+    let dir_str = worktree_dir.to_string_lossy().into_owned();
+    let _ = run_git(server, Some(base_git), &["worktree", "remove", "--force", &dir_str], false).await;
+    let _ = std::fs::remove_dir_all(worktree_dir);
+    let _ = run_git(server, Some(base_git), &["worktree", "prune"], false).await;
+    if let Some(branch_name) = branch {
+        let _ = run_git(server, Some(base_git), &["branch", "-D", branch_name], false).await;
+    }
 }
 
 fn unique_thread_id(existing: &[CheckoutRecord]) -> String {
@@ -1603,7 +2159,8 @@ async fn fetch_base_origin(server: &Server, base_git: &Path, default_branch: &st
     Ok(())
 }
 
-/// Adds or restores the linked worktree from `base.git`.
+/// Adds or restores the linked worktree from `base.git`. Never deletes an existing folder whose
+/// `.git` is missing; refuses with an explicit error so uncommitted files are never destroyed.
 async fn ensure_worktree(
     server: &Server,
     base_git: &Path,
@@ -1614,7 +2171,7 @@ async fn ensure_worktree(
 ) -> Result<(), String> {
     let _ = run_git(server, Some(base_git), &["worktree", "prune"], false).await;
     if worktree_dir.exists() {
-        let _ = std::fs::remove_dir_all(worktree_dir);
+        return Err("the checkout folder exists but is not a worktree; remove it at the node".to_string());
     }
     if let Some(parent) = worktree_dir.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -1657,60 +2214,59 @@ async fn ensure_worktree(
     Ok(())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct SubmoduleSpec {
     name: String,
     path: String,
-    url: String,
+    urls: Vec<String>,
 }
 
-/// Parses `.gitmodules` entries into `(name, path, url)`.
-fn parse_gitmodules(text: &str) -> Vec<SubmoduleSpec> {
-    let mut out = Vec::new();
-    let mut current_name: Option<String> = None;
-    let mut current_path: Option<String> = None;
-    let mut current_url: Option<String> = None;
-
-    let flush = |out: &mut Vec<SubmoduleSpec>, name: &mut Option<String>, path: &mut Option<String>, url: &mut Option<String>| {
-        if let (Some(n), Some(p), Some(u)) = (name.take(), path.take(), url.take()) {
-            out.push(SubmoduleSpec { name: n, path: p, url: u });
+/// Parses the NUL-terminated output of `git config -f .gitmodules -z --get-regexp '^submodule\..*\.(url|path)$'`.
+fn parse_gitmodules_config_z(output: &str) -> Vec<SubmoduleSpec> {
+    let mut specs: Vec<(String, Option<String>, Vec<String>)> = Vec::new();
+    for entry in output.split('\0') {
+        if entry.is_empty() {
+            continue;
+        }
+        let Some((raw_key, raw_val)) = entry.split_once('\n') else {
+            continue;
+        };
+        let key = raw_key.trim();
+        let val = raw_val.trim().to_string();
+        let Some(rest) = key.strip_prefix("submodule.") else {
+            continue;
+        };
+        let (name, is_path) = if let Some(n) = rest.strip_suffix(".path") {
+            (n, true)
+        } else if let Some(n) = rest.strip_suffix(".url") {
+            (n, false)
         } else {
-            *name = None;
-            *path = None;
-            *url = None;
-        }
-    };
-
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        };
+        if name.is_empty() {
             continue;
         }
-        if line.starts_with('[') && line.ends_with(']') {
-            flush(&mut out, &mut current_name, &mut current_path, &mut current_url);
-            let inner = &line[1..line.len() - 1].trim();
-            if let Some(rest) = inner.strip_prefix("submodule") {
-                let name = rest.trim().trim_matches('"').trim();
-                if !name.is_empty() {
-                    current_name = Some(name.to_string());
-                }
-            }
-            continue;
-        }
-        if current_name.is_some()
-            && let Some((k, v)) = line.split_once('=')
-        {
-            let key = k.trim();
-            let val = v.trim().trim_matches('"').to_string();
-            if key.eq_ignore_ascii_case("path") {
-                current_path = Some(val);
-            } else if key.eq_ignore_ascii_case("url") {
-                current_url = Some(val);
-            }
+        let slot = if let Some(existing) = specs.iter_mut().find(|(n, _, _)| n == name) {
+            existing
+        } else {
+            specs.push((name.to_string(), None, Vec::new()));
+            specs.last_mut().unwrap()
+        };
+        if is_path {
+            slot.1 = Some(val);
+        } else {
+            slot.2.push(val);
         }
     }
-    flush(&mut out, &mut current_name, &mut current_path, &mut current_url);
-    out
+    specs
+        .into_iter()
+        .filter(|(_, _, urls)| !urls.is_empty())
+        .map(|(name, path, urls)| SubmoduleSpec {
+            path: path.unwrap_or_else(|| name.clone()),
+            name,
+            urls,
+        })
+        .collect()
 }
 
 fn rewrite_forge_submodule_url(sub_url: &str, base_url: &str, parent_repo: &ForgeRepo) -> Option<String> {
@@ -1751,37 +2307,167 @@ async fn inspect_and_init_submodules_and_lfs(
 ) -> Vec<String> {
     let mut notes = Vec::new();
     let gitmodules_path = worktree_dir.join(".gitmodules");
-    if let Ok(text) = std::fs::read_to_string(&gitmodules_path) {
-        for sub in parse_gitmodules(&text) {
-            if !valid_worktree_rel_path(&sub.path) {
-                notes.push(format!("submodule {} has an invalid path and was skipped", sub.path));
-                continue;
-            }
-            if let Some(rewritten_url) = rewrite_forge_submodule_url(&sub.url, base_url, parent_repo) {
-                let _ = run_git_checked(server, Some(worktree_dir), &["submodule", "init", "--", &sub.path], false).await;
+    if gitmodules_path.is_file() {
+        let gm_out = run_git(
+            server,
+            Some(worktree_dir),
+            &[
+                "-c",
+                "protocol.allow=never",
+                "-c",
+                "protocol.http.allow=always",
+                "config",
+                "-f",
+                ".gitmodules",
+                "-z",
+                "--get-regexp",
+                "^submodule\\..*\\.(url|path)$",
+            ],
+            true,
+        )
+        .await;
+        if let Ok(out) = gm_out {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for sub in parse_gitmodules_config_z(&text) {
+                if !valid_worktree_rel_path(&sub.path) {
+                    notes.push(format!("submodule {} has an invalid path and was skipped", sub.path));
+                    continue;
+                }
                 let config_key = format!("submodule.{}.url", sub.name);
-                let _ = run_git_checked(server, Some(worktree_dir), &["config", &config_key, &rewritten_url], false).await;
-                if let Err(err) = run_git_checked(
+                let _ = run_git(
                     server,
                     Some(worktree_dir),
-                    &["submodule", "update", "--no-fetch", "--", &sub.path],
+                    &[
+                        "-c",
+                        "protocol.allow=never",
+                        "-c",
+                        "protocol.http.allow=always",
+                        "submodule",
+                        "init",
+                        "--",
+                        &sub.path,
+                    ],
+                    true,
+                )
+                .await;
+
+                let effective_url = run_git(
+                    server,
+                    Some(worktree_dir),
+                    &[
+                        "-c",
+                        "protocol.allow=never",
+                        "-c",
+                        "protocol.http.allow=always",
+                        "config",
+                        "--get",
+                        &config_key,
+                    ],
                     true,
                 )
                 .await
-                {
-                    if let Err(err2) = run_git_checked(
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| sub.urls.last().cloned().unwrap_or_default());
+
+                let all_urls_on_forge = sub
+                    .urls
+                    .iter()
+                    .all(|u| rewrite_forge_submodule_url(u, base_url, parent_repo).is_some());
+                let rewritten_effective =
+                    rewrite_forge_submodule_url(&effective_url, base_url, parent_repo).filter(|_| all_urls_on_forge);
+
+                if let Some(rewritten_url) = rewritten_effective {
+                    let _ = run_git_checked(
                         server,
                         Some(worktree_dir),
-                        &["submodule", "update", "--", &sub.path],
+                        &[
+                            "-c",
+                            "protocol.allow=never",
+                            "-c",
+                            "protocol.http.allow=always",
+                            "config",
+                            &config_key,
+                            &rewritten_url,
+                        ],
+                        true,
+                    )
+                    .await;
+                    if let Err(err) = run_git_checked(
+                        server,
+                        Some(worktree_dir),
+                        &[
+                            "-c",
+                            "protocol.allow=never",
+                            "-c",
+                            "protocol.http.allow=always",
+                            "submodule",
+                            "update",
+                            "--no-fetch",
+                            "--",
+                            &sub.path,
+                        ],
                         true,
                     )
                     .await
                     {
-                        notes.push(format!("submodule {} could not be updated: {err}; {err2}", sub.path));
+                        if let Err(err2) = run_git_checked(
+                            server,
+                            Some(worktree_dir),
+                            &[
+                                "-c",
+                                "protocol.allow=never",
+                                "-c",
+                                "protocol.http.allow=always",
+                                "submodule",
+                                "update",
+                                "--",
+                                &sub.path,
+                            ],
+                            true,
+                        )
+                        .await
+                        {
+                            notes.push(format!("submodule {} could not be updated: {err}; {err2}", sub.path));
+                        }
                     }
+                } else {
+                    let _ = run_git(
+                        server,
+                        Some(worktree_dir),
+                        &[
+                            "-c",
+                            "protocol.allow=never",
+                            "-c",
+                            "protocol.http.allow=always",
+                            "submodule",
+                            "deinit",
+                            "-f",
+                            "--",
+                            &sub.path,
+                        ],
+                        true,
+                    )
+                    .await;
+                    let _ = run_git(
+                        server,
+                        Some(worktree_dir),
+                        &[
+                            "-c",
+                            "protocol.allow=never",
+                            "-c",
+                            "protocol.http.allow=always",
+                            "config",
+                            "--unset-all",
+                            &config_key,
+                        ],
+                        true,
+                    )
+                    .await;
+                    notes.push(format!("submodule {} points outside the forge and was left empty", sub.path));
                 }
-            } else {
-                notes.push(format!("submodule {} points outside the forge and was left empty", sub.path));
             }
         }
     }
@@ -1908,18 +2594,33 @@ async fn uncommitted_stats(server: &Server, worktree_dir: &Path) -> Result<Vec<V
         false,
     )
     .await?;
+    let mut untracked_rels = Vec::new();
     for line in untracked.lines() {
         let rel = line.trim();
         if rel.is_empty() || seen.contains(rel) || !valid_worktree_rel_path(rel) {
             continue;
         }
-        let added = count_file_lines(&worktree_dir.join(rel));
         seen.insert(rel.to_string());
-        entries.push(json!({
-            "path": rel,
-            "added": added,
-            "removed": 0u64,
-        }));
+        untracked_rels.push(rel.to_string());
+    }
+    if !untracked_rels.is_empty() {
+        let wt = worktree_dir.to_path_buf();
+        let counted = tokio::task::spawn_blocking(move || {
+            untracked_rels
+                .into_iter()
+                .map(|rel| {
+                    let added = count_file_lines(&wt.join(&rel));
+                    json!({
+                        "path": rel,
+                        "added": added,
+                        "removed": 0u64,
+                    })
+                })
+                .collect::<Vec<Value>>()
+        })
+        .await
+        .map_err(|e| format!("failed to count untracked file lines: {e}"))?;
+        entries.extend(counted);
     }
     Ok(entries)
 }
@@ -1945,16 +2646,36 @@ fn parse_numstat(output: &str) -> Vec<Value> {
     out
 }
 
-fn count_file_lines(path: &Path) -> u64 {
-    let Ok(bytes) = std::fs::read(path) else { return 0 };
-    if bytes.is_empty() {
-        return 0;
+/// Counts lines of a regular file (never following symlinks) of at most `MAX_UNTRACKED_STAT_BYTES`
+/// (8 MiB) in a streaming 8 KiB buffer. Returns `None` for symlinks, special files, or files > 8 MiB.
+fn count_file_lines(path: &Path) -> Option<u64> {
+    use std::io::Read;
+
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    if !meta.file_type().is_file() || meta.len() > MAX_UNTRACKED_STAT_BYTES {
+        return None;
     }
-    let newlines = bytes.iter().filter(|&&b| b == b'\n').count() as u64;
-    if bytes.last() == Some(&b'\n') {
-        newlines
-    } else {
-        newlines + 1
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buf = [0u8; 8192];
+    let mut total_bytes = 0u64;
+    let mut newlines = 0u64;
+    let mut last_byte = None;
+    loop {
+        let n = file.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        total_bytes = total_bytes.saturating_add(n as u64);
+        if total_bytes > MAX_UNTRACKED_STAT_BYTES {
+            return None;
+        }
+        newlines += buf[..n].iter().filter(|&&b| b == b'\n').count() as u64;
+        last_byte = Some(buf[n - 1]);
+    }
+    match last_byte {
+        None => Some(0),
+        Some(b'\n') => Some(newlines),
+        Some(_) => Some(newlines + 1),
     }
 }
 
@@ -2026,7 +2747,7 @@ async fn repo_diff(
                 Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
             };
             let range = format!("{mb}..HEAD");
-            match run_git_checked(&server, Some(&worktree_dir), &["diff", &range, "--", rel], false).await {
+            match run_git_diff_capped(&server, &worktree_dir, &["diff", &range, "--", rel], true).await {
                 Ok(text) => text,
                 Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
             }
@@ -2053,7 +2774,7 @@ async fn repo_diff(
 }
 
 async fn uncommitted_file_diff(server: &Server, worktree_dir: &Path, rel: &str) -> Result<String, String> {
-    let tracked_diff = run_git_checked(server, Some(worktree_dir), &["diff", "HEAD", "--", rel], false).await?;
+    let tracked_diff = run_git_diff_capped(server, worktree_dir, &["diff", "HEAD", "--", rel], true).await?;
     if !tracked_diff.is_empty() {
         return Ok(tracked_diff);
     }
@@ -2065,8 +2786,14 @@ async fn uncommitted_file_diff(server: &Server, worktree_dir: &Path, rel: &str) 
     )
     .await?;
     if !untracked.trim().is_empty() {
-        let output = run_git(server, Some(worktree_dir), &["diff", "--no-index", "--", "/dev/null", rel], false).await?;
-        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+        let full = worktree_dir.join(rel);
+        let Ok(meta) = std::fs::symlink_metadata(&full) else {
+            return Ok(String::new());
+        };
+        if !meta.file_type().is_file() || meta.len() > MAX_UNTRACKED_STAT_BYTES {
+            return Ok("(cut: open the file to see all)".to_string());
+        }
+        return run_git_diff_capped(server, worktree_dir, &["diff", "--no-index", "--", "/dev/null", rel], false).await;
     }
     Ok(String::new())
 }
@@ -2180,29 +2907,85 @@ async fn read_owner_git_identity(server: &Server) -> Result<(String, String), St
     Ok((user_name, user_email))
 }
 
+struct MutationRequest {
+    caller_nonce_id: String,
+    confirm: String,
+    settings: ChatReposSettings,
+    base_url: String,
+    token: String,
+    request: Value,
+    record: CheckoutRecord,
+    worktree_dir: PathBuf,
+}
+
+impl ChatRepos {
+    /// Checks whether `nonce` is a valid unexpired confirmation nonce for `(caller, thread, intent)`
+    /// without consuming it yet.
+    pub fn check_nonce(&self, caller: &str, thread: &str, intent: &str, nonce: &str) -> bool {
+        if nonce.len() != 32 || !nonce.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return false;
+        }
+        let mut nonces = self.nonces.lock().unwrap_or_else(|p| p.into_inner());
+        nonces.retain(|_, v| v.issued_at.elapsed() < CONFIRM_TTL);
+        nonces
+            .get(nonce)
+            .is_some_and(|entry| entry.caller == caller && entry.thread == thread && entry.intent == intent)
+    }
+}
+
 /// Common pre-flight for every mutating `/api/repos/*` POST route: checks caller control scope,
-/// forge readiness, JSON body, checked-out `thread`, and consumes the single-use `confirm` nonce
-/// before the action runs.
-async fn validate_mutation_request(
+/// forge readiness, JSON body, checked-out `thread`, and verifies that a valid `confirm` nonce is
+/// present without consuming it until body and writability validation succeed.
+async fn prepare_mutation_request(
     server: &Server,
     headers: &HeaderMap,
     body: &Bytes,
     intent: &str,
-) -> Result<(ChatReposSettings, String, String, Value, CheckoutRecord, PathBuf), Response> {
+) -> Result<MutationRequest, Response> {
     let (_caller_device, caller_nonce_id) = require_control_caller_with_session(server, headers)?;
     let (settings, base_url, token) = ensure_service_ready(server).await?;
     let request: Value = serde_json::from_slice(body)
         .map_err(|_| json_response(StatusCode::BAD_REQUEST, json!({ "error": "send JSON" })))?;
     let thread = request.get("thread").and_then(Value::as_str).unwrap_or("").trim();
-    let confirm = request.get("confirm").and_then(Value::as_str).unwrap_or("").trim();
+    let confirm = request
+        .get("confirm")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let (record, worktree_dir) = find_checked_out_thread(server, thread)?;
-    if !server.chat_repos.consume_nonce(&caller_nonce_id, &record.thread, intent, confirm) {
+    if !server
+        .chat_repos
+        .check_nonce(&caller_nonce_id, &record.thread, intent, &confirm)
+    {
         return Err(json_response(
             StatusCode::CONFLICT,
             json!({ "error": "confirmation missing or expired" }),
         ));
     }
-    Ok((settings, base_url, token, request, record, worktree_dir))
+    Ok(MutationRequest {
+        caller_nonce_id,
+        confirm,
+        settings,
+        base_url,
+        token,
+        request,
+        record,
+        worktree_dir,
+    })
+}
+
+fn consume_mutation_nonce(server: &Server, req: &MutationRequest, intent: &str) -> Result<(), Response> {
+    if !server
+        .chat_repos
+        .consume_nonce(&req.caller_nonce_id, &req.record.thread, intent, &req.confirm)
+    {
+        return Err(json_response(
+            StatusCode::CONFLICT,
+            json!({ "error": "confirmation missing or expired" }),
+        ));
+    }
+    Ok(())
 }
 
 fn read_only_response() -> Response {
@@ -2215,15 +2998,14 @@ fn read_only_response() -> Response {
 /// `POST /api/repos/commit {thread, message, confirm}` (§4.4): stages all changes and commits with
 /// the node owner's git identity, never adding a trailer or messenger name.
 async fn repo_commit(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
-    let (_settings, _base_url, _token, request, record, worktree_dir) =
-        match validate_mutation_request(&server, &headers, &body, "commit").await {
-            Ok(v) => v,
-            Err(resp) => return resp,
-        };
-    if record.read_only {
+    let mreq = match prepare_mutation_request(&server, &headers, &body, "commit").await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if mreq.record.read_only {
         return read_only_response();
     }
-    let message = request.get("message").and_then(Value::as_str).unwrap_or("").trim();
+    let message = mreq.request.get("message").and_then(Value::as_str).unwrap_or("").trim();
     if message.is_empty() || message.chars().count() > MAX_COMMIT_MESSAGE_CHARS {
         return json_response(
             StatusCode::BAD_REQUEST,
@@ -2234,6 +3016,11 @@ async fn repo_commit(State(server): State<Arc<Server>>, headers: HeaderMap, body
         Ok(id) => id,
         Err(reason) => return json_response(StatusCode::CONFLICT, json!({ "error": reason })),
     };
+    if let Err(resp) = consume_mutation_nonce(&server, &mreq, "commit") {
+        return resp;
+    }
+    let record = mreq.record;
+    let worktree_dir = mreq.worktree_dir;
 
     let repo_lock = server.chat_repos.repo_mutex(&record.repo);
     let _repo_guard = repo_lock.lock().await;
@@ -2328,10 +3115,22 @@ async fn lookup_forge_repo(server: &Server, base_url: &str, token: &str, repo_na
     })
 }
 
+fn anonymity_error_response() -> Response {
+    json_response(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        json!({
+            "refused": "anonymity",
+            "error": "the anonymity check could not run",
+            "reason": "the anonymity check could not run",
+        }),
+    )
+}
+
 /// Runs the pre-push anonymity check (when `!forge_repo.private`) and pushes `refs/heads/<branch>:refs/heads/<branch>`
 /// without `--force`. Caller must hold the repository's mutex.
 async fn push_worktree_branch(
     server: &Server,
+    settings: &ChatReposSettings,
     record: &CheckoutRecord,
     worktree_dir: &Path,
     forge_repo: &ForgeRepo,
@@ -2343,10 +3142,21 @@ async fn push_worktree_branch(
         return Err(read_only_response());
     };
     let expected_phone = format!("phone/{}", record.thread);
-    if branch != expected_phone && branch != "main" {
+    if branch != expected_phone && branch != record.base {
         return Err(json_response(
             StatusCode::BAD_REQUEST,
             json!({ "error": "refusing to push an unrecognized branch" }),
+        ));
+    }
+    if branch == record.base && !settings.allow_main.iter().any(|r| r == &record.repo) {
+        return Err(json_response(
+            StatusCode::FORBIDDEN,
+            json!({
+                "error": format!(
+                    "Working on {1} is not allowed for `{0}`: run `ling chat repos allow-main {0}` at the node.",
+                    record.repo, record.base
+                )
+            }),
         ));
     }
 
@@ -2364,22 +3174,38 @@ async fn push_worktree_branch(
     let scan_base = if remote_is_ancestor {
         remote_branch_ref.clone()
     } else {
-        merge_base(server, worktree_dir, &record.base)
-            .await
-            .map_err(|err| json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })))?
+        merge_base(server, worktree_dir, &record.base).await.map_err(|err| {
+            if !forge_repo.private {
+                anonymity_error_response()
+            } else {
+                json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }))
+            }
+        })?
     };
 
     let range = format!("{scan_base}..HEAD");
     let rev_list_out = run_git_checked(server, Some(worktree_dir), &["rev-list", "--reverse", &range], false)
         .await
-        .map_err(|err| json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })))?;
+        .map_err(|err| {
+            if !forge_repo.private {
+                anonymity_error_response()
+            } else {
+                json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }))
+            }
+        })?;
     let commits: Vec<&str> = rev_list_out.lines().map(str::trim).filter(|s| !s.is_empty()).collect();
 
     let mut anonymity_note: Option<&'static str> = None;
     if !forge_repo.private {
-        let denylist_text = user_home_dir(server)
-            .and_then(|h| crate::anonymity::read_denylist(&h))
-            .or_else(|| crate::anonymity::read_denylist(&server.config.codex_home));
+        let denylist_res = match user_home_dir(server) {
+            Some(home) => match crate::anonymity::load_denylist(&home) {
+                Ok(Some(text)) => Ok(Some(text)),
+                Ok(None) => crate::anonymity::load_denylist(&server.config.codex_home),
+                Err(err) => Err(err),
+            },
+            None => crate::anonymity::load_denylist(&server.config.codex_home),
+        };
+        let denylist_text = denylist_res.map_err(|_| anonymity_error_response())?;
         match denylist_text {
             None => {
                 anonymity_note = Some("no denylist on this node");
@@ -2389,13 +3215,21 @@ async fn push_worktree_branch(
                 if !patterns.is_empty() {
                     let mut findings = Vec::new();
                     for sha in &commits {
-                        if let Ok(meta) = run_git_checked(
+                        let meta = run_git_checked(
                             server,
                             Some(worktree_dir),
-                            &["show", "-s", "--format=%an%x00%ae%x00%cn%x00%ce%x00%B", sha],
+                            &[
+                                "-c",
+                                "core.quotePath=false",
+                                "show",
+                                "-s",
+                                "--format=%an%x00%ae%x00%cn%x00%ce%x00%B",
+                                sha,
+                            ],
                             false,
                         )
                         .await
+                        .map_err(|_| anonymity_error_response())?;
                         {
                             let mut parts = meta.splitn(5, '\0');
                             let an = parts.next().unwrap_or("");
@@ -2407,13 +3241,24 @@ async fn push_worktree_branch(
                             crate::anonymity::scan_metadata(&patterns, "author", &author_blob, &mut findings);
                             crate::anonymity::scan_metadata(&patterns, "commit message", msg, &mut findings);
                         }
-                        if let Ok(names_out) = run_git_checked(
+                        let names_out = run_git_checked(
                             server,
                             Some(worktree_dir),
-                            &["diff-tree", "--no-commit-id", "--name-only", "-r", "--root", sha],
+                            &[
+                                "-c",
+                                "core.quotePath=false",
+                                "diff-tree",
+                                "-m",
+                                "--no-commit-id",
+                                "--name-only",
+                                "-r",
+                                "--root",
+                                sha,
+                            ],
                             false,
                         )
                         .await
+                        .map_err(|_| anonymity_error_response())?;
                         {
                             let paths: Vec<String> = names_out
                                 .lines()
@@ -2423,16 +3268,29 @@ async fn push_worktree_branch(
                                 .collect();
                             crate::anonymity::scan_paths(&patterns, &paths, &mut findings);
                         }
-                        if let Ok(patch) = run_git_checked(
+                        let patch = run_git_checked(
                             server,
                             Some(worktree_dir),
-                            &["show", "--format=", "--unified=0", "--no-renames", sha],
+                            &[
+                                "-c",
+                                "core.quotePath=false",
+                                "diff-tree",
+                                "-m",
+                                "-r",
+                                "-p",
+                                "-U0",
+                                "--text",
+                                "--no-renames",
+                                "--no-textconv",
+                                "--no-ext-diff",
+                                "--root",
+                                sha,
+                            ],
                             false,
                         )
                         .await
-                        {
-                            crate::anonymity::scan_unified_patch(&patterns, &patch, &mut findings);
-                        }
+                        .map_err(|_| anonymity_error_response())?;
+                        crate::anonymity::scan_unified_patch(&patterns, &patch, &mut findings);
                     }
                     if !findings.is_empty() {
                         let findings_json: Vec<Value> =
@@ -2470,7 +3328,7 @@ async fn push_worktree_branch(
             || combined.contains("fetch first")
             || combined.contains("[rejected]");
         let reason = if non_ff {
-            if branch == "main" {
+            if branch == record.base {
                 "the forge refused the push: the forge's main moved; /update first (the forge's branch moved; /update first)"
             } else {
                 "the forge refused the push: the forge's branch moved; /update first"
@@ -2516,25 +3374,43 @@ async fn branch_is_ahead_of_remote(server: &Server, worktree_dir: &Path, branch:
 }
 
 /// `POST /api/repos/push {thread, confirm}` (§4.5): runs the anonymity check on non-private
-/// repositories and pushes `phone/<thread>` (or `main` when allowed) to the forge without force.
+/// repositories and pushes `phone/<thread>` (or the default branch when allowed) to the forge without force.
 async fn repo_push(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
-    let (_settings, base_url, token, _request, record, worktree_dir) =
-        match validate_mutation_request(&server, &headers, &body, "push").await {
-            Ok(v) => v,
-            Err(resp) => return resp,
-        };
-    if record.read_only {
+    let mreq = match prepare_mutation_request(&server, &headers, &body, "push").await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if mreq.record.read_only {
         return read_only_response();
     }
-    let forge_repo = match lookup_forge_repo(&server, &base_url, &token, &record.repo).await {
+    let forge_repo = match lookup_forge_repo(&server, &mreq.base_url, &mreq.token, &mreq.record.repo).await {
         Ok(r) => r,
         Err(resp) => return resp,
     };
+    if forge_repo.read_only || forge_repo.archived {
+        return read_only_response();
+    }
+    if mreq.record.branch.as_deref() == Some(mreq.record.base.as_str())
+        && !mreq.settings.allow_main.iter().any(|r| r == &mreq.record.repo)
+    {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            json!({
+                "error": format!(
+                    "Working on {1} is not allowed for `{0}`: run `ling chat repos allow-main {0}` at the node.",
+                    mreq.record.repo, mreq.record.base
+                )
+            }),
+        );
+    }
+    if let Err(resp) = consume_mutation_nonce(&server, &mreq, "push") {
+        return resp;
+    }
 
-    let repo_lock = server.chat_repos.repo_mutex(&record.repo);
+    let repo_lock = server.chat_repos.repo_mutex(&mreq.record.repo);
     let _repo_guard = repo_lock.lock().await;
 
-    match push_worktree_branch(&server, &record, &worktree_dir, &forge_repo).await {
+    match push_worktree_branch(&server, &mreq.settings, &mreq.record, &mreq.worktree_dir, &forge_repo).await {
         Ok(payload) => json_response(StatusCode::OK, payload),
         Err(resp) => resp,
     }
@@ -2543,26 +3419,30 @@ async fn repo_push(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
 /// `POST /api/repos/update {thread, confirm, abort?}` (§4.6): fetches `base.git` and merges
 /// `origin/<default>` into the worktree, or aborts an in-progress merge when `abort: true`.
 async fn repo_update(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
-    let (_settings, base_url, token, request, record, worktree_dir) =
-        match validate_mutation_request(&server, &headers, &body, "update").await {
-            Ok(v) => v,
-            Err(resp) => return resp,
-        };
-    if record.read_only {
+    let mreq = match prepare_mutation_request(&server, &headers, &body, "update").await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if mreq.record.read_only {
         return read_only_response();
     }
-    let forge_repo = match lookup_forge_repo(&server, &base_url, &token, &record.repo).await {
+    let forge_repo = match lookup_forge_repo(&server, &mreq.base_url, &mreq.token, &mreq.record.repo).await {
         Ok(r) => r,
         Err(resp) => return resp,
     };
     if forge_repo.read_only || forge_repo.archived {
         return read_only_response();
     }
+    if let Err(resp) = consume_mutation_nonce(&server, &mreq, "update") {
+        return resp;
+    }
+    let record = mreq.record;
+    let worktree_dir = mreq.worktree_dir;
 
     let repo_lock = server.chat_repos.repo_mutex(&record.repo);
     let _repo_guard = repo_lock.lock().await;
 
-    let abort = request.get("abort").and_then(Value::as_bool).unwrap_or(false);
+    let abort = mreq.request.get("abort").and_then(Value::as_bool).unwrap_or(false);
     if abort {
         return match run_git_checked(&server, Some(&worktree_dir), &["merge", "--abort"], false).await {
             Ok(_) => json_response(StatusCode::OK, json!({ "aborted": true })),
@@ -2677,35 +3557,46 @@ async fn find_or_create_open_pr(
 /// forge's, then finds or opens a pull request and answers `{number, url}` with the relative
 /// `/forge/<owner>/<repo>/pulls/<number>` proxy path.
 async fn repo_pr(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
-    let (_settings, base_url, token, _request, record, worktree_dir) =
-        match validate_mutation_request(&server, &headers, &body, "pr").await {
-            Ok(v) => v,
-            Err(resp) => return resp,
-        };
-    if record.read_only {
+    let mreq = match prepare_mutation_request(&server, &headers, &body, "pr").await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if mreq.record.read_only {
         return read_only_response();
     }
-    let forge_repo = match lookup_forge_repo(&server, &base_url, &token, &record.repo).await {
+    let forge_repo = match lookup_forge_repo(&server, &mreq.base_url, &mreq.token, &mreq.record.repo).await {
         Ok(r) => r,
         Err(resp) => return resp,
     };
     if forge_repo.read_only || forge_repo.archived {
         return read_only_response();
     }
-    let Some(branch) = record.branch.as_deref() else {
+    let Some(branch) = mreq.record.branch.clone() else {
         return read_only_response();
     };
+    if let Err(resp) = consume_mutation_nonce(&server, &mreq, "pr") {
+        return resp;
+    }
 
-    let repo_lock = server.chat_repos.repo_mutex(&record.repo);
+    let repo_lock = server.chat_repos.repo_mutex(&mreq.record.repo);
     let _repo_guard = repo_lock.lock().await;
 
-    if branch_is_ahead_of_remote(&server, &worktree_dir, branch).await
-        && let Err(resp) = push_worktree_branch(&server, &record, &worktree_dir, &forge_repo).await
+    if branch_is_ahead_of_remote(&server, &mreq.worktree_dir, &branch).await
+        && let Err(resp) = push_worktree_branch(&server, &mreq.settings, &mreq.record, &mreq.worktree_dir, &forge_repo).await
     {
         return resp;
     }
 
-    let number = match find_or_create_open_pr(&base_url, &token, &record.repo, branch, &record.base, &record.thread).await {
+    let number = match find_or_create_open_pr(
+        &mreq.base_url,
+        &mreq.token,
+        &mreq.record.repo,
+        &branch,
+        &mreq.record.base,
+        &mreq.record.thread,
+    )
+    .await
+    {
         Ok(n) => n,
         Err(err) => {
             return json_response(
@@ -2714,42 +3605,48 @@ async fn repo_pr(State(server): State<Arc<Server>>, headers: HeaderMap, body: By
             );
         }
     };
-    let url = format!("/forge/{}/pulls/{number}", record.repo);
+    let url = format!("/forge/{}/pulls/{number}", mreq.record.repo);
     json_response(StatusCode::OK, json!({ "number": number, "url": url }))
 }
 
 /// `POST /api/repos/merge {thread, confirm}` (§4.6): pushes if ahead, opens a pull request if none
 /// exists, checks combined commit status and PR mergeability, and merges via the forge API.
 async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
-    let (_settings, base_url, token, _request, record, worktree_dir) =
-        match validate_mutation_request(&server, &headers, &body, "merge").await {
-            Ok(v) => v,
-            Err(resp) => return resp,
-        };
-    if record.read_only {
+    let mreq = match prepare_mutation_request(&server, &headers, &body, "merge").await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if mreq.record.read_only {
         return read_only_response();
     }
-    let forge_repo = match lookup_forge_repo(&server, &base_url, &token, &record.repo).await {
+    let forge_repo = match lookup_forge_repo(&server, &mreq.base_url, &mreq.token, &mreq.record.repo).await {
         Ok(r) => r,
         Err(resp) => return resp,
     };
     if forge_repo.read_only || forge_repo.archived {
         return read_only_response();
     }
-    let Some(branch) = record.branch.as_deref() else {
+    let Some(branch) = mreq.record.branch.clone() else {
         return read_only_response();
     };
+    if let Err(resp) = consume_mutation_nonce(&server, &mreq, "merge") {
+        return resp;
+    }
+    let base_url = mreq.base_url;
+    let token = mreq.token;
+    let record = mreq.record;
+    let worktree_dir = mreq.worktree_dir;
 
     let repo_lock = server.chat_repos.repo_mutex(&record.repo);
     let _repo_guard = repo_lock.lock().await;
 
-    if branch_is_ahead_of_remote(&server, &worktree_dir, branch).await
-        && let Err(resp) = push_worktree_branch(&server, &record, &worktree_dir, &forge_repo).await
+    if branch_is_ahead_of_remote(&server, &worktree_dir, &branch).await
+        && let Err(resp) = push_worktree_branch(&server, &mreq.settings, &record, &worktree_dir, &forge_repo).await
     {
         return resp;
     }
 
-    let pr_number = match find_or_create_open_pr(&base_url, &token, &record.repo, branch, &record.base, &record.thread).await {
+    let pr_number = match find_or_create_open_pr(&base_url, &token, &record.repo, &branch, &record.base, &record.thread).await {
         Ok(n) => n,
         Err(err) => {
             return json_response(
@@ -2847,36 +3744,82 @@ async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body:
     }
 }
 
-/// `POST /api/repos/main {thread, confirm}` (§3.3): switches the thread's checkout to `main` when
-/// the repository is listed in `[chat_repos] allow_main` and the worktree has no uncommitted changes.
+async fn is_branch_checked_out_in_other_worktree(
+    server: &Server,
+    base_git: &Path,
+    current_worktree: &Path,
+    branch: &str,
+) -> Result<bool, String> {
+    let _ = run_git(server, Some(base_git), &["worktree", "prune"], false).await;
+    let out = run_git_checked(server, Some(base_git), &["worktree", "list", "--porcelain"], false).await?;
+    let target_ref = format!("refs/heads/{branch}");
+    let mut wt_path: Option<PathBuf> = None;
+    let mut wt_branch: Option<String> = None;
+
+    let matches_other = |path: &Option<PathBuf>, br: &Option<String>| -> bool {
+        if let (Some(p), Some(b)) = (path, br)
+            && b == &target_ref
+            && !same_worktree_dir(p, current_worktree)
+            && !same_worktree_dir(p, base_git)
+        {
+            return true;
+        }
+        false
+    };
+
+    for line in out.lines() {
+        if line.trim().is_empty() {
+            if matches_other(&wt_path, &wt_branch) {
+                return Ok(true);
+            }
+            wt_path = None;
+            wt_branch = None;
+        } else if let Some(rest) = line.strip_prefix("worktree ") {
+            wt_path = Some(PathBuf::from(rest.trim()));
+        } else if let Some(rest) = line.strip_prefix("branch ") {
+            wt_branch = Some(rest.trim().to_string());
+        }
+    }
+    if matches_other(&wt_path, &wt_branch) {
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// `POST /api/repos/main {thread, confirm}` (§3.3): switches the thread's checkout to the
+/// repository's default branch (`record.base`) when the repository is listed in
+/// `[chat_repos] allow_main`, the branch is not checked out in another worktree, and the worktree
+/// has no uncommitted changes.
 async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
-    let (settings, base_url, token, _request, record, worktree_dir) =
-        match validate_mutation_request(&server, &headers, &body, "main").await {
-            Ok(v) => v,
-            Err(resp) => return resp,
-        };
-    if record.read_only {
+    let mreq = match prepare_mutation_request(&server, &headers, &body, "main").await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if mreq.record.read_only {
         return read_only_response();
     }
-    if !settings.allow_main.iter().any(|r| r == &record.repo) {
+    if !mreq.settings.allow_main.iter().any(|r| r == &mreq.record.repo) {
         return json_response(
             StatusCode::FORBIDDEN,
             json!({
                 "error": format!(
                     "Working on main is not allowed for `{0}`: run `ling chat repos allow-main {0}` at the node.",
-                    record.repo
+                    mreq.record.repo
                 )
             }),
         );
     }
 
-    let forge_repo = match lookup_forge_repo(&server, &base_url, &token, &record.repo).await {
+    let forge_repo = match lookup_forge_repo(&server, &mreq.base_url, &mreq.token, &mreq.record.repo).await {
         Ok(r) => r,
         Err(resp) => return resp,
     };
     if forge_repo.read_only || forge_repo.archived {
         return read_only_response();
     }
+    let record = mreq.record.clone();
+    let worktree_dir = mreq.worktree_dir.clone();
+    let default_branch = record.base.clone();
 
     let repo_lock = server.chat_repos.repo_mutex(&record.repo);
     let _repo_guard = repo_lock.lock().await;
@@ -2897,11 +3840,31 @@ async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
         return json_response(StatusCode::BAD_GATEWAY, json!({ "error": err }));
     }
 
-    let remote_default = format!("refs/remotes/origin/{}", record.base);
+    match is_branch_checked_out_in_other_worktree(&server, &base_git, &worktree_dir, &default_branch).await {
+        Ok(true) => {
+            return json_response(
+                StatusCode::CONFLICT,
+                json!({
+                    "error": format!(
+                        "`{default_branch}` is already checked out in another worktree of `{}`.",
+                        record.repo
+                    )
+                }),
+            );
+        }
+        Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
+        Ok(false) => {}
+    }
+
+    if let Err(resp) = consume_mutation_nonce(&server, &mreq, "main") {
+        return resp;
+    }
+
+    let remote_default = format!("refs/remotes/origin/{default_branch}");
     if let Err(err) = run_git_checked(
         &server,
         Some(&worktree_dir),
-        &["checkout", "--ignore-other-worktrees", "-B", "main", "--no-track", &remote_default],
+        &["checkout", "-B", &default_branch, "--no-track", &remote_default],
         false,
     )
     .await
@@ -2910,10 +3873,11 @@ async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
     }
 
     {
-        let _idx_guard = server.chat_repos.index_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _idx_guard = server.chat_repos.index_lock.lock().await;
+        let _io_guard = server.chat_repos.index_io_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut records = load_index(&server.config.codex_home);
         if let Some(item) = records.iter_mut().find(|r| r.thread == record.thread) {
-            item.branch = Some("main".to_string());
+            item.branch = Some(default_branch.clone());
             item.last_used = now_secs();
         }
         if let Err(err) = save_index(&server.config.codex_home, &records) {
@@ -2925,7 +3889,7 @@ async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
         StatusCode::OK,
         json!({
             "repo": record.repo,
-            "branch": "main",
+            "branch": default_branch,
         }),
     )
 }
@@ -2933,12 +3897,12 @@ async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
 /// `POST /api/repos/budget {thread, add, confirm}` (§7.2, §12.1): raises the chat's daily token
 /// budget by `add` (`1..=100,000,000`) until local midnight on the node.
 async fn repo_budget(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
-    let (settings, _base_url, _token, request, record, _worktree_dir) =
-        match validate_mutation_request(&server, &headers, &body, "budget").await {
-            Ok(v) => v,
-            Err(resp) => return resp,
-        };
-    let Some(add) = request
+    let mreq = match prepare_mutation_request(&server, &headers, &body, "budget").await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let Some(add) = mreq
+        .request
         .get("add")
         .and_then(Value::as_u64)
         .filter(|&n| (1..=crate::repo_limits::MAX_BUDGET_RAISE).contains(&n))
@@ -2948,7 +3912,12 @@ async fn repo_budget(State(server): State<Arc<Server>>, headers: HeaderMap, body
             json!({ "error": "add must be between 1 and 100,000,000" }),
         );
     };
-    let (used, limit, resets_at) = server.chat_repos.raise_budget(&record, settings.tokens_per_day, add);
+    if let Err(resp) = consume_mutation_nonce(&server, &mreq, "budget") {
+        return resp;
+    }
+    let (used, limit, resets_at) = server
+        .chat_repos
+        .raise_budget(&mreq.record, mreq.settings.tokens_per_day, add);
     json_response(
         StatusCode::OK,
         json!({
@@ -3000,6 +3969,7 @@ mod tests {
         night: AtomicBool,
         now_secs: AtomicU64,
         now_ms: AtomicU64,
+        git_timeout_ms: AtomicU64,
         utc_offset: Mutex<Option<i64>>,
     }
 
@@ -3010,6 +3980,7 @@ mod tests {
                 night: AtomicBool::new(night),
                 now_secs: AtomicU64::new(0),
                 now_ms: AtomicU64::new(0),
+                git_timeout_ms: AtomicU64::new(0),
                 utc_offset: Mutex::new(None),
             })
         }
@@ -3020,6 +3991,10 @@ mod tests {
 
         fn set_now_ms(&self, ms: u64) {
             self.now_ms.store(ms, Ordering::Relaxed);
+        }
+
+        fn set_git_timeout_ms(&self, ms: u64) {
+            self.git_timeout_ms.store(ms, Ordering::Relaxed);
         }
 
         fn set_utc_offset(&self, offset: Option<i64>) {
@@ -3059,6 +4034,18 @@ mod tests {
 
         fn utc_offset_seconds(&self) -> Option<i64> {
             *self.utc_offset.lock().unwrap_or_else(|p| p.into_inner())
+        }
+
+        fn git_timeout(&self, subcommand: &str) -> Duration {
+            let ms = self.git_timeout_ms.load(Ordering::Relaxed);
+            if ms > 0 {
+                Duration::from_millis(ms)
+            } else {
+                match subcommand {
+                    "clone" | "fetch" | "push" => GIT_NET_TIMEOUT,
+                    _ => GIT_LOCAL_TIMEOUT,
+                }
+            }
         }
     }
 
@@ -3510,7 +4497,7 @@ mod tests {
         ]))
         .await;
 
-        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let (server, _probe) = test_server(&s.dir, Some(forge_url.clone()), true);
         let cookie = owner_cookie(&server).await;
 
         // 1. Open org/widget for (signal, chat-1).
@@ -3636,11 +4623,17 @@ mod tests {
         let askpass_text = std::fs::read_to_string(&askpass).unwrap();
         assert!(!askpass_text.contains(TEST_TOKEN));
         let askpass_out = std::process::Command::new(&askpass)
-            .arg("Password for 'http://127.0.0.1:3200': ")
+            .arg(format!("Password for '{forge_url}': "))
             .output()
             .unwrap();
         assert!(askpass_out.status.success());
         assert_eq!(String::from_utf8_lossy(&askpass_out.stdout).trim(), TEST_TOKEN);
+        let askpass_bad = std::process::Command::new(&askpass)
+            .arg("Password for 'http://127.0.0.1:9999': ")
+            .output()
+            .unwrap();
+        assert!(!askpass_bad.status.success());
+        assert!(askpass_bad.stdout.is_empty());
 
         // 4. Read-only repository opens detached with read_only=true and no phone/<id> branch.
         let ro_req = Request::builder()
@@ -3892,7 +4885,7 @@ mod tests {
         ]))
         .await;
 
-        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let (server, _probe) = test_server(&s.dir, Some(forge_url.clone()), true);
         let cookie = owner_cookie(&server).await;
 
         let open_req = Request::builder()
@@ -4260,7 +5253,7 @@ mod tests {
         ]))
         .await;
 
-        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let (server, _probe) = test_server(&s.dir, Some(forge_url.clone()), true);
         let cookie = owner_cookie(&server).await;
 
         let (_, open, _) = post_json(
@@ -5011,7 +6004,7 @@ mod tests {
             dir: dir.to_string_lossy().into_owned(),
             branch: Some(format!("phone/{thread}")),
             base: "main".to_string(),
-            app_thread: None,
+            app_threads: Vec::new(),
             read_only: false,
             created: 1_700_000_000,
             last_used: 1_700_000_000,
@@ -5049,8 +6042,11 @@ mod tests {
         assert!(!is_repo_thread(&home, "thr-outside"));
         assert!(record_app_thread(&home, &checkout, "thr-99").unwrap());
         assert!(is_repo_thread(&home, "thr-99"));
+        assert!(record_app_thread(&home, &checkout, "thr-100").unwrap());
+        assert!(is_repo_thread(&home, "thr-99"));
+        assert!(is_repo_thread(&home, "thr-100"));
         let loaded = load_index(&home);
-        assert_eq!(loaded[0].app_thread.as_deref(), Some("thr-99"));
+        assert_eq!(loaded[0].app_threads, vec!["thr-99".to_string(), "thr-100".to_string()]);
     }
 
     #[tokio::test]
@@ -5187,11 +6183,12 @@ mod tests {
         let records = load_index(&server.config.codex_home);
         let record = records.iter().find(|r| r.thread == thread).unwrap().clone();
 
-        // 1. Initially usage is 0, notices empty.
+        // 1. Initially usage is 0, notices empty. First notification establishes baseline (0 charged).
         let (_, state, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread}")).await;
         assert_eq!(state["budget"]["used"], 0);
         assert_eq!(state["budget"]["limit"], 1_000_000);
         assert!(server.chat_repos.take_notices().is_empty());
+        server.chat_repos.add_token_usage(&record, 1_000_000, 0);
 
         // 2. Add tokens up to 790,000 (< 80%). No notice.
         server.chat_repos.add_token_usage(&record, 1_000_000, 790_000);
@@ -5262,7 +6259,7 @@ mod tests {
             }
         ]);
         let (forge_url, _forge_handle) = start_fake_forge(repos_json).await;
-        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let (server, _probe) = test_server(&s.dir, Some(forge_url.clone()), true);
         let cookie = owner_cookie(&server).await;
 
         let (_, open, _) = post_json(
@@ -5563,5 +6560,863 @@ mod tests {
         let int_val: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(int_val["method"], "turn/interrupt");
         assert_eq!(int_val["params"]["turnId"], "turn-ans-2");
+    }
+
+    #[tokio::test]
+    async fn fork_of_repo_thread_and_legacy_app_thread_field_are_recorded_and_bounded() {
+        let s = scratch("fork-and-legacy");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\nwork_tool_calls = 1\n",
+        )
+        .unwrap();
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+        let wt_str = wt.to_string_lossy().into_owned();
+
+        // Write a legacy index.json entry with only `"app_thread": "legacy-thr-1"`.
+        let legacy_idx = json!([
+            {
+                "thread": open["thread"],
+                "repo": "org/widget",
+                "bridge": "signal",
+                "chat": "c1",
+                "device": "owner",
+                "dir": wt_str,
+                "branch": open["branch"],
+                "base": "main",
+                "app_thread": "legacy-thr-1",
+                "read_only": false,
+                "created": 1_700_000_000u64,
+                "last_used": 1_700_000_000u64,
+            }
+        ]);
+        std::fs::write(
+            index_path(&server.config.codex_home),
+            serde_json::to_string_pretty(&legacy_idx).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_index(&server.config.codex_home);
+        assert_eq!(loaded[0].app_threads, vec!["legacy-thr-1".to_string()]);
+        assert!(is_repo_thread(&server.config.codex_home, "legacy-thr-1"));
+
+        // Deliver a fork response for a fork of `legacy-thr-1` and verify `forked-thr-2` is appended
+        // to `app_threads` and gets per-turn bounds.
+        let shared = Arc::new(crate::relay::Shared::default());
+        shared
+            .repo_openers
+            .lock()
+            .unwrap()
+            .insert("77".to_string(), wt.clone());
+        let (out_tx, _out_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (upstream_tx, mut upstream_rx) = tokio::sync::mpsc::unbounded_channel();
+        let fork_resp = json!({
+            "id": 77,
+            "result": {
+                "thread": {
+                    "id": "forked-thr-2",
+                    "cwd": wt_str,
+                }
+            }
+        })
+        .to_string();
+        crate::relay::deliver(&server, &shared, &out_tx, shared.tab_id, &fork_resp, &upstream_tx);
+
+        let updated = load_index(&server.config.codex_home);
+        assert_eq!(
+            updated[0].app_threads,
+            vec!["legacy-thr-1".to_string(), "forked-thr-2".to_string()]
+        );
+
+        // Start a turn on `forked-thr-2` and feed 1 tool call -> steered immediately!
+        crate::relay::handle_notification_repo_limits(
+            &server,
+            &shared,
+            "turn/started",
+            Some(&json!({ "threadId": "forked-thr-2", "turn": { "id": "turn-fork-1" } })),
+            &upstream_tx,
+        );
+        crate::relay::handle_notification_repo_limits(
+            &server,
+            &shared,
+            "item/started",
+            Some(&json!({ "threadId": "forked-thr-2", "item": { "id": "t1", "type": "applyPatch" } })),
+            &upstream_tx,
+        );
+        let steer_msg = upstream_rx.try_recv().expect("expected turn/steer on forked repo thread");
+        let tokio_tungstenite::tungstenite::Message::Text(text) = steer_msg else {
+            panic!("expected text")
+        };
+        let steer_val: Value = serde_json::from_str(text.as_str()).unwrap();
+        assert_eq!(steer_val["method"], "turn/steer");
+        assert_eq!(steer_val["params"]["threadId"], "forked-thr-2");
+    }
+
+    #[tokio::test]
+    async fn untracked_line_count_skips_symlinks_and_caps_over_8_mib_as_null() {
+        let s = scratch("untracked-bounds");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+
+        std::fs::write(wt.join("small.txt"), "one\ntwo\nthree\n").unwrap();
+        let big = std::fs::File::create(wt.join("over8m.bin")).unwrap();
+        big.set_len(MAX_UNTRACKED_STAT_BYTES + 1).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/dev/zero", wt.join("zero-link")).unwrap();
+
+        let (st, state, body) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread}")).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let uncommitted = state["uncommitted"].as_array().unwrap();
+        let small = uncommitted.iter().find(|e| e["path"] == "small.txt").unwrap();
+        assert_eq!(small["added"], json!(3));
+        let over = uncommitted.iter().find(|e| e["path"] == "over8m.bin").unwrap();
+        assert!(over["added"].is_null(), "expected null line count for >8 MiB file: {over}");
+        #[cfg(unix)]
+        {
+            let link = uncommitted.iter().find(|e| e["path"] == "zero-link").unwrap();
+            assert!(link["added"].is_null(), "expected null line count for symlink: {link}");
+        }
+    }
+
+    #[tokio::test]
+    async fn anonymity_scans_merge_commits_binary_files_and_refuses_on_scan_error() {
+        let s = scratch("anon-merge-bin-err");
+        let pub_bare = make_bare_repo(&s.dir, "org/pubrepo");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/pubrepo",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", pub_bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        let denylist_path = s.dir.join("user/.config/dreamference/anonymity-denylist.txt");
+        std::fs::write(&denylist_path, "box-sentinel-merge\nbox-sentinel-bin\n").unwrap();
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/pubrepo", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+
+        // (a) Conflicted merge commit containing a denylisted string is caught by diff-tree -m.
+        let seed_pub = s.dir.join("seed-work").join("org_pubrepo");
+        std::fs::write(seed_pub.join("README.md"), "# Demo\nupstream line\n").unwrap();
+        git_sync(&seed_pub, &["add", "README.md"]);
+        git_sync(&seed_pub, &["commit", "-m", "upstream edit"]);
+        git_sync(&seed_pub, &["push", "origin", "main"]);
+
+        std::fs::write(wt.join("README.md"), "# Demo\nlocal branch line\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "local edit", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let u_nonce = get_nonce(&server, &cookie, &thread, "update").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/update",
+            json!({ "thread": thread, "confirm": u_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT);
+
+        // Resolve conflict by introducing `box-sentinel-merge` in the merge commit itself.
+        std::fs::write(wt.join("README.md"), "# Demo\nmerged with box-sentinel-merge\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "resolve merge", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+
+        let p_nonce = get_nonce(&server, &cookie, &thread, "push").await;
+        let (st, res, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": thread, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(res["refused"], "anonymity");
+        assert!(!body.contains("box-sentinel-merge"), "{body}");
+
+        // (b) Binary / `-diff` file containing a denylisted string is caught by `--text`.
+        git_sync(&wt, &["reset", "--hard", "refs/remotes/origin/main"]);
+        std::fs::write(wt.join(".gitattributes"), "*.dat -diff\n").unwrap();
+        std::fs::write(wt.join("payload.dat"), b"BIN\x00box-sentinel-bin\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "add binary", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let p_nonce = get_nonce(&server, &cookie, &thread, "push").await;
+        let (st, res, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": thread, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(res["refused"], "anonymity");
+        assert!(!body.contains("box-sentinel-bin"), "{body}");
+
+        // (e) An unreadable denylist (e.g. a directory at the denylist path) refuses the push.
+        git_sync(&wt, &["reset", "--hard", "refs/remotes/origin/main"]);
+        std::fs::write(wt.join("clean.txt"), "clean line\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "clean commit", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        std::fs::remove_file(&denylist_path).unwrap();
+        std::fs::create_dir_all(&denylist_path).unwrap();
+        let p_nonce = get_nonce(&server, &cookie, &thread, "push").await;
+        let (st, res, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": thread, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(res["refused"], "anonymity");
+        assert!(
+            body.contains("the anonymity check could not run"),
+            "expected scan error refusal: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_opens_and_record_app_thread_preserve_all_index_updates() {
+        let s = scratch("concurrent-index");
+        let bare_a = make_bare_repo(&s.dir, "org/alpha");
+        let bare_b = make_bare_repo(&s.dir, "org/beta");
+        let bare_c = make_bare_repo(&s.dir, "org/gamma");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/alpha",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare_a.display()),
+            },
+            {
+                "full_name": "org/beta",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare_b.display()),
+            },
+            {
+                "full_name": "org/gamma",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare_c.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+
+        // Open org/alpha first so we can call record_app_thread on it concurrently with opening
+        // org/beta and org/gamma.
+        let (st, open_a, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/alpha", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let wt_a = PathBuf::from(open_a["cwd"].as_str().unwrap());
+
+        let srv_b = server.clone();
+        let ck_b = cookie.clone();
+        let srv_c = server.clone();
+        let ck_c = cookie.clone();
+        let srv_rec = server.clone();
+        let wt_a_clone = wt_a.clone();
+
+        let (res_b, res_c, rec_ok) = tokio::join!(
+            async move {
+                post_json(
+                    &srv_b,
+                    &ck_b,
+                    "/api/repos/open",
+                    json!({ "repo": "org/beta", "bridge": "signal", "chat": "c2" }),
+                )
+                .await
+            },
+            async move {
+                post_json(
+                    &srv_c,
+                    &ck_c,
+                    "/api/repos/open",
+                    json!({ "repo": "org/gamma", "bridge": "signal", "chat": "c3" }),
+                )
+                .await
+            },
+            async move {
+                srv_rec
+                    .chat_repos
+                    .record_app_thread(&srv_rec.config.codex_home, &wt_a_clone, "app-alpha-1")
+                    .unwrap()
+            }
+        );
+
+        assert_eq!(res_b.0, StatusCode::OK);
+        assert_eq!(res_c.0, StatusCode::OK);
+        assert!(rec_ok);
+
+        let records = load_index(&server.config.codex_home);
+        assert_eq!(records.len(), 3);
+        assert!(records.iter().any(|r| r.repo == "org/alpha" && r.app_threads == vec!["app-alpha-1".to_string()]));
+        assert!(records.iter().any(|r| r.repo == "org/beta"));
+        assert!(records.iter().any(|r| r.repo == "org/gamma"));
+    }
+
+    #[tokio::test]
+    async fn repo_main_uses_default_branch_refuses_other_worktree_and_push_rechecks_allow_main() {
+        let s = scratch("main-default-branch");
+        let bare = make_bare_repo(&s.dir, "org/trunkrepo");
+        // Rename the bare repo's default branch from `main` to `trunk`.
+        let seed_work = s.dir.join("seed-work").join("org_trunkrepo");
+        git_sync(&seed_work, &["branch", "-M", "trunk"]);
+        git_sync(&seed_work, &["push", "origin", "trunk"]);
+        git_sync(&bare, &["symbolic-ref", "HEAD", "refs/heads/trunk"]);
+
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/trunkrepo",
+                "default_branch": "trunk",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\nallow_main = [\"org/trunkrepo\"]\n",
+        )
+        .unwrap();
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open1, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/trunkrepo", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread1 = open1["thread"].as_str().unwrap().to_string();
+        let wt1 = PathBuf::from(open1["cwd"].as_str().unwrap());
+
+        let (_, open2, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/trunkrepo", "bridge": "signal", "chat": "c2" }),
+        )
+        .await;
+        let thread2 = open2["thread"].as_str().unwrap().to_string();
+
+        // 1. Switching thread1 with `/api/repos/main` switches to `trunk` (record.base), not `main`.
+        let m_nonce1 = get_nonce(&server, &cookie, &thread1, "main").await;
+        let (st, m_res1, body1) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/main",
+            json!({ "thread": thread1, "confirm": m_nonce1 }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body1}");
+        assert_eq!(m_res1["branch"], "trunk");
+
+        // 2. Switching thread2 to `trunk` while thread1 already has `trunk` checked out is refused with 409.
+        let m_nonce2 = get_nonce(&server, &cookie, &thread2, "main").await;
+        let (st, _, body2) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/main",
+            json!({ "thread": thread2, "confirm": m_nonce2 }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "{body2}");
+        assert!(body2.contains("already checked out in another worktree"), "{body2}");
+
+        // 3. Commit on `trunk` in thread1, then remove `org/trunkrepo` from `allow_main` and verify
+        // `/api/repos/push` re-checks `allow_main` and refuses with 403.
+        std::fs::write(wt1.join("trunk.txt"), "on trunk\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &thread1, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread1, "message": "commit on trunk", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        std::fs::write(server.config.user_config.as_ref().unwrap(), "[chat_repos]\nallow_main = []\n").unwrap();
+        let p_nonce = get_nonce(&server, &cookie, &thread1, "push").await;
+        let (st, _, p_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": thread1, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "{p_body}");
+        assert!(p_body.contains("ling chat repos allow-main org/trunkrepo"), "{p_body}");
+    }
+
+    #[tokio::test]
+    async fn submodule_one_line_off_forge_entry_is_left_empty() {
+        let s = scratch("submodule-oneline");
+        let bare = make_bare_repo(&s.dir, "org/subtest");
+        let seed_work = s.dir.join("seed-work").join("org_subtest");
+        // Single-line section header with url (`[submodule "sneaky"] url = ...`) that git accepts.
+        std::fs::write(
+            seed_work.join(".gitmodules"),
+            "[submodule \"sneaky\"] url = https://127.0.0.1:9443/outside/sneaky.git\n\tpath = vendor/sneaky\n",
+        )
+        .unwrap();
+        git_sync(&seed_work, &["add", ".gitmodules"]);
+        git_sync(&seed_work, &["commit", "-m", "add one-line submodule"]);
+        git_sync(&seed_work, &["push", "origin", "main"]);
+
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/subtest",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+
+        let (st, opened, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/subtest", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let notes = opened["notes"].as_array().unwrap();
+        assert!(
+            notes.iter().any(|n| n.as_str().unwrap().contains("vendor/sneaky")),
+            "expected off-forge note for one-line submodule entry: {notes:?}"
+        );
+        let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
+        assert!(!wt.join("vendor/sneaky/.git").exists());
+    }
+
+    #[tokio::test]
+    async fn turn_watches_do_not_duplicate_steers_hand_over_on_tab_close_and_record_unbounded() {
+        let s = scratch("watch-handover");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\nwork_tool_calls = 2\n",
+        )
+        .unwrap();
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+        server
+            .chat_repos
+            .record_app_thread(&server.config.codex_home, &wt, "thr-watch-1")
+            .unwrap();
+
+        let shared1 = Arc::new(crate::relay::Shared::for_tab(101));
+        let shared2 = Arc::new(crate::relay::Shared::for_tab(102));
+        let (tx1, mut rx1) = tokio::sync::mpsc::unbounded_channel();
+        let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel();
+
+        // 1. Both tabs observe turn/started and 2 tool calls for turn-w1: only tab 1 sends steer.
+        let start_w1 = json!({ "threadId": "thr-watch-1", "turn": { "id": "turn-w1" } });
+        crate::relay::handle_notification_repo_limits(&server, &shared1, "turn/started", Some(&start_w1), &tx1);
+        crate::relay::handle_notification_repo_limits(&server, &shared2, "turn/started", Some(&start_w1), &tx2);
+
+        for i in 1..=2 {
+            let item = json!({
+                "threadId": "thr-watch-1",
+                "turnId": "turn-w1",
+                "item": { "id": format!("tool-{i}"), "type": "applyPatch" }
+            });
+            crate::relay::handle_notification_repo_limits(&server, &shared1, "item/started", Some(&item), &tx1);
+            crate::relay::handle_notification_repo_limits(&server, &shared2, "item/started", Some(&item), &tx2);
+        }
+        assert!(rx1.try_recv().is_ok(), "owner tab 1 must send turn/steer");
+        assert!(rx1.try_recv().is_err(), "owner tab 1 must not send a second steer");
+        assert!(rx2.try_recv().is_err(), "observer tab 2 must not duplicate turn/steer");
+
+        // Complete turn-w1.
+        let end_w1 = json!({ "threadId": "thr-watch-1", "turn": { "id": "turn-w1", "status": "completed" } });
+        crate::relay::handle_notification_repo_limits(&server, &shared1, "turn/completed", Some(&end_w1), &tx1);
+
+        // 2. Start turn-w2 on tab 1 while tab 2 is also connected to thr-watch-1; close tab 1 ->
+        // watch is handed over to tab 2, and when tab 2 closes with no other tab left, an
+        // `unbounded` notice is recorded.
+        let start_w2 = json!({ "threadId": "thr-watch-1", "turn": { "id": "turn-w2" } });
+        crate::relay::handle_notification_repo_limits(&server, &shared1, "turn/started", Some(&start_w2), &tx1);
+        crate::relay::handle_notification_repo_limits(&server, &shared2, "turn/started", Some(&start_w2), &tx2);
+
+        server.chat_repos.forget_tab(shared1.tab_id);
+        assert!(server.chat_repos.take_notices().is_empty(), "handover to tab 2 must not emit unbounded");
+
+        // Tab 2 now owns the watch and steers after 2 tool calls.
+        for i in 1..=2 {
+            let item = json!({
+                "threadId": "thr-watch-1",
+                "turnId": "turn-w2",
+                "item": { "id": format!("tool2-{i}"), "type": "applyPatch" }
+            });
+            crate::relay::handle_notification_repo_limits(&server, &shared2, "item/started", Some(&item), &tx2);
+        }
+        assert!(rx2.try_recv().is_ok(), "tab 2 must send turn/steer after handover");
+
+        // Now close tab 2 while turn-w2 is still active and no tab remains -> records `unbounded`.
+        server.chat_repos.forget_tab(shared2.tab_id);
+        let notices = server.chat_repos.take_notices();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].kind, "unbounded");
+        assert_eq!(notices[0].repo, "org/widget");
+    }
+
+    #[tokio::test]
+    async fn run_git_times_out_kills_hung_command_and_names_subcommand_without_secrets() {
+        assert_eq!(SystemHostProbe.git_timeout("clone"), Duration::from_secs(300));
+        assert_eq!(SystemHostProbe.git_timeout("fetch"), Duration::from_secs(300));
+        assert_eq!(SystemHostProbe.git_timeout("push"), Duration::from_secs(300));
+        assert_eq!(SystemHostProbe.git_timeout("status"), Duration::from_secs(60));
+
+        let s = scratch("git-timeout");
+        let (server, probe) = test_server(&s.dir, None, true);
+        probe.set_git_timeout_ms(100);
+
+        // Start a TCP listener that accepts a connection and never replies so `git fetch` hangs.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _hold = tokio::spawn(async move {
+            if let Ok((_sock, _)) = listener.accept().await {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }
+        });
+
+        let secret_url = format!("http://127.0.0.1:{port}/{TEST_TOKEN}/org/widget.git");
+        // `ls-remote` needs no repository, so it reaches the silent listener and hangs there.
+        let err = run_git(&server, None, &["ls-remote", &secret_url], false)
+            .await
+            .expect_err("expected hung git ls-remote to time out");
+        assert!(err.contains("git ls-remote timed out"), "unexpected error: {err}");
+        assert!(!err.contains(TEST_TOKEN), "timeout error must never contain argument secrets: {err}");
+    }
+
+    #[tokio::test]
+    async fn diff_output_is_capped_at_1_mib_and_untracked_files_over_8_mib_are_not_diffed() {
+        let s = scratch("diff-caps");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+
+        // 1. Tracked file diff > 1 MiB is capped and ends with `(cut: open the file to see all)`.
+        let line = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ\n";
+        let big_tracked = line.repeat((MAX_DIFF_OUTPUT_BYTES / line.len()) + 500);
+        std::fs::write(wt.join("README.md"), big_tracked).unwrap();
+
+        let (st, diff_res, body) = get_json(
+            &server,
+            &cookie,
+            &format!("/api/repos/diff?thread={thread}&scope=uncommitted&path=README.md"),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let diff_str = diff_res["diff"].as_str().unwrap();
+        assert!(diff_str.ends_with("(cut: open the file to see all)"));
+        assert!(diff_str.len() <= MAX_DIFF_OUTPUT_BYTES + DIFF_CUT_SUFFIX.len());
+
+        // 2. Untracked file > 8 MiB is not diffed and answers `(cut: open the file to see all)`.
+        let giant = std::fs::File::create(wt.join("giant.txt")).unwrap();
+        giant.set_len(MAX_UNTRACKED_STAT_BYTES + 10).unwrap();
+        let (st, giant_res, body) = get_json(
+            &server,
+            &cookie,
+            &format!("/api/repos/diff?thread={thread}&scope=uncommitted&path=giant.txt"),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(giant_res["diff"], "(cut: open the file to see all)");
+    }
+
+    #[tokio::test]
+    async fn ensure_worktree_refuses_existing_non_worktree_folder_without_deleting_it() {
+        let s = scratch("worktree-preserve");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (server, _probe) = test_server(&s.dir, None, true);
+
+        let non_wt = s.dir.join("existing-folder");
+        std::fs::create_dir_all(&non_wt).unwrap();
+        let precious = non_wt.join("precious.txt");
+        std::fs::write(&precious, "do not delete me\n").unwrap();
+
+        let forge_repo = ForgeRepo {
+            repo: "org/widget".to_string(),
+            default_branch: "main".to_string(),
+            pushed_at: String::new(),
+            private: false,
+            archived: false,
+            mirror: false,
+            read_only: false,
+            clone_url: format!("file://{}", bare.display()),
+        };
+        let err = ensure_worktree(&server, &bare, &non_wt, "deadbeef", &forge_repo, None)
+            .await
+            .expect_err("expected refusal when checkout folder exists without .git");
+        assert_eq!(
+            err,
+            "the checkout folder exists but is not a worktree; remove it at the node"
+        );
+        assert!(precious.exists(), "ensure_worktree must never delete an existing folder");
+    }
+
+    #[tokio::test]
+    async fn refused_mutation_requests_do_not_consume_confirmation_nonce() {
+        let s = scratch("nonce-preserved-on-refusal");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+        std::fs::write(wt.join("edit.txt"), "hello\n").unwrap();
+
+        // 1. Empty commit message is refused with 400 and does NOT consume `c_nonce`.
+        let c_nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "   ", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+
+        // Using the same `c_nonce` with a valid message now succeeds!
+        let (st, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "valid message with same nonce", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+
+        // 2. Refused `/api/repos/main` (not in allow_main) does NOT consume `m_nonce`.
+        let m_nonce = get_nonce(&server, &cookie, &thread, "main").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/main",
+            json!({ "thread": thread, "confirm": m_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\nallow_main = [\"org/widget\"]\n",
+        )
+        .unwrap();
+        let (st, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/main",
+            json!({ "thread": thread, "confirm": m_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
     }
 }
