@@ -151,6 +151,9 @@ export type FromView =
   /** The memory files, and an edit of one (memoryfiles.ts, DESKTOP §16 B17). */
   | { type: "memories/files" }
   | { type: "memories/save"; name: string; text: string }
+  /** A link's folder checked, and a project's origin remote (DESKTOP §16 B19). */
+  | { type: "folder/check"; dir: string }
+  | { type: "git/origin"; dir: string }
   | { type: "night/list" }
   | { type: "night/report"; name: string }
   | { type: "night/add"; repo: string; task: string; test: string | null; on?: string | null; bestOf?: number | null }

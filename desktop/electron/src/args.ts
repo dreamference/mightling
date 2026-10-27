@@ -2,7 +2,7 @@
 // Work (the launcher passes them); nothing opens it on Ask, as before. A `ling://` link
 // (DESKTOP_PARITY §2.20; the app registers `ling` and, for links made before, `mightling`) opens
 // what it names: `ling://threads/<id>`, `ling://threads/new`, `ling://new?prompt=…&path=…`,
-// `ling://settings`, `ling://skills`, `ling://night`, `ling://plugins/<id>`; and the older
+// `ling://settings[/<page>]`, `ling://skills`, `ling://night` (and `ling://automations`), `ling://plugins/<id>`; and the older
 // `mightling://thread/<id>` and `mightling://work?cwd=<folder>`.
 
 import app from "../app.json";
@@ -18,6 +18,10 @@ export interface WorkTarget {
   send?: boolean;
   /** The plugin `ling://plugins/<id>` names. */
   plugin?: string;
+  /** `ling://settings/<page>`: the Settings page to open (DESKTOP §16 B19). */
+  settingsPage?: string;
+  /** `ling://new?originUrl=…`: a git remote; the new thread starts in the open project whose remote it is. */
+  origin?: string;
 }
 
 const SCHEMES = [app.scheme, ...app.legacySchemes];
@@ -44,14 +48,21 @@ export function linkTarget(link: string): WorkTarget {
     switch (url.hostname) {
       case "thread":
       case "threads":
-        if (rest === "new") return { cwd: null, thread: null, page: "new" };
+        // `ling://threads/new?prompt=…&path=…` (DESKTOP §16 B19): as `ling://new`.
+        if (rest === "new") return { cwd: url.searchParams.get("path"), thread: null, prompt: url.searchParams.get("prompt")?.slice(0, 4000) ?? null, page: "new" };
         return { cwd: null, thread: threadId(rest) };
-      case "new":
-        return { cwd: url.searchParams.get("path"), thread: null, prompt: url.searchParams.get("prompt"), page: "new" };
+      case "new": {
+        const origin = url.searchParams.get("originUrl");
+        return { cwd: url.searchParams.get("path"), thread: null, prompt: url.searchParams.get("prompt")?.slice(0, 4000) ?? null, page: "new", ...(origin ? { origin: origin.slice(0, 500) } : {}) };
+      }
       case "settings":
+        return { cwd: null, thread: null, page: "settings", ...(/^[a-z]{1,32}$/.test(rest) ? { settingsPage: rest } : {}) };
       case "skills":
       case "night":
         return { cwd: null, thread: null, page: url.hostname };
+      // The Codex app's name for scheduled tasks: Scheduled, over Night Shift.
+      case "automations":
+        return { cwd: null, thread: null, page: "night" };
       // `ling://pets` and the vendor's `pets/install` shape: Settings › Pets (a pet is not installed from a link).
       case "pets":
         return { cwd: null, thread: null, page: "pets" };

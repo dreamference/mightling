@@ -81,6 +81,7 @@ import { commandChoices, type ApprovalChoice } from "./approvals";
 import { busyHere } from "./checkouts";
 import { drawDiagrams } from "./diagrams";
 import { ExportDialog } from "./ExportDialog";
+import { LINKED_SETTINGS, sameRemote } from "./links2";
 import { PathMenu, pathOf, type PathAction, type PathMenuState } from "./PathMenu";
 import { QuestionCard } from "./QuestionCard";
 import { showsWelcome, WelcomeDialog, type WelcomeChoice } from "./WelcomeDialog";
@@ -214,6 +215,8 @@ export function App() {
   const [pathMenu, setPathMenu] = useState<PathMenuState | null>(null);
   /** The first-run page (DESKTOP §16 B6), decided once the threads and preferences are read. */
   const [welcome, setWelcome] = useState(false);
+  /** The plugin a `ling://plugins/<id>` link named, shown first in Skills and tools › Plugins (DESKTOP §16 B19). */
+  const [pluginFocus, setPluginFocus] = useState<string | null>(null);
   const [exporting, setExporting] = useState<{ thread: Thread; title: string; home: string | null } | null>(null);
   const draggedHeader = useRef<string | null>(null);
   const loadProjects = useCallback(async () => {
@@ -1628,15 +1631,33 @@ export function App() {
       return;
     }
     if (target.page === "settings") {
-      setSettingsPage("general");
+      const page = (LINKED_SETTINGS as readonly string[]).includes(target.settingsPage ?? "") ? (target.settingsPage as SettingsPage) : "general";
+      setSettingsPage(page);
       return setSettingsOpen(true);
     }
     if (target.page === "skills") return setExtensions("skills");
     if (target.page === "night") return setScheduledOpen(true);
-    if (target.page === "plugins") return setExtensions("skills");
+    if (target.page === "plugins") {
+      setPluginFocus(target.plugin ?? null);
+      return setExtensions("plugins");
+    }
     showView("work");
-    if (target.cwd) setNewCwd(target.cwd);
     if (target.prompt) setDraft(target.prompt);
+    // A link's folder only when it is an absolute folder that exists; a remote names the open project it belongs to.
+    if (target.cwd) {
+      const asked = target.cwd;
+      void bridge.folderExists(asked).then((exists) => exists && /^(\/|[A-Za-z]:[\\/])/.test(asked) && setNewCwd(asked)).catch(() => {});
+    } else if (target.origin && bridge.git.available()) {
+      const wanted = target.origin;
+      const folders = projects(state, askRoot, (thread) => projectFolder(thread, links)).map((group) => group.cwd);
+      void (async () => {
+        for (const folder of folders) {
+          const remote = await bridge.originOf(folder).catch(() => null);
+          if (remote && sameRemote(remote, wanted)) return setNewCwd(folder);
+        }
+        notice(`No open project has the remote ${wanted}.`);
+      })();
+    }
   };
 
   // The sidebar's order, which Ctrl+Tab and Ctrl+1–9 walk.
@@ -3034,7 +3055,7 @@ export function App() {
             }
           }} />
       ) : null}
-      {extensions ? <ExtensionsView client={client} listen={listen} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => setExtensions(null)} notice={notice} /> : null}
+      {extensions ? <ExtensionsView client={client} listen={listen} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => { setExtensions(null); setPluginFocus(null); }} notice={notice} focusPlugin={pluginFocus} /> : null}
       {fileSearch !== null && composeRoot ? (
         <FileSearch root={composeRoot} search={searchFiles} initial={fileSearch}
           front={paneActive?.kind === "file" && tabsShown ? paneActive.path : null}
