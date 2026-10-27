@@ -53,6 +53,7 @@ pub mod compat_keys;
 pub mod compat_print;
 pub mod compat_tui;
 pub mod compaction;
+pub mod delegate;
 pub mod docs_index;
 pub mod exec_tool;
 pub mod guard;
@@ -121,13 +122,13 @@ pub const UPSTREAM_TESTS_ENV: &str = "MIGHTLING_UPSTREAM_TESTS";
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal", "sync", "monitor",
+    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal", "sync", "monitor", "delegate",
 ];
 
 /// The launcher's own subcommands, handled before Codex parses the command line.
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
-    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync", "monitor",
+    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync", "monitor", "delegate",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -482,6 +483,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "monitor"
     {
         std::process::exit(monitor::run_cli(&user_args[index + 1..]));
+    }
+    // `delegate` is the Claude Code delegation plugin server and CLI (delegate.rs;
+    // specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md Part A).
+    if let Some(index) = subcommand
+        && user_args[index] == "delegate"
+    {
+        std::process::exit(delegate::run_cli(&user_args[index + 1..]));
     }
     // `refine` shows refine mode's setting, and `refine hook` is its hook in the TUI (refine.rs).
     if let Some(index) = subcommand

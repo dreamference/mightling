@@ -25,7 +25,8 @@ NIGHT_RUN_ENV: Final[str] = "MIGHTLING_NIGHT_RUN"
 # prompt, `resume`, `fork`, `agents`) is the TUI. Besides Codex's own, the launcher's (ling-rs/src/lib.rs):
 # the servers and bridges that run without a person (`apps serve`, the desktop app's Gmail search, lives as
 # long as its window; `web`, `chat`, `signal`), the hooks Codex runs inside a session (`ledger`, `notice`,
-# `refine hook`, `guard`) and one-shot commands.
+# `refine hook`, `guard`), the delegation plugin's MCP server
+# (`delegate`) and one-shot commands.
 NON_INTERACTIVE: Final[frozenset] = frozenset(
     {
         "exec",
@@ -45,6 +46,7 @@ NON_INTERACTIVE: Final[frozenset] = frozenset(
         "airgapped",
         "skill",
         "monitor",
+        "delegate",
         "prompt",
         "update",
         "app",

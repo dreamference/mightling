@@ -67,6 +67,8 @@ site/
 
 # Local tool files: editor and assistant settings, generated context maps, helper scripts
 .mcp.json
+# ...except the delegation plugin's own server declaration (it enables nothing by itself).
+!claude-plugin/.mcp.json
 .cursorrules
 .codesight/
 .neurr/

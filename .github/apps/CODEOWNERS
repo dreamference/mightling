@@ -38,6 +38,8 @@
 /codex                                          @dreamference/agent
 /codex-patches/                                 @dreamference/agent
 /codex-tests/                                   @dreamference/agent
+/claude-plugin/                                 @dreamference/agent
+/.claude-plugin/                                @dreamference/agent
 /dreamference/runner/                           @dreamference/agent
 /dreamference/cli/                              @dreamference/agent
 /dreamference/config/                           @dreamference/agent

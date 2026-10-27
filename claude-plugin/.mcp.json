@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mightling": {
+      "type": "stdio",
+      "command": "ling",
+      "args": ["delegate", "mcp"],
+      "env": {
+        "DREAMFERENCE_DELEGATE_NODE": "${user_config.node}",
+        "DREAMFERENCE_DELEGATE_MAX_PARALLEL": "${user_config.max_parallel}",
+        "DREAMFERENCE_DELEGATE_ALLOW_CLASSES": "${user_config.allow_classes}"
+      }
+    }
+  }
+}

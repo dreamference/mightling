@@ -54,6 +54,11 @@ pub enum Scope {
 /// The id `ling skill source` takes for both repository folders.
 pub const REPOSITORY_SOURCE: &str = "repo";
 
+/// Foreign skills that `ling` never links into its own sessions
+/// (`specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md` §4.3): `delegate` is the Claude Code
+/// delegation skill, so `ling` is never told to delegate to itself.
+pub const BUILTIN_EXCLUDED_FOREIGN_SKILLS: &[&str] = &["delegate"];
+
 const REPOSITORY_HINT: &str = "it is part of the repository; ling skill source repo off stops linking it";
 
 pub const AGENTS: &[Agent] = &[
@@ -507,6 +512,13 @@ pub fn plan(machine: &Machine, settings: &Settings) -> Plan {
             Ok(_) if matches!(&skill.origin, Origin::Linked(agent) if settings.sources_off.contains(agent.id)) => {
                 Status::SourceOff
             }
+            Ok(_)
+                if !forced
+                    && matches!(&skill.origin, Origin::Linked(_))
+                    && BUILTIN_EXCLUDED_FOREIGN_SKILLS.contains(&skill.name.as_str()) =>
+            {
+                Status::Unavailable("for Claude Code only (delegates to ling)".to_string())
+            }
             Ok(frontmatter) => {
                 let (verdict, found) = preflight::check(frontmatter, &machine.host);
                 notes = found;
@@ -848,5 +860,16 @@ mod tests {
         }
         machine.cwd = other;
         assert!(plan(&machine, &Settings::default()).find("planted").is_none());
+    }
+
+    #[test]
+    fn delegate_skill_from_foreign_agent_is_excluded_by_default() {
+        let fixture = Fixture::new("catalog-delegate-exclusion");
+        write_skill(&fixture.home.join(".claude/skills/delegate"), "delegate", "");
+        let built = plan(&fixture.machine(), &Settings::default());
+        assert_eq!(
+            built.find("delegate").map(|entry| entry.status.clone()),
+            Some(Status::Unavailable("for Claude Code only (delegates to ling)".to_string()))
+        );
     }
 }
