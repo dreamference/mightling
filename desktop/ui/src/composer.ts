@@ -93,6 +93,17 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "agents", description: "Show this thread's subagents, to open or stop them", needs: "thread" },
   { name: "night", description: "Night Shift: queue a task for tonight, or open Scheduled", needs: "none", args: "[add <task>]" },
   { name: "review", description: "Have the agent review the uncommitted changes, a branch, a commit, or what you ask", needs: "thread", args: "[base <branch> | commit <sha> | instructions]" },
+  // DESKTOP §16 B4: the Codex app's other commands, each an action the window already has.
+  { name: "side", description: "Ask a side question about this thread without adding to it", needs: "thread" },
+  { name: "pin", description: "Pin this thread to the top of the list, or unpin it", needs: "thread" },
+  { name: "pet", description: "Show or hide the pet", needs: "none" },
+  { name: "project", description: "Choose or create a project for the next thread", needs: "none" },
+  { name: "chat", description: "Start a thread with no project folder", needs: "none" },
+  { name: "worktree", description: "Hand this thread off to a worktree of its own", needs: "work" },
+  { name: "local", description: "Hand this thread back to the local checkout", needs: "work" },
+  { name: "reasoning", description: "How hard the model thinks: show the choices, or set one", needs: "none", args: "[effort]" },
+  { name: "plugins", description: "The plugins: install, remove, add a marketplace", needs: "none" },
+  { name: "hooks", description: "The hooks: what runs when, and whether you trust each", needs: "none" },
   { name: "airgapped", description: "Show the air-gap level, or set the default for new threads", needs: "none", args: "[default off|on]" },
   { name: "cavemode", description: "How terse answers are: show the level, set it for this thread, or the default", needs: "none", args: "[off|lite|full|ultra | default <level|built-in>]" },
 ];
@@ -131,6 +142,11 @@ export function parseSlash(text: string): { command: SlashCommand; args: string 
 export function parseShell(text: string): string | null {
   const match = text.trim().match(/^!\s*([\s\S]+)$/);
   return match ? match[1].trim() : null;
+}
+
+/** The enabled skills in the `/` menu (DESKTOP §16 B4), after the commands: choosing one inserts `$name`. */
+export function slashSkills(skills: SkillMetadata[], query: string, limit = 8): SkillMetadata[] {
+  return matchSkills(skills.filter((skill) => skill.enabled), query).slice(0, limit);
 }
 
 /** Skills whose name or description matches, enabled ones first. */

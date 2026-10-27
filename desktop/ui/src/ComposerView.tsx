@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 
 import {
-  activeTrigger, applyCompletion, effortChoices, enterSends, matchCommands, matchSkills, mentionPath,
+  activeTrigger, applyCompletion, effortChoices, enterSends, matchCommands, matchSkills, mentionPath, slashSkills,
   type CommandContext, type PromptHistory, type SlashCommand, type Trigger,
 } from "./composer";
 import { Icon } from "./icons";
@@ -108,10 +108,16 @@ export function Composer(props: ComposerProps) {
     }
     let current = true;
     if (trigger.kind === "/") {
-      setEntries(matchCommands(trigger.query, context).map((command) => ({
-        key: command.name, label: `/${command.name}`, detail: command.args ? `${command.args} — ${command.description}` : command.description,
-        insert: `/${command.name}`, command,
-      })));
+      setEntries([
+        ...matchCommands(trigger.query, context).map((command) => ({
+          key: command.name, label: `/${command.name}`, detail: command.args ? `${command.args} — ${command.description}` : command.description,
+          insert: `/${command.name}`, command,
+        })),
+        // The enabled skills follow the commands, as in the Codex app; choosing one inserts `$name`.
+        ...slashSkills(skills, trigger.query).map((skill) => ({
+          key: `skill:${skill.path}`, label: `$${skill.name}`, detail: skill.shortDescription || skill.description, insert: `$${skill.name}`,
+        })),
+      ]);
     } else if (trigger.kind === "$") {
       setEntries(matchSkills(skills, trigger.query).slice(0, 12).map((skill) => ({
         key: skill.path, label: `$${skill.name}`, detail: skill.shortDescription || skill.description, insert: `$${skill.name}`,

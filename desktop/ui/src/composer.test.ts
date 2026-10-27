@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PromptHistory, reviewTarget, activeTrigger, collaborationMode, applyCompletion, composeInput, effortChoices, effortFor, enterSends, keyAnswer,
-  lastUserTurn, matchCommands, matchSkills, mentionPath, parseShell, parseSlash, rememberModel, userTexts,
+  lastUserTurn, matchCommands, matchSkills, mentionPath, parseShell, parseSlash, rememberModel, slashSkills, userTexts,
 } from "./composer";
 import { DEFAULT_PREFS, cleanAppearance, sanitize } from "./prefs";
 import { ScriptedServer } from "./scripted-server";
@@ -242,3 +242,25 @@ describe("/review", () => {
     expect(parseSlash("/review base main")).toMatchObject({ command: { name: "review" }, args: "base main" });
   });
 });
+
+describe("the Codex app's other commands and the skills in the / menu (DESKTOP §16 B4)", () => {
+  it("offers /side, /pin, /pet, /project, /chat, /worktree, /local, /reasoning, /plugins and /hooks where they act", () => {
+    const work = matchCommands("", { view: "work", hasThread: true }).map((c) => c.name);
+    for (const name of ["side", "pin", "pet", "project", "chat", "worktree", "local", "reasoning", "plugins", "hooks"]) expect(work).toContain(name);
+    const ask = matchCommands("", { view: "ask", hasThread: false }).map((c) => c.name);
+    expect(ask).not.toContain("side");
+    expect(ask).not.toContain("worktree");
+    expect(ask).toContain("reasoning");
+    expect(parseSlash("/reasoning high")).toMatchObject({ command: { name: "reasoning" }, args: "high" });
+    expect(matchCommands("wo", { view: "work", hasThread: true })[0].name).toBe("worktree");
+  });
+
+  it("lists enabled skills only, after the commands", () => {
+    const skill = (name: string, enabled: boolean) => ({ name, description: `${name} things`, shortDescription: null, path: `/s/${name}`, enabled }) as unknown as Parameters<typeof slashSkills>[0][number];
+    const skills = [skill("pdf-search", true), skill("plot", false), skill("pptx", true)];
+    expect(slashSkills(skills, "p").map((s) => s.name)).toEqual(["pdf-search", "pptx"]);
+    expect(slashSkills(skills, "plo")).toEqual([]);
+    expect(slashSkills(skills, "", 1)).toHaveLength(1);
+  });
+});
+
