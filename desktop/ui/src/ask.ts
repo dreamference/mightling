@@ -95,7 +95,7 @@ export function viewTabs<T extends { kind: string; path?: string }>(tabs: T[], v
 }
 
 /** What a file an answer made is, in words, for its card. */
-export function fileKindLabel(kind: "markdown" | "image" | "pdf" | "html" | "latex" | "table" | null): string {
+export function fileKindLabel(kind: "markdown" | "image" | "pdf" | "html" | "latex" | "table" | "office" | null): string {
   switch (kind) {
     case "markdown":
       return "Document";
@@ -109,6 +109,8 @@ export function fileKindLabel(kind: "markdown" | "image" | "pdf" | "html" | "lat
       return "LaTeX";
     case "table":
       return "Table";
+    case "office":
+      return "Office document";
     default:
       return "File";
   }

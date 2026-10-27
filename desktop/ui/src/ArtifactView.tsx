@@ -77,6 +77,38 @@ export function ArtifactView(props: FileViewProps & { onOpenFile: (path: string)
 }
 
 function Rendered(props: FileViewProps & { kind: ArtifactKind; onOpenFile: (path: string) => void; onPreview?: (path: string) => void }) {
+  if (props.kind === "office") return <OfficeArtifact path={props.path} root={props.root} />;
+  return <FileRendered {...props} />;
+}
+
+/** An office file converted to a PDF by the desktop app (DESKTOP §16 B31), or why it cannot be. */
+function OfficeArtifact(props: { path: string; root: string | null }) {
+  const [state, setState] = useState<{ status: "loading" } | { status: "pdf"; data: Uint8Array<ArrayBuffer>; stamp: number } | { status: "none"; message: string }>({ status: "loading" });
+  const convert = useCallback(() => {
+    if (!bridge.office.available()) return setState({ status: "none", message: "Office files are previewed in the desktop app, which converts them with LibreOffice; open this one in an office suite." });
+    setState({ status: "loading" });
+    bridge.office.preview(props.path).then((answer) => {
+      if ("pdf" in answer) setState({ status: "pdf", data: Uint8Array.from(atob(answer.pdf), (char) => char.charCodeAt(0)), stamp: Date.now() });
+      else setState({ status: "none", message: answer.unavailable });
+    }).catch((error) => setState({ status: "none", message: error instanceof Error ? error.message : String(error) }));
+  }, [props.path]);
+  useEffect(convert, [convert]);
+  const shown = props.root && props.path.startsWith(`${props.root.replace(/\/+$/, "")}/`) ? props.path.slice(props.root.replace(/\/+$/, "").length + 1) : props.path;
+  return (
+    <>
+      <div className="file-tools artifact-tools">
+        <span className="file-path" title={props.path}>{shown}</span>
+        <span className="file-meta">converted by LibreOffice, with no network</span>
+        <button className="icon" title="Convert it again" aria-label="Reload the file" onClick={convert}><Icon name="undo" size={13} /></button>
+      </div>
+      {state.status === "loading" ? <p className="empty small">Converting…</p> : null}
+      {state.status === "none" ? <p className="artifact-note" role="status">{state.message}</p> : null}
+      {state.status === "pdf" ? <PdfArtifact data={state.data} stamp={state.stamp} /> : null}
+    </>
+  );
+}
+
+function FileRendered(props: FileViewProps & { kind: ArtifactKind; onOpenFile: (path: string) => void; onPreview?: (path: string) => void }) {
   const [bytes, reload, force] = useFileBytes(props);
   if (bytes.status === "loading") return <p className="empty small">Reading…</p>;
   if (bytes.status === "error") return <div className="notice">{bytes.message}</div>;

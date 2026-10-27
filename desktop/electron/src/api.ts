@@ -72,6 +72,7 @@ export type FromView =
   | { type: "git/branches"; root: string }
   /** Local environments (environments.ts): read from .codex/ and .mightling/, written to .mightling/ only. */
   | { type: "env/list"; project: string }
+  | { type: "office/preview"; path: string }
   | { type: "env/write"; project: string; environment: unknown }
   /**
    * The bottom panel's tasks (tasks.ts): a project environment's setup or one of its actions, named
