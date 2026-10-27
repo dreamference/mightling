@@ -61,6 +61,7 @@ import { PR_TAB, REVIEW_TAB, fileTab, previewTab, surfaceOf, tabbedTerminals, te
 import { TerminalView } from "./TerminalView";
 import { PreviewTab } from "./PreviewTab";
 import { PullRequestsTab } from "./PullRequestsTab";
+import { pullRequestDescription } from "./prtext";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { SyncedView, useSynced } from "./SyncedView";
@@ -3016,7 +3017,8 @@ export function App() {
           render={(tab) => tab.kind === "terminal" ? (
             <TerminalView hub={hub} processId={tab.processId} visible={paneActive?.key === tab.key} focus={front?.id === tab.processId ? front.tick : 0} />
           ) : tab.kind === "prs" ? (
-            <PullRequestsTab root={composeRoot} thread={selected?.thread.id ?? null} notice={notice}
+            <PullRequestsTab root={composeRoot} thread={selected?.thread.id ?? null} notice={notice} airgapOn={airgap?.level === "on"}
+              describe={(root, title, diff) => pullRequestDescription(client, listen, root, modelChoice ?? servedModel, diff, title, prefs.pullRequestPrompt ?? undefined)}
               onCompose={(text) => setDraft((draft) => (draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text))} />
           ) : tab.kind === "preview" ? (
             <PreviewTab id={tab.id} url={tab.url} thread={selected?.thread.id ?? null} devTools={prefs.previewDevTools}

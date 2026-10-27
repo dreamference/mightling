@@ -29,6 +29,7 @@ import { findEditors, openCommand, terminalCommand, type Editor } from "./editor
 import { environments, writeEnvironment } from "./environments";
 import * as git from "./git";
 import * as prs from "./prs";
+import { changedLines } from "./repolines";
 import { boardFile, readBoards } from "./board";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
@@ -787,6 +788,8 @@ export async function main(options: MainOptions): Promise<void> {
         return git.diff(await git.checkRoot(message.root), message.scope, message.commit ?? null);
       case "git/log":
         return git.log(await git.checkRoot(message.root));
+      case "git/changes":
+        return changedLines(await git.checkRoot(message.root));
       case "git/stage":
         return git.stage(await git.checkRoot(message.root), message.paths);
       case "git/unstage":
@@ -1016,16 +1019,11 @@ export async function main(options: MainOptions): Promise<void> {
       case "pr/list":
       case "pr/view":
       case "pr/diff":
-      case "pr/review": {
+      case "pr/review":
+      case "pr/activity":
+      case "pr/create":
         // Off unless Settings › Git turned it on; never at airgapped on (it is GitHub, over the network).
-        if (prefs.read().pullRequests !== true) throw new Error("the pull-request tab is off: turn it on in Settings › Git");
-        await offline(message.thread ?? null, "the pull-request tab");
-        const root = await git.checkRoot(message.root);
-        if (message.type === "pr/list") return prs.list(root, message.inbox);
-        if (message.type === "pr/view") return prs.view(root, message.number);
-        if (message.type === "pr/diff") return prs.diff(root, message.number);
-        return prs.review(root, message.number, message.verdict, message.body);
-      }
+        return prs.handle(message, { enabled: prefs.read().pullRequests === true, offline: (what) => offline(message.thread ?? null, what), checkRoot: git.checkRoot });
       case "board/read": {
         const home = codexHome();
         if (!home) return [];

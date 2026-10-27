@@ -130,6 +130,8 @@ export const git = {
   status: (root: string) => send<GitStatus>({ type: "git/status", root }),
   diff: (root: string, scope: GitScope, commit: string | null = null) => send<{ scope: GitScope; diff: string; against: string | null }>({ type: "git/diff", root, scope, commit }),
   log: (root: string) => send<GitCommit[]>({ type: "git/log", root }),
+  /** The lines the repository's tracked files changed against HEAD (DESKTOP §16 B32). */
+  changes: (root: string) => send<{ added: number; removed: number }>({ type: "git/changes", root }),
   stage: (root: string, paths: string[]) => send<void>({ type: "git/stage", root, paths }),
   unstage: (root: string, paths: string[]) => send<void>({ type: "git/unstage", root, paths }),
   discard: (root: string, paths: string[]) => send<void>({ type: "git/discard", root, paths }),
@@ -742,7 +744,16 @@ export const prs = {
   review: (root: string, number: number, verdict: "comment" | "approve" | "request-changes", body: string, thread: string | null) =>
     send<string>({ type: "pr/review", root, number, verdict, body, thread }),
   status: (root: string) => send<string>({ type: "pr/status", root }),
+  /** DESKTOP §16 B32: the comments and reviews (`gh pr view --json comments,reviews`), and Create pull request (`gh pr create`). */
+  activity: (root: string, number: number, thread: string | null) => send<PullRequestActivity>({ type: "pr/activity", root, number, thread }),
+  create: (root: string, draft: { title: string; body: string; base: string | null; draft: boolean }, thread: string | null) => send<string>({ type: "pr/create", root, draft, thread }),
 };
+
+/** A pull request's conversation as `gh pr view --json comments,reviews` answers (the fields the tab reads). */
+export interface PullRequestActivity {
+  comments?: { author: { login: string } | null; body: string; createdAt: string; url?: string }[];
+  reviews?: { author: { login: string } | null; body: string; state: string; submittedAt: string | null }[];
+}
 
 /** The agent message board as the app reads it (desktop/electron/src/board.ts). */
 export interface BoardPost {

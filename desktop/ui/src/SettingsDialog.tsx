@@ -673,11 +673,16 @@ function Git({ prefs, onChange }: SettingsProps) {
         <label><input type="radio" name="review" checked={prefs.reviewDelivery === "inline"} onChange={() => onChange({ reviewDelivery: "inline" })} /> Inline, in the thread</label>
         <label><input type="radio" name="review" checked={prefs.reviewDelivery === "detached"} onChange={() => onChange({ reviewDelivery: "detached" })} /> Detached, in a review thread of their own</label>
       </fieldset>
-      <p className="dialog-note">A pull request opens the forge's own page in your browser, which writes its description.</p>
+      <p className="dialog-note">The review pane's Pull request opens the forge's own page in your browser; Create pull request in the pull-request tab opens one through <code>gh</code>.</p>
       <fieldset>
         <legend>Pull requests</legend>
         <label><input type="checkbox" checked={prefs.pullRequests} onChange={(event) => onChange({ pullRequests: event.target.checked })} /> A pull-request tab, through your GitHub CLI (<code>gh</code>) and its sign-in</label>
         <span className="planned-note">Off by default: it talks to GitHub, so it is refused while airgapped is on. Review with Mightling and Fix put a request in the composer; a review is submitted as you only after you confirm.</span>
+      </fieldset>
+      <fieldset>
+        <legend>The instruction a written pull request description starts from</legend>
+        <textarea rows={4} defaultValue={prefs.pullRequestPrompt ?? ""} aria-label="Pull request description instruction" placeholder="Empty: Mightling's own (what changes and why, then how it was tested)"
+          onBlur={(event) => onChange({ pullRequestPrompt: event.target.value.trim() || null })} />
       </fieldset>
     </>
   );

@@ -56,6 +56,8 @@ export type FromView =
   | { type: "git/status"; root: string }
   | { type: "git/diff"; root: string; scope: "unstaged" | "staged" | "commit" | "branch"; commit?: string | null }
   | { type: "git/log"; root: string }
+  /** The lines a repository's tracked files changed against HEAD, for the review pane's selector (repolines.ts, DESKTOP §16 B32). */
+  | { type: "git/changes"; root: string }
   | { type: "git/stage" | "git/unstage" | "git/discard"; root: string; paths: string[] }
   | { type: "git/apply"; root: string; patch: string; cached?: boolean; reverse?: boolean; index?: boolean; zeroContext?: boolean }
   | { type: "git/commit"; root: string; message: string; all: boolean }
@@ -185,6 +187,9 @@ export type FromView =
   | { type: "pr/diff"; root: string; number: number; thread: string | null }
   | { type: "pr/review"; root: string; number: number; verdict: "comment" | "approve" | "request-changes"; body: string; thread: string | null }
   | { type: "pr/status"; root: string }
+  /** DESKTOP §16 B32: a pull request's comments and reviews, and Create pull request (`gh pr create`); refused at airgapped on. */
+  | { type: "pr/activity"; root: string; number: number; thread: string | null }
+  | { type: "pr/create"; root: string; draft: { title: string; body: string; base: string | null; draft: boolean }; thread: string | null }
   /** The agent message board (board.ts): its SQLite file, read only; `sqliteHome` is config.toml's `sqlite_home`, if set. */
   | { type: "board/read"; sqliteHome: string | null }
   /** The preview tab (preview.ts): a page in a view laid over the tab's body, under the rules of preview-rules.ts. */
