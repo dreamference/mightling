@@ -3018,7 +3018,8 @@ export function App() {
           ) : (
             artifactKind(tab.path) && !tab.line ? (
               <ArtifactView path={tab.path} line={tab.line} root={composeRoot} client={client} listen={listen} editor={prefs.editor} notice={notice}
-                onMention={(path) => setDraft((text) => `${text}${text && !text.endsWith(" ") ? " " : ""}@${path} `)} onOpenFile={(path) => openFile(path)} />
+                onMention={(path) => setDraft((text) => `${text}${text && !text.endsWith(" ") ? " " : ""}@${path} `)} onOpenFile={(path) => openFile(path)}
+                onPreview={bridge.preview.available() ? (path) => openPreview(path) : undefined} />
             ) : (
               <FileView path={tab.path} line={tab.line} root={composeRoot} client={client} listen={listen} editor={prefs.editor} notice={notice}
                 onMention={(path) => setDraft((text) => `${text}${text && !text.endsWith(" ") ? " " : ""}@${path} `)} />

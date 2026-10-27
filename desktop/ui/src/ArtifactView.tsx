@@ -5,10 +5,10 @@
 // shows the text in the ordinary file view; LaTeX has only its source, since `tectonic` is not
 // bundled (§7 question 4). The bytes come from the server's `fs/readFile`, followed with `fs/watch`.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as bridge from "./bridge";
-import { artifactKind, hasSource, imageType, localReference, sanitizeDocument, type ArtifactKind } from "./artifacts";
+import { TABLE_COLUMNS, TABLE_ROWS, artifactKind, hasSource, imageType, localReference, parseTable, sanitizeDocument, tableSeparator, type ArtifactKind } from "./artifacts";
 import { FileView, type FileViewProps } from "./FileView";
 import { bytesOf, sizeLabel } from "./files";
 import { Icon } from "./icons";
@@ -58,7 +58,7 @@ function useFileBytes(props: FileViewProps): [Bytes, () => void, () => void] {
   return [bytes, () => void load(), () => setForce(true)];
 }
 
-export function ArtifactView(props: FileViewProps & { onOpenFile: (path: string) => void }) {
+export function ArtifactView(props: FileViewProps & { onOpenFile: (path: string) => void; onPreview?: (path: string) => void }) {
   const kind = artifactKind(props.path) as ArtifactKind;
   const [mode, setMode] = useState<"rendered" | "source">(kind === "latex" ? "source" : "rendered");
   const sourceAvailable = hasSource(props.path);
@@ -76,7 +76,7 @@ export function ArtifactView(props: FileViewProps & { onOpenFile: (path: string)
   );
 }
 
-function Rendered(props: FileViewProps & { kind: ArtifactKind; onOpenFile: (path: string) => void }) {
+function Rendered(props: FileViewProps & { kind: ArtifactKind; onOpenFile: (path: string) => void; onPreview?: (path: string) => void }) {
   const [bytes, reload, force] = useFileBytes(props);
   if (bytes.status === "loading") return <p className="empty small">Reading…</p>;
   if (bytes.status === "error") return <div className="notice">{bytes.message}</div>;
@@ -99,6 +99,8 @@ function Rendered(props: FileViewProps & { kind: ArtifactKind; onOpenFile: (path
     case "markdown":
     case "html":
       return <>{tools}<DocumentArtifact {...props} data={bytes.data} kind={props.kind} /></>;
+    case "table":
+      return <>{tools}<TableArtifact data={bytes.data} path={props.path} /></>;
     default:
       return null;
   }
@@ -183,7 +185,7 @@ function PdfArtifact(props: { data: Uint8Array<ArrayBuffer>; stamp: number }) {
 }
 
 /** Markdown or HTML: rendered into a shadow root, local images read through the server, local links opened in a tab. */
-function DocumentArtifact(props: FileViewProps & { data: Uint8Array<ArrayBuffer>; kind: "markdown" | "html"; onOpenFile: (path: string) => void }) {
+function DocumentArtifact(props: FileViewProps & { data: Uint8Array<ArrayBuffer>; kind: "markdown" | "html"; onOpenFile: (path: string) => void; onPreview?: (path: string) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [removed, setRemoved] = useState(0);
   const { client, path, onOpenFile } = props;
@@ -241,9 +243,35 @@ function DocumentArtifact(props: FileViewProps & { data: Uint8Array<ArrayBuffer>
   return (
     <div className="document-artifact">
       {props.kind === "html" ? (
-        <p className="artifact-note">A preview without scripts{removed ? `: ${removed} script, form or active part${removed === 1 ? "" : "s"} left out` : ""}. Run the page in the preview tab to see it work.</p>
+        <p className="artifact-note">A preview without scripts{removed ? `: ${removed} script, form or active part${removed === 1 ? "" : "s"} left out` : ""}. Run the page in the preview tab to see it work.
+          {props.onPreview ? <>{" "}<button className="link-button" onClick={() => props.onPreview?.(path)}>Open in the preview tab</button></> : null}</p>
       ) : null}
       <div className="document-host" ref={host} role="document" aria-label={props.kind === "markdown" ? "Markdown" : "HTML"} />
+    </div>
+  );
+}
+
+/** A CSV or TSV file as a table (DESKTOP §16 B27): the first row as its header, capped at TABLE_ROWS × TABLE_COLUMNS. */
+function TableArtifact(props: { data: Uint8Array; path: string }) {
+  const table = useMemo(() => {
+    const text = new TextDecoder().decode(props.data);
+    return parseTable(text, tableSeparator(props.path, text));
+  }, [props.data, props.path]);
+  const [head, ...body] = table.rows;
+  const cut = table.totalRows > TABLE_ROWS || table.totalColumns > TABLE_COLUMNS;
+  if (!head) return <p className="empty small">An empty table.</p>;
+  return (
+    <div className="table-artifact">
+      <p className="artifact-note">
+        {table.totalRows.toLocaleString()} row{table.totalRows === 1 ? "" : "s"} · {table.totalColumns} column{table.totalColumns === 1 ? "" : "s"}
+        {cut ? `; the first ${Math.min(table.totalRows, TABLE_ROWS).toLocaleString()} rows and ${Math.min(table.totalColumns, TABLE_COLUMNS)} columns shown (Source has it all)` : ""}
+      </p>
+      <div className="table-scroll">
+        <table aria-label={props.path.split(/[\\/]/).pop()}>
+          <thead><tr>{head.map((cell, index) => <th key={index} scope="col">{cell}</th>)}</tr></thead>
+          <tbody>{body.map((row, index) => <tr key={index}>{row.map((cell, column) => <td key={column}>{cell}</td>)}</tr>)}</tbody>
+        </table>
+      </div>
     </div>
   );
 }
