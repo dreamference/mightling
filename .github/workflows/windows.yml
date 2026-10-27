@@ -175,10 +175,12 @@ jobs:
   # install.ps1, the air gap and the egress audit, from the build the ling job uploaded, on GitHub's
   # runners: they need an administrator (the sandbox's accounts, the firewall rule, ETW), which the
   # self-hosted runner is not, and install.ps1 changes the user's PATH, which a persistent runner
-  # would keep.
+  # would keep. Like the steps they were in the ling job, whatever the launcher's tests say: they
+  # need only the uploaded build.
   checks:
     name: Install and air gap - ${{ matrix.target }}
     needs: ling
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
