@@ -193,7 +193,7 @@ The repository service is one more module, `ling-rs/web/src/chat_repos.rs`. Its 
 - **An account for the phone surface.** `ling-admin node install` creates a forge account, `mightling-phone`, alongside the forge's other generated accounts (FORGEJO §2.2). It has write access to every repository, private ones included (R2), and appears on no protected branch's push allowlist except where `allow_main` puts it.
 - **Its token** sits in `ling web`'s state folder (0600) and is handed to git only through `GIT_ASKPASS` for the one command. It's never in a remote URL, `.git/config`, a log or a message. A worktree's remote is the plain forge URL, so a `git push` the agent tries inside the sandbox has no credential, and `.git` is read-only there anyway.
 - **Connections:** `ling web` reaches the forge the way its `/forge/` proxy does (FORGEJO §2.2), on the LAN only. The egress audit already declares the forge as a node service. These calls add no destination outside the owner's nodes.
-- **Stated plainly, as CHAT §6 does:** Codex's sandbox limits writes, not reads, so a command the agent runs can read the token at `/airgapped off`, as it can read the forge's owner password file. Branch protection keeps `main` safe from a phone token. Nothing keeps a prompt-injected command from using the token on other branches, or from reading private repositories with it. `/airgapped on` (which masks the user's runtime folders and takes the network away) is the defence, as for every credential on the node. Moving the token to a system account, as Signal's keys are, is open question Q3.
+- **Stated plainly, as CHAT §6 does:** Codex's sandbox limits writes, not reads, so a command the agent runs can read the token at `/airgapped off`, as it can read the forge's owner password file. Branch protection keeps `main` safe from a phone token. Nothing keeps a prompt-injected command from using the token on other branches, or from reading private repositories with it. `/airgapped on` (which masks the user's runtime folders and takes the network away) is the defence, as for every credential on the node. This is accepted for now; moving the token to a system account, as Signal's keys are, is left to a later phase (Q3, decided 2026-10-27).
 
 ### 4.3 Listing
 
@@ -305,7 +305,7 @@ The bot receives only `RepoNotice` values (§12.2), each built from a fixed temp
 - **What opens read-only:** a repository the forge marks archived (`archive-pre-rewrite` among them), or one where `mightling-phone` has read access only.
 - **How it behaves:** the thread's sandbox is `read-only`; `/commit`, `/push`, `/update`, `/merge` and `/pr` answer "this repository is read-only on the forge"; and `/branch` shows the default branch, with no phone branch made. A worktree is still made, detached at the default branch's tip, so the agent can read and run read-only commands.
 - **FORGEJO §5.3's "never cloned by agents"** now has one exception: a checkout made by `ling web` at the owner's request from a phone (R2). Runners still never check it out.
-- Whether the archive should be writable from the phone is open question Q1.
+- The archive stays read-only from the phone (Q1, decided 2026-10-27).
 
 ## 6. Approvals and access
 
@@ -565,11 +565,11 @@ Until then the feature is off, and the tests run on stand-ins.
 
 ## 15. Open questions
 
-| # | Question | Proposed |
+| # | Question | Decided by the owner (2026-10-27) |
 |---|---|---|
-| Q1 | Should the archived `archive-pre-rewrite` be writable from a phone? | Read-only (§5.4): it's an archive, and writes to it have no use |
-| Q2 | Full Access for phone threads | Off until the node's terminal turns it on (§6.3) |
-| Q3 | The forge token (and the owner password file) are readable by the agent's commands at `off` | Accept for now, as CHAT §6 does; move both to a system account like Signal's in a later phase |
-| Q4 | Bounds and budget numbers | 30 min, 200 tool calls and 10 min per command; 3 M tokens per chat per day |
-| Q5 | `/push` and `/merge` from the Telegram and Discord bots, with counts-only confirmations | Allowed (§2); the alternative is page-only |
-| Q6 | G2's launch pairing trusts Telegram plus tailnet reach as its two factors | Build it so; the alternative is confirming a new Mini App device from Signal or Matrix, or with `ling web pair` at the node |
+| Q1 | Should the archived `archive-pre-rewrite` be writable from a phone? | **Decided (2026-10-27):** read-only from the phone (§5.4): it's an archive, and writes to it have no use |
+| Q2 | Full Access for phone threads | **Decided (2026-10-27):** off until the node allows it, with a typed confirmation (§6.3) |
+| Q3 | The forge token (and the owner password file) are readable by the agent's commands at `off` | **Decided (2026-10-27):** accept for now, as CHAT §6 does; move the token to a system account in a later phase |
+| Q4 | Bounds and budget numbers | **Decided (2026-10-27):** 30 min and 200 tool calls per turn, 10 min per command, 3M tokens per chat per day |
+| Q5 | `/push` and `/merge` from the Telegram and Discord bots, with counts-only confirmations | **Decided (2026-10-27):** `/push` and `/merge` allowed from the bots, to the forge only (§2) |
+| Q6 | G2's launch pairing trusts Telegram plus tailnet reach as its two factors | **Decided (2026-10-27):** build it so; Telegram launch data plus tailnet reach are both required |
