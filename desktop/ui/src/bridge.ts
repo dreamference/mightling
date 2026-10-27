@@ -3,6 +3,7 @@
 // for what the main process sends — the Codex app's shape, so this page could also run in a
 // browser against another transport. Nothing else in the UI touches Electron.
 
+import { chatRepos, checkoutThreadForCwd, getActiveChatRepoCwd, isChatRepoCwd } from "./repos";
 import type { Transport } from "./rpc";
 import type { TerminalSession } from "./terminal";
 import type { PaneKind, WindowsState } from "./windows";
@@ -213,7 +214,7 @@ export interface GitStatus {
   files: GitFile[];
 }
 
-export type GitScope = "unstaged" | "staged" | "commit" | "branch";
+export type GitScope = "unstaged" | "staged" | "commit" | "branch" | "uncommitted";
 
 export interface GitCommit {
   sha: string;
@@ -228,20 +229,71 @@ export interface Editor {
   command: string;
 }
 
+function webRepoThread(folder?: string | null): string | null {
+  return checkoutThreadForCwd(folder ?? getActiveChatRepoCwd());
+}
+
 /**
- * Window-side git (desktop/electron/src/git.ts): only the desktop app has it. A browser on `ling
- * web` shows the review pane's Last turn scope, which comes from the server.
+ * Window-side git (desktop/electron/src/git.ts) in the desktop app, and `/api/repos/diff` +
+ * `/api/repos/state` for a `chat-repos` thread in `ling web` (CHAT_REPOS §10 G6); an ordinary
+ * browser thread shows only the review pane's Last turn scope from the server.
  */
 export const git = {
-  available: () => host() === "electron",
-  repos: (cwd: string) => send<string[]>({ type: "git/repos", cwd }),
+  // Without a folder named this answers for the window: the desktop app only, as every caller that
+  // gates Electron-only pieces on it expects. A `chat-repos` folder is git in the web host too.
+  available: (cwd?: string | null) => host() === "electron" || isChatRepoCwd(cwd),
+  repos: (cwd: string) => {
+    if (host() === "electron") return send<string[]>({ type: "git/repos", cwd });
+    return Promise.resolve(isChatRepoCwd(cwd) ? [cwd] : []);
+  },
   /** Why git cannot run on this machine (a Mac without the Command Line Tools), or null. */
-  missing: () => send<string | null>({ type: "git/missing" }),
-  status: (root: string) => send<GitStatus>({ type: "git/status", root }),
-  diff: (root: string, scope: GitScope, commit: string | null = null) => send<{ scope: GitScope; diff: string; against: string | null }>({ type: "git/diff", root, scope, commit }),
-  log: (root: string) => send<GitCommit[]>({ type: "git/log", root }),
+  missing: () => (host() === "electron" ? send<string | null>({ type: "git/missing" }) : Promise.resolve(null)),
+  status: async (root: string): Promise<GitStatus> => {
+    if (host() === "electron") return send<GitStatus>({ type: "git/status", root });
+    const thread = webRepoThread(root);
+    if (!thread) throw new Error("This folder is not a checked-out repository.");
+    const state = await chatRepos().state(thread);
+    return {
+      root,
+      branch: state.branch,
+      head: null,
+      upstream: state.base ? `origin/${state.base}` : null,
+      ahead: state.ahead,
+      behind: state.behind,
+      files: (state.uncommitted ?? []).map((entry) => ({
+        path: entry.path,
+        staged: ".",
+        unstaged: "M",
+        from: null,
+      })),
+    };
+  },
+  diff: async (root: string, scope: GitScope, commit: string | null = null): Promise<{ scope: GitScope; diff: string; against: string | null }> => {
+    if (host() === "electron") return send<{ scope: GitScope; diff: string; against: string | null }>({ type: "git/diff", root, scope, commit });
+    const thread = webRepoThread(root);
+    if (!thread) throw new Error("This folder is not a checked-out repository.");
+    const repoScope: "uncommitted" | "branch" = scope === "branch" ? "branch" : "uncommitted";
+    const diff = await chatRepos().diff(thread, repoScope);
+    return { scope, diff, against: repoScope === "branch" ? "main" : null };
+  },
+  log: async (root: string): Promise<GitCommit[]> => {
+    if (host() === "electron") return send<GitCommit[]>({ type: "git/log", root });
+    const thread = webRepoThread(root);
+    if (!thread) return [];
+    const entries = await chatRepos().log(thread);
+    return entries.map((entry) => ({ sha: entry.id, subject: entry.subject, author: entry.author, time: entry.time }));
+  },
   /** The lines the repository's tracked files changed against HEAD (DESKTOP §16 B32). */
-  changes: (root: string) => send<{ added: number; removed: number }>({ type: "git/changes", root }),
+  changes: async (root: string): Promise<{ added: number; removed: number }> => {
+    if (host() === "electron") return send<{ added: number; removed: number }>({ type: "git/changes", root });
+    const thread = webRepoThread(root);
+    if (!thread) return { added: 0, removed: 0 };
+    const state = await chatRepos().state(thread);
+    return (state.uncommitted ?? []).reduce(
+      (acc, file) => ({ added: acc.added + file.added, removed: acc.removed + file.removed }),
+      { added: 0, removed: 0 },
+    );
+  },
   stage: (root: string, paths: string[]) => send<void>({ type: "git/stage", root, paths }),
   unstage: (root: string, paths: string[]) => send<void>({ type: "git/unstage", root, paths }),
   discard: (root: string, paths: string[]) => send<void>({ type: "git/discard", root, paths }),

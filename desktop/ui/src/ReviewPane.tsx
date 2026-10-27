@@ -25,6 +25,24 @@ const SCOPES: { id: ReviewScope; label: string }[] = [
   { id: "turn", label: "Last turn" },
 ];
 
+const CHAT_REPO_SCOPES: { id: ReviewScope; label: string }[] = [
+  { id: "uncommitted", label: "Uncommitted" },
+  { id: "branch", label: "Branch" },
+  { id: "turn", label: "Last turn" },
+];
+
+/**
+ * The review scopes offered in the current host:
+ * - desktop app (`electron`): `unstaged`, `staged`, `commit`, `branch`, `turn`;
+ * - `ling web` on a `chat-repos` thread (`web` + `gitAvailable`): `uncommitted`, `branch`, `turn` (CHAT_REPOS §10 G6);
+ * - an ordinary browser thread: `turn` only.
+ */
+export function reviewScopesFor(currentHost: bridge.Host, gitAvailable: boolean): { id: ReviewScope; label: string }[] {
+  if (!gitAvailable) return [{ id: "turn", label: "Last turn" }];
+  if (currentHost === "web") return CHAT_REPO_SCOPES;
+  return SCOPES;
+}
+
 export interface ReviewPaneProps {
   cwd: string | null;
   threadId: string | null;
@@ -49,6 +67,9 @@ export interface ReviewPaneProps {
   detach?: { docks: boolean; run: () => void } | null;
   /** The thread's latest `/review` findings (findings.ts, DESKTOP §16 B12), shown on the lines they name. */
   findings?: Finding[];
+  /** Optional initial scope and diff for static rendering in tests. */
+  initialScope?: ReviewScope;
+  initialDiff?: string;
 }
 
 interface Draft {
@@ -60,11 +81,14 @@ interface Draft {
 }
 
 export function ReviewPane(props: ReviewPaneProps) {
-  const windowGit = bridge.git.available();
-  const [repos, setRepos] = useState<string[]>([]);
-  const [root, setRoot] = useState<string | null>(null);
-  const [scope, setScope] = useState<ReviewScope>(windowGit ? "unstaged" : "turn");
-  const [diff, setDiff] = useState("");
+  const currentHost = bridge.host();
+  const windowGit = bridge.git.available(props.cwd);
+  const shownScopes = reviewScopesFor(currentHost, windowGit);
+  const defaultScope: ReviewScope = !windowGit ? "turn" : currentHost === "web" ? "uncommitted" : "unstaged";
+  const [repos, setRepos] = useState<string[]>(() => (props.initialDiff !== undefined && props.cwd ? [props.cwd] : []));
+  const [root, setRoot] = useState<string | null>(() => (props.initialDiff !== undefined ? props.cwd : null));
+  const [scope, setScope] = useState<ReviewScope>(props.initialScope ?? defaultScope);
+  const [diff, setDiff] = useState(props.initialDiff ?? "");
   const [against, setAgainst] = useState<string | null>(null);
   const [status, setStatus] = useState<bridge.GitStatus | null>(null);
   const [commits, setCommits] = useState<bridge.GitCommit[]>([]);
@@ -121,6 +145,10 @@ export function ReviewPane(props: ReviewPaneProps) {
     if (!windowGit || !props.cwd) {
       setRepos([]);
       setRoot(null);
+      setDiff("");
+      setStatus(null);
+      setAgainst(null);
+      setShown(null);
       return;
     }
     let current = true;
@@ -143,11 +171,22 @@ export function ReviewPane(props: ReviewPaneProps) {
       setRoot((chosen) => (chosen && found.includes(chosen) ? chosen : found[0] ?? null));
       setResolvedCwd(cwd);
     }).catch(notice);
-    bridge.listEditors().then((found) => current && setEditors(found)).catch(() => {});
+    if (currentHost === "electron") bridge.listEditors().then((found) => current && setEditors(found)).catch(() => {});
     return () => {
       current = false;
     };
-  }, [props.cwd, windowGit, notice]);
+  }, [props.cwd, windowGit, currentHost, notice]);
+
+  // A browser moving from an ordinary thread to a checkout opens on its uncommitted changes.
+  useEffect(() => {
+    if (currentHost === "web" && windowGit) setScope("uncommitted");
+  }, [currentHost, windowGit]);
+
+  useEffect(() => {
+    if (!shownScopes.some((entry) => entry.id === scope)) {
+      setScope(shownScopes[0]?.id ?? "turn");
+    }
+  }, [shownScopes, scope]);
 
   // Each repository's lines changed against HEAD, for the selector (several repositories only).
   useEffect(() => {
@@ -205,7 +244,7 @@ export function ReviewPane(props: ReviewPaneProps) {
   // What is on screen belongs to this thread's folder and the repository chosen in it, or nothing is
   // shown: no diff, no Stage or Revert, no commit box (decided during the render, so not even one
   // frame of the last thread's repository with live buttons). Last turn is the thread's own diff.
-  const ready = !windowGit || (resolvedCwd === props.cwd && shown !== null && shown.cwd === props.cwd && shown.root === root);
+  const ready = props.initialDiff !== undefined || (!windowGit && scope === "turn") || (windowGit && resolvedCwd === props.cwd && shown !== null && shown.cwd === props.cwd && shown.root === root);
   const turnFiles = useMemo(() => parseDiff(props.turnDiff ?? ""), [props.turnDiff]);
   const turnCounts = useMemo(() => turnLines(turnFiles, props.cwd, repos), [turnFiles, props.cwd, repos]);
   const files = useMemo(() => (scope === "turn" ? filesIn(turnFiles, props.cwd, repos, repos.length > 1 && turnRepo && repos.includes(turnRepo) ? turnRepo : null) : ready ? parseDiff(diff) : []),
@@ -230,7 +269,7 @@ export function ReviewPane(props: ReviewPaneProps) {
   const confirmRevert = (what: string) => window.confirm(`Throw away ${what}? This cannot be undone from here.`);
 
   const fileActions = (file: FileDiff) => {
-    if (!root || scope === "turn" || scope === "commit" || scope === "branch") return null;
+    if (currentHost !== "electron" || !root || scope === "turn" || scope === "commit" || scope === "branch" || scope === "uncommitted") return null;
     if (scope === "unstaged") {
       return (
         <>
@@ -243,7 +282,7 @@ export function ReviewPane(props: ReviewPaneProps) {
   };
 
   const hunkActions = (file: FileDiff, index: number) => {
-    if (!root || (scope !== "unstaged" && scope !== "staged")) return null;
+    if (currentHost !== "electron" || !root || (scope !== "unstaged" && scope !== "staged")) return null;
     const patch = hunkPatch(file, index);
     if (scope === "unstaged") {
       return (
@@ -511,7 +550,7 @@ export function ReviewPane(props: ReviewPaneProps) {
         ) : null}
       </header>
       <nav className="review-scopes" aria-label="Scope">
-        {SCOPES.filter((entry) => windowGit || entry.id === "turn").map((entry) => (
+        {shownScopes.map((entry) => (
           <button key={entry.id} className={scope === entry.id ? "selected" : ""} aria-pressed={scope === entry.id} onClick={() => setScope(entry.id)}>{entry.label}</button>
         ))}
       </nav>
@@ -531,7 +570,7 @@ export function ReviewPane(props: ReviewPaneProps) {
         ) : !windowGit ? null : root ? "…" : gitMissing ? "Git is unavailable on this machine." : !props.cwd ? "Name the project folder to see its changes." : "This folder is not in a git repository."}
       </div>
       {gitMissing && scope !== "turn" ? <div className="notice">{gitMissing}</div> : error ? <div className="notice">{error}</div> : null}
-      {files.length > 0 && root && ready && (scope === "unstaged" || scope === "staged") ? (
+      {currentHost === "electron" && files.length > 0 && root && ready && (scope === "unstaged" || scope === "staged") ? (
         <div className="review-all">
           {scope === "unstaged" ? (
             <>
@@ -541,7 +580,7 @@ export function ReviewPane(props: ReviewPaneProps) {
           ) : <button className="link-button" onClick={() => void step("unstage", () => bridge.git.unstage(root, files.map((file) => file.path)))}>Unstage all</button>}
         </div>
       ) : null}
-      {scope === "turn" && props.onRevertTurn && files.length > 0 ? (
+      {currentHost === "electron" && scope === "turn" && props.onRevertTurn && files.length > 0 ? (
         <div className="review-all"><button className="link-button danger" onClick={props.onRevertTurn}>Revert the turn</button></div>
       ) : null}
       {elsewhere.length > 0 ? (
@@ -560,7 +599,7 @@ export function ReviewPane(props: ReviewPaneProps) {
           <button className="link-button" onClick={() => setComments([])}>Discard</button>
         </div>
       ) : null}
-      {windowGit && root && ready && (scope === "unstaged" || scope === "staged") ? (
+      {currentHost === "electron" && windowGit && root && ready && (scope === "unstaged" || scope === "staged") ? (
         <footer className="commit-box">
           <textarea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Commit message" aria-label="Commit message" />
           <div className="commit-actions">

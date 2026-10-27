@@ -93,6 +93,17 @@ import { drawDiagrams } from "./diagrams";
 import { AgentMark } from "./agentmarks";
 import { ExportDialog } from "./ExportDialog";
 import { LINKED_SETTINGS, sameRemote } from "./links2";
+import { GitBar } from "./GitBar";
+import { ReposView } from "./ReposView";
+import {
+  CHAT_WORK_PROMPT,
+  chatRepos,
+  checkoutThreadForCwd,
+  isChatRepoCwd,
+  openRepoForWork,
+  setActiveChatRepoCwd,
+  type ChatRepoState,
+} from "./repos";
 import { PathMenu, pathOf, type PathAction, type PathMenuState } from "./PathMenu";
 import { QuestionCard } from "./QuestionCard";
 import { showsWelcome, WelcomeDialog, type WelcomeChoice } from "./WelcomeDialog";
@@ -393,11 +404,13 @@ export function App() {
   }, []);
   /** Preselected `<org>/<repo>` from `?open=repo:<org>/<repo>` (CHAT_REPOS §12.4 G3/G4). */
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const [reposOpen, setReposOpen] = useState(false);
   /** Flag set by `&approval=1` on a deep link, read by the G7 approval step. */
   const [approvalRequested, setApprovalRequested] = useState(false);
-  /** Opens the Repos view (G4 builds it; today shows Work with `repo` preselected). */
+  /** Opens the Repos view (CHAT_REPOS §10 G4) in Work with `repo` preselected. */
   const openRepos = useCallback((repo: string | null = null) => {
     setSelectedRepo(repo);
+    setReposOpen(true);
     showView("work");
   }, [showView]);
   const openTargetRef = useRef<(target: bridge.OpenTarget) => void>(() => {});
@@ -491,6 +504,9 @@ export function App() {
       if (bridge.windows.available()) {
         bridge.windows.state().then(setWindowsState).catch(() => {});
         bridge.terminals.list().then(setTerminals).catch(() => {});
+      }
+      if (bridge.host() === "web") {
+        void chatRepos().list().catch(() => {});
       }
       // Deep links (`?open=repos|repo:<org>/<repo>|thread:<id>&approval=1`, CHAT_REPOS §12.4 G3),
       // read only after the launch check has passed and the page has its session.
@@ -831,6 +847,7 @@ export function App() {
   useEffect(() => () => pendingRef.current.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)), []);
 
   const openThread = async (threadId: string) => {
+    setReposOpen(false);
     dispatch({ type: "select", threadId });
     if (prefsRef.current.unreadThreads.includes(threadId)) updatePrefs({ unreadThreads: prefsRef.current.unreadThreads.filter((id) => id !== threadId) });
     setDrawer(false);
@@ -927,8 +944,9 @@ export function App() {
     }
     dispatch({ type: "dropNotice", message: NAME_THE_FOLDER });
     try {
-      if (newChoice.mode === "worktree" && bridge.git.available()) return await startInWorktree(cwd);
-      const started = await client.request("thread/start", { cwd, model: servedModel, permissions: profile, ...projectFields(true), ...windowToolFields() } as ParamsOf<"thread/start">);
+      if (newChoice.mode === "worktree" && HOST === "electron" && bridge.git.available()) return await startInWorktree(cwd);
+      const chatRepoFields = HOST === "web" && isChatRepoCwd(cwd) ? { prompt: CHAT_WORK_PROMPT } : {};
+      const started = await client.request("thread/start", { cwd, model: servedModel, permissions: profile, ...chatRepoFields, ...projectFields(true), ...windowToolFields() } as ParamsOf<"thread/start">);
       dispatch({ type: "opened", thread: started.thread });
       setDrawer(false);
       return started.thread;
@@ -1996,8 +2014,12 @@ export function App() {
   const selectedLink = selected ? links[selected.thread.id] : undefined;
   const workFolder = selected ? (turnCwd(selectedLink) ?? selected.thread.cwd) : (newCwd.trim() || null);
   const envProject = view !== "work" ? null : selected ? (selectedLink?.sourceCwd ?? selected.thread.cwd) : (newCwd.trim() || null);
+  setActiveChatRepoCwd(HOST === "web" && view === "work" ? workFolder : null);
+  const selectedChatRepoThread = HOST === "web" && view === "work" ? checkoutThreadForCwd(workFolder) : null;
+  const [chatRepoState, setChatRepoState] = useState<ChatRepoState | null>(null);
+  const chatRepoStateFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!bridge.git.available() || !envProject || state.server !== "ready") {
+    if (HOST !== "electron" || !bridge.git.available() || !envProject || state.server !== "ready") {
       setEnvs(null);
       return;
     }
@@ -2012,7 +2034,7 @@ export function App() {
   // A new thread's options: its repository's branches and environments.
   const newFolder = view === "work" && !selected ? newCwd.trim() : "";
   useEffect(() => {
-    if (!newFolder || !bridge.git.available() || state.server !== "ready") {
+    if (HOST !== "electron" || !newFolder || !bridge.git.available() || state.server !== "ready") {
       setNewBranches(null);
       setNewEnvs([]);
       return;
@@ -2036,7 +2058,7 @@ export function App() {
   // A worktree thread whose worktree was removed (archived, cleaned up): offer Restore.
   useEffect(() => {
     setMissingWorktree(null);
-    if (!selected || !selectedLink || selectedLink.location !== "worktree" || !bridge.git.available()) return;
+    if (HOST !== "electron" || !selected || !selectedLink || selectedLink.location !== "worktree" || !bridge.git.available()) return;
     let current = true;
     bridge.worktrees.list(selectedLink.sourceCwd, wtSettings.root)
       .then((listed) => current && !listed.some((entry) => entry.root === selectedLink.checkout) && setMissingWorktree(selected.thread.id))
@@ -2085,6 +2107,23 @@ export function App() {
   // The header's git facts for the shown thread: whether its folder is in a repository, and the branch.
   const [headerGit, setHeaderGit] = useState<{ folder: string; root: string | null; branch: string | null } | null>(null);
   const [gitTick, setGitTick] = useState(0);
+  useEffect(() => {
+    if (!selectedChatRepoThread) {
+      setChatRepoState(null);
+      chatRepoStateFor.current = null;
+      return;
+    }
+    let current = true;
+    // Another checkout: nothing of the last one's state stays on screen while this one's answers.
+    if (chatRepoStateFor.current !== selectedChatRepoThread) setChatRepoState(null);
+    chatRepoStateFor.current = selectedChatRepoThread;
+    chatRepos().state(selectedChatRepoThread)
+      .then((next) => { if (current) setChatRepoState(next); })
+      .catch(() => { if (current) setChatRepoState(null); });
+    return () => {
+      current = false;
+    };
+  }, [selectedChatRepoThread, gitTick, selected?.activeTurnId]);
   useEffect(() => {
     if (!selected || !workFolder || !bridge.git.available() || view !== "work") {
       setHeaderGit(null);
@@ -2963,6 +3002,9 @@ export function App() {
         ) : (
           <>
             <button className="nav-row new-thread-button" onClick={newThread}><Icon name="squarePen" />New thread</button>
+            {HOST === "web" ? (
+              <button className="nav-row repos-button" onClick={() => openRepos(selectedRepo)}><Icon name="gitFork" />Repositories</button>
+            ) : null}
             <button className="nav-row new-project-button" onClick={() => setProjectDialog({ project: null, folder: newCwd.trim() || null })}><Icon name="folderTree" />New project</button>
             <label className="new-thread" title="The project folder a new thread starts in">
               <Icon name="folder" size={14} />
@@ -3034,7 +3076,7 @@ export function App() {
                   <Icon name="folder" size={14} />{project.cwd.split(/[\\/]/).filter(Boolean).pop() ?? project.cwd}
                   <button className={`icon project-action${prefs.pinnedProjects.includes(project.cwd) ? " on" : ""}`} title={prefs.pinnedProjects.includes(project.cwd) ? "Unpin the project" : "Pin the project"} aria-label={prefs.pinnedProjects.includes(project.cwd) ? "Unpin the project" : "Pin the project"}
                     onClick={(event) => { event.stopPropagation(); pinProject(project.cwd); }}><Icon name="pin" size={12} /></button>
-                  {bridge.git.available() ? <button className="icon project-action" title="New permanent worktree: a project of its own, never cleaned up" aria-label="New permanent worktree"
+                  {HOST === "electron" && bridge.git.available() ? <button className="icon project-action" title="New permanent worktree: a project of its own, never cleaned up" aria-label="New permanent worktree"
                     onClick={(event) => { event.stopPropagation(); void permanentWorktree(project.cwd); }}><Icon name="gitFork" size={12} /></button> : null}
                   <button className="icon project-action" title="Make a project of this folder: more folders, instructions, knowledge files" aria-label="Make a project of this folder"
                     onClick={(event) => { event.stopPropagation(); setProjectDialog({ project: null, folder: project.cwd }); }}><Icon name="plus" size={12} /></button>
@@ -3097,10 +3139,11 @@ export function App() {
             <button className="icon bar-action ask-folder" aria-label="Open the folder" title="Open this question's folder in the file manager"
               onClick={() => void bridge.openFolder(askFolder).catch(notice)}><Icon name="folder" size={16} /></button>
           ) : null}
-          {selected && view === "work" && bridge.git.available() ? (
+          {selected && view === "work" && bridge.git.available(workFolder) ? (
             <WorktreeHeader link={selectedLink} branch={headerGit?.branch ?? null} inGit={Boolean(headerGit?.root)}
               canHandOff={!selected.activeTurnId} environment={environment}
-              onCreateBranch={createBranch} branchPrefix={prefs.branchPrefix} onHandOff={(direction) => void handOff(direction)} onOpen={openFolder} onAction={runAction} />
+              onCreateBranch={createBranch} branchPrefix={prefs.branchPrefix} onHandOff={(direction) => void handOff(direction)} onOpen={openFolder} onAction={runAction}
+              chatRepo={chatRepoState} />
           ) : null}
           {view === "work" && prefs.pullRequests && bridge.prs.available() && composeRoot ? <button className={`icon bar-action${tabs.some((tab) => tab.kind === "prs") ? " active" : ""}`} title="Pull requests, through your GitHub CLI" aria-label="Pull requests" onClick={openPullRequests}><Icon name="gitPullRequest" size={16} /></button> : null}
           {view === "work" ? <button className={`icon bar-action${reviewOpen ? " active" : ""}`} title={`Review: the repository's changes (${shortcutLabel("reviewTab")})`} aria-label="Review" aria-pressed={reviewOpen} onClick={() => { if (reviewOpen && prefs.layout === "chat") updatePrefs({ layout: "split" }); else setReviewOpen(!reviewOpen); }}><Icon name="fileDiff" size={16} /></button> : null}
@@ -3113,6 +3156,10 @@ export function App() {
             </span>
           ) : null}
         </header>
+        {HOST === "web" && view === "work" && selectedChatRepoThread && chatRepoState ? (
+          <GitBar key={selectedChatRepoThread} thread={selectedChatRepoThread} cwd={workFolder} state={chatRepoState}
+            onStateChange={(next) => { setChatRepoState(next); setGitTick((tick) => tick + 1); }} />
+        ) : null}
 
         {state.notices.map((message, index) => (
           <div key={index} className="notice" onClick={() => dispatch({ type: "dismissNotice", index })}>{message}</div>
@@ -3153,6 +3200,25 @@ export function App() {
               {info.body}
             </section>
           ) : null}
+          {HOST === "web" && view === "work" && reposOpen ? (
+            <ReposView
+              selectedRepo={selectedRepo}
+              onSelectRepo={setSelectedRepo}
+              onClose={() => setReposOpen(false)}
+              onOpenRepo={async (repo) => {
+                const { opened, thread } = await openRepoForWork(repo, {
+                  servedModel,
+                  existingThreads: Object.values(stateRef.current.threads).map((entry) => entry.thread),
+                  request: (method, params) => client.request(method, params as never) as Promise<{ thread: Thread }>,
+                });
+                loader.markLoaded(thread.id);
+                setNewCwd(opened.cwd);
+                setReposOpen(false);
+                dispatch({ type: "opened", thread });
+                setGitTick((tick) => tick + 1);
+              }}
+            />
+          ) : null}
           {selected ? selected.turns.map((turn, index) => (
             <Turn key={turn.id} turn={turn} last={index === selected.turns.length - 1} commandOutput={prefs.commandOutput}
               onFork={selected.thread.ephemeral ? null : (where) => void forkFrom(turn, where)}
@@ -3184,7 +3250,7 @@ export function App() {
         </div>
         </OpenFileContext.Provider>
 
-        {view === "work" && !selected && newBranches && bridge.git.available() ? (
+        {view === "work" && !selected && newBranches && HOST === "electron" && bridge.git.available() ? (
           <NewThreadOptions choice={newChoice} onChange={setNewChoice} branches={newBranches} environments={newEnvs} />
         ) : null}
         {selected && !agentsHidden ? (
@@ -3201,7 +3267,7 @@ export function App() {
         })()}
         {(() => {
           // Another thread working in this checkout (DESKTOP §16 B9): said, with a way out; nothing is blocked.
-          if (view !== "work" || !bridge.git.available()) return null;
+          if (view !== "work" || HOST !== "electron" || !bridge.git.available()) return null;
           const others = busyHere(state, links, workFolder, selected?.thread.id ?? null);
           if (!others.length) return null;
           const inWorktree = selected ? selectedLink?.location === "worktree" : newChoice.mode === "worktree";
@@ -3285,13 +3351,13 @@ export function App() {
             plan={planAvailable ? planning.has(planKey) : null} onTogglePlan={togglePlan}
           />
         ) : null}
-        {prefs.bottomPanel && view === "work" && bridge.git.available() && selected && detached.has(paneKey("terminal", selected.thread.id)) ? (
+        {prefs.bottomPanel && view === "work" && HOST === "electron" && bridge.git.available() && selected && detached.has(paneKey("terminal", selected.thread.id)) ? (
           <div className="pane-away" role="status">
             <Icon name="terminal" size={14} /><span>This thread's terminal is in a window of its own.</span>
             <span className="spacer" />
             <button className="link-button" onClick={() => detachPane("terminal")}>Dock it here</button>
           </div>
-        ) : prefs.bottomPanel && view === "work" && bridge.git.available() ? (
+        ) : prefs.bottomPanel && view === "work" && HOST === "electron" && bridge.git.available() ? (
           <BottomPanel tasks={tasks} environment={environment} problems={envs?.problems ?? []} project={envProject}
             terminals={terminals.filter((entry) => entry.threadId === (selected?.thread.id ?? null) && !tabbedTerminals(tabs).has(entry.processId))} hub={hub} front={front}
             onNewTerminal={() => openTerminal()} onCloseTerminal={closeTerminal} onSendToThread={sendTerminal}
