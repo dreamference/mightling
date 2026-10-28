@@ -752,6 +752,36 @@
       "message": {"id": 342, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [], "permissions": ":custom", "runtimeWorkspaceRoots": ["/etc"], "approvalPolicy": "never", "cwd": "/etc"}},
       "accept": true,
       "out": {"id": 342, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [], "sandboxPolicy": {"type": "dangerFullAccess"}}}
+    },
+    {
+      "name": "an ungranted repo thread turn/start carries the user's workspace sandbox: its network and its writable roots",
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "workspaceSandbox": {"networkAccess": true, "writableRoots": ["/codex/skills"]},
+      "message": {"id": 343, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "pip install"}], "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": ["/"], "networkAccess": true, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false}}},
+      "accept": true,
+      "out": {"id": 343, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "pip install"}], "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": ["/codex/skills"], "networkAccess": true, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false}}}
+    },
+    {
+      "name": "a repo thread in a read-only checkout keeps the user's network in its readOnly sandbox, and a grant never widens it",
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": true},
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "repoFullAccess": ["repo-t1"],
+      "workspaceSandbox": {"networkAccess": true, "writableRoots": ["/codex/skills"]},
+      "message": {"id": 344, "method": "turn/start", "params": {"threadId": "repo-t1", "input": []}},
+      "accept": true,
+      "out": {"id": 344, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [], "sandboxPolicy": {"type": "readOnly", "networkAccess": true}}}
+    },
+    {
+      "name": "a messenger bridge's turn on a granted repo thread gets the workspace sandbox, never dangerFullAccess",
+      "bridge": true,
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "repoFullAccess": ["repo-t1"],
+      "workspaceSandbox": {"networkAccess": true},
+      "message": {"id": 345, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "rm -rf"}], "sandboxPolicy": {"type": "dangerFullAccess"}}},
+      "accept": true,
+      "out": {"id": 345, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "rm -rf"}], "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": [], "networkAccess": true, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false}}}
     }
   ]
 }

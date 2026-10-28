@@ -4038,12 +4038,12 @@ async fn repo_access(State(server): State<Arc<Server>>, headers: HeaderMap, body
             }
             let request: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
             let thread = request.get("thread").and_then(Value::as_str).unwrap_or("").trim();
-            let (record, _) = match find_checked_out_thread(&server, thread) {
+            let (record, worktree_dir) = match find_checked_out_thread(&server, thread) {
                 Ok(found) => found,
                 Err(resp) => return resp,
             };
             server.chat_repos.revoke_full_access(&record.thread);
-            reset_checkout_sandbox(&server, &record).await;
+            reset_checkout_sandbox(&server, &record, &worktree_dir).await;
             json_response(StatusCode::OK, json!({ "level": "workspace" }))
         }
         "full" => {
@@ -4101,7 +4101,7 @@ const RESET_ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
 /// goal's own turns. Over a connection of its own: `thread/settings/update` with the sandbox the
 /// policy writes on a repository turn, and `turn/interrupt` for a turn still running. With no
 /// app-server listening no thread is loaded, and the next resume pins the sandbox anyway.
-async fn reset_checkout_sandbox(server: &Server, record: &CheckoutRecord) {
+async fn reset_checkout_sandbox(server: &Server, record: &CheckoutRecord, worktree_dir: &Path) {
     use futures::SinkExt;
     use tokio_tungstenite::tungstenite::Message;
 
@@ -4111,7 +4111,6 @@ async fn reset_checkout_sandbox(server: &Server, record: &CheckoutRecord) {
     let Ok(mut upstream) = server.app_server.connect_once().await else {
         return;
     };
-    let sandbox = repo_turn_sandbox(server, record);
     let mut next_id: u64 = 0;
     let initialize = json!({
         "clientInfo": { "name": "mightling-web-reset", "title": null, "version": env!("CARGO_PKG_VERSION") },
@@ -4124,7 +4123,8 @@ async fn reset_checkout_sandbox(server: &Server, record: &CheckoutRecord) {
         .send(Message::Text(json!({ "method": "initialized" }).to_string().into()))
         .await;
     for thread in &record.app_threads {
-        reset_ask(&mut upstream, &mut next_id, "thread/settings/update", json!({ "threadId": thread, "sandboxPolicy": sandbox.clone() })).await;
+        let sandbox = repo_turn_sandbox(server, record, worktree_dir, thread);
+        reset_ask(&mut upstream, &mut next_id, "thread/settings/update", json!({ "threadId": thread, "sandboxPolicy": sandbox })).await;
         let turns = reset_ask(&mut upstream, &mut next_id, "thread/turns/list", json!({ "threadId": thread, "limit": 1, "sortDirection": "desc" })).await;
         let running = turns
             .as_ref()
@@ -4164,20 +4164,16 @@ async fn reset_ask(upstream: &mut crate::app_server::Upstream, next_id: &mut u64
     .flatten()
 }
 
-/// The sandbox the policy writes on a repository thread's turn without Full Access: read-only in a
-/// read-only checkout, else the user's workspace-write.
-fn repo_turn_sandbox(_server: &Server, record: &CheckoutRecord) -> Value {
-    if record.read_only {
-        json!({ "type": "readOnly", "networkAccess": false })
-    } else {
-        json!({
-            "type": "workspaceWrite",
-            "writableRoots": [],
-            "networkAccess": false,
-            "excludeTmpdirEnvVar": false,
-            "excludeSlashTmp": false
-        })
+/// The sandbox the policy writes on the repository thread `thread`'s turn without Full Access
+/// (`ask::MessagePrompts::workspace_sandbox`): the user's `[sandbox_workspace_write]`, with no
+/// network while the thread's air gap is on (its own, the user's or the checkout's), read-only in a
+/// read-only checkout. The same answer as the thread's next turn gets, so the two never disagree.
+fn repo_turn_sandbox(server: &Server, record: &CheckoutRecord, worktree_dir: &Path, thread: &str) -> Value {
+    let mut sandbox = crate::ask::configured_workspace_sandbox(&server.config.codex_home);
+    if crate::server::thread_airgapped_on(Some(thread), Some(worktree_dir)) {
+        sandbox.network_access = false;
     }
+    sandbox.policy(record.read_only)
 }
 
 #[cfg(test)]
@@ -7729,12 +7725,20 @@ mod tests {
             created: 1,
             last_used: 1,
         };
-        reset_checkout_sandbox(&server, &record).await;
+        let checkout = s.dir.join("checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        reset_checkout_sandbox(&server, &record, &checkout).await;
 
         let mut methods = Vec::new();
         while let Ok(request) = seen.try_recv() {
             if request["method"] == "thread/settings/update" {
-                assert_eq!(request["params"]["sandboxPolicy"]["type"], "workspaceWrite", "{request}");
+                // The user's workspace sandbox, as the next turn's: the network stays on (absent
+                // from config.toml counts as on, as the launcher writes it).
+                assert_eq!(
+                    request["params"]["sandboxPolicy"],
+                    json!({ "type": "workspaceWrite", "writableRoots": [], "networkAccess": true, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false }),
+                    "{request}"
+                );
             }
             if request["method"] == "turn/interrupt" {
                 assert_eq!(request["params"], json!({ "threadId": "app-run", "turnId": "turn-9" }));

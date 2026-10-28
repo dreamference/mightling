@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { POLICY, airgapThread, namedPrompt, parsePolicy, threadPlace, vetOutgoing, type PromptSource } from "./policy";
+import { POLICY, airgapThread, namedPrompt, parsePolicy, threadPlace, vetOutgoing, type PromptSource, type WorkspaceSandbox } from "./policy";
 
 const WEB = path.join(__dirname, "..", "..", "..", "ling-rs", "web");
 
@@ -23,6 +23,7 @@ interface Case {
   repoThreads?: Record<string, string>;
   repoFullAccess?: string[];
   bridge?: boolean;
+  workspaceSandbox?: Partial<WorkspaceSandbox>;
 }
 
 describe("the policy", () => {
@@ -54,6 +55,7 @@ describe("the policy", () => {
     let repoThreads = new Map<string, string>();
     let repoFullAccess = new Set<string>();
     let bridge = false;
+    let workspace: WorkspaceSandbox = { networkAccess: false, writableRoots: [], excludeTmpdirEnvVar: false, excludeSlashTmp: false };
     const stub: PromptSource = {
       composed: (name) => `PROMPT:${name}`,
       newScratchFolder: () => `SCRATCH/${++made}`,
@@ -63,6 +65,7 @@ describe("the policy", () => {
       repoThreadCwd: (threadId) => repoThreads.get(threadId) ?? null,
       repoThreadFullAccess: (threadId) => repoFullAccess.has(threadId),
       isBridge: () => bridge,
+      workspaceSandbox: () => workspace,
       workFolder: (cwd) => cwd.startsWith("WORK/"),
     };
     for (const testCase of vectors.cases) {
@@ -72,6 +75,8 @@ describe("the policy", () => {
       repoThreads = new Map(Object.entries(testCase.repoThreads ?? {}));
       repoFullAccess = new Set(testCase.repoFullAccess ?? []);
       bridge = Boolean(testCase.bridge);
+      // The user's workspace sandbox (`workspaceSandbox`), no network and no extra roots when absent.
+      workspace = { networkAccess: false, writableRoots: [], excludeTmpdirEnvVar: false, excludeSlashTmp: false, ...testCase.workspaceSandbox };
       const pending = new Set(testCase.pending ?? []);
       if (testCase.accept) {
         let out: unknown;

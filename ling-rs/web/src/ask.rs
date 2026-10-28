@@ -108,6 +108,38 @@ pub fn is_bridge_device(name: &str) -> bool {
         && instance.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+/// The user's `[sandbox_workspace_write]` in `$CODEX_HOME/config.toml`, as the app-server reads it
+/// for `sandbox: "workspace-write"`. The launcher writes `network_access = true` when it is absent
+/// (the owner's decision of 2026-10-22), so absent counts as true; a writable root that is not an
+/// absolute path is left out, since the app-server refuses a turn naming one. The air gap is not
+/// read here: the caller turns the network off for a thread at `on`.
+pub fn configured_workspace_sandbox(codex_home: &Path) -> crate::policy::WorkspaceSandbox {
+    let text = std::fs::read_to_string(codex_home.join("config.toml")).unwrap_or_default();
+    let table = text
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|root| root.get("sandbox_workspace_write").and_then(toml::Value::as_table).cloned())
+        .unwrap_or_default();
+    let flag = |key: &str, absent: bool| table.get(key).and_then(toml::Value::as_bool).unwrap_or(absent);
+    crate::policy::WorkspaceSandbox {
+        network_access: flag("network_access", true),
+        writable_roots: table
+            .get("writable_roots")
+            .and_then(toml::Value::as_array)
+            .map(|roots| {
+                roots
+                    .iter()
+                    .filter_map(toml::Value::as_str)
+                    .filter(|root| Path::new(root).is_absolute())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        exclude_tmpdir_env_var: flag("exclude_tmpdir_env_var", false),
+        exclude_slash_tmp: flag("exclude_slash_tmp", false),
+    }
+}
+
 /// What the policy layer asks while vetting one message: the named prompt's text, fetched before
 /// the message is vetted, and the Ask folders.
 pub struct MessagePrompts<'a> {
@@ -215,6 +247,17 @@ impl PromptSource for MessagePrompts<'_> {
     fn is_bridge(&self) -> bool {
         false
     }
+
+    fn workspace_sandbox(&self, thread_id: &str) -> crate::policy::WorkspaceSandbox {
+        let mut sandbox = configured_workspace_sandbox(self.codex_home());
+        let checkout = self.repo_thread_cwd(thread_id).map(PathBuf::from);
+        if self.airgapped_on(Some(thread_id))
+            || checkout.is_some_and(|cwd| crate::server::thread_airgapped_on(Some(thread_id), Some(&cwd)))
+        {
+            sandbox.network_access = false;
+        }
+        sandbox
+    }
 }
 
 impl PromptSource for TabPrompts<'_> {
@@ -255,6 +298,10 @@ impl PromptSource for TabPrompts<'_> {
 
     fn work_folder(&self, cwd: &str) -> bool {
         self.inner.work_folder(cwd)
+    }
+
+    fn workspace_sandbox(&self, thread_id: &str) -> crate::policy::WorkspaceSandbox {
+        self.inner.workspace_sandbox(thread_id)
     }
 }
 
@@ -330,6 +377,71 @@ mod tests {
             assert_eq!(folder_of(&root, "planted"), None);
             assert!(!is_folder(&root, &home));
         }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_repository_turns_workspace_sandbox_is_the_users_with_no_network_at_on() {
+        let home = scratch("workspace-sandbox");
+        // The launcher writes `network_access = true` when absent: absent is true.
+        assert_eq!(
+            configured_workspace_sandbox(&home),
+            crate::policy::WorkspaceSandbox { network_access: true, ..Default::default() }
+        );
+        std::fs::write(
+            home.join("config.toml"),
+            "[sandbox_workspace_write]\nnetwork_access = false\nwritable_roots = [\"/codex/skills\", \"relative\", 3]\nexclude_slash_tmp = true\n",
+        )
+        .unwrap();
+        assert_eq!(
+            configured_workspace_sandbox(&home),
+            crate::policy::WorkspaceSandbox {
+                network_access: false,
+                writable_roots: vec!["/codex/skills".to_string()],
+                exclude_tmpdir_env_var: false,
+                exclude_slash_tmp: true,
+            }
+        );
+
+        // The file says network on, the checkout's air gap says on: the turn gets no network.
+        std::fs::write(
+            home.join("config.toml"),
+            "[sandbox_workspace_write]\nnetwork_access = true\nwritable_roots = [\"/codex/skills\"]\n",
+        )
+        .unwrap();
+        let root = root(&home);
+        std::fs::create_dir_all(&root).unwrap();
+        let checkout = crate::chat_repos::root_dir(&home).join("org_widget").join("cafef00d");
+        std::fs::create_dir_all(&checkout).unwrap();
+        let record = crate::chat_repos::CheckoutRecord {
+            thread: "cafef00d".to_string(),
+            repo: "org/widget".to_string(),
+            bridge: "telegram".to_string(),
+            chat: "c".to_string(),
+            device: "telegram-app".to_string(),
+            dir: checkout.to_string_lossy().into_owned(),
+            branch: Some("phone/cafef00d".to_string()),
+            base: "main".to_string(),
+            app_threads: vec!["app-net".to_string()],
+            read_only: false,
+            created: 1,
+            last_used: 1,
+        };
+        crate::chat_repos::save_index(&home, &[record]).unwrap();
+        let prompts = MessagePrompts {
+            root: &root,
+            composed: None,
+            created: Mutex::new(None),
+            airgapped_on: false,
+            thread_folder: None,
+        }
+        .with_bridge(false);
+        let open = prompts.workspace_sandbox("app-net");
+        assert!(open.network_access && open.writable_roots == vec!["/codex/skills".to_string()]);
+        std::fs::write(checkout.join("dreamference.toml"), "mightling_airgapped = \"on\"\n").unwrap();
+        let closed = prompts.workspace_sandbox("app-net");
+        assert!(!closed.network_access, "the air gap at on takes the network away");
+        assert_eq!(closed.writable_roots, vec!["/codex/skills".to_string()]);
         let _ = std::fs::remove_dir_all(&home);
     }
 
