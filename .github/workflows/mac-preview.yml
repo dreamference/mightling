@@ -64,7 +64,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The runners build-clients.yml builds these targets on.
+          # GitHub's runners, even when build-clients.yml builds the Apple silicon ling on the
+          # self-hosted Mac (MACOS_RUNNER): this job starts the app, which opens a window.
           - arch: arm64
             target: aarch64-apple-darwin
             runner: macos-15

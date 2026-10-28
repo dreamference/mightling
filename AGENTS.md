@@ -174,6 +174,7 @@ Use `rg -n "^class Foo"` for a definition and `ast-grep` for call sites by shape
 - [host-safety.md](docs/dev/host-safety.md): pre-flight checks, the PSI watchdog, the AppArmor profile for `bwrap`
 - [install-modes.md](docs/dev/install-modes.md): checkout vs release install, `install.sh`, `HostSafetySetup`
 - [codex-build.md](docs/dev/codex-build.md): building `ling`, the patches and their size cap, V8, the submodules
+- [ci-runners.md](docs/dev/ci-runners.md): the self-hosted Windows and macOS CI runners
 - [launcher.md](docs/dev/launcher.md): the launcher, `~/.mightling`, the vendor channels closed
 - [prompt.md](docs/dev/prompt.md): named system prompts
 - [egress-audit.md](docs/dev/egress-audit.md): `ling-admin audit egress`
