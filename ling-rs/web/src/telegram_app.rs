@@ -317,6 +317,22 @@ fn random_six_digit_code() -> String {
     format!("{:03} {:03}", number / 1_000, number % 1_000)
 }
 
+/// What one launch is remembered by: the digest of its signed `hash` field, as [`check_launch`]
+/// reads it (the last `hash`, decoded, lowercased). The raw query string will not do: the same
+/// signed fields re-ordered or re-encoded pass the signature check under a different string.
+fn launch_digest(init_data: &str) -> String {
+    let hash = init_data
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .filter(|(key, _)| percent_decode(key).as_deref() == Some("hash"))
+        .filter_map(|(_, value)| percent_decode(value))
+        .last();
+    match hash {
+        Some(hash) => auth::sha256_hex(&format!("hash:{}", hash.to_ascii_lowercase())),
+        None => auth::sha256_hex(init_data),
+    }
+}
+
 fn init_data_stale_at(init_data: &str, now: u64) -> u64 {
     let signed_at = init_data
         .split('&')
@@ -376,7 +392,7 @@ fn record_used_init_data(state: &Path, digest: &str, expires_at: u64, now: u64) 
 /// `initData` digests are remembered until they would be stale (`auth_date + MAX_LAUNCH_AGE_SECS`)
 /// so the same `initData` cannot pair twice.
 pub fn create_pending_pair(state: &Path, user_id: i64, init_data: &str, now: u64) -> std::io::Result<PendingLaunchPair> {
-    let digest = auth::sha256_hex(init_data);
+    let digest = launch_digest(init_data);
     let used = load_used_launches_raw(state, now);
     if used.iter().any(|entry| auth::same_secret(&entry.init_data_sha256, &digest)) {
         let _ = save_used_launches_raw(state, &used);
@@ -451,7 +467,7 @@ pub fn claim_pending_pair(state: &Path, id: &str, user_id: i64, init_data: &str,
         let _ = save_pending_pairs_raw(state, &entries);
         return ClaimOutcome::NotFound;
     };
-    let digest = auth::sha256_hex(init_data);
+    let digest = launch_digest(init_data);
     if entries[index].user_id != user_id || !auth::same_secret(&digest, &entries[index].init_data_sha256) {
         return ClaimOutcome::Forbidden;
     }
@@ -678,6 +694,33 @@ mod tests {
         // the remembered digest is pruned.
         let after_stale = 1000 + MAX_LAUNCH_AGE_SECS + 1;
         assert!(create_pending_pair(&state, 42, init1, after_stale).is_ok());
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn a_reordered_or_reencoded_copy_of_a_used_launch_cannot_pair_again() {
+        let state = std::env::temp_dir().join(format!("ling-web-tg-reencode-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state);
+        auth::private_dir(&state).unwrap();
+
+        let data = sign(&[("auth_date", "1000"), ("query_id", "AAH"), ("user", r#"{"id":42}"#)], TOKEN);
+        // The same signed fields, re-ordered, with one byte percent-encoded and the hash in capitals:
+        // a different string that check_launch still accepts.
+        let mut pairs: Vec<&str> = data.split('&').collect();
+        pairs.reverse();
+        let hash = pairs[0].trim_start_matches("hash=").to_ascii_uppercase();
+        let copy = format!("hash={hash}&{}", pairs[1..].join("&").replacen("query_id=AAH", "query%5Fid=AAH", 1));
+        assert_ne!(copy, data);
+        assert_eq!(check_launch(&copy, TOKEN, &[42], 1001), Ok(42));
+
+        let first = create_pending_pair(&state, 42, &data, 1001).unwrap();
+        assert!(create_pending_pair(&state, 42, &copy, 1002).is_err(), "a re-encoded copy pairs again while pending");
+        // The webview that launched with the copy is the same launch: it may collect the request.
+        assert_eq!(claim_pending_pair(&state, &first.id, 42, &copy, 1003), ClaimOutcome::Pending);
+        assert!(approve_pending_pair(&state, &first.id, 1004).unwrap());
+        assert!(matches!(claim_pending_pair(&state, &first.id, 42, &data, 1005), ClaimOutcome::Approved(_)));
+        assert!(create_pending_pair(&state, 42, &copy, 1006).is_err(), "a re-encoded copy pairs again once used");
 
         let _ = std::fs::remove_dir_all(&state);
     }
