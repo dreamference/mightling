@@ -1,0 +1,9 @@
+diff --git a/codex-rs/install-context/src/lib.rs b/codex-rs/install-context/src/lib.rs
+--- a/codex-rs/install-context/src/lib.rs
++++ b/codex-rs/install-context/src/lib.rs
+@@ -185,2 +185,5 @@
+     fn code_mode_host_program_from_exe(&self, current_exe: Option<&Path>) -> PathBuf {
++        // macOS reports the path the process was started by, so a symlink in ~/.local/bin hides the install directory.
++        let resolved_exe = current_exe.and_then(|exe| std::fs::canonicalize(exe).ok());
++        let current_exe = resolved_exe.as_deref().or(current_exe);
+         let executable_dir = if let Some(package_layout) = &self.package_layout {
