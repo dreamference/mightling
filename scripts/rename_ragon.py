@@ -35,7 +35,6 @@ EXCLUDE_FILES = {
     "scripts/rename_mightling.py",
     "scripts/rename_ragon.py",
     "tests/test_rename_ragon.py",
-    "dreamference/chat/retired_web_chat.py",
     "desktop/electron/predecessor.json",  # names Mightling on purpose (the desktop identity)
     "desktop/electron/windows/predecessor.nsh",
     # the migration modules: the overlay brings them in their final names
@@ -74,6 +73,10 @@ PROTECT = [
     "mightling-release",  # the SSHSIG namespace of SHA256SUMS
     "mightling-adapter",  # the SSHSIG namespace of adapter manifests
     "mightling-relay",
+    # the enrolment wire protocol: a 1.8 node and a 1.9 client (or the reverse) must still agree
+    "mightling-enrol-client|",
+    "mightling-enrol-server|",
+    "/mightling/enrol",
     "mightling-box-ready",
     "mightling-box-removed",
     ".ling-gpu",
@@ -83,12 +86,14 @@ PROTECT = [
     "mightling-<id>",
     "mightling-<node id>",
     "mightling-<its id>",
+    "not mightling-",  # the message that says a peer name is not the overlay one
     'NODE_PEER_PREFIX: Final[str] = "mightling-"',
     'OVERLAY_PREFIX: &str = "mightling-"',
     # SWE-bench stored keys
     "puffin_version",
     "puffin_code_calls",
     "puffin_code_users",
+    "PUFFIN_GMAIL_SECRET",  # the env name an old container hands the service (a test keeps it)
     "/puffin-images/",
     # the SCIP tables, until ling-code migrates them (scip_store.rs)
     "puffin_names",
@@ -96,6 +101,9 @@ PROTECT = [
     "puffin_meta",
     "puffin\\\\_%",
 ]
+
+# The same, as regular expressions: a peer name is `mightling-` and a node id, whatever the example.
+PROTECT_RE = [re.compile(r"mightling-(?=[0-9a-f]{8}-|\{(?:NODE_ID|node_id|self\.node_id)\}|(?:x|ab)\.netbird)")]
 
 RULES = [
     (r"DREAMFERENCE_MIGHTLING_LING_", "DREAMFERENCE_RAGON_"),
@@ -108,7 +116,7 @@ RULES = [
     (r"PUFFIN_", "RAGON_"),
     (r"\.lingignore", ".ragonignore"),
     (r"(?<![A-Za-z0-9])LING(?![A-Za-z])", "RAGON"),
-    (r"(?<![A-Za-z0-9])ling(?![A-Za-z])", "ragon"),
+    (r"(?:(?<![A-Za-z0-9])|(?<=\\[bnrt]))ling(?![A-Za-z])", "ragon"),  # \bling-code in a regex, \nling
     (r"(?<![A-Za-z])ling(?=[A-Z])", "ragon"),
     (r"(?<![A-Za-z])Ling(?![a-z])", "Ragon"),
 ]
@@ -120,7 +128,9 @@ LINK_REPL = {"MIGHTLING_LING": "RAGON", "MIGHTLING": "RAGON", "LING_ENGINE": "RA
 # Puffin is the name before Mightling: the bird, the 1.4.x transition assets and the legacy names stay
 # (the rename of the build caches and the AppArmor profile is in RULES), so the check does not look for it.
 # What the leftover check looks for, after the protected words are masked.
-LEFTOVER = re.compile(r"mightling|(?<![A-Za-z0-9])ling(?![A-Za-z])|\.lingignore", re.I)
+LEFTOVER = re.compile(
+    r"mightling|(?:(?<![A-Za-z0-9])|(?<=\\[bnrt]))ling(?![A-Za-z])|\.lingignore", re.I
+)
 
 # A prose line that talks about the rename itself or names an old name on purpose stays as it is.
 LEGACY_LINE = re.compile(
@@ -152,6 +162,14 @@ def transform(text):
             token = f"\x00P{i}\x00"
             saved[token] = word
             text = text.replace(word, token)
+    for n, pattern in enumerate(PROTECT_RE):
+
+        def keep(match, n=n):
+            token = f"\x00R{n}_{len(saved)}\x00"
+            saved[token] = match.group(0)
+            return token
+
+        text = pattern.sub(keep, text)
     for pattern, repl in COMPILED:
         text = pattern.sub(repl, text)
     for token, word in saved.items():
@@ -196,6 +214,8 @@ def masked(line):
     """`line` with the protected words blanked, for the leftover check."""
     for word in PROTECT + COMPAT_KEEP:
         line = line.replace(word, " ")
+    for pattern in PROTECT_RE:
+        line = pattern.sub(" ", line)
     return line
 
 
@@ -320,6 +340,36 @@ COMPAT_EDITS = [
         '"Ragon-mDNS-f3f04289"',
         1,
     ),
+    (
+        "tests/test_ragon_prompt.py",
+        "assert len(v1) == 4_232,",
+        "assert len(v1) == 4_228,",
+        1,
+    ),
+    (
+        "tests/test_agents_md.py",
+        "LIMIT_BYTES: Final[int] = 24_000",
+        "LIMIT_BYTES: Final[int] = 24_100",
+        1,
+    ),
+    (
+        "tests/test_forge.py",
+        'assert text.count("<service>") == 2 and',
+        'assert text.count("<service>") == 3 and',
+        1,
+    ),
+    (
+        "tests/test_node.py",
+        "    <txt-record>main=1</txt-record>\n  </service>\n</service-group>\n\"\"\"",
+        "    <txt-record>main=1</txt-record>\n  </service>\n  <service>\n    <type>_mightling-node._tcp</type>\n"
+        "    <port>8000</port>\n    <txt-record>proto=1</txt-record>\n"
+        "    <txt-record>node=7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001</txt-record>\n"
+        "    <txt-record>version=1.3.0</txt-record>\n    <txt-record>web=3000</txt-record>\n"
+        "    <txt-record>search=8888</txt-record>\n    <txt-record>state=ready</txt-record>\n"
+        "    <txt-record>main=1</txt-record>\n  </service>\n</service-group>\n\"\"\"",
+        1,
+    ),
+    (".github/apps/CODEOWNERS", "/scripts/rename_ragon.py ", "/scripts/rename_mightling.py                @dreamference/release\n/scripts/ragon_overlay/                       @dreamference/release\n/tests/test_rename_ragon.py                  @dreamference/release\n/scripts/rename_ragon.py ", 1),
     (  # the 1.6.0 notes are history and keep the old name; the test that renders them says so
         "tests/test_release_notes.py",
         "**Search your own documents.** Ragon now keeps",
@@ -403,6 +453,27 @@ def apply_compat(root, dry):
             full.write_text(text.replace(old, new), encoding="utf-8")
         done += 1
     return done
+
+
+def tidy(root, paths):
+    """Formats the renamed Python files with ruff (a longer name can push a line over the limit).
+
+    The ratchet tests treat a file whose formatting got worse as a regression. Uses the ruff of the
+    tree's own virtualenv, else of the interpreter running this script; says so and goes on when
+    neither has one.
+    """
+    files = sorted({new_path(p) for p in paths if p.endswith(".py")})
+    files = [f for f in files if f.startswith(("dreamference/", "tests/")) and (pathlib.Path(root) / f).exists()]
+    for python in (os.path.join(root, ".venv/bin/python"), sys.executable):
+        if not pathlib.Path(python).exists():
+            continue
+        if subprocess.run([python, "-m", "ruff", "--version"], capture_output=True).returncode:
+            continue
+        for command in (["format"], ["check", "--fix", "--quiet"]):
+            subprocess.run([python, "-m", "ruff", *command, *files], cwd=root, capture_output=True)
+        return len(files)
+    print("ruff not found: run `ruff format` and `ruff check --fix` on the renamed files by hand")
+    return 0
 
 
 def build_manifest(root):
@@ -599,6 +670,7 @@ def main(argv=None):
     overlays = [] if args.repo == "engine" else apply_overlay(root, args.dry)
     if args.repo == "main" and not args.paths and not args.dry:
         print(f"compat edits: {apply_compat(root, args.dry)}")
+        print(f"ruff-formatted files: {tidy(root, set(files))}")
     print(
         f"contents changed: {len(changed)} files; renamed: {len(renames)} paths; overlays: {len(overlays)}"
     )
