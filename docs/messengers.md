@@ -231,6 +231,40 @@ take the button away. It works in Telegram's phone and desktop apps, not in web.
 would have to frame the page.
 
 
+### Work on a repository from your phone
+
+With the app above, a Telegram chat can do real work on a repository from your node's own Git
+server (Forgejo; private repositories included), as the desktop app's Work view does. Nothing
+outside that server is reachable: no other Git host and no folder on the machine.
+
+- **Pairing.** The first time the app opens on a new phone, it shows a six-digit code and the bot
+  asks you, in the chat, to Approve or Decline "a Mini App on a new device". Approve and the phone
+  is paired (as a `telegram-app` device; `ling web revoke` removes it). Typing `ling web pair` on
+  the machine still works.
+- **Pick a repository** in the app's Repos view, then talk to the agent there. It works in a
+  checkout of its own on a branch named `phone/<thread>`; your own working folder is never touched.
+  The git bar shows the diff and offers Commit, Push, Update, Merge and a pull request; every
+  write asks for a fresh confirmation, and pushes are checked first for things that must not be
+  published. Working on `main` directly is off unless the repository is allowed to.
+- **Approvals** appear in a "Waiting for you" strip when you open the app from a notice, and are
+  answered there, once. An unanswered one is declined after ten minutes.
+- **What the bot says.** In a repository's topic the bot sends only short fixed notices, such as
+  "Turn finished in `<repo>`: 3 files changed." or "Approval waiting in `<repo>`.", each with an
+  Open button. It never sends code, file names, commands or the model's words, so none of that
+  reaches Telegram's servers; everything else stays inside the app, which your phone loads straight
+  from your machine. Text you type to the bot in a repository's topic is refused: type it in the
+  app.
+- **Full Access is off for phone threads.** To allow it, run `ling chat repos full-access on` at
+  the machine's own terminal and type `yes`. Even then, each thread asks you to type
+  `FULL ACCESS <repo>` in the app; it lasts until you go back to Workspace, ends when `ling web`
+  restarts, and is never offered by the bot. It is refused while `/airgapped` is `on`. Turn the
+  setting off with `ling chat repos full-access off`.
+- **Limits.** A Work turn stops after 30 minutes, 200 tool calls or a 10-minute command, and a
+  chat has a daily model budget; the bot tells you at 80%. Under `[chat_repos]` in
+  `~/.config/dreamference/config.toml`, `enabled` turns repository work off (default: on when the
+  node's Git server answers) and `bridges` lists the messengers allowed to use it.
+
+
 Telegram is the less private choice. Everything you send the bot, and every answer, passes through
 Telegram's servers unencrypted. Answers can include what the agent reads for you, such as mail,
 files and code. Setup shows this warning and asks you to type `yes`.
