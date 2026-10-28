@@ -342,6 +342,16 @@ class LegacyNameMigration:
             )
         return None
 
+    @staticmethod
+    def timer_window(timer: Path, marker: str) -> str | None:
+        """Reads the window a Night Shift timer file records after `marker`, if it has one."""
+        window = None
+        if timer.is_file():
+            for line in timer.read_text().splitlines():
+                if line.startswith(marker):
+                    window = line[len(marker) :].strip()
+        return window
+
     @classmethod
     def replace_night_units(cls) -> str | None:
         """Replaces the old Night Shift timer with the new one, in the same window, if it was on.
@@ -361,11 +371,7 @@ class LegacyNameMigration:
             service = directory / f"{unit}.service"
             if not timer.exists() and not service.exists():
                 continue
-            window = None
-            if timer.is_file():
-                for line in timer.read_text().splitlines():
-                    if line.startswith(WINDOW_MARKER):
-                        window = line[len(WINDOW_MARKER) :].strip()
+            window = cls.timer_window(timer, WINDOW_MARKER)
             enabled = NightShiftScheduler.systemctl(["is-enabled", f"{unit}.timer"]).returncode == 0
             NightShiftScheduler.systemctl(["disable", "--now", f"{unit}.timer"])
             for path in (timer, service):

@@ -370,6 +370,12 @@ COMPAT_EDITS = [
         1,
     ),
     (".github/apps/CODEOWNERS", "/scripts/rename_ragon.py ", "/scripts/rename_mightling.py                @dreamference/release\n/scripts/ragon_overlay/                       @dreamference/release\n/tests/test_rename_ragon.py                  @dreamference/release\n/scripts/rename_ragon.py ", 1),
+    (
+        "dreamference/audit/sync_egress_audit.py",
+        '"❌ --prompt has no effect with --sync: it traces one sync agent cycle, with no ragon session to prompt."',
+        '"❌ --prompt has no effect with --sync: it traces one sync agent cycle, "\n                "with no ragon session to prompt."',
+        1,
+    ),
     (  # the 1.6.0 notes are history and keep the old name; the test that renders them says so
         "tests/test_release_notes.py",
         "**Search your own documents.** Ragon now keeps",
@@ -455,25 +461,77 @@ def apply_compat(root, dry):
     return done
 
 
-def tidy(root, paths):
-    """Formats the renamed Python files with ruff (a longer name can push a line over the limit).
+def ruff_python(root):
+    """An interpreter that has ruff: RAGON_PYTHON, the tree's own virtualenv, else this one."""
+    for python in (os.environ.get("RAGON_PYTHON", ""), os.path.join(root, ".venv/bin/python"), sys.executable):
+        if python and pathlib.Path(python).exists():
+            if not subprocess.run([python, "-m", "ruff", "--version"], capture_output=True).returncode:
+                return python
+    return None
 
-    The ratchet tests treat a file whose formatting got worse as a regression. Uses the ruff of the
-    tree's own virtualenv, else of the interpreter running this script; says so and goes on when
-    neither has one.
+
+def python_sources(root, paths):
+    """The Python files of `paths` the ratchet tests watch (the package and the tests)."""
+    return sorted(
+        p for p in paths if p.endswith(".py") and p.startswith(("dreamference/", "tests/"))
+        and (pathlib.Path(root) / p).exists()
+    )
+
+
+def format_clean(root, paths):
+    """The files of `paths` that `ruff format` leaves alone now (run before the rename)."""
+    python = ruff_python(root)
+    files = python_sources(root, paths)
+    if python is None or not files:
+        return set()
+    out = subprocess.run(
+        [python, "-m", "ruff", "format", "--check", *files], cwd=root, capture_output=True, text=True
+    ).stdout
+    dirty = {line.split("Would reformat: ", 1)[1].strip() for line in out.splitlines() if "Would reformat: " in line}
+    return set(files) - dirty
+
+
+def tidy(root, clean):
+    """Formats the renamed files that were format-clean before: a longer name can push a line over.
+
+    The ratchet tests treat a file whose formatting got worse as a regression; a file that was not
+    clean to begin with is left as it was, so no unrelated reformatting enters the rename.
     """
-    files = sorted({new_path(p) for p in paths if p.endswith(".py")})
-    files = [f for f in files if f.startswith(("dreamference/", "tests/")) and (pathlib.Path(root) / f).exists()]
-    for python in (os.path.join(root, ".venv/bin/python"), sys.executable):
-        if not pathlib.Path(python).exists():
+    python = ruff_python(root)
+    files = python_sources(root, [new_path(p) for p in clean])
+    if python is None:
+        print("ruff not found: run `ruff format` on the renamed files by hand")
+        return 0
+    subprocess.run([python, "-m", "ruff", "format", *files], cwd=root, capture_output=True)
+    move_noqa(root, python, files)
+    return len(files)
+
+
+def move_noqa(root, python, files):
+    """Puts `# noqa: PLR0913` back on the `def` line when the formatter wrapped a signature.
+
+    A `noqa` sits on the line the finding is reported at; wrapping the arguments moves the report
+    to the `def` line and leaves the comment on an argument, where it is unused.
+    """
+    base = [python, "-m", "ruff", "check", "--select", "PLR0913,RUF100", "--output-format", "json"]
+    out = subprocess.run([*base, *files], cwd=root, capture_output=True, text=True).stdout
+    moved = {}
+    for hit in json.loads(out or "[]"):
+        moved.setdefault(hit["filename"], []).append(hit)
+    for name, hits in moved.items():
+        if not any(h["code"] == "RUF100" for h in hits):
             continue
-        if subprocess.run([python, "-m", "ruff", "--version"], capture_output=True).returncode:
-            continue
-        for command in (["format"], ["check", "--fix", "--quiet"]):
-            subprocess.run([python, "-m", "ruff", *command, *files], cwd=root, capture_output=True)
-        return len(files)
-    print("ruff not found: run `ruff format` and `ruff check --fix` on the renamed files by hand")
-    return 0
+        path = pathlib.Path(name)
+        lines = path.read_text(encoding="utf-8").split("\n")
+        for hit in hits:
+            row = hit["location"]["row"] - 1
+            if hit["code"] == "RUF100":
+                lines[row] = re.sub(r"\s*# noqa: PLR0913.*$", "", lines[row])
+        for hit in hits:
+            row = hit["location"]["row"] - 1
+            if hit["code"] == "PLR0913" and "noqa" not in lines[row]:
+                lines[row] = lines[row] + "  # noqa: PLR0913"
+        path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def build_manifest(root):
@@ -662,6 +720,7 @@ def main(argv=None):
         print(f"{len(hits)} leftover(s)")
         return 1 if hits else 0
     files = args.paths if args.paths else tracked(root)
+    clean = format_clean(root, files) if args.repo == "main" and not args.paths and not args.dry else set()
     changed, renames = run(root, files, args.dry, args.report)
     for path in changed:
         print(f"  {'would change' if args.dry else 'changed'} {path}")
@@ -670,7 +729,7 @@ def main(argv=None):
     overlays = [] if args.repo == "engine" else apply_overlay(root, args.dry)
     if args.repo == "main" and not args.paths and not args.dry:
         print(f"compat edits: {apply_compat(root, args.dry)}")
-        print(f"ruff-formatted files: {tidy(root, set(files))}")
+        print(f"ruff-formatted files: {tidy(root, clean)}")
     print(
         f"contents changed: {len(changed)} files; renamed: {len(renames)} paths; overlays: {len(overlays)}"
     )

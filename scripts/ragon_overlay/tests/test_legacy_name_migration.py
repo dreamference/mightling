@@ -4,7 +4,6 @@ systemctl and sudo stubbed. The suite imports the package from the checkout, whe
 refuses by itself, so the tests of what it does opt in with RAGON_LEGACY_MIGRATION=1, and the
 tests of the guard leave it unset."""
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -101,13 +100,13 @@ def opted_in(monkeypatch):
 
 @pytest.fixture
 def tmp_home():
-    return Path(os.path.expanduser("~"))
+    return Path.home()
 
 
 def test_a_puffin_node_is_moved_to_the_new_names_and_a_second_run_does_nothing(
     opted_in, monkeypatch, capsys
 ):
-    tmp_home = Path(os.path.expanduser("~"))
+    tmp_home = Path.home()
     venv, legacy_file = _legacy_node(tmp_home)
     calls, enabled_windows, privileged = [], [], []
     monkeypatch.setattr(NightShiftScheduler, "systemctl", _fake_systemctl(calls))
@@ -188,7 +187,7 @@ def test_a_project_file_with_old_keys_is_named_not_rewritten(
 def test_without_a_terminal_the_advertisement_keeps_working_and_the_sudo_line_is_printed(
     opted_in, monkeypatch
 ):
-    tmp_home = Path(os.path.expanduser("~"))
+    tmp_home = Path.home()
     _venv, legacy_file = _legacy_node(tmp_home)
     monkeypatch.setattr(NightShiftScheduler, "systemctl", _fake_systemctl([], enabled=False))
     monkeypatch.setattr(
@@ -224,7 +223,7 @@ def test_from_a_source_tree_a_puffin_node_is_left_alone_and_nothing_is_said(
     monkeypatch, tmp_path, capsys
 ):
     """The 2026-10-08 incident: the package imported from a worktree, beside a live Puffin install."""
-    tmp_home = Path(os.path.expanduser("~"))
+    tmp_home = Path.home()
     _venv, legacy_file = _legacy_node(tmp_home)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "dreamference.toml").write_text('puffin_prompt = "high-swe"\n')
@@ -243,7 +242,7 @@ def test_from_a_source_tree_a_puffin_node_is_left_alone_and_nothing_is_said(
 
 
 def test_the_switch_set_to_0_keeps_even_a_release_from_migrating(monkeypatch):
-    tmp_home = Path(os.path.expanduser("~"))
+    tmp_home = Path.home()
     _venv, legacy_file = _legacy_node(tmp_home)
     monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(_no_sudo))
     monkeypatch.setattr(
@@ -255,7 +254,7 @@ def test_the_switch_set_to_0_keeps_even_a_release_from_migrating(monkeypatch):
 
 
 def test_an_installed_release_migrates_without_the_switch(monkeypatch):
-    tmp_home = Path(os.path.expanduser("~"))
+    tmp_home = Path.home()
     _legacy_node(tmp_home)
     monkeypatch.setattr(NightShiftScheduler, "systemctl", _fake_systemctl([], enabled=False))
     monkeypatch.setattr(
