@@ -672,7 +672,7 @@ async fn launch_pairing_sends_buttons_to_telegram_and_pairs_only_on_the_approve_
     let mut hub = Hub::new(HubConfig::new(dir.clone()), agent, Box::new(|| false));
     hub.add_adapter("telegram", out_tx);
     let mut poller = Poller::new(api.clone(), dir.clone(), inbound_tx);
-    let mut renderer = Renderer::new(api);
+    let renderer = Renderer::new(api);
 
     // Hub polls `/api/telegram/pending-pairs` and emits the approval prompt to the Telegram adapter.
     hub.push_pending_pairs().await;
@@ -773,7 +773,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
     use ling_chat::hub::{Hub, HubConfig};
     use ling_chat::matrix::MatrixApi;
     use ling_web_server::app_server::Launch;
-    use ling_web_server::auth::{self, DeviceKind, Scope};
+    use ling_web_server::auth::{self, DeviceKind};
     use ling_web_server::server::{self, Config, Server};
     use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -960,6 +960,13 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
             .unwrap()
     }
 
+    async fn next_frame_at(frames: &mut Frames, line: u32) -> (Value, mpsc::UnboundedSender<Value>) {
+        tokio::time::timeout(Duration::from_secs(10), frames.recv())
+            .await
+            .unwrap_or_else(|_| panic!("the app-server heard nothing at line {line}"))
+            .unwrap()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn emit_scripted_turn_approval(
         replies: &[&mpsc::UnboundedSender<Value>],
@@ -1080,7 +1087,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
     let codex_home = root_dir.join("home");
     let state_dir = auth::state_dir(&codex_home);
     std::fs::create_dir_all(&state_dir).unwrap();
-    auth::write_private(&state_dir.join("forge-token"), &format!("{FORGE_TOKEN}\n")).unwrap();
+    auth::write_private(&state_dir.join("forge-phone-token"), &format!("{FORGE_TOKEN}\n")).unwrap();
 
     let user_home = root_dir.join("user");
     let user_config = user_home.join(".config/dreamference/config.toml");
@@ -1130,6 +1137,18 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
         public_names: Vec::new(),
     };
     let server = Server::new(config).unwrap();
+    /// A host with plenty of disk and no night running, whatever the real machine says.
+    struct RoomyHost;
+    impl ling_web_server::chat_repos::HostProbe for RoomyHost {
+        fn free_bytes(&self, _path: &std::path::Path) -> Result<u64, String> {
+            Ok(1 << 50)
+        }
+        fn swe_night_running(&self) -> bool {
+            false
+        }
+    }
+    server.chat_repos.set_probe(Arc::new(RoomyHost));
+    server.chat_repos.set_allow_file_protocol(true);
     std::fs::write(state_dir.join("server.json"), json!({ "port": port }).to_string()).unwrap();
     let (_stop, stopped) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(server::serve(server.clone(), vec![listener], async move {
@@ -1189,7 +1208,8 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
 
     let (tg_out_tx, mut tg_out_rx) = mpsc::unbounded_channel();
     hub.add_adapter("telegram", tg_out_tx);
-    let mut tg_renderer = Renderer::new(tg_api.clone())
+    let tg_renderer = Renderer::new(tg_api.clone())
+        .with_dir(hub_dir.clone())
         .with_topics(true)
         .with_mini_app_url(Some(MINI_APP.to_string()));
     tokio::spawn(async move {
@@ -1201,7 +1221,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
     let (mx_out_tx, mut mx_out_rx) = mpsc::unbounded_channel();
     hub.add_adapter("matrix", mx_out_tx);
     let (mx_dummy_tx, _mx_dummy_rx) = mpsc::unbounded_channel();
-    let (_, mut mx_renderer) = ling_chat::matrix::pair_for_tests(
+    let (_, mx_renderer) = ling_chat::matrix::pair_for_tests(
         MatrixApi::new(&mx_root, "bot-token"),
         root_dir.join("mx-state"),
         "@mightling:node.tail.ts.net",
@@ -1231,7 +1251,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
 
     // Issue a browser device cookie for the page tab.
     let (_dev_id, dev_token) =
-        auth::pair_device(&state_dir, "page", DeviceKind::Browser, Scope::Control).unwrap();
+        auth::add_device_of(&state_dir, "page", DeviceKind::Browser).unwrap();
     let page_cookie = format!("{}={dev_token}", auth::DEVICE_COOKIE);
     let origin = format!("http://127.0.0.1:{port}");
     let web_root = format!("http://127.0.0.1:{port}");
@@ -1249,7 +1269,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
         .json()
         .await
         .unwrap();
-    let tg_thread = open_tg["thread"].as_str().unwrap().to_string();
+    let tg_thread = open_tg["thread"].as_str().unwrap_or_else(|| panic!("open: {open_tg}")).to_string();
     let tg_wt = std::path::PathBuf::from(open_tg["cwd"].as_str().unwrap());
 
     // 2. Connect a page tab on `/ws` and start a thread in the Telegram checkout.
@@ -1277,7 +1297,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
                 "call": 2,
                 "message": {
                     "type": "work/send",
-                    "payload": { "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }
+                    "message": { "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }
                 }
             })
             .to_string()
@@ -1285,7 +1305,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
         ))
         .await
         .unwrap();
-    let (frame, page_reply) = next_frame(&mut app_server).await;
+    let (frame, page_reply) = next_frame_at(&mut app_server, 1300).await;
     assert_eq!(frame["method"], "initialize");
     page_reply.send(json!({ "id": frame["id"], "result": {} })).unwrap();
 
@@ -1295,7 +1315,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
                 "call": 3,
                 "message": {
                     "type": "work/send",
-                    "payload": { "jsonrpc": "2.0", "method": "initialized", "params": {} }
+                    "message": { "jsonrpc": "2.0", "method": "initialized", "params": {} }
                 }
             })
             .to_string()
@@ -1303,7 +1323,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
         ))
         .await
         .unwrap();
-    let (frame, _) = next_frame(&mut app_server).await;
+    let (frame, _) = next_frame_at(&mut app_server, 1318).await;
     assert_eq!(frame["method"], "initialized");
 
     let tg_app_thread = "0195f0a0-1111";
@@ -1313,7 +1333,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
                 "call": 4,
                 "message": {
                     "type": "work/send",
-                    "payload": {
+                    "message": {
                         "jsonrpc": "2.0",
                         "id": 2,
                         "method": "thread/start",
@@ -1326,7 +1346,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
         ))
         .await
         .unwrap();
-    let (frame, _) = next_frame(&mut app_server).await;
+    let (frame, _) = next_frame_at(&mut app_server, 1341).await;
     assert_eq!(frame["method"], "thread/start");
     page_reply
         .send(json!({ "id": frame["id"], "result": { "thread": { "id": tg_app_thread } } }))
@@ -1344,7 +1364,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
                 "call": 5,
                 "message": {
                     "type": "work/send",
-                    "payload": {
+                    "message": {
                         "jsonrpc": "2.0",
                         "id": 3,
                         "method": "turn/start",
@@ -1360,7 +1380,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
         ))
         .await
         .unwrap();
-    let (frame, _) = next_frame(&mut app_server).await;
+    let (frame, _) = next_frame_at(&mut app_server, 1375).await;
     assert_eq!(frame["method"], "turn/start");
     page_reply
         .send(json!({ "id": frame["id"], "result": { "turn": { "id": "turn-tg-1" } } }))
@@ -1387,7 +1407,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
                 "call": 6,
                 "message": {
                     "type": "work/send",
-                    "payload": { "jsonrpc": "2.0", "id": 901, "result": { "decision": "accept" } }
+                    "message": { "jsonrpc": "2.0", "id": 901, "result": { "decision": "accept" } }
                 }
             })
             .to_string()
@@ -1395,7 +1415,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
         ))
         .await
         .unwrap();
-    let (frame, _) = next_frame(&mut app_server).await;
+    let (frame, _) = next_frame_at(&mut app_server, 1410).await;
     assert_eq!(frame["id"], 901);
 
     emit_scripted_turn_rest(&[&page_reply, &bridge_reply], tg_app_thread, "turn-tg-1");
@@ -1503,7 +1523,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
     assert_eq!(tg_messages.len(), 6);
     let tg_texts: Vec<&str> = tg_messages.iter().map(|b| b["text"].as_str().unwrap()).collect();
     let expected_branch = format!("phone/{tg_thread}");
-    let expected_switched = format!("Switched to org/app ({expected_branch}).");
+    let expected_switched = format!("Working in org/app on {expected_branch}.");
     let expected_merged = format!("Merged {expected_branch} into main in org/app.");
     assert_eq!(
         tg_texts,
@@ -1511,8 +1531,8 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
             expected_switched.as_str(),
             "Approval waiting in org/app.",
             "Turn finished in org/app: 1 files changed.",
-            "Refused push in org/app. Open the app for details.",
-            "Pushed 1 commits to org/app.",
+            "Push refused in org/app; open the app.",
+            "Pushed 1 commits of org/app.",
             expected_merged.as_str(),
         ]
     );
@@ -1528,7 +1548,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
         assert_eq!(btn["text"], "Open");
         let url = btn["web_app"]["url"].as_str().unwrap();
         if idx == 0 {
-            assert_eq!(url, format!("{MINI_APP}?open=repo:org%2Fapp"));
+            assert_eq!(url, format!("{MINI_APP}?open=thread:{tg_thread}"));
         } else if idx == 1 {
             assert_eq!(url, format!("{MINI_APP}?open=thread:{tg_app_thread}&approval=1"));
         } else {
@@ -1555,7 +1575,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
         if tg_stand.bodies("sendMessage").len() >= 7 {
             break;
         }
-        assert!(tokio::time::Instant::now() < refusal_deadline, "timed out waiting for typed-text refusal");
+        assert!(tokio::time::Instant::now() < refusal_deadline, "timed out waiting for typed-text refusal: {:?} dir {}", tg_stand.bodies("sendMessage").iter().map(|b| b["text"].clone()).collect::<Vec<_>>(), root_dir.display());
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
     let refusal_msg = tg_stand.bodies("sendMessage").pop().unwrap();
@@ -1564,7 +1584,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
     assert_eq!(refusal_msg["text"], "Repo work happens in the app.");
     assert_eq!(
         refusal_msg["reply_markup"]["inline_keyboard"][0][0]["web_app"]["url"],
-        format!("{MINI_APP}?open=repo:org%2Fapp")
+        format!("{MINI_APP}?open=repo:org/app")
     );
     assert!(app_server.try_recv().is_err(), "no turn/start may reach the fake app-server");
 
@@ -1591,7 +1611,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
                 "call": 7,
                 "message": {
                     "type": "work/send",
-                    "payload": {
+                    "message": {
                         "jsonrpc": "2.0",
                         "id": 10,
                         "method": "thread/start",
@@ -1604,7 +1624,7 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
         ))
         .await
         .unwrap();
-    let (frame, _) = next_frame(&mut app_server).await;
+    let (frame, _) = next_frame_at(&mut app_server, 1619).await;
     assert_eq!(frame["method"], "thread/start");
     page_reply
         .send(json!({ "id": frame["id"], "result": { "thread": { "id": mx_app_thread } } }))
@@ -1623,15 +1643,15 @@ async fn repo_turns_send_no_content_to_telegram_or_discord() {
             text: "run matrix turn".into(),
         })
         .unwrap();
-    let (frame, _) = next_frame(&mut app_server).await;
+    let (frame, _) = next_frame_at(&mut app_server, 1638).await;
     assert_eq!(frame["method"], "thread/start");
     bridge_reply
         .send(json!({ "id": frame["id"], "result": { "thread": { "id": mx_app_thread } } }))
         .unwrap();
-    let (frame, _) = next_frame(&mut app_server).await;
+    let (frame, _) = next_frame_at(&mut app_server, 1643).await;
     assert_eq!(frame["method"], "thread/name/set");
     bridge_reply.send(json!({ "id": frame["id"], "result": {} })).unwrap();
-    let (frame, _) = next_frame(&mut app_server).await;
+    let (frame, _) = next_frame_at(&mut app_server, 1646).await;
     assert_eq!(frame["method"], "turn/start");
     bridge_reply
         .send(json!({ "id": frame["id"], "result": { "turn": { "id": "turn-mx-1" } } }))

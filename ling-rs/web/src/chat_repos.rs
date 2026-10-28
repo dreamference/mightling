@@ -2666,7 +2666,7 @@ async fn repo_off(State(server): State<Arc<Server>>, headers: HeaderMap, body: B
     };
     let bridge = request.get("bridge").and_then(Value::as_str).unwrap_or("").trim();
     let chat = request.get("chat").and_then(Value::as_str).unwrap_or("").trim();
-    if !KNOWN_BRIDGES.contains(&bridge) || !valid_ident(chat) {
+    if !KNOWN_BRIDGES.contains(&bridge) || chat.is_empty() || chat.len() > 200 {
         return json_response(StatusCode::BAD_REQUEST, json!({ "error": "valid bridge and chat are required" }));
     }
     let chat_key = format!("{bridge}:{chat}");
@@ -8868,8 +8868,19 @@ mod tests {
     async fn g14_recording_points_deduplicated_across_two_tabs_and_bridge_turn_refusal() {
         let s = scratch("g14-dedup-and-events");
         let bare = make_bare_repo(&s.dir, "org/widget");
-        let (forge_url, _forge_state, _forge_handle) =
-            start_merge_forge(&bare, "org/widget", false).await;
+        let (forge_url, _forge_state, _forge_handle) = start_fake_forge_with_state(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": true },
+                "clone_url": format!("file://{}", bare.display())
+            }
+        ]))
+        .await;
         let (server, probe) = test_server(&s.dir, Some(forge_url), true);
         std::fs::write(
             s.dir.join("user/.gitconfig"),
