@@ -18,6 +18,8 @@ from dreamference.node.node_job_sender import NodeJobSender
 from dreamference.node.node_lanes import NodeLanes
 from dreamference.node.node_model_sync import NodeModelSync
 from dreamference.node.node_pairing import NodePairing
+from dreamference.node.node_power_cycle import NodePowerCycle
+from dreamference.node.node_power_settings import NodePowerSettings
 from dreamference.node.node_prepare import NodePrepare
 from dreamference.node.node_provisioner import NodeProvisioner
 from dreamference.node.node_remote import NodeRemote
@@ -25,6 +27,7 @@ from dreamference.node.node_role_provisioner import NodeRoleProvisioner
 from dreamference.node.node_serve import NodeServe
 from dreamference.node.node_service_file import PROTO, SERVICE_TYPE, NodeServiceFile
 from dreamference.node.node_settings import NodeSettings
+from dreamference.node.node_shelly_plug import NodeShellyPlug
 
 __all__ = [
     "FleetAskpass",
@@ -41,6 +44,8 @@ __all__ = [
     "NodeModelSync",
     "NodeAdapterSync",
     "NodePairing",
+    "NodePowerCycle",
+    "NodePowerSettings",
     "NodePrepare",
     "NodeProvisioner",
     "NodeRemote",
@@ -48,6 +53,7 @@ __all__ = [
     "NodeServe",
     "NodeServiceFile",
     "NodeSettings",
+    "NodeShellyPlug",
     "PROTO",
     "SERVICE_TYPE",
 ]

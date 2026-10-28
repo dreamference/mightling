@@ -26,6 +26,9 @@ from dreamference.node.node_pairing import KEY_COMMENT, NodePairing
 # A paired sender's copy of one signed adapter (MIGHTLING_ADAPTERS §6.4), after the model.
 RECEIVE_OPERATION: Final[str] = "adapter-receive"
 
+# A neighbour at the same site switching one of this node's configured smart plugs (node_power_cycle.py).
+POWER_OPERATION: Final[str] = "power-plug"
+
 # A model key as the matrix spells them. Checked before the matrix is consulted, so nothing with
 # a space, a slash or an option's leading dash ever reaches a command line.
 MODEL_KEY: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9._-]{1,80}")
@@ -176,7 +179,7 @@ class NodeServe:
             return cls.git_service(operation, arguments[0])
         if operation.startswith("job-"):
             return cls.job_operation(operation, arguments)
-        if operation.startswith(("night-", "forge-")):
+        if operation.startswith(("night-", "forge-", "power-")):
             return cls.subsystem_operation(operation, arguments)
         print(REFUSAL, file=sys.stderr)
         return 2
@@ -192,6 +195,9 @@ class NodeServe:
         Returns:
             int: The subsystem's exit code.
         """
+        if operation == POWER_OPERATION:
+            from dreamference.node.node_power_cycle import NodePowerCycle
+            return NodePowerCycle.serve(arguments)
         if operation.startswith("night-"):
             from dreamference.night_shift.night_shift_remote import NightShiftRemote
             return NightShiftRemote.serve(operation, arguments)

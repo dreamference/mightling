@@ -54,6 +54,10 @@ SEARXNG_PORT: Final[int] = 8888
 PROBE_YES: Final[str] = "1"
 CONTAINER_RUNNING: Final[str] = "true"
 
+# How often a model copy is started again while its connection keeps dropping (a node at
+# another site, reached over the internet), with a pause between: carrying on from the partial file.
+COPY_ATTEMPTS: Final[int] = 30
+
 # A single-label host name (`spark-1a2b`), which this LAN resolves only as `<name>.local`.
 BARE_NAME: Final[re.Pattern] = re.compile(r"[A-Za-z0-9-]+")
 
@@ -169,7 +173,11 @@ class NodeProvisioner:
             self.users[host] = record["user"]
         candidates = [host]
         if BARE_NAME.fullmatch(host):
-            candidates.append(f"{host}.local")
+            # The overlay's DNS (remote access) first: a machine at another site is never on this
+            # LAN, so mDNS cannot find it; `<name>.local` stays the LAN's way.
+            candidates += [f"{host}.{NodePairing.overlay_domain()}", f"{host}.local"]
+        if record is not None and record.get("overlay_name"):
+            candidates.insert(1, record["overlay_name"])
         if record is not None and record.get("name") and record["name"] != host:
             candidates += [record["name"], f"{record['name']}.local"]
         for candidate in candidates:
@@ -489,7 +497,9 @@ class NodeProvisioner:
             )
         started = time.monotonic()
         for folder in FleetModelPlan.local_folders(missing):
-            copied = session.rsync(folder, f"{state.get('hub')}/{folder.name}")
+            copied = session.rsync(
+                folder, f"{state.get('hub')}/{folder.name}", attempts=COPY_ATTEMPTS
+            )
             if copied.returncode != 0:
                 return self._fail(
                     host,
@@ -568,6 +578,8 @@ class NodeProvisioner:
                 return self._fail(host, "pair", "pairing failed", f"ling-admin node add {host}")
             self._done(host, "paired")
         record["address"] = self.connect.get(host, host)
+        if NodePairing.is_overlay_name(record["address"]):
+            record["overlay_name"] = record["address"]
         record["provisioned"] = {
             "bundle": FleetBundle.version(self.bundle) if self.bundle else "",
             "model": self.model,

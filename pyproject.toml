@@ -64,6 +64,9 @@ convention = "google"
 "dreamference/forge/**" = ["T201"]
 # §3.9: `ling-admin node provision --role`'s steps are console-facing, like the provisioner they extend.
 "dreamference/node/node_role_provisioner.py" = ["T201"]
+# §3.9: `ling-admin node power-cycle` is console-facing, like the provisioner.
+"dreamference/node/node_power_cycle.py" = ["T201"]
+"dreamference/node/node_power_settings.py" = ["T201"]
 # Tests: a test's name is its documentation, asserts compare literal expected values, and a test
 # prints only when it is diagnosing itself. Decided in Phase 0 (spec §6) as the noisy rules there.
 "tests/**" = ["D100", "D101", "D102", "D103", "D104", "D105", "D107", "PLR2004", "T201", "ANN401"]

@@ -611,6 +611,47 @@ Copy a model's files from this machine's cache to a paired node, so it need not 
 | `model` | A key of the model matrix. |
 | `--address` | Reach the node at this address instead, such as its QSFP link's. |
 
+#### `ling-admin node power-cycle`
+
+Switch a hung node's smart plug off and on again (`power-config` says which plug).
+
+| Option | Description |
+|---|---|
+| `name` | The paired node. |
+| `--off-seconds` | How long the power stays off (default 20, at least 5) |
+| `--wait-minutes` | How long to wait for the node to answer afterwards (default 10) |
+| `--force` | Cut the power even though the node answers. |
+
+#### `ling-admin node power-config`
+
+Say which smart plug powers which node (node-power.json).
+
+#### `ling-admin node power-config plug`
+
+A plug this machine can reach on its own network.
+
+| Option | Description |
+|---|---|
+| `plug` | The plug's name. |
+| `--host` | Its host name here, such as shellyplug-aabbcc.local. |
+| `--kind` | The brand (shelly) |
+| `--channel` | The switch's id (0 on a plug) |
+| `--generation` | The Shelly API generation, 1 or 2. |
+
+#### `ling-admin node power-config node`
+
+Which plug powers a paired node.
+
+| Option | Description |
+|---|---|
+| `name` | The paired node. |
+| `--plug` | The plug's name. |
+| `--via` | The paired node at that site that reaches the plug. |
+
+#### `ling-admin node power-config show`
+
+Print the plugs and the nodes they power.
+
 #### `ling-admin node provision`
 
 Set up new GB10s from this one: install Mightling, the root half, the model, pairing, start (FLEET spec); re-run on paired nodes, it is the fleet update.
@@ -1039,6 +1080,10 @@ Print a one-time code and wait for one client to enrol with it on this LAN.
 | Option | Description |
 |---|---|
 | `--bundle-file` | Instead: write one ephemeral peer's bundle (one-use, 10-minute key) to a new 0600 file, no code and no listener (an off-LAN test runner) |
+| `--ttl` | With --bundle-file: an ordinary peer's key that waits this long (90m, 2h; at most 24h), still one use; unused, it expires by itself. |
+| `--join` | With --bundle-file: write the one line that installs NetBird and joins on a new machine with no ling (2h unless --ttl) |
+| `--name` | With --join: the new machine's name in the overlay (one DNS label) |
+| `--ssh-user` | With --join: the account for the machine's gx10-remote ssh alias. |
 
 #### `ling-admin remote peers`
 

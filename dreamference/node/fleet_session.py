@@ -11,12 +11,16 @@ the remote command's standard input over the encrypted channel. The run's log re
 command and its output, never what was written to a command's input.
 """
 
+import logging
 import os
 import shlex
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Final
+
+LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
 # Seconds to wait for the first connection, which may sit at a password prompt.
 CONNECT_TIMEOUT: Final[int] = 15
@@ -303,22 +307,48 @@ class FleetSession:
         """
         return f"sg docker -c {shlex.quote(line)}"
 
-    def rsync(self, source: Path, destination: str) -> subprocess.CompletedProcess:
-        """Copies a folder there over the session: `rsync -aH --partial`, so the hub cache's links
-        survive and an interrupted copy resumes.
+    # rsync's and ssh's exits that mean the connection went, not that the copy is wrong: the
+    # protocol or stream ended early (10, 12, 30 timeout, 35), or ssh itself failed (255).
+    RSYNC_DROPPED: tuple[int, ...] = (10, 12, 30, 35, 255)
+
+    def rsync(
+        self, source: Path, destination: str, attempts: int = 1, wait_s: float = 20.0
+    ) -> subprocess.CompletedProcess:
+        """Copies a folder there over the session: `rsync -aH --partial --append-verify`, so the
+        hub cache's links survive and an interrupted copy resumes where it stopped.
+
+        A copy over the internet (a node at another site, through the overlay) drops now and then:
+        rsync gives up after `--timeout` of silence, the ssh keep-alive notices a dead path, and
+        when the exit code says the connection went, the copy is started again (up to `attempts`
+        times), carrying on from the partial file instead of from zero. A weight file is named by
+        its SHA-256 in the hub cache, so `--append-verify` (append, then check the whole file) is
+        safe and spares re-reading what already arrived. Any other exit is a real failure.
 
         Args:
             source: The local folder.
             destination: The remote folder (may start with `~/`).
+            attempts: How many times to try while the connection keeps dropping.
+            wait_s: Seconds to wait between attempts.
 
         Returns:
-            subprocess.CompletedProcess: rsync's result.
+            subprocess.CompletedProcess: rsync's result (the last attempt's).
         """
-        transport = " ".join(["ssh", *(shlex.quote(option) for option in self.options())])
+        transport = " ".join(
+            [
+                "ssh",
+                *(shlex.quote(option) for option in self.options()),
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=4",
+            ]
+        )
         command = [
             "rsync",
             "-aH",
             "--partial",
+            "--append-verify",
+            "--timeout=120",
             "--mkpath",
             "-e",
             transport,
@@ -330,6 +360,16 @@ class FleetSession:
         ]
         result = self._spawn(command, capture=True)
         self._log(command, result)
+        for attempt in range(2, attempts + 1):
+            if result.returncode not in self.RSYNC_DROPPED:
+                break
+            LOG.warning(
+                f"⏳ The connection to {self.host} dropped (rsync exit {result.returncode}); "
+                f"resuming in {wait_s:.0f} s (attempt {attempt} of {attempts})."
+            )
+            time.sleep(wait_s)
+            result = self._spawn(command, capture=True)
+            self._log(command, result)
         return result
 
     def pipe_into(self, producer: list[list[str]], remote_line: str) -> int:
