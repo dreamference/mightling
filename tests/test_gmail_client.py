@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from dreamference.chat import gmail_client as client_module
-from dreamference.chat.gmail_client import GmailClient, NOT_RUNNING_ERROR, NOT_SET_UP_ERROR
+from dreamference.chat.gmail_client import NOT_RUNNING_ERROR, NOT_SET_UP_ERROR, GmailClient
 from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
 
 
@@ -24,6 +24,7 @@ def _serve(payload, seen):
     def urlopen(request, timeout=None):
         seen.append(request)
         return _Response(json.dumps(payload).encode())
+
     return urlopen
 
 
@@ -31,8 +32,10 @@ def test_search_sends_the_secret_encodes_the_query_and_clamps_the_limit(tmp_path
     secret = tmp_path / "service-secret"
     secret.write_text("s3cret\n")
     seen = []
-    with patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)), \
-            patch("urllib.request.urlopen", _serve({"messages": []}, seen)):
+    with (
+        patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)),
+        patch("urllib.request.urlopen", _serve({"messages": []}, seen)),
+    ):
         GmailClient.search("from:alice invoice", limit=500)
     (request,) = seen
     assert request.get_header("X-mightling-gmail-token") == "s3cret"
@@ -44,8 +47,10 @@ def test_read_keeps_the_account_separator_literal(tmp_path):
     secret = tmp_path / "service-secret"
     secret.write_text("s")
     seen = []
-    with patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)), \
-            patch("urllib.request.urlopen", _serve({"body": "hi"}, seen)):
+    with (
+        patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)),
+        patch("urllib.request.urlopen", _serve({"body": "hi"}, seen)),
+    ):
         GmailClient.read("a@x.com|123")
     assert seen[0].full_url.endswith("/message/a@x.com|123")
 
@@ -59,23 +64,29 @@ def test_a_missing_secret_and_a_stopped_service_name_their_fixes(tmp_path):
     def refused(request, timeout=None):
         raise urllib.error.URLError(ConnectionRefusedError())
 
-    with patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)), \
-            patch("urllib.request.urlopen", refused):
+    with (
+        patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)),
+        patch("urllib.request.urlopen", refused),
+    ):
         assert GmailClient.search("x") == NOT_RUNNING_ERROR
 
 
 def _gmail(argv, payload, capsys, status=None):
     parser = DreamferenceCLIController.build_parser()
     args = parser.parse_args(["gmail", *argv])
-    with patch.object(GmailClient, "search", return_value=payload), \
-            patch.object(GmailClient, "read", return_value=payload), \
-            patch.object(GmailClient, "status", return_value=status or payload):
+    with (
+        patch.object(GmailClient, "search", return_value=payload),
+        patch.object(GmailClient, "read", return_value=payload),
+        patch.object(GmailClient, "status", return_value=status or payload),
+    ):
         code = DreamferenceCLIController.handle_gmail(args)
     return code, capsys.readouterr().out
 
 
 def test_search_prints_numbered_results_with_ids(capsys):
-    payload = {"messages": [{"id": "a@x.com|1", "from": "Alice", "date": "Mon", "subject": "Invoice"}]}
+    payload = {
+        "messages": [{"id": "a@x.com|1", "from": "Alice", "date": "Mon", "subject": "Invoice"}]
+    }
     code, out = _gmail(["search", "invoice"], payload, capsys)
     assert code == 0
     assert "1. Invoice" in out and "id: a@x.com|1" in out
@@ -87,16 +98,19 @@ def test_no_match_is_said_explicitly_and_is_not_an_error(capsys):
 
 
 def test_a_failed_account_is_reported_but_other_results_stand(capsys):
-    payload = {"messages": [{"id": "a@x.com|1", "subject": "Hi"}],
-               "errors": [{"account": "b@y.com", "error": "AUTHENTICATIONFAILED"}]}
+    payload = {
+        "messages": [{"id": "a@x.com|1", "subject": "Hi"}],
+        "errors": [{"account": "b@y.com", "error": "AUTHENTICATIONFAILED"}],
+    }
     code, out = _gmail(["search", "hi"], payload, capsys)
     assert code == 0 and "⚠️ b@y.com: AUTHENTICATIONFAILED" in out
 
 
 def test_every_account_failing_is_an_error(capsys):
     payload = {"messages": [], "errors": [{"account": "b@y.com", "error": "AUTHENTICATIONFAILED"}]}
-    code, _ = _gmail(["search", "hi"], payload, capsys,
-                     status={"connected": True, "email": "b@y.com"})
+    code, _ = _gmail(
+        ["search", "hi"], payload, capsys, status={"connected": True, "email": "b@y.com"}
+    )
     assert code == 1
 
 
@@ -110,7 +124,9 @@ def test_read_frames_the_body_as_untrusted(capsys):
 
 def test_service_errors_exit_non_zero_with_the_hint(capsys):
     code, out = _gmail(["search", "x"], dict(NOT_RUNNING_ERROR), capsys)
-    assert code == 1 and "❌ Gmail service is not running." in out and "ling-admin google start" in out
+    assert (
+        code == 1 and "❌ Gmail service is not running." in out and "ling-admin google start" in out
+    )
 
 
 def test_the_service_reports_a_failing_account_next_to_the_others_results():
@@ -121,10 +137,18 @@ def test_the_service_reports_a_failing_account_next_to_the_others_results():
             pass
 
     # b@y.com opened but broke mid-search; c@z.com never opened.
-    with patch.object(GmailSearchService, "_open_mailboxes",
-                      return_value=({"b@y.com": Connection()}, None,
-                                    [{"account": "c@z.com", "error": "AUTHENTICATIONFAILED"}])), \
-            patch.object(GmailSearchService, "_search_uids", side_effect=RuntimeError("socket closed")):
+    with (
+        patch.object(
+            GmailSearchService,
+            "_open_mailboxes",
+            return_value=(
+                {"b@y.com": Connection()},
+                None,
+                [{"account": "c@z.com", "error": "AUTHENTICATIONFAILED"}],
+            ),
+        ),
+        patch.object(GmailSearchService, "_search_uids", side_effect=RuntimeError("socket closed")),
+    ):
         answer = GmailSearchService.search("hi", 5)
     assert answer["messages"] == []
     assert {failure["account"] for failure in answer["errors"]} == {"b@y.com", "c@z.com"}
@@ -145,15 +169,412 @@ def test_a_grant_without_gmail_access_is_recognised():
     # connected, and failed every IMAP login with "Invalid credentials".
     from dreamference.chat.gmail_search_service import GmailSearchService
 
-    assert GmailSearchService.grants_gmail({"scope": "https://www.googleapis.com/auth/userinfo.email https://mail.google.com/ openid"})
-    assert not GmailSearchService.grants_gmail({"scope": "https://www.googleapis.com/auth/userinfo.email openid"})
+    assert GmailSearchService.grants_gmail(
+        {"scope": "https://www.googleapis.com/auth/userinfo.email https://mail.google.com/ openid"}
+    )
+    assert not GmailSearchService.grants_gmail(
+        {"scope": "https://www.googleapis.com/auth/userinfo.email openid"}
+    )
     assert GmailSearchService.grants_gmail({})  # no scope listed: Google granted what was asked
 
 
 def test_an_imap_authentication_failure_says_to_reconnect():
     import imaplib
+
     from dreamference.chat.gmail_search_service import GmailSearchService
 
-    described = GmailSearchService._describe(imaplib.IMAP4.error(b"[AUTHENTICATIONFAILED] Invalid credentials (Failure)"))
+    described = GmailSearchService._describe(
+        imaplib.IMAP4.error(b"[AUTHENTICATIONFAILED] Invalid credentials (Failure)")
+    )
     assert described.startswith("[AUTHENTICATIONFAILED] Invalid credentials")
     assert "reconnect this account" in described
+
+
+def test_unseal_rejects_corrupt_short_tampered_and_non_utf8_blobs(tmp_path):
+    import base64
+    import hashlib
+    import hmac
+
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    directory = str(tmp_path)
+    assert GmailSearchService._unseal("!!!not-base64!!!", directory) is None
+    assert GmailSearchService._unseal(base64.b64encode(b"short").decode("ascii"), directory) is None
+    tampered = base64.b64encode(b"0" * 40).decode("ascii")
+    assert GmailSearchService._unseal(tampered, directory) is None
+
+    key = GmailSearchService._key(directory)
+    nonce = b"n" * 16
+    raw_bytes = b"\xff\xfe"
+    cipher = bytes(
+        a ^ b
+        for a, b in zip(
+            raw_bytes,
+            GmailSearchService._keystream(key, nonce, len(raw_bytes)),
+            strict=True,
+        )
+    )
+    tag = hmac.new(key, nonce + cipher, hashlib.sha256).digest()[:16]
+    non_utf8_blob = base64.b64encode(nonce + tag + cipher).decode("ascii")
+    assert GmailSearchService._unseal(non_utf8_blob, directory) is None
+
+
+def test_raw_and_credentials_migrate_legacy_and_refresh_expired_tokens(tmp_path, monkeypatch):
+    from dreamference.chat import gmail_search_service as svc_mod
+    from dreamference.chat.gmail_search_service import CREDENTIALS_NAME, GmailSearchService
+
+    directory = str(tmp_path)
+    cred_file = tmp_path / CREDENTIALS_NAME
+    cred_file.write_text("[1, 2]")
+    assert GmailSearchService._raw(directory) == {"accounts": {}}
+
+    cred_file.write_text(json.dumps({"other": 1}))
+    assert GmailSearchService._raw(directory) == {"accounts": {}}
+
+    sealed_tok = GmailSearchService._seal("tok-legacy", directory)
+    cred_file.write_text(
+        json.dumps({"email": "leg@x.com", "access_token": sealed_tok, "expires_at": 9999999999})
+    )
+    assert "leg@x.com" in GmailSearchService._raw(directory)["accounts"]
+
+    sealed_ref = GmailSearchService._seal("ref-ok", directory)
+    accounts = {
+        "empty@x.com": {"email": "empty@x.com"},
+        "noref@x.com": {"email": "noref@x.com", "access_token": sealed_tok, "expires_at": 0},
+        "badref@x.com": {
+            "email": "badref@x.com",
+            "access_token": sealed_tok,
+            "expires_at": 0,
+            "refresh_token": "!!!",
+        },
+        "refresh@x.com": {
+            "email": "refresh@x.com",
+            "access_token": sealed_tok,
+            "expires_at": 0,
+            "refresh_token": sealed_ref,
+        },
+    }
+    cred_file.write_text(json.dumps({"accounts": accounts}))
+
+    monkeypatch.setattr(
+        svc_mod.urllib.request,
+        "urlopen",
+        lambda req, timeout=10: _Response(
+            json.dumps({"access_token": "refreshed-tok", "expires_in": 3600}).encode()
+        ),
+    )
+    creds = GmailSearchService.credentials(directory)
+    assert len(creds) == 1 and creds[0]["email"] == "refresh@x.com"
+    assert creds[0]["access_token"] == "refreshed-tok"
+
+    # When refresh urlopen raises, the expired account is skipped cleanly.
+    cred_file.write_text(json.dumps({"accounts": {"refresh@x.com": accounts["refresh@x.com"]}}))
+
+    def boom(req, timeout=10):
+        raise OSError("network down")
+
+    monkeypatch.setattr(svc_mod.urllib.request, "urlopen", boom)
+    assert GmailSearchService.credentials(directory) == []
+
+
+def test_token_storage_forget_and_gnome_hints_handle_os_errors(tmp_path, monkeypatch):
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    directory = str(tmp_path)
+    assert GmailSearchService.save_token(
+        "a@x.com", "tok", 3600, directory, refresh_token="ref", scopes=["s1"]
+    )
+    assert GmailSearchService.delete_token("missing@x.com", directory) is False
+    assert GmailSearchService.delete_token("a@x.com", directory) is True
+
+    assert GmailSearchService.forget(directory) is True
+    assert GmailSearchService.forget(directory) is True
+
+    assert GmailSearchService.save_gnome_accounts(["g@x.com"], directory) is True
+    assert GmailSearchService.gnome_accounts(directory) == ["g@x.com"]
+    assert GmailSearchService.gnome_accounts(str(tmp_path / "missing")) == []
+
+    # Trigger OSError paths on save_token, delete_token, forget, and save_gnome_accounts.
+    GmailSearchService.save_token("b@x.com", "tok", 3600, directory)
+    real_open = open
+
+    def fail_text_write(file, mode="r", *a, **k):
+        if mode == "w":
+            raise OSError("ro")
+        return real_open(file, mode, *a, **k)
+
+    monkeypatch.setattr("builtins.open", fail_text_write)
+    assert GmailSearchService.save_token("b@x.com", "tok2", 3600, directory) is False
+    assert GmailSearchService.delete_token("b@x.com", directory) is False
+    assert GmailSearchService.save_gnome_accounts(["g@x.com"], directory) is False
+
+    monkeypatch.setattr("os.remove", lambda p: (_ for _ in ()).throw(PermissionError("denied")))
+    assert GmailSearchService.forget(directory) is False
+
+
+def test_xoauth2_and_open_mailboxes_handle_mixed_and_total_failures(monkeypatch):
+    import imaplib
+
+    from dreamference.chat import gmail_search_service as svc_mod
+    from dreamference.chat.gmail_search_service import (
+        DRIVE_SCOPE,
+        GMAIL_SCOPE,
+        NOT_CONNECTED_MESSAGE,
+        GmailSearchService,
+    )
+
+    responder = GmailSearchService._xoauth2("a@x.com", "secret-tok")
+    first = responder(b"challenge-1")
+    second = responder(b"challenge-2")
+    assert b"user=a@x.com" in first and second == b""
+
+    monkeypatch.setattr(GmailSearchService, "credentials", classmethod(lambda cls: []))
+    assert GmailSearchService._open_mailboxes() == ({}, NOT_CONNECTED_MESSAGE, [])
+
+    class FakeIMAP:
+        def __init__(self, host, port, timeout=None):
+            self.selected = None
+
+        def authenticate(self, mech, resp):
+            if b"bad@x.com" in resp(b""):
+                raise imaplib.IMAP4.error(b"[AUTHENTICATIONFAILED]")
+
+        def list(self):
+            return "OK", [b'(\\HasNoChildren \\All) "/" "[Gmail]/All Mail"']
+
+        def select(self, folder, readonly=False):
+            self.selected = (folder, readonly)
+
+    monkeypatch.setattr(svc_mod.imaplib, "IMAP4_SSL", FakeIMAP)
+    monkeypatch.setattr(
+        GmailSearchService,
+        "credentials",
+        classmethod(
+            lambda cls: [
+                {"email": "ok@x.com", "access_token": "t1"},
+                {"email": "bad@x.com", "access_token": "t2"},
+            ]
+        ),
+    )
+    conns, err, failures = GmailSearchService._open_mailboxes()
+    assert err is None and "ok@x.com" in conns and len(failures) == 1
+
+    monkeypatch.setattr(
+        GmailSearchService,
+        "credentials",
+        classmethod(lambda cls: [{"email": "bad@x.com", "access_token": "t2"}]),
+    )
+    conns_none, err_all, failures_all = GmailSearchService._open_mailboxes()
+    assert not conns_none and err_all and len(failures_all) == 1
+
+    assert GmailSearchService.granted_scopes({}) == [GMAIL_SCOPE]
+    assert GmailSearchService.accept_grant("drive", {"scope": GMAIL_SCOPE}, "a@x.com") is not None
+    monkeypatch.setattr(GmailSearchService, "save_token", classmethod(lambda cls, *a, **k: True))
+    assert (
+        GmailSearchService.accept_grant(
+            "drive", {"access_token": "t", "scope": DRIVE_SCOPE}, "a@x.com"
+        )
+        is None
+    )
+    assert "not granted" in GmailSearchService.grant_page("drive", "tick the box")
+    assert "Google Drive connected" in GmailSearchService.grant_page("drive", None)
+
+
+def test_all_mail_folder_and_search_uids_fallbacks():
+    import imaplib
+
+    from dreamference.chat.gmail_search_service import ALL_MAIL_FALLBACK, GmailSearchService
+
+    class BrokenListConn:
+        def list(self):
+            raise imaplib.IMAP4.error("boom")
+
+    class NonOkListConn:
+        def list(self):
+            return "NO", []
+
+    class NoAttrListConn:
+        def list(self):
+            return "OK", [b'(\\HasNoChildren) "/" "INBOX"']
+
+    assert GmailSearchService._all_mail_folder(BrokenListConn()) == ALL_MAIL_FALLBACK
+    assert GmailSearchService._all_mail_folder(NonOkListConn()) == ALL_MAIL_FALLBACK
+    assert GmailSearchService._all_mail_folder(NoAttrListConn()) == ALL_MAIL_FALLBACK
+
+    class SearchConn:
+        def __init__(self, mode):
+            self.mode = mode
+            self.literal = None
+
+        def uid(self, cmd, *args):
+            if self.mode == "ok":
+                return "OK", [b"10 20"]
+            if self.mode == "fallback_ok":
+                if args and args[0] == "CHARSET":
+                    raise imaplib.IMAP4.error("CHARSET unsupported")
+                return "OK", [b"30"]
+            if self.mode == "both_fail":
+                raise imaplib.IMAP4.error("dead")
+            return "OK", [b""]
+
+    assert GmailSearchService._search_uids(SearchConn("ok"), "hi") == [b"10", b"20"]
+    assert GmailSearchService._search_uids(SearchConn("fallback_ok"), 'from:"bob"') == [b"30"]
+    assert GmailSearchService._search_uids(SearchConn("both_fail"), "hi") == []
+    assert GmailSearchService._search_uids(SearchConn("empty"), "hi") == []
+
+
+def test_search_fetch_headers_fetch_body_and_message_lookup(monkeypatch):
+    import imaplib
+
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    monkeypatch.setattr(
+        GmailSearchService,
+        "_open_mailboxes",
+        classmethod(lambda cls: ({}, "none open", [{"account": "a@x.com", "error": "bad"}])),
+    )
+    assert GmailSearchService.search("q", 5) == {
+        "error": "none open",
+        "errors": [{"account": "a@x.com", "error": "bad"}],
+    }
+    assert GmailSearchService.message("a@x.com|1") == {"error": "none open"}
+
+    raw_msg = (
+        b"From: =?utf-8?b?QWxpY2U=?= <alice@x.com>\r\n"
+        b"To: Bob <bob@x.com>\r\n"
+        b"Subject: Hello\r\n"
+        b"Date: Wed, 28 Oct 2026 12:00:00 +0000\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        b"Plain body text"
+    )
+
+    class FullConn:
+        def uid(self, cmd, *args):
+            if cmd == "SEARCH":
+                if "999" in args:
+                    return "OK", [b""]
+                if "boom" in args:
+                    raise imaplib.IMAP4.error("search failed")
+                if "555" in args:
+                    return "OK", [b"3"]
+                return "OK", [b"1 2 3"]
+            uid_arg = args[0]
+            if uid_arg == "1":
+                raise OSError("fetch err")
+            if uid_arg == "2":
+                return "NO", []
+            return "OK", [(b"3 (X-GM-MSGID 555 BODY[] {100}", raw_msg)]
+
+        def close(self):
+            raise imaplib.IMAP4.error("close err")
+
+        def logout(self):
+            raise imaplib.IMAP4.error("logout err")
+
+    conn = FullConn()
+    GmailSearchService._close(conn)
+    monkeypatch.setattr(
+        GmailSearchService,
+        "_open_mailboxes",
+        classmethod(lambda cls: ({"a@x.com": conn}, None, [])),
+    )
+    res = GmailSearchService.search("q", 5)
+    assert len(res["messages"]) == 1
+    assert res["messages"][0]["id"] == "a@x.com|555"
+    assert res["messages"][0]["from"].startswith("Alice")
+
+    assert GmailSearchService._fetch_body(conn, "1") == {"error": "Message could not be read."}
+    assert GmailSearchService._fetch_body(conn, "2") == {"error": "Message could not be read."}
+    body_ok = GmailSearchService._fetch_body(conn, "3")
+    assert body_ok["id"] == "555" and body_ok["body"] == "Plain body text"
+
+    assert GmailSearchService.message("a@x.com|555")["body"] == "Plain body text"
+    assert GmailSearchService.message("a@x.com|999") == {"error": "Message not found"}
+    assert "error" in GmailSearchService.message("a@x.com|boom")
+    assert GmailSearchService.message("555")["body"] == "Plain body text"
+    assert GmailSearchService.message("999") == {"error": "Message not found"}
+    assert GmailSearchService.message("boom") == {"error": "Message not found"}
+
+
+def test_extract_text_handles_multipart_attachments_html_and_bad_charsets():
+    from email.message import EmailMessage
+
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    assert GmailSearchService._decode_header("") == ""
+
+    msg = EmailMessage()
+    msg["Subject"] = "Test"
+    msg.make_mixed()
+    att = EmailMessage()
+    att.set_content("attachment text")
+    att.add_header("Content-Disposition", "attachment", filename="a.txt")
+    msg.attach(att)
+    html_part = EmailMessage()
+    html_part.set_content(
+        "<html><style>body{}</style><script>alert(1)</script><p>Visible <b>HTML</b></p></html>",
+        subtype="html",
+    )
+    msg.attach(html_part)
+    assert GmailSearchService._extract_text(msg) == "Visible HTML"
+
+    empty_msg = EmailMessage()
+    empty_msg.make_mixed()
+    assert GmailSearchService._extract_text(empty_msg) == ""
+
+    bad_charset_msg = EmailMessage()
+    bad_charset_msg.set_content("hello charset")
+    bad_charset_msg.set_param("charset", "unknown-charset-xyz")
+    assert "hello charset" in GmailSearchService._extract_text(bad_charset_msg)
+
+
+def test_workspace_dispatch_covers_drive_and_calendar_routes(monkeypatch):
+    from dreamference.chat.gmail_search_service import (
+        NOT_CONNECTED_MESSAGE,
+        GmailSearchService,
+        GoogleWorkspaceReader,
+    )
+
+    monkeypatch.setattr(GmailSearchService, "credentials", classmethod(lambda cls: []))
+    assert GmailSearchService.workspace("/drive/search", {}) == {"error": NOT_CONNECTED_MESSAGE}
+
+    monkeypatch.setattr(
+        GmailSearchService,
+        "credentials",
+        classmethod(lambda cls: [{"email": "a@x.com", "access_token": "t", "scopes": []}]),
+    )
+    monkeypatch.setattr(
+        GoogleWorkspaceReader,
+        "drive_search",
+        classmethod(lambda cls, accs, q, limit: {"q": q, "limit": limit}),
+    )
+    monkeypatch.setattr(
+        GoogleWorkspaceReader,
+        "drive_read",
+        classmethod(lambda cls, accs, fid: {"file": fid}),
+    )
+    monkeypatch.setattr(
+        GoogleWorkspaceReader,
+        "calendar_events",
+        classmethod(lambda cls, accs, s, e, cal, q, limit: {"events": limit, "cal": cal}),
+    )
+    monkeypatch.setattr(
+        GoogleWorkspaceReader,
+        "calendar_event",
+        classmethod(lambda cls, accs, cal, eid: {"cal": cal, "event": eid}),
+    )
+
+    assert GmailSearchService.workspace("/drive/search", {}) == {"error": "q is required"}
+    assert GmailSearchService.workspace(
+        "/drive/search", {"q": ["spec"], "limit": ["not-an-int"]}
+    ) == {"q": "spec", "limit": 10}
+    assert GmailSearchService.workspace("/drive/file/doc-1", {}) == {"file": "doc-1"}
+    assert GmailSearchService.workspace("/calendar/events", {"calendar": ["work"]}) == {
+        "events": 25,
+        "cal": "work",
+    }
+    assert GmailSearchService.workspace("/calendar/event/primary/ev-9", {}) == {
+        "cal": "primary",
+        "event": "ev-9",
+    }
+    assert GmailSearchService.workspace("/unknown", {}) == {"error": "not found"}
