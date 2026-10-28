@@ -2621,9 +2621,7 @@ export function App() {
     setBoardOpen(false);
     setActivityOpen(false);
     setScheduledOpen(false);
-    setScheduledRun(null);
     setExtensions(null);
-    setPluginFocus(null);
     setPicker("closed");
     setSettingsOpen(false);
     setMenuOpen(false);
@@ -2633,6 +2631,8 @@ export function App() {
   };
   const closeDialogLayers = () => {
     closeEscapeLayers();
+    setScheduledRun(null);
+    setPluginFocus(null);
     setContinuing(null);
     setLinkAsked(null);
     setSyncedOpen(false);
