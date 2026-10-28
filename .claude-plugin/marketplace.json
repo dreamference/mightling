@@ -8,7 +8,7 @@
       "name": "mightling",
       "source": "./claude-plugin",
       "description": "Mightling local delegation plugin for Claude Code (Phase P1: class W1 watch tool, no model).",
-      "version": "1.7.2"
+      "version": "1.7.3"
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "name": "mightling",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "Mightling local delegation plugin for Claude Code (the model-free tools watch, lookup, run_test, git_log and diff_stat, and the task tool that hands bounded edits with one test to the local model, on probation).",
   "author": {
     "name": "Dreamference"

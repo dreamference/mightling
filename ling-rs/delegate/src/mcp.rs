@@ -36,7 +36,7 @@ use crate::watch::{
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 const SERVER_NAME: &str = "mightling";
-const SERVER_VERSION: &str = "1.7.2";
+const SERVER_VERSION: &str = "1.7.3";
 
 /// What the tools reach: the code index, the process runner (git, tests, `ling exec`) and the
 /// plugin's state. Injectable, so the tests need no network, no model and no toolchain.
