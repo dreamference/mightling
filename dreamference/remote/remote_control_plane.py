@@ -521,13 +521,15 @@ class RemoteControlPlane:
                 )
 
     @classmethod
-    def setup_key(cls, dns_name: str, token: str, name: str) -> str | None:
+    def setup_key(cls, dns_name: str, token: str, name: str, ephemeral: bool = False) -> str | None:
         """Mints a one-time setup key: one use, ten minutes, no groups beyond the default.
 
         Args:
             dns_name: The box's public DNS name.
             token: The node's management token.
             name: What the key is for, kept in management's activity log.
+            ephemeral: Whether the peer it enrols is ephemeral: management deletes such a peer
+                by itself once it has been offline for ten minutes (a test runner's peer).
 
         Returns:
             Optional[str]: The key, or None.
@@ -542,7 +544,7 @@ class RemoteControlPlane:
                 "expires_in": SETUP_KEY_MINUTES * 60,
                 "auto_groups": [],
                 "usage_limit": 1,
-                "ephemeral": False,
+                "ephemeral": ephemeral,
             },
             token=token,
         )
