@@ -414,7 +414,19 @@ NODE_STOP = "        let _ = daemon.stop_browse(locator::SERVICE_TYPE);\n"
 NODE_STRIP = "        .strip_suffix(locator::SERVICE_TYPE)\n"
 
 SWE_UNIT_OLD = '                    "ragon-swe-*",\n'
+# While `~/.mightling` waits to move (a running Night Shift, or a binary that may not migrate), every
+# session keeps using it, so no second home is started beside it (rename.rs, `unmoved_home`).
+HOME_ANCHOR = '    let Some(ragon_home) = resolve(std::env::var_os("CODEX_HOME").as_deref(), &home) else {\n'
+HOME_NEW = (
+    "    // While the old home waits to move, it stays the home: no second one starts beside it\n"
+    "    // (rename::unmoved_home). An explicit CODEX_HOME still wins.\n"
+    "    let unmoved = crate::rename::unmoved_home(&home);\n"
+    "    let Some(ragon_home) =\n"
+    '        resolve(std::env::var_os("CODEX_HOME").as_deref(), &home).map(|new| unmoved.unwrap_or(new))\n'
+    "    else {\n"
+)
 COMPAT_EDITS = [
+    ("ragon-rs/src/home.rs", HOME_ANCHOR, HOME_NEW, 1),
     ("ragon-rs/node-locator/src/lib.rs", LOC_ANCHOR, LOC_NEW, 1),
     ("ragon-web-rs/src/node_locator.rs", LOC_ANCHOR, LOC_NEW, 1),
     ("ragon-code-rs/src/index/host.rs", SLICE_ANCHOR, SLICE_NEW, 1),

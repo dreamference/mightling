@@ -37,6 +37,8 @@ pub const INSTALL_DIR: &str = ".local/share/dreamference/ragon";
 pub const MARKER: &str = ".migrated-from-puffin";
 /// Left in `~/.mightling` after the move, so nothing mistakes the empty place for a fresh start.
 pub const MOVED_MARKER: &str = ".moved-to-ragon";
+/// Added to the name of a `~/.ragon` found beside an unmoved `~/.mightling`, which is moved aside.
+pub const PRE_MIGRATION_SUFFIX: &str = ".pre-migration";
 /// `1` migrates whichever binary runs (to test the migration on purpose, in a scratch HOME), `0`
 /// never migrates; unset, only an installed binary does. `ragon-admin` reads the same variable.
 pub const OPT_IN_ENV: &str = "RAGON_LEGACY_MIGRATION";
@@ -359,15 +361,56 @@ fn link(target: &Path, link_path: &Path) -> io::Result<()> {
 /// Moves `~/.mightling` to the new home whole, leaves a marker folder at the old path, and then
 /// fixes what the move leaves wrong inside: paths and server tables in `config.toml`, files named
 /// after the product, skills' origin records and the worktrees' links to their repositories.
+///
+/// A new home that already exists beside an unmoved `~/.mightling` was never the user's home (while
+/// `~/.mightling` waits to move, every session uses it: [`unmoved_home`]), so it is moved aside to
+/// `~/.ragon.pre-migration` and kept, not merged and not deleted.
 fn move_home(home: &Path, report: &mut Report) {
     let old = home.join(MIGHTLING_HOME_DIR);
     let new = home.join(crate::home::RAGON_HOME_DIR);
-    if !old.is_dir()
-        || old.join(MOVED_MARKER).exists()
-        || std::fs::symlink_metadata(&new).is_ok()
-        || std::fs::rename(&old, &new).is_err()
-    {
+    if !old.is_dir() || old.join(MOVED_MARKER).exists() {
         return;
+    }
+    let mut aside = None;
+    if std::fs::symlink_metadata(&new).is_ok() {
+        let spare = home.join(format!("{}{PRE_MIGRATION_SUFFIX}", crate::home::RAGON_HOME_DIR));
+        if std::fs::symlink_metadata(&spare).is_ok() {
+            report.lines.push(format!(
+                "could not move {} to {}: both {} and {} exist; move one of them away",
+                old.display(),
+                new.display(),
+                new.display(),
+                spare.display()
+            ));
+            return;
+        }
+        if let Err(error) = std::fs::rename(&new, &spare) {
+            report.lines.push(format!(
+                "could not move {} aside to {}: {error}",
+                new.display(),
+                spare.display()
+            ));
+            return;
+        }
+        aside = Some(spare);
+    }
+    if let Err(error) = std::fs::rename(&old, &new) {
+        if let Some(spare) = &aside {
+            let _ = std::fs::rename(spare, &new);
+        }
+        report.lines.push(format!(
+            "could not move {} to {}: {error}",
+            old.display(),
+            new.display()
+        ));
+        return;
+    }
+    if let Some(spare) = &aside {
+        report.lines.push(format!(
+            "moved {} (created before the move) aside to {}",
+            new.display(),
+            spare.display()
+        ));
     }
     if std::fs::create_dir_all(&old).is_ok() {
         let _ = std::fs::write(
@@ -569,13 +612,26 @@ fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
     }
 }
 
-/// The old home under `home` to copy from, when there is one and it was not moved: the newest of
-/// `~/.mightling` and `~/.puffin`.
+/// The old home under `home` to copy from: `~/.puffin`, when it is there and `~/.mightling` is not
+/// waiting to move. An unmoved `~/.mightling` is never copied: it is moved whole by [`migrate`],
+/// and until then it stays the home ([`unmoved_home`]), so a copy would only block the later move.
 pub fn legacy_home(home: &Path) -> Option<PathBuf> {
+    if unmoved_home(home).is_some() {
+        return None;
+    }
     LEGACY_HOME_DIRS
         .iter()
+        .filter(|dir| **dir != MIGHTLING_HOME_DIR)
         .map(|dir| home.join(dir))
         .find(|path| path.is_dir() && !path.join(MOVED_MARKER).exists())
+}
+
+/// `~/.mightling` when it is still there and was not moved (the move waits for a running Night
+/// Shift, SWE-bench run or job, or the binary is not an installed one): the home to keep using
+/// until the move happens, so no second home is started beside it.
+pub fn unmoved_home(home: &Path) -> Option<PathBuf> {
+    let old = home.join(MIGHTLING_HOME_DIR);
+    (old.is_dir() && !old.join(MOVED_MARKER).exists()).then_some(old)
 }
 
 #[cfg(test)]
@@ -765,13 +821,34 @@ mod tests {
     }
 
     #[test]
-    fn real_files_and_an_existing_new_home_are_left_alone() {
+    fn a_new_home_made_before_the_move_is_moved_aside_and_kept() {
         let home = scratch("existing");
         mightling_layout(&home);
-        write(&home.join(crate::home::RAGON_HOME_DIR).join("keep"), "mine");
-        migrate(&home, &home, None);
+        let new_home = home.join(crate::home::RAGON_HOME_DIR);
+        write(&new_home.join("keep"), "made by a binary that could not migrate");
+        assert_eq!(unmoved_home(&home), Some(home.join(MIGHTLING_HOME_DIR)));
+        assert_eq!(legacy_home(&home), None, "an unmoved ~/.mightling is never copied");
+        let report = migrate(&home, &home, None);
+        let spare = home.join(format!("{}{PRE_MIGRATION_SUFFIX}", crate::home::RAGON_HOME_DIR));
+        assert!(spare.join("keep").is_file(), "the early home is kept aside");
+        assert!(new_home.join("auth.json").is_file(), "~/.mightling moved whole all the same");
+        assert!(report.lines.iter().any(|line| line.contains("aside")));
+        assert_eq!(unmoved_home(&home), None);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_taken_spare_name_leaves_both_homes_where_they_are() {
+        let home = scratch("existing-spare");
+        mightling_layout(&home);
+        let new_home = home.join(crate::home::RAGON_HOME_DIR);
+        write(&new_home.join("keep"), "early");
+        let spare = home.join(format!("{}{PRE_MIGRATION_SUFFIX}", crate::home::RAGON_HOME_DIR));
+        write(&spare.join("older"), "older");
+        let report = migrate(&home, &home, None);
         assert!(home.join(MIGHTLING_HOME_DIR).join("auth.json").is_file(), "no move onto a home that exists");
-        assert!(home.join(crate::home::RAGON_HOME_DIR).join("keep").is_file());
+        assert!(new_home.join("keep").is_file() && spare.join("older").is_file());
+        assert!(report.lines.iter().any(|line| line.starts_with("could not move")));
         let _ = std::fs::remove_dir_all(&home);
     }
 
