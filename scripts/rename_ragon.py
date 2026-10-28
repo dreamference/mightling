@@ -95,10 +95,7 @@ PROTECT = [
     "puffin_code_users",
     "PUFFIN_GMAIL_SECRET",  # the env name an old container hands the service (a test keeps it)
     "/puffin-images/",
-    # the SCIP tables, until ling-code migrates them (scip_store.rs)
-    "puffin_names",
-    "puffin_relationships",
-    "puffin_meta",
+    # the SCIP tables are renamed (RULES); the schema hash's filter keeps the old pattern beside the new one
     "puffin\\\\_%",
 ]
 
@@ -114,6 +111,7 @@ RULES = [
     # Puffin leftovers that are not product names (build caches, the AppArmor profile, ...)
     (r"puffin-(codex|web|code-build|bwrap)", r"ragon-\1"),
     (r"PUFFIN_", "RAGON_"),
+    (r"puffin_(names|relationships|meta)", r"ragon_\1"),  # the SCIP stores' own tables
     (r"\.lingignore", ".ragonignore"),
     (r"(?<![A-Za-z0-9])LING(?![A-Za-z])", "RAGON"),
     (r"(?:(?<![A-Za-z0-9])|(?<=\\[bnrt]))ling(?![A-Za-z])", "ragon"),  # \bling-code in a regex, \nling
@@ -260,6 +258,7 @@ def leftovers(root, files=None):
 COMPAT_KEEP = [
     "MIGHTLING_LEGACY_MIGRATION",
     "_mightling-node._tcp",
+    "mightling.slice/mightling-index.slice",
     "ling-swe-*",
     "still runs Mightling: `ling update` there",
 ]
@@ -305,8 +304,139 @@ OLD_ASSETS_STEP = r"""      # 1.9.0 publishes the binaries three times, under ra
           done < <(find artifacts -type f -name 'ragon-*' | sort)
 """
 
+SCIP_FILTER_OLD = "WHERE name NOT LIKE 'puffin\\\\_%' ESCAPE '\\\\' AND name NOT LIKE 'sqlite\\\\_%' ESCAPE '\\\\'"
+SCIP_FILTER_NEW = (
+    "WHERE name NOT LIKE 'ragon\\\\_%' ESCAPE '\\\\' AND name NOT LIKE 'puffin\\\\_%' ESCAPE '\\\\'\n"
+    "           AND name NOT LIKE 'sqlite\\\\_%' ESCAPE '\\\\'"
+)
+SCIP_HAS_OLD = "SELECT count(*) FROM sqlite_master WHERE name = 'ragon_names'"
+SCIP_HAS_NEW = "SELECT count(*) FROM sqlite_master WHERE name IN ('ragon_names', 'puffin_names')"
+SCIP_OPEN_ANCHOR = '        let docs = {\n            let mut stmt = conn.prepare("SELECT relative_path FROM documents")?;\n'
+SCIP_OPEN_NEW = (
+    "        expose_legacy_tables(&conn)?;\n" + SCIP_OPEN_ANCHOR
+)
+SCIP_HELPER_ANCHOR = "/// SHA-256 of the ordered `sql` of `sqlite_master`"
+SCIP_HELPER = """/// A store written before the rename (1.8 and earlier) calls its own tables `puffin_*`. A store is opened
+/// read-only, so they are shown under their new names by temporary views (the connection's own, gone
+/// with it); the next index run writes a store with the new names (spec DREAMFERENCE_RENAME_RAGON.md §3).
+fn expose_legacy_tables(conn: &Connection) -> Result<()> {
+    let present = |name: &str| -> rusqlite::Result<bool> {
+        conn.query_row("SELECT count(*) FROM sqlite_master WHERE name = ?1", [name], |r| r.get::<_, i64>(0))
+            .map(|n| n > 0)
+    };
+    for table in ["names", "relationships", "meta"] {
+        let (old, new) = (format!("puffin_{table}"), format!("ragon_{table}"));
+        if present(&old)? && !present(&new)? {
+            conn.execute_batch(&format!("CREATE TEMP VIEW {new} AS SELECT * FROM {old}"))?;
+        }
+    }
+    Ok(())
+}
+
+"""
+SCIP_TEST_ANCHOR = "#[cfg(test)]\nmod tests {\n"
+SCIP_TEST = """#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_store_with_the_older_table_names_is_read_through_views() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        {
+            let conn = super::Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE puffin_names (symbol_id INTEGER NOT NULL, name TEXT NOT NULL);
+                 INSERT INTO puffin_names VALUES (1, 'main');",
+            )
+            .unwrap();
+        }
+        let conn = super::Connection::open_with_flags(&path, super::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        super::expose_legacy_tables(&conn).unwrap();
+        let name: String = conn.query_row("SELECT name FROM ragon_names", [], |r| r.get(0)).unwrap();
+        assert_eq!(name, "main");
+        super::expose_legacy_tables(&conn).unwrap(); // a second call finds the view and does nothing
+    }
+
+"""
+
+LOC_ANCHOR = 'pub const SERVICE_TYPE: &str = "_ragon-node._tcp.local.";\n'
+LOC_NEW = (
+    LOC_ANCHOR
+    + "\n/// The type 1.5 to 1.8 nodes announce; a 1.9 client browses it beside the new one for one release.\n"
+    + 'pub const LEGACY_SERVICE_TYPE: &str = "_mightling-node._tcp.local.";\n'
+)
+SLICE_ANCHOR = "        let Ok(entries) = std::fs::read_dir(slice_cgroup()) else { return Vec::new() };\n        entries\n            .flatten()\n"
+SLICE_NEW = (
+    "        // Runs started by a 1.8 binary are in the older slice; they count against the same budget.\n"
+    "        let entries: Vec<std::fs::DirEntry> = [slice_cgroup(), legacy_slice_cgroup()]\n"
+    "            .iter()\n"
+    "            .filter_map(|dir| std::fs::read_dir(dir).ok())\n"
+    "            .flat_map(|dir| dir.flatten().collect::<Vec<_>>())\n"
+    "            .collect();\n"
+    "        entries\n"
+    "            .into_iter()\n"
+)
+SLICE_FN_ANCHOR = "fn read_u64(path: &Path) -> Option<u64> {\n"
+SLICE_FN = (
+    "fn legacy_slice_cgroup() -> PathBuf {\n"
+    '    PathBuf::from(slice_cgroup().to_string_lossy().replace("ragon.slice/ragon-index.slice", "mightling.slice/mightling-index.slice"))\n'
+    "}\n\n"
+)
+NODE_DEADLINE = "        let deadline = Instant::now() + browse_timeout(wanted);\n"
+NODE_RECV_OLD = (
+    "            match events.recv_timeout(limit - now) {\n"
+    "                Ok(mdns_sd::ServiceEvent::ServiceResolved(service)) => {\n"
+)
+NODE_RECV_NEW = (
+    "            let slice = (limit - now).min(Duration::from_millis(50));\n"
+    "            let waited = Instant::now();\n"
+    "            let mut event = events.recv_timeout(slice).ok();\n"
+    "            if event.is_none() {\n"
+    "                event = legacy_events.as_ref().and_then(|legacy| legacy.try_recv().ok());\n"
+    "            }\n"
+    "            let Some(event) = event else {\n"
+    "                std::thread::sleep(slice.saturating_sub(waited.elapsed()));\n"
+    "                continue;\n"
+    "            };\n"
+    "            match event {\n"
+    "                mdns_sd::ServiceEvent::ServiceResolved(service) => {\n"
+)
+NODE_TAIL_OLD = "                Ok(_) => {}\n                Err(_) => break,\n"
+NODE_STOP = "        let _ = daemon.stop_browse(locator::SERVICE_TYPE);\n"
+NODE_STRIP = "        .strip_suffix(locator::SERVICE_TYPE)\n"
+
 SWE_UNIT_OLD = '                    "ragon-swe-*",\n'
 COMPAT_EDITS = [
+    ("ragon-rs/node-locator/src/lib.rs", LOC_ANCHOR, LOC_NEW, 1),
+    ("ragon-web-rs/src/node_locator.rs", LOC_ANCHOR, LOC_NEW, 1),
+    ("ragon-code-rs/src/index/host.rs", SLICE_ANCHOR, SLICE_NEW, 1),
+    ("ragon-docs-rs/src/host.rs", SLICE_ANCHOR, SLICE_NEW, 1),
+    ("ragon-code-rs/src/index/host.rs", SLICE_FN_ANCHOR, SLICE_FN + SLICE_FN_ANCHOR, 1),
+    ("ragon-docs-rs/src/host.rs", SLICE_FN_ANCHOR, SLICE_FN + SLICE_FN_ANCHOR, 1),
+    (
+        "ragon-rs/src/node.rs",
+        NODE_DEADLINE,
+        "        let legacy_events = daemon.browse(locator::LEGACY_SERVICE_TYPE).ok();\n" + NODE_DEADLINE,
+        1,
+    ),
+    ("ragon-rs/src/node.rs", NODE_RECV_OLD, NODE_RECV_NEW, 1),
+    ("ragon-rs/src/node.rs", NODE_TAIL_OLD, "                _ => {}\n", 1),
+    (
+        "ragon-rs/src/node.rs",
+        NODE_STOP,
+        NODE_STOP + "        let _ = daemon.stop_browse(locator::LEGACY_SERVICE_TYPE);\n",
+        1,
+    ),
+    (
+        "ragon-rs/src/node.rs",
+        NODE_STRIP,
+        NODE_STRIP + "        .or_else(|| fullname.strip_suffix(locator::LEGACY_SERVICE_TYPE))\n",
+        1,
+    ),
+    ("ragon-code-rs/src/scip_store.rs", SCIP_FILTER_OLD, SCIP_FILTER_NEW, 1),
+    ("ragon-code-rs/src/scip_store.rs", SCIP_HAS_OLD, SCIP_HAS_NEW, 1),
+    ("ragon-code-rs/src/scip_store.rs", SCIP_OPEN_ANCHOR, SCIP_OPEN_NEW, 1),
+    ("ragon-code-rs/src/scip_store.rs", SCIP_HELPER_ANCHOR, SCIP_HELPER + SCIP_HELPER_ANCHOR, 1),
+    ("ragon-code-rs/src/scip_store.rs", SCIP_TEST_ANCHOR, SCIP_TEST, 1),
     (
         "install.sh",
         OLD_INSTALL_SH_ANCHOR,
