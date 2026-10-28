@@ -229,7 +229,11 @@ def test_enrolled_peer_names_keep_the_old_prefix(peer):
 
 
 def test_the_protected_words_do_not_count_as_leftovers():
-    for word in ("mightling-release-key", "mightling-adapter", "still runs Mightling: `ling update` there"):
+    for word in (
+        "mightling-release-key",
+        "mightling-adapter",
+        "still runs Mightling: `ling update` there",
+    ):
         assert rr.LEFTOVER.search(rr.masked(word)) is None
 
 
