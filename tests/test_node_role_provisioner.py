@@ -314,3 +314,31 @@ def test_the_command_line_hands_the_role_to_the_provisioner(monkeypatch):
         main()
     assert exit_info.value.code == 0
     assert seen[0]["role"] == "engine" and seen[0]["dry_run"] is True
+
+
+def test_a_main_node_with_no_default_key_makes_one_instead_of_failing(
+    role_fleet, tmp_path, monkeypatch
+):
+    (tmp_path / "id_ed25519.pub").unlink()
+    (tmp_path / "id_ed25519").unlink()
+    made = []
+
+    def keygen(command, **kwargs):
+        made.append(command)
+        (tmp_path / "id_ed25519.pub").write_text(PUBLIC_KEY + "\n")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", keygen)
+    machine = FakeSession.machines["new-node"] = StandIn()
+    assert provision() == 0
+    assert made and made[0][:4] == ["ssh-keygen", "-q", "-t", "ed25519"]
+    assert PUBLIC_KEY in machine.files["authorized_keys"]
+
+
+def test_a_dry_run_names_the_key_it_would_make_and_makes_none(role_fleet, tmp_path, capsys):
+    (tmp_path / "id_ed25519.pub").unlink()
+    (tmp_path / "id_ed25519").unlink()
+    FakeSession.machines["new-node"] = StandIn()
+    assert provision(dry_run=True) == 0
+    assert not (tmp_path / "id_ed25519").exists()
+    assert "would: make id_ed25519.pub on this machine" in capsys.readouterr().out
