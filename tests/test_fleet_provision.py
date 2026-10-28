@@ -401,7 +401,7 @@ class FakeSession:
         self.machine.become_ready()
         return subprocess.CompletedProcess(line, 0, "", "")
 
-    def rsync(self, source, destination):
+    def rsync(self, source, destination, **options):
         self.machine.commands.append(f"rsync {source} {destination}")
         if "models--" in str(source):
             self.machine.copied = True
@@ -686,3 +686,70 @@ def test_a_bundle_file_that_fails_its_checksum_installs_nothing(tmp_path):
 def test_install_help_documents_from_and_no_host_setup():
     result = subprocess.run(["bash", str(ROOT / "install.sh"), "--help"], capture_output=True, text=True, check=False)
     assert "--from <dir>" in result.stdout and "--no-host-setup" in result.stdout
+
+
+# -- a machine at another site, reached through the remote-access overlay ----------------------------
+
+
+def test_a_bare_name_resolves_in_the_overlay_before_mdns(fleet):
+    FakeSession.machines = {"house-1.netbird.selfhosted": StandIn()}
+    assert provision(["house-1"]) == 0
+    assert "house-1.netbird.selfhosted" in {entry[1] for entry in FakeSession.order if len(entry) > 1}
+
+
+def test_a_full_overlay_name_is_used_as_typed(fleet):
+    FakeSession.machines = {"house-1.netbird.selfhosted": StandIn()}
+    assert provision(["house-1.netbird.selfhosted"]) == 0
+
+
+def test_a_paired_node_with_an_overlay_name_is_reached_by_that_name_with_no_browse(monkeypatch):
+    record = {"node": "ab12", "name": "house-1", "address": "stale", "user": "owner",
+              "overlay_name": "house-1.netbird.selfhosted"}
+    monkeypatch.setattr(NodePairing, "_name_resolves", classmethod(lambda cls, name: True))
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: pytest.fail("no mDNS")))
+    command = NodePairing.ssh_command(record, "info")
+    assert command[-2] == "owner@house-1.netbird.selfhosted"
+    assert NodePairing.is_overlay_name("House-1.netbird.selfhosted.")
+    assert not NodePairing.is_overlay_name("spark-1.local")
+
+
+def test_an_overlay_name_that_does_not_resolve_falls_back_to_the_lan_browse(monkeypatch):
+    record = {"node": "ab12", "name": "house-1", "address": "x", "user": "owner",
+              "overlay_name": "house-1.netbird.selfhosted"}
+    monkeypatch.setattr(NodePairing, "_name_resolves", classmethod(lambda cls, name: False))
+    monkeypatch.setattr(NodePairing, "resolve_wait_s", 0.0)
+    NodePairing.forget_resolved()
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": "house-1", "node": "ab12", "address": "192.168.1.9", "port": "8000"}]))
+    monkeypatch.setattr(NodePairing, "_save", classmethod(lambda cls, record: None))
+    assert NodePairing.resolve(record) == "192.168.1.9"
+
+
+def _session_with(tmp_path, results, sleeps):
+    session = FleetSession("house-1.netbird.selfhosted", "owner", tmp_path)
+    calls = []
+
+    def spawn(command, capture, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, results.pop(0), "", "")
+
+    session._spawn = spawn
+    session._log = lambda *args, **kwargs: None
+    return session, calls
+
+
+def test_a_model_copy_that_loses_its_connection_resumes_and_a_real_failure_does_not(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(fleet_session_module.time, "sleep", lambda seconds: None)
+    sleeps = []
+    session, calls = _session_with(tmp_path, [255, 30, 0], sleeps)
+    done = session.rsync(tmp_path, "~/.cache/huggingface/hub/models--x", attempts=5, wait_s=7)
+    assert done.returncode == 0 and len(calls) == 3
+    command = calls[0]
+    assert "--partial" in command and "--append-verify" in command and "--timeout=120" in command
+    assert "ServerAliveInterval=15" in command[command.index("-e") + 1]
+    session, calls = _session_with(tmp_path, [23, 0], sleeps)  # partial transfer: not a drop
+    assert session.rsync(tmp_path, "~/x", attempts=5).returncode == 23 and len(calls) == 1
+    session, calls = _session_with(tmp_path, [255] * 3, sleeps)
+    assert session.rsync(tmp_path, "~/x", attempts=3).returncode == 255 and len(calls) == 3

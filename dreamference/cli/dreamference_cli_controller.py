@@ -1540,6 +1540,38 @@ class DreamferenceCLIController:
         node_sync_parser.add_argument("name", help="The paired node")
         node_sync_parser.add_argument("model", help="A key of the model matrix")
         node_sync_parser.add_argument("--address", default=None, help="Reach the node at this address instead, such as its QSFP link's")
+        node_power_parser = node_subparsers.add_parser(
+            "power-cycle",
+            help="Switch a hung node's smart plug off and on again (`power-config` says which plug)")
+        node_power_parser.add_argument("name", help="The paired node")
+        node_power_parser.add_argument(
+            "--off-seconds", type=int, default=20,
+            help="How long the power stays off (default 20, at least 5)")
+        node_power_parser.add_argument(
+            "--wait-minutes", type=int, default=10,
+            help="How long to wait for the node to answer afterwards (default 10)")
+        node_power_parser.add_argument(
+            "--force", action="store_true", help="Cut the power even though the node answers")
+        node_power_config_parser = node_subparsers.add_parser(
+            "power-config", help="Say which smart plug powers which node (node-power.json)")
+        power_config_subparsers = node_power_config_parser.add_subparsers(dest="power_config_command")
+        power_plug_parser = power_config_subparsers.add_parser(
+            "plug", help="A plug this machine can reach on its own network")
+        power_plug_parser.add_argument("plug", help="The plug's name")
+        power_plug_parser.add_argument(
+            "--host", required=True, help="Its host name here, such as shellyplug-aabbcc.local")
+        power_plug_parser.add_argument("--kind", default="shelly", help="The brand (shelly)")
+        power_plug_parser.add_argument(
+            "--channel", type=int, default=0, help="The switch's id (0 on a plug)")
+        power_plug_parser.add_argument(
+            "--generation", type=int, default=2, help="The Shelly API generation, 1 or 2")
+        power_node_parser = power_config_subparsers.add_parser(
+            "node", help="Which plug powers a paired node")
+        power_node_parser.add_argument("name", help="The paired node")
+        power_node_parser.add_argument("--plug", required=True, help="The plug's name")
+        power_node_parser.add_argument(
+            "--via", default=None, help="The paired node at that site that reaches the plug")
+        power_config_subparsers.add_parser("show", help="Print the plugs and the nodes they power")
         node_provision_parser = node_subparsers.add_parser("provision", help="Set up new GB10s from this one: install Mightling, the root half, the model, pairing, start (FLEET spec); re-run on paired nodes, it is the fleet update")
         node_provision_parser.add_argument("hosts", nargs="*", help="Host names, addresses or paired nodes; none lists unprovisioned GB10s on the network")
         node_provision_parser.add_argument("--all", action="store_true", help="Every paired node: the fleet update")
@@ -1747,6 +1779,18 @@ class DreamferenceCLIController:
             "--bundle-file", metavar="PATH", default=None,
             help="Instead: write one ephemeral peer's bundle (one-use, 10-minute key) to a new 0600 file, "
                  "no code and no listener (an off-LAN test runner)")
+        remote_code_parser.add_argument(
+            "--ttl", metavar="DURATION", default=None,
+            help="With --bundle-file: an ordinary peer's key that waits this long (90m, 2h; at most 24h), "
+                 "still one use; unused, it expires by itself")
+        remote_code_parser.add_argument(
+            "--join", action="store_true",
+            help="With --bundle-file: write the one line that installs NetBird and joins on a new machine "
+                 "with no ling (2h unless --ttl)")
+        remote_code_parser.add_argument(
+            "--name", default="", help="With --join: the new machine's name in the overlay (one DNS label)")
+        remote_code_parser.add_argument(
+            "--ssh-user", default="", help="With --join: the account for the machine's gx10-remote ssh alias")
         remote_subparsers.add_parser("peers", help="List the enrolled peers")
         remote_revoke_parser = remote_subparsers.add_parser(
             "revoke", help="Delete a peer: its key is forgotten; it can rejoin only on the LAN"
@@ -2989,6 +3033,10 @@ class DreamferenceCLIController:
                 if args.node_command == "fetch":
                     sys.exit(NodeJobSender.fetch(args.job))
                 sys.exit(NodeJob.execute(args.job))
+            from dreamference.node.node_power_settings import COMMANDS as POWER_COMMANDS
+            if args.node_command in POWER_COMMANDS:
+                from dreamference.node.node_power_settings import NodePowerSettings
+                sys.exit(NodePowerSettings.dispatch(args))
             if args.node_command == "provision":
                 from dreamference.node.node_provisioner import NodeProvisioner
                 options = {name: getattr(args, name) for name in (
@@ -3206,8 +3254,9 @@ class DreamferenceCLIController:
                                                     box_only=args.box_only, ca_scope=args.ca_scope),
                 "status": RemoteAccess.status,
                 "remove": lambda: RemoteAccess.remove(purge=args.purge, yes=args.yes),
-                "code": lambda: (RemoteAccess.bundle_file(args.bundle_file) if args.bundle_file
-                                 else RemoteAccess.code()),
+                "code": lambda: (RemoteAccess.bundle_file(args.bundle_file, ttl=args.ttl, join=args.join,
+                                                           name=args.name, ssh_user=args.ssh_user)
+                                 if args.bundle_file else RemoteAccess.code()),
                 "peers": RemoteAccess.peers,
                 "revoke": lambda: RemoteAccess.revoke(args.peer),
                 "certificate": lambda: cls._remote_certificate(args),

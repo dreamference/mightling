@@ -8,6 +8,7 @@ Nothing here reaches a real box, Docker, systemd, sudo or the network: every cla
 test's own HOME, because the argv is the thing worth testing there.
 """
 
+import base64
 import contextlib
 import hashlib
 import io
@@ -33,12 +34,14 @@ from dreamference.remote import (
     RemoteCertificateAuthority,
     RemoteControlPlane,
     RemoteEnrolment,
+    RemoteJoinScript,
     RemoteNodePeer,
     RemotePublicCertificate,
     RemoteSettings,
     RemoteTunnel,
     remote_settings,
 )
+from dreamference.remote.remote_settings import CLIENT_ARCHIVES
 
 NODE_ID = "7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001"
 BOX = "relay.example.org"
@@ -1267,8 +1270,8 @@ def _bundle_file_ready(monkeypatch):
     monkeypatch.setattr(RemoteAccess, "_node_id", classmethod(lambda cls: NODE_ID))
     minted = []
 
-    def setup_key(cls, dns_name, token, name, ephemeral=False):
-        minted.append((name, ephemeral))
+    def setup_key(cls, dns_name, token, name, ephemeral=False, minutes=10):
+        minted.append((name, ephemeral) if minutes == 10 else (name, ephemeral, minutes))
         return "SECRET-KEY-1"
 
     monkeypatch.setattr(RemoteControlPlane, "setup_key", classmethod(setup_key))
@@ -1294,6 +1297,66 @@ def test_a_bundle_file_holds_an_ephemeral_peers_bundle_in_a_private_file(
     assert bundle["management_url"] == "https://relay.example.org:443"
     assert bundle["ca"].startswith("-----BEGIN")
     assert "SECRET-KEY-1" not in capsys.readouterr().out
+
+
+def test_a_ttl_lifetime_is_a_number_with_a_unit_up_to_a_day():
+    parse = RemoteAccess.parse_ttl
+    assert [parse(t) for t in ("90m", "2h", "1d", "45")] == [90, 120, 1440, 45]
+    assert [parse(t) for t in ("25h", "2d", "0m", "", "h", "2 hours", "-5m")] == [None] * 7
+
+
+def test_a_ttl_bundle_is_an_ordinary_peers_key_that_waits(monkeypatch, tmp_path):
+    minted = _bundle_file_ready(monkeypatch)
+    target = tmp_path / "bundle.json"
+    assert RemoteAccess.bundle_file(str(target), ttl="2h", name="house-1") == 0
+    assert minted == [("client house-1", False, 120)]
+    assert json.loads(target.read_text())["setup_key"] == "SECRET-KEY-1"
+
+
+def test_a_ttl_over_a_day_or_a_bad_name_mints_nothing(monkeypatch, tmp_path):
+    minted = _bundle_file_ready(monkeypatch)
+    assert RemoteAccess.bundle_file(str(tmp_path / "a"), ttl="25h") == 1
+    assert RemoteAccess.bundle_file(str(tmp_path / "b"), join=True, name="Bad Name") == 1
+    assert minted == [] and not (tmp_path / "a").exists() and not (tmp_path / "b").exists()
+
+
+def test_a_join_file_is_one_private_line_that_decodes_to_a_valid_script(
+    monkeypatch, tmp_path, capsys
+):
+    minted = _bundle_file_ready(monkeypatch)
+    target = tmp_path / "join.txt"
+    assert RemoteAccess.bundle_file(str(target), join=True, name="house-1", ssh_user="owner") == 0
+    assert minted == [("client house-1", False, 120)]  # two hours, one use, not ephemeral
+    assert target.stat().st_mode & 0o777 == 0o600
+    text = target.read_text()
+    assert text.count("\n") == 1 and text.startswith(" sudo bash -c")
+    assert "SECRET-KEY-1" not in text  # only inside the base64
+    assert "SECRET-KEY-1" not in capsys.readouterr().out
+    encoded = text.split("'")[1]
+    script = base64.b64decode(encoded).decode()
+    assert "SECRET-KEY-1" in script and "--setup-key-file" in script
+    assert "--setup-key " not in script and "set -x" not in script
+    assert "BEGIN CERTIFICATE" in script  # no public certificate recorded: the CA travels
+    path = tmp_path / "join.sh"
+    path.write_text(script)
+    assert subprocess.run(["bash", "-n", str(path)], check=False).returncode == 0
+    assert "mightling-" in script
+    assert "gx10-remote" in script and "User" in script
+
+
+def test_the_join_script_leaves_out_the_ca_when_the_certificate_is_public():
+    bundle = {
+        "management_url": "https://remote.example.org:443",
+        "setup_key": "K",
+        "overlay_name": "mightling-ab.netbird.selfhosted",
+        "ca": "",
+    }
+    script = RemoteJoinScript.script(bundle)
+    assert "update-ca-certificates" not in script and "ca.crt" not in script
+    for arch in ("amd64", "arm64"):  # the laptop (x86-64) and the GB10s (arm64) both have a pin
+        assert CLIENT_ARCHIVES[arch] in script
+    assert set(re.findall(r"@[A-Z_0-9]+@", script)) == {"@ARCH@"}  # no placeholder left unfilled
+    assert "netbird_0.80.0_linux_@ARCH@.tar.gz" in script
 
 
 def test_a_bundle_file_never_overwrites_and_mints_nothing_when_refused(monkeypatch, tmp_path):
@@ -1806,3 +1869,59 @@ def test_status_names_the_public_certificate_and_its_timer(monkeypatch, capsys):
     )
     timer[0] = "inactive"
     assert RemoteAccess.status() == 1, "nothing renews it"
+
+
+def test_the_join_script_runs_against_stand_in_commands_and_never_shows_the_key(tmp_path):
+    """The script as root on a bare machine, with every command it calls replaced by a stub."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls.log"
+    home = tmp_path / "home"
+    home.mkdir()
+    stubs = {
+        "curl": 'echo "curl $*" >> "$LOG"; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done; : > "$out"',
+        "sha256sum": 'cat >/dev/null; echo "sha256sum" >> "$LOG"',
+        "tar": 'echo "tar $*" >> "$LOG"; touch "${@: -2:1}/netbird" 2>/dev/null; true',
+        "install": 'echo "install $*" >> "$LOG"',
+        "systemctl": 'echo "systemctl $*" >> "$LOG"',
+        "apt-get": 'echo "apt-get $*" >> "$LOG"',
+        "update-ca-certificates": 'echo "update-ca" >> "$LOG"',
+        "chown": "true",
+        "getent": f'echo "u:x:1:1::{home}:/bin/bash"',
+        "sshd": "true",
+        "netbird": 'echo "netbird $*" >> "$LOG"; case "$1" in version) echo 0.0.1;; '
+        'status) echo "Management: Connected";; up) cat "${@: -3:1}" >> "$LOG.key";; esac',
+    }
+    for name, body in stubs.items():
+        stub = bin_dir / name
+        stub.write_text(f"#!/bin/bash\n{body}\n")
+        stub.chmod(0o755)
+    bundle = {
+        "management_url": "https://remote.example.org:443",
+        "setup_key": "SECRET-KEY-2",
+        "overlay_name": "mightling-ab.netbird.selfhosted",
+        "ca": "",
+    }
+    script = tmp_path / "join.sh"
+    script.write_text(RemoteJoinScript.script(bundle, peer="house-2", ssh_user="owner"))
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "LOG": str(log),
+        "SUDO_USER": "owner",
+    }
+    result = subprocess.run(
+        ["bash", "-c", f"id() {{ echo 0; }}; export -f id; bash {script}"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text()
+    assert "SECRET-KEY-2" not in calls + result.stdout + result.stderr
+    assert "--management-url https://remote.example.org:443" in calls
+    assert "--hostname house-2" in calls and "--setup-key-file" in calls
+    assert "/netbird_0.80.0_linux_" in calls and "sha256sum" in calls  # the archive was checked
+    config = (home / ".ssh" / "config").read_text()
+    assert "Host gx10-remote" in config and "HostName mightling-ab.netbird.selfhosted" in config
+    assert "User owner" in config
