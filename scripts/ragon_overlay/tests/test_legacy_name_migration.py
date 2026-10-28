@@ -461,7 +461,11 @@ def test_an_old_forge_is_moved_to_its_new_names(monkeypatch, tmp_home):
     assert line and "renamed the forge account" in line
     assert sorted(path.name for path in units.iterdir()) == ["other.service"]
     assert (ForgeSettings.data_dir() / "ragon/frozen").read_text() == "1" and not state.exists()
-    assert ["rm", "-f", "mightling-forge"] in docker and ["network", "rm", "mightling-forge"] in docker
+    assert ["rm", "-f", "mightling-forge"] in docker and [
+        "network",
+        "rm",
+        "mightling-forge",
+    ] in docker
     assert any(call[0] == "enable" for call in systemctl)
     assert ("POST", "/admin/users/mightling-phone/rename", {"new_username": "ragon-phone"}) in api
     assert LegacyNameMigration.migrate_forge() is None, "a second run finds nothing to do"
@@ -484,16 +488,113 @@ def test_an_old_service_file_is_rendered_again_with_both_types():
     assert LegacyNameMigration.with_both_types("not a service file") == "not a service file"
 
 
-def test_the_sudo_line_names_the_signal_account_only_when_the_old_unit_is_there(
+def test_the_sudo_line_moves_every_old_signal_bridge_and_says_how_to_start_it_again(
     monkeypatch, tmp_path
 ):
-    unit = tmp_path / "mightling-signal.service"
-    monkeypatch.setattr(legacy_name_migration, "LEGACY_SIGNAL_UNIT", unit)
-    monkeypatch.setattr(Path, "exists", lambda self: self == unit and unit.is_file())
-    assert LegacyNameMigration.privileged_line() is None
-    unit.write_text("[Unit]\n")
-    line = LegacyNameMigration.privileged_line()
-    assert "usermod -l ragon-signal mightling-signal" in line and "groupmod -n" in line
+    assert LegacyNameMigration.privileged_line(tmp_path) is None
+    for folder in (
+        "mightling-signal",
+        "mightling-signal-work",
+        "mightling-signal-Bad",
+        "postgresql",
+    ):
+        (tmp_path / "var/lib" / folder).mkdir(parents=True)
+    units = tmp_path / "etc/systemd/system"
+    units.mkdir(parents=True)
+    (units / "mightling-signal.service").write_text("[Unit]\n")
+    (units / "mightling-signal@.service").write_text("[Unit]\n")
+    (tmp_path / "opt/mightling").mkdir(parents=True)
+    asked = []
+    monkeypatch.setattr(
+        LegacyNameMigration,
+        "system_unit_enabled",
+        classmethod(lambda cls, unit: asked.append(unit) or unit == "mightling-signal.service"),
+    )
+
+    line = LegacyNameMigration.privileged_line(tmp_path)
+
+    root, _sep, after = line.partition("'; ")
+    assert root.startswith("sudo sh -c 'systemctl disable --now ")
+    assert "mightling-signal.service mightling-signal@work.service;" in root
+    for old, new in (
+        ("mightling-signal", "ragon-signal"),
+        ("mightling-signal-work", "ragon-signal-work"),
+    ):
+        assert f"usermod -l {new} {old};" in root and f"groupmod -n {new} {old};" in root
+        assert f"[ -e /var/lib/{new} ] || mv /var/lib/{old} /var/lib/{new};" in root
+    assert "Bad" not in root and "postgresql" not in root
+    assert "mv /opt/mightling /opt/ragon" in root
+    assert "rm -f /usr/local/lib/mightling/ling-signal;" in root
+    assert (
+        "rm -f /etc/systemd/system/mightling-signal.service /etc/systemd/system/mightling-signal@.service"
+        in root
+    )
+    assert root.endswith("systemctl daemon-reload")
+    assert after == "ragon signal setup --refresh; ragon signal start --name default", (
+        "only the bridge that was on starts again"
+    )
+    assert asked == ["mightling-signal.service", "mightling-signal@work.service"]
+
+
+def test_old_user_units_move_with_their_text_links_and_running_state(monkeypatch, tmp_home):
+    units = LegacyNameMigration.user_unit_dir()
+    wants = units / "default.target.wants"
+    wants.mkdir(parents=True)
+    bin_dir = tmp_home / ".local/share/dreamference/mightling/bin"
+    (units / "mightling-web.service").write_text(
+        f"[Unit]\nDescription=Mightling web server (ling web)\n[Service]\nExecStart={bin_dir}/ling web serve --lan\n"
+    )
+    (units / "mightling-chat.service").write_text("[Unit]\nAfter=mightling-web.service\n")
+    (units / "mightling-remote-certificate.service").write_text(
+        "[Service]\nSlice=mightling-batch.slice\nExecStart=%h/.local/bin/ling-admin remote certificate renew\n"
+    )
+    (units / "mightling-remote-tunnel.service").write_text(
+        "[Service]\nExecStart=/usr/bin/ssh -N -o UserKnownHostsFile=/k mightling-tunnel@relay.example.com\n"
+    )
+    (units / "mightling-night.timer").write_text("left to replace_night_units")
+    (wants / "mightling-web.service").symlink_to(units / "mightling-web.service")
+    calls = []
+
+    def systemctl(cls, *args):
+        calls.append(" ".join(args))
+        return args != ("is-active", "--quiet", "mightling-chat.service")
+
+    monkeypatch.setattr(LegacyNameMigration, "user_systemctl", classmethod(systemctl))
+    assert LegacyNameMigration.anything_old()
+
+    moved, to_start = LegacyNameMigration.move_user_units()
+    assert not any(call.startswith("start") for call in calls), (
+        "nothing starts before the programs move"
+    )
+    line = LegacyNameMigration.start_user_units(moved, to_start)
+
+    new_bin = tmp_home / ".local/share/dreamference/ragon/bin"
+    assert (units / "ragon-web.service").read_text() == (
+        f"[Unit]\nDescription=Ragon web server (ling web)\n[Service]\nExecStart={new_bin}/ragon web serve --lan\n"
+    )
+    assert (units / "ragon-chat.service").read_text() == "[Unit]\nAfter=ragon-web.service\n"
+    assert (units / "ragon-remote-certificate.service").read_text() == (
+        "[Service]\nSlice=ragon-batch.slice\nExecStart=%h/.local/bin/ragon-admin remote certificate renew\n"
+    )
+    assert (
+        " mightling-tunnel@relay.example.com\n"
+        in (units / "ragon-remote-tunnel.service").read_text()
+    )
+    assert (units / "mightling-night.timer").is_file()
+    assert not (units / "mightling-web.service").exists()
+    assert not (wants / "mightling-web.service").is_symlink()
+    assert (wants / "ragon-web.service").resolve() == units / "ragon-web.service"
+    running = (
+        "mightling-remote-certificate.service mightling-remote-tunnel.service mightling-web.service"
+    )
+    assert calls.index(f"stop {running}") < calls.index("daemon-reload")
+    assert (
+        calls[-1]
+        == "start ragon-remote-certificate.service ragon-remote-tunnel.service ragon-web.service"
+    )
+    assert line.startswith("moved the user units mightling-chat.service, ") and "started" in line
+    assert not LegacyNameMigration.anything_old()
+    assert LegacyNameMigration.move_user_units() == ([], [])
 
 
 def test_a_second_run_after_a_full_migration_with_delegate_and_app_changes_nothing(

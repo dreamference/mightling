@@ -40,9 +40,32 @@ LEGACY_FORGE_STATE: Final[str] = "mightling"
 LEGACY_PHONE_ACCOUNT: Final[str] = "mightling-phone"
 # The engine's containers: `ling-serve` and, while it scans, `ling-serve-scan-*`.
 LEGACY_ENGINE_CONTAINER: Final[str] = "ling-serve"
-# A Signal bridge's system account and unit (the sudo line renames the account; its uid stays).
-LEGACY_SIGNAL_UNIT: Final[Path] = Path("/etc/systemd/system/mightling-signal.service")
+# A Signal bridge's system accounts, units, state folders, runtime and binary (the sudo line renames
+# the accounts, whose uids stay, and moves the rest; `ragon signal setup --refresh` writes the units).
+# Relative to the root `privileged_line` is given.
+LEGACY_SIGNAL_UNIT: Final[str] = "etc/systemd/system/mightling-signal.service"
+LEGACY_SIGNAL_TEMPLATE: Final[str] = "etc/systemd/system/mightling-signal@.service"
 LEGACY_SIGNAL_ACCOUNT: Final[str] = "mightling-signal"
+SIGNAL_ACCOUNT: Final[str] = "ragon-signal"
+SIGNAL_STATE_ROOT: Final[str] = "var/lib"
+LEGACY_SIGNAL_RUNTIME: Final[str] = "opt/mightling"
+SIGNAL_RUNTIME: Final[str] = "opt/ragon"
+LEGACY_SIGNAL_BRIDGE: Final[str] = "usr/local/lib/mightling/ling-signal"
+# The user units of every other subsystem (web, chat, sync, the monitor, the Matrix proxy, remote
+# access…): moved to their new names with their text rewritten, by `ragon` and here, whichever runs
+# first. The Night Shift and forge units have steps of their own (the timer's window, the forge's state).
+LEGACY_UNIT_PREFIXES: Final[tuple] = ("mightling-", "puffin-")
+LEGACY_SLICES: Final[tuple] = ("mightling.slice", "puffin.slice")
+UNITS_WITH_OWN_STEPS: Final[tuple] = ("mightling-night", "puffin-night", "mightling-forge")
+UNIT_SUFFIXES: Final[tuple] = (".service", ".timer", ".socket", ".path", ".slice", ".target")
+# The folders an old unit's program may sit in, and the new install folder's.
+LEGACY_UNIT_BIN_DIRS: Final[tuple] = ("/dreamference/mightling/bin/", "/dreamference/puffin/bin/")
+UNIT_BIN_DIR: Final[str] = "/dreamference/ragon/bin/"
+LINK_DIR_SUFFIX: Final[str] = "/.local/bin/"
+LEGACY_ENV_PREFIX: Final[str] = "MIGHTLING_"
+ENV_PREFIX: Final[str] = "RAGON_"
+LEGACY_PRODUCT_WORDS: Final[tuple] = ("Mightling", "Puffin")
+PRODUCT_WORD: Final[str] = "Ragon"
 # The `main` record of an advertised node that serves a model a coding client can use.
 MAIN_RECORD_ON: Final[str] = "1"
 FORGE_RENAME_TRIES: Final[int] = 6
@@ -95,6 +118,13 @@ LEGACY_LINKS: Final[tuple] = (
     "ling-delegate",
     "ling-admin",
 )
+# A program named in an old unit, by its old name and its new one (the binaries, and the admin command).
+UNIT_PROGRAMS: Final[dict] = {
+    **dict(LEGACY_BINARIES),
+    "puffin-app": "ragon-app",
+    "puffin-admin": "ragon-admin",
+    "ling-admin": "ragon-admin",
+}
 # Units that must not be running while anything moves: SWE-bench runs, Night Shift and node jobs (`ragon`
 # waits for the same ones, rename.rs).
 BUSY_UNIT_PATTERNS: Final[tuple] = (
@@ -209,7 +239,36 @@ class LegacyNameMigration:
                     file=sys.stderr,
                 )
             return []
+        done = cls.run_steps()
+        stale = cls.stale_project_config()
+        if done or stale:
+            print(
+                "Mightling is now Ragon: the commands are `ragon` and `ragon-admin`.",
+                file=sys.stderr,
+            )
+            for line in done + ([stale] if stale else []):
+                print(f"   {line}", file=sys.stderr)
+            privileged = cls.privileged_line()
+            if privileged:
+                print(f"   once (the sudo parts as root): {privileged}", file=sys.stderr)
+        return done
+
+    @classmethod
+    def run_steps(cls) -> list[str]:
+        """Runs every step once; a step that fails on the file system is reported and the others still run.
+
+        The old user units stop before anything they run from moves, and start again under their new
+        names only once it has moved.
+
+        Returns:
+            list[str]: What was done, one line per step.
+        """
         done: list[str] = []
+        try:
+            moved_units, to_start = cls.move_user_units()
+        except OSError as error:
+            moved_units, to_start = [], []
+            done.append(f"could not finish move_user_units: {error}")
         for step in (
             cls.move_install_dir,
             cls.move_build_caches,
@@ -229,45 +288,331 @@ class LegacyNameMigration:
                 line = f"could not finish {step.__name__}: {error}"
             if line:
                 done.append(line)
-        stale = cls.stale_project_config()
-        if done or stale:
-            print(
-                "Mightling is now Ragon: the commands are `ragon` and `ragon-admin`.",
-                file=sys.stderr,
-            )
-            for line in done + ([stale] if stale else []):
-                print(f"   {line}", file=sys.stderr)
-            privileged = cls.privileged_line()
-            if privileged:
-                print(f"   once, as root: {privileged}", file=sys.stderr)
+        units_line = cls.start_user_units(moved_units, to_start)
+        if units_line:
+            done.append(units_line)
         return done
 
     @classmethod
     def anything_old(cls) -> bool:
-        """Returns: bool: Whether an old install folder, link or unit is still on this machine."""
+        """Returns: bool: Whether an old install folder, link or user unit is still on this machine."""
         paths = [Path(p).expanduser() for p in LEGACY_INSTALL_DIRS]
         links = Path("~/.local/bin").expanduser()
         paths += [links / name for name in LEGACY_LINKS]
-        return any(path.is_dir() or path.is_symlink() for path in paths)
+        return any(path.is_dir() or path.is_symlink() for path in paths) or bool(
+            cls.old_user_units()
+        )
 
     @classmethod
-    def privileged_line(cls) -> str | None:
-        """The line the owner runs with sudo for the root-owned leftovers.
+    def legacy_signal_accounts(cls, root: Path) -> list[str]:
+        """The system accounts of the old Signal bridges, by their state folders under `/var/lib`.
+
+        Args:
+            root: The file system's root (a scratch folder in the tests).
 
         Returns:
-            str | None: The command (AppArmor profiles, the Avahi file), or None when there are none.
+            list[str]: `mightling-signal` and every `mightling-signal-<name>`, sorted; empty when none.
         """
-        old = [Path("/etc/apparmor.d") / name for name in ("puffin-bwrap", "mightling-bwrap")]
-        lines = ["sudo ragon-admin host setup"] if any(path.exists() for path in old) else []
-        if LEGACY_SIGNAL_UNIT.exists():
-            # The account keeps its uid, so the bridge's state and the device link survive; `ragon signal
-            # start` installs the unit under its new name.
-            lines.append(
-                f"sudo sh -c 'systemctl disable --now {LEGACY_SIGNAL_UNIT.name}; "
-                f"usermod -l ragon-signal {LEGACY_SIGNAL_ACCOUNT}; "
-                f"groupmod -n ragon-signal {LEGACY_SIGNAL_ACCOUNT}; rm -f {LEGACY_SIGNAL_UNIT}'"
+        try:
+            names = [path.name for path in (root / SIGNAL_STATE_ROOT).iterdir() if path.is_dir()]
+        except OSError:
+            return []
+        prefix = f"{LEGACY_SIGNAL_ACCOUNT}-"
+        return sorted(
+            name
+            for name in names
+            if name == LEGACY_SIGNAL_ACCOUNT
+            or (
+                name.startswith(prefix)
+                and re.fullmatch(r"[a-z][a-z0-9-]{0,11}", name[len(prefix) :])
             )
+        )
+
+    @classmethod
+    def system_unit_enabled(cls, unit: str) -> bool:
+        """Whether a system unit is enabled (`systemctl is-enabled` needs no root).
+
+        Args:
+            unit: The unit's name.
+
+        Returns:
+            bool: True when systemctl says it is enabled; False when it is not or cannot be asked.
+        """
+        try:
+            found = subprocess.run(
+                ["systemctl", "is-enabled", "--quiet", unit],
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return found.returncode == 0
+
+    @classmethod
+    def signal_line(cls, root: Path) -> str | None:
+        """The commands that move the old Signal bridges to their new names, run once by the owner.
+
+        As root: stop the old units, rename each account and its group (the uid stays, so the Signal
+        keys and the device link in its state folder survive), move its state folder to the new name,
+        move the shared runtime (`/opt`) so it is not fetched again, and remove the old bridge binary
+        and unit files. Then, as the owner, `ragon signal setup --refresh` installs the bridge under its
+        new name, points each bridge's settings at the moved runtime and writes the new units, and
+        `ragon signal start` starts each bridge that was on.
+
+        Args:
+            root: The file system's root (a scratch folder in the tests).
+
+        Returns:
+            str | None: The line, or None when no old bridge is here.
+        """
+        accounts = cls.legacy_signal_accounts(root)
+        unit, template = root / LEGACY_SIGNAL_UNIT, root / LEGACY_SIGNAL_TEMPLATE
+        if not accounts and not unit.exists() and not template.exists():
+            return None
+        units = {
+            account: (
+                unit.name
+                if account == LEGACY_SIGNAL_ACCOUNT
+                else f"{LEGACY_SIGNAL_ACCOUNT}@{account[len(LEGACY_SIGNAL_ACCOUNT) + 1 :]}.service"
+            )
+            for account in accounts
+        }
+        steps = [f"systemctl disable --now {' '.join(units.values() or [unit.name])}"]
+        state = f"/{SIGNAL_STATE_ROOT}"
+        for account in accounts:
+            new = SIGNAL_ACCOUNT + account[len(LEGACY_SIGNAL_ACCOUNT) :]
+            steps += [
+                f"usermod -l {new} {account}",
+                f"groupmod -n {new} {account}",
+                f"[ -e {state}/{new} ] || mv {state}/{account} {state}/{new}",
+            ]
+        runtime, new_runtime = f"/{LEGACY_SIGNAL_RUNTIME}", f"/{SIGNAL_RUNTIME}"
+        bridge = f"/{LEGACY_SIGNAL_BRIDGE}"
+        steps += [
+            f"[ -e {new_runtime} ] || [ ! -d {runtime} ] || mv {runtime} {new_runtime}",
+            f"rm -f {bridge}",
+            f"rmdir {Path(bridge).parent} 2>/dev/null",
+            f"rm -f /{LEGACY_SIGNAL_UNIT} /{LEGACY_SIGNAL_TEMPLATE}",
+            "systemctl daemon-reload",
+        ]
+        line = f"sudo sh -c '{'; '.join(steps)}'; ragon signal setup --refresh"
+        several = len(accounts) > 1
+        for account, name in units.items():
+            if cls.system_unit_enabled(name):
+                instance = account[len(LEGACY_SIGNAL_ACCOUNT) + 1 :] or "default"
+                line += "; ragon signal start" + (f" --name {instance}" if several else "")
+        return line
+
+    @classmethod
+    def privileged_line(cls, root: Path = Path("/")) -> str | None:
+        """The line the owner runs for the root-owned leftovers (each root part says `sudo`).
+
+        Args:
+            root: The file system's root (a scratch folder in the tests).
+
+        Returns:
+            str | None: The commands (AppArmor profiles, the Avahi file, the Signal bridges), or None
+            when there are none.
+        """
+        old = [root / "etc/apparmor.d" / name for name in ("puffin-bwrap", "mightling-bwrap")]
+        lines = ["sudo ragon-admin host setup"] if any(path.exists() for path in old) else []
+        signal = cls.signal_line(root)
+        if signal:
+            lines.append(signal)
         return "; ".join(lines) if lines else None
+
+    @classmethod
+    def new_unit_name(cls, name: str, own_steps: bool = False) -> str | None:
+        """The new name of an old user unit.
+
+        Args:
+            name: A unit's name.
+            own_steps: Whether a unit with a step of its own (Night Shift, the forge) is renamed too, as
+                it is where another unit names it; the generic step leaves those files to their steps.
+
+        Returns:
+            str | None: `ragon-…` (or `ragon.slice`), or None for a name that is not an old unit's (or
+            that has a step of its own, unless `own_steps`).
+        """
+        if not name.endswith(UNIT_SUFFIXES) or (
+            name.startswith(UNITS_WITH_OWN_STEPS) and not own_steps
+        ):
+            return None
+        if name in LEGACY_SLICES:
+            return "ragon.slice"
+        for prefix in LEGACY_UNIT_PREFIXES:
+            if name.startswith(prefix) and len(name) > len(prefix):
+                return "ragon-" + name[len(prefix) :]
+        return None
+
+    @classmethod
+    def rewrite_unit_word(cls, word: str) -> str:
+        """Renames one word of a unit file; a word with no old name in it is kept.
+
+        The old names are a unit's, a program's path, a path into the old home, an old variable's
+        and the product's.
+
+        Args:
+            word: The text between spaces and `=` signs.
+
+        Returns:
+            str: The word as the new version writes it.
+        """
+        if word in LEGACY_PRODUCT_WORDS:
+            return PRODUCT_WORD
+        if word.startswith(LEGACY_ENV_PREFIX):
+            return ENV_PREFIX + word[len(LEGACY_ENV_PREFIX) :]
+        renamed = cls.new_unit_name(word, own_steps=True) or cls.new_program_path(word)
+        if renamed:
+            return renamed
+        if word.endswith("/.mightling"):
+            word += "/"
+            return word.replace("/.mightling/", "/.ragon/")[:-1]
+        return word.replace("/.mightling/", "/.ragon/")
+
+    @classmethod
+    def new_program_path(cls, word: str) -> str | None:
+        """The new path of a program an old unit runs.
+
+        Args:
+            word: A word of a unit file.
+
+        Returns:
+            str | None: The path in the new install folder or the new link, or None when the word is
+            not an old program's path.
+        """
+        folder, slash, program = word.rpartition("/")
+        folder += slash
+        for legacy in LEGACY_UNIT_BIN_DIRS:
+            if folder.endswith(legacy):
+                return folder[: -len(legacy)] + UNIT_BIN_DIR + UNIT_PROGRAMS.get(program, program)
+        if folder.endswith(LINK_DIR_SUFFIX) and program in UNIT_PROGRAMS:
+            return folder + UNIT_PROGRAMS[program]
+        return None
+
+    @classmethod
+    def rewrite_unit_text(cls, text: str) -> str:
+        """Rewrites an old unit file's text for its new name, word by word (`rename.rs` does the same).
+
+        Only names the migration moves are changed: a name it keeps (the relay box's tunnel account in
+        an `ssh` command, an overlay peer's DNS name) does not end like a unit and is left as it was.
+
+        Args:
+            text: The old unit file's text.
+
+        Returns:
+            str: The text of the unit under its new name.
+        """
+        return "\n".join(
+            " ".join(
+                "=".join(cls.rewrite_unit_word(part) for part in word.split("="))
+                for word in line.split(" ")
+            )
+            for line in text.split("\n")
+        )
+
+    @classmethod
+    def user_unit_dir(cls) -> Path:
+        """Returns: Path: `~/.config/systemd/user`, computed at call time (tests move `HOME`)."""
+        return Path("~/.config/systemd/user").expanduser()
+
+    @classmethod
+    def old_user_units(cls) -> list[tuple[str, str]]:
+        """The old user unit files the generic step moves.
+
+        Returns:
+            list[tuple[str, str]]: (old name, new name) of each, sorted.
+        """
+        directory = cls.user_unit_dir()
+        try:
+            names = sorted(path.name for path in directory.iterdir() if path.is_file())
+        except OSError:
+            return []
+        return [(name, new) for name in names if (new := cls.new_unit_name(name))]
+
+    @classmethod
+    def user_systemctl(cls, *args: str) -> bool:
+        """Runs `systemctl --user` with `args`.
+
+        Args:
+            *args: The arguments.
+
+        Returns:
+            bool: Whether it succeeded; False when systemctl could not be run.
+        """
+        try:
+            done = subprocess.run(
+                ["systemctl", "--user", *args], capture_output=True, check=False, timeout=60
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return done.returncode == 0
+
+    @classmethod
+    def move_user_units(cls) -> tuple[list[str], list[str]]:
+        """Stops the old user units and moves them to their new names (A2), before anything moves.
+
+        Each unit file is written again under its new name with its text rewritten (the programs it
+        runs, the units it names), and the links `systemctl enable` made follow it, so an enabled unit
+        stays enabled. A unit already written under its new name is kept as it is. The units that ran
+        are started by `start_user_units`, after the programs have moved.
+
+        Returns:
+            tuple[list[str], list[str]]: The old names moved, and the new names to start.
+        """
+        directory = cls.user_unit_dir()
+        units = cls.old_user_units()
+        if not units:
+            return [], []
+        running = [old for old, _new in units if cls.user_systemctl("is-active", "--quiet", old)]
+        if running:
+            cls.user_systemctl("stop", *running)
+        moved, to_start = [], []
+        for old, new in units:
+            if not (directory / new).exists():
+                (directory / new).write_text(cls.rewrite_unit_text((directory / old).read_text()))
+            (directory / old).unlink()
+            cls.move_enable_links(directory, old, new)
+            moved.append(old)
+            if old in running:
+                to_start.append(new)
+        cls.user_systemctl("daemon-reload")
+        return moved, to_start
+
+    @classmethod
+    def move_enable_links(cls, directory: Path, old: str, new: str) -> None:
+        """Moves the links `systemctl enable` made for an old unit (`*.wants/`, `*.requires/`) to the new one.
+
+        Args:
+            directory: The user unit folder.
+            old: The old unit's name.
+            new: The new unit's name.
+        """
+        for folder in directory.iterdir():
+            if folder.suffix not in (".wants", ".requires") or not (folder / old).is_symlink():
+                continue
+            (folder / old).unlink()
+            if not (folder / new).is_symlink():
+                (folder / new).symlink_to(directory / new)
+
+    @classmethod
+    def start_user_units(cls, moved: list[str], to_start: list[str]) -> str | None:
+        """Starts again, under their new names, the old units that ran.
+
+        Args:
+            moved: The old names `move_user_units` moved.
+            to_start: The new names of those that ran.
+
+        Returns:
+            str | None: A line when units were moved.
+        """
+        if not moved:
+            return None
+        if to_start:
+            cls.user_systemctl("start", *to_start)
+        started = f"; started {', '.join(to_start)} again" if to_start else ""
+        return f"moved the user units {', '.join(moved)} to their new names{started}"
 
     @classmethod
     def move_install_dir(cls) -> str | None:
@@ -497,9 +842,12 @@ class LegacyNameMigration:
         names = [
             name
             for name in listed.stdout.split()
-            if name == LEGACY_ENGINE_CONTAINER or name.startswith(f"{LEGACY_ENGINE_CONTAINER}-scan-")
+            if name == LEGACY_ENGINE_CONTAINER
+            or name.startswith(f"{LEGACY_ENGINE_CONTAINER}-scan-")
         ]
-        removed = [name for name in names if ForgeContainer.docker(["rm", "-f", name]).returncode == 0]
+        removed = [
+            name for name in names if ForgeContainer.docker(["rm", "-f", name]).returncode == 0
+        ]
         if not removed:
             return None
         return f"removed the container {', '.join(removed)}; `ragon-admin server start` starts the engine again"
@@ -515,7 +863,9 @@ class LegacyNameMigration:
         from dreamference.forge.forge_service import ForgeService
         from dreamference.forge.forge_settings import ForgeSettings
 
-        units = sorted(path for path in ForgeService.unit_dir().glob(f"{LEGACY_FORGE_NAME}*") if path.is_file())
+        units = sorted(
+            path for path in ForgeService.unit_dir().glob(f"{LEGACY_FORGE_NAME}*") if path.is_file()
+        )
         return units, ForgeSettings.data_dir() / LEGACY_FORGE_STATE
 
     @classmethod
@@ -571,14 +921,19 @@ class LegacyNameMigration:
             return None
         status = 0
         for _ in range(FORGE_RENAME_TRIES):
-            status, _body = ForgeContainer.api("GET", f"/users/{LEGACY_PHONE_ACCOUNT}", admin, timeout=10)
+            status, _body = ForgeContainer.api(
+                "GET", f"/users/{LEGACY_PHONE_ACCOUNT}", admin, timeout=10
+            )
             if status:
                 break
             time.sleep(FORGE_RENAME_WAIT_S)
         if status != HTTPStatus.OK:
             return None
         status, _body = ForgeContainer.api(
-            "POST", f"/admin/users/{LEGACY_PHONE_ACCOUNT}/rename", admin, {"new_username": PHONE_ACCOUNT}
+            "POST",
+            f"/admin/users/{LEGACY_PHONE_ACCOUNT}/rename",
+            admin,
+            {"new_username": PHONE_ACCOUNT},
         )
         if status in (HTTPStatus.OK, HTTPStatus.NO_CONTENT):
             return f"renamed the forge account {LEGACY_PHONE_ACCOUNT} to {PHONE_ACCOUNT}"

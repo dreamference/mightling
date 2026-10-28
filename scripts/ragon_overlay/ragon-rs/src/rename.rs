@@ -180,6 +180,24 @@ const NIGHT_RUNNER_LOCK: &str = "night/runner.lock";
 #[cfg(target_os = "linux")]
 const SYSTEMCTL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// The user units' folder, relative to `$HOME`.
+const USER_UNIT_DIR: &str = ".config/systemd/user";
+/// The old user units of every subsystem (web, chat, sync, the monitor, the Matrix proxy, remote
+/// access…), moved to their new names with their text rewritten, here and by `ragon-admin`, whichever
+/// runs first (specs/DREAMFERENCE_RENAME_RAGON.md §2.3, A2). The Night Shift and forge units are left
+/// to `ragon-admin`, whose steps keep the timer's window and the forge's state.
+const LEGACY_UNIT_PREFIXES: &[&str] = &["mightling-", "puffin-"];
+const LEGACY_SLICES: &[&str] = &["mightling.slice", "puffin.slice"];
+const UNITS_WITH_OWN_STEPS: &[&str] = &["mightling-night", "puffin-night", "mightling-forge"];
+const UNIT_SUFFIXES: &[&str] = &[".service", ".timer", ".socket", ".path", ".slice", ".target"];
+/// The folders an old unit's program may sit in, and the new install folder's.
+const LEGACY_UNIT_BIN_DIRS: &[&str] = &["/dreamference/mightling/bin/", "/dreamference/puffin/bin/"];
+const UNIT_BIN_DIR: &str = "/dreamference/ragon/bin/";
+const LINK_DIR_SUFFIX: &str = "/.local/bin/";
+/// Programs an old unit may name besides [`BINARIES`]: the admin command and the 1.4 app.
+const UNIT_PROGRAMS: &[(&str, &str)] = &[("puffin-app", "ragon-app"), ("puffin-admin", "ragon-admin"), ("ling-admin", "ragon-admin")];
+const LEGACY_PRODUCT_WORDS: &[&str] = &["Mightling", "Puffin"];
+
 /// What a migration did, one line per step; empty when there was nothing to do.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Report {
@@ -231,10 +249,14 @@ pub fn migrate(home: &Path, cwd: &Path, config_path: Option<&Path>) -> Report {
             return report;
         }
     }
+    // The old units stop before anything they run from moves, and start again under their new names
+    // only once it has moved.
+    let units = move_user_units(home);
     move_install_dir(home, &mut report);
     copy_windows_install(home, &mut report);
     relink(home, &mut report);
     move_home(home, &mut report);
+    start_user_units(&units, &mut report);
     let mut configs = vec![
         home.join(".config/dreamference/config.toml"),
         cwd.join("dreamference.toml"),
@@ -342,7 +364,7 @@ fn night_runner_holds(lock: &Path) -> bool {
 }
 
 /// Whether anything of an old installation is left to move: an old install folder, an old command
-/// link or an unmoved `~/.mightling`.
+/// link, an unmoved `~/.mightling` or an old user unit.
 pub fn anything_old(home: &Path) -> bool {
     LEGACY_INSTALL_DIRS.iter().any(|dir| home.join(dir).is_dir())
         || LEGACY_LINKS.iter().any(|name| {
@@ -350,6 +372,230 @@ pub fn anything_old(home: &Path) -> bool {
                 .is_ok_and(|metadata| metadata.file_type().is_symlink())
         })
         || unmoved_home(home).is_some()
+        || !old_user_units(home).is_empty()
+}
+
+/// The new name of an old user unit. `own_steps` renames the Night Shift and forge units too, as where
+/// another unit names them; the generic step leaves those files to `ragon-admin`.
+pub fn new_unit_name(name: &str, own_steps: bool) -> Option<String> {
+    if !UNIT_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+        || (!own_steps && UNITS_WITH_OWN_STEPS.iter().any(|prefix| name.starts_with(prefix)))
+    {
+        return None;
+    }
+    if LEGACY_SLICES.contains(&name) {
+        return Some("ragon.slice".to_string());
+    }
+    LEGACY_UNIT_PREFIXES
+        .iter()
+        .find_map(|prefix| name.strip_prefix(prefix).filter(|rest| !rest.is_empty()))
+        .map(|rest| format!("ragon-{rest}"))
+}
+
+/// The new path of a program an old unit runs: in the new install folder, or the new link.
+fn new_program_path(word: &str) -> Option<String> {
+    let slash = word.rfind('/')?;
+    let (folder, program) = (&word[..=slash], &word[slash + 1..]);
+    let renamed = BINARIES
+        .iter()
+        .chain(UNIT_PROGRAMS)
+        .find(|(old, _)| *old == program)
+        .map(|(_, new)| *new);
+    if let Some(legacy) = LEGACY_UNIT_BIN_DIRS.iter().find(|legacy| folder.ends_with(*legacy)) {
+        let base = &folder[..folder.len() - legacy.len()];
+        return Some(format!("{base}{UNIT_BIN_DIR}{}", renamed.unwrap_or(program)));
+    }
+    (folder.ends_with(LINK_DIR_SUFFIX) && renamed.is_some()).then(|| format!("{folder}{}", renamed.unwrap_or(program)))
+}
+
+/// Renames one word of a unit file (a unit's name, a program's path, a path into the old home, an
+/// old variable's name or the product's name); a word with no old name in it is kept.
+fn rewrite_unit_word(word: &str) -> String {
+    if LEGACY_PRODUCT_WORDS.contains(&word) {
+        return "Ragon".to_string();
+    }
+    if let Some(rest) = word.strip_prefix("MIGHTLING_") {
+        return format!("RAGON_{rest}");
+    }
+    if let Some(renamed) = new_unit_name(word, true).or_else(|| new_program_path(word)) {
+        return renamed;
+    }
+    if let Some(base) = word.strip_suffix("/.mightling") {
+        return format!("{}/.ragon", base.replace("/.mightling/", "/.ragon/"));
+    }
+    word.replace("/.mightling/", "/.ragon/")
+}
+
+/// Rewrites an old unit file's text for its new name, word by word (`ragon-admin` does the same).
+/// Only names the migration moves change: a name it keeps (the relay box's tunnel account in an
+/// `ssh` command, an overlay peer's DNS name) does not end like a unit and is left as it was.
+pub fn rewrite_unit_text(text: &str) -> String {
+    text.split('\n')
+        .map(|line| {
+            line.split(' ')
+                .map(|word| word.split('=').map(rewrite_unit_word).collect::<Vec<_>>().join("="))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The old user unit files the generic step moves: (old name, new name), sorted.
+fn old_user_units(home: &Path) -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir(home.join(USER_UNIT_DIR)) else {
+        return Vec::new();
+    };
+    let mut units: Vec<(String, String)> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            new_unit_name(&name, false).map(|new| (name, new))
+        })
+        .collect();
+    units.sort();
+    units
+}
+
+/// The old units [`move_user_units`] moved, and the new names of those that ran.
+#[derive(Debug, Default)]
+struct MovedUnits {
+    moved: Vec<String>,
+    start: Vec<String>,
+}
+
+/// Stops the old user units and moves them to their new names, before anything they run from
+/// moves. Each unit file is written again under its new name with its text rewritten, and the links
+/// `systemctl enable` made follow it, so an enabled unit stays enabled. A unit already written under
+/// its new name is kept as it is.
+fn move_user_units(home: &Path) -> MovedUnits {
+    let mut result = MovedUnits::default();
+    let units = old_user_units(home);
+    if units.is_empty() {
+        return result;
+    }
+    let dir = home.join(USER_UNIT_DIR);
+    let running: Vec<&str> = units
+        .iter()
+        .map(|(old, _)| old.as_str())
+        .filter(|old| user_systemctl(&["is-active", "--quiet", old]))
+        .collect();
+    if !running.is_empty() {
+        let mut stop = vec!["stop"];
+        stop.extend(&running);
+        user_systemctl(&stop);
+    }
+    for (old, new) in &units {
+        if std::fs::symlink_metadata(dir.join(new)).is_err() {
+            let Ok(text) = std::fs::read_to_string(dir.join(old)) else {
+                continue;
+            };
+            if std::fs::write(dir.join(new), rewrite_unit_text(&text)).is_err() {
+                continue;
+            }
+        }
+        if std::fs::remove_file(dir.join(old)).is_err() {
+            continue;
+        }
+        move_enable_links(&dir, old, new);
+        result.moved.push(old.clone());
+        if running.contains(&old.as_str()) {
+            result.start.push(new.clone());
+        }
+    }
+    user_systemctl(&["daemon-reload"]);
+    result
+}
+
+/// Moves the links `systemctl enable` made for an old unit (`*.wants/`, `*.requires/`) to the new one.
+fn move_enable_links(dir: &Path, old: &str, new: &str) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for folder in entries.flatten().map(|entry| entry.path()) {
+        let enabling = folder.extension().is_some_and(|ext| ext == "wants" || ext == "requires");
+        let link = folder.join(old);
+        if !enabling || !std::fs::symlink_metadata(&link).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            continue;
+        }
+        let _ = std::fs::remove_file(&link);
+        if std::fs::symlink_metadata(folder.join(new)).is_err() {
+            let _ = make_symlink(dir.join(new), folder.join(new));
+        }
+    }
+}
+
+/// Starts again, under their new names, the old units that ran, and says what moved.
+fn start_user_units(units: &MovedUnits, report: &mut Report) {
+    if units.moved.is_empty() {
+        return;
+    }
+    let mut line = format!("moved the user units {} to their new names", units.moved.join(", "));
+    if !units.start.is_empty() {
+        let mut start = vec!["start"];
+        start.extend(units.start.iter().map(String::as_str));
+        user_systemctl(&start);
+        line.push_str(&format!("; started {} again", units.start.join(", ")));
+    }
+    report.lines.push(line);
+}
+
+/// Runs `systemctl --user` with `args`; true when it succeeded. Any failure (no user manager, a
+/// timeout) is false.
+#[cfg(all(target_os = "linux", not(test)))]
+fn user_systemctl(args: &[&str]) -> bool {
+    use std::process::Command;
+    use std::process::Stdio;
+    let Ok(mut child) = Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if started.elapsed() < UNIT_SYSTEMCTL_TIMEOUT => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+/// How long one `systemctl --user` call on a unit may take (a stop waits for the unit to end).
+#[cfg(all(target_os = "linux", not(test)))]
+const UNIT_SYSTEMCTL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[cfg(all(not(target_os = "linux"), not(test)))]
+fn user_systemctl(_args: &[&str]) -> bool {
+    false
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Under `cargo test`: every `systemctl --user` call, and the units `is-active` answers yes for.
+    static SYSTEMCTL_CALLS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    static ACTIVE_UNITS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+fn user_systemctl(args: &[&str]) -> bool {
+    SYSTEMCTL_CALLS.with(|calls| calls.borrow_mut().push(args.join(" ")));
+    match args {
+        ["is-active", "--quiet", unit] => ACTIVE_UNITS.with(|active| active.borrow().iter().any(|name| name == unit)),
+        _ => true,
+    }
 }
 
 fn rename_if_free(from: &Path, to: &Path, report: &mut Report) {
@@ -1269,6 +1515,72 @@ mod tests {
     fn nothing_old_means_nothing_to_do() {
         let home = scratch("clean");
         assert!(migrate(&home, &home, None).is_empty());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn old_user_units_move_with_their_text_links_and_running_state_and_a_second_run_is_empty() {
+        let home = scratch("units");
+        let dir = home.join(USER_UNIT_DIR);
+        let h = home.display();
+        write(
+            &dir.join("mightling-web.service"),
+            &format!("[Unit]\nDescription=Mightling web server (ling web)\n[Service]\nExecStart={h}/.local/share/dreamference/mightling/bin/ling web serve --lan --port 3101\n"),
+        );
+        write(&dir.join("mightling-chat.service"), "[Unit]\nWants=mightling-web.service\nAfter=mightling-web.service\n");
+        write(
+            &dir.join("mightling-remote-certificate.service"),
+            "[Unit]\nOnFailure=mightling-remote-certificate-alert.service\n[Service]\nSlice=mightling-batch.slice\n\
+             ExecStart=%h/.local/bin/ling-admin remote certificate renew\nEnvironment=MIGHTLING_NODE=1 CODEX_HOME=%h/.mightling\n",
+        );
+        write(&dir.join("mightling-remote-certificate.timer"), "[Timer]\nOnCalendar=daily\n");
+        write(
+            &dir.join("mightling-remote-tunnel.service"),
+            "[Service]\nExecStart=/usr/bin/ssh -N -o UserKnownHostsFile=/k mightling-tunnel@relay.example.com\n",
+        );
+        write(&dir.join("mightling-sync.service"), "old");
+        write(&dir.join("ragon-sync.service"), "written by the new version");
+        write(&dir.join("mightling-night.timer"), "left to ragon-admin");
+        std::fs::create_dir_all(dir.join("default.target.wants")).unwrap();
+        std::fs::create_dir_all(dir.join("timers.target.wants")).unwrap();
+        make_symlink(dir.join("mightling-web.service"), dir.join("default.target.wants/mightling-web.service")).unwrap();
+        make_symlink(dir.join("mightling-chat.service"), dir.join("default.target.wants/mightling-chat.service")).unwrap();
+        make_symlink(dir.join("mightling-remote-certificate.timer"), dir.join("timers.target.wants/mightling-remote-certificate.timer")).unwrap();
+        ACTIVE_UNITS.with(|active| *active.borrow_mut() = vec!["mightling-web.service".into(), "mightling-remote-certificate.timer".into()]);
+        SYSTEMCTL_CALLS.with(|calls| calls.borrow_mut().clear());
+
+        assert!(anything_old(&home));
+        let report = migrate(&home, &home, None);
+
+        let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+        assert_eq!(
+            read("ragon-web.service"),
+            format!("[Unit]\nDescription=Ragon web server (ling web)\n[Service]\nExecStart={h}/.local/share/dreamference/ragon/bin/ragon web serve --lan --port 3101\n")
+        );
+        assert_eq!(read("ragon-chat.service"), "[Unit]\nWants=ragon-web.service\nAfter=ragon-web.service\n");
+        assert_eq!(
+            read("ragon-remote-certificate.service"),
+            "[Unit]\nOnFailure=ragon-remote-certificate-alert.service\n[Service]\nSlice=ragon-batch.slice\n\
+             ExecStart=%h/.local/bin/ragon-admin remote certificate renew\nEnvironment=RAGON_NODE=1 CODEX_HOME=%h/.ragon\n"
+        );
+        assert!(read("ragon-remote-tunnel.service").contains(" mightling-tunnel@relay.example.com\n"), "the box's account keeps its name");
+        assert_eq!(read("ragon-sync.service"), "written by the new version");
+        assert_eq!(read("mightling-night.timer"), "left to ragon-admin");
+        for old in ["mightling-web.service", "mightling-chat.service", "mightling-sync.service", "mightling-remote-certificate.timer"] {
+            assert!(!dir.join(old).exists(), "{old}");
+        }
+        for (wants, unit) in [("default.target.wants", "web.service"), ("default.target.wants", "chat.service"), ("timers.target.wants", "remote-certificate.timer")] {
+            assert!(std::fs::symlink_metadata(dir.join(wants).join(format!("mightling-{unit}"))).is_err());
+            assert_eq!(std::fs::read_link(dir.join(wants).join(format!("ragon-{unit}"))).unwrap(), dir.join(format!("ragon-{unit}")));
+        }
+        let calls = SYSTEMCTL_CALLS.with(|calls| calls.borrow().clone());
+        let stop = calls.iter().position(|call| call == "stop mightling-remote-certificate.timer mightling-web.service").expect("the running units stop");
+        let start = calls.iter().position(|call| call == "start ragon-remote-certificate.timer ragon-web.service").expect("and start again");
+        assert!(stop < start && calls.contains(&"daemon-reload".to_string()), "{calls:?}");
+        assert!(report.lines.iter().any(|line| line.starts_with("moved the user units mightling-chat.service,") && line.ends_with("; started ragon-remote-certificate.timer, ragon-web.service again")), "{report:?}");
+
+        assert!(!anything_old(&home), "the night units are ragon-admin's");
+        assert_eq!(migrate(&home, &home, None), Report::default());
         let _ = std::fs::remove_dir_all(&home);
     }
 }
