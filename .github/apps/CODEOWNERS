@@ -157,6 +157,7 @@
 /dreamference/vllm_server/wifi_power_save.py    @dreamference/nodes
 /dreamference/remote/                            @dreamference/nodes @dreamference/security
 /ling-rs/src/remote_join.rs                     @dreamference/nodes
+/scripts/remote_acceptance/                     @dreamference/nodes @dreamference/security
 
 # Security & Egress: last, so its paths are never shadowed by the area that holds them.
 /SECURITY.md                                    @dreamference/security
