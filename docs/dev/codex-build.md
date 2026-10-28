@@ -19,6 +19,8 @@ A stamp keyed on the commit, the patch bytes, the launcher source and the profil
 
 The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from the standalone crate `ling-web-rs/` (own lockfile, own target directory, built `--locked` and stamped separately by `CodexBrandedBuilder.build_web_tools()`, so changing them never relinks Codex), installed beside `ling`; `WebTools` in `mcp_server/web_tools.py` is now only the MCP server's copy of the same behaviour.
 
+The release builds of this on our own machines (the AMD box for x86-64 Windows, a Mac for Apple silicon): [ci-runners.md](ci-runners.md).
+
 ## The compile cache
 
 Several builds compile the same crates in separate target directories: `ling-admin codex build` (the export's `target/`), the launcher and bridge tests in that export, and `ling-web-rs/`, `ling-code-rs/` and `ling-docs-rs/` in every worktree. [sccache](https://github.com/mozilla/sccache) sits in front of `rustc` and keeps what it compiled in one local disk cache, so a crate compiled by one of them is fetched by the next.

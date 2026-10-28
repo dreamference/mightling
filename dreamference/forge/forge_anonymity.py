@@ -54,6 +54,7 @@ PLACEHOLDER_USERS: Final[tuple] = (
     "bob",
     "sessions",
     "shell_snapshots",
+    "shared",
     "...",
 )
 DENYLIST: Final[str] = "~/.config/dreamference/anonymity-denylist.txt"
