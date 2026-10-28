@@ -366,7 +366,7 @@ Both are read in every run, arm or not: the report's `Weakened tests` line count
 
 ### 10.3 The A/B plan (a proposal for the owner)
 
-The thirds are planned as nights 14 to 16; which arms they carry, G1 to G3 below or others, is the owner's choice. They are `fresh-150k-1of3.txt`, `-2of3.txt` and `-3of3.txt` (50 tasks each, balanced by tier, by membership of `fresh-61j.txt` and by repository; committed on branch `bench/chunked-images`, not yet on main, so a guard night needs that branch merged or the lists copied). `<record>` is the night's record arm (`default` unless an earlier night has changed the configuration of record). Every guard night runs a `ling` built from a commit with `guard.rs` (a source build and the egress audit after it, as nights 5 and 6), and its `start` refuses one without.
+The thirds are planned as nights 14 to 16; which arms they carry, G1 to G3 below or others, is the owner's choice. They are `fresh-150k-1of3.txt`, `-2of3.txt` and `-3of3.txt` (50 tasks each, balanced by tier, by membership of `fresh-61j.txt` and by repository; committed under `docs/dev/swe-bench/`, merged from branch `bench/chunked-images`). `<record>` is the night's record arm (`default` unless an earlier night has changed the configuration of record). Every guard night runs a `ling` built from a commit with `guard.rs` (a source build and the egress audit after it, as nights 5 and 6), and its `start` refuses one without.
 
 | Night | List | `ARMS` | Decided by |
 |---|---|---|---|

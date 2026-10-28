@@ -37,9 +37,9 @@ on either, and the crates never leave this repository.
 | The agent | `puffin` | **`ling`** | Cargo still builds `codex`; the builder installs it as `ling` |
 | Web commands | `puffin-search`, `puffin-fetch` | `ling-search`, `ling-fetch` | |
 | Code index router | `puffin-code` | `ling-code` | its MCP server becomes `ling_code` |
-| Desktop app | `puffin-app`, id `dev.dreamference.puffin`, product "Puffin" | `ling-app`, id `dev.dreamference.mightling`, product "Mightling" | the webview data dir is moved once (§4.3) |
+| Desktop app | `puffin-app`, id `dev.dreamference.puffin`, product "Puffin" | `ling-app` (replaced on 2026-10-07 by the Electron desktop app `Mightling`, launched by `ling app` or `ling-admin desktop run`), id `dev.dreamference.mightling`, product "Mightling" | the webview data dir is moved once (§4.2) |
 | Admin CLI | `puffin-admin` | **`ling-admin`** | the wheel's only console script |
-| Its web-chat group | `puffin-admin puffin …` (alias `onyx`) | `ling-admin chat …` (alias `onyx`, which predates the rename and stays) | `ling-admin mightling start` would read as nonsense |
+| Its web-chat group | `puffin-admin puffin …` (alias `onyx`) | `ling-admin chat …` (alias `onyx`, which predates the rename; after Onyx's retirement in 1.7.0 only `ling-admin chat remove` remains) | `ling-admin mightling start` would read as nonsense |
 | Code Mode host | `codex-code-mode-host` | unchanged | internal: Codex finds it by this name next to its executable |
 | Install dir | `~/.local/share/dreamference/puffin` | `~/.local/share/dreamference/mightling` | |
 | PATH links | `~/.local/bin/puffin*` | `~/.local/bin/ling*` | old links removed by the migration |
@@ -96,15 +96,15 @@ Mightling runs it whenever an old layout is present (the old install dir, `~/.pu
 
 **The launcher** (`ling-rs/src/rename.rs`), on every machine:
 1. **Moves `~/.local/share/dreamference/puffin`** to `…/mightling` when the new one does not exist, and renames the binaries inside it: `puffin` → `ling`, `puffin-search` → `ling-search`, and so on.
-2. **Creates the home.** If `~/.mightling` does not exist and `~/.puffin` does, it copies the same allow-list the first Codex migration used (`home.rs`), never `auth.json`, `installation_id` or the logs. Then it rewrites `/.puffin/` paths in the copied `config.toml`, renames `puffin-code.toml` to `ling-code.toml`, and leaves `~/.puffin` in place with a marker file naming the new home. It rewrites nothing in the old home, so the user can return to it by hand.
+2. **Creates the home.** If `~/.mightling` does not exist and `~/.puffin` does, it copies the same allow-list the first Codex migration used (`home.rs`), never `auth.json`, `installation_id` or the logs. Then it rewrites `/.puffin/` paths in the copied `config.toml`, renames `puffin-code.toml` to `ling-code.toml`, `puffin-skills.toml` to `ling-skills.toml`, and each skill's `.puffin-origin.toml` to `.mightling-origin.toml`, and leaves `~/.puffin` in place with a marker file (`.migrated-from-puffin`) naming the new home. It rewrites nothing in the old home, so the user can return to it by hand.
 3. **Rewrites configuration keys** in `~/.config/dreamference/config.toml`, and in `dreamference.toml` in the current directory: `puffin_<key>` becomes `mightling_<key>`, on whole-line key matches only.
 4. **Relinks.** In `~/.local/bin`, it removes `puffin`, `puffin-search`, `puffin-fetch`, `puffin-code`, `puffin-app` and `puffin-admin` **only when they are links** (a real file of that name belongs to someone else). It creates `ling`, `ling-search`, `ling-fetch` and `ling-code` pointing into the new install dir. When the old `puffin-admin` link pointed into a virtualenv that already has `ling-admin`, it links that too.
-5. **Renames the pairing key** `~/.ssh/puffin-node_ed25519` (and `.pub`) when the new name is free.
+5. **Renames the pairing key** `~/.ssh/puffin-node_ed25519` (and `.pub`) and moves the desktop app's data dir `~/.local/share/dev.dreamference.puffin` to `~/.local/share/dev.dreamference.mightling` when the new names are free.
 6. **Prints once:** "Puffin is now Mightling: run `ling`", plus "update `ling-admin` with install.sh" when step 4 found no `ling-admin`.
 
 **`ling-admin`** (`dreamference/cli/legacy_name_migration.py`), on a machine with the Python side:
 0. **The same install-folder move and link removal** as the launcher's steps 1 and 4, so a node whose first new command is `ling-admin` does not start an empty install folder beside the old one.
-1. **The same key rewrite** of the configuration files.
+1. **Rewrites user configuration keys** in `~/.config/dreamference/config.toml` (`rewrite_user_config`), and warns when `./dreamference.toml` still has `puffin_*` keys (`stale_project_config`; `ling` rewrites a project's `dreamference.toml` when run there).
 2. **Replaces the old Night Shift units** (stops and removes the old ones, then reinstalls under the new names when the old timer was enabled). Also any other `puffin-*` user units it installed.
 3. **Replaces the Avahi service file** when it can write it, and otherwise prints the one `sudo` line that does.
 4. **Rewrites the `authorized_keys` lines** carrying the old marker: the forced command's `puffin-admin` becomes the `ling-admin` beside it, and the marker becomes `mightling-node`.

@@ -18,7 +18,7 @@ The Gmail half of this design is implemented inside the **Gmail service containe
 - **Multi-account (§8):** yes. Accounts can be disconnected with `POST /disconnect`, and search reports failures per account.
 - **Since 2026-10-03:** Drive (My Drive and shared drives; Docs and Slides exported as text, Sheets as CSV, small `text/*` files) and Calendar, read-only, in `google_workspace_reader.py` beside the service, each asked for with its own consent (`/api/google/oauth/start?app=`), with the granted scopes recorded per account. GNOME's client is refused the read-only Drive and Calendar scopes, so the full ones are requested and the service only reads (MIGHTLING_APPS §11.1).
 - **Not implemented:** Contacts (§7 row 4); the `invalid_grant` / `invalid_client` / `accessNotConfigured` error mapping (§6); the fleet-wide alert and fallback UI (§10); DWD for Workspace.
-- **Earlier design, now gone from the code:** GNOME Online Accounts on the host holding the refresh token, with a systemd user timer pushing access tokens into a service that accepted no POST. The module docstring now describes the flow above and records that design as removed, and the leftover `GNOME_TOKEN_UNIT` constant is gone from `onyx_runner.py` (both until 2026-09-29).
+- **Earlier design, now gone from the code:** GNOME Online Accounts on the host holding the refresh token, with a systemd user timer pushing access tokens into a service that accepted no POST. The module docstring now describes the flow above and records that design as removed, and the leftover `GNOME_TOKEN_UNIT` constant was removed from `onyx_runner.py` on 2026-09-29 (`onyx_runner.py` itself was deleted when Onyx was retired in 1.7.0, 2026-10-09).
 
 ## 1. Summary
 
@@ -117,4 +117,4 @@ Tenant "Third-party app access = restricted/blocked" requires the admin to allow
 
 - [ ] Run the Gmail API probe with a GOA token; decide REST vs IMAP for Gmail.
 - [x] Confirm `drive.readonly` is accepted as a narrowing of the client's `drive` scope. **Answered no (2026-10-03):** refused ("This app is blocked"); the full `…/auth/drive` and `…/auth/calendar` work (§4). Drive `files.list` worked for My Drive and `corpora=allDrives`; `calendarList` returned 2 calendars.
-- [ ] Draft the connect-screen copy and the paste-back UI.
+- [x] Draft the connect-screen copy and the paste-back UI. **Built (`dreamference/chat/gmail_search_service.py`, `GET /connect`):** the connect page explains that the consent screen says GNOME and provides the `#pasted` / `#paste-btn` paste-back input for `POST /api/google/oauth/complete`.

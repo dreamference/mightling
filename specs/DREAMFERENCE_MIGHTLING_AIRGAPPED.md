@@ -2,7 +2,7 @@
 
 **Status:** Phase 1 partly implemented on 2026-10-01: the levels, `/airgapped` and `ling airgapped`, the sandbox enforcement of `on`, the web commands, and the configuration field. §14 records what was built, where it departs from the design below (the enforcement hook is in the sandbox helper, not in core), what ran live, and what is not built. The rest of this document is the design as specified; §9 lists what was checked before the build. **On 2026-10-03 the `duckduckgo` level was removed** (§14.6): DuckDuckGo answered SearXNG with a CAPTCHA, so the level searched nothing. The design below still describes it; where it does, it is history.
 **Goal:** one command that says how much of a `ling` session may reach the internet, with two levels: everything (the default) and nothing at all. (A third, search through DuckDuckGo only, was removed on 2026-10-03; §14.6.)
-**Target:** the `ling` terminal agent. The web chat is not covered (§8).
+**Target:** the `ling` terminal agent (and, since §14.9, `ling web`, the desktop app and the phone bridges; the retired Onyx web chat was not covered, §8).
 **Builds on:**
 - the web commands `ling-search` and `ling-fetch` ([MIGHTLING_CODEX §4.1](./DREAMFERENCE_MIGHTLING_CODEX.md)), and the SearXNG instance on `127.0.0.1:8888` they search through;
 - Codex's command sandbox, which already runs a command with no network when its policy says so (`bwrap --unshare-net`);
@@ -195,13 +195,13 @@ Run by hand from a terminal, outside any session, the commands follow tiers 2–
 
 ### 6.4 Patch `0019-airgapped`
 
-Modelled on `0017-cave-mode` and `0018-night-slash-command`:
+Modelled on `0017-cave-mode` (removed 2026-10-28) and `0018-night-slash-command`:
 - `codex-rs/tui/src/slash_command.rs`: the variant `Airgapped`, placed after `Permissions`, since both set what the agent may reach; its description, "set how much of the internet this session may use"; membership in `supports_inline_args()` and `available_during_task()`;
 - `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: one arm in each of the two dispatch functions, calling `ling_launcher::airgapped::command(…)`, and membership in the list of commands that run at once when queued;
-- `codex-rs/app-server/src/extensions.rs` and `codex-rs/cli/src/main.rs`: one `install` line each for the World State section, beside cave mode's;
+- `codex-rs/app-server/src/extensions.rs` and `codex-rs/cli/src/main.rs`: one `install` line each for the World State section (where cave mode's also sat before its removal on 2026-10-28);
 - `codex-rs/core`: the one-line hook of §5.1, and one path dependency in its manifest: `ling-launcher`, or the leaf crate `ling-airgapped` if Phase 0 finds a cycle.
 
-**Budget.** The series stands at 26,933 bytes under a 27,500-byte cap (`test_the_patches_stay_small`). `0018` cost 2,133 bytes for the slash command alone; the two `install` lines and the core hook add about 1.2 KB, so `0019` is estimated at 3.3 KB and the series at about 30.2 KB. The cap is raised in the same commit, explicitly, to the measured size rounded up to the next 500 bytes, as cave mode and `/night` did.
+**Budget.** When `0019` was designed, the series stood at 26,933 bytes under a 27,500-byte cap (`test_the_patches_stay_small`; the cap is 64,000 bytes today). `0018` cost 2,133 bytes for the slash command alone; the two `install` lines and the core hook add about 1.2 KB, so `0019` was estimated at 3.3 KB and the series at about 30.2 KB. The cap was raised in the same commit, explicitly, to the measured size rounded up to the next 500 bytes, as cave mode and `/night` did.
 
 ---
 
@@ -329,7 +329,9 @@ Stated in the command's own output (§2), so nobody takes `on` for more than it 
 |---|---|
 | Levels, tiers, strictest-of-two-files, `sealed_for_command()`, the seals and the exposure check | `ling-rs/airgapped/src/lib.rs` |
 | `/airgapped`, `ling airgapped`, status, `default`, World State fragments, Full Access refusal, 30-day prune | `ling-rs/src/airgapped.rs`, `ling-rs/src/lib.rs` |
-| Slash command, section registration, helper hook | `codex-patches/0019-airgapped.patch` |
+| Slash command, section registration, helper hook, host socket mask | `codex-patches/0019-airgapped.patch` |
+| App-server Full Access refusal at `on`, Windows elevated sandbox network clear, read-only sandbox network below `on` | `codex-patches/0023-airgapped-app-server.patch`, `0024-airgapped-windows.patch`, `0031-read-only-network.patch` |
+| Plugin refusal at `on` | `ling-rs/src/plugins.rs`, `ling-rs/web/policy.json` |
 | `ling-search` and `ling-fetch` following the level; `--json` gains `airgapped` and `engines` | `ling-web-rs/src/{airgapped,lib,search}.rs`, `src/bin/` |
 | `DreamferenceConfig.mightling_airgapped`, `resolve_airgapped_level()` | `dreamference/config/dreamference_config.py` |
 | `web_search` and `web_fetch` over MCP following the level | `dreamference/mcp_server/web_tools.py` |
@@ -371,7 +373,7 @@ NOT ENFORCED for: a command you approve to run outside the sandbox, MCP servers 
 
 with `/airgapped`'s `NOT ENFORCED against a command rewriting the level` between the two when the level files are inside a writable root and there is no runtime directory for a seal. Nothing is printed at `off`. Full Access is not listed: it is refused at launch and disabled in `/permissions` (§14.7). It goes to stderr for `ling exec` too. `startup_lines` in `ling-rs/src/airgapped.rs`, unit-tested.
 
-**Watched in the build of `258c3b5` (2026-10-03).** A TUI session started in tmux with `DREAMFERENCE_MIGHTLING_AIRGAPPED=on` and `-s workspace-write` wrote both lines to stderr (`🔒 Airgapped: on (DREAMFERENCE_MIGHTLING_AIRGAPPED). Enforced: …` and the `NOT ENFORCED for:` line), captured by redirecting stderr to a file. **They are not visible in the interface:** with stderr on the terminal, the TUI's first frame starts at the top of the pane and the scrollback holds neither line (nor the skills line printed just after). Printed to stderr before Codex draws, they are drawn over. Fixed on branch `fix/startup-lines-app-server` (not yet in an installed build): every start-up line the launcher prints (this one, the skills line, the night line, a prompt other than `default`) is also kept, and for a TUI session (`ling`, `ling resume`, `ling fork`) written to `$CODEX_HOME/notice/<hash>.txt` and registered as a trusted `SessionStart` hook, `<ling> notice <hash>`, under matcher `startup|resume` (`ling-rs/src/notice.rs`). Codex shows the hook's `systemMessage` in the history at the start of the first turn, above the first answer, not on the empty screen before it. No patch. For `exec` the hook is removed, since `exec` prints every hook run and the lines are on stderr already; `ling exec` shows them, since it does not take over the screen.
+**Watched in the build of `258c3b5` (2026-10-03).** A TUI session started in tmux with `DREAMFERENCE_MIGHTLING_AIRGAPPED=on` and `-s workspace-write` wrote both lines to stderr (`🔒 Airgapped: on (DREAMFERENCE_MIGHTLING_AIRGAPPED). Enforced: …` and the `NOT ENFORCED for:` line), captured by redirecting stderr to a file. **They are not visible in the interface:** with stderr on the terminal, the TUI's first frame starts at the top of the pane and the scrollback holds neither line (nor the skills line printed just after). Printed to stderr before Codex draws, they are drawn over. Fixed on branch `fix/startup-lines-app-server` (merged into `main`): every start-up line the launcher prints (this one, the skills line, the night line, a prompt other than `default`) is also kept, and for a TUI session (`ling`, `ling resume`, `ling fork`) written to `$CODEX_HOME/notice/<hash>.txt` and registered as a trusted `SessionStart` hook, `<ling> notice <hash>`, under matcher `startup|resume` (`ling-rs/src/notice.rs`). Codex shows the hook's `systemMessage` in the history at the start of the first turn, above the first answer, not on the empty screen before it. No patch. For `exec` the hook is removed, since `exec` prints every hook run and the lines are on stderr already; `ling exec` shows them, since it does not take over the screen.
 
 ### 14.5 Added on 2026-10-02: the three gaps of "not built"
 

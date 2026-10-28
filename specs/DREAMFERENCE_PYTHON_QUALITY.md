@@ -2,7 +2,7 @@
 
 **Status:** Phase 0 built (2026-10-03, §10). **Phase 1 built (2026-10-20, §11) without its two tree-wide commits:** the ratchet is in the suite (`tests/test_code_quality.py` for ruff, the formatter and the §3.9 checks; `tests/test_typing.py` for mypy), the baselines recorded on the tree as it stood, and the seven dead shims deleted; `ruff format` and `ruff check --fix` over everything (§6, Phase 1 steps 1 and 2) were not run, by the owner's decision, because many branches were in flight, so the formatter is ratcheted per file (§11). §2's numbers were measured earlier on `main` at `584f26e` with flake8 7.3 and an AST script; §10.1 gives ruff's counts at Phase 0 and §11.2 at Phase 1.
 **Goal:** make the Python half of Mightling read like code written to a teaching standard: small, deep modules, one idea per function, names that make comments unnecessary for the *what* and comments that carry the *why*. The standard is checked by tools wherever a tool can decide, by a fixed review checklist where it cannot, and it may only get stricter over time.
-**Scope:** `dreamference/` and `tests/` (Python). Not the Rust crates (`ling-rs/`, `ling-web-rs/`, `ling-code-rs/`, which have `cargo clippy`), not `desktop/`, not the `codex/` submodule (never modified), not `scratch/`.
+**Scope:** `dreamference/` and `tests/` (Python). Not the Rust crates (`ling-rs/`, `ling-web-rs/`, `ling-code-rs/`, `ling-docs-rs/`, which have `cargo clippy`), not `desktop/`, not the `codex/` submodule (never modified), not `scratch/`.
 
 ---
 
@@ -94,7 +94,7 @@ Function **length** has no hard limit, for §1's reason; a function over 40 line
 - **One class per file**, the file named after the class in snake_case (AGENTS.md). Exempt: a file that is copied into a container and run there as one script; the exemption is a list in the test, each entry with its reason.
 - **`__init__.py` is a facade** with an explicit `__all__` and no logic.
 - **No module-level logic** beyond constants, imports and `__all__`.
-- **`print` only in `cli/`** and in the console-facing methods it calls; long-running services (`gmail_search_service`, `image_search_service`, the MCP server, `diffusion_openai_service`) log through `logging` (`T201` with per-file ignores).
+- **`print` only in `cli/`** and in the console-facing methods it calls (`pyproject.toml` per-file ignores for `T201`: `dreamference/cli/**`, `dreamference/remote/remote_access.py`, `dreamference/forge/**`, `dreamference/node/node_role_provisioner.py`, `dreamference/node/node_power_cycle.py`, `dreamference/node/node_power_settings.py`); long-running services (`gmail_search_service`, `image_search_service`, the MCP server, `diffusion_openai_service`) log through `logging` (`T201` with per-file ignores).
 
 ---
 

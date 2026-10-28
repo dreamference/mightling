@@ -11,7 +11,7 @@ Mightling's own web server are specified separately; this document covers the in
 own files that both of them, and the coding agent, search.
 **Added on the same crate 2026-10-12** (`340828b`, `fbbd7a1`, `1f583b7`; merged 2026-10-13):
 `pdf_search`, an ephemeral index of one PDF outside the collections, and `ling-docs extract`,
-specified in [PDF_SEARCH](./DREAMFERENCE_PDF_SEARCH.md) §3–§4, not here. Current release 1.6.4.
+specified in [PDF_SEARCH](./DREAMFERENCE_PDF_SEARCH.md) §3–§4, not here. Current release 1.7.2.
 **Phase 0 measured on 2026-10-07** on the GB10 with the model server resident (§15): the PDF
 extractor, the multilingual embedding model, the chunk size, OCR and the first index of a
 Documents+Downloads folder are chosen with numbers. Apple Silicon was not measured here.
@@ -819,7 +819,7 @@ names the script cannot know. Every name below is final; there are no aliases fo
 
 ## 17. Shipping in 1.6.0
 
-Unchanged through 1.6.4 (checked 2026-10-19); every "not done" item below is still not done.
+Unchanged through 1.7.2 (checked 2026-10-28), with OCR's 76 MB of pinned models and Tesseract/Leptonica libraries added to `ling-admin docs setup` in §20.3; every "not done" item below is still not done.
 Decided for 1.6.0 where this document left packaging open (§16.7 before the port listed it as not
 done), each the simplest choice that is correct:
 

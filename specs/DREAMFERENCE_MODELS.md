@@ -1,12 +1,12 @@
 # Mightling Supported Models & Hardware
 
-> **Version:** 1.5.1
+> **Version:** 1.7.2
 > **Subject:** NVIDIA GB10 Model Matrix & Default Model Selection
-> **Checked against the code:** 2026-10-09 (`dreamference/hardware/model_matrix_registry.py` and `hardware_manager.py`: every alias, repo, memory range and recipe value below was compared with `MATRIX`)
+> **Checked against the code:** 2026-10-28 (`dreamference/hardware/model_matrix_registry.py` and `hardware_manager.py`: every alias, repo, memory range and recipe value below was compared with `MATRIX`)
 
 > **2026-10-09: one candidate added.** `qwen3.8-27b-minima-nvfp4-dflash2` (Minima, the all-NVFP4 Qwen3.8-27B) is in `MATRIX` for night 2's A/B (§2.2). It is not the default and is served only when named (`server start --model …`).
 
-> **2026-10-19: a trial candidate added, on branch `models/flash-next` (not merged).** `qwen3.8-flash-next-nvfp4-mtp` (Qwen3.8-Flash-Next, local-inference-lab's QAD NVFP4 export, on a pinned vLLM nightly with MTP) is in `MATRIX` for a smoke boot and then a SWE-bench A/B (§2.3). It is not the default. It carries the first per-model start-gate figure (`load_transient_gb`) and the first per-model SWE-bench cap (`swe_bench_max_parallel`).
+> **2026-10-19: a trial candidate added.** `qwen3.8-flash-next-nvfp4-mtp` (Qwen3.8-Flash-Next, local-inference-lab's QAD NVFP4 export, on a pinned vLLM nightly with MTP) is in `MATRIX` for a smoke boot and then a SWE-bench A/B (§2.3). It is not the default. It carries the first per-model start-gate figure (`load_transient_gb`) and the first per-model SWE-bench cap (`swe_bench_max_parallel`).
 
 ---
 
@@ -25,7 +25,7 @@ Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`
 
 | Alias | Model | Params | Format | Memory (min–max GB) | Vision | Role |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `qwen3.8-27b-nvfp4-dflash2` | Qwen 3.8 27B (NVFP4 + DFlash2, SGLang) | 27B | NVFP4 | 20–70 | ✅ | **The** main model (`DEFAULT_MODEL_ALIAS`, since 2026-09-29). Served by **SGLang**, not vLLM (`launch_overrides['engine']`) |
+| `qwen3.8-27b-nvfp4-dflash2` | Qwen 3.8 27B (NVFP4 + DFlash2, SGLang) | 27B | NVFP4 | 20–70 | ✅ | **The** main model (`DEFAULT_MODEL_ALIAS`, since 2026-09-29). Served by **SGLang** (`launch_overrides['engine']`), with `ling-engine`'s `ling-serve` beside it, opt-in since 1.7.2 (`engine_recipes['ling']`, `server start --engine ling`, `server_engine = "ling"`) |
 | `qwen3.8-27b-minima-nvfp4-dflash2` | Qwen 3.8 27B Minima (all-NVFP4 + DFlash2, SGLang) | 27B | NVFP4 (compressed-tensors) | 19–70 | — | Candidate for night 2's A/B (§2.2); production's recipe with the checkpoint swapped. Added 2026-10-09 |
 | `qwen3.8-flash-next-nvfp4-mtp` | Qwen 3.8 Flash-Next (QAD NVFP4 + MTP, vLLM) | 125B (6B active) + 51B n-gram table + 4B MTP | NVFP4 / MXFP8 (QAD) | 100–115 | ✅ | **Trial candidate** (§2.3), status: registry entry ready, not yet booted. Served by **vLLM** nightly. Added 2026-10-19 |
 | `qwen3.8-27b-dflash2-draft` | Qwen 3.8 27B DFlash2 drafter (NVFP4) | 1B | NVFP4 | 1–2 | — | Drafter named by the main recipe's `speculative_config`; not served on its own. Listed so the memory gates have a size before the snapshot is on disk |
@@ -39,12 +39,13 @@ Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`
 - `local-inference-lab/Qwen3.8-Flash-Next-NVFP4`: the Flash-Next trial, pinned to revision `6c01ac37…`;
 - `dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1`: the diffusion model.
 
-**The recipe (`qwen3.8-27b-nvfp4-dflash2`)** runs on SGLang from `lmsysorg/sglang` pinned by digest (v0.5.21 since 1.6.4, which carries the unpublished 1.6.2's pin, after `docs/dev/sglang-probe-2026-10-14.md`; v0.5.19 before, from github.com/hasso5703/dgx-spark-qwen38 v1.18):
+**The recipe (`qwen3.8-27b-nvfp4-dflash2`)** runs on SGLang from `lmsysorg/sglang` pinned by digest (v0.5.21 since 1.6.4, which carries the unpublished 1.6.2's pin, after `docs/dev/sglang-probe-2026-10-14.md`; v0.5.19 before, from github.com/hasso5703/dgx-spark-qwen38 v1.18), with `QWEN38_LING_RECIPE` (`engine: ling`, `ghcr.io/dreamference/ling-serve@sha256:7bff4e37…` at `8d112d0d2539`) in `engine_recipes["ling"]`:
 - context 262,144 tokens (`max_model_len`); `gpu_memory_utilization` 0.50; `container_headroom_gb` 24;
 - tool calls `qwen3_coder`, reasoning parser `qwen3`;
-- DFlash2 drafter (`method: DFLASH`, `quantization: modelopt_fp4`) with 16 speculative tokens;
-- `extra_args`: flashinfer attention, the PyTorch sampler (`--sampling-backend pytorch`, not FlashInfer), chunked prefill 8,192, no prefill CUDA graph, CUDA graphs up to batch 8, no FlashInfer autotune, the mamba radix cache in `extra_buffer` mode with a bf16 SSM state and at most 96 cached states, at most 8 running requests, torch.compile up to batch 4, two continuous decode steps, `--sleep-on-idle` and `--enable-metrics`;
-- two `chat_template_patches`, applied on a copy at launch by `ChatTemplatePatcher`: reasoning efforts `max`/`high` map to `xhigh` and `minimal` to `low` (the stock template answered HTTP 400 to Codex's efforts), and a system message after the first becomes a `<system-reminder>` user turn instead of raising an exception.
+- DFlash2 drafter (`method: DFLASH`, `quantization: modelopt_fp4`) with 12 speculative tokens (lowered from 16 on 2026-10-09 after 12 measured +7% on the replay set, 48.3 against 45.1 tok/s);
+- `extra_args`: flashinfer attention, the PyTorch sampler (`--sampling-backend pytorch`, not FlashInfer), chunked prefill 8,192, no prefill CUDA graph, decode CUDA graphs up to batch 8 (`--cuda-graph-max-bs-decode 8`), no FlashInfer autotune, the mamba radix cache in `extra_buffer` mode with a bf16 SSM state and at most 96 cached states, at most 8 running requests, torch.compile up to batch 4, two continuous decode steps, `--sleep-on-idle` and `--enable-metrics`;
+- two `runtime_patches` mounted on `/sgl-workspace/sglang/python/sglang/srt/entrypoints/openai/serving_responses.py` by `SGLangRuntimePatcher`: `SGLANG_PHASE_MERGE_PATCH` (merging consecutive assistant items regardless of `phase`) and `SGLANG_STREAM_PHASE_PATCH` (holding only a message's closing events for one event of lookahead so text streams live when tools are offered), plus `QWEN38_LORA_RECIPE` when LoRA adapters are served;
+- two `chat_template_patches`, applied on a copy at launch by `ChatTemplatePatcher`: the default reasoning effort drops from `xhigh` to `medium` while `max`/`high` map to `xhigh` and `minimal` to `low` (the stock template answered HTTP 400 to Codex's efforts), and a system message after the first becomes a `<system-reminder>` user turn instead of raising an exception.
 
 See `DREAMFERENCE_INFERENCE.md` and `DREAMFERENCE_CODEBASE.md` §5 for the full launch command.
 
@@ -111,7 +112,7 @@ A start that fails or fails the canary skips arm B and serves production again.
 
 **The registry entry** is `qwen3.8-27b-minima-nvfp4-dflash2`. It is not the default and `DEFAULT_MODEL_ALIAS` is unchanged.
 - **One shared recipe.** Production's launch overrides were moved, unchanged, into the module constant `QWEN38_SGLANG_RECIPE`. The entry takes that constant whole and changes two things: the checkpoint's `revision`, and `--kv-cache-dtype bfloat16` appended to `extra_args`.
-- **Everything else is shared:** the image, the 0.50 memory fraction, the 262,144-token context, the parsers, the template patches, the drafter at 16 tokens, the PyTorch sampler and torch.compile.
+- **Everything else is shared:** the image, the 0.50 memory fraction, the 262,144-token context, the parsers, the template patches, the drafter at 12 tokens, the PyTorch sampler and torch.compile.
 - `supports_vision` is false. Switching production to it would take image input away from Ask and the image search re-rank, which is a cost of the switch, not of the A/B.
 
 **Fairness.** The two arms differ in the target's weights alone:
@@ -150,7 +151,7 @@ A start that fails or fails the canary skips arm B and serves production again.
 
 ### 2.3. Trial candidate: Qwen3.8-Flash-Next (approved 2026-10-19; registry entry ready, not yet booted)
 
-**Status.** The owner approved the trial on 2026-10-19, together with a per-model memory-headroom override in place of the global start-gate estimate. The entry is on branch `models/flash-next` and is not merged. Its go comes after a day-time smoke boot on a free GB10, planned in `docs/dev/flash-next-smoke-boot.md` and not yet run. Production stays the default. The research, with checkpoints, engines and expected speed, is `docs/dev/flash-next-feasibility-2026-10-19.md`.
+**Status.** The owner approved the trial on 2026-10-19, together with a per-model memory-headroom override in place of the global start-gate estimate. The entry was added on branch `models/flash-next` and merged into `main`. Its go comes after a day-time smoke boot on a free GB10, planned in `docs/dev/flash-next-smoke-boot.md` and not yet run. Production stays the default. The research, with checkpoints, engines and expected speed, is `docs/dev/flash-next-feasibility-2026-10-19.md`.
 
 **The checkpoint.** `local-inference-lab/Qwen3.8-Flash-Next-NVFP4` at `6c01ac378d22f6652c9f392c87700496eca8e5dc` (106.4 GB on disk, about 97.5 GiB loaded). It is quantization-aware distilled: experts and the 51B n-gram table in NVFP4 (the table at 26.8 GiB), attention and shared experts in MXFP8. It is the only export that both fits resident on one GB10 and loads on upstream vLLM. It has a vision tower. The licence is the Qwen Community License 1.0, to be checked before shipping.
 

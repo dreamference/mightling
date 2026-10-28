@@ -1,6 +1,6 @@
 # Mightling Chat: talking to Mightling from a phone messenger
 
-**Status:** Phase 1 implemented and merged into `main` on 2026-10-08, off by default (§14 what was built, §15 the merge: `ling chat …`, `ling-admin matrix …`, stop disables the units). Tested against stand-ins only: nothing has run against a real Telegram bot, a real Matrix client, Element X or Tailscale. Planned for 1.6.0. Proposed 2026-10-08.
+**Status:** Phase 1 implemented and merged into `main` on 2026-10-08, shipped in 1.6.0, off by default (§14 what was built, §15 the merge: `ling chat …`, `ling-admin matrix …`, stop disables the units). Phase 2 (images and attachments, fresh thread after silence, bounds and phone prompt, quick follow-ups, Telegram Phase 1 topics/rich/approvals, voice messages, files back, Night Shift from the phone, speed fixes) built in §16 (`ling-rs/chat/src/`). Telegram went live on a real bot on 2026-10-20 and is tested automatically against a real test bot via TDLib in `scripts/messenger_live/run.sh` (2026-10-27); Matrix, Element X and Tailscale remain tested against stand-ins only. Proposed 2026-10-08.
 
 **Spec owner:** the user. **Depends on:** MIGHTLING_ASK (Ask threads, `ling web`, the bridge policy), MIGHTLING_NODE (advertised nodes), MIGHTLING_AIRGAPPED, DOCKER §6 (sidecars).
 
@@ -12,7 +12,7 @@
   - **Matrix, private.** A Matrix homeserver runs on the node, and the phone reaches it over a Tailscale VPN. Messages and answers never leave the user's machines.
   - **Telegram, less private.** It is for users who accept that their messages and answers pass through Telegram's servers, where bot chats are not end-to-end encrypted. It is off until the user turns it on, and turning it on says exactly that and asks for a yes.
 - **One bridge, two adapters.** `ling chat` is one process with a Matrix adapter and a Telegram adapter. Everything that is not messenger-specific is shared and tested once: threads, approvals, commands, rendering, splitting and access control.
-- **A chat is an Ask thread** (MIGHTLING_ASK §3): no repository, a scratch folder, the `ask` prompt, and the same sandbox as an Ask thread in the browser. Threads started from a phone appear in the web UI and the desktop app, because they live in the same `ling app-server`.
+- **A chat is an Ask thread** (MIGHTLING_ASK §3): no repository, a scratch folder (`ask/chat-<hex>` since §16.3), the `chat` prompt (`ling-rs/prompts/chat.md`, falling back to `ask`; §16.3), and the same sandbox as an Ask thread in the browser. Threads started from a phone appear in the web UI and the desktop app, because they live in the same `ling app-server`.
 - **The bridge is a client of `ling web`, never of the app-server directly.** Every message it sends passes the same bridge policy as a browser tab: allow-lists, dropped fields, named prompts and Ask folders. The policy stays in one place.
 - **The bridge is a separate process, not part of `ling web`.** `ling web` promises it "calls nothing on any network". The Telegram adapter must reach `api.telegram.org`, so it lives elsewhere, and a crash in a messenger adapter cannot take the web UI down.
 - **No open port for Telegram.** The adapter long-polls `getUpdates`, so no webhook and nothing reachable from the internet.
@@ -32,14 +32,16 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
 | `/threads` | The last 10 threads started from this chat, numbered, with their names. |
 | `/use <n>` | Continues thread `n` from that list. |
 | `/status` | Model server, air-gap level, the current thread, and whether a turn is running. |
-| `/cavemode [level]` | How terse this thread's answers are, as on Signal (CAVE_MODE §11.7): the level in force, a level for this thread, or `default <level|built-in>` for new ones. |
+| `/night add <task>` \| `/night status` | Queues a task for Night Shift tonight (with the thread's last exchange, confirmed before queueing) or shows the queue (§16.8). |
+| ~~`/cavemode [level]`~~ | **Removed 2026-10-28** (`ef443182`). Set how terse the thread's answers were. |
 | `/help` | This table. |
 | `/pair <code>` | Telegram only: pairs this Telegram account (§4.1). |
+| `/app` | Telegram only: opens `ling web` as a Telegram Mini App when `[chat] telegram_mini_app_url` is set ([TELEGRAM_MOONSHOT §15](./DREAMFERENCE_MIGHTLING_TELEGRAM_MOONSHOT.md)). |
 
-- **Approvals on the phone.** When the agent asks for something (a command, a file change, more permissions, or an answer to a question), the chat shows the request with **Approve** and **Decline**: buttons in Telegram, ✅/❌ reactions or replying `yes`/`no` in Matrix. Nothing is approved by silence: after 10 minutes the bridge declines and says so.
+- **Approvals on the phone.** When the agent or the bridge asks for something (since 2026-10-27 phone threads run with `approval_policy = "never"`, §16.3, so command escalations are refused and rerun sandboxed without asking; approvals are used for `/night add`, sending files back, and Mini App launch pairing), the chat shows the request with **Approve** and **Decline**: buttons in Telegram, ✅/❌ reactions or replying `yes`/`no` in Matrix. Nothing is approved by silence: after 10 minutes the bridge declines and says so.
 - **A message during a running turn** steers it (`turn/steer` with `expectedTurnId` set to the running turn), as typing into a running session does. If the server refuses the steer, for example because the turn just ended, the message starts the next turn instead.
 
-**Not in Phase 1** (§13): photos, files and voice messages; Work threads (a repository); queuing Night Shift tasks; group chats; end-to-end encryption inside Matrix (§5.4 says why it is not needed for privacy).
+**Not in Phase 1** (§13): photos, files and voice messages, and queuing Night Shift tasks (all built in Phase 2, §16.1, §16.6–§16.8); Work threads on a repository (built for the Mini App and `ling web` in [CHAT_REPOS](./DREAMFERENCE_MIGHTLING_CHAT_REPOS.md)); group chats; end-to-end encryption inside Matrix (§5.4 says why it is not needed for privacy).
 
 ## 2. Architecture
 
@@ -221,6 +223,7 @@ The registration token in `matrix-admin.json` lets anyone who can reach the home
 ```
 ling chat start | stop | status | serve          the bridge (user unit mightling-chat.service)
 ling chat telegram setup | pair | users | remove <id> | off
+ling chat repos full-access on | off             phone repository worktrees (CHAT_REPOS §7)
 ling-admin matrix start | stop | status | add-user <name> | push on|off | remove
 ```
 
@@ -261,6 +264,8 @@ ling-admin matrix start | stop | status | add-user <name> | push on|off | remove
 | `telegram_rich` | false | rich messages built from blocks, until Phase 0 (MOONSHOT §14) |
 | `night_repos` | [] | repositories `/night add` may queue in, besides every one already queued in (§16.8). **Being retired:** `/night add` now queues in the chat's current forge repository (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §11.2) |
 | `night_report_to` | ["signal", "matrix"] | which messengers get Night Shift's morning report; Telegram only when named (§16.8) |
+| `sync_notices_to` | ["signal", "matrix"] | which messengers pass on sync's notices ([MIGHTLING_SYNC §18.3](./DREAMFERENCE_MIGHTLING_SYNC.md)); Telegram only when named (`chat_settings.rs`) |
+| `telegram_mini_app_url` | *(unset)* | plain `https://` URL of `ling web` on the user's network, offered as Telegram's Mini App menu button and `/app` ([TELEGRAM_MOONSHOT §15](./DREAMFERENCE_MIGHTLING_TELEGRAM_MOONSHOT.md), `telegram_app.rs`) |
 | `new_thread_after_hours` | 4 | a message after this long a silence starts a new thread; 0: never (§16.2; Signal reads it too, through `ling web`) |
 
 ## 11. Phase 0, measured before relying on it
@@ -321,14 +326,14 @@ All tests use stand-ins. None reaches Telegram, a homeserver, `ling web` or Dock
   - the bridge, both adapters, and `ling chat` with its user unit;
   - `ling-admin matrix`;
   - the tests above.
-- **Phase 2:**
-  - photos and files, through `/api/upload` into the thread's folder;
-  - voice messages, through the speech sidecar, once `/api/transcribe` exists (MIGHTLING_ASK §7);
-  - `/night add <repo> <task>`;
-  - push opt-in verified on iOS.
+- **Phase 2 (built in §16, 2026-10-20/21, except iOS push):**
+  - photos and files, through `/api/upload` into the thread's folder (§16.1), and files made by the agent sent back (§16.7);
+  - voice messages, through the speech sidecar (`/api/transcribe`, §16.6);
+  - `/night add <task>` and `/night status` (§16.8);
+  - push opt-in verified on iOS *(not yet run)*.
 - **Phase 3:**
-  - Work threads on a repository chosen from the phone, with approvals: superseded by specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md (2026-10-27: every forge repository, a worktree per thread on `phone/<thread>`, repo work on Telegram and Discord only inside the Mini App or the `ling web` link);
-  - other messengers, if users ask (Signal through `signal-cli` is the obvious next, with the caveats its own project states).
+  - Work threads on a repository chosen from the phone, with approvals: superseded by and built under specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md (2026-10-27: every forge repository, a worktree per thread on `phone/<thread>`, repo work on Telegram and Discord only inside the Mini App or the `ling web` link; `ling-rs/web/src/chat_repos.rs`, `ling-rs/chat/src/repo_notice.rs`);
+  - other messengers: Signal shipped in `ling-rs/signal/` ([MIGHTLING_SIGNAL](./DREAMFERENCE_MIGHTLING_SIGNAL.md)); Discord specified in [MIGHTLING_DISCORD](./DREAMFERENCE_MIGHTLING_DISCORD.md).
 
 ## 14. What was built (Phase 1, branch `chat/messengers`, 2026-10-08; merged with §15)
 

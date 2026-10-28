@@ -46,6 +46,7 @@ You queue coding tasks during the day with `/night add …`, from inside a `ling
 | `/night` or `/night list` | Lists this repository's queue: id, status, age, first line of the task. The last line is the next window. |
 | `/night show <id>` | The full task, its status history, and for finished tasks the branch, diff stat, test result and stall notes. |
 | `/night drop <id>` | Cancels a queued or interrupted task. A running task is marked `cancel-requested` and stopped at its next check (§5.3). A unique suffix of the id is enough (`/night drop a3f`). |
+| `/night apply <id>` | Applies `base..night/<id>` to the checkout as uncommitted changes, all or nothing (§11.10); also `ling night apply <id>`. |
 | `/night report` | The latest morning report (§5.6) for this repository. |
 
 **Rules:**
@@ -65,12 +66,12 @@ The Codex source is never edited ([MIGHTLING_CODEX §1](./DREAMFERENCE_MIGHTLING
 - the variant `SlashCommand::Night` (strum's kebab-case gives `night`), placed after `Goal` so it sits near the long-running-task commands in the popup;
 - its description, "queue a task for the overnight run";
 - membership in `supports_inline_args()` and `available_during_task()`;
-- one arm in `dispatch_command` and one in `dispatch_command_with_args`. Both call `ling_launcher::night::command(args, &self.config.cwd)`, which returns the lines to print, and add them with `add_plain_history_lines`, as `/usage` and `/cavemode` do;
+- one arm in `dispatch_command` and one in `dispatch_command_with_args`. Both call `ling_launcher::night::command(args, &self.config.cwd)`, which returns the lines to print, and add them with `add_plain_history_lines`, as `/usage` does (and as `/cavemode` did before cave mode was removed on 2026-10-28);
 - membership in `queued_command_drain_result`'s list of commands that run at once when queued.
 
 `tui` already depends on the launcher crate (patch `0011`), so `0018` needs no manifest change.
 
-**Budget.** The patch series was capped at 25,000 bytes (`test_the_patches_stay_small`) and stood at 24,800 bytes after `0017-cave-mode`. `0018` is 2,133 bytes (seven hunks in two files), so the series is 26,933 bytes and the cap was raised to 27,500 in the same commit, explicitly, as the name hooks and cave mode did.
+**Budget.** When `0018` landed, the patch series was capped at 25,000 bytes (`test_the_patches_stay_small`) and stood at 24,800 bytes after `0017-cave-mode` (removed on 2026-10-28; the cap is now 64,000 bytes in `tests/test_codex_branded_builder.py`). `0018` was 2,133 bytes (seven hunks in two files; 1,808 bytes today after hunk-header and index-line trimming), so the series was 26,933 bytes and the cap was raised to 27,500 in the same commit, explicitly, as the name hooks and cave mode did.
 - Adding a variant needs an arm in every exhaustive `match` over `SlashCommand`. Across the three files that is about six places, judging by where `Goal` appears.
 - Where `_ =>` defaults already exist, rely on them.
 - If `0018` cannot fit, raise the cap in the same commit and say why. Do not trim the other patches.
@@ -262,6 +263,9 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | `index_timeout` | `20m` | The most one repository's refresh may take; never more than half of what is left of the window. |
 | `nodes` | `paired` | Other nodes' model servers a run may also use, as extra lanes ([MIGHTLING_NODE §12.3](./DREAMFERENCE_MIGHTLING_NODE.md)): every paired node serving the same model by default, `none`, or a list of node names. |
 | `compaction_audit` | `true` | Before the queue, audit the compactions of the sessions written since the last run for what their summaries lost, by rule and with no model call, into the report's `## Compactions` section; an empty queue still gets a report when there is something to say ([COMPACTION §12.2](./DREAMFERENCE_MIGHTLING_COMPACTION.md)). |
+| `autofill` | `false` | Before reading the queue on a non-benchmark night, queue up to `autofill_max` bounded tasks from failing CI tests on `main`, failing desktop QA checks, the open Windows QA issue, and unchecked spec boxes / `TODO:` lines (`night_shift_autofill.py`, §11.11). |
+| `autofill_max` | `5` | Maximum tasks autofill queues per night (`1` to `5`). |
+| `autofill_repo` | *(this checkout)* | Repository checkout where autofill runs `ling night add`. |
 
 ---
 
@@ -345,13 +349,20 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | Morning report | `dreamference/night_shift/night_shift_report.py` |
 | Timer | `dreamference/night_shift/night_shift_scheduler.py` |
 | Code index refresh before the tasks | `dreamference/night_shift/night_shift_index.py` |
+| Best-of-N attempts and chooser v1 | `dreamference/night_shift/night_shift_best_of_n.py`, `night_shift_chooser.py`, `chooser_candidate.py` |
+| Repeating tasks (`ling-admin night every`) | `dreamference/night_shift/night_shift_recurring.py` |
+| Archive (`ling-admin night archive`) | `dreamference/night_shift/night_shift_archive.py`, `archive_outcome.py` |
+| Autofill (`ling-admin night autofill`) | `dreamference/night_shift/night_shift_autofill.py`, `autofill_candidate.py` |
+| Remote node hand-off and replica lanes | `dreamference/night_shift/night_shift_remote.py` |
+| Compaction summary audit | `dreamference/night_shift/night_shift_compaction_audit.py` |
+| Phone bridge endpoints (`/api/night/*`) | `ling-rs/web/src/night_phone.rs` |
 | Refusals during a night run | `DreamferenceCLIController._refuse_during_night_run` (`index`, `codex build`, `server start`) |
 
 ### 11.3 Tests
 
 - **Launcher** (`cargo test -p ling-launcher` in the export): parsing of every `/night` form and of `ling night …`; add, list, show and drop round trip, drop by id suffix, drop of a running task; uncommitted-change warning; refusal outside a repository; a linked worktree's tasks belong to the main checkout; 200 ids without a collision; the report section and the newest report; the startup line announced once; the window from the timer, then the config.
 - **Runner** (`tests/test_night_shift.py`, a scripted stand-in for `ling`): a change committed on `night/<id>` with the user's checkout untouched; a failing test recorded; an announce-only reply nudged twice and then `stalled`; a nudge that works; `no-change`; an exec error; an interrupted task keeping its worktree and resuming its session the next time; cancellation before a start and while running; a vanished base; test detection in its order; metrics under both engines' names; parallelism never 0; TUI command lines; each admission check on its own; the idle wait counted from the last change; the window closing while waiting; round-robin; an outside request or session blocking a start; memory blocking a start; the test run sent through `ling sandbox` with the runner's fixed policy and the task's session; no network for it at `/airgapped on`; the level fixed before the agent runs, so an agent that rewrites the worktree's config cannot loosen it, and kept by a resumed task; the main checkout's untracked level reaching its tasks; the launcher's resolution order; unsandboxed tests as an explicit choice, refused at `on`; a whole night of three tasks with its report; a refused admission keeping the queue; the index refresh (once per repository, before the first task; off; not installed; half the remaining window); a second runner refused; `codex build` refused while a night run holds the lock; the queue format shared with the launcher; the timer units; the report's rows.
-- **Not covered by the slash suite.** `tests/test_mightling_slash_commands.py` enumerates the slash commands of unpatched Codex, so a command a patch adds is invisible to it, as `/cavemode` was. `/night` was checked in the TUI itself instead, driven through tmux (§11.4).
+- **Not covered by the slash suite.** `tests/test_mightling_slash_commands.py` enumerates the slash commands of unpatched Codex, so a command a patch adds is invisible to it, as `/cavemode` was (before cave mode was removed on 2026-10-28). `/night` was checked in the TUI itself instead, driven through tmux (§11.4).
 - **Codex's own TUI snapshots** that list the slash-command popup change again with `/night` in it, as they did with `/cavemode`; they need new snapshots reviewed by hand.
 
 ### 11.4 Measured runs
@@ -434,4 +445,11 @@ The runner still merges nothing; a task's result was a branch the user had to fi
 - **The report** says on each task's `Branch` line that it is not merged and names the command, and the Review section says nothing was merged and how to apply.
 - **The TUI's start line** names `/night apply <id>` when a task is done; the desktop app's inbox names the branch and the command on an opened finished task.
 - The worktrees stay: an unattended queue must not edit the checkout while the user works in it, and best-of-N needs one per attempt.
+
+### 11.11 Repeating tasks, archive and autofill (2026-10-21 to 2026-10-28)
+
+- **Repeating tasks (`dreamference/night_shift/night_shift_recurring.py`).** `ling-admin night every add --daily|--weekly <day>|--days <days>|--every <N>|--monthly <D> [--test cmd] -- <task>` (and `night every list|drop`) manages templates under `$CODEX_HOME/night/recurring/r<12 hex>.json` ([DESKTOP_PARITY §9.5](./DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md), [DESKTOP §16](./DREAMFERENCE_MIGHTLING_DESKTOP.md) B42). Each `night run` queues due templates through `ling night add` before reading the queue.
+- **Archive (`dreamference/night_shift/night_shift_archive.py`).** `ling-admin night archive [--weeks N]` (default `4`, `DEFAULT_ARCHIVE_WEEKS`) moves finished tasks older than `N` weeks, their logs and old reports into `$CODEX_HOME/night/archive/{tasks,logs,reports}/` under `runner.lock` and per-task locks ([DESKTOP §16](./DREAMFERENCE_MIGHTLING_DESKTOP.md) B41).
+- **Autofill (`dreamference/night_shift/night_shift_autofill.py`, `tests/test_night_shift_autofill.py`).** When `[night] autofill = true` (off by default) or via `ling-admin night autofill [--dry-run] [--max N]`, up to `autofill_max` (default `5`) bounded tasks (`[autofill:<key>]`) are queued through `ling night add` from failing `main` CI tests (repository's own runs only), failing desktop QA checks, the open Windows QA issue (number only), and unchecked `- [ ]` / `TODO:` lines in `specs/*.md`, skipping security-sensitive paths, recently queued keys (`night/autofill.json`, 14 days) and benchmark nights (`docs/dev/night-shift.md`).
+
 
