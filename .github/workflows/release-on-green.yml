@@ -1,0 +1,41 @@
+# Starts a release when main is green and holds changes that matter to users (owner's decision,
+# 2026-10-28). Off until the repository variable RELEASE_ON_GREEN is "true"; set it to false (or
+# delete it) to stop. The rules and what they read are in scripts/release_on_green.py and
+# docs/dev/release-on-green.md. This file only runs it: it never tags, signs or publishes; it
+# dispatches release.yml, which does, from main, as a manual dispatch would.
+#
+# Triggers: a finished Release dry run (the full build and test pass on main) or a finished Release
+# (a waiting release is then taken). Never pull_request or pull_request_target.
+name: Release on green
+
+on:
+  workflow_run:
+    workflows: ["Release dry run", "Release"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One evaluation at a time; a second waits, so two cannot both see "no release running".
+concurrency:
+  group: release-on-green
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Evaluate and start the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ON_GREEN: ${{ vars.RELEASE_ON_GREEN }}
+        run: python3 scripts/release_on_green.py

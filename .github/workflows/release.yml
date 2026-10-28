@@ -26,6 +26,11 @@ on:
         description: "Create the release as a draft (publish it by hand afterwards). Off: the run publishes it, with the notes of specs/DREAMFERENCE_RELEASE_<version>.md"
         type: boolean
         default: false
+      generated_notes:
+        # Set by release-on-green.yml when main has no specs/DREAMFERENCE_RELEASE_<version>.md.
+        description: "Publish with GitHub's generated notes when the version has no notes spec (a patch released automatically)"
+        type: boolean
+        default: false
       run_tests:
         description: "Gate the release on the test suite"
         type: boolean
@@ -125,8 +130,8 @@ jobs:
       - name: Check the release notes
         run: |
           if ! python3 scripts/release_notes.py --version "$VERSION" > /dev/null 2> notes-error.txt; then
-            if [[ "${{ inputs.draft }}" == "true" ]]; then
-              echo "::warning::$(cat notes-error.txt). The draft carries GitHub's generated notes only."
+            if [[ "${{ inputs.draft }}" == "true" || "${{ inputs.generated_notes }}" == "true" ]]; then
+              echo "::warning::$(cat notes-error.txt). The release carries GitHub's generated notes only."
             else
               echo "::error::$(cat notes-error.txt). A published release needs its notes; dispatch with draft to build one without them."
               exit 1
@@ -307,8 +312,8 @@ jobs:
           if python3 source/scripts/release_notes.py source/specs/DREAMFERENCE_RELEASE_"$VERSION".md > body.md 2> notes-error.txt; then
             cat body.md >> notes.md
             echo >> notes.md
-          elif [[ "${{ inputs.draft }}" == "true" ]]; then
-            echo "::warning::$(cat notes-error.txt). The draft carries GitHub's generated notes only."
+          elif [[ "${{ inputs.draft }}" == "true" || "${{ inputs.generated_notes }}" == "true" ]]; then
+            echo "::warning::$(cat notes-error.txt). The release carries GitHub's generated notes only."
           else
             echo "::error::$(cat notes-error.txt). Nothing was published."
             exit 1
