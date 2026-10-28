@@ -57,6 +57,10 @@ The web-access instructions are appended to the system prompt by the launcher (`
 
 That trace is now `ling-admin audit egress` ([egress-audit.md](egress-audit.md)), and `ling-admin codex build` runs it (and its `--tui` form) after installing a new binary (`--no-audit` skips it; without a model server it says so and does not wait): after a Codex bump, read its verdict.
 
+## The share scope header
+
+Every launch passes `-c model_providers.openai-custom.http_headers.X-Ling-Share-Scope="<hash>"` (`ling-rs/src/share_scope.rs`), so Codex sends `X-Ling-Share-Scope` on every request to the model server; it needs no patch, and a per-launch override rather than `config.toml` because the repository follows the working folder. The value is the first 32 hex characters of SHA-256 over the node id (else the user id) and the repository: the normalized `origin` URL, else the git toplevel's canonical path. Nothing readable leaves the machine. The engine (ling-serve, P4c) shares a cached prefix only between requests with the same scope, and requests without the header only with each other; SGLang and vLLM ignore the header. The launcher's own `/v1/models` calls carry none, as they touch no cache.
+
 ## Tests
 
 The launcher's unit tests run with `cargo test --release -p ling-launcher` in the *export* directory under `~/.cache/dreamference/puffin-codex/`, never in `codex/`.

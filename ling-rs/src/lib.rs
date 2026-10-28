@@ -79,6 +79,7 @@ pub mod sandbox_share;
 #[cfg(target_os = "linux")]
 pub mod signal;
 pub mod skills;
+pub mod share_scope;
 pub mod summary_cap;
 #[cfg(unix)]
 pub mod sync;
@@ -788,6 +789,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let args = compaction::prepare_turn_end(args, &codex_home, model.max_model_len, !one_shot);
     // A length bound on the compaction summary, 800 words unless switched off (summary_cap.rs).
     let args = summary_cap::prepare(args, &codex_home);
+    // The share scope header for the model server's prefix cache (share_scope.rs).
+    let args = share_scope::prepare(args, &session_dir);
     // `default` is `model_catalog.json`, already named in `config.toml`; another prompt's catalog
     // is named for this process only, so a session it resumes keeps the prompt it recorded.
     let args = match catalog {
