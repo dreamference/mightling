@@ -4,6 +4,9 @@ Every model Mightling can serve is listed in its model registry, together with t
 settings it runs with on a GB10. Choosing a model chooses all of its settings, so there is nothing
 to tune by hand.
 
+How well the default model solves real coding tasks, release by release, is on the
+[Benchmarks](benchmarks.md) page.
+
 ## The registry
 
 | Alias | Model | Parameters | Precision | Memory needed | Images |

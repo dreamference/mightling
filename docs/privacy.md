@@ -72,6 +72,17 @@ access is root on the machine**, in every mode, Read Only included. If that matt
 use `/airgapped on`, which also masks those sockets. You choose the sandbox mode (Read only, Workspace, Full Access) in `/permissions`, the desktop app
 and the browser page; Full Access runs commands with no sandbox at all.
 
+## Git in a folder the agent can write
+
+The agent can edit a repository's `.git/config` and `.gitattributes`, and git can be told there to
+run a program (a pager, a filter, a diff tool, a hook). Mightling's own background `git` calls,
+made outside the sandbox by the web UI, the terminal agent's launcher, `ling delegate` and
+`ling monitor`, the code index and the desktop app (for diffs, status, branches and the like), therefore
+refuse every such setting: the program a repository names is not run, and neither are its hooks.
+A repository's hooks run when *you* choose to run them: `git commit` or `git push` in your own
+terminal runs them as usual. One consequence: committing from a button in the desktop app skips
+`pre-commit`, so run your checks yourself.
+
 ## Air-gapped sessions
 
 `/airgapped on` (or `mightling_airgapped = "on"` in `dreamference.toml`, or

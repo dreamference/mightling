@@ -52,7 +52,7 @@ agent sessions.
   [Privacy & security](privacy.md) for exactly what can leave the machine, and when.
 - **Fast, with no rate limits.** The default model, Qwen3.8-27B with speculative decoding, measures
   50 tokens/s on code, 87 on JSON and 25 on prose on a GB10, single-stream, with a 262K-token
-  context. Run several agents at once: there is no quota and no bill. See [Models](models.md).
+  context. Run several agents at once: there is no quota and no bill. See [Models](models.md); each release's measured result is on the [Benchmarks](benchmarks.md) page.
 - **Easy.** One installer, no tuning, and the model load is guarded so it cannot freeze the
   machine: on the GB10 the GPU and the system share one pool of memory, so Mightling checks the host
   before loading and watches memory pressure while it loads. See [Architecture](architecture.md).

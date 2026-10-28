@@ -66,7 +66,7 @@ sessions in `~/.codex`, the first run copies them and your settings across, neve
 | **`ling update`** | Installs the latest published Mightling release. |
 | **`ling uninstall`** | Removes a client installed by `install.sh` or `install.ps1`: its programs, the links in `~/.local/bin` (Linux, macOS), and on Windows its `Path` entry and its firewall rules (one Administrator prompt; over SSH it prints the command for an administrator). It asks first (`--yes` does not). `~/.mightling`, with your sessions and settings, stays unless you add `--purge`. A node, and a `ling` built from a checkout, are not removed this way. |
 | **Code index** | `ling-code` answers where a name is defined, who calls it and what a change would touch, from an index of the repository kept current as you work. The model is offered it as tools (`code_search`, `code_show`, `code_refs`, …) and from the shell. |
-| **`/night`** | Queue a task for tonight: `/night add <task>`. `ling-admin night run` (on a timer once `ling-admin night enable` is set) works through the queue while the model is otherwise idle, each task on its own git branch; nothing is merged or pushed. `ling night apply <id>` (or `/night apply <id>`) in the repository brings a finished task's changes into your checkout as uncommitted changes to review and commit; when they conflict with your own changes it refuses and changes nothing. Each task is attempted three times, one after another, and only the best attempt is committed: an attempt whose tests fail is dropped, and among those left the model compares the diffs in pairs and picks one (with no test command to run, the model's comparison alone decides). The morning report lists every attempt, which one was chosen and why, and where each one's diff and logs are. `/night add --best-of 1 <task>` runs a task once (or `[night] best_of = 1` in `dreamference.toml`, for every task); `--best-of N` asks for N. A task sent to another node with `--on <node>` is worked once there. Three attempts take about three times as long as one, so a short window may fit fewer: the report says when it did. `ling-admin night archive` moves finished runs older than four weeks (`--weeks N` for another age), with their transcripts and the old reports, to `~/.mightling/night/archive/`; their branches stay. |
+| **`/night`** | Queue a task for tonight: `/night add <task>`. `ling-admin night run` (on a timer once `ling-admin night enable` is set) works through the queue while the model is otherwise idle, each task on its own git branch; nothing is merged or pushed. `ling night apply <id>` (or `/night apply <id>`) in the repository brings a finished task's changes into your checkout as uncommitted changes to review and commit; when they conflict with your own changes it refuses and changes nothing. Each task is attempted three times, one after another, and only the best attempt is committed: an attempt whose tests fail is dropped, and among those left the model compares the diffs in pairs and picks one (with no test command to run, the model's comparison alone decides). The morning report lists every attempt, which one was chosen and why, and where each one's diff and logs are. `/night add --best-of 1 <task>` runs a task once (or `[night] best_of = 1` in `dreamference.toml`, for every task); `--best-of N` asks for N. A task sent to another node with `--on <node>` is worked once there. Three attempts take about three times as long as one, so a short window may fit fewer: the report says when it did. Night Shift can also fill its own queue (off by default): with `[night] autofill = true` in `dreamference.toml`, each night begins by queueing up to five small tasks (`[night] autofill_max`, 1 to 5) from the failing tests of the latest failed CI run, the desktop QA report and unchecked items (`- [ ]` and `TODO:` lines) in the repository's `specs/` documents. They are ordinary tasks on their own branches, marked `[autofill:...]` on their first line, with the test that must pass written into them; a finding is queued at most once in 14 days, anything that mentions the sandbox, credentials, signing or similar is skipped, and nothing is merged. `ling-admin night autofill --dry-run` shows what it would queue. Review each branch in the morning like any other Night Shift result. `ling-admin night archive` moves finished runs older than four weeks (`--weeks N` for another age), with their transcripts and the old reports, to `~/.mightling/night/archive/`; their branches stay. |
 | **`/worktree`: in place or a worktree** | By default a session edits your checkout in place, as Codex does, and your editor sees every change at once. `/worktree on` (or `ling worktree on`) makes new sessions in a git repository start in a fresh git worktree on a branch of their own (`ling/<id>`, under `~/.mightling/session-worktrees/`), so your checkout is untouched while the agent works; `/worktree off` goes back. The footer always shows the folder and branch the session edits. In a worktree session, `/worktree status` shows what is not yet applied, `/worktree apply` brings the changes into your checkout as uncommitted changes (all or nothing: it refuses, changing nothing, if they conflict with yours), and `/worktree discard` drops them, keeping a snapshot under `refs/mightling/snapshots/`. `ling worktree list` names a repository's worktree sessions. The worktree starts from your last commit: uncommitted changes, ignored files and submodules are not in it. `/worktree` alone opens Codex's own worktree picker. The desktop app's Local/Worktree toggle starts on the same choice. |
 | **Refine mode (off by default)** | Each new task is first studied by a separate session that changes nothing and writes a refined description (intent, requirements, every code path, edge cases, what must not change, acceptance checks); a fresh session then does the task with that description. It runs by itself with no stop: in `ling exec`, on the first prompt of each interactive session, and for each new Night Shift task. On SWE-bench it solved 20 of 24 tasks against 16 and 17 without it, at about two and a half times the time; it becomes the default only if a 100-task comparison confirms that. Switch it on with `ling --refine`, `DREAMFERENCE_MIGHTLING_REFINE=on` or `mightling_refine = true` in `dreamference.toml` (`[night] refine` for Night Shift alone); `ling refine` shows the setting. A second version of its texts, refine-v2, is built for a comparison night and chosen with `ling --refine-version v2`, `DREAMFERENCE_MIGHTLING_REFINE_VERSION=v2`, `mightling_refine_version = "v2"` or `[night] refine_version = "v2"`; v1 stays the default. |
 | **Guards (off by default)** | Two checks on the agent's own work, built from what went wrong in benchmark runs. The test guard points out a change that weakens an existing test (an assertion rewritten or removed, a test deleted or skipped) and holds the first stop once while it stands, so the agent decides from your task whether that behaviour was meant to change. The finish check holds the first stop once when source files changed and no test has run on them since, when the agent calls failures pre-existing without having run the tests on the unchanged code, or when it stops announcing a next step. Each hold happens at most once per session and never refuses anything. Switch them on with `mightling_test_guard = true` and `mightling_finish_check = true` in `dreamference.toml`, or `DREAMFERENCE_MIGHTLING_TEST_GUARD=on` and `DREAMFERENCE_MIGHTLING_FINISH_CHECK=on`; Night Shift's sessions follow the same settings. They work in a git repository only. |
@@ -194,6 +194,39 @@ on it, always does. A job runs with a memory cap and a time limit (8 GB and 90 m
 say otherwise), cannot use the GPU, and sees nothing of the other node's home folder. Uncommitted
 changes are not sent. All of this was built and tested on a single GB10 playing both sides; it has
 not yet run between two machines.
+
+### Setting up a node from far away
+
+A new GB10 can be set up from the one you sit at, over the network or over the
+[overlay](remote.md) when it is at another site:
+
+```bash
+ling-admin node provision <name> --user <the account on that machine>
+```
+
+It installs Mightling there, gives the node its model, pairs it and starts it; run on nodes that are
+already paired, `ling-admin node provision --all` updates them all. With no name it lists the
+unprovisioned GB10s it finds on the network. `--dry-run` connects and reads only, then says what
+would change. It asks for the new machine's password once (`--per-host-password` asks for each).
+
+By default the model's files (about 22 GiB for the default model) are copied from the GB10 you run
+it on. For a node on a slow connection to you, let the node download them itself:
+
+```bash
+ling-admin node provision <name> --user <account> --model-source hf
+```
+
+The node fetches the public weights from Hugging Face, at the exact revision your own GB10 holds,
+and resumes a download that is cut off. Every file is then checked against your copy by its
+SHA-256 checksum; only a file that Hugging Face does not carry, or whose checksum differs, is sent
+from your GB10. If two machines are provisioned in one command and the download keeps failing on
+the second, it takes the files from the first over their own network. The default, `--model-source
+copy`, stays as it was.
+
+### Restarting a hung node
+
+If a node stops answering, `ling-admin node power-cycle <node>` switches its smart plug off and on
+again. See [Away from home](remote.md#how-do-i-restart-a-hung-gb10-from-a-distance) for the setup.
 
 ## Debugging
 
