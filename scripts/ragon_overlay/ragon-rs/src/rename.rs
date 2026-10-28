@@ -88,6 +88,7 @@ const BINARIES: &[(&str, &str)] = &[
     ("ling-code", "ragon-code"),
     ("ling-docs", "ragon-docs"),
     ("ling-app", "ragon-app"),
+    ("ling-delegate", "ragon-delegate"),
     ("ling-signal", "ragon-signal"),
 ];
 /// Command links the old installations put in `~/.local/bin`, removed when they are links.
@@ -104,6 +105,7 @@ const LEGACY_LINKS: &[&str] = &[
     "ling-code",
     "ling-docs",
     "ling-app",
+    "ling-delegate",
     "ling-admin",
 ];
 /// Entries of an old home carried into the new one by a copy: Codex's own state (the same
@@ -300,6 +302,10 @@ fn copy_windows_install(home: &Path, report: &mut Report) {
     }
 }
 
+/// Removes the old command links and links the new names. A new link is made wherever it is missing
+/// and its binary is in the install folder, whether or not this run removed the old one: `ragon-admin`
+/// may have run first and removed the old links already. `ragon-signal` never gets one (its commands
+/// are `ragon signal …`). Says something only when it removed or linked something.
 fn relink(home: &Path, report: &mut Report) {
     let links = home.join(".local/bin");
     let bin = home.join(INSTALL_DIR).join("bin");
@@ -330,19 +336,35 @@ fn relink(home: &Path, report: &mut Report) {
             }
         }
     }
-    if removed.is_empty() {
-        return;
-    }
-    for (old, new) in BINARIES {
-        if removed.contains(old) && bin.join(new).is_file() {
-            let _ = link(&bin.join(new), &links.join(new));
+    let mut linked: Vec<&str> = Vec::new();
+    for new in linked_names() {
+        let target = bin.join(new);
+        let path = links.join(new);
+        if target.is_file() && std::fs::symlink_metadata(&path).is_err() && link(&target, &path).is_ok() {
+            linked.push(new);
         }
     }
-    report.lines.push(format!(
-        "replaced the links {} in {}",
-        removed.join(", "),
-        links.display()
-    ));
+    let mut parts = Vec::new();
+    if !removed.is_empty() {
+        parts.push(format!("removed the links {}", removed.join(", ")));
+    }
+    if !linked.is_empty() {
+        parts.push(format!("linked {}", linked.join(", ")));
+    }
+    if !parts.is_empty() {
+        report.lines.push(format!("{} in {}", parts.join("; "), links.display()));
+    }
+}
+
+/// The new names that get a command link: those of the binaries whose old name had one.
+fn linked_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = Vec::new();
+    for (old, new) in BINARIES {
+        if LEGACY_LINKS.contains(old) && !names.contains(new) {
+            names.push(new);
+        }
+    }
+    names
 }
 
 /// Links `link_path` to `target`, unless a real file already has that name.

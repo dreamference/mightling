@@ -76,6 +76,7 @@ LEGACY_BINARIES: Final[tuple] = (
     ("ling-code", "ragon-code"),
     ("ling-docs", "ragon-docs"),
     ("ling-app", "ragon-app"),
+    ("ling-delegate", "ragon-delegate"),
     ("ling-signal", "ragon-signal"),
 )
 LEGACY_LINKS: Final[tuple] = (
@@ -91,6 +92,7 @@ LEGACY_LINKS: Final[tuple] = (
     "ling-code",
     "ling-docs",
     "ling-app",
+    "ling-delegate",
     "ling-admin",
 )
 # Units that must not be running while the install folder moves.
@@ -298,18 +300,37 @@ class LegacyNameMigration:
 
     @classmethod
     def remove_old_links(cls) -> str | None:
-        """Removes the old command links from `~/.local/bin`, links only (a real file is someone else's).
+        """Replaces the old command links in `~/.local/bin` with the new ones.
 
-        `codex build` and `ragon` make the new ones.
+        Only links are removed (a real file is someone else's). A new link is made wherever it is missing
+        and its target exists: the binaries of the install folder whose old name had a link (never
+        `ragon-signal`), and `ragon-admin` beside this interpreter. `ragon` makes the same links, so either
+        may run first.
 
         Returns:
-            Optional[str]: A line when old links were removed.
+            Optional[str]: A line when a link was removed or made.
         """
+        from dreamference.runner.codex_branded_builder import INSTALL_DIR
+
         links = Path("~/.local/bin").expanduser()
         removed = [name for name in LEGACY_LINKS if (links / name).is_symlink()]
         for name in removed:
             (links / name).unlink()
-        return f"removed the links {', '.join(removed)} from {links}" if removed else None
+        targets: dict[str, Path] = {}
+        for old, new in LEGACY_BINARIES:
+            if old in LEGACY_LINKS:
+                targets.setdefault(new, Path(INSTALL_DIR) / "bin" / new)
+        targets["ragon-admin"] = Path(sys.executable).parent / "ragon-admin"
+        linked = []
+        for name, target in targets.items():
+            path = links / name
+            if target.is_file() and not path.is_symlink() and not path.exists():
+                links.mkdir(parents=True, exist_ok=True)
+                path.symlink_to(target)
+                linked.append(name)
+        parts = [f"removed the links {', '.join(removed)}"] if removed else []
+        parts += [f"linked {', '.join(linked)}"] if linked else []
+        return f"{'; '.join(parts)} in {links}" if parts else None
 
     @classmethod
     def rewrite_keys(cls, path: Path) -> bool:
