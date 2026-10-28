@@ -273,7 +273,7 @@ The provider's firewall now opens 33080/tcp+udp and 3478/udp. The owner ran `lin
 
 ### 13.1 Built (branch `remote/vpn-mvp`)
 
-- **Node** (`dreamference/remote/`): `RemoteSettings` (paths, pins, `remote.json`), `RemoteCertificateAuthority` (the constrained CA, `openssl`), `RemoteControlPlane` (the container, `config.yaml`, the API: setup, tokens, setup keys, peers), `RemoteBox` (probe, relay extraction and check, the staged archive, the install and remove scripts, unit states, the check of port 443 from the node), `RemoteTunnel` (key, known hosts, user unit), `RemoteNodePeer` (the node's client, CA, `netbird up`, leave), `RemoteEnrolment` (code, proofs, the LAN listener), `RemoteAccess` (the six commands; `setup --ssh` and `--box-only`, 2026-10-12). The advertisement's `remote` key (`NodeServiceFile`, `NodeAdvertiser`), the audit's declared exception, `ling-admin remote …` in the CLI.
+- **Node** (`dreamference/remote/`): `RemoteSettings` (paths, pins, `remote.json`), `RemoteCertificateAuthority` (the constrained CA, `openssl`), `RemoteControlPlane` (the container, `config.yaml`, the API: setup, tokens, setup keys, peers), `RemoteBox` (probe, relay extraction and check, the staged archive, the install and remove scripts, unit states, the check of port 443 from the node), `RemoteTunnel` (key, known hosts, user unit), `RemoteNodePeer` (the node's client, CA, `netbird up`, leave), `RemoteEnrolment` (code, proofs, the LAN listener), `BundleOptions` and `RemoteJoinScript` (`remote code --bundle-file [--ttl] [--join]`), `RemotePublicCertificate` (§15.2) and `RemoteRelayCertificate` (§15.5), `RemoteAccess` (the six commands — `setup --ssh` and `--box-only`, 2026-10-12 — plus `remote certificate {issue,relay,renew,off,relay-off}`). The advertisement's `remote` key (`NodeServiceFile`, `NodeAdvertiser`), the audit's declared exception, `ling-admin remote …` in the CLI.
 - **Launcher** (`ling-rs/`): `remote_join.rs` (`ling node remote join`), the overlay tier and listing in `node.rs`, the overlay name in `NO_PROXY` (`proxy.rs`), the audit's host for an overlay resolution (`audit.rs`), and in `ling-node-locator` (with its copy in `ling-web-rs`) the `remote` field, the own-name rule and the LAN-or-overlay choice.
 - **Tests:** HMAC vectors shared by the Python and Rust halves (and RFC 4231 case 2), the CA's constraints with real `openssl`, the box's scripts through `bash -n`, the enrolment listener on a scratch loopback port, the 443 handshake's verdicts against scratch loopback TLS listeners (the node's CA, a stranger's certificate, a bare close, nothing), the commands with every seam faked.
 
@@ -282,7 +282,7 @@ The provider's firewall now opens 33080/tcp+udp and 3478/udp. The owner ran `lin
 - Matrix on the overlay (§8) and the `ling web` Devices page with the phone's QR code (§4.2).
 - `audit egress --remote` (§6), with the Rust audit.
 - A `ling-admin remote` line in `ling-admin status`, and docs on the user site.
-- A relayed path for Android: the relay's certificate is the node CA's, which the app cannot trust (§15.4).
+- ~~A relayed path for Android: the relay's certificate is the node CA's, which the app cannot trust (§15.4).~~ **Built 2026-10-28** (§15.5, `dreamference/remote/remote_relay_certificate.py`, `ling-admin remote certificate relay`).
 
 ### 13.3 Phase 0, then the live acceptance
 
@@ -379,7 +379,7 @@ What does not change: the overlay's internal names, `ling web` over the overlay 
 - **Renewal.** The existing daily timer: `remote certificate renew` renews the control plane's certificate and the relay's, each only when lego says it is due, restarts the control plane only for its own new leaf, and pushes the relay's certificate only when lego's leaf differs from the one last pushed (`relay_pushed` in `remote.json`), restarting the relay alone. One failing does not stop the other.
 - **The alert.** The renewal service has `OnFailure=mightling-remote-certificate-alert.service`, which runs `owner-notify` (the Telegram path the acceptance run uses). Before 2026-10-28 a failed renewal was silent.
 - **Status.** `remote status` adds "Relay cert: <issuer>, valid N more days, presented by the box": a handshake with the relay's port, verified against the system store, that must present lego's current leaf.
-- **Commands.** `ling-admin remote certificate relay [--staging] [--name N]` and `relay-off`.
+- **Commands.** `ling-admin remote certificate relay [--staging] [--name N]` and `relay-off` (`dreamference/remote/remote_relay_certificate.py`).
 
 **The switch and its window.** The order is: DNS and certificate; the relay on the box (new certificate, new exposed address), checked from the node against the system store for exactly the new leaf; then the control plane's configuration and a restart of its container. Between the relay's restart and the peers' next management sync, a peer that still holds the old relay address cannot use the relay (the certificate no longer matches the old name); peer-to-peer sessions are unaffected. If the box does not present the new leaf, or management cannot be restarted, the node CA's relay certificate and the old address are put back (`relay-off` does the same by hand).
 

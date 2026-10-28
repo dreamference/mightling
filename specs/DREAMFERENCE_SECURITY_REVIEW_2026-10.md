@@ -81,7 +81,7 @@ injection channel.
 service's own is refused (403). Programs (the launcher, `ling-admin`) send no `Origin` and are
 unaffected; a browser always sends one with a cross-origin or rebinding POST. Tests:
 `tests/test_google_service_origin.py`, which runs the real service on a free port. The fix reaches
-a running installation when the service's copy is refreshed (`ling-admin ling configure` or
+a running installation when the service's copy is refreshed (`ling-admin chat configure`, since retired with the Onyx web chat, or
 `ling-admin google start`).
 
 ### 5. Untrusted content (fixed)
@@ -145,7 +145,7 @@ redirecting if the account is renamed and its old name is claimed by someone els
 
 ### 10. The model server on port 8000 (accepted)
 
-By design, the model server listens on every interface with no key, because the web chat and
+By design, the model server listens on every interface with no key, because the web chat (since retired; now image search) and
 OpenHands reach it through Docker's bridge and the local network is assumed trusted. This is
 stated in `docs/privacy.md`, with the firewall rule to apply on an untrusted network. Not changed.
 
@@ -157,7 +157,7 @@ explicitly. Consistent with the trusted-LAN premise above.
 
 ### 12. The rename migration (recommendations for `rename/mightling`)
 
-Read on the branch, not changed here:
+Read on the branch, not changed here (`rename/mightling` later merged as `LegacyNameMigration` in `dreamference/cli/legacy_name_migration.py` and `ling-rs/src/rename.rs`, adding `rekey_paired_nodes` while keeping in-place `write_text` and `cwd.join("dreamference.toml")`; those lessons were carried into [DREAMFERENCE_RENAME_RAGON.md](./DREAMFERENCE_RENAME_RAGON.md)):
 
 - `LegacyNameMigration.rewrite_authorized_keys` rewrites `~/.ssh/authorized_keys` with
   `write_text`. An interruption mid-write can truncate the file and lock the owner out of their own

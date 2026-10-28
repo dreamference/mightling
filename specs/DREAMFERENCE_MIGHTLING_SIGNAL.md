@@ -1,6 +1,6 @@
 # Mightling over Signal: `ling signal`
 
-**Status:** implemented, off by default (2026-10-08). §18 (2026-10-11) specifies several accounts on one node; the owner decided on 2026-10-12 to build it, and it is built on branch `signal/multi-account` (§18.8) and merged into `main` on 2026-10-18 (`b385ab7`, unreleased until 1.7.0), not yet run live. The bridge is built and tested (§16) end to end against a scripted signal-cli and a stand-in `ling web`, and merged into `main` with the other messengers (§17): `ling signal …` is a launcher subcommand, the `ling-signal` daemon binary ships in the release, and signal-cli and its Java runtime are fetched pinned by setup. It was first run against a real Signal account on 2026-10-12, in linked mode, with the published 1.6.0 (§17.2), and from 1.6.1 it is no longer labelled a preview (the owner's decision, 2026-10-12). The user asked for this on 2026-10-08 ("can I chat with ling using signal? … write a spec for this").
+**Status:** implemented, off by default (2026-10-08). §18 (2026-10-11) specifies several accounts on one node; the owner decided on 2026-10-12 to build it, and it is built on branch `signal/multi-account` (§18.8) and merged into `main` on 2026-10-18 (`b385ab7`, shipped in 1.7.0), not yet run live. The bridge is built and tested (§16) end to end against a scripted signal-cli and a stand-in `ling web`, and merged into `main` with the other messengers (§17): `ling signal …` is a launcher subcommand, the `ling-signal` daemon binary ships in the release, and signal-cli and its Java runtime are fetched pinned by setup. It was first run against a real Signal account on 2026-10-12, in linked mode, with the published 1.6.0 (§17.2), and from 1.6.1 it is no longer labelled a preview (the owner's decision, 2026-10-12). The user asked for this on 2026-10-08 ("can I chat with ling using signal? … write a spec for this").
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 **Builds on:**
 - [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md). The bridge is one more client of `ling web`, signed in like a paired phone (§4.3 there). It uses **Ask threads** (§3 there), the bridge policy (`ling-rs/web/policy.json`) and `/api/upload`.
@@ -275,11 +275,12 @@ A message that is exactly one of these is a command. Anything else is a question
 | `/status` | What is running and for how long, the queue, the model server's state, the air-gap level, the bridge's and signal-cli's versions |
 | `/threads` | The last eight threads started from Signal, numbered, with their first line |
 | `/use N` | Continues thread N from `/threads` (`thread/resume`; an Ask thread keeps its folder, ASK §16) |
-| `/cavemode [level]` | How terse this thread's answers are: the level in force, or `off`, `lite`, `full`, `ultra` for this thread; `/cavemode default <level|built-in>` for new threads, on every surface (CAVE_MODE §11.7). Through `ling web`'s `/api/cavemode` |
+| `/night add <task>` / `/night status` | Queues a task for Night Shift tonight with this thread's last exchange, or shows the queue (§19.7, `ling-rs/signal/src/command.rs`) |
+| ~~`/cavemode [level]`~~ | **Removed 2026-10-28** (`ef443182`). Was: how terse this thread's answers are: the level in force, or `off`, `lite`, `full`, `ultra` for this thread; `/cavemode default <level|built-in>` for new threads, on every surface. Through `ling web`'s `/api/cavemode` (also removed) |
 | `/help` | This table |
 | `YES` / `NO` | Only while an approval is pending (§8); otherwise an ordinary message |
 
-**No command reaches the node's administration:** none starts or stops the model server, changes the air-gap level, pairs devices or changes the bridge. (`/cavemode default` writes one preference of the owner's own, as the terminal's `/cavemode default` does.) Those stay with a shell on the node.
+**No command reaches the node's administration:** none starts or stops the model server, changes the air-gap level, pairs devices or changes the bridge. (`/cavemode default`, before cave mode was removed on 2026-10-28, wrote one preference of the owner's own, as the terminal's `/cavemode default` did.) Those stay with a shell on the node.
 
 ### 5.3 A changed identity key
 
@@ -486,12 +487,12 @@ All without Signal, without a network, without `ling web` running, and without s
 
 ## 14. Later
 
-- **Voice notes:** Signal voice messages (AAC) go to `ling web`'s `/api/transcribe` (ASK §7), once it exists, and are answered as text. Answering in voice (text-to-speech) is not planned.
-- **Files out:** a `ling web` route that serves a file from an Ask folder to a paired device, so the bridge can send what the agent wrote ("here is the report: report.pdf").
+- **Voice notes:** Signal voice messages (AAC) go to `ling web`'s `/api/transcribe` (ASK §7), once it exists, and are answered as text. Answering in voice (text-to-speech) is not planned. **Built 2026-10-21** (§19.5, `ling-rs/signal/src/bridge.rs`).
+- **Files out:** a `ling web` route that serves a file from an Ask folder to a paired device, so the bridge can send what the agent wrote ("here is the report: report.pdf"). **Built 2026-10-21** (§19.6, `ling-rs/signal/src/bridge.rs` `Action::SendFile`).
 - **Work threads:** `/work <project>` starts a Work thread in a repository the owner listed in `[signal] projects`. It uses the default prompt and the workspace-write sandbox, with approvals as in §8. It never offers Full Access. **Superseded (2026-10-27)** by specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md: `/repo` over every forge repository, a worktree per thread, code inline on Signal, Full Access only by the node's policy and a typed confirmation.
-- **Night Shift from the phone:** `/night <task>` queues a Night Shift task (`ling night add`), and the morning report comes back as a message.
+- **Night Shift from the phone:** `/night <task>` queues a Night Shift task (`ling night add`), and the morning report comes back as a message. **Built 2026-10-21** (§19.7, `ling-rs/signal/src/command.rs`, `ling-rs/web/src/night_phone.rs` `/api/night/add`).
 - **A native client:** evaluate presage (Rust, on Signal's libsignal; both AGPL-3.0, compatible with Mightling's licence) to replace the JVM. Ship it if it is maintained, passes the same tests and handles the same edge cases.
-- **Other messengers:** Matrix, through the same bridge shape. WhatsApp and Telegram are out of scope: their bot APIs pass messages through the company's servers in readable form.
+- **Other messengers:** Matrix, through the same bridge shape. WhatsApp and Telegram are out of scope: their bot APIs pass messages through the company's servers in readable form. **Since built (2026-10-10 to 2026-10-21):** Matrix and Telegram ship in `ling-rs/chat/src/matrix.rs` and `ling-rs/chat/src/telegram.rs`.
 
 ---
 
@@ -559,10 +560,10 @@ It checks that:
 
 Tests: 69 unit tests and three end-to-end tests (dedicated, air gap on, linked).
 
-**Not built** (as of this section; §17 adds the routing, the packaging and `setup --refresh`):
+**Not built** (as of this section; §17 adds the routing, the packaging and `setup --refresh`; §19.5–19.7 add voice notes, files back and Night Shift from the phone):
 - **CI building libsignal's JNI library for arm64** (§3); exquo's build stays pinned.
 - **Egress audit:** `audit egress --signal`, the trace of the unit's own connections. The note is built: when `mightling-signal.service` is enabled, every `ling-admin audit egress` report ends with "ℹ️ Declared exception: Signal bridge enabled …" (`EgressAudit.declared_exceptions`, tested).
-- **Phase 2:** everything in §14.
+- **Phase 2:** everything in §14 (voice notes, files out, Night Shift from the phone, and Matrix/Telegram have since shipped; see §14 and §19.5–19.7).
 
 A second end-to-end test runs the daemon with `ling web` answering `on`. The owner's message then gets no send, no receipt and no typing, and no thread or turn is requested.
 
@@ -875,7 +876,7 @@ On the morning of 2026-10-20 the owner's Note to Self thread gave useless answer
   Thirty seconds after that "answer now", a turn still running is interrupted (`turn/interrupt`), the owner is told in one line ("This is taking too long (…), so I asked for an answer with what was found so far."), and a **final turn** asks for the answer from what was found, without tools. The final turn has 90 seconds; past them it is interrupted and the owner gets what it wrote and "No answer came in time, so I stopped it. Ask again, maybe more narrowly." `/stop` still stops everything, with no final turn. 0 switches a bound off.
 - **The phone prompt, `chat`:** the bridges open threads with `thread/start {prompt: "chat"}`, `ask` plus `ling-rs/prompts/chat.md`: answer within minutes, `ling-search` and `ling-fetch` first, never a search engine's result page with curl, never sleep-and-retry, `timeout` on a command that could hang, no clarifying question (since 2026-10-27: the most likely reading, typos included, said in one short line, then the whole answer; "it" with nothing to point at is what the user last named, never an earlier topic), a question only before something destructive or costly, through the approval flow, no mention of an attachment the message does not carry, and what `[Screenshot text: …]` and `[Attached and saved in this thread's folder: …]` are. `ling web`'s policy names it (`namedPrompts`, `scratchPrompts`, a conformance case); a `ling web` that refuses it gets `ask`.
 - **How a phone thread is recognised:** its scratch folder is `ask/chat-<hex>` instead of `ask/q-<hex>` (`ask::folder_prefix`), so the model gate's extension gives a phone's thread its own output-token cap from the folder alone; nothing extra reaches the model. The desktop app counts both as Ask threads.
-- **Cave mode (§19, item 6).** On the morning of 2026-10-20 ultra applied to phone threads by design (it was the user-level default). Its "answer every question first" did not make the wrong answer: the empty message did, and the model answered the thread's last question. The cave texts are not changed (they are the benchmark's, byte for byte); the phone prompt said instead to ask back about anything referred to but not visible, and since 2026-10-27 says to take the most likely reading and never answer about an earlier topic in its place. Since the cave-mode study of the same day (branch `cave/default-study`) the phone starts at `lite` and `/cavemode` works from the phone.
+- **Cave mode (§19, item 6; removed 2026-10-28, `ef443182`).** On the morning of 2026-10-20 ultra applied to phone threads by design (it was the user-level default). Its "answer every question first" did not make the wrong answer: the empty message did, and the model answered the thread's last question. The cave texts are not changed (they are the benchmark's, byte for byte); the phone prompt said instead to ask back about anything referred to but not visible, and since 2026-10-27 says to take the most likely reading and never answer about an earlier topic in its place. Since the cave-mode study of the same day (branch `cave/default-study`) the phone started at `lite` and `/cavemode` worked from the phone until cave mode and `/cavemode` were removed across the launcher, `ling web` and the bridges on 2026-10-28 (`ling-rs/signal/src/command.rs`, `tests/test_removed_cave_settings.py`).
 
 ### 19.4 Quick follow-ups join the answer in hand (branch `chat/merge-quick`)
 

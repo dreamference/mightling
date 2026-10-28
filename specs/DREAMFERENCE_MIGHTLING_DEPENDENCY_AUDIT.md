@@ -153,8 +153,8 @@ them; it was not done here.
 
 `desktop/ui/` and `ling-code-rs/indexers/`: no vulnerabilities.
 
-`desktop/electron/`: every finding is in `devDependencies`, behind `@electron-forge/*` 7.11.2, the
-packaging tool. Forge runs on a developer machine and in the release workflow; Vite bundles the
+`desktop/electron/`: every finding at the time of this audit was in `devDependencies`, behind `@electron-forge/*` 7.11.2, the
+packaging tool (`desktop/electron/package.json` has since moved to `@electron-forge/*` `8.0.1`). Forge runs on a developer machine and in the release workflow; Vite bundles the
 app, and none of these packages is in the shipped application. `npm audit fix` without `--force`
 changes nothing (checked on a copy of the lockfile): the only fix npm offers is Forge 8.0.1, a
 major version, and `braces` has no fixed release at all.
@@ -171,7 +171,7 @@ major version, and `braces` has no fixed release at all.
 | `sprintf-js` 1.1.3 | GHSA-hp3w-g68c-fv3c, unbounded precision | Moderate | `roarr` ← `global-agent` ← `@electron/get` 3 | Not fixed: Forge 8 |
 
 The way to clear these is moving `desktop/electron` to Electron Forge 8 as its own change, with the
-`.deb` and the Mac preview rebuilt and checked; it is a toolchain upgrade, not a security patch.
+`.deb` and the Mac preview rebuilt and checked; it is a toolchain upgrade, not a security patch (since done: `desktop/electron/package.json` is now on `@electron-forge/*` `8.0.1`).
 
 ## 7. GitHub Actions
 

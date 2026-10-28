@@ -1,6 +1,6 @@
 # Mightling on Discord: a third adapter for `ling chat`
 
-**Status:** Proposed (2026-10-21); decided by the owner on 2026-10-22, every proposal of §0.1 accepted; nothing built, and the build waits for Telegram's Phase 0 and the shared Phase 2 (D9). The owner asked that day for a Discord integration "at least as private as our Telegram implementation". Discord's platform was read from its own pages on 2026-10-21 (sources in §14); anything a primary source did not confirm is marked **unverified**, and what can only be learnt with a real Discord application is Phase 0 (§10), which the owner runs. No Discord application or account was created for this spec.
+**Status:** Proposed (2026-10-21); decided by the owner on 2026-10-22, every proposal of §0.1 accepted; the Discord adapter itself (`ling-rs/chat/src/discord.rs`) is not built yet and waits for Phase 0 (the shared Phase 2 items of D9 — voice, Night Shift and files back — have since landed in `ling-rs/chat/src/hub.rs`). The owner asked that day for a Discord integration "at least as private as our Telegram implementation". Discord's platform was read from its own pages on 2026-10-21 (sources in §14); anything a primary source did not confirm is marked **unverified**, and what can only be learnt with a real Discord application is Phase 0 (§10), which the owner runs. No Discord application or account was created for this spec.
 
 **Spec owner:** the owner. **Depends on:** [MIGHTLING_CHAT](./DREAMFERENCE_MIGHTLING_CHAT.md) (the bridge, its hub and §16's fixes), [MIGHTLING_TELEGRAM_MOONSHOT](./DREAMFERENCE_MIGHTLING_TELEGRAM_MOONSHOT.md) (approvals with nonces, the partial kept, `blocks.rs`, the Mini App of §15), [MIGHTLING_SIGNAL](./DREAMFERENCE_MIGHTLING_SIGNAL.md) §19 (images, the gap rule, bounds, the phone prompt, quick follow-ups), [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) (Ask threads, `ling web`, the bridge policy), [MIGHTLING_REMOTE_ACCESS](./DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md) (the HTTPS front for the browser link), [MIGHTLING_EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md).
 
@@ -34,8 +34,8 @@ Every proposal was accepted as written.
 | D5 | **The front-end**: a link button to `ling web` over the tailnet (`/app` and the status line), never an Activity | Yes |
 | D6 | **The token's home**: `~/.mightling/chat/discord.json` beside Telegram's token (readable by the agent's commands, CHAT §6), or a system account as Signal's keys are | Same as Telegram for Phase 1; revisit with Telegram together |
 | D7 | **The app's terms and privacy policy**: Discord's Developer Terms ask every application for a privacy policy and a way to report problems; for an app whose developer is its only user, a one-paragraph policy (nothing kept beyond the node, nothing shared) linked in the app's settings | Yes, a fixed text in the docs that setup points to |
-| D8 | **Voice messages**: transcribed on the node through the shared path of MOONSHOT §3.4 when it lands; until then dropped with one line | Yes, with a consent line about the voice |
-| D9 | **Discord before or after the shared Phase 2 items** (voice, Night Shift, files back) | After Telegram's Phase 0 and the shared Phase 2, so the adapter starts with them |
+| D8 | **Voice messages**: transcribed on the node through the shared path of MOONSHOT §3.4 when it lands (since built in `ling-rs/chat/src/hub.rs` and `agent.rs`); until then dropped with one line | Yes, with a consent line about the voice |
+| D9 | **Discord before or after the shared Phase 2 items** (voice, Night Shift, files back; all three now built in `ling-rs/chat/src/hub.rs`) | After Telegram's Phase 0 and the shared Phase 2, so the adapter starts with them |
 
 ## 1. What Discord offers (verified 2026-10-21)
 
@@ -170,7 +170,7 @@ Who can read what, with each bridge as built (Signal in linked mode, Matrix on t
 
 ### 3.4 Commands
 
-- **Registered as global application commands with `contexts: [1]` (`BOT_DM`)** and the integration types the app supports, so Discord offers them only in the bot's DM: `/new`, `/stop`, `/threads`, `/use <n>`, `/status`, `/cavemode [level]`, `/help`, `/pair <code>`, and `/app` when a front is set (§3.11). The same table as CHAT §1.
+- **Registered as global application commands with `contexts: [1]` (`BOT_DM`)** and the integration types the app supports, so Discord offers them only in the bot's DM: `/new`, `/stop`, `/threads`, `/use <n>`, `/status`, `/night`, ~~`/cavemode [level]`~~ (removed 2026-10-28, `ef443182`), `/help`, `/pair <code>`, and `/app` when a front is set (§3.11). The same table as CHAT §1 (`ling-rs/chat/src/hub.rs`).
 - **Typed text works too.** A message starting with `/` that Discord did not turn into an interaction (an older client, a typo) is handled as the hub handles text commands today.
 - **An interaction is acknowledged at once.** The adapter answers within the 3 seconds with a deferred response (type 5) and sends the hub's reply as the follow-up, or, for a button, with `UPDATE_MESSAGE` (type 7). The hub never waits on a 3-second clock.
 
@@ -207,9 +207,9 @@ Nothing here is new; it is the hub as it is (CHAT §3, §16; SIGNAL §19; MOONSH
 ### 3.8 Images, files and voice
 
 - **Images and files** the owner sends: each attachment's signed `url` is downloaded at once (the URLs expire), from `cdn.discordapp.com` or `media.discordapp.net` only, up to 20 MB (Telegram's `DOWNLOAD_LIMIT`, and Discord's default upload limit), then uploaded into the thread's Ask folder through `/api/upload?read=1` and composed by the shared `attachments.rs`: an image as `localImage` when the model takes images, its text as `[Screenshot text: …]` from Tesseract on the node, a file named; with nothing usable, "I can't read this image; describe it or paste the text." and no turn.
-- **Voice messages** (`IS_VOICE_MESSAGE`, one `audio/ogg` attachment): until MOONSHOT §3.4's shared voice path lands, dropped with one line ("I can't take a voice message here yet, so it was dropped"); after it, transcribed on the node with the "Heard: …" echo line, and setup's consent gains the voice line (D8).
+- **Voice messages** (`IS_VOICE_MESSAGE`, one `audio/ogg` attachment): until MOONSHOT §3.4's shared voice path landed (now built in `ling-rs/chat/src/hub.rs` and `agent.rs`), dropped with one line ("I can't take a voice message here yet, so it was dropped"); with it built, transcribed on the node with the "Heard: …" echo line, and setup's consent gains the voice line (D8).
 - **Stickers, embeds, polls, forwarded messages and anything else** are named as dropped in one line.
-- **Nothing is sent back** as a file in Phase 1; MOONSHOT §3.7's "Send file" button is shared work and comes to Discord with it.
+- **Nothing is sent back** as a file in Phase 1; MOONSHOT §3.7's "Send file" button is shared work (now built in `ling-rs/chat/src/hub.rs` `offer_files`) and comes to Discord with it.
 
 ### 3.9 The air gap
 
@@ -321,8 +321,8 @@ The shared keys (`approval_timeout_s`, `answer_seconds`, `tool_calls`, `command_
 | Approvals with nonces, the used state | Hub; buttons per adapter | Success and Danger buttons, one disabled outcome button |
 | Markdown → messenger format | `blocks.rs` parser, a writer per adapter | A Discord Markdown writer that escapes Discord's own syntax |
 | Images, OCR, vision | `attachments.rs`, `ling web` | Signed CDN URLs downloaded at once |
-| Voice (MOONSHOT §3.4) | Shared, when built | Voice messages (D8) |
-| Night Shift and files back (MOONSHOT §3.5, §3.7) | Shared, when built | Come with them; Night Shift reports to Discord only if `night_report_to` names it |
+| Voice (MOONSHOT §3.4) | Shared (built in `ling-rs/chat/src/hub.rs` and `agent.rs`) | Voice messages (D8) |
+| Night Shift and files back (MOONSHOT §3.5, §3.7) | Shared (built in `ling-rs/chat/src/hub.rs`) | Come with them; Night Shift reports to Discord only if `night_report_to` names it |
 | In-app front-end | `ling web` | A link button; no Activity |
 | The air gap | Hub | Pauses, as Telegram |
 
