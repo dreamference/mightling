@@ -1,6 +1,6 @@
 {
   "name": "mightling",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "Mightling local delegation plugin for Claude Code (Phase P1: class W1 watch tool, no model).",
   "author": {
     "name": "Dreamference"
