@@ -275,7 +275,7 @@ describe("incognito questions (DESKTOP_PARITY_CLAUDE §4.3)", () => {
 
   it("tracks readiness, busy turns, serverRequests, observers, protocol errors and incognito through AppServer", async () => {
     const dir = scratch("server-lifecycle");
-    nodeScript(dir, "ling", `const fs = require("fs");
+    const lingPath = nodeScript(dir, "ling", `const fs = require("fs");
 const args = process.argv.slice(2);
 if (args[0] === "prompt") { process.stdout.write("COMPOSED " + args[2]); process.exit(0); }
 if (args[0] === "airgapped") { process.stdout.write("Airgapped: off (stub)\\n"); process.exit(0); }
@@ -313,7 +313,10 @@ process.stdin.on("data", (chunk) => {
       return false;
     });
     const savedHome = process.env.CODEX_HOME;
+    const savedBin = process.env.MIGHTLING_BIN;
     process.env.CODEX_HOME = dir;
+    // On Windows the stand-in is ling.cmd, which the lookup for ling.exe does not find: name it.
+    process.env.MIGHTLING_BIN = lingPath;
     try {
       expect(server.running).toBe(false);
       await expect(server.send({ id: 1, method: "thread/list", params: {} })).rejects.toThrow("not running");
@@ -339,6 +342,8 @@ process.stdin.on("data", (chunk) => {
       server.stop();
       if (savedHome === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = savedHome;
+      if (savedBin === undefined) delete process.env.MIGHTLING_BIN;
+      else process.env.MIGHTLING_BIN = savedBin;
     }
   });
 });

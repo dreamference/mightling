@@ -146,8 +146,9 @@ describe("window-side git", () => {
 describe("git on a checkout the agent wrote the config of", () => {
   it("runs no program the config names, on any read the window makes", async () => {
     const root = repo();
-    const marker = path.join(root, "..", `ran-${path.basename(root)}`);
-    const tool = path.join(root, "..", `tool-${path.basename(root)}.sh`);
+    // Forward slashes: a backslash in a config value is an escape, and sh wants them too.
+    const marker = path.join(root, "..", `ran-${path.basename(root)}`).replace(/\\/g, "/");
+    const tool = path.join(root, "..", `tool-${path.basename(root)}.sh`).replace(/\\/g, "/");
     fs.writeFileSync(tool, `#!/bin/sh\necho ran >> '${marker}'\ncat\n`, { mode: 0o755 });
     fs.writeFileSync(path.join(root, ".gitattributes"), "*.txt filter=evil diff=evil\n");
     const config = path.join(root, ".git", "config");
@@ -184,10 +185,10 @@ describe("git on a checkout the agent wrote the config of", () => {
 
   it("reads the system config (Git for Windows' autocrlf), but a program it names loses to the pins", async () => {
     const root = repo();
-    const marker = path.join(root, "..", `ran-system-${path.basename(root)}`);
-    const tool = path.join(root, "..", `tool-system-${path.basename(root)}.sh`);
+    const marker = path.join(root, "..", `ran-system-${path.basename(root)}`).replace(/\\/g, "/");
+    const tool = path.join(root, "..", `tool-system-${path.basename(root)}.sh`).replace(/\\/g, "/");
     fs.writeFileSync(tool, `#!/bin/sh\necho ran >> '${marker}'\ncat\n`, { mode: 0o755 });
-    const system = path.join(root, "..", `system-${path.basename(root)}.gitconfig`);
+    const system = path.join(root, "..", `system-${path.basename(root)}.gitconfig`).replace(/\\/g, "/");
     fs.writeFileSync(
       system,
       ["[core]", "\tautocrlf = true", `\tfsmonitor = ${tool}`, `\tpager = ${tool}`, `\tsshCommand = ${tool}`, "[diff]", `\texternal = ${tool}`, "[credential]", `\thelper = ${tool}`, ""].join("\n"),

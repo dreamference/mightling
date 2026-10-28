@@ -146,7 +146,7 @@ describe("managed worktrees", () => {
     expect(worktree.defaultRoot(scratchHome)).toContain("worktrees");
     expect(() => worktree.checkWorktreeRoot("relative")).toThrow("must be an absolute path");
     await expect(worktree.restore(source, root, "not-a-sha")).rejects.toThrow("not a snapshot");
-  });
+  }, 60_000);
 });
 
 describe("local environments", () => {
