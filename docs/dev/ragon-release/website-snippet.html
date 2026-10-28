@@ -1,0 +1,17 @@
+<!-- Drop-in for website/index.html at release time. Replaces the hero's two logo <img> lines and adds
+     one line and the tagline under them. The puffin stays; the logo SVGs are the renamed files
+     (website/assets/ragon-logo-*.svg). No illustration. Styles: .tagline and .renamed are new (below). -->
+
+    <img class="logo logo-light" src="assets/ragon-logo-light.svg" alt="Ragon" width="300" height="181">
+    <img class="logo logo-dark" src="assets/ragon-logo-dark.svg" alt="Ragon" width="300" height="181">
+    <p class="tagline">Ragon is a puffin that thinks it is a dragon.</p>
+    <p class="renamed">Mightling is now Ragon, from 1.9.0. <a href="https://github.com/dreamference/ragon/releases/tag/v1.9.0">What changed</a></p>
+
+<!-- website/style.css, after the .hero rules: -->
+<style>
+.hero .tagline { margin: .6rem 0 0; font-style: italic; color: var(--muted, #555); }
+.hero .renamed { margin: .25rem 0 1.2rem; font-size: .9rem; color: var(--muted, #555); }
+</style>
+
+<!-- Also: <title>, og:title and og:description say Ragon; website/CNAME holds ragon.dreamference.ai;
+     canonical and og:url point at https://ragon.dreamference.ai/. -->
