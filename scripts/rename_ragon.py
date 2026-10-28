@@ -232,6 +232,24 @@ def leftovers(root, files=None):
     return hits
 
 
+def build_manifest(root):
+    """Writes scripts/ragon_overlay/manifest.json from the files beside it and the tracked tree (main)."""
+    overlay = pathlib.Path(root) / OVERLAY_DIR
+    by_final = {new_path(path): path for path in tracked(root) if not path.startswith(OVERLAY_DIR)}
+    manifest = {}
+    for file in sorted(overlay.rglob("*")):
+        final = file.relative_to(overlay).as_posix()
+        if not file.is_file() or final == "manifest.json":
+            continue
+        old = by_final.get(final)
+        if old is None:
+            sys.exit(f"overlay file {final} replaces nothing on this tree")
+        digest = hashlib.sha256((pathlib.Path(root) / old).read_bytes()).hexdigest()
+        manifest[final] = {"replaces": old, "sha256": digest}
+    (overlay / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return manifest
+
+
 def apply_overlay(root, dry):
     """Copies scripts/ragon_overlay/ over the renamed tree, refusing when main changed a file it replaces."""
     manifest_path = os.path.join(root, OVERLAY_DIR, "manifest.json")
@@ -380,12 +398,18 @@ def main(argv=None):
     parser.add_argument("--dry", action="store_true")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument(
+        "--manifest", action="store_true", help="rebuild the overlay's manifest from this tree"
+    )
     parser.add_argument("--report")
     parser.add_argument("--root", default=".")
     parser.add_argument("--repo", choices=("main", "engine"), default="main")
     parser.add_argument("--paths", nargs="+")
     args = parser.parse_args(argv)
     root = os.path.abspath(args.root)
+    if args.manifest:
+        print(json.dumps(build_manifest(root), indent=2))
+        return 0
     if args.verify:
         return verify(root)
     if args.check:
