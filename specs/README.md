@@ -145,7 +145,7 @@ The reconciliation on 2026-09-28 found these places where the **code** was wrong
 
 ### Reconciled on 2026-10-19 (at `c2bcc7a`)
 
-The specs were ranked by the commits on the paths each one cites since its own last change, and CLI, MIGHTLING_CODEX, LOCAL_INDEX, EGRESS, ONYX, NODE and the three desktop specs were brought up to date (commands, flags, defaults, pins, versions and built/not-built markers checked against the code). These are the places where the **code** (or a developer note) was found wrong; none is fixed yet:
+The specs were ranked by the commits on the paths each one cites since its own last change, and CLI, MIGHTLING_CODEX, LOCAL_INDEX, EGRESS, ONYX, NODE and the three desktop specs were brought up to date (commands, flags, defaults, pins, versions and built/not-built markers checked against the code). These are the places where the **code** (or a developer note) was found wrong; all seven were fixed on 2026-10-19 in `99658763` (the AGENTS.md list since moved to `docs/dev/cli.md`, `fab3b749`); the table is kept as the record:
 
 | Where | Defect | Spec |
 |---|---|---|
