@@ -1,7 +1,8 @@
 //! `ling web …` (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.1).
 //!
 //! - `serve [--lan] [--port N]`: the server in the foreground; what the user unit runs.
-//! - `start [--lan] [--port N]`, `stop`: the user unit `mightling-web.service`. `--port` is for a
+//! - `start [--lan] [--port N]`, `stop`: the user unit `mightling-web.service` (on macOS the launchd
+//!   agent `ai.dreamference.mightling-web` in `~/Library/LaunchAgents`). `--port` is for a
 //!   second Linux user on the node, whose server cannot also take 3100 (a Signal bridge of their
 //!   own answers through it, specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §18).
 //! - `status`: whether it answers, where, and how many devices are paired.
@@ -187,6 +188,97 @@ fn systemctl(args: &[&str]) -> Result<(), String> {
     if status.success() { Ok(()) } else { Err(format!("systemctl --user {} failed ({status})", args.join(" "))) }
 }
 
+/// The launchd label of the per-user agent that stands in for the user unit on macOS.
+pub const LAUNCHD_LABEL: &str = "ai.dreamference.mightling-web";
+
+/// The launchd agent's property list: the same command as the user unit, restarted on failure.
+pub fn launchd_plist(ling: &Path, lan: bool, port: u16, log: &Path) -> String {
+    let lan = if lan { "\n        <string>--lan</string>" } else { "" };
+    let port = if port == DEFAULT_PORT { String::new() } else { format!("\n        <string>--port</string>\n        <string>{port}</string>") };
+    let escape = |text: &str| text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+         <!-- Written by `ling web start`; `ling web stop` stops it. -->\n\
+         <plist version=\"1.0\">\n\
+         <dict>\n    <key>Label</key>\n    <string>{LAUNCHD_LABEL}</string>\n\
+         \x20   <key>ProgramArguments</key>\n    <array>\n        <string>{}</string>\n        <string>web</string>\n        <string>serve</string>{lan}{port}\n    </array>\n\
+         \x20   <key>RunAtLoad</key>\n    <true/>\n\
+         \x20   <key>KeepAlive</key>\n    <dict>\n        <key>SuccessfulExit</key>\n        <false/>\n    </dict>\n\
+         \x20   <key>ThrottleInterval</key>\n    <integer>2</integer>\n\
+         \x20   <key>StandardOutPath</key>\n    <string>{log}</string>\n    <key>StandardErrorPath</key>\n    <string>{log}</string>\n\
+         </dict>\n</plist>\n",
+        escape(&ling.display().to_string()),
+        log = escape(&log.display().to_string())
+    )
+}
+
+fn launchctl(args: &[&str]) -> Result<(), String> {
+    let status = std::process::Command::new("launchctl")
+        .args(args)
+        .status()
+        .map_err(|err| format!("could not run launchctl: {err}"))?;
+    if status.success() { Ok(()) } else { Err(format!("launchctl {} failed ({status})", args.join(" "))) }
+}
+
+/// Where the macOS agent's property list lives.
+fn launchd_plist_path(home: &Path) -> PathBuf {
+    home.join("Library/LaunchAgents").join(format!("{LAUNCHD_LABEL}.plist"))
+}
+
+/// The launchd domain of this user's login session, `gui/<uid>`.
+fn launchd_domain() -> String {
+    // SAFETY: getuid has no preconditions and cannot fail.
+    format!("gui/{}", unsafe { libc::getuid() })
+}
+
+/// Stops the web server: the user unit on Linux, the launchd agent on macOS.
+fn stop() -> i32 {
+    let result = if cfg!(target_os = "macos") {
+        let target = format!("{}/{LAUNCHD_LABEL}", launchd_domain());
+        launchctl(&["bootout", &target])
+    } else {
+        systemctl(&["stop", UNIT_NAME])
+    };
+    match result {
+        Ok(()) => {
+            println!("Stopped the Mightling web server.");
+            0
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            1
+        }
+    }
+}
+
+/// Writes the service definition and (re)starts it: a user unit on Linux, a launchd agent on macOS.
+fn install_and_restart(environment: &Environment, lan: bool, port: u16) -> Result<(), String> {
+    let macos = cfg!(target_os = "macos");
+    let (path, text) = if macos {
+        let log = environment.home.join("Library/Logs/mightling-web.log");
+        (launchd_plist_path(&environment.home), launchd_plist(&environment.ling, lan, port, &log))
+    } else {
+        (environment.home.join(".config/systemd/user").join(UNIT_NAME), unit_text_on(&environment.ling, lan, port))
+    };
+    let written = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| if macos { std::fs::create_dir_all(environment.home.join("Library/Logs")) } else { Ok(()) })
+        .and_then(|()| std::fs::write(&path, text));
+    if let Err(err) = written {
+        return Err(format!("Could not write {}: {err}", path.display()));
+    }
+    if macos {
+        let domain = launchd_domain();
+        // A loaded agent is replaced: bootout fails when none is loaded, which is fine.
+        let _ = launchctl(&["bootout", &format!("{domain}/{LAUNCHD_LABEL}")]);
+        launchctl(&["bootstrap", &domain, &path.display().to_string()])
+    } else {
+        systemctl(&["daemon-reload"]).and_then(|()| systemctl(&["restart", UNIT_NAME]))
+    }
+}
+
 /// Opens a URL in this machine's browser, without waiting for it.
 fn open_browser(url: &str) -> bool {
     let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
@@ -209,16 +301,7 @@ pub async fn run_cli(args: &[String], environment: Environment) -> i32 {
     match words.first().copied() {
         Some("serve") => serve_command(&args[1..], &environment).await,
         Some("start") => start(&args[1..], &environment),
-        Some("stop") => match systemctl(&["stop", UNIT_NAME]) {
-            Ok(()) => {
-                println!("Stopped the Mightling web server.");
-                0
-            }
-            Err(err) => {
-                eprintln!("{err}");
-                1
-            }
-        },
+        Some("stop") => stop(),
         Some("status") => status(&state),
         Some("open") if words.contains(&"--print-url") => print_login_url(&state),
         Some("open") => open(&state, words.contains(&"--no-browser")),
@@ -352,16 +435,7 @@ fn start(args: &[String], environment: &Environment) -> i32 {
         eprintln!("--lan serves the web UI to the network, which only an advertised node does: run `ling-admin node enable` first.");
         return 1;
     }
-    let unit = environment.home.join(".config/systemd/user").join(UNIT_NAME);
-    let written = unit
-        .parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&unit, unit_text_on(&environment.ling, lan, port)));
-    if let Err(err) = written {
-        eprintln!("Could not write {}: {err}", unit.display());
-        return 1;
-    }
-    if let Err(err) = systemctl(&["daemon-reload"]).and_then(|()| systemctl(&["restart", UNIT_NAME])) {
+    if let Err(err) = install_and_restart(environment, lan, port) {
         eprintln!("{err}");
         return 1;
     }
@@ -621,6 +695,22 @@ mod tests {
         assert_eq!(overlay_name(&home), None);
         std::fs::write(&file, "not json").unwrap();
         assert_eq!(overlay_name(&home), None);
+    }
+
+    #[test]
+    fn the_launchd_agent_runs_the_server_in_the_foreground() {
+        let log = Path::new("/home/u/Library/Logs/mightling-web.log");
+        let text = launchd_plist(Path::new("/home/u/.local/bin/ling"), true, DEFAULT_PORT, log);
+        assert!(text.contains("<string>ai.dreamference.mightling-web</string>"));
+        assert!(text.contains("<string>/home/u/.local/bin/ling</string>\n        <string>web</string>\n        <string>serve</string>\n        <string>--lan</string>\n    </array>"));
+        assert!(text.contains("<key>SuccessfulExit</key>\n        <false/>"));
+        assert!(text.contains("<string>/home/u/Library/Logs/mightling-web.log</string>"));
+        let plain = launchd_plist(Path::new("/x/ling"), false, DEFAULT_PORT, log);
+        assert!(!plain.contains("--lan") && !plain.contains("--port"));
+        assert!(launchd_plist(Path::new("/x/ling"), false, 3101, log).contains("<string>--port</string>\n        <string>3101</string>"));
+        assert!(launchd_plist(Path::new("/x/a&b/ling"), false, DEFAULT_PORT, log).contains("/x/a&amp;b/ling"));
+        assert_eq!(launchd_plist_path(Path::new("/home/u")), Path::new("/home/u/Library/LaunchAgents/ai.dreamference.mightling-web.plist"));
+        assert!(launchd_domain().starts_with("gui/"));
     }
 
     #[test]
