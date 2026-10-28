@@ -187,7 +187,7 @@
 <section id="proof">
 <div class="wrap">
 <h2>Mã nguồn không rời khỏi bàn làm việc của bạn, và bạn có thể tự chứng minh điều đó</h2>
-<p class="sub">Các tác tử lập trình trên đám mây gửi mã nguồn của bạn lên máy chủ của người khác. Mightling không gửi đi đâu cả: mô hình chạy trên GB10 của bạn, và không có gì trong Mightling tự kết nối về máy chủ bên ngoài. Không phân tích sử dụng, không số liệu đo đạc, không đăng nhập, không báo cáo lỗi "ẩn danh". Nhờ vậy bạn dùng được cho mã không được phép tải lên: việc của khách hàng, dữ liệu chịu quản lý, sản phẩm chưa phát hành.</p>
+<p class="sub">Các tác tử lập trình trên đám mây gửi mã nguồn của bạn lên máy chủ của người khác. Mightling không gửi đi đâu cả: mô hình chạy trên GB10 của bạn, và không có gì trong Mightling gọi về nhà. Không phân tích sử dụng, không số liệu đo đạc, không đăng nhập, không báo cáo lỗi "ẩn danh". Nhờ vậy bạn dùng được cho mã không được phép tải lên: việc của khách hàng, dữ liệu chịu quản lý, sản phẩm chưa phát hành.</p>
 <div class="proof">
 <div>
 <p>Một lệnh chạy một phiên Mightling thật dưới <code>strace</code> và liệt kê mọi kết nối mạng mà nó đã tạo:</p>
@@ -201,7 +201,7 @@ Networked git commands: none</pre></div>
 <p>Mọi thứ đều ở trong <code>127.0.0.1</code>. Không một truy vấn DNS nào.</p>
 </div>
 <div>
-<h3>Cần một đảm bảo tuyệt đối?</h3>
+<h3>Cần một đảm bảo cứng?</h3>
 <p>Gõ <code>/airgapped on</code> và mọi lệnh tác tử chạy đều nhận một network namespace rỗng từ nhân Linux. Đây không phải lời nhờ lịch sự gửi cho mô hình: đơn giản là không có mạng nào để chạm tới. Full Access, vốn sẽ vượt qua sandbox, cũng bị từ chối cùng lúc.</p>
 <h3>Điều gì có thể ra ngoài, và khi nào</h3>
 <p>Chỉ những gì bạn hoặc tác tử yêu cầu: một lần tìm kiếm web (qua một SearXNG riêng trên máy của bạn), một lần tải trang, một yêu cầu chỉ-đọc tới tài khoản Google bạn đã kết nối, hoặc một lần kiểm tra bản cập nhật. Khi <code>/airgapped on</code>, không cái nào trong số đó xảy ra.</p>
@@ -238,7 +238,7 @@ Networked git commands: none</pre></div>
 <h3>✨ Không cần cấu hình</h3>
 <ul>
 <li><b>Không cần tinh chỉnh:</b> mô hình, ngữ cảnh, kernel và giải mã suy đoán đều đã được chọn cho GB10.</li>
-<li><b>Không làm treo máy của bạn:</b> máy host được kiểm tra, và áp lực bộ nhớ được theo dõi trong lúc nạp mô hình.</li>
+<li><b>Không làm treo máy của bạn:</b> máy chủ được kiểm tra, và áp lực bộ nhớ được theo dõi trong lúc nạp mô hình.</li>
 <li><b>Các máy khác của bạn tự tìm thấy nó</b> trên mạng cục bộ.</li>
 <li><b>Cập nhật chỉ một lệnh:</b> <code>ling update</code>.</li>
 </ul>
@@ -291,7 +291,7 @@ Networked git commands: none</pre></div>
 <div class="wrap">
 <h2>Bài báo</h2>
 <div class="pillar">
-<h3><a href="paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
+<h3><a href="paper/desktop-architecture.pdf">Kiến trúc máy khách desktop cục bộ, có thể cách ly mạng, cho các lập trình viên cặp đôi tác tử AI: tương thích giao thức, cô lập tiến trình và an toàn bộ nhớ máy chủ</a></h3>
 <p class="note-small">dgxcoder · Tháng 10 năm 2026</p>
 <p>Chúng tôi trình bày thiết kế kiến trúc, mô hình năng lực hình thức và đánh giá thực nghiệm của Mightling Desktop, một môi trường desktop mã nguồn mở dùng cùng giao thức app-server với máy khách desktop của nhà cung cấp gốc, giữ các mặc định tương thích Codex, chạy suy luận trên phần cứng của chính người dùng, và giam mọi lệnh trong sandbox bên trong máy trạm khi người dùng bật <code>/airgapped on</code>.</p>
 <p><a href="paper/desktop-architecture.pdf">Đọc bài báo (PDF)</a></p>

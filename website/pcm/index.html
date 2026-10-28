@@ -134,7 +134,7 @@
 
 <div class="tablewrap">
 <table class="bench">
-<tr><th>System</th><th>Di same 100<br/>tasks</th><th>All di 500<br/>tasks</th></tr>
+<tr><th>System</th><th>Same 100<br/>tasks</th><th>All 500<br/>tasks</th></tr>
 <tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4), one DGX Spark, offline<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">estimated</span></td></tr>
 <tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4), refine mode, one DGX Spark, offline<a class="fn" href="#fn1">1</a></td><td class="num">69/100</td><td class="num">≈70% <span class="est">estimated</span></td></tr>
 <tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
@@ -143,7 +143,7 @@
 <tr><td>DeepSeek V3.2, high (mini-SWE-agent)<a class="fn" href="#fn5">5</a></td><td class="num">70/100</td><td class="num">70.0%</td></tr>
 <tr><td>Claude Opus 4.5, four agents<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
 <tr><td>Gemini 3 Pro (live-SWE-agent)<a class="fn" href="#fn7">7</a></td><td class="num">79/100</td><td class="num">77.4%</td></tr>
-<tr class="group"><td colspan="3">Small open models dem (20–40B parameters)</td></tr>
+<tr class="group"><td colspan="3">Smaller open models (20–40B parameters)</td></tr>
 <tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), test-time scaling<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
 <tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), single attempt<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
 <tr><td>Devstral Small 2512 (mini-SWE-agent)<a class="fn" href="#fn9">9</a></td><td class="num">57/100</td><td class="num">56.4%</td></tr>
@@ -153,15 +153,15 @@
 <tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">dem no publish</td><td class="ns"><a href="https://cursor.com/blog/composer">dem no publish</a></td></tr>
 </table>
 </div>
-<p class="sub after">Read am as company, no be ranking. For di same 100 tasks Mightling solve as many as Qwen3-Coder-480B and GLM-4.6, models wey big pass am many times, but every row dey use different agent, different hardware and, for di leaderboard rows, di official x86 test images, while our own run for community arm64 images. For refine mode, one first session go study di task without changing anything, then new session go do am: e solve one task pass di default (69 against 68, each side win tasks wey di oda one lose), for about 2.2 times di time per task, so e remain opt-in (<code>ling --refine</code>).</p>
+<p class="sub after">Read am as company, no be ranking. For di same 100 tasks Mightling solve as many as Qwen3-Coder-480B and GLM-4.6, models wey big pass am many times, but every row dey use different agent, different hardware and, for di leaderboard rows, di official x86 test images, while ours run for community arm64 images. For refine mode, one first session go study di task without changing anything, then a fresh session go do am: e solve one task more than di default (69 against 68, each arm win tasks wey di oda one lose), for about 2.2 times di time per task, so e remain opt-in (<code>ling --refine</code>).</p>
 <details class="method"><summary>How we estimate di ≈69%</summary>
-<p>100 tasks na one fifth of Verified, so di full-set figure na estimate. We fit one-parameter item-response (Rasch) model on di per-task results of all 175 public Verified submissions: every task get difficulty and every system get ability. Mightling ability na di one wey explain 68 solved for dis 100 tasks; ≈69% na di expected score of dat ability for all 500 (plain regression on di published scores agree within one point). To check am, we score every public submission for dis 100 tasks alone and predict im overall score di same way: di error na 2.4 points (RMSE), and di band wey dey up na ±1.96 times dat. Every number for di table, <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> dey reproduce am from di public per-task data of <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
-<p>Di 100 tasks spread across Verified repositories in proportion to di full set, among di tasks wey dia test environment dey run and validate for arm64 (di gold patch pass, empty change fail). Published systems dey score 1.0 to 1.5 points low pass all 500 for dis 100, so di sample no easy. E no be leaderboard entry: SWE-bench team dey grade those one for dia own infrastructure.</p>
+<p>100 tasks na one fifth of Verified, so di full-set figure na estimate. We fit one-parameter item-response (Rasch) model on di per-task results of all 175 public Verified submissions: every task get difficulty and every system get ability. Mightling ability na di one wey explain 68 solved for these 100 tasks; ≈69% na di expected score of dat ability for all 500 (plain regression on di published scores agree within one point). To check am, we score every public submission for these 100 tasks alone and predict im overall score di same way: di error na 2.4 points (RMSE), and di band wey dey up na ±1.96 times dat. Every number for di table, <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> dey reproduce am from di public per-task data of <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
+<p>Di 100 tasks spread across Verified repositories in proportion to di full set, among di tasks wey dia test environment dey run and validate for arm64 (di gold patch pass, empty change fail). Published systems score 1.0 to 1.5 points lower for these 100 than for all 500, so di sample no easy. E no be leaderboard entry: SWE-bench team dey grade those one for dia own infrastructure.</p>
 </details>
 <ol class="footnotes">
-<li id="fn1">Mightling: 100 tasks, one attempt each; one DGX Spark (GB10, 128 GB), model dey serve locally, no cloud; we measure default mode for 2026-10-08, refine mode for 2026-10-09. Estimate from di <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> per-task data.</li>
+<li id="fn1">Mightling: 100 tasks, one attempt each; one DGX Spark (GB10, 128 GB), model dey serve locally, no cloud; default mode measure 2026-10-08, refine mode 2026-10-09. Estimate from di <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> per-task data.</li>
 <li id="fn2">500 tasks, one attempt; dem no talk di hardware. Source: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>. Di same model with mini-SWE-agent: 57/100, 55.4%.</li>
-<li id="fn3">500 tasks, one attempt, dem no talk which agent; dem no talk di hardware. Source: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>.</li>
+<li id="fn3">500 tasks, one attempt, agent no dey disclosed; dem no talk di hardware. Source: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>.</li>
 <li id="fn4">500 tasks, one attempt; dem no talk di hardware. Source: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>.</li>
 <li id="fn5">500 tasks, one attempt; dem no talk di hardware. Source: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_deepseek-3-2-high">experiments, 20260217_mini-v2.0.0_deepseek-3-2-high</a>.</li>
 <li id="fn6">500 tasks each; dem no talk di hardware. Four submissions: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251127_openhands_claude-opus-4-5">OpenHands</a> (80/100, 77.6%), <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251215_livesweagent_claude-opus-4-5">live-SWE-agent</a> (80/100, 79.2%), <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251205_sonar-foundation-agent_claude-opus-4-5">Sonar Foundation Agent</a> (77/100, 79.2%), <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_claude-4-5-opus-high">mini-SWE-agent, high</a> (79/100, 76.8%). One earlier <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251124_mini-v1.16.0_claude-opus-4-5-20251101">mini-SWE-agent run</a> score 74/100, 74.4%.</li>
@@ -177,11 +177,11 @@
 </section>
 <section id="try">
 <div class="wrap">
-<h2>Try dis ones first</h2>
+<h2>Try these first</h2>
 <div class="cmd"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
 <span class="p">$ </span>ling "the tests are failing: find out why and fix them"
 <span class="p">$ </span>ling "add input validation to the signup form, with tests"</pre></div>
-<p class="sub after">Or put work for tonight queue with <code>/night add &lt;task&gt;</code>: Mightling go work through di queue while you dey sleep, each task for im own git branch, and you go review di branches with coffee for hand.</p>
+<p class="sub after">Or put work for tonight queue with <code>/night add &lt;task&gt;</code>: Mightling go work through di queue while you dey sleep, each task for im own git branch, and you go review di branches wit coffee for hand.</p>
 </div>
 </section>
 <section id="proof">
@@ -201,8 +201,8 @@ Networked git commands: none</pre></div>
 <p>Everything stay for <code>127.0.0.1</code>. Not even one DNS lookup.</p>
 </div>
 <div>
-<h3>You need sure guarantee?</h3>
-<p>Type <code>/airgapped on</code> and every command wey di agent run go get empty network namespace from di Linux kernel. E no be polite request to di model: network just no dey to reach. Full Access, wey for bypass di sandbox, dem go refuse am at di same time.</p>
+<h3>You need hard guarantee?</h3>
+<p>Type <code>/airgapped on</code> and every command wey di agent run go get empty network namespace from di Linux kernel. E no be polite request to di model: network just no dey to reach. Full Access, wey for bypass di sandbox, dem go refuse am for di same time.</p>
 <h3>Wetin fit comot, and when</h3>
 <p>Only wetin you or di agent ask for: web search (through private SearXNG for your own machine), page fetch, read-only request to Google account wey you connect, or update check. For <code>/airgapped on</code>, none of dem.</p>
 </div>
@@ -211,7 +211,7 @@ Networked git commands: none</pre></div>
 </section>
 <section id="why">
 <div class="wrap">
-<h2>Why na Mightling</h2>
+<h2>Why Mightling</h2>
 <div class="pillars">
 <div class="pillar">
 <h3>🔒 Confidential</h3>
@@ -229,13 +229,13 @@ Networked git commands: none</pre></div>
 <tr><td>Code</td><td class="num">69 tok/s</td></tr>
 <tr><td>JSON</td><td class="num">84 tok/s</td></tr>
 <tr><td>Prose</td><td class="num">32 tok/s</td></tr>
-<tr><td>To read code</td><td class="num">~1,800 tok/s</td></tr>
+<tr><td>Reading code</td><td class="num">~1,800 tok/s</td></tr>
 <tr><td>Context</td><td class="num">262K</td></tr>
 </table>
 <p class="note-small">Single stream for GB10 with speculative decoding. Dem measure agent work over real agent sessions; code, JSON and prose by kind of output, with greedy decoding. Run four agents at once: no quota, no "abeg wait".</p>
 </div>
 <div class="pillar">
-<h3>✨ Nothing wey you need set up</h3>
+<h3>✨ Nothing to configure</h3>
 <ul>
 <li><b>No tuning:</b> model, context, kernels and speculative decoding dem don choose am for di GB10.</li>
 <li><b>E no go freeze your machine:</b> dem dey check di host and dey watch memory pressure during di load.</li>
@@ -268,8 +268,8 @@ Networked git commands: none</pre></div>
 <table>
 <tr><th></th><th>Cloud coding agents</th><th>Mightling</th></tr>
 <tr><td>Where your code dey go</td><td>Dia servers</td><td class="yes">Nowhere</td></tr>
-<tr><td>You need account?</td><td>Yes</td><td class="yes">No</td></tr>
-<tr><td>Cost per token</td><td>Dem dey count am charge</td><td class="yes">Zero</td></tr>
+<tr><td>Account needed</td><td>Yes</td><td class="yes">No</td></tr>
+<tr><td>Cost per token</td><td>Dem dey meter am</td><td class="yes">Zero</td></tr>
 <tr><td>Rate limits</td><td>Yes</td><td class="yes">No</td></tr>
 <tr><td>E dey work even if network comot</td><td>No</td><td class="yes">Yes</td></tr>
 <tr><td>You fit verify wetin dey comot</td><td>No</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
@@ -303,7 +303,7 @@ Networked git commands: none</pre></div>
 <h2>FAQ</h2>
 <details><summary>I need GB10?</summary>
 <p>Yes, to run di model. Your oda computers dey use am as clients: Linux (Arm or x86) and macOS with di same install command, Windows (Arm or x86, preview) with <a href="#install">di PowerShell line</a>.</p></details>
-<details><summary>I don install Puffin. Na im be dis?</summary>
+<details><summary>I don install Puffin. Na dis one?</summary>
 <p>Yes: dem rename Puffin to Mightling for 1.5. Run <code>puffin update</code> once, then <code>puffin</code> one last time. E go move your sessions, settings and links come, and from then di command na <code>ling</code>.</p></details>
 <details><summary>E really free?</summary>
 <p>Yes. Mightling na open source under di AGPL, and di model weights free. Di only running cost wey you get na electricity.</p></details>

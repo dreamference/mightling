@@ -138,24 +138,24 @@
 <tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4)، ایک DGX Spark، آف لائن<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">تخمینہ</span></td></tr>
 <tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4)، refine موڈ، ایک DGX Spark، آف لائن<a class="fn" href="#fn1">1</a></td><td class="num">69/100</td><td class="num">≈70% <span class="est">تخمینہ</span></td></tr>
 <tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
-<tr><td>GLM-4.6 (Z.ai کا ایجنٹ)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
+<tr><td>GLM-4.6 (Z.ai's agent)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
 <tr><td>Kimi K2.5, high (mini-SWE-agent)<a class="fn" href="#fn4">4</a></td><td class="num">70/100</td><td class="num">70.8%</td></tr>
 <tr><td>DeepSeek V3.2, high (mini-SWE-agent)<a class="fn" href="#fn5">5</a></td><td class="num">70/100</td><td class="num">70.0%</td></tr>
-<tr><td>Claude Opus 4.5، چار ایجنٹ<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
+<tr><td>Claude Opus 4.5, four agents<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
 <tr><td>Gemini 3 Pro (live-SWE-agent)<a class="fn" href="#fn7">7</a></td><td class="num">79/100</td><td class="num">77.4%</td></tr>
 <tr class="group"><td colspan="3">چھوٹے اوپن ماڈل (20–40 ارب پیرامیٹر)</td></tr>
 <tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), test-time scaling<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
-<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E)، ایک کوشش<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), single attempt<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
 <tr><td>Devstral Small 2512 (mini-SWE-agent)<a class="fn" href="#fn9">9</a></td><td class="num">57/100</td><td class="num">56.4%</td></tr>
 <tr class="group"><td colspan="3">کوڈنگ ایجنٹ پروڈکٹس، جیسا ان کے فروخت کنندگان شائع کرتے ہیں</td></tr>
-<tr><td>GitHub Copilot agent mode (VS Code)، Claude 3.7 Sonnet کے ساتھ<a class="fn" href="#fn10">10</a></td><td class="ns">شائع نہیں</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
+<tr><td>GitHub Copilot agent mode (VS Code), with Claude 3.7 Sonnet<a class="fn" href="#fn10">10</a></td><td class="ns">شائع نہیں</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
 <tr><td>Claude Code<a class="fn" href="#fn11">11</a></td><td class="ns">شائع نہیں</td><td class="ns"><a href="https://www.anthropic.com/engineering/swe-bench-sonnet">شائع نہیں</a></td></tr>
 <tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">شائع نہیں</td><td class="ns"><a href="https://cursor.com/blog/composer">شائع نہیں</a></td></tr>
 </table>
 </div>
-<p class="sub after">اسے ہم پلہ ماڈلز کے موازنے کے طور پر پڑھیں، رینکنگ کے طور پر نہیں۔ انہی 100 ٹاسک پر Mightling نے اتنے ہی حل کیے جتنے Qwen3-Coder-480B اور GLM-4.6 نے، جو اس سے کئی گنا بڑے ماڈل ہیں، مگر ہر صف میں ایجنٹ الگ ہے، ہارڈویئر الگ ہے، اور لیڈر بورڈ والی صفوں میں سرکاری x86 ٹیسٹ امیجز ہیں، جبکہ ہمارا کام کمیونٹی کی arm64 امیجز پر چلا۔ refine موڈ میں پہلا سیشن ٹاسک کو بغیر کچھ بدلے سمجھتا ہے اور نیا سیشن اسے کرتا ہے: اس نے ڈیفالٹ سے ایک ٹاسک زیادہ حل کیا (69 بمقابلہ 68، اور ہر طرف نے وہ ٹاسک جیتے جو دوسری طرف سے رہ گئے)، فی ٹاسک تقریباً 2.2 گنا وقت پر، اس لیے یہ اختیاری رہتا ہے (<code>ling --refine</code>)۔</p>
+<p class="sub after">اسے ہم سفروں کے طور پر پڑھیں، رینکنگ کے طور پر نہیں۔ انہی 100 ٹاسک پر Mightling نے اتنے ہی حل کیے جتنے Qwen3-Coder-480B اور GLM-4.6 نے، جو اس سے کئی گنا بڑے ماڈل ہیں، مگر ہر صف میں ایجنٹ الگ ہے، ہارڈویئر الگ ہے، اور لیڈر بورڈ والی صفوں میں سرکاری x86 ٹیسٹ امیجز ہیں، جبکہ ہمارا کام کمیونٹی کی arm64 امیجز پر چلا۔ refine موڈ میں پہلا سیشن ٹاسک کو بغیر کچھ بدلے سمجھتا ہے اور نیا سیشن اسے کرتا ہے: اس نے ڈیفالٹ سے ایک ٹاسک زیادہ حل کیا (69 بمقابلہ 68، اور ہر طرف نے وہ ٹاسک جیتے جو دوسری طرف سے رہ گئے)، فی ٹاسک تقریباً 2.2 گنا وقت پر، اس لیے یہ اختیاری رہتا ہے (<code>ling --refine</code>)۔</p>
 <details class="method"><summary>≈69% کا تخمینہ کیسے لگایا گیا</summary>
-<p>100 ٹاسک Verified کا پانچواں حصہ ہیں، اس لیے پورے سیٹ کا عدد تخمینہ ہے۔ ایک پیرامیٹر والا آئٹم ریسپانس (Rasch) ماڈل Verified کے تمام 175 عوامی جمع کرائے گئے اندراجات کے فی ٹاسک نتائج پر فٹ کیا گیا: ہر ٹاسک کو مشکل اور ہر سسٹم کو صلاحیت ملتی ہے۔ Mightling کی صلاحیت وہ ہے جو ان 100 ٹاسک پر 68 حل ہونے کی وضاحت کرے؛ ≈69% اسی صلاحیت کا تمام 500 پر متوقع اسکور ہے (شائع شدہ اسکورز پر سادہ ریگریشن ایک پوائنٹ کے اندر اتفاق کرتی ہے)۔ جانچنے کے لیے ہر عوامی جمع کرائے گئے اندراج کو صرف انہی 100 ٹاسک پر اسکور کیا گیا اور اس کا مجموعی اسکور اسی طرح پیش گوئی کیا گیا: غلطی 2.4 پوائنٹ (RMSE) رہی، اور اوپر کا بینڈ اس کا ±1.96 گنا ہے۔ جدول کا ہر عدد <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> سے <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> کے عوامی فی ٹاسک ڈیٹا سے دوبارہ بنتا ہے۔</p>
+<p>100 ٹاسک Verified کا پانچواں حصہ ہیں، اس لیے پورے سیٹ کا عدد تخمینہ ہے۔ ایک پیرامیٹر والا آئٹم ریسپانس (Rasch) ماڈل Verified کی تمام 175 عوامی جمع کرائی گئی نتائج کے فی ٹاسک نتائج پر فٹ کیا گیا: ہر ٹاسک کو مشکل اور ہر سسٹم کو صلاحیت ملتی ہے۔ Mightling کی صلاحیت وہ ہے جو ان 100 ٹاسک پر 68 حل ہونے کی وضاحت کرے؛ ≈69% اسی صلاحیت کا تمام 500 پر متوقع اسکور ہے (شائع شدہ اسکورز پر سادہ ریگریشن ایک پوائنٹ کے اندر اتفاق کرتی ہے)۔ جانچنے کے لیے ہر عوامی جمع کرائی گئی نتیجے کو صرف انہی 100 ٹاسک پر اسکور کیا گیا اور اس کا مجموعی اسکور اسی طرح پیش گوئی کیا گیا: غلطی 2.4 پوائنٹ (RMSE) رہی، اور اوپر کا بینڈ اس کا ±1.96 گنا ہے۔ جدول کا ہر عدد <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> سے <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> کے عوامی فی ٹاسک ڈیٹا سے دوبارہ بنتا ہے۔</p>
 <p>یہ 100 ٹاسک Verified کے ریپوزٹریز میں پورے سیٹ کے تناسب سے پھیلائے گئے ہیں، ان ٹاسک میں سے جن کا ٹیسٹ ماحول arm64 پر چلتا اور تصدیق ہوتا ہے (گولڈ پیچ پاس ہوتا ہے، خالی تبدیلی فیل)۔ شائع شدہ سسٹمز ان 100 پر تمام 500 کے مقابلے میں 1.0 سے 1.5 پوائنٹ کم اسکور کرتے ہیں، اس لیے نمونہ آسان نہیں۔ یہ لیڈر بورڈ کا اندراج نہیں: وہ SWE-bench ٹیم اپنے انفراسٹرکچر پر گریڈ کرتی ہے۔</p>
 </details>
 <ol class="footnotes">
@@ -164,7 +164,7 @@
 <li id="fn3">500 ٹاسک، ایک کوشش، ایجنٹ ظاہر نہیں؛ ہارڈویئر مذکور نہیں۔ ماخذ: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>۔</li>
 <li id="fn4">500 ٹاسک، ایک کوشش؛ ہارڈویئر مذکور نہیں۔ ماخذ: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>۔</li>
 <li id="fn5">500 ٹاسک، ایک کوشش؛ ہارڈویئر مذکور نہیں۔ ماخذ: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_deepseek-3-2-high">experiments, 20260217_mini-v2.0.0_deepseek-3-2-high</a>۔</li>
-<li id="fn6">ہر ایک پر 500 ٹاسک؛ ہارڈویئر مذکور نہیں۔ چار جمع کرائے گئے اندراجات: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251127_openhands_claude-opus-4-5">OpenHands</a> (80/100، 77.6%)، <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251215_livesweagent_claude-opus-4-5">live-SWE-agent</a> (80/100، 79.2%)، <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251205_sonar-foundation-agent_claude-opus-4-5">Sonar Foundation Agent</a> (77/100، 79.2%)، <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_claude-4-5-opus-high">mini-SWE-agent, high</a> (79/100، 76.8%)۔ ایک پہلے کی <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251124_mini-v1.16.0_claude-opus-4-5-20251101">mini-SWE-agent رن</a> نے 74/100، 74.4% اسکور کیا۔</li>
+<li id="fn6">ہر ایک پر 500 ٹاسک؛ ہارڈویئر مذکور نہیں۔ چار جمع کرائی گئی نتائج: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251127_openhands_claude-opus-4-5">OpenHands</a> (80/100، 77.6%)، <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251215_livesweagent_claude-opus-4-5">live-SWE-agent</a> (80/100، 79.2%)، <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251205_sonar-foundation-agent_claude-opus-4-5">Sonar Foundation Agent</a> (77/100، 79.2%)، <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_claude-4-5-opus-high">mini-SWE-agent, high</a> (79/100، 76.8%)۔ ایک پہلے کی <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251124_mini-v1.16.0_claude-opus-4-5-20251101">mini-SWE-agent رن</a> نے 74/100، 74.4% اسکور کیا۔</li>
 <li id="fn7">500 ٹاسک، ایک کوشش؛ ہارڈویئر مذکور نہیں۔ ماخذ: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251120_livesweagent_gemini-3-pro-preview">experiments, 20251120_livesweagent_gemini-3-pro-preview</a>۔ وہی ماڈل mini-SWE-agent کے ساتھ: 72/100، 74.2%۔</li>
 <li id="fn8">لیڈر بورڈ پر شائع شدہ بہترین 20–40B ماڈل۔ 500 ٹاسک؛ ٹیسٹ ٹائم اسکیلنگ میں فی ٹاسک دو یا زیادہ کوششیں ہوتی ہیں؛ ہارڈویئر مذکور نہیں۔ ماخذ: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B_tts">ٹیسٹ ٹائم اسکیلنگ</a>، <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B">ایک کوشش</a>۔</li>
 <li id="fn9">500 ٹاسک، ایک کوشش؛ ہارڈویئر مذکور نہیں۔ ماخذ: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251209_mini-v1.17.2_devstral-small-2512">experiments, 20251209_mini-v1.17.2_devstral-small-2512</a>۔</li>
@@ -172,7 +172,7 @@
 <li id="fn11">Anthropic اپنے Claude ماڈلز کے لیے SWE-bench Verified شائع کرتی ہے، جو اس کے اپنے سادہ اسکیفولڈ (bash ٹول اور ایڈٹ ٹول) میں چلایا جاتا ہے، Claude Code پروڈکٹ کے لیے نہیں۔ ماخذ: <a href="https://claude.com/product/claude-code">Claude Code</a>، <a href="https://www.anthropic.com/engineering/swe-bench-sonnet">Anthropic کا SWE-bench طریقہ</a>۔</li>
 <li id="fn12">Cursor اپنے بینچ مارک Cursor Bench پر نتائج شائع کرتا ہے، SWE-bench Verified پر نہیں۔ ماخذ: <a href="https://cursor.com/blog/composer">Cursor بلاگ، Composer</a>۔</li>
 </ol>
-<p class="note-small">لیڈر بورڈ کے تمام اعداد: <a href="https://www.swebench.com/">swebench.com</a> اور <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> ریپوزٹری؛ “وہی 100 ٹاسک” ہر جمع کرائے گئے اندراج کے شائع شدہ فی ٹاسک نتائج ہیں جو صرف ان ٹاسک تک محدود ہیں جو Mightling نے چلائے۔</p>
+<p class="note-small">لیڈر بورڈ کے تمام اعداد: <a href="https://www.swebench.com/">swebench.com</a> اور <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> ریپوزٹری؛ “وہی 100 ٹاسک” ہر جمع کرائی گئی نتیجے کے شائع شدہ فی ٹاسک نتائج ہیں جو صرف ان ٹاسک تک محدود ہیں جو Mightling نے چلائے۔</p>
 </div>
 </section>
 <section id="try">
@@ -204,7 +204,7 @@ Networked git commands: none</pre></div>
 <h3>پکی ضمانت چاہیے؟</h3>
 <p><code>/airgapped on</code> ٹائپ کریں اور ایجنٹ کی چلائی ہوئی ہر کمانڈ کو Linux کرنل سے خالی نیٹ ورک نیم اسپیس ملتا ہے۔ یہ ماڈل سے شائستہ درخواست نہیں: بس کوئی نیٹ ورک ہے ہی نہیں جس تک پہنچا جا سکے۔ Full Access، جو سینڈ باکس کو بائی پاس کر دیتا، اسی وقت مسترد ہو جاتا ہے۔</p>
 <h3>کیا باہر جا سکتا ہے، اور کب</h3>
-<p>صرف وہ جو آپ یا ایجنٹ مانگیں: ویب سرچ (آپ کی اپنی مشین پر نجی SearXNG کے ذریعے)، کسی صفحے کی فیچنگ، آپ کے جوڑے ہوئے Google اکاؤنٹ کو صرف پڑھنے والی درخواست، یا اپ ڈیٹ کی جانچ۔ <code>/airgapped on</code> پر ان میں سے کچھ نہیں۔</p>
+<p>صرف وہ جو آپ یا ایجنٹ مانگیں: ویب سرچ (آپ کی اپنی مشین پر نجی SearXNG کے ذریعے)، کسی صفحے کی فچنگ، آپ کے جوڑے ہوئے Google اکاؤنٹ کو صرف پڑھنے والی درخواست، یا اپ ڈیٹ کی جانچ۔ <code>/airgapped on</code> پر ان میں سے کچھ نہیں۔</p>
 </div>
 </div>
 </div>
@@ -252,7 +252,7 @@ Networked git commands: none</pre></div>
 <div class="features">
 <div class="feature"><h3>🖥️ <code>ling</code>، ٹرمینل ایجنٹ</h3><p>آپ کی ریپوزٹری پڑھتا ہے، کمانڈز اور ٹیسٹ چلاتا ہے، کوڈ میں ترمیم کرتا ہے، اور کسی بھی خطرے والی چیز سے پہلے پوچھتا ہے۔</p></div>
 <div class="feature"><h3>🌙 Night Shift</h3><p>سونے سے پہلے <code>/night add &lt;task&gt;</code>؛ صبح تک ہر ٹاسک اپنی git برانچ پر مکمل۔ آپ کے بغیر کچھ مرج یا پش نہیں ہوتا۔</p></div>
-<div class="feature"><h3>🔎 ویب سرچ اور فیچ</h3><p>آپ کی اپنی مشین پر نجی SearXNG کے ذریعے: نہ سرچ اکاؤنٹ، نہ API کلید۔</p></div>
+<div class="feature"><h3>🔎 ویب سرچ اور فچ</h3><p>آپ کی اپنی مشین پر نجی SearXNG کے ذریعے: نہ سرچ اکاؤنٹ، نہ API کلید۔</p></div>
 <div class="feature"><h3>🧭 کوڈ انڈیکس</h3><p>پوری ریپوزٹری میں ڈیفینیشنز، کالرز اور اثرات، تاکہ ایجنٹ کوڈ کو grep کرنے کے بجائے ڈھونڈے۔</p></div>
 <div class="feature"><h3>🧩 آپ کی موجودہ اسکلز</h3><p>جو اسکلز آپ نے Claude Code، Gemini CLI، OpenClaw یا Hermes کے لیے لکھیں وہ بغیر تبدیلی کے چلتی ہیں۔</p></div>
 <div class="feature"><h3>💬 Ask، براؤزر میں</h3><p>ویب سرچ، امیج سرچ اور ڈکٹیشن کے ساتھ سوالات، اور آپ کے ایجنٹ سیشنز، اس مشین سے یا جوڑے ہوئے فون سے، اسی مقامی ماڈل پر۔</p></div>
@@ -269,7 +269,7 @@ Networked git commands: none</pre></div>
 <tr><th></th><th>کلاؤڈ کوڈنگ ایجنٹ</th><th>Mightling</th></tr>
 <tr><td>آپ کا کوڈ کہاں جاتا ہے</td><td>ان کے سرورز</td><td class="yes">کہیں نہیں</td></tr>
 <tr><td>اکاؤنٹ ضروری</td><td>ہاں</td><td class="yes">نہیں</td></tr>
-<tr><td>فی ٹوکن لاگت</td><td>استعمال کے حساب سے</td><td class="yes">صفر</td></tr>
+<tr><td>فی ٹوکن لاگت</td><td>ناپ کر</td><td class="yes">صفر</td></tr>
 <tr><td>ریٹ کی حدیں</td><td>ہاں</td><td class="yes">نہیں</td></tr>
 <tr><td>نیٹ ورک نکال کر بھی چلتا ہے</td><td>نہیں</td><td class="yes">ہاں</td></tr>
 <tr><td>آپ جانچ سکتے ہیں کہ کیا باہر جاتا ہے</td><td>نہیں</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
@@ -292,7 +292,7 @@ Networked git commands: none</pre></div>
 <h2>مقالہ</h2>
 <div class="pillar">
 <h3><a href="paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
-<p class="note-small">dgxcoder · اکتوبر 2026</p>
+<p class="note-small">dgxcoder · October 2026</p>
 <p>ہم Mightling Desktop کا تعمیراتی ڈیزائن، رسمی صلاحیتی ماڈل اور تجرباتی جائزہ پیش کرتے ہیں، جو ایک اوپن سورس ڈیسک ٹاپ ماحول ہے۔ یہ اپ اسٹریم وینڈر کے ڈیسک ٹاپ کلائنٹ جیسا ہی ایپ سرور پروٹوکول بولتا ہے، Codex سے ہم آہنگ ڈیفالٹس رکھتا ہے، انفرنس صارف کے اپنے ہارڈویئر پر چلاتا ہے، اور جب صارف <code>/airgapped on</code> کرے تو ہر سینڈ باکس کمانڈ کو ورک اسٹیشن کے اندر محدود کر دیتا ہے۔</p>
 <p><a href="paper/desktop-architecture.pdf">مقالہ پڑھیں (PDF)</a></p>
 </div>
@@ -336,7 +336,7 @@ Networked git commands: none</pre></div>
 <p>یہ سائٹ کوئی تھرڈ پارٹی درخواست نہیں کرتی: نہ ٹریکرز، نہ اینالیٹکس، نہ بیرونی فونٹس۔</p>
 </div>
 <div>
-<p><a href="https://github.com/dreamference/mightling">GitHub</a> · <a href="https://github.com/dreamference/mightling/issues">Issues</a> · <a href="https://github.com/dreamference/mightling/blob/main/LICENSE">لائسنس</a></p>
+<p><a href="https://github.com/dreamference/mightling">GitHub</a> · <a href="https://github.com/dreamference/mightling/issues">مسائل</a> · <a href="https://github.com/dreamference/mightling/blob/main/LICENSE">لائسنس</a></p>
 </div>
 </div>
 </div>
