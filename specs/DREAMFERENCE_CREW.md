@@ -1,5 +1,7 @@
 # Crew: `ling` coordinating sub-agents
 
+Status: postponed to 2.0 (owner, 2026-10-28); not scheduled for 1.x.
+
 > **Status:** first draft, proposed 2026-10-28, nothing built. Owner request: a mode in which `ling` runs a project through background sub-agents, with the same working habits a human-run coordinator session has needed in practice. This document specifies those habits as tools and files, not as prompt advice.
 
 ## 0. Why
