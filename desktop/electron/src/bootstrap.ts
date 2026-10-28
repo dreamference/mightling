@@ -4,6 +4,7 @@
 import { app } from "electron";
 
 import appConfig from "../app.json";
+import { claimAppIdentity } from "./app-identity";
 import { auditSeconds, workTarget } from "./args";
 import { applySessionRules } from "./egress";
 import { main } from "./main";
@@ -15,6 +16,8 @@ export async function bootstrap(): Promise<void> {
     return;
   }
   for (const scheme of [appConfig.scheme, ...appConfig.legacySchemes]) app.setAsDefaultProtocolClient(scheme);
+  // Windows: the app's ID, before any notification or window (app-identity.ts).
+  claimAppIdentity();
   applySessionRules();
 
   await main({ work: workTarget(process.argv.slice(1)), audit: auditSeconds() });
