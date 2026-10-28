@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mightling — 手元で動く高速 AI コーディング</title>
-<meta name="description" content="NVIDIA DGX Spark 1 台でオフラインのまま SWE-bench Verified の 100 タスク中 68 件を解決(全体では約 69% と推定)、毎秒約 47 トークン。クラウドもアカウントも API 料金も不要。">
+<meta name="description" content="NVIDIA DGX Spark 1 台でオフラインのまま SWE-bench Verified の 100 タスク中 68 件を解決（全体では約 69% と推定）、毎秒約 47 トークン。クラウドもアカウントも API 料金も不要。">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="referrer" content="no-referrer">
 <link rel="canonical" href="https://mightling.dreamference.ai/ja/">
@@ -72,20 +72,20 @@
 <div class="install">
 <div class="cmd has-copy"><button class="copy" data-done="コピーしました" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">コピー</button>
 <pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
-<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># モデルは初回に 1 度だけダウンロードし(約 20 GB)、その後は配信します</span>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># モデルは初回に 1 度だけダウンロードし（約 20 GB）、その後は配信します</span>
 <span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># これだけです</span></pre></div>
 <p class="note">NVIDIA DGX Spark とすべての GB10 マシンで動作します。スクリプトは各ダウンロードをリリースのチェックサムで検証し、<code>sudo</code> コマンドは実行前に毎回表示します。気になる方は、<a href="https://github.com/dreamference/mightling/blob/main/install.sh">先にスクリプトを読む</a>こともできます。</p>
 <div class="clients">
 <div class="client">
 <h3>Mac と Linux のクライアント</h3>
 <p>ほかのコンピュータは、ローカルネットワーク越しに GB10 のモデルを使います。Mac や別の Linux マシンでも、上と同じコマンドで <code>ling</code> クライアントがインストールされ、GB10 は自動的に見つかります。</p>
-<p>1.7.2 からは、Mac では「アプリケーション」にデスクトップアプリも入り、すぐ開けます(入れたくない場合は <code>--no-app</code>)。</p>
+<p>1.7.2 からは、Mac では「アプリケーション」にデスクトップアプリも入り、すぐ開けます（入れたくない場合は <code>--no-app</code>)。</p>
 </div>
 <div class="client">
 <h3>Windows クライアント <span class="tag">プレビュー</span></h3>
 <div class="cmd has-copy"><button class="copy" data-done="コピーしました" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">コピー</button>
 <pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
-<p>PowerShell で実行します。管理者権限なしでインストールでき(1.7.2 からはデスクトップアプリも同様)、そのあと Windows がエージェントのサンドボックスを設定するかどうか 1 度だけ確認します。まだ署名されていないため、スマート アプリ コントロール(Smart App Control)をオフにしておく必要があります。<a href="https://github.com/dreamference/mightling/blob/main/install.ps1">スクリプトを読む</a>。</p>
+<p>PowerShell で実行します。管理者権限なしでインストールでき（1.7.2 からはデスクトップアプリも同様）、そのあと Windows がエージェントのサンドボックスを設定するかどうか 1 度だけ確認します。まだ署名されていないため、スマート アプリ コントロール（Smart App Control）をオフにしておく必要があります。<a href="https://github.com/dreamference/mightling/blob/main/install.ps1">スクリプトを読む</a>。</p>
 </div>
 </div>
 </div>
@@ -99,7 +99,7 @@
 </div>
 <section id="new">
 <div class="wrap">
-<h2>1.7 の新機能:Mac、Linux、Windows 向けデスクトップアプリ</h2>
+<h2>1.7 の新機能：Mac、Linux、Windows 向けデスクトップアプリ</h2>
 <p class="sub">Mightling 1.7.0 のデスクトップアプリは、Ask と Work を 1 つのウィンドウにまとめました。Work はエージェントセッションのための本格的な作業台です。ファイル、スキル、コマンドを扱えるコンポーザー、ステージ・取り消し・コミットができるレビューペイン、ワークツリー、ターミナルタブ、スレッドの横にあるファイルツリーとファイルタブを備えています。ほかのコンピュータでは GB10 のクライアントとして動作し、GB10 はローカルネットワーク上で自動的に見つかります。</p>
 <div class="pillars">
 <div class="pillar">
@@ -108,69 +108,69 @@
 </div>
 <div class="pillar">
 <h3>Linux</h3>
-<p>GB10 では、<code>mightling_1.7.0_arm64.deb</code> がアプリ本体、ランチャーのエントリ、<code>ling-app</code> コマンド、そして必要なサンドボックスのプロファイルをインストールします:</p>
+<p>GB10 では、<code>mightling_1.7.0_arm64.deb</code> がアプリ本体、ランチャーのエントリ、<code>ling-app</code> コマンド、そして必要なサンドボックスのプロファイルをインストールします：</p>
 <div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
 <p>そのあとはアプリケーションメニューから、または <code>ling app</code> で開きます。<a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">詳細</a>。</p>
 </div>
 <div class="pillar">
 <h3>Windows 11 <span class="tag">プレビュー</span></h3>
-<p>1.7.2 からは、<a href="#install">PowerShell の 1 行</a>でアプリも一緒にインストールされます。自分のユーザー専用で管理者権限は不要、スタートメニューにも登録されます。削除は「設定 → アプリ」から、更新は <code>ling update</code> です。スマート アプリ コントロール(Smart App Control)はオフにしておく必要があります。</p>
+<p>1.7.2 からは、<a href="#install">PowerShell の 1 行</a>でアプリも一緒にインストールされます。自分のユーザー専用で管理者権限は不要、スタートメニューにも登録されます。削除は「設定 → アプリ」から、更新は <code>ling update</code> です。スマート アプリ コントロール（Smart App Control）はオフにしておく必要があります。</p>
 </div>
 </div>
 <details class="other"><summary>そのほかのインストール方法</summary>
-<p>リリースページには、Mac 用の dmg(<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>、Intel は <code>x64</code>)と、Windows 用インストーラ(<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>、または <code>arm64</code>)もあります。いずれも署名のないプレビュー版で、ブラウザでダウンロードすると初回はブロックされます。先にリリースの署名付き <code>SHA256SUMS</code> と照合してください。</p>
+<p>リリースページには、Mac 用の dmg（<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>、Intel は <code>x64</code>）と、Windows 用インストーラ（<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>、または <code>arm64</code>）もあります。いずれも署名のないプレビュー版で、ブラウザでダウンロードすると初回はブロックされます。先にリリースの署名付き <code>SHA256SUMS</code> と照合してください。</p>
 <ul>
-<li>macOS 15 以降:Mightling を「アプリケーション」にドラッグして 1 度開き、システム設定 › プライバシーとセキュリティ › <b>このまま開く</b> を選びます。macOS 14 以前では、アプリを Control キーを押しながらクリック › 開く。</li>
-<li>Windows:SmartScreen › <b>詳細情報</b> › <b>実行</b>。スマート アプリ コントロール(Smart App Control)はオフにしておく必要があります。</li>
+<li>macOS 15 以降：Mightling を「アプリケーション」にドラッグして 1 度開き、システム設定 › プライバシーとセキュリティ › <b>このまま開く</b> を選びます。macOS 14 以前では、アプリを Control キーを押しながらクリック › 開く。</li>
+<li>Windows:SmartScreen › <b>詳細情報</b> › <b>実行</b>。スマート アプリ コントロール（Smart App Control）はオフにしておく必要があります。</li>
 </ul>
 </details>
-<p class="sub after">1.7.0 にはほかにも、Night Shift が 1 つのタスクを複数回試して最良の結果を残せること(<code>/night add --best-of N</code>)、1 台のマシンで複数の Signal ブリッジを動かせること、同じネットワーク上に 2 つのノードがあってもクライアントが選べて、既知のノードを見失わないこと、が加わりました。<a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">リリースノートとダウンロード</a>。</p>
+<p class="sub after">1.7.0 にはほかにも、Night Shift が 1 つのタスクを複数回試して最良の結果を残せること（<code>/night add --best-of N</code>）、1 台のマシンで複数の Signal ブリッジを動かせること、同じネットワーク上に 2 つのノードがあってもクライアントが選べて、既知のノードを見失わないこと、が加わりました。<a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">リリースノートとダウンロード</a>。</p>
 </div>
 </section>
 <section id="benchmark">
 <div class="wrap">
 <h2>SWE-bench Verified、DGX Spark 1 台での実測</h2>
-<p class="sub">2026-10-08、Mightling 1.5.1 のエージェントと Qwen3.8-27B は、DGX Spark 1 台のオフライン環境で SWE-bench Verified の <b>100 タスク中 68 件</b>を解決しました。固定した 100 タスクのサンプルで、1 タスクにつき 1 回の試行、デフォルトモードです。全 500 タスクに換算すると、推定 <b>≈69%</b>(95% 区間 63.9–73.4%)になります。これは自分たちのマシンで、一部のサブセットに対して行った自前の測定であり、リーダーボードへの登録ではありません。</p>
+<p class="sub">2026-10-08、Mightling 1.5.1 のエージェントと Qwen3.8-27B は、DGX Spark 1 台のオフライン環境で SWE-bench Verified の <b>100 タスク中 68 件</b>を解決しました。固定した 100 タスクのサンプルで、1 タスクにつき 1 回の試行、デフォルトモードです。全 500 タスクに換算すると、推定 <b>≈69%</b>（95% 区間 63.9–73.4%）になります。これは自分たちのマシンで、一部のサブセットに対して行った自前の測定であり、リーダーボードへの登録ではありません。</p>
 
 <div class="tablewrap">
 <table class="bench">
 <tr><th>システム</th><th>同じ 100<br/>タスク</th><th>全 500<br/>タスク</th></tr>
-<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4)、DGX Spark 1 台、オフライン<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">推定</span></td></tr>
-<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4)、refine モード、DGX Spark 1 台、オフライン<a class="fn" href="#fn1">1</a></td><td class="num">69/100</td><td class="num">≈70% <span class="est">推定</span></td></tr>
+<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B （NVFP4）、DGX Spark 1 台、オフライン<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">推定</span></td></tr>
+<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B （NVFP4）、refine モード、DGX Spark 1 台、オフライン<a class="fn" href="#fn1">1</a></td><td class="num">69/100</td><td class="num">≈70% <span class="est">推定</span></td></tr>
 <tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
-<tr><td>GLM-4.6 (Z.ai のエージェント)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
+<tr><td>GLM-4.6 （Z.ai のエージェント）<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
 <tr><td>Kimi K2.5, high (mini-SWE-agent)<a class="fn" href="#fn4">4</a></td><td class="num">70/100</td><td class="num">70.8%</td></tr>
 <tr><td>DeepSeek V3.2, high (mini-SWE-agent)<a class="fn" href="#fn5">5</a></td><td class="num">70/100</td><td class="num">70.0%</td></tr>
 <tr><td>Claude Opus 4.5、4 種のエージェント<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
 <tr><td>Gemini 3 Pro (live-SWE-agent)<a class="fn" href="#fn7">7</a></td><td class="num">79/100</td><td class="num">77.4%</td></tr>
-<tr class="group"><td colspan="3">より小さなオープンモデル(20–40B パラメータ)</td></tr>
-<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E)、テスト時スケーリング<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
-<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E)、1 回の試行<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
+<tr class="group"><td colspan="3">より小さなオープンモデル（20–40B パラメータ）</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B （EntroPO + R2E）、テスト時スケーリング<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B （EntroPO + R2E）、1 回の試行<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
 <tr><td>Devstral Small 2512 (mini-SWE-agent)<a class="fn" href="#fn9">9</a></td><td class="num">57/100</td><td class="num">56.4%</td></tr>
-<tr class="group"><td colspan="3">コーディングエージェント製品(各ベンダーの公表値)</td></tr>
-<tr><td>GitHub Copilot agent mode (VS Code)、Claude 3.7 Sonnet 使用<a class="fn" href="#fn10">10</a></td><td class="ns">未公表</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
+<tr class="group"><td colspan="3">コーディングエージェント製品（各ベンダーの公表値）</td></tr>
+<tr><td>GitHub Copilot agent mode （VS Code）、Claude 3.7 Sonnet 使用<a class="fn" href="#fn10">10</a></td><td class="ns">未公表</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
 <tr><td>Claude Code<a class="fn" href="#fn11">11</a></td><td class="ns">未公表</td><td class="ns"><a href="https://www.anthropic.com/engineering/swe-bench-sonnet">未公表</a></td></tr>
 <tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">未公表</td><td class="ns"><a href="https://cursor.com/blog/composer">未公表</a></td></tr>
 </table>
 </div>
-<p class="sub after">順位表ではなく、比較の目安として読んでください。同じ 100 タスクで、Mightling は自分の何倍もの規模の Qwen3-Coder-480B や GLM-4.6 と同数のタスクを解決しました。ただし、行ごとにエージェントもハードウェアも異なり、リーダーボードの行は公式の x86 テストイメージで評価されている一方、こちらはコミュニティ製の arm64 イメージで実行しています。refine モードでは、最初のセッションが何も変更せずにタスクを調べ、新しいセッションが実作業を行います。解決数はデフォルトより 1 件多い 69 件(68 件に対して。互いに相手が落としたタスクを解いています)で、タスクあたりの時間は約 2.2 倍かかるため、引き続きオプトインです(<code>ling --refine</code>)。</p>
+<p class="sub after">順位表ではなく、比較の目安として読んでください。同じ 100 タスクで、Mightling は自分の何倍もの規模の Qwen3-Coder-480B や GLM-4.6 と同数のタスクを解決しました。ただし、行ごとにエージェントもハードウェアも異なり、リーダーボードの行は公式の x86 テストイメージで評価されている一方、こちらはコミュニティ製の arm64 イメージで実行しています。refine モードでは、最初のセッションが何も変更せずにタスクを調べ、新しいセッションが実作業を行います。解決数はデフォルトより 1 件多い 69 件（68 件に対して。互いに相手が落としたタスクを解いています）で、タスクあたりの時間は約 2.2 倍かかるため、引き続きオプトインです（<code>ling --refine</code>)。</p>
 <details class="method"><summary>≈69% の推定方法</summary>
-<p>100 タスクは Verified の 5 分の 1 にすぎないので、全体の数値は推定です。公開されている Verified の全 175 件の提出について、タスクごとの結果に 1 パラメータの項目反応(Rasch)モデルを当てはめます。各タスクに難易度、各システムに能力を割り当てるモデルです。Mightling の能力は、この 100 タスクで 68 件解決を説明する値で、≈69% はその能力の全 500 タスクでの期待スコアです(公表スコアに対する単純な回帰とも 1 ポイント以内で一致します)。検証のため、公開されているすべての提出をこの 100 タスクだけで採点し、全体スコアを同じ方法で予測しました。誤差は 2.4 ポイント(RMSE)で、上の区間はその ±1.96 倍です。表のすべての数値は、<a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> の公開されたタスクごとのデータから <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> で再現できます。</p>
-<p>100 タスクは、テスト環境が arm64 で動作して検証できるタスク(正解パッチは通り、空の変更は失敗する)の中から、Verified の各リポジトリに全体の比率どおりに振り分けています。公開されているシステムは、この 100 タスクでは全 500 タスクより 1.0〜1.5 ポイント低く出るので、このサンプルが易しいわけではありません。これはリーダーボードへの登録ではありません。リーダーボードは SWE-bench チームが自分たちの環境で採点したものです。</p>
+<p>100 タスクは Verified の 5 分の 1 にすぎないので、全体の数値は推定です。公開されている Verified の全 175 件の提出について、タスクごとの結果に 1 パラメータの項目反応（Rasch）モデルを当てはめます。各タスクに難易度、各システムに能力を割り当てるモデルです。Mightling の能力は、この 100 タスクで 68 件解決を説明する値で、≈69% はその能力の全 500 タスクでの期待スコアです（公表スコアに対する単純な回帰とも 1 ポイント以内で一致します）。検証のため、公開されているすべての提出をこの 100 タスクだけで採点し、全体スコアを同じ方法で予測しました。誤差は 2.4 ポイント（RMSE）で、上の区間はその ±1.96 倍です。表のすべての数値は、<a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> の公開されたタスクごとのデータから <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> で再現できます。</p>
+<p>100 タスクは、テスト環境が arm64 で動作して検証できるタスク（正解パッチは通り、空の変更は失敗する）の中から、Verified の各リポジトリに全体の比率どおりに振り分けています。公開されているシステムは、この 100 タスクでは全 500 タスクより 1.0〜1.5 ポイント低く出るので、このサンプルが易しいわけではありません。これはリーダーボードへの登録ではありません。リーダーボードは SWE-bench チームが自分たちの環境で採点したものです。</p>
 </details>
 <ol class="footnotes">
-<li id="fn1">Mightling:100 タスク、各 1 回の試行。DGX Spark 1 台 (GB10, 128 GB)、モデルはローカルで配信、クラウドなし。デフォルトモードは 2026-10-08、refine モードは 2026-10-09 に測定。推定値は <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> のタスクごとのデータによる。</li>
-<li id="fn2">500 タスク、1 回の試行。ハードウェアは不明。出典:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>。同じモデルを mini-SWE-agent で使った場合:57/100、55.4%。</li>
-<li id="fn3">500 タスク、1 回の試行。エージェントは非公開、ハードウェアは不明。出典:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>。</li>
-<li id="fn4">500 タスク、1 回の試行。ハードウェアは不明。出典:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>。</li>
-<li id="fn5">500 タスク、1 回の試行。ハードウェアは不明。出典:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_deepseek-3-2-high">experiments, 20260217_mini-v2.0.0_deepseek-3-2-high</a>。</li>
-<li id="fn6">いずれも 500 タスク。ハードウェアは不明。4 件の提出:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251127_openhands_claude-opus-4-5">OpenHands</a>(80/100、77.6%)、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251215_livesweagent_claude-opus-4-5">live-SWE-agent</a>(80/100、79.2%)、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251205_sonar-foundation-agent_claude-opus-4-5">Sonar Foundation Agent</a>(77/100、79.2%)、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_claude-4-5-opus-high">mini-SWE-agent, high</a>(79/100、76.8%)。これより前の <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251124_mini-v1.16.0_claude-opus-4-5-20251101">mini-SWE-agent の実行</a>は 74/100、74.4% でした。</li>
-<li id="fn7">500 タスク、1 回の試行。ハードウェアは不明。出典:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251120_livesweagent_gemini-3-pro-preview">experiments, 20251120_livesweagent_gemini-3-pro-preview</a>。同じモデルを mini-SWE-agent で使った場合:72/100、74.2%。</li>
-<li id="fn8">リーダーボードで公表されている 20–40B モデルの最高成績。500 タスク。テスト時スケーリングは 1 タスクにつき 2 回以上試行。ハードウェアは不明。出典:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B_tts">テスト時スケーリング</a>、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B">1 回の試行</a>。</li>
-<li id="fn9">500 タスク、1 回の試行。ハードウェアは不明。出典:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251209_mini-v1.17.2_devstral-small-2512">experiments, 20251209_mini-v1.17.2_devstral-small-2512</a>。</li>
-<li id="fn10">GitHub 自身の数値(2025 年 4 月):「agent mode achieves a pass rate of 56.0% on SWE-bench Verified with Claude 3.7 Sonnet」。タスク数、試行回数、ハードウェアは不明で、リーダーボードには載っていません。出典:<a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">GitHub ブログ</a>。</li>
-<li id="fn11">Anthropic は Claude モデルの SWE-bench Verified の結果を、独自のシンプルなスキャフォールド(bash ツールと編集ツール)で測って公表しており、Claude Code という製品としては公表していません。出典:<a href="https://claude.com/product/claude-code">Claude Code</a>、<a href="https://www.anthropic.com/engineering/swe-bench-sonnet">Anthropic の SWE-bench の手法</a>。</li>
-<li id="fn12">Cursor が公表しているのは自社のベンチマーク Cursor Bench の結果で、SWE-bench Verified ではありません。出典:<a href="https://cursor.com/blog/composer">Cursor ブログ、Composer</a>。</li>
+<li id="fn1">Mightling:100 タスク、各 1 回の試行。DGX Spark 1 台 （GB10, 128 GB）、モデルはローカルで配信、クラウドなし。デフォルトモードは 2026-10-08、refine モードは 2026-10-09 に測定。推定値は <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> のタスクごとのデータによる。</li>
+<li id="fn2">500 タスク、1 回の試行。ハードウェアは不明。出典：<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>。同じモデルを mini-SWE-agent で使った場合：57/100、55.4%。</li>
+<li id="fn3">500 タスク、1 回の試行。エージェントは非公開、ハードウェアは不明。出典：<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>。</li>
+<li id="fn4">500 タスク、1 回の試行。ハードウェアは不明。出典：<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>。</li>
+<li id="fn5">500 タスク、1 回の試行。ハードウェアは不明。出典：<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_deepseek-3-2-high">experiments, 20260217_mini-v2.0.0_deepseek-3-2-high</a>。</li>
+<li id="fn6">いずれも 500 タスク。ハードウェアは不明。4 件の提出：<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251127_openhands_claude-opus-4-5">OpenHands</a>(80/100、77.6%)、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251215_livesweagent_claude-opus-4-5">live-SWE-agent</a>(80/100、79.2%)、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251205_sonar-foundation-agent_claude-opus-4-5">Sonar Foundation Agent</a>(77/100、79.2%)、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_claude-4-5-opus-high">mini-SWE-agent, high</a>（79/100、76.8%）。これより前の <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251124_mini-v1.16.0_claude-opus-4-5-20251101">mini-SWE-agent の実行</a>は 74/100、74.4% でした。</li>
+<li id="fn7">500 タスク、1 回の試行。ハードウェアは不明。出典：<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251120_livesweagent_gemini-3-pro-preview">experiments, 20251120_livesweagent_gemini-3-pro-preview</a>。同じモデルを mini-SWE-agent で使った場合：72/100、74.2%。</li>
+<li id="fn8">リーダーボードで公表されている 20–40B モデルの最高成績。500 タスク。テスト時スケーリングは 1 タスクにつき 2 回以上試行。ハードウェアは不明。出典：<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B_tts">テスト時スケーリング</a>、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B">1 回の試行</a>。</li>
+<li id="fn9">500 タスク、1 回の試行。ハードウェアは不明。出典：<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251209_mini-v1.17.2_devstral-small-2512">experiments, 20251209_mini-v1.17.2_devstral-small-2512</a>。</li>
+<li id="fn10">GitHub 自身の数値（2025 年 4 月）:「agent mode achieves a pass rate of 56.0% on SWE-bench Verified with Claude 3.7 Sonnet」。タスク数、試行回数、ハードウェアは不明で、リーダーボードには載っていません。出典：<a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">GitHub ブログ</a>。</li>
+<li id="fn11">Anthropic は Claude モデルの SWE-bench Verified の結果を、独自のシンプルなスキャフォールド（bash ツールと編集ツール）で測って公表しており、Claude Code という製品としては公表していません。出典：<a href="https://claude.com/product/claude-code">Claude Code</a>、<a href="https://www.anthropic.com/engineering/swe-bench-sonnet">Anthropic の SWE-bench の手法</a>。</li>
+<li id="fn12">Cursor が公表しているのは自社のベンチマーク Cursor Bench の結果で、SWE-bench Verified ではありません。出典：<a href="https://cursor.com/blog/composer">Cursor ブログ、Composer</a>。</li>
 </ol>
 <p class="note-small">リーダーボードの数値はすべて <a href="https://www.swebench.com/">swebench.com</a> と <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> リポジトリによるものです。「同じ 100 タスク」は、各提出のタスクごとの公表結果を、Mightling が実行したタスクに絞ったものです。</p>
 </div>
@@ -190,7 +190,7 @@
 <p class="sub">クラウドのコーディングエージェントは、ソースコードを他人のサーバーに送ります。Mightling はどこにも送りません。モデルはあなたの GB10 で動き、Mightling の中に外へ通信するものは何もありません。利用状況の分析も、メトリクスも、サインインも、「匿名」のクラッシュレポートもありません。だから、アップロードが許されないコードにも使えます。顧客の案件、規制対象のデータ、未発表の製品などです。</p>
 <div class="proof">
 <div>
-<p>コマンド 1 つで、実際の Mightling セッションを <code>strace</code> の下で実行し、確立されたすべてのネットワーク接続を一覧にします:</p>
+<p>コマンド 1 つで、実際の Mightling セッションを <code>strace</code> の下で実行し、確立されたすべてのネットワーク接続を一覧にします：</p>
 <div class="cmd"><pre><span class="p">$ </span>ling-admin audit egress
 <span class="ok">✔ Egress audit: pass</span>
 Network destinations:
@@ -201,10 +201,10 @@ Networked git commands: none</pre></div>
 <p>すべて <code>127.0.0.1</code> の中で完結しました。DNS の問い合わせは 1 件もありません。</p>
 </div>
 <div>
-<h3>確実な保証が必要ですか?</h3>
+<h3>確実な保証が必要ですか？</h3>
 <p><code>/airgapped on</code> と入力すると、エージェントが実行するすべてのコマンドに、Linux カーネルから空のネットワーク名前空間が割り当てられます。モデルへのお願いではありません。到達できるネットワークがそもそも存在しないのです。サンドボックスを回避してしまう Full Access も、同時に拒否されます。</p>
 <h3>外に出るもの、そのタイミング</h3>
-<p>あなたまたはエージェントが求めたものだけです。Web 検索(自分のマシン上のプライベートな SearXNG 経由)、ページの取得、連携した Google アカウントへの読み取り専用リクエスト、更新の確認。<code>/airgapped on</code> では、そのどれも出ません。</p>
+<p>あなたまたはエージェントが求めたものだけです。Web 検索（自分のマシン上のプライベートな SearXNG 経由）、ページの取得、連携した Google アカウントへの読み取り専用リクエスト、更新の確認。<code>/airgapped on</code> では、そのどれも出ません。</p>
 </div>
 </div>
 </div>
@@ -237,10 +237,10 @@ Networked git commands: none</pre></div>
 <div class="pillar">
 <h3>✨ 設定は不要</h3>
 <ul>
-<li><b>チューニング不要:</b>モデル、コンテキスト、カーネル、投機的デコーディングは GB10 向けに選定済みです。</li>
-<li><b>マシンをフリーズさせません:</b>ホストを事前に確認し、ロード中はメモリ負荷を監視します。</li>
+<li><b>チューニング不要：</b>モデル、コンテキスト、カーネル、投機的デコーディングは GB10 向けに選定済みです。</li>
+<li><b>マシンをフリーズさせません：</b>ホストを事前に確認し、ロード中はメモリ負荷を監視します。</li>
 <li><b>ほかのマシンから見つかります。</b>同じローカルネットワーク上にあれば自動的に。</li>
-<li><b>更新はコマンド 1 つ:</b><code>ling update</code>。</li>
+<li><b>更新はコマンド 1 つ：</b><code>ling update</code>。</li>
 </ul>
 </div>
 </div>
@@ -291,27 +291,27 @@ Networked git commands: none</pre></div>
 <div class="wrap">
 <h2>論文</h2>
 <div class="pillar">
-<h3><a href="paper/desktop-architecture.pdf">エージェント型ペアプログラマ向けの、ローカルでエアギャップ対応のデスクトップクライアントの設計:プロトコル互換性、プロセス分離、ホストのメモリ安全性</a></h3>
+<h3><a href="paper/desktop-architecture.pdf">エージェント型ペアプログラマ向けの、ローカルでエアギャップ対応のデスクトップクライアントの設計：プロトコル互換性、プロセス分離、ホストのメモリ安全性</a></h3>
 <p class="note-small">dgxcoder · 2026 年 10 月</p>
 <p>本論文では、Mightling Desktop のアーキテクチャ設計、形式的な権限モデル、実証評価を示す。これはオープンソースのデスクトップ環境で、上流ベンダーのデスクトップクライアントと同じ app-server プロトコルを話し、Codex 互換のデフォルトを保ち、推論をユーザー自身のハードウェアで実行し、ユーザーが <code>/airgapped on</code> を有効にすると、サンドボックス内のすべてのコマンドをワークステーション内に閉じ込める。</p>
-<p><a href="paper/desktop-architecture.pdf">論文を読む(PDF)</a></p>
+<p><a href="paper/desktop-architecture.pdf">論文を読む（PDF）</a></p>
 </div>
 </div>
 </section>
 <section id="faq">
 <div class="wrap">
 <h2>FAQ</h2>
-<details><summary>GB10 は必須ですか?</summary>
-<p>モデルを動かすには必要です。ほかのコンピュータはクライアントとしてそれを使います。Linux(Arm または x86)と macOS は同じインストールコマンドで、Windows(Arm または x86、プレビュー)は<a href="#install">PowerShell の 1 行</a>で使えます。</p></details>
-<details><summary>Puffin をインストールしています。これがその後継ですか?</summary>
+<details><summary>GB10 は必須ですか？</summary>
+<p>モデルを動かすには必要です。ほかのコンピュータはクライアントとしてそれを使います。Linux（Arm または x86）と macOS は同じインストールコマンドで、Windows（Arm または x86、プレビュー）は<a href="#install">PowerShell の 1 行</a>で使えます。</p></details>
+<details><summary>Puffin をインストールしています。これがその後継ですか？</summary>
 <p>はい。Puffin は 1.5 で Mightling に名前が変わりました。<code>puffin update</code> を 1 度実行し、そのあと最後にもう 1 度 <code>puffin</code> を実行してください。セッション、設定、リンクが引き継がれ、以降のコマンドは <code>ling</code> になります。</p></details>
-<details><summary>本当に無料ですか?</summary>
+<details><summary>本当に無料ですか？</summary>
 <p>はい。Mightling は AGPL のオープンソースで、モデルの重みも無料です。かかる費用は電気代だけです。</p></details>
-<details><summary>マシン以外に必要なものは?</summary>
-<p>付属の OS(DGX OS 7、ベンダーが提供している場合は Ubuntu 24.04)、NVIDIA Container Toolkit 入りの Docker、Python 3、Git です。素の Ubuntu では、<code>ling-admin host check</code> が足りないものを教えてくれます。</p></details>
-<details><summary>インターネットに出ていくものはありますか?</summary>
+<details><summary>マシン以外に必要なものは？</summary>
+<p>付属の OS（DGX OS 7、ベンダーが提供している場合は Ubuntu 24.04）、NVIDIA Container Toolkit 入りの Docker、Python 3、Git です。素の Ubuntu では、<code>ling-admin host check</code> が足りないものを教えてくれます。</p></details>
+<details><summary>インターネットに出ていくものはありますか？</summary>
 <p>あなたまたはエージェントが求めたものだけです。たとえば自分のマシン上の SearXNG 経由の Web 検索や、初回のダウンロードがそうです。<code>/airgapped on</code> にすると、そのすべてが止まります。</p></details>
-<details><summary>どのモデルが動きますか?</summary>
+<details><summary>どのモデルが動きますか？</summary>
 <p>NVIDIA の 4 ビット NVFP4 形式の Qwen3.8-27B を、DFlash2 ドラフターを組み合わせた SGLang で配信します。GB10 向けに選定・チューニングしたものです。重みは約 20 GB で、配信中もマシンのメモリは約 38 GB 空いたままです。</p></details>
 </div>
 </section>
