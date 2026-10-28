@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="tr" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mightling — masanda hızlı yapay zekâ ile kodlama</title>
+<meta name="description" content="Tek bir NVIDIA DGX Spark üzerinde çevrimdışı olarak 100 SWE-bench Verified görevinden 68&#x27;ini çözen kodlama ajanı (tüm sette tahmini yaklaşık %69), saniyede yaklaşık 47 token. Bulut yok, hesap yok, API faturası yok, telemetri yok.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="https://mightling.dreamference.ai/tr/">
+<link rel="alternate" hreflang="en" href="https://mightling.dreamference.ai/">
+<link rel="alternate" hreflang="zh-Hans" href="https://mightling.dreamference.ai/zh/">
+<link rel="alternate" hreflang="hi" href="https://mightling.dreamference.ai/hi/">
+<link rel="alternate" hreflang="es" href="https://mightling.dreamference.ai/es/">
+<link rel="alternate" hreflang="ar" href="https://mightling.dreamference.ai/ar/">
+<link rel="alternate" hreflang="fr" href="https://mightling.dreamference.ai/fr/">
+<link rel="alternate" hreflang="bn" href="https://mightling.dreamference.ai/bn/">
+<link rel="alternate" hreflang="pt" href="https://mightling.dreamference.ai/pt/">
+<link rel="alternate" hreflang="id" href="https://mightling.dreamference.ai/id/">
+<link rel="alternate" hreflang="ur" href="https://mightling.dreamference.ai/ur/">
+<link rel="alternate" hreflang="ru" href="https://mightling.dreamference.ai/ru/">
+<link rel="alternate" hreflang="de" href="https://mightling.dreamference.ai/de/">
+<link rel="alternate" hreflang="ja" href="https://mightling.dreamference.ai/ja/">
+<link rel="alternate" hreflang="pcm" href="https://mightling.dreamference.ai/pcm/">
+<link rel="alternate" hreflang="mr" href="https://mightling.dreamference.ai/mr/">
+<link rel="alternate" hreflang="vi" href="https://mightling.dreamference.ai/vi/">
+<link rel="alternate" hreflang="te" href="https://mightling.dreamference.ai/te/">
+<link rel="alternate" hreflang="sw" href="https://mightling.dreamference.ai/sw/">
+<link rel="alternate" hreflang="ha" href="https://mightling.dreamference.ai/ha/">
+<link rel="alternate" hreflang="tr" href="https://mightling.dreamference.ai/tr/">
+<link rel="alternate" hreflang="x-default" href="https://mightling.dreamference.ai/">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mightling">
+<meta property="og:title" content="Mightling — masanda hızlı yapay zekâ ile kodlama. SWE-bench Verified&#x27;da yaklaşık %69.">
+<meta property="og:description" content="Tek bir DGX Spark üzerinde, çevrimdışı, 100 SWE-bench Verified görevinden 68&#x27;i, saniyede yaklaşık 47 token. Bulut yok, hesap yok, API faturası yok, telemetri yok.">
+<meta property="og:url" content="https://mightling.dreamference.ai/tr/">
+<meta property="og:locale" content="tr_TR">
+<meta property="og:image" content="https://mightling.dreamference.ai/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<script src="/init.js"></script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+<div class="wrap">
+<a class="brand" href="#"><img alt="" height="34" src="/assets/favicon.svg" width="34"/>Mightling</a>
+<nav class="links">
+<a href="#install">Kurulum</a>
+<a class="opt" href="#new">1.7'de yeni</a>
+<a class="opt" href="#benchmark">Kıyaslama</a>
+<a class="opt" href="#proof">Kanıt</a>
+<a class="opt" href="#paper">Makale</a>
+<a class="opt" href="#faq">SSS</a>
+<a href="https://github.com/dreamference/mightling">GitHub</a>
+</nav>
+<div class="controls"><details class="lang"><summary aria-label="Dil" title="Dil"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="cur">Türkçe</span><span class="cc">tr</span></summary><ul><li><a href="/en/" hreflang="en" lang="en" data-lang="en">English</a></li><li><a href="/zh/" hreflang="zh-Hans" lang="zh-Hans" data-lang="zh">简体中文</a></li><li><a href="/hi/" hreflang="hi" lang="hi" data-lang="hi">हिन्दी</a></li><li><a href="/es/" hreflang="es" lang="es" data-lang="es">Español</a></li><li><a href="/ar/" hreflang="ar" lang="ar" dir="rtl" data-lang="ar">العربية</a></li><li><a href="/fr/" hreflang="fr" lang="fr" data-lang="fr">Français</a></li><li><a href="/bn/" hreflang="bn" lang="bn" data-lang="bn">বাংলা</a></li><li><a href="/pt/" hreflang="pt" lang="pt" data-lang="pt">Português</a></li><li><a href="/id/" hreflang="id" lang="id" data-lang="id">Bahasa Indonesia</a></li><li><a href="/ur/" hreflang="ur" lang="ur" dir="rtl" data-lang="ur">اردو</a></li><li><a href="/ru/" hreflang="ru" lang="ru" data-lang="ru">Русский</a></li><li><a href="/de/" hreflang="de" lang="de" data-lang="de">Deutsch</a></li><li><a href="/ja/" hreflang="ja" lang="ja" data-lang="ja">日本語</a></li><li><a href="/pcm/" hreflang="pcm" lang="pcm" data-lang="pcm">Naijá</a></li><li><a href="/mr/" hreflang="mr" lang="mr" data-lang="mr">मराठी</a></li><li><a href="/vi/" hreflang="vi" lang="vi" data-lang="vi">Tiếng Việt</a></li><li><a href="/te/" hreflang="te" lang="te" data-lang="te">తెలుగు</a></li><li><a href="/sw/" hreflang="sw" lang="sw" data-lang="sw">Kiswahili</a></li><li><a href="/ha/" hreflang="ha" lang="ha" data-lang="ha">Hausa</a></li><li><a href="/tr/" hreflang="tr" lang="tr" data-lang="tr" aria-current="true">Türkçe</a></li></ul></details><button class="theme" type="button" hidden data-mode="system" aria-label="Tema" title="Tema" data-theme-label="Tema" data-label-system="Sistem" data-label-light="Açık" data-label-dark="Koyu"><svg class="ico ico-system" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><svg class="ico ico-light" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="ico ico-dark" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 13.5A9 9 0 1 1 10.5 3a7 7 0 0 0 10.5 10.5z"/></svg><span class="tl">Sistem</span></button></div>
+</div>
+</header>
+<main>
+<div class="wrap">
+<div class="hero" id="install">
+<img alt="Mightling" class="logo logo-light" height="181" src="/assets/mightling-logo-light.svg" width="300"/>
+<img alt="Mightling" class="logo logo-dark" height="181" src="/assets/mightling-logo-dark.svg" width="300"/>
+<h1>Masanda hızlı yapay zekâ ile kodlama.<br/>SWE‑bench Verified'da yaklaşık %69.</h1>
+<p class="lede"><strong>Tek bir DGX Spark üzerinde çevrimdışı çözülen 100 SWE-bench Verified görevinden 68'i</strong>, saniyede yaklaşık 47 token hızıyla. Bir kodlama ajanı, bir sohbet asistanı ve bir masaüstü uygulaması; hepsi tamamen kendi GB10'unda çalışır. Bulut yok. Hesap yok. API faturası yok. Telemetri yok. <a href="#benchmark">Nasıl ölçüldü</a></p>
+<div class="install">
+<div class="cmd has-copy"><button class="copy" data-done="Kopyalandı" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">Kopyala</button>
+<pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># modeli bir kez indirir (~20 GB), sonra sunar</span>
+<span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># hepsi bu</span></pre></div>
+<p class="note">NVIDIA DGX Spark'ta ve her GB10 makinesinde çalışır. Betik, her indirmeyi sürümün sağlama toplamlarıyla doğrular ve her <code>sudo</code> komutunu çalıştırmadan önce ekrana yazar. İstersen <a href="https://github.com/dreamference/mightling/blob/main/install.sh">önce oku</a>.</p>
+<div class="clients">
+<div class="client">
+<h3>Mac ve Linux istemcileri</h3>
+<p>Diğer bilgisayarların GB10'un modelini yerel ağ üzerinden kullanır. Bir Mac'te ya da başka bir Linux makinesinde yukarıdaki aynı komut <code>ling</code> istemcisini kurar; GB10'u kendisi bulur.</p>
+<p>1.7.2'den itibaren Mac'te masaüstü uygulamasını da Uygulamalar klasörüne koyar, açmaya hazır halde (<code>--no-app</code> bunu atlar).</p>
+</div>
+<div class="client">
+<h3>Windows istemcisi <span class="tag">önizleme</span></h3>
+<div class="cmd has-copy"><button class="copy" data-done="Kopyalandı" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">Kopyala</button>
+<pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
+<p>PowerShell'de. Yönetici hakları olmadan kurulur (1.7.2'den itibaren masaüstü uygulaması da), ardından Windows ajanın korumalı alanını kurmak için bir kez sorar. Henüz imzalı değil, bu yüzden Smart App Control kapalı olmalı. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">Betiği oku</a>.</p>
+</div>
+</div>
+</div>
+<div class="numbers">
+<div><b>68/100</b><span>SWE-bench Verified görevi, tek bir DGX Spark üzerinde çevrimdışı</span></div>
+<div><b>~48 tok/s</b><span>ajan işinde üretim, tek akış</span></div>
+<div><b>0</b><span>eve bağlanan bağlantı, çıkış denetimiyle doğrulandı</span></div>
+<div><b>$0</b><span>token başına, sonsuza dek</span></div>
+</div>
+</div>
+</div>
+<section id="new">
+<div class="wrap">
+<h2>1.7'de yeni: Mac, Linux ve Windows için masaüstü uygulaması</h2>
+<p class="sub">Mightling 1.7.0'ın masaüstü uygulaması Ask ve Work'ü tek pencerede toplar. Work, ajan oturumları için eksiksiz bir tezgâhtır: dosyalı, beceri ve komutlu bir giriş alanı, hazırlamak, geri almak ve commit etmek için bir inceleme bölmesi, worktree'ler, terminal sekmeleri ve konuşmanın yanında bir dosya ağacı ile dosya sekmeleri. Diğer bilgisayarlarında, yerel ağda bulduğu GB10'unun istemcisi olarak çalışır.</p>
+<div class="pillars">
+<div class="pillar">
+<h3>macOS <span class="tag">önizleme</span></h3>
+<p>1.7.2'den itibaren <a href="#install">kurulum komutu</a> Mightling'i <code>ling</code>'in yanında Uygulamalar klasörüne koyar ve diğer uygulamalar gibi açılır. Apple silicon ve Intel, macOS 12 veya üstü. <code>ling update</code> onu da günceller.</p>
+</div>
+<div class="pillar">
+<h3>Linux</h3>
+<p>GB10'da <code>mightling_1.7.0_arm64.deb</code> uygulamayı, başlatıcı girdisini ve <code>ling-app</code> komutunu, ihtiyaç duyduğu korumalı alan profiliyle birlikte kurar:</p>
+<div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
+<p>Sonra uygulama menüsünden ya da <code>ling app</code> ile aç. <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">Daha fazlası</a>.</p>
+</div>
+<div class="pillar">
+<h3>Windows 11 <span class="tag">önizleme</span></h3>
+<p>1.7.2'den itibaren <a href="#install">PowerShell satırı</a> uygulamayı da kurar; yalnızca senin için, yönetici hakları olmadan, Başlat menüsü girdisiyle; Ayarlar → Uygulamalar'dan kaldırılır; <code>ling update</code> günceller. Smart App Control kapalı olmalı.</p>
+</div>
+</div>
+<details class="other"><summary>Diğer kurulum yolları</summary>
+<p>Sürüm sayfasında ayrıca Mac dmg dosyası (<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>, Intel için <code>x64</code>) ve Windows yükleyicisi (<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>, ya da <code>arm64</code>) bulunur. Bunlar imzasız önizlemelerdir: tarayıcıyla indirilince ilk seferde engellenirler. Önce her birini sürümün imzalı <code>SHA256SUMS</code> dosyasıyla karşılaştır.</p>
+<ul>
+<li>macOS 15 ve üstü: Mightling'i Uygulamalar'a sürükle ve bir kez aç, ardından Sistem Ayarları › Gizlilik ve Güvenlik › <b>Yine de Aç</b>. macOS 14 ve öncesinde uygulamaya Control tuşuyla tıkla › Aç.</li>
+<li>Windows: SmartScreen › <b>Daha fazla bilgi</b> › <b>Yine de çalıştır</b>. Smart App Control kapalı olmalı.</li>
+</ul>
+</details>
+<p class="sub after">1.7.0'da ayrıca: Night Shift bir görevi birkaç kez deneyip en iyi denemeyi tutabilir (<code>/night add --best-of N</code>), bir makine birkaç Signal köprüsü çalıştırabilir ve bir istemci aynı ağdaki iki düğüm arasında, bildiğini kaybetmeden seçim yapar. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">Sürüm notları ve indirmeler</a>.</p>
+</div>
+</section>
+<section id="benchmark">
+<div class="wrap">
+<h2>SWE-bench Verified, tek bir DGX Spark üzerinde ölçüldü</h2>
+<p class="sub">2026-10-08'de Mightling 1.5.1'in ajanı Qwen3.8-27B ile tek bir DGX Spark üzerinde, çevrimdışı olarak <b>100 SWE-bench Verified görevinden 68'ini</b> çözdü: sabit 100 görevlik bir örneklem, görev başına tek deneme, varsayılan mod. 500 görevin tamamına ölçeklendiğinde bu tahmini <b>≈%69</b> eder (%95 aralığı %63,9–73,4). Bu, kendi makinemizde ve bir alt kümede yaptığımız kendi ölçümümüzdür; bir lider tablosu girişi değildir.</p>
+
+<div class="tablewrap">
+<table class="bench">
+<tr><th>Sistem</th><th>Aynı 100<br/>görev</th><th>Tüm 500<br/>görev</th></tr>
+<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4), tek DGX Spark, çevrimdışı<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈%69 <span class="est">tahmini</span></td></tr>
+<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4), refine modu, tek DGX Spark, çevrimdışı<a class="fn" href="#fn1">1</a></td><td class="num">69/100</td><td class="num">≈%70 <span class="est">tahmini</span></td></tr>
+<tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
+<tr><td>GLM-4.6 (Z.ai'nin ajanı)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
+<tr><td>Kimi K2.5, high (mini-SWE-agent)<a class="fn" href="#fn4">4</a></td><td class="num">70/100</td><td class="num">70.8%</td></tr>
+<tr><td>DeepSeek V3.2, high (mini-SWE-agent)<a class="fn" href="#fn5">5</a></td><td class="num">70/100</td><td class="num">70.0%</td></tr>
+<tr><td>Claude Opus 4.5, dört ajan<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
+<tr><td>Gemini 3 Pro (live-SWE-agent)<a class="fn" href="#fn7">7</a></td><td class="num">79/100</td><td class="num">77.4%</td></tr>
+<tr class="group"><td colspan="3">Daha küçük açık modeller (20–40 milyar parametre)</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), test anı ölçekleme<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), tek deneme<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
+<tr><td>Devstral Small 2512 (mini-SWE-agent)<a class="fn" href="#fn9">9</a></td><td class="num">57/100</td><td class="num">56.4%</td></tr>
+<tr class="group"><td colspan="3">Kodlama ajanı ürünleri, üreticilerinin yayımladığı haliyle</td></tr>
+<tr><td>GitHub Copilot agent mode (VS Code), Claude 3.7 Sonnet ile<a class="fn" href="#fn10">10</a></td><td class="ns">yayımlanmadı</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
+<tr><td>Claude Code<a class="fn" href="#fn11">11</a></td><td class="ns">yayımlanmadı</td><td class="ns"><a href="https://www.anthropic.com/engineering/swe-bench-sonnet">yayımlanmadı</a></td></tr>
+<tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">yayımlanmadı</td><td class="ns"><a href="https://cursor.com/blog/composer">yayımlanmadı</a></td></tr>
+</table>
+</div>
+<p class="sub after">Bunu bir sıralama olarak değil, bir yan yana koyma olarak oku. Aynı 100 görevde Mightling, kendisinden kat kat büyük modeller olan Qwen3-Coder-480B ve GLM-4.6 kadar görev çözdü; ama her satırda farklı bir ajan, farklı donanım ve lider tablosu satırlarında resmî x86 test imajları var, bizimkiler ise topluluğun arm64 imajlarında çalıştı. Refine modunda ilk oturum görevi hiçbir şeyi değiştirmeden inceler, yeni bir oturum da onu yapar: varsayılan moddan bir görev fazla çözdü (69'a karşı 68; her kol diğerinin kaybettiği görevleri kazandı), görev başına yaklaşık 2,2 kat süreyle, bu yüzden isteğe bağlı kalıyor (<code>ling --refine</code>).</p>
+<details class="method"><summary>≈%69 nasıl tahmin ediliyor</summary>
+<p>100 görev Verified'ın beşte biridir, dolayısıyla tüm sette rakam bir tahmindir. Tek parametreli bir madde-tepki (Rasch) modeli, 175 herkese açık Verified gönderiminin tamamının görev başına sonuçlarına oturtulur: her göreve bir zorluk, her sisteme bir yetenek düşer. Mightling'in yeteneği, bu 100 görevde 68 çözümü açıklayan yetenektir; ≈%69 bu yeteneğin 500 görevin tamamındaki beklenen puanıdır (yayımlanan puanlar üzerinde sade bir regresyon bir puan içinde aynı sonucu verir). Bunu sınamak için her herkese açık gönderim yalnızca bu 100 görevde puanlandı ve genel puanı aynı yolla tahmin edildi: hata 2,4 puan (RMSE) çıktı, yukarıdaki aralık bunun ±1,96 katıdır. Tablodaki her sayı, <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> deposundaki herkese açık görev başına verilerden <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> ile yeniden üretilir.</p>
+<p>100 görev, test ortamı arm64'te çalışan ve doğrulanan görevler arasından (altın yama geçer, boş değişiklik kalır) Verified'ın depolarına tam kümeyle orantılı dağıtılmıştır. Yayımlanmış sistemler bu 100 görevde tüm 500'e göre 1,0 ile 1,5 puan daha düşük alır, yani örneklem kolay bir örneklem değildir. Bir lider tablosu girişi de değildir: onları SWE-bench ekibi kendi altyapısında puanlar.</p>
+</details>
+<ol class="footnotes">
+<li id="fn1">Mightling: 100 görev, her biri için tek deneme; tek DGX Spark (GB10, 128 GB), model yerelde sunuldu, bulut yok; varsayılan mod 2026-10-08'de, refine modu 2026-10-09'da ölçüldü. Tahmin, <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> görev başına verilerinden.</li>
+<li id="fn2">500 görev, tek deneme; donanım belirtilmemiş. Kaynak: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>. Aynı model mini-SWE-agent ile: 57/100, %55,4.</li>
+<li id="fn3">500 görev, tek deneme, ajan açıklanmamış; donanım belirtilmemiş. Kaynak: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>.</li>
+<li id="fn4">500 görev, tek deneme; donanım belirtilmemiş. Kaynak: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>.</li>
+<li id="fn5">500 görev, tek deneme; donanım belirtilmemiş. Kaynak: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_deepseek-3-2-high">experiments, 20260217_mini-v2.0.0_deepseek-3-2-high</a>.</li>
+<li id="fn6">Her biri 500 görev; donanım belirtilmemiş. Dört gönderim: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251127_openhands_claude-opus-4-5">OpenHands</a> (80/100, %77,6), <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251215_livesweagent_claude-opus-4-5">live-SWE-agent</a> (80/100, %79,2), <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251205_sonar-foundation-agent_claude-opus-4-5">Sonar Foundation Agent</a> (77/100, %79,2), <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_claude-4-5-opus-high">mini-SWE-agent, high</a> (79/100, %76,8). Daha önceki bir <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251124_mini-v1.16.0_claude-opus-4-5-20251101">mini-SWE-agent çalıştırması</a> 74/100, %74,4 aldı.</li>
+<li id="fn7">500 görev, tek deneme; donanım belirtilmemiş. Kaynak: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251120_livesweagent_gemini-3-pro-preview">experiments, 20251120_livesweagent_gemini-3-pro-preview</a>. Aynı model mini-SWE-agent ile: 72/100, %74,2.</li>
+<li id="fn8">Lider tablosundaki yayımlanmış en iyi 20–40B model. 500 görev; test anı ölçekleme görev başına iki veya daha fazla deneme kullanır; donanım belirtilmemiş. Kaynaklar: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B_tts">test anı ölçekleme</a>, <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B">tek deneme</a>.</li>
+<li id="fn9">500 görev, tek deneme; donanım belirtilmemiş. Kaynak: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251209_mini-v1.17.2_devstral-small-2512">experiments, 20251209_mini-v1.17.2_devstral-small-2512</a>.</li>
+<li id="fn10">GitHub'ın kendi rakamı, Nisan 2025: “agent mode achieves a pass rate of 56.0% on SWE-bench Verified with Claude 3.7 Sonnet”. Görev sayısı, deneme sayısı ve donanım belirtilmemiş; lider tablosunda yok. Kaynak: <a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">GitHub blogu</a>.</li>
+<li id="fn11">Anthropic, Claude modelleri için SWE-bench Verified sonuçlarını kendi basit iskelesinde (bir bash aracı ve bir düzenleme aracı) çalıştırarak yayımlar; Claude Code ürünü için değil. Kaynaklar: <a href="https://claude.com/product/claude-code">Claude Code</a>, <a href="https://www.anthropic.com/engineering/swe-bench-sonnet">Anthropic'in SWE-bench yöntemi</a>.</li>
+<li id="fn12">Cursor, sonuçlarını SWE-bench Verified'da değil, kendi kıyaslaması olan Cursor Bench'te yayımlar. Kaynak: <a href="https://cursor.com/blog/composer">Cursor blogu, Composer</a>.</li>
+</ol>
+<p class="note-small">Tüm lider tablosu rakamları: <a href="https://www.swebench.com/">swebench.com</a> ve <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> deposu; “aynı 100 görev”, her gönderimin yayımlanmış görev başına sonuçlarının Mightling'in çalıştırdığı görevlerle sınırlandırılmış halidir.</p>
+</div>
+</section>
+<section id="try">
+<div class="wrap">
+<h2>Önce bunları dene</h2>
+<div class="cmd"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
+<span class="p">$ </span>ling "the tests are failing: find out why and fix them"
+<span class="p">$ </span>ling "add input validation to the signup form, with tests"</pre></div>
+<p class="sub after">Ya da bu geceye iş kuyruğa al: <code>/night add &lt;task&gt;</code>. Mightling sen uyurken kuyruğu eritir, her görev kendi git dalında olur, dalları sabah kahvesinin yanında gözden geçirirsin.</p>
+</div>
+</section>
+<section id="proof">
+<div class="wrap">
+<h2>Kodun masandan asla çıkmaz — ve bunu kanıtlayabilirsin</h2>
+<p class="sub">Bulut kodlama ajanları kaynak kodunu başkasının sunucularına gönderir. Mightling onu hiçbir yere göndermez: model GB10'unda çalışır ve Mightling'deki hiçbir şey eve bağlanmaz. Kullanım analizi yok, metrik yok, oturum açma yok, “anonim” çökme raporu yok. Bu da onu yükleme iznin olmayan kodlar için kullanılabilir kılar: müşteri işleri, düzenlemeye tabi veriler, yayımlanmamış ürünler.</p>
+<div class="proof">
+<div>
+<p>Tek bir komut gerçek bir Mightling oturumunu <code>strace</code> altında çalıştırır ve kurduğu her ağ bağlantısını listeler:</p>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin audit egress
+<span class="ok">✔ Egress audit: pass</span>
+Network destinations:
+   127.0.0.1:8000     29x  model server
+   127.0.0.1:8767      1x  Gmail search service
+DNS queries: none
+Networked git commands: none</pre></div>
+<p>Her şey <code>127.0.0.1</code> üzerinde kaldı. Tek bir DNS sorgusu bile yok.</p>
+</div>
+<div>
+<h3>Kesin bir garanti mi gerekiyor?</h3>
+<p><code>/airgapped on</code> yaz; ajanın çalıştırdığı her komut Linux çekirdeğinden boş bir ağ ad alanı alır. Bu, modele kibarca yapılmış bir rica değildir: erişilecek bir ağ yoktur. Korumalı alanı aşacak Full Access ise aynı anda reddedilir.</p>
+<h3>Ne çıkabilir ve ne zaman</h3>
+<p>Yalnızca senin ya da ajanın istediği şey: bir web araması (kendi makinendeki özel bir SearXNG üzerinden), bir sayfa getirme, bağladığın bir Google hesabına salt okunur bir istek ya da bir güncelleme denetimi. <code>/airgapped on</code> iken bunların hiçbiri.</p>
+</div>
+</div>
+</div>
+</section>
+<section id="why">
+<div class="wrap">
+<h2>Neden Mightling</h2>
+<div class="pillars">
+<div class="pillar">
+<h3>🔒 Gizli</h3>
+<p>Model, kodun, istemlerin ve yanıtların bulundukları makinede kalır.</p>
+<ul>
+<li>Hesap yok, telemetri yok</li>
+<li>Yeniden çalıştırabileceğin çıkış denetimi</li>
+<li><code>/airgapped on</code>, çekirdek tarafından uygulanır</li>
+</ul>
+</div>
+<div class="pillar">
+<h3>⚡ Hızlı, faturasız</h3>
+<table>
+<tr><td>Ajan işi</td><td class="num">~48 tok/s</td></tr>
+<tr><td>Kod</td><td class="num">69 tok/s</td></tr>
+<tr><td>JSON</td><td class="num">84 tok/s</td></tr>
+<tr><td>Düz yazı</td><td class="num">32 tok/s</td></tr>
+<tr><td>Kod okuma</td><td class="num">~1,800 tok/s</td></tr>
+<tr><td>Bağlam</td><td class="num">262K</td></tr>
+</table>
+<p class="note-small">Spekülatif kod çözmeli bir GB10'da tek akış. Ajan işi gerçek ajan oturumları üzerinden ölçülür; kod, JSON ve düz yazı çıktı türüne göre, açgözlü kod çözmeyle. Aynı anda dört ajan çalıştır: kota yok, “lütfen bekleyin” yok.</p>
+</div>
+<div class="pillar">
+<h3>✨ Yapılandıracak bir şey yok</h3>
+<ul>
+<li><b>Ayar yok:</b> model, bağlam, çekirdekler ve spekülatif kod çözme GB10 için seçilmiştir.</li>
+<li><b>Makineni dondurmaz:</b> ana makine denetlenir ve yükleme sırasında bellek baskısı izlenir.</li>
+<li><b>Diğer makinelerin onu bulur</b>, yerel ağda.</li>
+<li><b>Güncellemeler tek komut:</b> <code>ling update</code>.</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section id="features">
+<div class="wrap">
+<h2>Ne elde edersin</h2>
+<div class="features">
+<div class="feature"><h3>🖥️ <code>ling</code>, terminal ajanı</h3><p>Deponu okur, komut ve testleri çalıştırır, kodu düzenler ve riskli bir şeyden önce sorar.</p></div>
+<div class="feature"><h3>🌙 Night Shift</h3><p>Yatmadan önce <code>/night add &lt;task&gt;</code>; sabaha her görev kendi git dalında tamamlanmış olur. Sen olmadan hiçbir şey birleştirilmez ya da push edilmez.</p></div>
+<div class="feature"><h3>🔎 Web araması ve getirme</h3><p>Kendi makinendeki özel bir SearXNG üzerinden: arama hesabı yok, API anahtarı yok.</p></div>
+<div class="feature"><h3>🧭 Bir kod dizini</h3><p>Deponun genelinde tanımlar, çağıranlar ve etki; böylece ajan kodu grep'leyerek aramak yerine bulur.</p></div>
+<div class="feature"><h3>🧩 Mevcut becerilerin</h3><p>Claude Code, Gemini CLI, OpenClaw veya Hermes için zaten yazdığın beceriler değişmeden çalışır.</p></div>
+<div class="feature"><h3>💬 Ask, tarayıcıda</h3><p>Web araması, görsel araması ve dikte ile sorular ve ajan oturumların; bu makineden ya da eşleştirilmiş bir telefondan, aynı yerel model üzerinde.</p></div>
+<div class="feature"><h3>🪟 Masaüstü uygulaması <span class="tag">önizleme</span></h3><p>Ask ve Work tek pencerede; GB10'da, Mac'te, Linux'ta veya Windows'ta: onaylı ajan oturumları, bir inceleme bölmesi, worktree'ler ve geri alma. <a href="#new">1.7'de yeni</a>.</p></div>
+<div class="feature"><h3>📬 Gmail, Drive, Calendar <span class="tag">önizleme</span></h3><p>Salt okunur, makinende kalan bir oturum açma üzerinden. <code>/airgapped on</code> iken tamamen kapalı.</p></div>
+</div>
+</div>
+</section>
+<section id="compare">
+<div class="wrap">
+<h2>Mightling ve bulut kodlama ajanları</h2>
+<div class="tablewrap">
+<table>
+<tr><th></th><th>Bulut kodlama ajanları</th><th>Mightling</th></tr>
+<tr><td>Kodun nereye gider</td><td>Onların sunucularına</td><td class="yes">Hiçbir yere</td></tr>
+<tr><td>Hesap gerekir</td><td>Evet</td><td class="yes">Hayır</td></tr>
+<tr><td>Token başına maliyet</td><td>Kullanıma göre</td><td class="yes">Sıfır</td></tr>
+<tr><td>Hız sınırları</td><td>Evet</td><td class="yes">Hayır</td></tr>
+<tr><td>Ağ fişi çekiliyken çalışır</td><td>Hayır</td><td class="yes">Evet</td></tr>
+<tr><td>Dışarı çıkanı doğrulayabilirsin</td><td>Hayır</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
+</table>
+</div>
+</div>
+</section>
+<section id="machines">
+<div class="wrap">
+<h2>Her GB10'da çalışır</h2>
+<ul class="machines">
+<li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
+<li>Gigabyte AI TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
+</ul>
+<p class="sub flush">Hepsi aynı çipi, 128 GB birleşik belleği ve DGX OS 7'yi paylaşır, bu yüzden tek bir yükleyici hepsini kapsar. Mightling her gün ASUS Ascent GX10 üzerinde geliştirilir ve test edilir; diğerleri testlerle kapsanır.</p>
+</div>
+</section>
+<section id="paper">
+<div class="wrap">
+<h2>Makale</h2>
+<div class="pillar">
+<h3><a href="paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
+<p class="note-small">dgxcoder · Ekim 2026</p>
+<p>Mightling Desktop'ın mimari tasarımını, biçimsel yetenek modelini ve deneysel değerlendirmesini sunuyoruz. Bu, üst akıştaki üreticinin masaüstü istemcisiyle aynı app-server protokolünü konuşan, Codex uyumlu varsayılanları koruyan, çıkarımı kullanıcının kendi donanımında çalıştıran ve kullanıcı <code>/airgapped on</code> açtığında korumalı alandaki her komutu iş istasyonuyla sınırlayan açık kaynaklı bir masaüstü ortamıdır.</p>
+<p><a href="paper/desktop-architecture.pdf">Makaleyi oku (PDF)</a></p>
+</div>
+</div>
+</section>
+<section id="faq">
+<div class="wrap">
+<h2>SSS</h2>
+<details><summary>GB10'a ihtiyacım var mı?</summary>
+<p>Evet, modeli çalıştırmak için. Diğer bilgisayarların onu istemci olarak kullanır: Linux (Arm veya x86) ve macOS aynı kurulum komutuyla, Windows (Arm veya x86, önizleme) <a href="#install">PowerShell satırıyla</a>.</p></details>
+<details><summary>Puffin kurmuştum. Bu o mu?</summary>
+<p>Evet: Puffin, 1.5'te Mightling olarak yeniden adlandırıldı. Bir kez <code>puffin update</code>, sonra son bir kez <code>puffin</code> çalıştır. Oturumlarını, ayarlarını ve bağlantılarını taşır; bundan sonra komut <code>ling</code> olur.</p></details>
+<details><summary>Gerçekten ücretsiz mi?</summary>
+<p>Evet. Mightling AGPL altında açık kaynaklıdır ve modelin ağırlıkları ücretsizdir. Tek işletme maliyetin elektriktir.</p></details>
+<details><summary>Makineden başka neye ihtiyacım var?</summary>
+<p>Birlikte gelen işletim sistemi (DGX OS 7 ya da üretici sunuyorsa Ubuntu 24.04), NVIDIA Container Toolkit'li Docker, Python 3 ve Git. Düz Ubuntu'da neyin eksik olduğunu <code>ling-admin host check</code> söyler.</p></details>
+<details><summary>İnternete herhangi bir şey çıkıyor mu?</summary>
+<p>Yalnızca senin ya da ajanın istediği şey, örneğin kendi makinendeki SearXNG üzerinden bir web araması, ve ilk seferdeki indirmeler. <code>/airgapped on</code> bunların hepsini kapatır.</p></details>
+<details><summary>Hangi modeli çalıştırıyor?</summary>
+<p>NVIDIA'nın 4 bitlik NVFP4 biçiminde Qwen3.8-27B, DFlash2 taslak modeliyle SGLang tarafından sunulur; GB10 için seçilmiş ve ayarlanmıştır. Yaklaşık 20 GB ağırlık; model çalışırken makinenin belleğinin kabaca 38 GB'ı boş kalır.</p></details>
+</div>
+</section>
+<section class="cta">
+<div class="wrap">
+<h2>Kodunu masanda tut</h2>
+<p class="sub centered">Kodun yazıldığı masada kalması gerektiğine inanıyorsan depoya yıldız ver: diğer GB10 sahipleri Mightling'i böyle bulur.</p>
+<div class="buttons">
+<a class="btn primary" href="https://github.com/dreamference/mightling">GitHub'da yıldızla</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">Son sürüm</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">Belgeler</a>
+</div>
+</div>
+</section>
+</main>
+<footer>
+<div class="wrap">
+<div class="row">
+<div>
+<p><b>Dreamference'ın Mightling'i.</b> Dreamference, kendi donanımında çalışan gizli yapay zekâ geliştirir.</p>
+<p>GNU AGPL v3 altında açık kaynak. NVIDIA, GB10, DGX ve DGX Spark, NVIDIA Corporation'ın ticari markalarıdır; diğer adlar sahiplerinin ticari markalarıdır. Mightling ve Dreamference bunlarla bağlantılı değildir.</p>
+<p>Bu site üçüncü taraflara istek yapmaz: izleyici yok, analiz yok, harici yazı tipi yok.</p>
+</div>
+<div>
+<p><a href="https://github.com/dreamference/mightling">GitHub</a> · <a href="https://github.com/dreamference/mightling/issues">Issues</a> · <a href="https://github.com/dreamference/mightling/blob/main/LICENSE">Lisans</a></p>
+</div>
+</div>
+</div>
+</footer>
+<script src="/copy.js"></script>
+</body>
+</html>

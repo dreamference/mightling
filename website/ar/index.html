@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mightling — برمجة سريعة بالذكاء الاصطناعي على مكتبك</title>
+<meta name="description" content="وكيل برمجة حلّ 68 من 100 مهمة في SWE-bench Verified دون اتصال على DGX Spark واحد (نحو 69% تقديريًا)، بنحو 47 رمزًا في الثانية. بلا سحابة ولا حساب ولا تتبّع.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="https://mightling.dreamference.ai/ar/">
+<link rel="alternate" hreflang="en" href="https://mightling.dreamference.ai/">
+<link rel="alternate" hreflang="zh-Hans" href="https://mightling.dreamference.ai/zh/">
+<link rel="alternate" hreflang="hi" href="https://mightling.dreamference.ai/hi/">
+<link rel="alternate" hreflang="es" href="https://mightling.dreamference.ai/es/">
+<link rel="alternate" hreflang="ar" href="https://mightling.dreamference.ai/ar/">
+<link rel="alternate" hreflang="fr" href="https://mightling.dreamference.ai/fr/">
+<link rel="alternate" hreflang="bn" href="https://mightling.dreamference.ai/bn/">
+<link rel="alternate" hreflang="pt" href="https://mightling.dreamference.ai/pt/">
+<link rel="alternate" hreflang="id" href="https://mightling.dreamference.ai/id/">
+<link rel="alternate" hreflang="ur" href="https://mightling.dreamference.ai/ur/">
+<link rel="alternate" hreflang="ru" href="https://mightling.dreamference.ai/ru/">
+<link rel="alternate" hreflang="de" href="https://mightling.dreamference.ai/de/">
+<link rel="alternate" hreflang="ja" href="https://mightling.dreamference.ai/ja/">
+<link rel="alternate" hreflang="pcm" href="https://mightling.dreamference.ai/pcm/">
+<link rel="alternate" hreflang="mr" href="https://mightling.dreamference.ai/mr/">
+<link rel="alternate" hreflang="vi" href="https://mightling.dreamference.ai/vi/">
+<link rel="alternate" hreflang="te" href="https://mightling.dreamference.ai/te/">
+<link rel="alternate" hreflang="sw" href="https://mightling.dreamference.ai/sw/">
+<link rel="alternate" hreflang="ha" href="https://mightling.dreamference.ai/ha/">
+<link rel="alternate" hreflang="tr" href="https://mightling.dreamference.ai/tr/">
+<link rel="alternate" hreflang="x-default" href="https://mightling.dreamference.ai/">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mightling">
+<meta property="og:title" content="Mightling — برمجة سريعة بالذكاء الاصطناعي على مكتبك. نحو 69% في SWE-bench Verified.">
+<meta property="og:description" content="68 من 100 مهمة في SWE-bench Verified، دون اتصال، على جهاز DGX Spark واحد، بنحو 47 رمزًا في الثانية. بلا سحابة ولا حساب ولا فواتير API ولا تتبّع.">
+<meta property="og:url" content="https://mightling.dreamference.ai/ar/">
+<meta property="og:locale" content="ar_AR">
+<meta property="og:image" content="https://mightling.dreamference.ai/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<script src="/init.js"></script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+<div class="wrap">
+<a class="brand" href="#"><img alt="" height="34" src="/assets/favicon.svg" width="34"/>Mightling</a>
+<nav class="links">
+<a href="#install">التثبيت</a>
+<a class="opt" href="#new">جديد في 1.7</a>
+<a class="opt" href="#benchmark">الاختبار</a>
+<a class="opt" href="#proof">الإثبات</a>
+<a class="opt" href="#paper">الورقة</a>
+<a class="opt" href="#faq">الأسئلة الشائعة</a>
+<a href="https://github.com/dreamference/mightling">GitHub</a>
+</nav>
+<div class="controls"><details class="lang"><summary aria-label="اللغة" title="اللغة"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="cur">العربية</span><span class="cc">ar</span></summary><ul><li><a href="/en/" hreflang="en" lang="en" data-lang="en">English</a></li><li><a href="/zh/" hreflang="zh-Hans" lang="zh-Hans" data-lang="zh">简体中文</a></li><li><a href="/hi/" hreflang="hi" lang="hi" data-lang="hi">हिन्दी</a></li><li><a href="/es/" hreflang="es" lang="es" data-lang="es">Español</a></li><li><a href="/ar/" hreflang="ar" lang="ar" dir="rtl" data-lang="ar" aria-current="true">العربية</a></li><li><a href="/fr/" hreflang="fr" lang="fr" data-lang="fr">Français</a></li><li><a href="/bn/" hreflang="bn" lang="bn" data-lang="bn">বাংলা</a></li><li><a href="/pt/" hreflang="pt" lang="pt" data-lang="pt">Português</a></li><li><a href="/id/" hreflang="id" lang="id" data-lang="id">Bahasa Indonesia</a></li><li><a href="/ur/" hreflang="ur" lang="ur" dir="rtl" data-lang="ur">اردو</a></li><li><a href="/ru/" hreflang="ru" lang="ru" data-lang="ru">Русский</a></li><li><a href="/de/" hreflang="de" lang="de" data-lang="de">Deutsch</a></li><li><a href="/ja/" hreflang="ja" lang="ja" data-lang="ja">日本語</a></li><li><a href="/pcm/" hreflang="pcm" lang="pcm" data-lang="pcm">Naijá</a></li><li><a href="/mr/" hreflang="mr" lang="mr" data-lang="mr">मराठी</a></li><li><a href="/vi/" hreflang="vi" lang="vi" data-lang="vi">Tiếng Việt</a></li><li><a href="/te/" hreflang="te" lang="te" data-lang="te">తెలుగు</a></li><li><a href="/sw/" hreflang="sw" lang="sw" data-lang="sw">Kiswahili</a></li><li><a href="/ha/" hreflang="ha" lang="ha" data-lang="ha">Hausa</a></li><li><a href="/tr/" hreflang="tr" lang="tr" data-lang="tr">Türkçe</a></li></ul></details><button class="theme" type="button" hidden data-mode="system" aria-label="المظهر" title="المظهر" data-theme-label="المظهر" data-label-system="النظام" data-label-light="فاتح" data-label-dark="داكن"><svg class="ico ico-system" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><svg class="ico ico-light" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="ico ico-dark" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 13.5A9 9 0 1 1 10.5 3a7 7 0 0 0 10.5 10.5z"/></svg><span class="tl">النظام</span></button></div>
+</div>
+</header>
+<main>
+<div class="wrap">
+<div class="hero" id="install">
+<img alt="Mightling" class="logo logo-light" height="181" src="/assets/mightling-logo-light.svg" width="300"/>
+<img alt="Mightling" class="logo logo-dark" height="181" src="/assets/mightling-logo-dark.svg" width="300"/>
+<h1>برمجة سريعة بالذكاء الاصطناعي على مكتبك.<br/>نحو 69% في SWE‑bench Verified.</h1>
+<p class="lede"><strong>68 من 100 مهمة في SWE-bench Verified، حُلّت دون اتصال على جهاز DGX Spark واحد</strong>، بنحو 47 رمزًا في الثانية. وكيل برمجة ومساعد محادثة وتطبيق سطح مكتب، يعمل كله على جهاز GB10 الخاص بك. بلا سحابة. بلا حساب. بلا فواتير API. بلا تتبّع. <a href="#benchmark">كيف جرى القياس</a></p>
+<div class="install">
+<div class="cmd has-copy"><button class="copy" data-done="تم النسخ" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">نسخ</button>
+<pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># ينزّل النموذج مرة واحدة (نحو 20 GB) ثم يشغّله</span>
+<span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># هذا كل شيء</span></pre></div>
+<p class="note">يعمل على NVIDIA DGX Spark وعلى كل جهاز GB10. يتحقق السكربت من كل تنزيل بمقارنته بمجاميع التحقق الخاصة بالإصدار، ويعرض كل أمر <code>sudo</code> قبل تنفيذه. <a href="https://github.com/dreamference/mightling/blob/main/install.sh">اقرأه أولًا</a> إن شئت.</p>
+<div class="clients">
+<div class="client">
+<h3>عملاء Mac وLinux</h3>
+<p>تستخدم أجهزتك الأخرى نموذج GB10 عبر الشبكة المحلية. على Mac أو جهاز Linux آخر، يثبّت الأمر نفسه أعلاه عميل <code>ling</code>، ويعثر على GB10 من تلقاء نفسه.</p>
+<p>ابتداءً من 1.7.2 يضع أيضًا تطبيق سطح المكتب في Applications على Mac جاهزًا للفتح (الخيار <code>--no-app</code> يستثنيه).</p>
+</div>
+<div class="client">
+<h3>عميل Windows <span class="tag">معاينة</span></h3>
+<div class="cmd has-copy"><button class="copy" data-done="تم النسخ" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">نسخ</button>
+<pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
+<p>في PowerShell. يُثبَّت دون صلاحيات المسؤول (ومعه تطبيق سطح المكتب ابتداءً من 1.7.2)، ثم يطلب Windows مرة واحدة إعداد صندوق العزل الخاص بالوكيل. لم يُوقَّع بعد، لذا يجب إيقاف Smart App Control. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">اقرأ السكربت</a>.</p>
+</div>
+</div>
+</div>
+<div class="numbers">
+<div><b>68/100</b><span>مهمة من SWE-bench Verified، دون اتصال على DGX Spark واحد</span></div>
+<div><b>~48 tok/s</b><span>سرعة التوليد في عمل الوكيل، مسار واحد</span></div>
+<div><b>0</b><span>اتصالات بجهات خارجية، تؤكده مراجعة الخروج</span></div>
+<div><b>$0</b><span>لكل رمز، إلى الأبد</span></div>
+</div>
+</div>
+</div>
+<section id="new">
+<div class="wrap">
+<h2>جديد في 1.7: تطبيق سطح المكتب على Mac وLinux وWindows</h2>
+<p class="sub">يجمع تطبيق سطح المكتب في Mightling 1.7.0 بين Ask وWork في نافذة واحدة. Work منصة عمل كاملة لجلسات الوكيل: مربع كتابة يدعم الملفات والمهارات والأوامر، ولوحة مراجعة للتجهيز والتراجع والإيداع، وworktrees، وتبويبات طرفية، وشجرة ملفات وتبويبات ملفات بجانب المحادثة. على أجهزتك الأخرى يعمل عميلًا لجهاز GB10 الذي يجده على الشبكة المحلية.</p>
+<div class="pillars">
+<div class="pillar">
+<h3>macOS <span class="tag">معاينة</span></h3>
+<p>ابتداءً من 1.7.2، <a href="#install">أمر التثبيت</a> يضع Mightling في Applications بجانب <code>ling</code>، ويُفتح كأي تطبيق آخر. Apple silicon وIntel، وmacOS 12 أو أحدث. يحدّثه <code>ling update</code>.</p>
+</div>
+<div class="pillar">
+<h3>Linux</h3>
+<p>على GB10، تثبّت الحزمة <code>mightling_1.7.0_arm64.deb</code> التطبيق ومدخل المشغّل والأمر <code>ling-app</code>، مع ملف العزل الذي يحتاجه:</p>
+<div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
+<p>ثم افتحه من قائمة التطبيقات أو بالأمر <code>ling app</code>. <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">المزيد</a>.</p>
+</div>
+<div class="pillar">
+<h3>Windows 11 <span class="tag">معاينة</span></h3>
+<p>ابتداءً من 1.7.2، <a href="#install">سطر PowerShell</a> يثبّت التطبيق أيضًا، لك وحدك ودون صلاحيات المسؤول، مع مدخل في قائمة ابدأ؛ تزيله من الإعدادات → التطبيقات؛ ويحدّثه <code>ling update</code>. يجب إيقاف Smart App Control.</p>
+</div>
+</div>
+<details class="other"><summary>طرق تثبيت أخرى</summary>
+<p>تضم صفحة الإصدار أيضًا ملف dmg لنظام Mac (<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>، أو <code>x64</code> لـ Intel) ومثبّت Windows (<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>، أو <code>arm64</code>). هذه معاينات غير موقّعة: إذا نُزّلت من متصفح فسيمنعها النظام في أول مرة. تحقق من كل ملف أولًا بمقارنته بالملف الموقّع <code>SHA256SUMS</code> الخاص بالإصدار.</p>
+<ul>
+<li>macOS 15 فأحدث: اسحب Mightling إلى Applications وافتحه مرة واحدة، ثم System Settings › Privacy & Security › <b>Open Anyway</b>. في macOS 14 وما قبله: اضغط على التطبيق مع Control › Open.</li>
+<li>Windows: SmartScreen › <b>More info</b> › <b>Run anyway</b>. يجب إيقاف Smart App Control.</li>
+</ul>
+</details>
+<p class="sub after">وفي 1.7.0 أيضًا: يمكن لـ Night Shift تجربة المهمة عدة مرات والاحتفاظ بأفضل محاولة (<code>/night add --best-of N</code>)، ويمكن لجهاز واحد تشغيل عدة جسور Signal، ويختار العميل بين عقدتين على شبكة واحدة دون أن يفقد العقدة التي يعرفها. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">ملاحظات الإصدار والتنزيلات</a>.</p>
+</div>
+</section>
+<section id="benchmark">
+<div class="wrap">
+<h2>SWE-bench Verified، قياس على DGX Spark واحد</h2>
+<p class="sub">في 2026-10-08، حلّ وكيل Mightling 1.5.1 مع Qwen3.8-27B <b>68 من 100</b> مهمة في SWE-bench Verified على DGX Spark واحد، دون اتصال: عيّنة ثابتة من 100 مهمة، ومحاولة واحدة لكل مهمة، في الوضع الافتراضي. وبالتعميم على المهام الخمسمئة كلها، يُقدَّر الناتج بنحو <b>69%</b> (نطاق ثقة 95%: من 63.9 إلى 73.4%). هذا قياس أجريناه بأنفسنا على جهازنا وعلى جزء من المهام، وليس إدراجًا في لوحة الصدارة.</p>
+
+<div class="tablewrap">
+<table class="bench">
+<tr><th>النظام</th><th>المهام المئة<br/>نفسها</th><th>كل المهام<br/>الخمسمئة</th></tr>
+<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4)، DGX Spark واحد، دون اتصال<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">تقديري</span></td></tr>
+<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4)، وضع refine، DGX Spark واحد، دون اتصال<a class="fn" href="#fn1">1</a></td><td class="num">69/100</td><td class="num">≈70% <span class="est">تقديري</span></td></tr>
+<tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
+<tr><td>GLM-4.6 (Z.ai's agent)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
+<tr><td>Kimi K2.5, high (mini-SWE-agent)<a class="fn" href="#fn4">4</a></td><td class="num">70/100</td><td class="num">70.8%</td></tr>
+<tr><td>DeepSeek V3.2, high (mini-SWE-agent)<a class="fn" href="#fn5">5</a></td><td class="num">70/100</td><td class="num">70.0%</td></tr>
+<tr><td>Claude Opus 4.5, four agents<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
+<tr><td>Gemini 3 Pro (live-SWE-agent)<a class="fn" href="#fn7">7</a></td><td class="num">79/100</td><td class="num">77.4%</td></tr>
+<tr class="group"><td colspan="3">نماذج مفتوحة أصغر (20–40 مليار معامل)</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), test-time scaling<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), single attempt<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
+<tr><td>Devstral Small 2512 (mini-SWE-agent)<a class="fn" href="#fn9">9</a></td><td class="num">57/100</td><td class="num">56.4%</td></tr>
+<tr class="group"><td colspan="3">منتجات وكلاء البرمجة، كما تنشرها جهاتها</td></tr>
+<tr><td>GitHub Copilot agent mode (VS Code), with Claude 3.7 Sonnet<a class="fn" href="#fn10">10</a></td><td class="ns">غير منشور</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
+<tr><td>Claude Code<a class="fn" href="#fn11">11</a></td><td class="ns">غير منشور</td><td class="ns"><a href="https://www.anthropic.com/engineering/swe-bench-sonnet">غير منشور</a></td></tr>
+<tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">غير منشور</td><td class="ns"><a href="https://cursor.com/blog/composer">غير منشور</a></td></tr>
+</table>
+</div>
+<p class="sub after">اقرأها بوصفها وضعًا بين أقران لا ترتيبًا. على المهام المئة نفسها حلّ Mightling عددًا مساويًا لما حلّه Qwen3-Coder-480B وGLM-4.6، وهما نموذجان أكبر منه بأضعاف، لكن لكل صف وكيلًا مختلفًا وعتادًا مختلفًا، وفي صفوف لوحة الصدارة صور الاختبار الرسمية لمعمارية x86، بينما عملنا على صور مجتمعية لمعمارية arm64. في وضع refine تدرس جلسة أولى المهمة دون تغيير أي شيء، ثم تنفذها جلسة جديدة: فحلّ مهمة واحدة أكثر من الوضع الافتراضي (69 مقابل 68، وكل وضع حلّ مهام أخفق فيها الآخر)، بنحو 2.2 ضعف الوقت لكل مهمة، ولذلك يبقى اختياريًا (<code>ling --refine</code>).</p>
+<details class="method"><summary>كيف قُدِّرت نسبة ≈69%</summary>
+<p>المئة مهمة خُمس Verified، لذا فالرقم على المجموعة الكاملة تقدير. جرى ضبط نموذج استجابة المفردة (Rasch) ذي المعامل الواحد على النتائج لكل مهمة في جميع الإرسالات العامة الـ175 إلى Verified: لكل مهمة صعوبة ولكل نظام قدرة. وقدرة Mightling هي التي تفسّر حلّ 68 مهمة من هذه المئة؛ ونسبة ≈69% هي الدرجة المتوقعة لهذه القدرة على المهام الخمسمئة كلها (ويتفق معها انحدار بسيط على الدرجات المنشورة في حدود نقطة واحدة). وللتحقق، قُيِّمت كل إرسالة عامة على هذه المئة وحدها وتُنبِّئ درجتها الكلية بالطريقة نفسها: فبلغ الخطأ 2.4 نقطة (RMSE)، والنطاق أعلاه هو ±1.96 ضعف ذلك. كل رقم في الجدول يعيد إنتاجه <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> من البيانات العامة لكل مهمة في <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
+<p>المئة مهمة موزعة على مستودعات Verified بنسبة مجموعتها الكاملة، من بين المهام التي تعمل بيئة اختبارها وتُتحقَّق على arm64 (يجتاز الإصلاح المرجعي الاختبار ويفشل التغيير الفارغ). تسجّل الأنظمة المنشورة درجة أقل بنقطة إلى نقطة ونصف على هذه المئة منها على الخمسمئة كلها، فالعيّنة ليست سهلة. وهي ليست إدراجًا في لوحة الصدارة: فتلك يصحّحها فريق SWE-bench على بنيته التحتية.</p>
+</details>
+<ol class="footnotes">
+<li id="fn1">Mightling: 100 مهمة، محاولة واحدة لكل مهمة؛ DGX Spark واحد (GB10، ذاكرة 128 GB)، النموذج يعمل محليًا، بلا سحابة؛ الوضع الافتراضي قيس في 2026-10-08، ووضع refine في 2026-10-09. التقدير من بيانات كل مهمة في <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a>.</li>
+<li id="fn2">500 مهمة، محاولة واحدة؛ العتاد غير مذكور. المصدر: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>. النموذج نفسه مع mini-SWE-agent: 57/100، 55.4%.</li>
+<li id="fn3">500 مهمة، محاولة واحدة، الوكيل غير معلن؛ العتاد غير مذكور. المصدر: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>.</li>
+<li id="fn4">500 مهمة، محاولة واحدة؛ العتاد غير مذكور. المصدر: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>.</li>
+<li id="fn5">500 مهمة، محاولة واحدة؛ العتاد غير مذكور. المصدر: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_deepseek-3-2-high">experiments, 20260217_mini-v2.0.0_deepseek-3-2-high</a>.</li>
+<li id="fn6">500 مهمة لكل منها؛ العتاد غير مذكور. أربع إرسالات: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251127_openhands_claude-opus-4-5">OpenHands</a> (80/100، 77.6%)، و<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251215_livesweagent_claude-opus-4-5">live-SWE-agent</a> (80/100، 79.2%)، و<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251205_sonar-foundation-agent_claude-opus-4-5">Sonar Foundation Agent</a> (77/100، 79.2%)، و<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_claude-4-5-opus-high">mini-SWE-agent, high</a> (79/100، 76.8%). وحقق <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251124_mini-v1.16.0_claude-opus-4-5-20251101">تشغيل سابق لـ mini-SWE-agent</a> نتيجة 74/100، 74.4%.</li>
+<li id="fn7">500 مهمة، محاولة واحدة؛ العتاد غير مذكور. المصدر: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251120_livesweagent_gemini-3-pro-preview">experiments, 20251120_livesweagent_gemini-3-pro-preview</a>. النموذج نفسه مع mini-SWE-agent: 72/100، 74.2%.</li>
+<li id="fn8">أفضل نموذج منشور بحجم 20–40 مليار معامل في لوحة الصدارة. 500 مهمة؛ توسيع الاختبار (test-time scaling) يستخدم محاولتين أو أكثر لكل مهمة؛ العتاد غير مذكور. المصادر: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B_tts">test-time scaling</a>، <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B">محاولة واحدة</a>.</li>
+<li id="fn9">500 مهمة، محاولة واحدة؛ العتاد غير مذكور. المصدر: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251209_mini-v1.17.2_devstral-small-2512">experiments, 20251209_mini-v1.17.2_devstral-small-2512</a>.</li>
+<li id="fn10">رقم من GitHub نفسها، أبريل 2025: «agent mode achieves a pass rate of 56.0% on SWE-bench Verified with Claude 3.7 Sonnet». عدد المهام والمحاولات والعتاد غير مذكور؛ وليس في لوحة الصدارة. المصدر: <a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">مدونة GitHub</a>.</li>
+<li id="fn11">تنشر Anthropic نتائج SWE-bench Verified لنماذج Claude، مشغّلة في هيكل بسيط من صنعها (أداة bash وأداة تحرير)، وليس لمنتج Claude Code. المصادر: <a href="https://claude.com/product/claude-code">Claude Code</a>، <a href="https://www.anthropic.com/engineering/swe-bench-sonnet">منهج Anthropic في SWE-bench</a>.</li>
+<li id="fn12">تنشر Cursor نتائج على معيارها الخاص Cursor Bench، لا على SWE-bench Verified. المصدر: <a href="https://cursor.com/blog/composer">مدونة Cursor، Composer</a>.</li>
+</ol>
+<p class="note-small">جميع أرقام لوحة الصدارة: <a href="https://www.swebench.com/">swebench.com</a> ومستودع <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>؛ و«المهام المئة نفسها» هي النتائج المنشورة لكل إرسالة لكل مهمة، مقصورة على المهام التي شغّلها Mightling.</p>
+</div>
+</section>
+<section id="try">
+<div class="wrap">
+<h2>جرّب هذه أولًا</h2>
+<div class="cmd"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
+<span class="p">$ </span>ling "the tests are failing: find out why and fix them"
+<span class="p">$ </span>ling "add input validation to the signup form, with tests"</pre></div>
+<p class="sub after">أو ضع عملًا في الطابور لهذه الليلة بالأمر <code>/night add &lt;task&gt;</code>: يعمل Mightling على الطابور وأنت نائم، كل مهمة على فرع git خاص بها، وتراجع الفروع صباحًا مع قهوتك.</p>
+</div>
+</section>
+<section id="proof">
+<div class="wrap">
+<h2>شيفرتك لا تغادر مكتبك، ويمكنك إثبات ذلك</h2>
+<p class="sub">ترسل وكلاء البرمجة السحابية شيفرتك المصدرية إلى خوادم غيرك. أما Mightling فلا يرسلها إلى أي مكان: النموذج يعمل على جهاز GB10 الخاص بك، ولا شيء في Mightling يتصل بجهة خارجية. لا تحليلات استخدام ولا مقاييس ولا تسجيل دخول ولا تقارير أعطال «مجهولة». لذا يصلح للشيفرة التي لا يُسمح لك برفعها: أعمال العملاء، والبيانات الخاضعة للتنظيم، والمنتجات غير المطروحة بعد.</p>
+<div class="proof">
+<div>
+<p>أمر واحد يشغّل جلسة Mightling حقيقية تحت <code>strace</code> ويسرد كل اتصال شبكي أجرته:</p>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin audit egress
+<span class="ok">✔ Egress audit: pass</span>
+Network destinations:
+   127.0.0.1:8000     29x  model server
+   127.0.0.1:8767      1x  Gmail search service
+DNS queries: none
+Networked git commands: none</pre></div>
+<p>بقي كل شيء على <code>127.0.0.1</code>. ولا استعلام DNS واحد.</p>
+</div>
+<div>
+<h3>هل تحتاج إلى ضمان قاطع؟</h3>
+<p>اكتب <code>/airgapped on</code> فيحصل كل أمر ينفذه الوكيل على فضاء أسماء شبكي فارغ من نواة Linux. ليس هذا طلبًا مهذبًا من النموذج: ببساطة لا توجد شبكة يمكن الوصول إليها. ويُرفض في الوقت نفسه Full Access الذي كان سيتجاوز صندوق العزل.</p>
+<h3>ما الذي قد يخرج، ومتى</h3>
+<p>فقط ما تطلبه أنت أو الوكيل: بحث على الويب (عبر SearXNG خاص على جهازك)، أو جلب صفحة، أو طلب للقراءة فقط إلى حساب Google ربطته، أو التحقق من وجود تحديث. وعند <code>/airgapped on</code> لا شيء من ذلك.</p>
+</div>
+</div>
+</div>
+</section>
+<section id="why">
+<div class="wrap">
+<h2>لماذا Mightling</h2>
+<div class="pillars">
+<div class="pillar">
+<h3>🔒 سرّي</h3>
+<p>النموذج وشيفرتك وطلباتك وإجاباتك تبقى على الجهاز الذي هي عليه.</p>
+<ul>
+<li>بلا حساب ولا تتبّع</li>
+<li>مراجعة خروج يمكنك إعادتها</li>
+<li><code>/airgapped on</code>، تفرضه النواة</li>
+</ul>
+</div>
+<div class="pillar">
+<h3>⚡ سريع، بلا فواتير</h3>
+<table>
+<tr><td>عمل الوكيل</td><td class="num">~48 tok/s</td></tr>
+<tr><td>شيفرة</td><td class="num">69 tok/s</td></tr>
+<tr><td>JSON</td><td class="num">84 tok/s</td></tr>
+<tr><td>نثر</td><td class="num">32 tok/s</td></tr>
+<tr><td>قراءة الشيفرة</td><td class="num">~1,800 tok/s</td></tr>
+<tr><td>السياق</td><td class="num">262K</td></tr>
+</table>
+<p class="note-small">مسار واحد على GB10 مع فك الترميز التخميني. يُقاس عمل الوكيل على جلسات وكيل حقيقية؛ والشيفرة وJSON والنثر بحسب نوع المخرجات، بفك ترميز greedy. شغّل أربعة وكلاء معًا: بلا حصص ولا «يرجى الانتظار».</p>
+</div>
+<div class="pillar">
+<h3>✨ لا شيء لضبطه</h3>
+<ul>
+<li><b>بلا ضبط:</b> النموذج والسياق والنوى وفك الترميز التخميني مختارة لـ GB10.</li>
+<li><b>لن يجمّد جهازك:</b> يُفحص المضيف ويُراقَب ضغط الذاكرة أثناء التحميل.</li>
+<li><b>تجده أجهزتك الأخرى</b> على الشبكة المحلية.</li>
+<li><b>التحديث بأمر واحد:</b> <code>ling update</code>.</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section id="features">
+<div class="wrap">
+<h2>ماذا ستحصل عليه</h2>
+<div class="features">
+<div class="feature"><h3>🖥️ <code>ling</code>، وكيل الطرفية</h3><p>يقرأ مستودعك، وينفذ الأوامر والاختبارات، ويعدّل الشيفرة، ويسألك قبل أي خطوة محفوفة بالمخاطر.</p></div>
+<div class="feature"><h3>🌙 Night Shift</h3><p><code>/night add &lt;task&gt;</code> قبل النوم؛ وتكون كل مهمة قد أُنجزت على فرع git خاص بها عند الصباح. لا شيء يُدمج أو يُدفع دونك.</p></div>
+<div class="feature"><h3>🔎 بحث وجلب من الويب</h3><p>عبر SearXNG خاص على جهازك: بلا حساب بحث ولا مفتاح API.</p></div>
+<div class="feature"><h3>🧭 فهرس للشيفرة</h3><p>التعريفات والمستدعون والأثر عبر مستودعك، ليجد الوكيل الشيفرة بدل أن يبحث عنها بـ grep.</p></div>
+<div class="feature"><h3>🧩 مهاراتك الحالية</h3><p>المهارات التي كتبتها لـ Claude Code أو Gemini CLI أو OpenClaw أو Hermes تعمل دون تغيير.</p></div>
+<div class="feature"><h3>💬 Ask، في المتصفح</h3><p>أسئلة مع بحث في الويب وبحث عن الصور وإملاء صوتي، وجلسات الوكيل، من هذا الجهاز أو من هاتف مقترن، على النموذج المحلي نفسه.</p></div>
+<div class="feature"><h3>🪟 تطبيق سطح المكتب <span class="tag">معاينة</span></h3><p>Ask وWork في نافذة واحدة، على GB10 أو Mac أو Linux أو Windows: جلسات وكيل مع موافقات ولوحة مراجعة وworktrees وتراجع. <a href="#new">جديد في 1.7</a>.</p></div>
+<div class="feature"><h3>📬 Gmail وDrive وCalendar <span class="tag">معاينة</span></h3><p>للقراءة فقط، عبر تسجيل دخول يبقى على جهازك. ويتوقف تمامًا عند <code>/airgapped on</code>.</p></div>
+</div>
+</div>
+</section>
+<section id="compare">
+<div class="wrap">
+<h2>Mightling ووكلاء البرمجة السحابية</h2>
+<div class="tablewrap">
+<table>
+<tr><th></th><th>وكلاء البرمجة السحابية</th><th>Mightling</th></tr>
+<tr><td>وجهة شيفرتك</td><td>خوادمهم</td><td class="yes">لا مكان</td></tr>
+<tr><td>يتطلب حسابًا</td><td>نعم</td><td class="yes">لا</td></tr>
+<tr><td>التكلفة لكل رمز</td><td>بالقياس</td><td class="yes">صفر</td></tr>
+<tr><td>حدود الاستخدام</td><td>نعم</td><td class="yes">لا</td></tr>
+<tr><td>يعمل مع فصل الشبكة</td><td>لا</td><td class="yes">نعم</td></tr>
+<tr><td>يمكنك التحقق مما يخرج</td><td>لا</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
+</table>
+</div>
+</div>
+</section>
+<section id="machines">
+<div class="wrap">
+<h2>يعمل على كل جهاز GB10</h2>
+<ul class="machines">
+<li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
+<li>Gigabyte AI TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
+</ul>
+<p class="sub flush">تشترك في الشريحة والذاكرة الموحدة بسعة 128 GB ونظام DGX OS 7، فيغطيها كلها مثبّت واحد. يُطوَّر Mightling ويُختبر يوميًا على ASUS Ascent GX10؛ أما الباقي فتغطيه الاختبارات.</p>
+</div>
+</section>
+<section id="paper">
+<div class="wrap">
+<h2>الورقة</h2>
+<div class="pillar">
+<h3><a href="paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
+<p class="note-small">dgxcoder · October 2026</p>
+<p>نعرض التصميم المعماري ونموذج القدرات الصوري والتقييم التجريبي لـ Mightling Desktop، وهو بيئة سطح مكتب مفتوحة المصدر تتحدث بروتوكول app-server نفسه الذي يتحدثه عميل سطح المكتب لدى المورّد الأصلي، وتحتفظ بالإعدادات الافتراضية المتوافقة مع Codex، وتشغّل الاستدلال على عتاد المستخدم نفسه، وتحصر كل أمر معزول داخل محطة العمل حين يفعّل المستخدم <code>/airgapped on</code>.</p>
+<p><a href="paper/desktop-architecture.pdf">اقرأ الورقة (PDF)</a></p>
+</div>
+</div>
+</section>
+<section id="faq">
+<div class="wrap">
+<h2>الأسئلة الشائعة</h2>
+<details><summary>هل أحتاج إلى GB10؟</summary>
+<p>نعم، لتشغيل النموذج. أما أجهزتك الأخرى فتستخدمه عملاءً: Linux (Arm أو x86) وmacOS بأمر التثبيت نفسه، وWindows (Arm أو x86، معاينة) عبر <a href="#install">سطر PowerShell</a>.</p></details>
+<details><summary>ثبّتُّ Puffin. هل هذا هو نفسه؟</summary>
+<p>نعم: أُعيدت تسمية Puffin إلى Mightling في 1.5. شغّل <code>puffin update</code> مرة واحدة، ثم <code>puffin</code> مرة أخيرة. ينقل جلساتك وإعداداتك وروابطك، ومن ثم يصبح الأمر <code>ling</code>.</p></details>
+<details><summary>هل هو مجاني فعلًا؟</summary>
+<p>نعم. Mightling مفتوح المصدر برخصة AGPL، وأوزان النموذج مجانية. تكلفتك الجارية الوحيدة هي الكهرباء.</p></details>
+<details><summary>ماذا أحتاج غير الجهاز؟</summary>
+<p>نظام التشغيل الذي يأتي به (DGX OS 7، أو Ubuntu 24.04 حيث يتيحه المورّد)، وDocker مع NVIDIA Container Toolkit، وPython 3 وGit. على Ubuntu العادي يخبرك <code>ling-admin host check</code> بما ينقصك.</p></details>
+<details><summary>هل يصل أي شيء إلى الإنترنت؟</summary>
+<p>فقط ما تطلبه أنت أو الوكيل، مثل بحث على الويب عبر SearXNG على جهازك، وتنزيلات المرة الأولى. و<code>/airgapped on</code> يوقف ذلك كله.</p></details>
+<details><summary>أي نموذج يشغّل؟</summary>
+<p>Qwen3.8-27B بصيغة NVFP4 ذات 4 بت من NVIDIA، تقدّمه SGLang مع مسوّدة DFlash2، مختار ومضبوط لـ GB10. نحو 20 GB من الأوزان؛ ويبقى نحو 38 GB من ذاكرة الجهاز حرة أثناء التشغيل.</p></details>
+</div>
+</section>
+<section class="cta">
+<div class="wrap">
+<h2>أبقِ شيفرتك على مكتبك</h2>
+<p class="sub centered">إن كنت ترى أن الشيفرة يجب أن تبقى على المكتب الذي كُتبت عليه، فضع نجمة للمستودع: بهذا يجد أصحاب أجهزة GB10 الآخرون Mightling.</p>
+<div class="buttons">
+<a class="btn primary" href="https://github.com/dreamference/mightling">نجمة على GitHub</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">أحدث إصدار</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">التوثيق</a>
+</div>
+</div>
+</section>
+</main>
+<footer>
+<div class="wrap">
+<div class="row">
+<div>
+<p><b>Mightling من Dreamference.</b> تبني Dreamference ذكاءً اصطناعيًا سريًّا يعمل على عتادك الخاص.</p>
+<p>مفتوح المصدر برخصة GNU AGPL v3. NVIDIA وGB10 وDGX وDGX Spark علامات تجارية لشركة NVIDIA Corporation؛ والأسماء الأخرى علامات تجارية لأصحابها. لا ترتبط Mightling ولا Dreamference بها.</p>
+<p>لا يجري هذا الموقع أي طلبات إلى جهات خارجية: بلا متتبّعات ولا تحليلات ولا خطوط خارجية.</p>
+</div>
+<div>
+<p><a href="https://github.com/dreamference/mightling">GitHub</a> · <a href="https://github.com/dreamference/mightling/issues">المشكلات</a> · <a href="https://github.com/dreamference/mightling/blob/main/LICENSE">الرخصة</a></p>
+</div>
+</div>
+</div>
+</footer>
+<script src="/copy.js"></script>
+</body>
+</html>
