@@ -243,10 +243,28 @@ jobs:
             Write-Host "after the update: $version"
             if ($version -notmatch [regex]::Escape($env:LATEST) + '$') { $failures += "ling update left '$version', not $env:LATEST" }
             $appVersion = (Get-ItemProperty $appKey -ErrorAction SilentlyContinue).DisplayVersion
-            if ($appVersion -ne $env:LATEST) { $failures += "ling update left the desktop app at '$appVersion', not $env:LATEST" }
+            # `ling update` has updated the desktop app since 1.7.2 (c16da043): the installed binary does
+            # the update, so a release before that one leaves the app as it was, and that is no failure.
+            if ([version]$env:PREVIOUS -ge [version]"1.7.2") {
+              if ($appVersion -ne $env:LATEST) { $failures += "ling update left the desktop app at '$appVersion', not $env:LATEST" }
+            } else {
+              Write-Host "note: $env:PREVIOUS predates the desktop app's update; the app stays at '$appVersion'"
+            }
             # 3. `ling uninstall`, then the app's own uninstaller.
-            & $ling uninstall --yes
-            if ($LASTEXITCODE -ne 0) { $failures += "ling uninstall failed (exit $LASTEXITCODE)" }
+            # The runner is a service with no desktop to show the Administrator prompt the mDNS firewall
+            # rules need: `ling uninstall` then exits 1 naming only those rules as left. That alone is
+            # expected here; any other leftover, or any other exit, is a failure.
+            $ErrorActionPreference = "Continue"
+            $uninstallOut = (& $ling uninstall --yes 2>&1 | Out-String)
+            $uninstallExit = $LASTEXITCODE
+            $ErrorActionPreference = "Stop"
+            Write-Host $uninstallOut
+            if ($uninstallExit -ne 0) {
+              $left = [regex]::Match($uninstallOut, '(?s)except:(.*)$').Groups[1].Value -split "`n" | Where-Object { $_ -match '^\s*- ' }
+              $other = @($left | Where-Object { $_ -notmatch 'firewall' })
+              if ($left.Count -eq 0 -or $other.Count -gt 0) { $failures += "ling uninstall failed (exit $uninstallExit)" }
+              else { Write-Host "note: ling uninstall left only the mDNS firewall rules (no Administrator in a service session)" }
+            }
             if (-not (Wait-Gone $bin)) { $failures += "ling uninstall left $bin" }
             if ([Environment]::GetEnvironmentVariable("Path", "User") -split ";" -contains $bin) { $failures += "ling uninstall left $bin on the user's PATH" }
             Remove-App
