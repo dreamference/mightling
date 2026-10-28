@@ -6,13 +6,18 @@ and computing cosine similarity. Designed for GB10 unified memory (loads
 ~100-300 MB model alongside vLLM).
 """
 
-from typing import Dict, Final, List, Optional
+import importlib
+from typing import TYPE_CHECKING, Any, Dict, Final, List, Optional
 import numpy as np
 
-try:
-    from sentence_transformers import SentenceTransformer
-except ImportError:
-    SentenceTransformer = None  # type: ignore
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer as SentenceTransformerType
+
+# sentence-transformers pulls in torch and transformers (about 2.5 s), so it is imported on first
+# use. The attribute keeps its old meaning once resolved: the class, or None when the package is
+# missing. Until then it is the _NOT_LOADED sentinel; tests may set it to a stand-in or to None.
+_NOT_LOADED: Final = object()
+SentenceTransformer: Any = _NOT_LOADED
 
 EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 
@@ -42,7 +47,7 @@ class EmbeddingCalculator:
     _unavailable = False  # set once loading has failed, so it is not retried per call
 
     @classmethod
-    def _get_model(cls) -> Optional["SentenceTransformer"]:
+    def _get_model(cls) -> Optional["SentenceTransformerType"]:
         """
         Loads the embedding model once, or reports that it cannot be loaded.
 
@@ -53,6 +58,12 @@ class EmbeddingCalculator:
         Returns:
             Optional[SentenceTransformer]: The model, or None when it is unavailable.
         """
+        global SentenceTransformer
+        if SentenceTransformer is _NOT_LOADED and cls._model is None and not cls._unavailable:
+            try:
+                SentenceTransformer = importlib.import_module("sentence_transformers").SentenceTransformer
+            except ImportError:
+                SentenceTransformer = None
         if cls._model is None and not cls._unavailable and SentenceTransformer is not None:
             try:
                 cls._model = SentenceTransformer(EMBEDDING_MODEL, trust_remote_code=True, device=EMBEDDING_DEVICE)
