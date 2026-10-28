@@ -19,28 +19,30 @@ BRIDGE = Path(__file__).resolve().parent.parent / "ling-rs" / "web" / "static" /
 HARNESS = Path(__file__).resolve().parent / "telegram_mini_app_harness.js"
 
 
-def run(
-    hash_: str,
-    answer: dict | list[dict],
-    *,
-    search: str = "",
-    unpaired: bool = False,
-    reloadable: bool = False,
-    throw_on_storage: bool = False,
-    receive_events: list[dict] | None = None,
-    view_messages: list[dict] | None = None,
-    receive_non_finite_safe_area: bool = False,
-) -> dict:
+def run(hash_: str, answer: dict | list[dict], **settings: object) -> dict:
+    """Run the bridge in the node harness; ``settings`` are the harness options in snake_case."""
     if shutil.which("node") is None:
         pytest.skip("node is not installed")
+    known = {
+        "search": "",
+        "unpaired": False,
+        "reloadable": False,
+        "throw_on_storage": False,
+        "receive_events": [],
+        "view_messages": [],
+        "receive_non_finite_safe_area": False,
+    }
+    unknown = set(settings) - set(known)
+    assert not unknown, unknown
+    merged = {**known, **{k: v for k, v in settings.items() if v is not None}}
     options = {
-        "search": search,
-        "unpaired": unpaired,
-        "reloadable": reloadable,
-        "throwOnStorage": throw_on_storage,
-        "receiveEvents": receive_events or [],
-        "viewMessages": view_messages or [],
-        "receiveNonFiniteSafeArea": receive_non_finite_safe_area,
+        "search": merged["search"],
+        "unpaired": merged["unpaired"],
+        "reloadable": merged["reloadable"],
+        "throwOnStorage": merged["throw_on_storage"],
+        "receiveEvents": merged["receive_events"],
+        "viewMessages": merged["view_messages"],
+        "receiveNonFiniteSafeArea": merged["receive_non_finite_safe_area"],
     }
     result = subprocess.run(
         [
@@ -279,4 +281,3 @@ def test_ordinary_browser_tab_posts_no_safe_area_or_back_button_events() -> None
     assert record["cssVars"] == {}
     assert record["telegramBack"] == 0
     assert record["sockets"] == 1
-

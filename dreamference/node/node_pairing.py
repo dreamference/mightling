@@ -9,6 +9,7 @@ sets the key up once; the user never types an SSH command.
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -236,12 +237,10 @@ class NodePairing:
         Returns:
             Optional[str]: The address to connect to, or None when the node is not on the network.
         """
-        if record.get("address_fixed"):
-            return record["address"]
         node_id = record["node"]
-        known = cls._resolved.get(node_id)
-        if known is not None and time.monotonic() < known["until"]:
-            return known["address"]
+        settled = cls._overlay_address(record) or cls._reused(node_id)
+        if record.get("address_fixed") or settled is not None:
+            return record["address"] if record.get("address_fixed") else settled
         deadline = time.monotonic() + cls.resolve_wait_s
         address: str | None = None
         attempts = 0
@@ -269,6 +268,51 @@ class NodePairing:
             "until": time.monotonic() + cls.resolve_reuse_s,
         }
         return address
+
+    @classmethod
+    def overlay_domain(cls) -> str:
+        """The remote-access overlay's DNS domain (imported late: `remote` imports this package).
+
+        Returns:
+            str: The overlay's DNS domain.
+        """
+        from dreamference.remote.remote_settings import OVERLAY_DOMAIN
+
+        return OVERLAY_DOMAIN
+
+    @classmethod
+    def _reused(cls, node_id: str) -> str | None:
+        known = cls._resolved.get(node_id)
+        if known is not None and time.monotonic() < known["until"]:
+            return known["address"]
+        return None
+
+    @classmethod
+    def _overlay_address(cls, record: dict[str, Any]) -> str | None:
+        # A node reached through remote access has a name in the overlay's DNS and no mDNS advert
+        # on this LAN to browse for: the name is resolved afresh each time (a name, never an
+        # address), and a browse stays the fallback for a node that is on the LAN as well.
+        overlay = record.get("overlay_name")
+        return str(overlay) if overlay and cls._name_resolves(overlay) else None
+
+    @classmethod
+    def is_overlay_name(cls, host: str) -> bool:
+        """Whether a name is in the overlay's domain.
+
+        Args:
+            host: A name as typed or connected to.
+
+        Returns:
+            bool: True for a machine reached through remote access.
+        """
+        return host.lower().rstrip(".").endswith("." + cls.overlay_domain())
+
+    @classmethod
+    def _name_resolves(cls, name: str) -> bool:
+        try:
+            return bool(socket.getaddrinfo(name, 22, type=socket.SOCK_STREAM))
+        except (OSError, UnicodeError):
+            return False
 
     @classmethod
     def forget_resolved(cls) -> None:
@@ -477,6 +521,8 @@ class NodePairing:
             "user": session.user,
             "ssh_port": session.ssh_port,
         }
+        if cls.is_overlay_name(session.host):
+            record["overlay_name"] = session.host
         public_key = cls.ensure_key()
         if public_key is None:
             print("❌ ssh-keygen could not create the pairing key.")

@@ -32,6 +32,7 @@
 # Quality
 /tests/                                         @dreamference/quality
 /scripts/as_team.py                             @dreamference/quality
+/scripts/qa/                                     @dreamference/quality
 
 # Agent
 /ling-rs/                                       @dreamference/agent

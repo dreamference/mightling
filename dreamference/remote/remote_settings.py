@@ -102,6 +102,9 @@ ENROL_PATH: Final[str] = "/mightling/enrol"
 CODE_MINUTES: Final[int] = 10
 CODE_ATTEMPTS: Final[int] = 10
 SETUP_KEY_MINUTES: Final[int] = 10
+# A key for a machine at another site (`code --bundle-file --ttl`): still one use, but it may wait for
+# the owner to get to the machine; it expires by itself, which is how an unused one is revoked.
+SETUP_KEY_MAX_MINUTES: Final[int] = 24 * 60
 
 TUNNEL_UNIT: Final[str] = "mightling-remote-tunnel.service"
 

@@ -19,6 +19,7 @@ import ipaddress
 import json
 import os
 import platform
+import re
 import secrets
 import socket
 import time
@@ -26,9 +27,11 @@ from pathlib import Path
 from typing import Any
 
 from dreamference.remote.remote_box import RemoteBox
+from dreamference.remote.remote_bundle_options import BundleOptions
 from dreamference.remote.remote_certificate_authority import RemoteCertificateAuthority
 from dreamference.remote.remote_control_plane import RemoteControlPlane
 from dreamference.remote.remote_enrolment import RemoteEnrolment
+from dreamference.remote.remote_join_script import RemoteJoinScript
 from dreamference.remote.remote_node_peer import RemoteNodePeer
 from dreamference.remote.remote_public_certificate import RemotePublicCertificate
 from dreamference.remote.remote_settings import (
@@ -38,6 +41,7 @@ from dreamference.remote.remote_settings import (
     NETBIRD_VERSION,
     OVERLAY_DOMAIN,
     RELAY_PORT,
+    SETUP_KEY_MAX_MINUTES,
     STUN_PORT,
     TUNNEL_UNIT,
     RemoteSettings,
@@ -884,7 +888,7 @@ class RemoteAccess:
         token: str,
         node_id: str,
         client: str,
-        ephemeral: bool = False,
+        options: BundleOptions | None = None,
     ) -> dict[str, Any] | None:
         """Makes one client's bundle, minting its setup key.
 
@@ -893,13 +897,16 @@ class RemoteAccess:
             token: The management token.
             node_id: The node's id.
             client: The client's host name, for the key's name.
-            ephemeral: Whether the key enrols an ephemeral peer.
+            options: Which kind of key and whether the CA travels; None for the default (ten
+                minutes, ordinary peer, CA included).
 
         Returns:
             Optional[Dict[str, Any]]: The bundle, or None.
         """
+        options = options or BundleOptions()
+        extra = {} if options.minutes is None else {"minutes": options.minutes}
         key = RemoteControlPlane.setup_key(
-            record["dns_name"], token, f"client {client}", ephemeral=ephemeral
+            record["dns_name"], token, f"client {client}", ephemeral=options.ephemeral, **extra
         )
         if key is None:
             return None
@@ -907,7 +914,9 @@ class RemoteAccess:
             "version": 1,
             "node": node_id,
             "name": socket.gethostname(),
-            "ca": RemoteCertificateAuthority.ca_certificate().read_text(),
+            "ca": RemoteCertificateAuthority.ca_certificate().read_text()
+            if options.with_ca
+            else "",
             "management_url": RemoteSettings.management_url(record["dns_name"]),
             "relay": RemoteSettings.relay_address(record["dns_name"]),
             "overlay_domain": record.get("overlay_domain", OVERLAY_DOMAIN),
@@ -917,17 +926,65 @@ class RemoteAccess:
         }
 
     @classmethod
-    def bundle_file(cls, path: str) -> int:
-        """Writes one ephemeral peer's bundle to a new 0600 file, with no code and no listener.
+    def parse_ttl(cls, text: str) -> int | None:
+        """Reads a key lifetime such as `90m`, `2h` or `1d`.
 
-        For a test runner off the LAN (the daily off-LAN acceptance): the bundle is the one
-        `code` would hand a client, but its key enrols an **ephemeral** peer (management deletes
-        it ten minutes after it goes offline), still one use and ten minutes. Whoever can run this
-        already holds the node's management token, so the file gives nothing new away; it holds a
-        live key until it is spent or expires, so the caller deletes it.
+        Args:
+            text: A number and a unit (`m`, `h` or `d`); a bare number is minutes.
+
+        Returns:
+            Optional[int]: The minutes, or None when the text is not a lifetime between one minute
+            and 24 hours.
+        """
+        match = re.fullmatch(r"(\d{1,4})([mhd]?)", text.strip().lower())
+        if match is None:
+            return None
+        minutes = int(match.group(1)) * {"": 1, "m": 1, "h": 60, "d": 1440}[match.group(2)]
+        return minutes if 1 <= minutes <= SETUP_KEY_MAX_MINUTES else None
+
+    @classmethod
+    def _bundle_file_problem(
+        cls, target: Path, minutes: int | None, wants_ttl: bool, name: str
+    ) -> str | None:
+        """Why a bundle file cannot be made, before anything is minted; None when it can."""
+        if wants_ttl and minutes is None:
+            return "❌ --ttl is a number with m, h or d (1 minute to 24 hours), such as 2h."
+        if name and not re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", name):
+            return "❌ --name is one DNS label: lowercase letters, digits and hyphens."
+        if target.exists() or not target.parent.is_dir():
+            return f"❌ {target} exists or its folder does not; nothing was minted."
+        return None
+
+    @classmethod
+    def bundle_file(
+        cls,
+        path: str,
+        ttl: str | None = None,
+        join: bool = False,
+        name: str = "",
+        ssh_user: str = "",
+    ) -> int:
+        """Writes one bundle to a new 0600 file, with no code and no listener.
+
+        Plain, it is for a test runner off the LAN (the daily off-LAN acceptance): the bundle is
+        the one `code` would hand a client, but its key enrols an **ephemeral** peer (management
+        deletes it ten minutes after it goes offline), still one use and ten minutes.
+
+        With `ttl` or `join` it is for a **new machine at another site** (spec §4.5): the key
+        enrols an ordinary peer, still one use, and waits for `ttl` (two hours by default for
+        `join`, at most 24); management refuses it after that, spent or not, which is how an unused
+        key is revoked. `join` writes, instead of JSON, the one line that installs NetBird there
+        and joins (`RemoteJoinScript`), for the owner to paste from an end-to-end encrypted channel.
+
+        Whoever can run this already holds the node's management token, so the file gives nothing
+        new away; it holds a live key until it is spent or expires, so the caller deletes it.
 
         Args:
             path: The file to create; an existing file is refused, never overwritten.
+            ttl: How long the key waits (`90m`, `2h`); None for ten minutes.
+            join: Write the one-line join instead of the JSON bundle.
+            name: The new machine's name in the overlay (one DNS label); empty uses its host name.
+            ssh_user: The account to put in the machine's `gx10-remote` alias.
 
         Returns:
             int: The exit status.
@@ -938,11 +995,25 @@ class RemoteAccess:
         if record is None or not token or not node_id:
             print("Remote access is not set up (ling-admin remote setup <box's DNS name>).")
             return 3
-        target = Path(path).expanduser()
-        if target.exists() or not target.parent.is_dir():
-            print(f"❌ {target} exists or its folder does not; nothing was minted.")
+        minutes = cls.parse_ttl(ttl or "2h") if (ttl is not None or join) else None
+        wrong = cls._bundle_file_problem(
+            Path(path).expanduser(), minutes, ttl is not None or join, name
+        )
+        if wrong:
+            print(wrong)
             return 1
-        bundle = cls.bundle(record, token, node_id, "bundle file", ephemeral=True)
+        target = Path(path).expanduser()
+        bundle = cls.bundle(
+            record,
+            token,
+            node_id,
+            name or "bundle file",
+            BundleOptions(
+                ephemeral=minutes is None,
+                minutes=minutes,
+                with_ca=not RemoteSettings.public_certificate(),
+            ),
+        )
         if bundle is None:
             return 1
         try:
@@ -951,11 +1022,18 @@ class RemoteAccess:
             print(f"❌ Could not create {target}: {error}")
             return 1
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(bundle, handle, sort_keys=True)
+            if join:
+                script = RemoteJoinScript.script(bundle, peer=name, ssh_user=ssh_user)
+                handle.write(RemoteJoinScript.one_line(script) + "\n")
+            else:
+                json.dump(bundle, handle, sort_keys=True)
+        kind = "an ordinary peer" if minutes is not None else "one ephemeral peer"
         print(
-            f"✅ A bundle for one ephemeral peer (one use, valid {CODE_MINUTES} minutes) is in {target} (0600)."
+            f"✅ {'The join line' if join else 'A bundle'} for {kind} (one use, valid "
+            f"{minutes or CODE_MINUTES} minutes; unused, it expires by itself) is in {target} (0600)."
         )
-        print("   It holds a live setup key: delete the file once it is spent.")
+        print("   It holds a live setup key: send it only over an end-to-end encrypted channel,")
+        print("   then delete the file.")
         return 0
 
     @classmethod

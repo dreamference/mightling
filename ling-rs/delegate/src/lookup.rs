@@ -138,7 +138,7 @@ impl IndexBackend for SystemIndex {
 }
 
 /// Checks that `rel` is a plain relative path or glob that cannot leave the repository.
-fn check_relative(rel: &str, what: &str) -> Result<(), String> {
+pub fn check_relative(rel: &str, what: &str) -> Result<(), String> {
     if rel.is_empty() || rel.len() > 400 || rel.contains('\0') || rel.contains('\n') {
         return Err(format!("invalid {what}"));
     }

@@ -10,6 +10,7 @@ from dreamference.remote.remote_box import RemoteBox
 from dreamference.remote.remote_certificate_authority import RemoteCertificateAuthority
 from dreamference.remote.remote_control_plane import RemoteControlPlane
 from dreamference.remote.remote_enrolment import RemoteEnrolment
+from dreamference.remote.remote_join_script import RemoteJoinScript
 from dreamference.remote.remote_node_peer import RemoteNodePeer
 from dreamference.remote.remote_public_certificate import RemotePublicCertificate
 from dreamference.remote.remote_settings import RemoteSettings
@@ -21,6 +22,7 @@ __all__ = [
     "RemoteCertificateAuthority",
     "RemoteControlPlane",
     "RemoteEnrolment",
+    "RemoteJoinScript",
     "RemoteNodePeer",
     "RemotePublicCertificate",
     "RemoteSettings",
