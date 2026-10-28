@@ -311,6 +311,15 @@ Move finished runs' records, transcripts and reports older than some weeks to ni
 |---|---|
 | `--weeks` | How old a run must be, in weeks (default 4) |
 
+#### `ling-admin night autofill`
+
+Queue up to 5 bounded tasks from QA findings, failing CI tests and open spec items (also runs at the start of `night run` when [night] autofill = true).
+
+| Option | Description |
+|---|---|
+| `--dry-run` | Say what would be queued; queue nothing. |
+| `--max` | Tasks at most (1 to 5; default [night] autofill_max) |
+
 #### `ling-admin night pause`
 
 Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate).
