@@ -52,14 +52,14 @@ Commit identity, for every team alike: the bot, `dreamference-<team>[bot] <ID+dr
 ### 2.2 Inference & Models (`models`)
 
 - **Mission:** the model server starts safely, serves the registry's model with the registry's flags, and never freezes the host.
-- **Owns:** `dreamference/vllm_server/` (except the model gate, shared with Nodes), `dreamference/hardware/`, `dreamference/cli/adapter_command.py`, `dreamference/cli/model_deep_inspector.py`, `scripts/adapters/`, `scripts/install_gb10.sh`, `scripts/run_vllm_gb10.sh`, `scripts/check_nvfp4_fused_scales.py`, `scripts/decode_speed.py`, `ling-rs/src/vision.rs`.
+- **Owns:** `dreamference/vllm_server/` (except the model gate and `wifi_power_save.py`, owned with or by Nodes, and `sandbox_prerequisite.py`, shared with Security), `dreamference/hardware/`, `dreamference/cli/adapter_command.py`, `dreamference/cli/model_deep_inspector.py`, `docker/ling-serve/`, `scripts/adapters/`, `scripts/install_gb10.sh`, `scripts/run_vllm_gb10.sh`, `scripts/check_nvfp4_fused_scales.py`, `scripts/long_prompt_probe.py`, `scripts/build_ling_serve_image.sh`, `scripts/pin_ling_serve_image.py`, `scripts/decode_speed.py`, `scripts/loop_guard_corpus.py`, `ling-rs/src/vision.rs`.
 - **GitHub team:** `@dreamference/models`. **Bot:** `dreamference-models[bot]`. **Address:** `models@dreamference.ai`.
 - **Review duty:** launch flags live in the registry, never in the builder; both host-safety layers stay; peer reviewer for Engine.
 
 ### 2.3 Agent (`agent`)
 
 - **Mission:** `ling` is Codex built here, branded, with its vendor channels closed and its patches small.
-- **Owns:** `ling-rs/` (the launcher and its leaf crates, except the areas named for other teams), the `codex` submodule pointer, `codex-patches/`, `codex-tests/`, `dreamference/runner/`, `dreamference/cli/`, `dreamference/config/`, `dreamference/__init__.py`, `dreamference.toml`.
+- **Owns:** `ling-rs/` (the launcher and its leaf crates, except the areas named for other teams), the `codex` submodule pointer, `codex-patches/`, `codex-tests/`, `claude-plugin/`, `.claude-plugin/`, `dreamference/runner/`, `dreamference/cli/`, `dreamference/config/`, `dreamference/__init__.py`, `dreamference.toml`.
 - **GitHub team:** `@dreamference/agent`. **Bot:** `dreamference-agent[bot]`. **Address:** `agent@dreamference.ai`.
 - **Review duty:** `codex/` is never modified, the patch cap holds, `ling` is never upstream `codex`; co-reviews the patches Security co-owns. Its peer is Security.
 
@@ -94,7 +94,7 @@ Commit identity, for every team alike: the bot, `dreamference-<team>[bot] <ID+dr
 ### 2.8 Messengers (`messengers`)
 
 - **Mission:** the phone bridges ship off and stay off until a command turns one on.
-- **Owns:** `ling-rs/chat/`, `ling-rs/signal/`, `ling-rs/src/chat.rs`, `ling-rs/src/signal.rs`, `dreamference/chat/matrix_homeserver.py`.
+- **Owns:** `ling-rs/chat/`, `ling-rs/signal/`, `ling-rs/src/chat.rs`, `ling-rs/src/signal.rs`, `dreamference/chat/matrix_homeserver.py`, `scripts/messenger_live/`.
 - **GitHub team:** `@dreamference/messengers`. **Bot:** `dreamference-messengers[bot]`. **Address:** `messengers@dreamference.ai`.
 - **Review duty:** pinned downloads stay pinned by URL and SHA-256; the egress audit names every bridge that is on. Its peer is Security.
 
@@ -108,7 +108,7 @@ Commit identity, for every team alike: the bot, `dreamference-<team>[bot] <ID+dr
 ### 2.10 Benchmarks (`benchmarks`)
 
 - **Mission:** numbers that compare configurations on this hardware honestly, with how they were measured.
-- **Owns:** `dreamference/swe_bench/`, `scripts/swe_bench_*`, `scripts/cave_mode_bench/`, `scripts/context_budget_*`, `scripts/turn_end_compaction_*`, `docs/dev/swe-bench/`, `docs/dev/turn-end-compaction/`.
+- **Owns:** `dreamference/swe_bench/`, `scripts/swe_bench_*`, `scripts/engine_ab_remote.sh`, `scripts/ask_evals/`, `scripts/industry_evals/`, `scripts/context_budget_*`, `scripts/turn_end_compaction_*`, `docs/dev/swe-bench/`, `docs/dev/turn-end-compaction/` (`scripts/cave_mode_bench/` was removed on 2026-10-28 with cave mode).
 - **GitHub team:** `@dreamference/benchmarks`. **Bot:** `dreamference-benchmarks[bot]`. **Address:** `benchmarks@dreamference.ai`.
 - **Review duty:** a result states its sample, its spread and that it is not a leaderboard score; result files carry no machine or account names (§7); peer reviewer for Night Shift.
 
@@ -122,14 +122,14 @@ Commit identity, for every team alike: the bot, `dreamference-<team>[bot] <ID+dr
 ### 2.12 Release & Infra (`release`)
 
 - **Mission:** a release is cut from `main` by the workflow, signed, attested and installable, with no hand step.
-- **Owns:** `.github/` (except `.github/apps/`), `install.sh`, `install.ps1`, `setup.py`, `pyproject.toml`, `Dockerfile`, `.gitattributes`, `.gitignore`, `.gitmodules`, `scripts/package_mightling.sh`, `scripts/release_notes.py`, `scripts/rename_mightling.py`, `scripts/gen_admin_reference.py`, `specs/DREAMFERENCE_RELEASE_*.md`, `ling-rs/release-signing.pub`, `ling-rs/src/update.rs`, `ling-rs/src/release_signature.rs`, `ling-rs/src/rename.rs`, `dreamference/cli/legacy_name_migration.py`.
+- **Owns:** `.github/` (except `.github/apps/`, `.github/CODEOWNERS` and the PR/issue templates), `install.sh`, `install.ps1`, `setup.py`, `pyproject.toml`, `Dockerfile`, `.gitattributes`, `.gitignore`, `.gitmodules`, `scripts/package_mightling.sh`, `scripts/macos/` (with Security), `scripts/release_notes.py`, `scripts/release_benchmark.py`, `scripts/release_on_green.py`, `scripts/rename_mightling.py`, `scripts/gen_admin_reference.py`, `specs/DREAMFERENCE_RELEASE_*.md`, `ling-rs/release-signing.pub`, `ling-rs/src/update.rs`, `ling-rs/src/release_signature.rs`, `ling-rs/src/rename.rs`, `dreamference/cli/legacy_name_migration.py`.
 - **GitHub team:** `@dreamference/release`. **Bot:** `dreamference-release[bot]`, the only bot with `workflows: write` (GitHub requires it to change a file under `.github/workflows/`) and `actions: write` (it dispatches the Release workflow). **Address:** `release@dreamference.ai`.
 - **Review duty:** actions pinned by SHA, workflow permissions minimal, the release notes complete; runs the pre-release checklist (§7.9). Its peer is Security.
 
 ### 2.13 Nodes & Remote Access (`nodes`)
 
 - **Mission:** a client finds its node by id at use time, and a second node is managed through one forced SSH command, never an open port.
-- **Owns:** `dreamference/node/`, `dreamference/remote/` (with Security), `ling-rs/src/remote_join.rs`, `ling-rs/node-locator/`, `ling-web-rs/src/node_locator.rs`, `ling-rs/src/node.rs`, `ling-rs/src/node_command.rs`, `dreamference/vllm_server/model_gate*.py` (with Models), `dreamference/vllm_server/wifi_power_save.py`.
+- **Owns:** `dreamference/node/`, `dreamference/forge/` (with Security), `dreamference/remote/` (with Security), `scripts/remote_acceptance/` (with Security), `ling-rs/src/remote_join.rs`, `ling-rs/node-locator/`, `ling-web-rs/src/node_locator.rs`, `ling-rs/src/node.rs`, `ling-rs/src/node_command.rs`, `dreamference/vllm_server/model_gate*.py` (with Models), `dreamference/vllm_server/wifi_power_save.py`.
 - **GitHub team:** `@dreamference/nodes`. **Bot:** `dreamference-nodes[bot]`. **Address:** `nodes@dreamference.ai`.
 - **Review duty:** the two byte-identical locator copies change together; no stored addresses. Its peer is Security.
 
@@ -143,7 +143,7 @@ Commit identity, for every team alike: the bot, `dreamference-<team>[bot] <ID+dr
 ### 2.15 Quality (`quality`)
 
 - **Mission:** the tests never touch the real machine, and the code standard only gets stricter.
-- **Owns:** `tests/`, `scripts/as_team.py`, `.github/apps/`, the live `.github/CODEOWNERS` once it exists, and the fallback `*`.
+- **Owns:** `tests/`, `scripts/as_team.py`, `scripts/qa/`, `.github/apps/`, the live `.github/CODEOWNERS` once it exists, and the fallback `*`.
 - **GitHub team:** `@dreamference/quality`. **Bot:** `dreamference-quality[bot]`, the only bot with `statuses: write`: it sets the `team-review` status (§5.6). **Address:** `quality@dreamference.ai`.
 - **Review duty:** conftest guards and both ratchets; owns the gate; peer reviewer for Security and Docs & Specs.
 

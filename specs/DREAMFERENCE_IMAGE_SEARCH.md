@@ -1,6 +1,6 @@
 # Mightling Image Search Tool — Technical Specification
 
-**Status:** v14 — Implemented (updated from the source as built; v13 was the pre-implementation draft). Constants re-checked against `image_search_service.py` on 2026-09-28.
+**Status:** v14 — Implemented (updated from the source as built; v13 was the pre-implementation draft). Constants re-checked against `image_search_service.py` on 2026-10-28.
 **Target:** Mightling (sidecar ecosystem)
 **Source:** `dreamference/chat/image_search_service.py` (the sidecar), `image_search_sidecar.py` (`ling-admin images start|stop|status`), `image_search_mcp.py` (the `image_search` tool, `ling-admin images mcp`), `ling-rs/src/images.rs` (the launcher's declaration), `ling-rs/web/src/sidecars.rs` and the app's `app-protocol.ts` (serving `/images/`). Tests: `tests/test_image_search_service.py`, `tests/test_image_search_sidecar.py`.
 **Since Onyx's retirement (2026-10-09, MIGHTLING_ASK §19.2):** provisioning, the Onyx custom tool, the nginx route `/puffin-images/` and the gallery described below are gone. The tool is an MCP tool, the images are served at `/images/<id>.jpg` by `ling web` and the app and shown inline, and the sidecar runs on `dreamference-sidecars`. The funnel (§2 on) is unchanged.
@@ -9,9 +9,9 @@
 
 ## 1. Overview
 
-A built-in `Image Search` tool lets the LLM search the internet for images and display them inline in chat. It is implemented as an independent **Mightling sidecar container (`dreamference-image-search`, port 8768)** — the `dream-*` names of the v13 draft predate the deployment-wide rename to `dreamference-*` — and registered via Onyx's Custom Tool REST API, mirroring the Gmail integration.
+A built-in `Image Search` tool lets the LLM search the internet for images and display them inline in chat. It is implemented as an independent **Mightling sidecar container (`dreamference-image-search`, port 8768)** — the `dream-*` names of the v13 draft predate the deployment-wide rename to `dreamference-*` — and exposed to `ling` sessions as the `mightling-images` stdio MCP server (`ling-admin images mcp`, declared by `ling-rs/src/images.rs`; before Onyx was retired on 2026-10-09, it was registered via Onyx's Custom Tool REST API, mirroring the Gmail integration).
 
-One `POST /search` call runs the whole funnel: SearXNG's image category with a **wide candidate pool (30)**, **in-memory thumbnail fetches** behind a hardened SSRF guard, a **SigLIP pre-filter**, **perceptual-hash collapse** of visual near-duplicates, a **vision rank-and-filter pass** by the served multimodal model (with the shortlist's full downloads already **prefetching speculatively**), then persistence of the winners into a local store that nginx serves back at `/puffin-images/{file_id}.jpg`. Caching locally is the point: hotlinked images die of CORP blocks and link rot; cached ones render permanently.
+One `POST /search` call runs the whole funnel: SearXNG's image category with a **wide candidate pool (30)**, **in-memory thumbnail fetches** behind a hardened SSRF guard, a **SigLIP pre-filter**, **perceptual-hash collapse** of visual near-duplicates, a **vision rank-and-filter pass** by the served multimodal model (with the shortlist's full downloads already **prefetching speculatively**), then persistence of the winners into a local store (`~/.config/dreamference/image-search/data/images`) that `ling web` and the desktop app serve back at `/images/{file_id}.jpg` (formerly served by nginx at `/puffin-images/{file_id}.jpg` before Onyx was retired). Caching locally is the point: hotlinked images die of CORP blocks and link rot; cached ones render permanently.
 
 **Deviation from the v13 draft, adopted deliberately:** the sidecar is **standard library + Pillow, not FastAPI**. It follows the Gmail sidecar exactly — a single staged file in a stock `python:3-slim` container, nothing to install at boot beyond Pillow itself (pip-installed into `/tmp` on start, skipped when present, degraded gracefully when offline). The draft's architecture — endpoints, funnel, hourly GC — is implemented whole; only the web framework differs.
 
@@ -52,7 +52,8 @@ Hamming ≤ 8 merges to the first representative
 RANK-AND-FILTER ─┬─ SPECULATIVE PREFETCH (concurrent)
    (vision)      │   hardened full downloads of every FRESH shortlist candidate begin when
                  │   the rank call is dispatched; cached candidates prefetch nothing
-  one standard /v1 vision call to the served vLLM model: shortlist thumbnails + query →
+  one standard /v1 vision call to the served vLLM model: shortlist thumbnails (downscaled to
+  256px JPEG by `_rank_thumb`) + query →
   strict-JSON array of the MATCHING indices, best first. A successful verdict is a FILTER:
   indices it leaves out stay out (an empty array is a valid answer), and only a transport or
   parse failure falls back to the unfiltered order. Even a single candidate is judged — one
@@ -67,14 +68,14 @@ PERSIST: winners re-encoded to JPEG (normalises format, strips non-image payload
 store; phash + source URL + title recorded in SQLite
         │
         ▼
-{"response": "![title](/puffin-images/{file_id}.jpg)\n\n…",
+{"response": "![title](/images/{file_id}.jpg)\n\n…",
  "instructions": "…include these lines VERBATIM… <the same markdown again>"}
 ```
 
 The `instructions` field restates the Markdown embeds and forbids answering with a bare
 acknowledgement, because a model given only a pointer ("embed the above") has answered `Done`
-and shown nothing. The Mightling persona prompt and the tool's OpenAPI summary reinforce the same
-contract from their side.
+and shown nothing. The MCP tool description (`TOOL["description"]` in `image_search_mcp.py`; formerly the Mightling persona prompt and `openapi_definition()` before Onyx was retired) reinforces the same
+contract from its side.
 
 ---
 
@@ -93,7 +94,7 @@ file id, pHash, title, timestamp). **GC:** a background thread deletes images ol
 hourly and then trims oldest-first to a 2 GB cap; a DB row whose file was collected reads as
 absent and is purged.
 
-### 3.2 Nginx routing — host-side template, deferred resolution
+### 3.2 Nginx routing — host-side template, deferred resolution *(Removed 2026-10-09 when Onyx was retired; `ling web` and the desktop app now serve `/images/{id}.jpg` and `/images/{id}.json` directly from the local store)*
 
 `OnyxRunner._inject_image_route()` rewrites the **host-side**
 `~/.config/onyx/data/nginx/app.conf.template` (marker-based, cut-at-marker idempotent, so the
@@ -122,8 +123,10 @@ Two hard-won constraints:
 
 ### 3.3 Tool registration
 
-The v13 draft's `{"custom_tool_url": …}` sketch does not match Onyx's API. Registration mirrors
-Gmail: an **OpenAPI document** (`openapi_definition()` in the service module, one
+**Current (`ImageSearchSidecar` + `ImageSearchMcp`, since 2026-10-09):** `ling-admin images start` (`ImageSearchSidecar.start` in `dreamference/chat/image_search_sidecar.py`, also invoked by `ling-admin server start` on a node) generates the shared secret once into `~/.config/dreamference/image-search/secret` (mode `0600`) and starts `dreamference-image-search` on the `dreamference-sidecars` Docker network (`127.0.0.1:8768`). When the secret file exists, the machine is a node, and `/airgapped` is not `on`, the launcher (`ling-rs/src/images.rs`) declares `mightling-images` (`~/.local/bin/ling-admin images mcp`, `ImageSearchMcp` in `dreamference/chat/image_search_mcp.py`) as an MCP server for the `ling` session. Every `image_search` call re-checks the air-gap configuration and the parent process's runtime seal (`SEAL_DIR_NAME = "ling-airgapped"`), then `POST`s to `http://127.0.0.1:8768/search` with `X-Mightling-Image-Token`. The sidecar also serves `GET /images/{id}.jpg` and `GET /images/{id}.json` (`source_url`, `title`, `host`) without a token.
+
+**Onyx-era registration *(Removed 2026-10-09 when Onyx was retired)*:** The v13 draft's `{"custom_tool_url": …}` sketch does not match Onyx's API. Registration mirrors
+Gmail: an **OpenAPI document** (`openapi_definition()` in the service module, removed when Onyx was retired; one
 `image_search` POST operation with `queries` and optional `count`) sent to
 `POST /admin/tool/custom`, with lookup-then-`PUT` so re-runs update rather than duplicate, and
 a `custom_headers` shared secret (`X-Mightling-Image-Token`, generated once into the data
@@ -134,14 +137,13 @@ secret — the browser is the caller and the ids are unguessable.
 
 ## 4. Provider & inference interactions
 
-- **SearXNG** — `SEARXNG_CONTAINER_URL` (the deployment's own instance, JSON API). Relative
+- **SearXNG** — `SEARXNG_CONTAINER_URL` (`http://dreamference-searxng:8080`, the deployment's own instance on `dreamference-sidecars`, JSON API). Relative
   `thumbnail_src` values are resolved against the SearXNG base.
-- **SigLIP** — `dreamference-siglip`, an Infinity server (`michaelf34/infinity`, CPU,
-  `google/siglip-base-patch16-224`, weights in a named volume), provisioned best-effort by
-  `_start_siglip()`. See §7 for the arm64 gap.
-- **Vision** — the served vLLM model, reached at the runner's existing loopback→bridge-gateway
-  rewrite (`resolve_container_vllm_url`) with the registry-resolved model id; both passed as
-  environment, never recomputed in the sidecar.
+- **SigLIP** — `dreamference-siglip`, an Infinity server (`michaelf34/infinity:latest-cpu`, CPU,
+  `google/siglip-base-patch16-224`, weights in named volume `dreamference-siglip-cache`), provisioned best-effort by
+  `ImageSearchSidecar.start_siglip()` (formerly `_start_siglip()`). See §7 for the arm64 gap.
+- **Vision** — the served vLLM model, reached at `DockerBridge.container_vllm_url(vllm_host)` (formerly `resolve_container_vllm_url`) with the served model id resolved by `ImageSearchSidecar.vision_model(vllm_host, model)` (reading `/v1/models` first and falling back to `resolve_model_hf_repo(model)`); both passed as
+  environment (`MIGHTLING_VISION_URL`, `MIGHTLING_VISION_MODEL`), never recomputed in the sidecar.
 
 ---
 
@@ -164,6 +166,9 @@ The hardened downloader implements, and the tests assert:
 
 ## 6. Presentation
 
+**Current (`ling web` and the desktop app, since 2026-10-09):** `ling web` (`ling-rs/web/src/sidecars.rs`) and the Electron desktop app (`desktop/electron/src/app-protocol.ts`) serve `/images/<id>.jpg` directly from `~/.config/dreamference/image-search/data/images` and render the Markdown image embeds inline in the assistant turn.
+
+**Onyx-era scripts *(Removed 2026-10-09 when Onyx was retired)*:**
 - **Gallery** (`GALLERY_SCRIPT` + `GALLERY_CSS`): the tool's images inside one assistant
   message are regrouped into a clickable mosaic — hero image left, tiles right, keyed per
   count; five or more switch to a three-column tile grid. Clicking opens a lightbox
@@ -193,15 +198,16 @@ mould (aarch64 wheels exist for both).
 
 **Unit (offline, `tests/test_image_search_service.py`):** SSRF assertions (private ranges,
 the single SearXNG exemption, redirect cap, size cap, magic bytes), pHash collapse/separation,
-store dedupe and GC (age + size cap), the funnel with injected fakes (round-robin merge,
+store dedupe and GC (age + size cap), and the funnel with injected fakes (round-robin merge,
 cached-skip-network-but-not-judgment, vision verdict as filter, empty verdict, requested
-count satisfied and gracefully under-satisfied, unfetchable candidates dropping out), and the
-OpenAPI document. The funnel's collaborators are constructor-injected for exactly this.
+count satisfied and gracefully under-satisfied, unfetchable candidates dropping out). The funnel's collaborators are constructor-injected for exactly this. (The OpenAPI document assertion was removed when Onyx was retired.)
 
-**Runner (`tests/test_onyx_runner.py`):** registration payload (OpenAPI document + secret
+**Sidecar and MCP (`tests/test_image_search_sidecar.py`, replacing the retired `tests/test_onyx_runner.py`):** `ImageSearchSidecar` lifecycle (`start`, `stop`, `status`, secret creation, network migration onto `dreamference-sidecars`, SigLIP best-effort start, vision model resolution) and `ImageSearchMcp` stdio JSON-RPC protocol (`initialize`, `tools/list` without network I/O, `tools/call` forwarding with `X-Mightling-Image-Token`, and refusal when `/airgapped` is `on` or sealed by the parent PID).
+
+**Runner (`tests/test_onyx_runner.py`, *Removed 2026-10-09 when Onyx was retired*):** registration payload (OpenAPI document + secret
 header, create-then-update), nginx route idempotence and deferred form, configure opt-out. An
 autouse fixture stubs the provisioning internals so the suite never starts containers.
 
-**Live E2E (performed):** `ling-admin chat configure` (alias `onyx`) registers the tool; a real `/search` returns
+**Live E2E (historical, performed on Onyx before its retirement on 2026-10-09):** `ling-admin chat configure` (alias `onyx`) registers the tool; a real `/search` returns
 ranked cached embeds; the image serves through `localhost:3000/puffin-images/…` (200,
 `image/jpeg`); nginx survives the sidecar being stopped; a `count: 6` request returns six.

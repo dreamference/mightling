@@ -2,11 +2,11 @@
 
 **Status:** v5 — history since 2026-10-07. Both recipes this document covers were removed from the registry on 2026-10-07, together with `runtime/`, `Dockerfile.dflash` and `Dockerfile.dense`, so none of the patches named below exists in the tree any more; they are in git history. The findings are kept for any future vLLM recipe on a hybrid GDN + drafter stack. As deployed until then (the registry on 2026-09-28): `hybrid-dflash` on `dense5` (region-adaptive chunking, 9048 budget), and the `int4-dflash` fallback moved to `dense9` (1120 grid + opt-in caching, §6.1), with `enable_prefix_caching: True` on both.
 
-**Scope (noted 2026-10-01):** this document covers the two vLLM 122B DFlash recipes, of which `hybrid-dflash` is now the fallback. The default model since 2026-09-29, `qwen3.8-27b-nvfp4-dflash2`, runs on SGLang, whose prefix caching is its own radix cache (`--mamba-radix-cache-strategy extra_buffer` in the recipe) and is not described here.
+**Scope (noted 2026-10-01; updated 2026-10-28):** this document covers the two vLLM 122B DFlash recipes (`hybrid-dflash` was the fallback from 2026-09-29 until both 122B recipes were removed on 2026-10-07). The default model since 2026-09-29, `qwen3.8-27b-nvfp4-dflash2`, runs on SGLang, whose prefix caching is its own radix cache (`--mamba-radix-cache-strategy extra_buffer` in `dreamference/hardware/model_matrix_registry.py`), with `ling-serve` opt-in beside it since `1.7.2` (using `X-Ling-Share-Scope` from `ling-rs/src/share_scope.rs` for prefix-cache scoping in P4c); neither is described here.
 
 **Date:** 2026-08-24
-**Patch:** `runtime/patch_mamba_chunk_align.py`
-**Registry context:** `qwen3.5-122b-a10b-hybrid-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense5`) / `qwen3.5-122b-a10b-int4-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense9`; it was `kvfix2` when this document was first written). The patches live in `runtime/` and are baked in by `Dockerfile.dense`, which also bakes `patch_opt_in_cache.py`.
+**Patch:** `runtime/patch_mamba_chunk_align.py` (removed 2026-10-07)
+**Registry context:** `qwen3.5-122b-a10b-hybrid-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense5`) / `qwen3.5-122b-a10b-int4-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense9`; it was `kvfix2` when this document was first written). The patches lived in `runtime/` and were baked in by `Dockerfile.dense`, which also baked `patch_opt_in_cache.py` (all removed on 2026-10-07).
 
 ---
 

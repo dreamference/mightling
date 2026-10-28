@@ -1,8 +1,8 @@
 # Mightling CLI Reference
 
-> **Version:** 1.6.4 (`setup.py`)
+> **Version:** 1.7.2 (`setup.py`)
 > **Subject:** Command Suite, Subcommands, Configuration, Environment Variables
-> **Checked against the code:** 2026-10-19 (`dreamference/cli/dreamference_cli_controller.py`, `build_parser()`: a script walked the parser and found every subcommand and every visible `--option` in this document; the launcher's own subcommands read from `ling-rs/src/lib.rs`)
+> **Checked against the code:** 2026-10-28 (`dreamference/cli/dreamference_cli_controller.py`, `build_parser()`: a script walked the parser and found every subcommand and every visible `--option` in this document; the launcher's own subcommands read from `ling-rs/src/lib.rs`)
 
 ---
 
@@ -22,11 +22,11 @@
 **Entry points** (`setup.py` `console_scripts`):
 
 - `ling-admin`: the administration CLI (`dreamference.cli:main`, controller `DreamferenceCLIController` in `dreamference/cli/`). Everything in this document.
-- `ling`: **not** a Python entry point. It is the Rust binary built by `ling-admin codex build`: Codex with Mightling's branding and launcher compiled in, linked at `~/.local/bin/ling`. It takes Codex's command line, plus subcommands the launcher answers itself before Codex parses anything:
-  - `ling app` (the desktop app), `ling night …`, `ling airgapped [default <level>]`, `ling node list|use|forget`;
+- `ling`: **not** a Python entry point. It is the Rust binary built by `ling-admin codex build`: Codex with Mightling's branding and launcher compiled in, linked at `~/.local/bin/ling`. It takes Codex's command line, plus subcommands the launcher answers itself before Codex parses anything (`LAUNCHER_SUBCOMMANDS` in `ling-rs/src/lib.rs`):
+  - `ling app` (the desktop app), `ling night …`, `ling airgapped [default <level>]`, `ling node list|use|forget|join`, `ling worktree …`, `ling refine …`, `ling sync …`, `ling uninstall`;
   - `ling compat [status|use claude|off|doctor]` and the flag `--compat claude|off`, the compatibility mode: `ling` working the way Claude Code does, reading its project files (`DREAMFERENCE_MIGHTLING_COMPAT` or `mightling_compat`, the key read only from the user's own `~/.config/dreamference/config.toml`; see `DREAMFERENCE_MIGHTLING_LING_CLAUDE.md` §0.4);
   - `ling prompt [list|show [<name>]|use <name>]`, which chooses the system prompt new sessions get (`default`, `offline`, `high-swe`, `ask` or a custom one; `DREAMFERENCE_MIGHTLING_PROMPT` or `mightling_prompt`, see `DREAMFERENCE_MIGHTLING_PROMPT.md`);
-  - `ling skill …` (other agents' skills, `DREAMFERENCE_MIGHTLING_SKILLS.md`) and `ling docs add|remove|search|read|status` (the document index, `DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md`);
+  - `ling skill …` (other agents' skills, `DREAMFERENCE_MIGHTLING_SKILLS.md`), `ling docs add|remove|search|read|status` (the document index, `DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md`), `ling apps`, `ling ledger`, `ling notice`, `ling audit`, `ling loop-guard`, `ling guard`, `ling monitor …` and `ling delegate …` (`DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md`);
   - `ling web serve|start|stop|status|open|pair` (the web UI on port 3100, `DREAMFERENCE_MIGHTLING_ASK.md`), `ling chat …` (Matrix and Telegram) and `ling signal setup|status|start|stop|trust|remove|unit` (Linux), both off until set up (`DREAMFERENCE_MIGHTLING_CHAT.md`, `DREAMFERENCE_MIGHTLING_SIGNAL.md`);
   - `ling update`, a subcommand patch `0008` adds to Codex's own parser.
 
@@ -38,10 +38,10 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 
 **Commands:**
 
-- **Setup:** `init`, `host {check,setup}`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}` (absent while diffusion is switched off, §4.2), `clear {model-cache,tensorize-cache}`, `docs setup`
-- **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run,pause,resume}`
-- **Measurement and checks:** `swe-bench {setup,smoke,run,eval,report,status,clean,shard,merge}`, `audit {egress}`
-- **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch,provision,prepare}` (plus `authorize`, `serve-job`, `job-exec` and `askpass`, which a person does not type, §4.25)
+- **Setup:** `init`, `host {check,setup}`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}` (absent while diffusion is switched off, §4.2), `adapter {list,install,remove,verify}`, `clear {model-cache,tensorize-cache}`, `docs setup`
+- **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run,every,archive,autofill,pause,resume}`
+- **Measurement and checks:** `swe-bench {setup,build-images,smoke,run,eval,report,status,clean,shard,merge}`, `audit {egress}`
+- **Model server and fleet:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,power-cycle,power-config,run,jobs,logs,cancel,fetch,provision,prepare}` (plus `authorize`, `serve-job`, `job-exec` and `askpass`, which a person does not type, §4.25), `forge {status,on,off,move,promote,backup,restore,key,github-mirror,password,import,archive,mirrors}` (plus `run` and `tick`, §4.30), `remote {setup,status,remove,code,peers,revoke,certificate}` (§4.31)
 - **Web UI, desktop and messengers:** `chat {remove,status}` (the retired Onyx web chat's leftovers, since 2026-10-18; alias `onyx`), `desktop {install,run,build,status}`, `matrix {start,stop,status,add-user,push,remove}`; `ling web` itself is the launcher's
 - **Agent tools:** `gmail {search,read,status}`, `google {start,stop,status}`, `images {start,stop,status,mcp}`, `voice {start,stop,status}`, `searxng {start,status}`, `code setup`; search and fetch are commands of their own, `ling-search` and `ling-fetch` (§4.16), and so is the code index, `ling-code` (§4.22)
 - **Context and IDE:** `index`, `mcp`, `web`, `status`
@@ -89,18 +89,21 @@ These options come before the subcommand (`ling-admin --agent cline run "…"`).
 | **`codex start` / `stop`** | Start / stop the Codex app-server daemon using `ling` | — |
 | **`codex test`** | Run Codex's own test suite on Mightling's patched tree, except the tests in `codex-tests/mightling-skips.toml` | `[-E FILTER] [--test-threads 8] [--jobs 6] [--memory-max 24G] [--accept-snapshots]` |
 | **`code setup`** | Install the pinned tools the code index (`ling-code`) runs | — |
-| **`night …`** | Night Shift: the timer and the overnight run of the `/night` queue | `enable [--window]`, `disable`, `status`, `run [--until] [--minutes] [--idle-minutes] [--ignore-open-sessions]`, `pause [--for DURATION]`, `resume` (the model gate during a SWE-bench run); see §4.21 |
-| **`swe-bench …`** | Run `ling` over SWE-bench instances and have the upstream harness grade the patches | `setup`, `smoke`, `run`, `eval`, `report`, `status`, `clean`; see §4.23 |
-| **`audit egress`** | Trace one real `ling` session (or the TUI, the desktop app, `ling web`, the document index) and list every network destination and process, with a verdict | `[--tui \| --app \| --web \| --docs \| --compat claude] [--prompt P] [--json]`; see §4.24 |
-| **`node …`** | Advertise this machine on the local network so clients find it with no address typed; list other nodes and, once paired over SSH, manage them, copy a model to them and run jobs on them | `enable [--no-web] [--yes]`, `disable`, `status [NAME]`, `id`, `list`, `add NAME`, `remove NAME`, `set NAME --model M`, `start NAME`, `stop NAME`, `sync-model NAME MODEL`, `run NAME [--gpu] … -- CMD`, `jobs`, `logs`, `cancel`, `fetch`, `provision [HOST…]`, `prepare`; see §4.25 |
+| **`night …`** | Night Shift: the timer and the overnight run of the `/night` queue | `enable [--window]`, `disable`, `status`, `run [--until] [--minutes] [--idle-minutes] [--ignore-open-sessions]`, `every {add,list,drop}`, `archive [--weeks 4]`, `autofill [--dry-run] [--max N]`, `pause [--for DURATION]`, `resume` (the model gate during a SWE-bench run); see §4.21 |
+| **`swe-bench …`** | Run `ling` over SWE-bench instances and have the upstream harness grade the patches | `setup`, `build-images`, `smoke`, `run`, `eval`, `report`, `status`, `clean`, `shard`, `merge`; see §4.23 |
+| **`audit egress`** | Trace one real `ling` session (or the TUI, the desktop app, `ling web`, the document index, `ling sync`) and list every network destination and process, with a verdict | `[--tui \| --app \| --web \| --docs \| --sync \| --compat claude] [--prompt P] [--json]`; see §4.24 |
+| **`node …`** | Advertise this machine on the local network so clients find it with no address typed; list other nodes and, once paired over SSH, manage them, copy a model to them and run jobs on them | `enable [--no-web] [--yes] [--no-forge]`, `disable`, `status [NAME]`, `id`, `list`, `add NAME`, `remove NAME`, `set NAME --model M`, `start NAME`, `stop NAME`, `sync-model NAME MODEL`, `power-cycle NAME`, `power-config {plug,node,show}`, `run NAME [--gpu] … -- CMD`, `jobs`, `logs`, `cancel`, `fetch`, `provision [HOST…]`, `prepare`; see §4.25 |
 | **`host …`** | The host settings a model load is refused without: report them, or apply them with sudo | `check`, `setup [--yes]`; also Wi-Fi power saving, which blocks no load; see §4.26 |
 | **`chat …`** (`onyx …`) | The retired Onyx web chat: remove what an older install left | `remove [--yes] [--delete-data]`, `status`; see §4.19 |
 | **`images …`** | Image search: the sidecar and the `image_search` tool's MCP server | `start [--no-siglip]`, `stop`, `status`, `mcp`; see §4.19 |
 | **`voice …`** | Speech-to-text for the microphone in the app and `ling web` | `start`, `stop`, `status`; see §4.19 |
 | **`desktop …`** | The Electron desktop app (`ling-app`) | `install`, `run`, `build`, `status` |
-| **`docs setup`** | Fetch what `ling-docs` loads: PDFium, ONNX Runtime and the embedding model, pinned | — |
+| **`docs setup`** | Fetch what `ling-docs` loads: PDFium, ONNX Runtime, the embedding model and OCR's models and libraries, pinned | — |
 | **`google …`** | The Google service (Gmail, Drive, Calendar for `/apps`) without the web UI, on `127.0.0.1:8767` | `start`, `stop`, `status`; see §4.27 |
 | **`matrix …`** | The private Matrix homeserver behind `ling chat` (off by default) | `start`, `stop`, `status`, `add-user NAME`, `push on\|off`, `remove [--yes]`; see §4.28 |
+| **`adapter …`** | Install and manage LoRA adapters for the served model | `list [--available] [--json]`, `install [NAME] [--repo R] [--third-party] [--hf-token T]`, `remove NAME`, `verify [NAME]`; see §4.29 |
+| **`forge …`** | The node's Forgejo forge: status, on/off, move, promote, backups, keys, the GitHub mirror | `status`, `on`, `off`, `move [NODE] [--back]`, `promote [NODE]`, `backup`, `restore --check`, `key add FILE`, `github-mirror --all-branches\|--off [--account A]`, `password --show`, `import SOURCE NAME …`, `archive NAME BUNDLES…`, `mirrors sync`; see §4.30 |
+| **`remote …`** | Reach this node from outside the LAN: a NetBird overlay run here, one rented relay box | `setup DNS_NAME …`, `status`, `remove [--purge] [--yes]`, `code [--bundle-file P] [--ttl D] [--join] …`, `peers`, `revoke PEER`, `certificate {issue,relay,relay-off,renew,off}`; see §4.31 |
 | **`searxng start`** | Start the SearXNG container on `127.0.0.1:8888`, on the network `dreamference-sidecars`; replaces one made on Docker's default bridge ([DOCKER §6](./DREAMFERENCE_DOCKER.md)) and writes its settings | — |
 | **`searxng status`** | Each general search engine's state: ok, failing, suspended until when, not loaded, off; read from SearXNG's logs, nothing searched | — |
 | **`gmail …`** | Read-only Gmail search and read | `search QUERY [-n 10] [--json]`, `read ID [--max-chars 8000] [--json]`, `status [--json]` |
@@ -143,10 +146,10 @@ ling-admin diffusion-model set MODEL
 ### 4.3. `ling-admin run`
 
 ```bash
-ling-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--hf-token …] [--debug]
+ling-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--hf-token …] [--debug] [--compat claude|off]
 ```
 
-**Behaviour:** dispatches on `config.agent_runner` to one of `CodexRunner` (also for any unrecognised value), `ClineRunner`, `ContinueRunner` or `OpenHandsRunner`, then calls `run_session(prompt=…, debug=…)`.
+**Behaviour:** dispatches on `config.agent_runner` to one of `CodexRunner` (also for any unrecognised value), `ClineRunner`, `ContinueRunner` or `OpenHandsRunner`, then calls `run_session(prompt=…, debug=…)`. `--compat` sets `DREAMFERENCE_MIGHTLING_COMPAT` for that `ling` session and is refused for the other agents.
 
 - **Codex (default):**
   - builds `ling` if it is missing or stale;
@@ -186,7 +189,7 @@ Indexes the workspace, the current directory unless `--dir` is given, with Pytho
 ### 4.6. `ling-admin server start`
 
 ```bash
-ling-admin server start [--model MODEL] [--port 8000] [--quantization Q] [--draft-model D] [--num-speculative-tokens N]
+ling-admin server start [--model MODEL] [--port 8000] [--engine ling|sglang] [--quantization Q] [--draft-model D] [--num-speculative-tokens N]
   [--hf-token T] [--num-scheduler-steps N] [--attention-backend B] [--kv-cache-dtype D] [--api-key K]
   [--enable-auto-tool-choice] [--tool-call-parser P] [--reasoning-parser P] [--moe-backend B]
   [--max-num-batched-tokens N] [--guided-decoding-backend B] [--tensorize/--no-tensorize]
@@ -195,13 +198,13 @@ ling-admin server start [--model MODEL] [--port 8000] [--quantization Q] [--draf
 
 **Behaviour:**
 1. Refuses while a Night Shift run holds its lock (§4.21), then runs the host-safety pre-flight (`check_host_safety`).
-2. Refuses a model a release removed from the matrix (`ModelMatrixRegistry.removed_in`), before anything starts. On a node it then starts the Google service, image search and speech-to-text when absent (`ensure_on_node`; since 2026-10-09, `d0cc859`); a failure is a warning naming the command to retry and never blocks the model.
+2. Refuses a model a release removed from the matrix (`ModelMatrixRegistry.removed_in`), before anything starts. Resolves the serving engine (`--engine`, else `server_engine` in the config, else the model's default: SGLang for the default model, with `ling-serve` opt-in since 1.7.2; when LoRA adapters are installed for the model and `ling-serve` is resolved without `--engine`, it falls back to SGLang, and an explicit `--engine ling` is refused). On a node it then starts the Google service, image search and speech-to-text when absent (`ensure_on_node`; since 2026-10-09, `d0cc859`); a failure is a warning naming the command to retry and never blocks the model.
 3. Starts the diffusion sidecar `dreamference-diffusion-<diffusion-port>` **first**, unless `--no-diffusion`, so that vLLM's free-memory check accounts for it.
-4. Starts vLLM in Docker, under the PSI memory-pressure watchdog. It streams logs and memory until the health check passes, then exits, leaving the server running.
+4. Starts the engine in Docker, under the PSI memory-pressure watchdog. It streams logs and memory until the health check passes, runs the correctness and streamed `/v1/responses` tool-call canaries (`ToolCallCanary`), then exits, leaving the server running.
 
 **The model gate** (since 2026-10-09, `MIGHTLING_SWE_BENCH.md` §18). The engine listens on `127.0.0.1:<port + 10000>` and a second container, `dreamference-gate-<port>` (the engine's image, `--network host`, the same restart policy, 256 MiB), serves `<port>` on every interface in front of it. Every client reaches the model through it; it passes everything through untouched unless a SWE-bench run holds it. It starts after the old engine container is removed and before the new one; if it cannot start, the engine serves `<port>` itself, as before. `--no-gate` does the same on purpose. `server stop` and `remove` stop and remove the gate with the engine.
 
-Per-model flags come from the model matrix's `launch_overrides`. Options given here override them, and anything unset falls back to the recipe. `--docker-image` overrides the model's pinned image.
+Per-model flags come from the model matrix's `launch_overrides` (or `engine_recipes[engine]`). Options given here override them, and anything unset falls back to the recipe. `--docker-image` overrides the model's pinned image.
 
 **Speculation.** `--draft-model` and `--num-speculative-tokens` are turned into `--speculative-config` JSON by `VLLMServerManager.resolve_speculative_config()`, never into separate flags: vLLM 0.2x has no `--speculative-model` or `--num-speculative-tokens`. The depth passed is the config's resolved value (flag > `DREAMFERENCE_SPECULATIVE_TOKENS` > file > default), and it applies only together with `--draft-model`; without one, the recipe's speculative config is used exactly. See `DREAMFERENCE_INFERENCE.md` §3.
 
@@ -217,7 +220,7 @@ docker run --ipc=host --network host --restart unless-stopped --name dreamferenc
   --entrypoint vllm <image> serve <hf_repo> [vllm flags]
 ```
 
-The line above is the vLLM form. A model whose recipe names `engine: sglang` (the default model does) gets the same `docker run` prefix and mounts, and `SGLangLaunchBuilder` builds what follows the image (`DREAMFERENCE_INFERENCE.md`).
+The line above is the vLLM form. A model whose recipe names `engine: sglang` (the default model does) gets the same `docker run` prefix and mounts, and `SGLangLaunchBuilder` builds what follows the image; for `engine: ling` (`--engine ling`), `LingServeLaunchBuilder` builds the `ling-serve` launch (`DREAMFERENCE_INFERENCE.md`).
 
 The container's memory limit is derived from the model's `gpu_memory_utilization` plus headroom, capped below total memory by a host reserve. `--memory-swap` equals `--memory`, so the container cannot swap.
 
@@ -230,8 +233,8 @@ ling-admin server stop   [--port 8000] [--diffusion-port 8001]
 ling-admin server remove [--port 8000] [--diffusion-port 8001]
 ```
 
-- `stop` runs `docker stop` on both `dreamference-vllm-<port>` and `dreamference-diffusion-<diffusion-port>`.
-- `remove` runs `docker rm -f` on both.
+- `stop` runs `docker stop` on both `dreamference-vllm-<port>` and `dreamference-diffusion-<diffusion-port>` (and stops/removes `dreamference-gate-<port>`).
+- `remove` runs `docker rm -f` on both (and `dreamference-gate-<port>`).
 
 Both are safe no-ops when the containers don't exist.
 
@@ -266,7 +269,7 @@ stdio JSON-RPC MCP server (`serverInfo.name` `dreamference-mcp-server`) for JetB
 - `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`: these read and write the in-process `IDEState`, which is empty unless an IDE companion populates it.
 - `ide_apply_diff`: always answers `status: not_applied` and tells the agent to edit the file directly. Nothing in the server writes files. Until 2026-09-29 it answered `success`, so an agent carried on as though its edit had landed.
 - `web_search`, `web_fetch`: `WebTools`, through the local SearXNG instance and direct HTTP.
-- `workspace_search_code`: `ContextEngine.search_code`.
+- `workspace_search_code`: `CodeIndexSearch.search` (`ling-code`) when `ling-code` is installed and the workspace is indexed, falling back to `ContextEngine.search_code`.
 
 Protocol handling:
 - methods: `initialize`, `ping`, `tools/list`, `tools/call`;
@@ -335,7 +338,7 @@ ling-admin codex stop
 ling-admin codex test [-E FILTER] [--test-threads 8] [--jobs 6] [--memory-max 24G] [--accept-snapshots]
 ```
 
-- **`build`:** builds `ling` and `codex-code-mode-host` with `CodexBrandedBuilder`, the web commands (`ling-search`, `ling-fetch`) and `ling-code`, and links them into `~/.local/bin`. It refuses while a Night Shift run holds its lock. It skips the build when the recorded build key is current, unless `--force`. See `DREAMFERENCE_MIGHTLING_CODEX.md`.
+- **`build`:** builds `ling` and `codex-code-mode-host` (plus, on Linux, `ling-signal` and `ling-delegate`, installed beside `ling`) with `CodexBrandedBuilder`, the web commands (`ling-search`, `ling-fetch`), `ling-code` and (on Linux) `ling-docs`, and links `ling`, `ling-admin`, `ling-search`, `ling-fetch`, `ling-code` and `ling-docs` into `~/.local/bin`. It refuses while a Night Shift run holds its lock. It skips the build when the recorded build key is current, unless `--force`. See `DREAMFERENCE_MIGHTLING_CODEX.md`.
 - **`start` / `stop`:** run `ling app-server daemon start|stop`, building `ling` first if it is missing. (The help's "Codex comic server" typo is fixed: it now reads "ling's app-server daemon".)
 - **`test`:** runs Codex's own tests with `cargo-nextest` on the patched export, inside a memory-capped scope (`--memory-max`). `-E`/`--filter` takes a nextest filterset; `--accept-snapshots` rewrites the selected TUI snapshots and keeps those that differ from upstream's by the name alone. See `DREAMFERENCE_MIGHTLING_CODEX.md`.
 
@@ -362,7 +365,7 @@ Search and fetch are programs of their own rather than `ling-admin` subcommands:
 
 ### 4.17. `ling-admin clear model-cache`
 
-`ModelDownloader.clear_cache()` removes exactly two directories: the HuggingFace hub (`~/.cache/huggingface/hub`, or `$HF_HOME/hub`) and the tensorizer cache (`~/.cache/dreamference/tensorizer`). Their parents are left alone: `~/.cache/huggingface` holds the HuggingFace login token, and `~/.cache/dreamference` holds vLLM's torch.compile cache, the `ling` build cache (`mightling-codex/`), fonts and test logs. Until 2026-09-29 it deleted both parents.
+`ModelDownloader.clear_cache()` removes exactly two directories: the HuggingFace hub (`~/.cache/huggingface/hub`, or `$HF_HOME/hub`) and the tensorizer cache (`~/.cache/dreamference/tensorizer`). Their parents are left alone: `~/.cache/huggingface` holds the HuggingFace login token, and `~/.cache/dreamference` holds vLLM's torch.compile cache, the `ling` build cache (`puffin-codex/`, kept under its original name so Cargo's target directory is not discarded), fonts and test logs. Until 2026-09-29 it deleted both parents.
 
 Containers write parts of these caches as root, which `rmtree` cannot remove as the user. When a directory survives, the command says so, prints the `sudo rm -rf` that would finish the job, and exits 1 rather than reporting success.
 
@@ -396,6 +399,10 @@ ling-admin night enable [--window HH:MM-HH:MM]     # default: [night] window, 01
 ling-admin night disable
 ling-admin night status
 ling-admin night run [--until HH:MM] [--minutes N] [--idle-minutes N] [--ignore-open-sessions]
+ling-admin night every add (--daily | --weekly DAY | --days DAYS | --every N | --monthly D) [--test CMD] TASK...
+ling-admin night every list | drop ID
+ling-admin night archive [--weeks 4]
+ling-admin night autofill [--dry-run] [--max N]
 ling-admin night pause [--for DURATION]           # default 1h; 90m, 2h, 45s, or minutes
 ling-admin night resume
 ```
@@ -404,6 +411,9 @@ Night Shift (`dreamference/night_shift/`, `DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md
 
 - **`enable` / `disable`:** install or remove the systemd user timer `mightling-night.timer` that starts `night run` at the window's start.
 - **`status`:** the timer, the window and the queue of every repository, and what the model gate is doing.
+- **`every`:** repeating tasks (`NightShiftRecurring`), queued by each night's run when due (`add` with `--daily`, `--weekly`, `--days`, `--every N` or `--monthly D`; `list`; `drop ID`).
+- **`archive`:** moves finished runs' records, transcripts and reports older than `--weeks` (default 4) to `night/archive/` (`NightShiftArchive`); branches stay.
+- **`autofill`:** queues up to 5 bounded tasks from QA findings, failing CI tests and open spec items (`NightShiftAutofill`; also runs at the start of `night run` when `[night] autofill = true`).
 - **`pause` / `resume`:** while a SWE-bench run holds the model gate, it refuses every other request (`MIGHTLING_SWE_BENCH.md` §18). `pause` lets everything through until `--for` has passed (default one hour; a second `pause` extends it from now and keeps one interval); the run starts no new instance meanwhile while others use the model, as before the gate, and its report names the interval. `resume` ends it early. A pause given with no run holding the gate also covers a run that starts before it ends.
 - **`run`:** works through the queue now, until the window ends (`--until`, or `--minutes` from now). It waits for the model server to have been idle for `--idle-minutes` (default 10). `--ignore-open-sessions` skips the wait for open `ling` sessions; it is for testing.
 
@@ -419,45 +429,51 @@ While a night run holds its lock, `server start`, `codex build` and `index` refu
 ### 4.23. `ling-admin swe-bench`
 
 ```bash
-ling-admin swe-bench setup [--dataset verified|lite|full|<HF id>] [--validate [--instances IDS] [--limit N] [--force]]
+ling-admin swe-bench setup [--dataset verified|lite|full|multilingual|<HF id>] [--validate [--instances IDS] [--limit N] [--force]]
+ling-admin swe-bench build-images [--dataset multilingual] [--instances IDS | --subset FILE] [--languages L] [--limit N] [--force] [--validate]
 ling-admin swe-bench smoke [--idle-minutes N] [--ignore-open-sessions]
-ling-admin swe-bench run [--dataset D] [--instances IDS | --subset FILE] [--limit N] [--name NAME]
-                           [--eval [--remove-images]] [--code-index off|universal|exact] [--prompt <name>]
+ling-admin swe-bench run [--dataset D] [--instances IDS | --subset FILE] [--limit N] [--name NAME] [--shard I/K]
+                           [--eval [--remove-images] [--image-chunk N]] [--code-index off|universal|exact] [--prompt <name>]
                            [--mask off|on] [--strip-names] [--refine [--refine-version v1|v2]] [--task-rules tests|tests-v2|issue-v1[,…]] [--review-turn]
                            [--hooks issue-v1] [--restart-after-compactions N] [--turn-end-compaction on|off|1-99]
                            [--apply-patch off|function|freeform] [--exec-tool function|freeform] [--compat claude|off] [--drop-old-outputs]
+                           [--loop-guard] [--output-budget TOKENS] [--sampling default|nonthinking]
                            [--test-guard] [--finish-check]
                            [--until HH:MM] [--idle-minutes N] [--ignore-open-sessions] [--label TEXT]
-ling-admin swe-bench eval [RUN] [--drop-test-hunks] [--remove-images]
+ling-admin swe-bench eval [RUN] [--drop-test-hunks] [--remove-images] [--image-chunk N]
 ling-admin swe-bench report [RUN] [--against RUN] [--drop-test-hunks]
 ling-admin swe-bench status
 ling-admin swe-bench clean [RUN] [--images]
+ling-admin swe-bench shard LIST --shards K [--out-dir DIR] [--dataset verified] [--balance-by OTHER]...
+ling-admin swe-bench merge NAME RUN...
 ```
 
 SWE-bench on this machine (`dreamference/swe_bench/`, `DREAMFERENCE_MIGHTLING_SWE_BENCH.md`). `RUN` defaults to the latest run.
 
 - **`setup`:** installs the upstream harness (`swebench` 5.0.2) in a virtualenv of its own, downloads the dataset and builds the relocated copy of `ling` that starts inside the instance images. `--validate` also checks which instances grade correctly here (the reference patch resolves, a no-op patch does not), which pulls their images.
+- **`build-images`:** builds the arm64 instance images of a dataset nobody publishes them for (`multilingual`), from its task repository at the pinned commit (`SweBenchImageBuilder`).
 - **`smoke`:** proves the whole pipeline on five fixed instances. `run` refuses until a smoke has passed with the installed harness version.
-- **`run`:** the agent phase. One `ling exec` per instance, each inside that instance's own container on the internal Docker network `mightling-swe-bench`, which reaches the model server and nothing else. It writes `predictions.jsonl`. A run with an existing `--name` is resumed. `--eval` grades when the agent phase ends; `--remove-images` then works one repository at a time and removes its images once graded. `--code-index universal` indexes each instance's repository on the host and gives the agent `ling-code` (default `off`). `--prompt <name>` starts the agent under that system prompt (`default`, `offline`, `high-swe`, or a custom one from `$CODEX_HOME/system-prompts/`, mounted read-only); without it the configured one. The manifest records it, with the custom file's SHA-256, and `report --against` names it when two runs differ. The arms: `--code-index exact` gives the SCIP stores alone and no graph; `--mask on` masks old tool outputs in the agent's requests (MIGHTLING_CONTEXT_BUDGET §4.1); `--strip-names` takes the files, modules, functions and classes the reference fix touches out of the issue; `--refine` runs two sessions per instance, one that studies the issue and writes a refined description without changing the repository and a fresh one that fixes it (MIGHTLING_REFINE), and `--refine-version v2` gives both steps refine-v2's texts instead of the measured v1 (MIGHTLING_REFINE §10; refused without `--refine`, recorded in the manifest as `refine_version`); `--task-rules tests` adds rules to the task prompt (never change an existing test, keep your own scripts in `/tmp`, compare failing tests by name with and without the change). Rules stack, comma-separated (`tests-v2,issue-v1`); `--review-turn` resumes the agent's session once more to review and test its diff before the patch is collected (MIGHTLING_SWE_BENCH §19). `--hooks issue-v1` enforces the issue-v1 rule through Codex hooks (the first edit held until the files and functions the issue names were read, the first stop held if the issue's example was not run since the last edit; `306bc98`, 2026-10-09). `--restart-after-compactions N` stops the fix session at its N-th compaction and starts one fresh session with the task and the stopped diff as a file (default 0, never; `be64083`). `--turn-end-compaction` sets Codex's `model_post_turn_compact_threshold_percent` on the exec command line (`on`, `off` or a percentage; absent, exec never compacts at a turn's end; `34ba10c`). `--apply-patch` and `--exec-tool` choose how `apply_patch` and Code Mode's `exec` are offered (`function`, which SGLang serves, or `freeform`, which only ling-engine serves; absent, the launcher chooses; `0e95f5f`, `25d514e`). `--drop-old-outputs` drops older tool outputs before a compaction summarises (`8de91ae`). `--test-guard` and `--finish-check` switch on the launcher's guards in every session (MIGHTLING_SWE_BENCH §29): a change that weakens an existing test is pointed out and the first stop while it stands held once; the first stop after a source change no test has run on, one that ends mid-work, and one that calls failures pre-existing unchecked are held once each; the report prints a `Guards` line and, in every run, a `Weakened tests` line. While it runs it holds the model gate: any request that does not come from its network is refused with HTTP 503 naming the run, `--label` (default `SWE-bench run <name>`), its progress and the time left (`MIGHTLING_SWE_BENCH.md` §18).
-- **`eval`:** the grading phase: the upstream harness applies each patch and runs the tests. It needs no model. `--drop-test-hunks` grades the same predictions again with every test file left out of each patch, as a separate grading (`eval-drop-test-hunks/`); `--remove-images` grades one repository at a time and removes its images.
+- **`run`:** the agent phase. One `ling exec` per instance, each inside that instance's own container on the internal Docker network `mightling-swe-bench`, which reaches the model server and nothing else. It writes `predictions.jsonl`. A run with an existing `--name` is resumed; `--shard I/K` runs only the I-th of K balanced shards. `--eval` grades when the agent phase ends; `--remove-images` then works one repository at a time in chunks of at most `--image-chunk` instances (default 25) and removes a chunk's images once graded. `--code-index universal` indexes each instance's repository on the host and gives the agent `ling-code` (default `off`). `--prompt <name>` starts the agent under that system prompt (`default`, `offline`, `high-swe`, or a custom one from `$CODEX_HOME/system-prompts/`, mounted read-only); without it the configured one. The manifest records it, with the custom file's SHA-256, and `report --against` names it when two runs differ. The arms: `--code-index exact` gives the SCIP stores alone and no graph; `--mask on` masks old tool outputs in the agent's requests (MIGHTLING_CONTEXT_BUDGET §4.1); `--strip-names` takes the files, modules, functions and classes the reference fix touches out of the issue; `--refine` runs two sessions per instance, one that studies the issue and writes a refined description without changing the repository and a fresh one that fixes it (MIGHTLING_REFINE), and `--refine-version v2` gives both steps refine-v2's texts instead of the measured v1 (MIGHTLING_REFINE §10; refused without `--refine`, recorded in the manifest as `refine_version`); `--task-rules tests` adds rules to the task prompt (never change an existing test, keep your own scripts in `/tmp`, compare failing tests by name with and without the change). Rules stack, comma-separated (`tests-v2,issue-v1`); `--review-turn` resumes the agent's session once more to review and test its diff before the patch is collected (MIGHTLING_SWE_BENCH §19). `--hooks issue-v1` enforces the issue-v1 rule through Codex hooks (the first edit held until the files and functions the issue names were read, the first stop held if the issue's example was not run since the last edit; `306bc98`, 2026-10-09). `--restart-after-compactions N` stops the fix session at its N-th compaction and starts one fresh session with the task and the stopped diff as a file (default 0, never; `be64083`). `--turn-end-compaction` sets Codex's `model_post_turn_compact_threshold_percent` on the exec command line (`on`, `off` or a percentage; absent, exec never compacts at a turn's end; `34ba10c`). `--apply-patch` and `--exec-tool` choose how `apply_patch` and Code Mode's `exec` are offered (`function`, which SGLang serves, or `freeform`, which only ling-engine serves; absent, the launcher chooses; `0e95f5f`, `25d514e`). `--drop-old-outputs` drops older tool outputs before a compaction summarises (`8de91ae`). `--loop-guard`, `--output-budget TOKENS` and `--sampling default|nonthinking` switch on the loop detector, response token cap and sampling arm (`docs/dev/loop-guard.md`). `--test-guard` and `--finish-check` switch on the launcher's guards in every session (MIGHTLING_SWE_BENCH §29): a change that weakens an existing test is pointed out and the first stop while it stands held once; the first stop after a source change no test has run on, one that ends mid-work, and one that calls failures pre-existing unchecked are held once each; the report prints a `Guards` line and, in every run, a `Weakened tests` line. While it runs it holds the model gate: any request that does not come from its network is refused with HTTP 503 naming the run, `--label` (default `SWE-bench run <name>`), its progress and the time left (`MIGHTLING_SWE_BENCH.md` §18).
+- **`eval`:** the grading phase: the upstream harness applies each patch and runs the tests. It needs no model. `--drop-test-hunks` grades the same predictions again with every test file left out of each patch, as a separate grading (`eval-drop-test-hunks/`); `--remove-images` grades one repository at a time in chunks of `--image-chunk` and removes its images.
 - **`report`:** the resolved rate and what it was measured with; `--against` compares two runs instance by instance; `--drop-test-hunks` reports that second grading.
 - **`status`:** runs, their progress, the images present, free disk, and what the model gate is doing.
 - **`clean`:** removes a run's containers and scratch (every run's, with no `RUN`); `--images` also removes the instance images.
+- **`shard` / `merge`:** split a task list into `K` balanced shards (`SweBenchShards`) and merge the finished shard runs into one run (`SweBenchShardMerge`).
 
 Files: the harness, dataset, runtime and validation results under `~/.cache/dreamference/swe-bench/`; one directory per run under `~/.local/share/dreamference/swe-bench/runs/`. Settings come from the `[swe_bench]` table (§5.1). `run` and `smoke` use Night Shift's admission (idle model, memory) and its runner lock.
 
 ### 4.24. `ling-admin audit egress`
 
 ```bash
-ling-admin audit egress [--tui | --app | --web | --docs | --compat claude] [--prompt PROMPT] [--json]
+ling-admin audit egress [--tui | --app | --web | --docs | --sync | --compat claude] [--prompt PROMPT] [--json]
 ```
 
-Runs one real `ling exec` session under `strace`, in a throwaway repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked of a resolver and every process the session started, with a verdict (`dreamference/audit/`, `DREAMFERENCE_MIGHTLING_EGRESS.md`). `--tui` traces the full-screen interface on a pseudo-terminal instead of `ling exec` (needs `pexpect` and `pyte`); `--app` the desktop app with both windows hidden, on the display `DISPLAY` names; `--web` `ling web serve` answering one Ask thread; `--docs` the document index (`ling-docs index` and `search` over a fixture folder must reach nothing). `codex build` runs the audit after installing a new binary unless `--no-audit`. `--prompt` replaces the default prompt (a one-word reply) and is refused with `--docs`, which runs no session; `--json` also writes the full result to `$CODEX_HOME/audit/<timestamp>-<session>.json` (`exec`, `tui`, `app`, `web` or `docs`). Exit status: 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed. `--compat claude` traces the compatibility mode's print mode, `ling --compat claude -p "<prompt>" --output-format json`, in a throwaway repository that holds a `CLAUDE.md`, a `.claude/settings.json` with one hook and one permission rule, a `.claude/commands/` file and a `.claude/agents/` file, so every path of the mode that reads them runs inside the trace (`dreamference/audit/compat_print_session.py`). It counts as answered when its last line is a successful `result` with an answer in it. `codex build` also runs this trace after the other two when the user's new sessions start in the mode (`DREAMFERENCE_MIGHTLING_COMPAT=claude` or `mightling_compat = "claude"`), and writes the record as `<timestamp>-claude.json`.
+Runs one real `ling exec` session under `strace`, in a throwaway repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked of a resolver and every process the session started, with a verdict (`dreamference/audit/`, `DREAMFERENCE_MIGHTLING_EGRESS.md`). `--tui` traces the full-screen interface on a pseudo-terminal instead of `ling exec` (needs `pexpect` and `pyte`); `--app` the desktop app with both windows hidden, on the display `DISPLAY` names; `--web` `ling web serve` answering one Ask thread; `--docs` the document index (`ling-docs index` and `search` over a fixture folder must reach nothing); `--sync` traces one `ling sync agent --once` cycle against a throwaway hub (`SyncEgressAudit`). `codex build` runs the audit after installing a new binary unless `--no-audit`. `--prompt` replaces the default prompt (a one-word reply) and is refused with `--docs` and `--sync`, which run no session; `--json` also writes the full result to `$CODEX_HOME/audit/<timestamp>-<session>.json` (`exec`, `tui`, `app`, `web`, `docs`, `sync` or `claude`). Exit status: 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed. `--compat claude` traces the compatibility mode's print mode, `ling --compat claude -p "<prompt>" --output-format json`, in a throwaway repository that holds a `CLAUDE.md`, a `.claude/settings.json` with one hook and one permission rule, a `.claude/commands/` file and a `.claude/agents/` file, so every path of the mode that reads them runs inside the trace (`dreamference/audit/compat_print_session.py`). It counts as answered when its last line is a successful `result` with an answer in it. `codex build` also runs this trace after the other two when the user's new sessions start in the mode (`DREAMFERENCE_MIGHTLING_COMPAT=claude` or `mightling_compat = "claude"`), and writes the record as `<timestamp>-claude.json`.
 
 ### 4.25. `ling-admin node`
 
 ```bash
-ling-admin node enable [--no-web] [--yes]
+ling-admin node enable [--no-web] [--yes] [--no-forge]
 ling-admin node disable
 ling-admin node status [NAME]
 ling-admin node id
@@ -467,17 +483,19 @@ ling-admin node remove NAME
 ling-admin node set NAME --model MODEL
 ling-admin node start NAME | stop NAME
 ling-admin node sync-model NAME MODEL [--address ADDR]
+ling-admin node power-cycle NAME [--off-seconds 20] [--wait-minutes 10] [--force]
+ling-admin node power-config {plug PLUG --host HOST [--kind shelly] [--channel 0] [--generation 2] | node NAME --plug PLUG [--via NODE] | show}
 ling-admin node run NAME [--gpu] [--memory 8G] [--time 90m] [--test CMD] [--setup CMD] [--out DIR] [--bind PATH]... -- COMMAND...
 ling-admin node jobs [NAME] | logs JOB | cancel JOB | fetch JOB
 ling-admin node provision [HOST…] [--all] [--user U] [--model M] [--from this|release[=X.Y.Z]] [--per-host-password]
-                          [--web] [--no-start] [--restart] [--os-update] [--dry-run] [--via ADDR] [--match PATTERN]
-                          [--start-timeout 1200] [--mesh]
+                          [--web] [--no-start] [--no-forge] [--restart] [--os-update] [--dry-run] [--via ADDR] [--match PATTERN]
+                          [--start-timeout 1200] [--model-source copy|hf] [--role night|engine] [--mesh]
 sudo ling-admin node prepare
 ```
 
 The node half of the client/server split (`dreamference/node/`, `DREAMFERENCE_MIGHTLING_NODE.md`).
 
-- **`enable`:** installs the Avahi service file that advertises this machine as `_mightling-node._tcp`, publishes the web UI and SearXNG beyond loopback, and records that it did, so a later `ling configure` or `searxng start` keeps those addresses. `--no-web` keeps the web UI on this machine; clients then get `ling` and web search only. Root is needed once, for the file under `/etc/avahi`: the command is printed and `sudo` prompts on the terminal; `--yes` runs it with `sudo -n` and never waits for input (what `install.sh` uses). If the file cannot be installed, nothing is published. It prints that anyone on the local network can then use the node, with nothing encrypted or authenticated, and that the web UI's one account (and its Gmail tool) is shared.
+- **`enable`:** installs the Avahi service file that advertises this machine as `_mightling-node._tcp`, publishes the web UI and SearXNG beyond loopback, sets up the node's Forgejo forge unless `--no-forge` (§4.30), and records that it did, so a later `ling configure` or `searxng start` keeps those addresses. `--no-web` keeps the web UI on this machine; clients then get `ling` and web search only. Root is needed once, for the file under `/etc/avahi`: the command is printed and `sudo` prompts on the terminal; `--yes` runs it with `sudo -n` and never waits for input (what `install.sh` uses). If the file cannot be installed, nothing is published. It prints that anyone on the local network can then use the node, with nothing encrypted or authenticated, and that the web UI's one account (and its Gmail tool) is shared.
 - **`disable`:** stops advertising and puts the web UI and web search back on this machine only.
 - **`status`:** the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status. `id` prints this machine's node id, creating it if absent.
 - **`enable`** also warns, without stopping, when Wi-Fi power saving is on (it lost up to ~80% of mDNS queries on the GB10s' MT7925; `9fb0b1e`, 2026-10-12).
@@ -487,14 +505,15 @@ The node half of the client/server split (`dreamference/node/`, `DREAMFERENCE_MI
 - **`set` / `start` / `stop`:** assign a model (a key of that node's model matrix) and start it there, or start or stop a paired node's model server. Each is carried out by that node's own `ling-admin`, with its own host-safety checks.
 - **`list`** also shows each node's free memory, for this machine and for paired nodes (asked over the pairing; memory is not on the open model port).
 - **`sync-model`:** copies a model's Hugging Face cache folders (and its drafter's) to a paired node over the pairing, so it need not download them; `--address` uses another address of the same node, such as its QSFP link's. The node accepts only folders of a key of its own matrix, checks each weight file's checksum, and keeps files it already has.
+- **`power-cycle` / `power-config`:** configure which Shelly smart plug powers which paired node (`~/.config/dreamference/node-power.json`, `NodePowerSettings`) and switch a hung node's plug off and on again (`NodePowerCycle`, `NodeShellyPlug`).
 - **`run`:** runs a command on a paired node, in this repository at `HEAD`, in a sandboxed, memory-capped and time-limited unit there; its changes come back as the branch `job/<id>`. `--setup` builds an environment once per lock-file content and binds it read-only into later jobs; `--out` names a folder that comes back as files to `~/.mightling/jobs/received/<id>/`, never committed; `--bind` binds a path on the node read-only, if the node's `[node] bindable` allows it. `--gpu` asks for the GPU, which nodes refuse for now. `jobs`, `logs`, `cancel` and `fetch` follow a job; a finished job is pruned on the node a day after it was fetched, or 14 days after it finished.
 
-- **`provision`:** sets up more GB10s from this one (`DREAMFERENCE_MIGHTLING_FLEET.md`): with hosts (names, addresses or paired nodes) it logs in with the account's password, runs `node prepare` there with one `sudo`, installs Mightling from this machine's build (`--from this`, the default) or a release, copies the model over the LAN, pairs and starts the node; with none it lists unprovisioned GB10s on the network (`--match` changes the name pattern from `spark-`/`gx10-`/`zgx-`); `--all` re-runs it on every paired node, which is the fleet update. One password serves every host unless `--per-host-password`; `--dry-run` connects and reads only; `--via` copies over another address (a QSFP link's); `--os-update` runs NVIDIA's OS and firmware update first, with a reboot; `--web` also shares the web UI (`ling web`) on the LAN there, through `node enable` without `--no-web` (until `d43a926` it ran a nonexistent `ling-admin ling start` to install Onyx); `--no-start` leaves the model server stopped, `--restart` restarts a running one. `--mesh` (every node paired with every other) is not built. `/node provision` in the TUI runs the same command (MIGHTLING_NODE §18.9). Not yet run against a second machine.
+- **`provision`:** sets up more GB10s from this one (`DREAMFERENCE_MIGHTLING_FLEET.md`): with hosts (names, addresses or paired nodes) it logs in with the account's password, runs `node prepare` there with one `sudo`, installs Mightling from this machine's build (`--from this`, the default) or a release, copies the model over the LAN (`--model-source copy`, the default, or `--model-source hf` to fetch public weights from Hugging Face verified by SHA-256 and send only release-hosted files from here), pairs and starts the node (and its forge unless `--no-forge`; `--role night|engine` also applies that role's setup via `NodeRoleProvisioner`); with none it lists unprovisioned GB10s on the network (`--match` changes the name pattern from `spark-`/`gx10-`/`zgx-`); `--all` re-runs it on every paired node, which is the fleet update. One password serves every host unless `--per-host-password`; `--dry-run` connects and reads only; `--via` copies over another address (a QSFP link's); `--os-update` runs NVIDIA's OS and firmware update first, with a reboot; `--web` also shares the web UI (`ling web`) on the LAN there, through `node enable` without `--no-web` (until `d43a926` it ran a nonexistent `ling-admin ling start` to install Onyx); `--no-start` leaves the model server stopped, `--restart` restarts a running one. `--mesh` (every node paired with every other) is not built. `/node provision` in the TUI runs the same command (MIGHTLING_NODE §18.9).
 - **`prepare`:** run with `sudo` on a new GB10 (by hand, or by `provision`): every root step of a node install and nothing else, for the user who invoked sudo: the host settings, the `docker` group, lingering, an empty Avahi service file owned by the user, bubblewrap's AppArmor profile, NVIDIA's telemetry service disabled, and Wi-Fi power saving off (since 2026-10-12, `1ae9387`: exactly `nmcli connection modify <conn> 802-11-wireless.powersave 2` and `iw dev <if> set power_save off`, neither of which reconnects). It never touches sshd, any other network setting, the firewall, users, APT sources or other NVIDIA services.
 
 Four more subcommands are not typed by a person: `node job-exec <job>` (run inside a job's systemd unit to carry out that job), `node authorize` (run by `node add` on the other node; it reads a public key on standard input) and `node serve-job [--key TAG]` (the forced command sshd starts for a paired key; it refuses anything but info, status, start, stop, set-model, model-receive, unpair, the two git services for a job repository, and the job and night-task requests), and `node askpass` (answers ssh's password prompt during a `provision` run that holds the passwords). There is no primary node: the machine `ling-admin node …` is typed on is the one doing the managing. Pairing was first run against a scratch sshd on loopback; since 2026-10-08 it has also run between two GB10s (MIGHTLING_NODE §18.10).
 
-The switches are kept in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`, because that file is resolved from the working directory first. On a client the counterpart is `ling node list|use|forget`, in the launcher.
+The switches are kept in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`, because that file is resolved from the working directory first. On a client the counterpart is `ling node list|use|forget|join`, in the launcher.
 
 ### 4.26. `ling-admin host`
 
@@ -529,6 +548,44 @@ ling-admin matrix remove [--yes]     # the homeserver, every account and every m
 
 The private Matrix homeserver behind `ling chat`'s Matrix adapter (`chat/matrix_homeserver.py`, `DREAMFERENCE_MIGHTLING_CHAT.md` §5): tuwunel pinned by digest, on an internal Docker network with no route out, federation off, reached through a loopback proxy and `tailscale serve`. `start` brings up all three; `stop` stops it and keeps accounts and messages, and disables the units and `tailscale serve`, so it stays off across a reboot; a missing `tailscale` is reported as a failed step and does not stop `stop` or `remove`. Off by default: nothing else starts it.
 
+### 4.29. `ling-admin adapter`
+
+```bash
+ling-admin adapter list [--available] [--json]
+ling-admin adapter install [NAME] [--repo <org>/<repo>@<commit>] [--third-party] [--hf-token TOKEN]
+ling-admin adapter remove NAME
+ling-admin adapter verify [NAME]
+```
+
+Installs and manages LoRA adapters for the served base model on a node (`cli/adapter_command.py`, `DREAMFERENCE_MIGHTLING_ADAPTERS.md` §3). Only `install` uses the network; `list`, `verify` and `remove` read local files only. Installed adapters are served by SGLang at the next `ling-admin server start` and listed in `/v1/models` as `<base>+<name>` for `ling --adapter <name>` or `/adapter <name>`.
+
+### 4.30. `ling-admin forge`
+
+```bash
+ling-admin forge status | on | off
+ling-admin forge move [NODE] [--back] | promote [NODE]
+ling-admin forge backup | restore --check
+ling-admin forge key add FILE | password --show
+ling-admin forge github-mirror (--all-branches | --off) [--account ACCOUNT]
+ling-admin forge import SOURCE NAME [--anonymity full|denylist|off] [--exempt PATH]... [--mirror]
+ling-admin forge archive NAME BUNDLES...
+ling-admin forge mirrors sync
+```
+
+Manages the node's Forgejo instance (`forge/forge_command.py`, `DREAMFERENCE_MIGHTLING_FORGEJO.md` §7): the first node is the forge of record and paired nodes are read-only mirrors. `run` and `tick` are run by the forge's systemd user unit and timer.
+
+### 4.31. `ling-admin remote`
+
+```bash
+ling-admin remote setup DNS_NAME [--yes] [--ssh DESTINATION] [--ca-scope DOMAIN] [--box-only]
+ling-admin remote status | peers | revoke PEER
+ling-admin remote remove [--purge] [--yes]
+ling-admin remote code [--bundle-file PATH [--ttl DURATION] [--join [--name NAME] [--ssh-user USER]]]
+ling-admin remote certificate {issue [--staging] | relay [--staging] [--name NAME] | relay-off | renew | off}
+```
+
+Reaches the node from outside the LAN over a NetBird overlay whose control plane and private CA run on the node, with one rented relay box configured over SSH (`remote/remote_access.py`, `DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md`).
+
 ---
 
 ## 5. Configuration Hierarchy
@@ -559,6 +616,7 @@ enable_chunked_prefill = true
 num_scheduler_steps = 8
 attention_backend = "auto"
 # kv_cache_dtype unset = use the model recipe's value
+# server_engine unset = use the model's default ("sglang"; "ling" opts into ling-serve)
 mightling_gmail = true
 mightling_airgapped = "off"     # off | on
 mightling_compaction_ledger = true    # hand the agent a rule-built ledger after each compaction
@@ -576,11 +634,11 @@ max_parallel = 3
 ```
 
 The tables take these keys, each with a built-in default:
-- **`[night]`:** `window`, `max_parallel`, `task_timeout`, `test_timeout`, `task_memory`, `nudges`, `test`, `test_sandbox`, `airgapped`, `prompt`, `refine`, `refine_version`, `task_context`, `compact_at`, `compaction_audit`, `idle_minutes`, `index`, `index_timeout`, `nodes`, `best_of` (attempts per task, `8961650`, 2026-10-16);
-- **`[swe_bench]`:** `max_parallel`, `task_timeout`, `task_memory`, `task_cpus`, `nudges`, `idle_minutes`, `task_context`, `eval_workers`, `eval_memory`, `eval_timeout`, `disk_reserve`, `nodes`;
+- **`[night]`:** `window`, `max_parallel`, `task_timeout`, `test_timeout`, `task_memory`, `nudges`, `test`, `test_sandbox`, `airgapped`, `prompt`, `refine`, `refine_version`, `task_context`, `compact_at`, `compaction_audit`, `idle_minutes`, `index`, `index_timeout`, `nodes`, `best_of` (attempts per task, default 3 since 2026-10-19; `8961650`, 2026-10-16), `autofill`, `autofill_max`, `autofill_repo`;
+- **`[swe_bench]`:** `max_parallel`, `task_timeout`, `task_memory`, `task_cpus`, `nudges`, `idle_minutes`, `task_context`, `eval_workers`, `eval_memory`, `eval_timeout`, `disk_reserve`, `image_chunk`, `image_cache_lists`, `image_cache_floor`, `build_memory`, `build_cpus`, `nodes`;
 - **`[node]`:** `bindable`, the folders a job sent to this node may bind read-only.
 
-The launcher reads a few more top-level keys itself (`mightling_docs`, `mightling_context_window`, among others); `DREAMFERENCE_MIGHTLING_CODEX.md` lists them.
+The launcher reads a few more top-level keys itself (`mightling_docs`, `mightling_context_window`, `mightling_adapter`, among others); `DREAMFERENCE_MIGHTLING_CODEX.md` lists them.
 
 A `sandbox = …` line left in an older file is ignored: the option was removed on 2026-10-01.
 
@@ -597,11 +655,13 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | `DREAMFERENCE_CONFIG_PATH` | (resolver order, §5) | Config file path |
 | `DREAMFERENCE_VLLM_HOST` | `http://localhost:8000` | vLLM endpoint. Also read by `ling`'s launcher. |
 | `DREAMFERENCE_MODEL` | `qwen3.8-27b-nvfp4-dflash2` | Main model alias |
+| `DREAMFERENCE_SERVER_ENGINE` | (unset: model's default, `sglang`) | Engine `server start` serves the model with (`ling`, `sglang` or `vllm`); also `server_engine` in the config file and `server start --engine` |
 | `DREAMFERENCE_DIFFUSION_MODEL` | `tiny-a2d-coder-0.5b-diffusion` | Diffusion sidecar model |
 | `DREAMFERENCE_DRAFT_MODEL` | (unset) | Draft model alias |
 | `DREAMFERENCE_SPECULATIVE_TOKENS` | `8` | Speculative token count |
 | `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUNNER` | `codex` | Agent runner (`codex`, `cline`, `continue`, `openhands`) |
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
+| `DREAMFERENCE_MIGHTLING_ADAPTER` | (unset: base model) | LoRA adapter new `ling` sessions start with (`ling --adapter <name>` or `/adapter <name>`); also `mightling_adapter` in the config file (`ling-rs/src/adapter.rs`) |
 | `DREAMFERENCE_MIGHTLING_GMAIL` | `true` | Add the Gmail section to `ling`'s prompt when an account is connected |
 | `DREAMFERENCE_MIGHTLING_CONTEXT_WINDOW` | unset | The model's context window in tokens, overriding what the server reports (also `mightling_context_window` in the config file). Without either, `ling` reads `max_model_len`, `context_length` or `max_context_length` from `/v1/models`, then llama.cpp's `/props` `n_ctx`, then its `n_ctx_train`, else assumes 32,768. Ollama reports none, so set it there |
 | `DREAMFERENCE_MIGHTLING_COMPAT` | `off` | The compatibility mode (`claude` or `off`; `--compat` on the command line sets it for the process and what it starts); also the config key `mightling_compat`, which `ling compat use` writes and which is read only from `~/.config/dreamference/config.toml`, never from a repository's `dreamference.toml` or `DREAMFERENCE_CONFIG_PATH`. A value naming no mode stops the start, from the flag or the variable; from the file it is reported and the mode stays off. Fixed for a session's life (`DREAMFERENCE_MIGHTLING_LING_CLAUDE.md` §0.4) |

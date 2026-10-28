@@ -1,8 +1,8 @@
 # Mightling Code Indexing & Context Engine
 
-> **Version:** 1.5.1
+> **Version:** 1.7.2
 > **Subject:** AST Extraction, Hybrid Search, SQLite/FTS5 Indexing, Testing
-> **Checked against the code:** 2026-09-29 (`dreamference/context_engine/`); §6's test table against `tests/` on 2026-10-09 (all 45 test files are listed)
+> **Checked against the code:** 2026-10-28 (`dreamference/context_engine/` and `tests/`: all 110 `test_*.py` files in `tests/` are listed in §6)
 
 ---
 
@@ -16,11 +16,11 @@
 - [6. Tests Architecture](#6-tests-architecture)
 
 **Who uses this index:**
-- the MCP tool `workspace_search_code` (`ling-admin mcp`, for JetBrains and VS Code);
+- the MCP tool `workspace_search_code` (`ling-admin mcp`, for JetBrains and VS Code), as the fallback when the workspace is not indexed by `ling-code` (`CodeIndexSearch`);
 - the web canvas (`ling-admin web`);
 - `status`, which shows the counts.
 
-The `ling` agent does **not** use it: it searches with `rg`/`ast-grep` through its shell. A code index for `ling` is proposed separately in `DREAMFERENCE_MIGHTLING_CODE_INDEX.md`.
+The `ling` agent does **not** use it: it uses `ling-code` (built in `DREAMFERENCE_MIGHTLING_CODE_INDEX.md`) and searches with `rg`/`ast-grep` through its shell.
 
 ---
 
@@ -34,7 +34,7 @@ The `ling` agent does **not** use it: it searches with `rg`/`ast-grep` through i
 ### 1.2. Steps (`index_workspace`)
 
 1. **Discover files** (`collect_files`):
-   - **In a git repository:** `git ls-files -z --cached --others --exclude-standard`, i.e. tracked files plus untracked files git does not ignore. Every `.gitignore` applies, nested ones included.
+   - **In a git repository:** `SafeGit.run(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], …)`, i.e. tracked files plus untracked files git does not ignore (with repository hooks, fsmonitor, `core.gitProxy` and `gpg.ssh.defaultKeyCommand` disabled). Every `.gitignore` applies, nested ones included.
    - **Submodules are not entered.** They are someone else's code (`codex/` alone is ~8,700 files), and git lists each one as a single directory entry, which the file check drops.
    - **Outside a repository, or without git:** `os.walk` from the workspace root.
    - **Both paths skip `IGNORE_DIRS`:** `.git`, `.svn`, `.hg`, `__pycache__`, `.venv`, `venv`, `node_modules`, `.idea`, `.vscode`, `build`, `dist`, `.dreamference`, `target`, `.cargo`.
@@ -145,7 +145,7 @@ These are recorded here because the spec used to promise otherwise.
 | `test_codex_test_runner.py` | `ling-admin codex test`: Codex's own tests on the patched export, the skip list |
 | `test_mightling_privacy.py` | No usage analytics or the upstream vendor channels from `ling` |
 | `test_web_commands.py` | `ling-search` and `ling-fetch` are Rust binaries, not console scripts |
-| `test_cave_mode.py` | Cave mode's Python side: the setting, and the level texts matching the benchmark's |
+| `test_removed_cave_settings.py` | Old cave-mode config keys/env vars are ignored without breaking config loading (`test_cave_mode.py` was removed on 2026-10-28 with cave mode) |
 | `test_code_index.py` | `ling-admin code setup`, and `server start` stopping index runs before a load |
 | `test_night_shift.py` | Night Shift's runner, with a scripted stand-in for `ling` |
 | `test_swe_bench.py` | `ling-admin swe-bench`, with a stand-in for `docker` and a scripted `ling exec` |
@@ -156,22 +156,34 @@ These are recorded here because the spec used to promise otherwise.
 | `test_cache_clearing.py` | `ling-admin clear` removes weights only |
 | `test_admin_reference.py` | `docs/admin.md` is generated from the CLI and in step with it |
 | `test_desktop_work.py` | The desktop app's Work window on Electron |
+| `test_desktop_parity.py` | Desktop app parity backlog items and bridge policy conformance |
 | `test_diffusion_switched_off.py` | Diffusion switched off: never started, downloaded or shown; and everything back when the switch is on |
 | `test_docs_index.py` | `ling-admin docs setup`'s pinned files and the document index's egress verdict (fetches stubbed) |
-| `test_fleet_provision.py` | `ling-admin node provision` and `node prepare`, with stand-ins for every machine; any real `ssh`, `scp`, `rsync`, `sudo` or `sg` fails the test |
-| `test_google_service_origin.py` | The Google service's state-changing POSTs refuse other origins |
+| `test_fleet_provision.py` / `test_fleet_hub_fetch.py` | `ling-admin node provision` (`--model-source copy\|hf`) and `node prepare`, with stand-ins for every machine; any real `ssh`, `scp`, `rsync`, `sudo` or `sg` fails the test |
 | `test_legacy_name_migration.py` | `ling-admin`'s one-time Puffin → Mightling migration, in a scratch home with `systemctl` and `sudo` stubbed |
 | `test_matrix_homeserver.py` | `ling-admin matrix`, with Docker, systemd, Tailscale and the homeserver replaced |
 | `test_mightling_apps_service.py` | `/apps`'s Python half: scopes per app, the Drive and Calendar reader, the connect page |
 | `test_mightling_prompt.py` | Named system prompts' Python side, the shipped `high-swe` text, Night Shift's pass-through |
-| `test_night_shift_compaction.py` | Night Shift's per-task KV budget and compaction limit |
+| `test_night_shift_compaction.py` / `test_night_shift_compaction_audit.py` | Night Shift's per-task KV budget, compaction limit and morning compaction audit |
+| `test_night_shift_best_of_n.py` / `test_night_shift_recurring.py` / `test_night_shift_autofill.py` / `test_night_shift_archive.py` / `test_night_probe_services.py` | Night Shift best-of-N and chooser, `night every`, `night autofill`, `night archive` and host probes |
 | `test_refine.py` | Refine mode's setting tiers and the texts the product and the benchmark share |
-| `test_release_install.py` | Installing from a release with no checkout: `install.sh` against a stand-in server, `ling-admin host`, the builder without source |
+| `test_release_install.py` / `test_install_ps1.py` / `test_windows_installer.py` / `test_macos_signing.py` / `test_macos_ci_runner.py` | Installing from a release (`install.sh`, `install.ps1`, Windows/macOS packaging and signing) |
+| `test_release_benchmark.py` / `test_release_dry_run.py` / `test_release_notes.py` / `test_release_on_green.py` | Release benchmark gate, dry-run, release notes generator and release-on-green script |
 | `test_removed_models.py` | A configuration naming a removed model is refused with what to do |
-| `test_sandbox_prerequisite.py` | The bubblewrap check every `ling-admin` run makes |
+| `test_sandbox_prerequisite.py` / `test_sandbox_host_sockets.py` | The bubblewrap check every `ling-admin` run makes, and host control socket masking |
 | `test_skills.py` | What the Python side and the docs must agree on with the launcher's skills |
+| `test_adapters.py` / `test_adapter_signing.py` / `test_adapter_serving.py` / `test_adapters_need_sglang.py` | `ling-admin adapter`, Ed25519 manifest signing, SGLang LoRA serving and engine fallback |
+| `test_ling_serve_engine.py` / `test_ling_serve_dockerfile.py` / `test_sglang_phase_merge.py` / `test_sglang_stream_phase.py` / `test_flash_next_recipe.py` / `test_pinned_revisions.py` / `test_tool_call_canary.py` | `ling-serve` launch and image, SGLang runtime patches, Flash-Next recipe, pinned revisions and `/v1/responses` canary |
+| `test_model_gate.py` | The loopback model gate, SWE-bench gate hold, `night pause`/`resume` and LRU adapter loading |
+| `test_node_power.py` / `test_node_role_provisioner.py` / `test_wifi_power_save.py` | Smart-plug power cycling, `node provision --role` and Wi-Fi power-save checks |
+| `test_forge.py` / `test_forge_private.py` | `ling-admin forge`: Forgejo container, mirrors, backups, GitHub mirror and anonymity hook |
+| `test_remote_access.py` / `test_remote_relay_certificate.py` | `ling-admin remote`: NetBird control plane, CA, Let's Encrypt certificates, relay box and LAN enrolment |
+| `test_claude_plugin.py` / `test_session_monitor.py` | `ling delegate` and `ling monitor` (Claude Code plugin MCP servers, watch, lookup, task and ledger) |
+| `test_swe_bench_arm_smoke.py` / `test_swe_bench_best_of.py` / `test_swe_bench_chooser.py` / `test_swe_bench_chooser_v2.py` / `test_swe_bench_fresh.py` / `test_swe_bench_image_cache.py` / `test_swe_bench_multilingual.py` / `test_swe_bench_night_script.py` / `test_swe_bench_shards.py` | SWE-bench arms, best-of-N chooser, fresh task selection, image cache, Multilingual image builder and sharding/merging |
+| `test_code_quality.py` / `test_typing.py` / `test_conftest_guards.py` / `test_safe_git.py` / `test_proxy_bypass.py` / `test_anonymity.py` / `test_as_team.py` / `test_agents_md.py` | Ruff and mypy ratchets, `conftest.py` isolation guards, `SafeGit`, proxy bypass, anonymity check, `as_team.py` and `AGENTS.md` size cap |
+| `test_ask_evals.py` / `test_chat_limits.py` / `test_context_budget_replay.py` / `test_industry_evals.py` / `test_loop_guard_binary.py` / `test_messenger_live.py` / `test_searxng_settings.py` / `test_sync_egress_audit.py` / `test_telegram_mini_app.py` / `test_turn_end_compaction_bench.py` / `test_website.py` | Ask/industry/messenger evals, chat limits, loop-guard corpus, SearXNG settings, `ling sync` egress audit, Telegram Mini App, compaction bench and website checks |
 
-The Rust launcher has its own unit tests, run in the build export with `cargo test --release -p ling-launcher` (`DREAMFERENCE_MIGHTLING_CODEX.md`); `ling-web-rs/`, `ling-code-rs/` and `ling-docs-rs/` are tested with `cargo test --locked` in their own directories, and the member crates (`ling-signal`, `ling-chat`, `ling-web-server`, `ling-apps`, `ling-skills`) with `cargo test -p <crate>` in the export; the Electron app and the UI with `vitest` in `desktop/electron/` and `desktop/ui/`.
+The Rust launcher has its own unit tests, run in the build export with `cargo test --release -p ling-launcher` (`DREAMFERENCE_MIGHTLING_CODEX.md`); `ling-web-rs/`, `ling-code-rs/` and `ling-docs-rs/` are tested with `cargo test --locked` in their own directories, and the member crates (`ling-signal`, `ling-chat`, `ling-web-server`, `ling-apps`, `ling-skills`, `ling-delegate`, `ling-monitor`, `ling-sync`, `ling-safegit`, `ling-loop-guard`) with `cargo test -p <crate>` in the export; the Electron app and the UI with `vitest` in `desktop/electron/` and `desktop/ui/`.
 
 ---
 

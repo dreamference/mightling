@@ -1,6 +1,6 @@
 # Fast Tools — a diffusion model for Mightling's mundane work
 
-**Status:** proposed. Nothing in this spec is implemented yet. Since 2026-10-03 the diffusion slot it builds on is switched off (`DIFFUSION_ENABLED = False` in `hardware/model_matrix_registry.py`: no sidecar is started, downloaded or shown, the code is kept), so building this spec starts by switching it back on with a capable model in it.
+**Status:** proposed (on hold / tracked for Mightling 2.0 in [DREAMFERENCE_2_0.md](./DREAMFERENCE_2_0.md) §7.2). Nothing in this spec is implemented yet. Since 2026-10-03 the diffusion slot it builds on is switched off (`DIFFUSION_ENABLED = False` in `hardware/model_matrix_registry.py`: no sidecar is started, downloaded or shown, the code is kept), so building this spec starts by switching it back on with a capable model in it.
 **Goal:** let `ling` hand long, low-judgement outputs (file scaffolds, tests, docstrings, docs, commit and PR text, summaries of long tool output) to a fast diffusion model, so the main model spends its time on the decisions.
 **Builds on:**
 - the diffusion slot beside the main model (`DiffusionServerManager`, `diffusion-model set`, port 8001; [INFERENCE](./DREAMFERENCE_INFERENCE.md), `docs/dev/diffusion.md`);
@@ -8,7 +8,7 @@
 - the prompt block the launcher appends to the model catalog (`WEB_ACCESS_INSTRUCTIONS`), which is how the local model already learns `ling-search`;
 - admission control from [MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md) and host safety (`check_host_safety`).
 
-**Needs no Codex patch.** The patch budget has 567 bytes left (26,933 of 27,500 on 2026-10-01, after `0018`), so everything here lives in the launcher, the registry and `ling-admin`.
+**Needs no Codex patch.** At the time of writing the patch budget had 567 bytes left (26,933 of 27,500 on 2026-10-01, after `0018`; the cap in `tests/test_codex_branded_builder.py` was later raised to 64,000 bytes through patch `0035`), so everything here lives in the launcher, the registry and `ling-admin`.
 
 ---
 
@@ -93,12 +93,12 @@ The fast model is weaker on code than an autoregressive model of its class (Diff
 
 ### 4.3 Phase 2: a fast subagent
 
-Codex already lets the main model spawn subagents and name their model (`spawn_agent`'s `model`, `[agents.<role>] config_file`, `default_subagent_model`). A role's config layer can set `model` but **not** `model_provider` (`core/src/agent/role.rs`), so the fast model must be reachable through the main provider's URL. Phase 2 adds a small router (loopback, stdlib, beside the Gmail sidecar pattern) that dispatches /v1 requests by `model` field: the served main model to SGLang, `mightling-fast` to the diffusion server; the launcher points the provider at the router and adds `mightling-fast` to the model catalog, and a role `[agents.fast_worker]` whose layer sets `model = "mightling-fast"`. The subagent then runs a whole mundane task with tools (DiffusionGemma's tool calling works through vLLM's `gemma4` parser). Gated on §7's Responses-API check.
+Codex already lets the main model spawn subagents and name their model (`spawn_agent`'s `model`, `[agents.<role>] config_file`, `default_subagent_model`). A role's config layer can set `model` but **not** `model_provider` (`core/src/agent/role.rs`), so the fast model must be reachable through the main provider's URL. Phase 2 adds a small router (loopback, stdlib, beside the Google service sidecar pattern in `dreamference/chat/google_service.py`, formerly the Gmail sidecar) that dispatches /v1 requests by `model` field: the served main model to SGLang, `mightling-fast` to the diffusion server; the launcher points the provider at the router and adds `mightling-fast` to the model catalog, and a role `[agents.fast_worker]` whose layer sets `model = "mightling-fast"`. The subagent then runs a whole mundane task with tools (DiffusionGemma's tool calling works through vLLM's `gemma4` parser). Gated on §7's Responses-API check.
 
 ### 4.4 Not proposed
 
 - **A fast-apply model** (Morph/Relace/Mercury Apply-Edit): §1 shows the main model already copies at ~126 tok/s.
-- **Routing `/compact` or commit messages** to it: compaction is inside Codex (a patch, and the budget is 567 bytes); commit messages are below one canvas.
+- **Routing `/compact` or commit messages** to it: compaction is inside Codex (a patch, and the budget was 567 bytes when this was written; see [MIGHTLING_COMPACTION](./DREAMFERENCE_MIGHTLING_COMPACTION.md) for `0018-compact-prompt-from-config.patch` and `ling-rs/src/compaction.rs`); commit messages are below one canvas.
 - **Using it as the main model's drafter:** that is DFlash2's role already.
 
 ---

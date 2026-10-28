@@ -1,6 +1,6 @@
 # Mightling on AMD Strix Halo: the test box, a Windows node, a Linux node
 
-**Status:** research and proposal (2026-10-21); the owner's decisions D1, D2, D3 and D8 taken (2026-10-21/26, §12); the box's first measurements in §13. **Nothing is built and nothing has been run on AMD hardware.** Every speed in this document is a third-party figure read on the web (source named) or an estimate computed from those figures (marked *estimate*). Statements about Mightling are read from this repository at `2eb7cb0d` (file named).
+**Status:** research and proposal (2026-10-21); the owner's decisions D1, D2, D3 and D8 taken (2026-10-21/26, §12); the box's first measurements in §13 (2026-10-26). On 2026-10-27 the owner chose a Windows-only port of `ling-engine` for Strix Halo (no interim `llama.cpp` engine; Linux "later, if ever") and postponed the port to Mightling 2.0 after the first 140 W HIP milestone passed ([DREAMFERENCE_2_0.md](./DREAMFERENCE_2_0.md) §3). Every speed in §1–§11 is a third-party figure read on the web on 2026-10-21 (source named) or an estimate computed from those figures (marked *estimate*); §13 holds the measurements taken on the box on 2026-10-26. Statements about Mightling are read from this repository at `2eb7cb0d` (file named).
 
 **Why this exists.** The owner asked (2026-10-21) whether AMD "Strix Halo" boxes (Ryzen AI Max+ 395, Radeon 8060S, `gfx1151`, 128 GB LPDDR5X-8000 on a 256-bit bus) can be Mightling **nodes**, machines that run the model, and not only clients. Later the same day the owner **bought one**: an ACEMAGIC AI Mini PC (Ryzen AI Max+ 395, 128 GB, 2 TB NVMe, dual LAN, Wi-Fi 7, Windows 11 Pro preinstalled), arriving **Friday 2026-10-23**, to be **kept on Windows for testing**. So the question changed from "buy one?" to "what do we do with this one": (A) a Windows client test box from day 1, (B) a node on Windows, (C) a node on Linux by dual boot or WSL2.
 
@@ -316,7 +316,7 @@ Keeping Windows for testing and running the node on Linux are both possible on o
 
 ## 12. Decisions for the owner
 
-**Decided by the owner on 2026-10-21 and 2026-10-26:** D1, D2, D3 and D8 below, plus two standing points: the local network is trusted (as for the GB10 node), and the box's GPU carve-out goes to **96 GB** (from the 64 GB the first measurements were planned at). D4–D7 stay open until Phase 1's numbers are in.
+**Decided by the owner on 2026-10-21 and 2026-10-26:** D1, D2, D3 and D8 below, plus two standing points: the local network is trusted (as for the GB10 node), and the box's GPU carve-out goes to **96 GB** (from the 64 GB the first measurements were planned at). **Updated 2026-10-27 ([DREAMFERENCE_2_0.md](./DREAMFERENCE_2_0.md) §3):** for D4–D6, the owner decided against an interim `llama.cpp` engine and chose a Windows-only port of `ling-engine` (Linux "later, if ever"), postponed to Mightling 2.0 after its first 140 W HIP milestone passed on the box on 2026-10-27. D7 stays open.
 
 
 - **D1. Decided:** the box is `amd-box` (`amd-box.local` over mDNS), and the agents get access: the local administrator account over SSH with the dedicated key.

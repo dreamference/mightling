@@ -9,10 +9,10 @@
 **Goal:** make Mightling's desktop app work the way Codex desktop app does — a desktop client that drives the agent through Codex's **app-server** (JSON-RPC over stdio), with the same projects → threads → turns model, the same composer, approvals, diffs, review, worktrees and terminal — and **get there by growing today's `ling-app` in place, never breaking it**. Today `ling-app` (`desktop/`) is a window on the Onyx web chat with no coding agent in it. That window stays exactly as it is and becomes the app's **Chat** window; the coding agent arrives beside it as the **Work** window.
 
 **Builds on:**
-- `ling` itself: the launcher in `ling-rs/` resolves the model server, writes the model catalog, the prompt blocks and `config.toml`; every Codex hook Mightling has (cave mode's extension, patch `0017`; MCP tools as plain functions, `0020`; the air-gap sandbox hook, `0019`) applies to app-server clients because they are Codex's;
+- `ling` itself: the launcher in `ling-rs/` resolves the model server, writes the model catalog, the prompt blocks and `config.toml`; every Codex hook Mightling has (cave mode's extension, patch `0017` — *removed 2026-10-28 with cave mode*; MCP tools as plain functions, `0020`; the air-gap sandbox hook, `0019`) applies to app-server clients because they are Codex's;
 - the Tauri shell in `desktop/`: `main.rs` (the WebKitGTK environment), `forwarder.rs` and `discover.rs` (a client reaching its node's web UI), `auto_sign_in.js`;
 - `ling app`, the launcher's entry to the window (`ling-rs/src/app.rs`);
-- MIGHTLING_APPS (Gmail and Drive through `/apps`), MIGHTLING_NIGHT_SHIFT, MIGHTLING_AIRGAPPED, MIGHTLING_NODE, MIGHTLING_CAVE_MODE, MIGHTLING_SKILLS.
+- MIGHTLING_APPS (Gmail and Drive through `/apps`), MIGHTLING_NIGHT_SHIFT, MIGHTLING_AIRGAPPED, MIGHTLING_NODE, MIGHTLING_CAVE_MODE *(removed 2026-10-28)*, MIGHTLING_SKILLS.
 
 **Codex patches:** none for Phase 1. Phase 2 needs at most two one-line hooks, each counted against the patch cap and decided in Phase 0: the air-gap check on the app-server's thread and turn paths (§8.2), and `/app` from the TUI on Linux (§6.9).
 
@@ -67,7 +67,7 @@ The app-server it drives is the one in our submodule. Its client requests (`app-
 | The webview is WebKitGTK, not Chromium (Tauri era; since 2026-10-07 the app is Chromium through Electron, DESKTOP_ELECTRON, and the preview tab is built, DESKTOP_PARITY §2.9) | The upstream vendor's agent-driven browser plugin cannot be reproduced. A **preview pane** showing a local dev server is just another webview and can be |
 | Today's `ling-app` has users (2026-10-03; the Chat window it protects is gone, DESKTOP_ELECTRON §11, ASK §18.6) | Its window, its address, its sign-in and its client forwarding must keep working through every phase (§4.1) |
 
-So "as close as possible" means: **the same architecture** (an app-server client over stdio), **the same information architecture and interaction model** (projects, threads, a composer, item-by-item streaming, inline approvals, a review pane, worktrees per thread, terminal tabs, settings that write `config.toml`), **the same keyboard shortcuts and slash commands where they apply** (§6.10), and **sessions shared with the TUI** as the upstream vendor's app shares them with its CLI. Not the same pixels, and not the upstream vendor's trade dress: Mightling's own name, icon (`OnyxBrandAssets.render_app_icon()`), colours and copy.
+So "as close as possible" means: **the same architecture** (an app-server client over stdio), **the same information architecture and interaction model** (projects, threads, a composer, item-by-item streaming, inline approvals, a review pane, worktrees per thread, terminal tabs, settings that write `config.toml`), **the same keyboard shortcuts and slash commands where they apply** (§6.10), and **sessions shared with the TUI** as the upstream vendor's app shares them with its CLI. Not the same pixels, and not the upstream vendor's trade dress: Mightling's own name, icon (`OnyxBrandAssets.render_app_icon()` — *removed when Onyx was retired; icons now live in `desktop/electron/icons/`*), colours and copy.
 
 ---
 
@@ -188,14 +188,14 @@ Status: **Same** (the Codex app's behaviour, on our server), **Mightling's** (th
 | Text, `@` file mentions | `turn/start`, `fuzzyFileSearch` | **Same** | 1 |
 | Images and attachments | `thread/attachment/*`, input items | **Same** for images (Qwen3.8 is text-only today: attachments are offered only when the served model's entry says `supports_vision`) | 2 |
 | Model and effort picker | `model/list`, `turn/start` `model`/`effort` | **Mightling's:** `config/read`'s `model` (set by the launcher once Phase 0 item 2 ships; measured with `-c model`), with `$CODEX_HOME/model_catalog.json` as the fallback, while `model/list` is empty (§5); efforts the patched template accepts | 1 |
-| Personality (`/personality`) | `personality` | **Mightling's: cave mode** (`/cavemode`, MIGHTLING_CAVE_MODE), not a second mechanism; `personality` is not sent | 2 |
+| Personality (`/personality`) | `personality` | **Mightling's: cave mode** (`/cavemode`, MIGHTLING_CAVE_MODE — *removed 2026-10-28, `tests/test_removed_cave_settings.py`*), not a second mechanism; `personality` is not sent | 2 |
 | Plan mode | `turn/start` `collaborationMode`, `collaborationMode/list` (experimental, §5) | **Same** | 2 |
 | Steer while running, queued follow-ups, stop | `turn/steer`, `thread/queue/*` (experimental), `turn/interrupt` | **Same** | 1 |
 | Edit the previous message (Esc twice) | `thread/revert` + `turn/start` | **Same** | 2 |
 | Context-usage indicator and Compress | `thread/tokenUsage/updated`, `thread/compact/start` | **Same**, against the launcher's KV-pool-based limit | 1 |
 | Fork a thread | `thread/fork` | **Same** | 2 |
 | Thread goal | `thread/goal/*` | **Same** | 2 |
-| Slash commands | client | The Codex ones, plus Mightling's: `/airgapped`, `/cavemode`, `/night`, `/prompt`, `/apps`, each a call to the launcher's own command (`ling airgapped`, `ling night`, `ling prompt` …) so the TUI and the app cannot drift | 2 |
+| Slash commands | client | The Codex ones, plus Mightling's: `/airgapped`, `/cavemode` *(removed 2026-10-28)*, `/night`, `/prompt`, `/apps`, each a call to the launcher's own command (`ling airgapped`, `ling night`, `ling prompt` …) so the TUI and the app cannot drift | 2 |
 | Voice dictation | client; `thread/realtime/*` is the upstream vendor's realtime API | **Mightling's:** the speech-to-text sidecar (`dream-stt`, CPU Whisper) already running for Chat; `thread/realtime/*` is never sent | 2 |
 
 ### 6.3 The stream
@@ -316,7 +316,7 @@ The Full Access refusal at `on` (MIGHTLING_AIRGAPPED §14.7) is enforced in the 
 
 Where the check goes, decided in Phase 0 in this order:
 1. **Codex's requirements system** (`allowed_permission_profiles` in `requirements.toml`) already removes profiles for every client, but its file is system-wide (`/etc/codex/requirements.toml`) and fixed, not per session: rejected unless a per-`CODEX_HOME` layer exists.
-2. **The launcher's registered extension** (patch `0017`'s registry): if an extension can veto a thread or turn configuration, the rule moves there with no new patch.
+2. **The launcher's registered extension** (patch `0017`'s registry — *retired 2026-10-28 when cave mode was removed*): if an extension can veto a thread or turn configuration, the rule moves there with no new patch.
 3. **One hook** where the app-server resolves a thread's or turn's permissions (`thread_processor.rs`, beside `has_permission_override`, and the turn path in `turn_processor.rs`), refusing Full Access when `ling_airgapped::resolve` says `on`, with the same message as the launcher; and `permissionProfile/list` answering `allowed: false` with the reason at `on`, so every client's picker shows it.
 
 **The seal is a second target.** The seal's protection rests on `$XDG_RUNTIME_DIR` being read-only inside the sandbox (MIGHTLING_AIRGAPPED §14.5). A client passing `runtimeWorkspaceRoots` (or a `permissions` profile, or `config`'s `sandbox_workspace_write.writable_roots`) that covers `$XDG_RUNTIME_DIR/ling-airgapped` would make it writable, and a command could then delete the seal. The same check therefore also refuses, at `on`, any writable root that contains the seal's directory or the directory itself.
@@ -351,7 +351,7 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 
 ## 11. Phases
 
-> **Dated (2026-10-19):** Phase 1 shipped (1.4.0, then on Electron in 1.5.1). Phases 2 and 3 were re-planned and are tracked in DESKTOP_PARITY §4.2 and §4.3: Phase 2 merged 2026-10-16 to 2026-10-18 (1d9eb48 last); Phase 3 items 1 to 10 and 12 merged 2026-10-18 (the Windows app in CI as an unsigned zip, 54a4578); dark mode not built and not approved. `git.rs` was never written: window-side git is `desktop/electron/src/git.ts` and `worktree.ts` on the `codex-worktree` contract (Phase 0 item 9 still open).
+> **Dated (2026-10-19):** Phase 1 shipped (1.4.0, then on Electron in 1.5.1). Phases 2 and 3 were re-planned and are tracked in DESKTOP_PARITY §4.2 and §4.3: Phase 2 merged 2026-10-16 to 2026-10-18 (1d9eb48 last); Phase 3 items 1 to 10 and 12 merged 2026-10-18 (the Windows app in CI as an unsigned zip, 54a4578); dark mode approved and built on 2026-10-20 (§6.1, §14 Q3). `git.rs` was never written: window-side git is `desktop/electron/src/git.ts` and `worktree.ts` on the `codex-worktree` contract (Phase 0 item 9 still open).
 
 **Phase 0 — check (about a day; part done, §5).**
 1. ~~`ling app-server` handshake, sign-in gate, one turn, clean stdout~~ — done (§5).
@@ -368,7 +368,7 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 
 **Phase 1 — Work beside Chat.** The second window, the bridge, the busy marker, the project and thread sidebar, the composer, streaming items, approvals, the permission picker, interrupt and steer, the context indicator, the model picker, settings, the start-up screen, revert, the egress audit's `--app` mode, and the Chat window unchanged. *Done when* (with Phase 0 item 2 shipped, so both sides run Mightling's prompt) a task started in Work can be resumed in the TUI and the other way round, the audit passes, the Chat test passes unchanged — and only then does `ling app` open Work by default.
 
-**Phase 2 — the rest of the Codex surface.** Review pane and git, worktrees and hand-off, terminal, command palette, pop-outs, notifications, prevent-sleep, fork, goal, edit-previous, images, skills, plugins, apps, MCP, hooks, Night Shift as automations, Mightling's slash commands, dictation, cave mode as personality, plan mode, `ling app --thread` and the `ling://` handler, the air-gap and node indicators, the KV headroom.
+**Phase 2 — the rest of the Codex surface.** Review pane and git, worktrees and hand-off, terminal, command palette, pop-outs, notifications, prevent-sleep, fork, goal, edit-previous, images, skills, plugins, apps, MCP, hooks, Night Shift as automations, Mightling's slash commands, dictation, cave mode as personality *(cave mode removed 2026-10-28)*, plan mode, `ling app --thread` and the `ling://` handler, the air-gap and node indicators, the KV headroom.
 
 **Phase 3 — optional.** `/app` from the TUI on Linux (one hook), the `ssh` host kind to a node, the preview pane, the artifact viewer, external agent import, dark mode, macOS and Windows builds.
 

@@ -36,11 +36,11 @@ The rest are recorded here for the first time: the model server's `1.8.0` step a
 | Decided | Gate | Where recorded |
 |---|---|---|
 | 2026-10-26 (the owner) | The default once it reads images, serves adapters and runs more than two requests at once | `docs/dev/models-and-engines.md` ("ling-serve beside SGLang"), [DREAMFERENCE_RELEASE_1.7.2.md](./DREAMFERENCE_RELEASE_1.7.2.md), the comment above `QWEN38_LING_RECIPE` |
-| 2026-10-27 (the owner) | `1.8.0` is the step before 2.0: `ling-serve` becomes the default once it handles 4 or more concurrent conversations and a benchmark night shows no loss against SGLang, cut only with the owner's OK. 2.0 builds on that engine | here, for the first time |
+| 2026-10-27 (the owner) | `1.8.0` is the step before 2.0: `ling-serve` becomes the default once it handles 4 or more concurrent conversations and a benchmark night shows no loss against SGLang, cut only with the owner's OK. 2.0 builds on that engine | here, and `docs/dev/release-1.8.0.md` (with the owner's 2026-10-28 bar: 4-session pooled decode ≥ 34.6 tok/s, greedy-identical paged vs flat output, and a night with no loss) |
 
 ### Spec(s)
 
-- `docs/dev/models-and-engines.md` ("ling-serve beside SGLang, opt-in (1.7.2)": the recipe, the image, the launch and the measurements)
+- `docs/dev/models-and-engines.md` ("ling-serve beside SGLang, opt-in (1.7.2)": the recipe, the image, the launch and the measurements) and `docs/dev/release-1.8.0.md` (the `1.8.0` cut checklist and bar)
 - [DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md) (§1, the default model and its drafter)
 - [DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md) (§5.3, the SGLang recipe `ling-serve` would replace, and custom tools)
 - [DREAMFERENCE_RELEASE_1.7.2.md](./DREAMFERENCE_RELEASE_1.7.2.md) (the opt-in engine and its measured numbers; still a draft)
@@ -58,7 +58,8 @@ The rest are recorded here for the first time: the model server's `1.8.0` step a
 ### What was already measured or built
 
 - Opt-in support, on `main` for `1.7.2` (its release notes are still a draft): `QWEN38_LING_RECIPE` (`engine_recipes["ling"]` on `qwen3.8-27b-nvfp4-dflash2` in `dreamference/hardware/model_matrix_registry.py`), `LingServeLaunchBuilder` (`dreamference/vllm_server/ling_serve_launch_builder.py`), `ling-admin server start --engine ling`, `server_engine = "ling"` in `DreamferenceConfig`, and `DREAMFERENCE_SERVER_ENGINE=ling`.
-- Container image `ghcr.io/dreamference/ling-serve:8d112d0d2539` (`sha256:7bff4e37e731893a6248b0632897a2740e1842e0b19b28a68f0eee22d670caf8`, ling-engine 8d112d0: bdda3a2 plus the tokenizer cache's mutex; bdda3a2's own image, `sha256:87807c50…`, was deleted because its binary carried a home path), built by `scripts/build_ling_serve_image.sh` on `nvidia/cuda:13.0.2-base-ubuntu24.04` with `python3` for the model gate: **682 MB** against SGLang's **33.7 GB**.
+- Mightling's side of the `1.8.0` switch, merged on 2026-10-28 (`docs/dev/release-1.8.0.md`, inert at the `1.7.2` pin): `QWEN38_DEFAULT_ENGINE = ENGINE_SGLANG`, `QWEN38_LING_SESSIONS = 4`, `QWEN38_LING_BATCH = 4` and `LING_ENGINE_KV_PAGES_SINCE = "f180b44a40369d7dd03f9ae97e7fa8be4ece1380"` (`dreamference/hardware/model_matrix_registry.py`); `LingServeLaunchBuilder.server_args` passing `--sessions 4 --batch 4 --kv-pages` when `"kv-pages"` is in `engine_features`; `VLLMServerManager.ling_serve_plan` running `--plan-only` for the pre-load memory check; `scripts/pin_ling_serve_image.py`; `ling-rs/src/share_scope.rs` sending `X-Ling-Share-Scope` (opaque owner + repository hash) on every model-server request for P4c prefix-cache scoping; `DreamferenceCLIController._engine_for_adapters` (`dreamference/cli/dreamference_cli_controller.py`) keeping launches with installed LoRA adapters on SGLang (falling back when `ling` comes from the default or config, and refusing `--engine ling` with exit 2); and the vision runtime libraries (`libpng16-16t64`, `libwebp7`, `libjpeg-turbo8`) in `docker/ling-serve/Dockerfile`.
+- Container image `ghcr.io/dreamference/ling-serve:8d112d0d2539` (`sha256:7bff4e37e731893a6248b0632897a2740e1842e0b19b28a68f0eee22d670caf8`, ling-engine 8d112d0: bdda3a2 plus the tokenizer cache's mutex, rebuilt under neutral paths with binary SHA-256 `8e517c88…`; the earlier `8d112d0` build `sha256:9428996a…` and bdda3a2's `sha256:87807c50…` were deleted because their binaries carried a home path), built by `scripts/build_ling_serve_image.sh` on `nvidia/cuda:13.0.2-base-ubuntu24.04` with `python3` for the model gate: **681–682 MB** against SGLang's **33.7 GB**.
 - Engine commit `bdda3a244a9cd24742346dce806561f7441405fd` (`b8e9451`, tested on SWE-bench nights 12 and 15, plus the parse-only tool-call fix `fix/toolcall-text` so tool calls with surrounding prose are emitted as structured calls), binary SHA-256 `598e5520…`, verified greedy-identical to night 15's binary on all 16 turns of `agentlong`.
 - Freeform custom tools (`apply_patch` and Code Mode `exec`) are handled natively by `ling-serve` on `/v1/responses` without translation ([DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md) §5.3).
 - Live measurements on a GB10 node (2026-10-26) at `--max-context 262144` with DFlash2 draft block 12, CUDA graphs, PDL, tree verification, megakernel stages and 2 resident sessions:
@@ -72,9 +73,9 @@ The rest are recorded here for the first time: the model server's `1.8.0` step a
 
 ### Open questions
 
-- How the two gates combine. The 2026-10-26 gate also asks for images and adapters, which the 2026-10-27 `1.8.0` gate does not name. Does `1.8.0` wait for vision (`input_image`, `/model_info`) and unmerged LoRA serving ([DREAMFERENCE_MIGHTLING_ADAPTERS.md](./DREAMFERENCE_MIGHTLING_ADAPTERS.md) §9), or do they come in 2.0? Structured output and `--api-key` are the other SGLang features `ling-serve` lacks.
+- How the two gates combine. The 2026-10-26 gate also asks for images and adapters, which the 2026-10-27 `1.8.0` gate does not name. As recorded on 2026-10-28 (`docs/dev/release-1.8.0.md`), `1.8.0` includes vision (`input_image`, `/model_info`), while unmerged LoRA serving in `ling-serve` ([DREAMFERENCE_MIGHTLING_ADAPTERS.md](./DREAMFERENCE_MIGHTLING_ADAPTERS.md) §9) waits for 2.0 and `DreamferenceCLIController._engine_for_adapters` keeps a node with installed adapters on SGLang. Structured output and `--api-key` are the other SGLang features `ling-serve` lacks.
 - Whether SGLang stays in `ModelMatrixRegistry` as `--engine sglang` in 2.0 (for third-party models and fallback) or is removed from the default installation flow.
-- How host-safety and container memory probes account for `cudaMalloc` unified memory allocations that sit outside the container's cgroup `memory.current`.
+- How host-safety and container memory probes account for `cudaMalloc` unified memory allocations that sit outside the container's cgroup `memory.current` (the pre-load check now uses `VLLMServerManager.ling_serve_plan` with `--plan-only` to size the 4-session allocation before launch).
 
 ---
 
