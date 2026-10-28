@@ -4,7 +4,7 @@ Developer notes behind the remote-access line in `AGENTS.md`. Spec: `specs/DREAM
 
 ## What it is
 
-A client off the LAN reaches its node **by name** over a NetBird overlay whose management, signal and private DNS run on the node, under the node's own name-constrained CA. One rented box runs only NetBird's relay (with STUN) and haproxy on port 443, which routes the box's own server name, unopened, to an SSH tunnel the node dials out. The box terminates no TLS for the control plane and holds no key of the overlay.
+A client off the LAN reaches its node **by name** over a NetBird overlay whose management, signal and private DNS run on the node, under the node's own name-constrained CA, except that the control plane presents a public Let's Encrypt certificate since 2026-10-28 (below). One rented box runs only NetBird's relay (with STUN) and haproxy on port 443, which routes the box's own server name, unopened, to an SSH tunnel the node dials out. The box terminates no TLS for the control plane and holds no key of the overlay.
 
 - **The box name:** `remote.dreamference.ai` (one name). Control plane at `https://remote.dreamference.ai:443` through haproxy and the tunnel; relay at `rels://remote.dreamference.ai:33080` (TCP and UDP), STUN on 3478/udp.
 - **The node's name in the overlay:** `mightling-<node id>.netbird.selfhosted`, so the name carries the node's id.
@@ -14,7 +14,8 @@ A client off the LAN reaches its node **by name** over a NetBird overlay whose m
 
 - **Node** (`dreamference/remote/`): `RemoteSettings` (paths, pins, `remote.json`), `RemoteCertificateAuthority` (`openssl`, name-constrained to the CA scope and `netbird.selfhosted`), `RemoteControlPlane` (the container, its configuration, the loopback proxy, the management API), `RemoteBox` (probe, relay extraction, haproxy and the relay over SSH, the port-443 check), `RemoteTunnel`, `RemoteNodePeer`, `RemoteEnrolment` (the code, HMAC both ways, the LAN listener on 3190), `RemoteAccess` (the commands). Only `RemoteAccess` prints (a per-file `T201` ignore, console-facing); the others report failures through their module logger, which prints the bare line to standard error.
 - **Launcher** (`ling-rs/`): `remote_join.rs` (`ling node remote join`), the overlay tier in `node.rs`, the overlay name in `NO_PROXY`, and the `remote` field in both byte-identical locator copies.
-- **Commands:** `ling-admin remote setup <dns-name> [--ssh <alias>] [--ca-scope <domain>] [--box-only] [--yes]`, `status`, `remove [--purge]`, `code`, `code --bundle-file <path>` (one ephemeral peer's bundle, one-use 10-minute key, written to a new 0600 file with no code and no LAN listener: for the off-LAN acceptance runner), `peers`, `revoke <peer>`.
+- **The public certificate** (`RemotePublicCertificate`, spec §15): lego, CAA, the copy into `server/` and the container restart, and the renewal timer.
+- **Commands:** `ling-admin remote setup <dns-name> [--ssh <alias>] [--ca-scope <domain>] [--box-only] [--yes]`, `status`, `remove [--purge]`, `code`, `code --bundle-file <path>` (one ephemeral peer's bundle, one-use 10-minute key, written to a new 0600 file with no code and no LAN listener: for the off-LAN acceptance runner), `peers`, `revoke <peer>`, `certificate issue [--staging]|renew|off`.
 
 ## Fixed on 2026-10-20 (ported from the Phase 1 that was reverted)
 
@@ -60,8 +61,21 @@ The check from outside the LAN runs on GitHub-hosted runners, not a phone, so no
 - **Daily:** the user units `mightling-remote-acceptance.timer` (13:20 UTC; GitHub's own schedule does not fire for us) and `.service` (`mightling-batch.slice`, `Nice=10`), printed by `run.sh units`; `--notify` sends `owner-notify` on failure only.
 - **The logs:** pass/fail lines and numbers only. Every field of the bundle, the node's overlay label, the runner's own overlay address and name and the node's overlay address are masked with `::add-mask::` before anything could print them, as a second guard to printing none of them.
 - **What the runner may do:** the overlay's ACL lets every peer reach the node's ports, so the workflows do the checks above and nothing else, and leave the overlay at the end.
-- **Results (2026-10-28):** Linux passed, P2P at about 152 ms and relayed at about 164 ms (spec §13.3, acceptance 2). Android, with the node's CA as a user certificate: enrolment fails on the certificate, and a control arm with the CA in the system store connects (spec §4.2). Android is not part of the daily run.
+- **Results (2026-10-28):** Linux passed, P2P at about 152 ms and relayed at about 164 ms (spec §13.3, acceptance 2). Android, with the node's CA as a user certificate: enrolment fails on the certificate, and a control arm with the CA in the system store connects (spec §4.2). That led to the public certificate. `android.yml` now takes `ca_mode` (`none` by default: no CA of ours on the emulator; `user`: the old test). Android is not part of the daily run.
 - **Found while building it:** `gh run watch` can return before the run ends; the driver polls the run's status instead, since nothing may be revoked while the runner could still join.
+
+## The public certificate (2026-10-28, spec §15)
+
+The owner decided that Android's app, which trusts only the system store, should not need our CA, so the control plane presents a Let's Encrypt certificate for `remote.dreamference.ai`. The relay and everything else keep the node CA.
+
+- **Issue:** `ling-admin remote certificate issue` (`--staging` first to test: Let's Encrypt's staging CA, nothing served). lego 5.5.2 is pinned by SHA-256 in `RemoteSettings` (`LEGO_ARCHIVES`) and downloaded into `remote/acme/bin/`. DNS-01 runs in Cloudflare with `~/.config/dreamference/cloudflare-token`, passed to lego as `CF_DNS_API_TOKEN_FILE` and never printed. The account and certificate live in `remote/acme/` (0600/0700); the staging copies are in `remote/acme-staging/`.
+- **CAA:** before every issue or renewal, the box's name carries `issue "letsencrypt.org; validationmethods=dns-01; accounturi=<account>"` for each local account, and `issuewild ";"`. Without it the box, which answers for the name on 443, could get a trusted certificate of its own. The record is rewritten whenever the accounts change (a `remove --purge` and a new account, say). `--purge` leaves it in DNS.
+- **Serving:** the certificate and key are copied into `server/tls.crt` and `server/tls.key`, then `docker restart dreamference-remote`, because NetBird's combined server reads the files only at start. The command waits until loopback 33443 presents the new leaf. Peers' tunnels carry on: in a 0.2 s ping over the overlay across the switch, none was lost.
+- **Renewal:** `mightling-remote-certificate.timer` runs daily, `.service` in `mightling-batch.slice`, `ExecStart=%h/.local/bin/ling-admin remote certificate renew`. It restarts the control plane only when lego got a new certificate (renewal under 30 days, or earlier when the CA's renewal information asks).
+- **Status:** `remote status` prints "Public cert: <issuer>, valid N more days" and "Renewal: <timer state>", and checks 443 against the system store **and** the installed leaf's SHA-256.
+- **Rollback:** `ling-admin remote certificate off` serves the node CA's certificate again and disables the timer. Linux and macOS clients that installed the CA keep working; Android loses management.
+- **Seen on the switch:** the node's own calls to management (`RemoteControlPlane._request`) used to trust only the node CA, so the old code's `remote code`, `peers` and `revoke` fail against the public certificate. They now trust the system store and the node CA. Any checkout running `ling-admin` must have the new code before the switch.
+- **The relay** keeps the node CA's certificate, and NetBird's relay client also verifies against the system store, so Android has no relayed path (spec §15.4). On the emulator, with no CA of ours (run of 2026-10-28), the app enrolled and showed Connected, but pings to the node got 0/5 replies: both relay transports failed with `x509: certificate signed by unknown authority`, and peer to peer did not come up from behind the emulator's NAT.
 
 ## Live-test plan after the migration (needs a client)
 
