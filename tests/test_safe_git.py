@@ -6,6 +6,7 @@ run (owner's choice, 2026-10-28), and a test pins that.
 """
 
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -183,7 +184,8 @@ def test_the_environment_drops_program_variables_and_keeps_the_callers_ssh():
     env = SafeGit.environment(
         {"GIT_EXTERNAL_DIFF": "x", "GIT_PROXY_COMMAND": "y", "GIT_SSH_COMMAND": "ssh -i k"}
     )
-    assert "GIT_EXTERNAL_DIFF" not in env and "GIT_PROXY_COMMAND" not in env
+    assert "GIT_EXTERNAL_DIFF" not in env
+    assert env["GIT_PROXY_COMMAND"] == ""
     assert env["GIT_SSH_COMMAND"] == "ssh -i k"
     assert env["GIT_CONFIG_NOSYSTEM"] == "1" and env["GIT_PAGER"] == "cat"
 
@@ -202,3 +204,65 @@ def test_driver_names_come_from_the_checkouts_own_config(tmp_path):
     assert command[:2] == ["git", "--no-pager"]
     assert command[-4:] == ["diff", "--no-ext-diff", "--no-textconv", "HEAD"][-4:]
     assert "core.fsmonitor=false" in command
+
+
+def test_a_git_proxy_and_a_signing_key_command_in_the_checkout_never_run(tmp_path):
+    """core.gitProxy is first-value-wins, so `-c core.gitProxy=` alone lets the checkout's run."""
+    marker = tmp_path / "marker"
+    proxy = _script(tmp_path, "proxy", marker)
+    key = _script(tmp_path, "keycommand", marker)
+
+    def make(name: str) -> Path:
+        repo = tmp_path / name
+        repo.mkdir()
+        _plain(repo, "init", "-q")
+        for k, v in (
+            ("core.gitProxy", proxy),
+            ("gpg.format", "ssh"),
+            ("commit.gpgSign", "true"),
+            ("gpg.ssh.defaultKeyCommand", key),
+            ("user.name", "t"),
+            ("user.email", "t@t"),
+        ):
+            _plain(repo, "config", k, v)
+        return repo
+
+    control = make("control")
+    for args in (
+        ["-c", "core.gitProxy=", "ls-remote", "git://127.0.0.1:1/x"],
+        ["commit", "-q", "--allow-empty", "-m", "m"],
+    ):
+        subprocess.run(
+            ["git", "-C", str(control), *args],
+            capture_output=True,
+            env={k: v for k, v in PLAIN_ENV.items() if k != "GIT_PROXY_COMMAND"},
+        )
+    assert "ran-proxy" in _ran(marker) and "ran-keycommand" in _ran(marker)
+    marker.unlink()
+
+    repo = make("repo")
+    SafeGit.run(["ls-remote", "git://127.0.0.1:1/x"], repo)
+    SafeGit.run(["commit", "-q", "--allow-empty", "-m", "m"], repo)
+    assert _ran(marker) == ""
+
+
+def test_the_rust_helper_and_the_desktop_app_pin_the_same_keys():
+    """The three copies (Rust helper, this module, the desktop app's git.ts) stay in step."""
+    root = Path(__file__).resolve().parent.parent
+    rust = (root / "ling-rs" / "safegit" / "src" / "lib.rs").read_text()
+    rust_block = rust.split("pub const FIXED_CONFIG", 1)[1].split("];", 1)[0]
+    assert set(re.findall(r'"([^"]+=[^"]*)"', rust_block)) == set(FIXED_CONFIG)
+    assert '("GIT_PROXY_COMMAND", "")' in rust
+    ts = (root / "desktop" / "electron" / "src" / "git.ts").read_text()
+    ts_block = ts.split("export const SAFE_CONFIG", 1)[1].split("];", 1)[0]
+    ts_keys = {pair.split("=", 1)[0] for pair in re.findall(r'"([^"]+=[^"]*)"', ts_block)}
+    program_keys = {
+        pair.split("=", 1)[0]
+        for pair in FIXED_CONFIG
+        if re.search(
+            r"program|Command|gitProxy|external|helper|fsmonitor|pager|askPass|editor|ext\.allow",
+            pair,
+        )
+    }
+    assert program_keys <= ts_keys, program_keys - ts_keys
+    assert 'env.GIT_PROXY_COMMAND = "";' in ts

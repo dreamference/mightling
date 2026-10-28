@@ -46,6 +46,7 @@ FIXED_CONFIG: Final[tuple[str, ...]] = (
     "gpg.ssh.program=ssh-keygen",
     "gpg.x509.program=gpgsm",
     "gpg.openpgp.program=gpg",
+    "gpg.ssh.defaultKeyCommand=",
     "log.showSignature=false",
     "protocol.ext.allow=never",
     "uploadpack.packObjectsHook=",
@@ -58,13 +59,15 @@ FIXED_CONFIG: Final[tuple[str, ...]] = (
 REMOVED_ENV: Final[tuple[str, ...]] = (
     "GIT_EXTERNAL_DIFF",
     "GIT_CONFIG_PARAMETERS",
-    "GIT_PROXY_COMMAND",
 )
 FIXED_ENV: Final[dict[str, str]] = {
     "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_PAGER": "cat",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_OPTIONAL_LOCKS": "0",
+    # Empty, not removed: core.gitProxy is first-value-wins, so a -c pair cannot replace the
+    # checkout's own value, but git reads no core.gitProxy once this is set, and empty means none.
+    "GIT_PROXY_COMMAND": "",
 }
 _UNWRITABLE: Final[re.Pattern] = re.compile("[=\n]")
 _NETWORK_SUBCOMMANDS: Final[frozenset[str]] = frozenset(

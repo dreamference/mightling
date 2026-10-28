@@ -753,10 +753,19 @@ impl Probe for SystemProbe {
         let (prog, args) = argv
             .split_first()
             .ok_or_else(|| "empty command".to_string())?;
-        let output = Command::new(prog)
-            .args(args)
-            .output()
-            .map_err(|e| format!("spawn {prog}: {e}"))?;
+        // An allowlisted `git [-C dir] <read-only subcommand>` still reads the checkout's config,
+        // which can name programs (diff.external, a filter, fsmonitor): run it through the helper.
+        let output = if prog == "git" {
+            let (dir, rest) = match args {
+                [flag, dir, rest @ ..] if flag == "-C" => (Path::new(dir.as_str()), rest),
+                _ => (Path::new("."), args),
+            };
+            let rest: Vec<&str> = rest.iter().map(String::as_str).collect();
+            ling_safegit::output(dir, &rest)
+        } else {
+            Command::new(prog).args(args).output()
+        }
+        .map_err(|e| format!("spawn {prog}: {e}"))?;
         Ok(CommandOutput {
             exit_code: output.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -1936,5 +1945,44 @@ mod tests {
         probe.pid_alive_polls.push_back(false);
         let req = WatchRequest { kind: "pid_exit".to_string(), pid: Some(77), ..Default::default() };
         assert!(execute(&req, &mut probe).unwrap().met);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_allowlisted_git_command_runs_no_program_the_checkouts_config_names() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("ling-watch-git-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let marker = root.join("marker");
+        let tool = root.join("external");
+        std::fs::write(&tool, format!("#!/bin/sh\necho ran >> '{}'\n", marker.display())).unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let git = |args: &[&str]| {
+            let ok = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "init"]);
+        git(&["config", "diff.external", tool.to_str().unwrap()]);
+        std::fs::write(repo.join("a.txt"), "two\n").unwrap();
+
+        let argv: Vec<String> = ["git", "-C", repo.to_str().unwrap(), "diff"].iter().map(|s| s.to_string()).collect();
+        let out = SystemProbe::new().run_command(&argv).unwrap();
+        assert_eq!(out.exit_code, 0, "{}", out.stderr);
+        assert!(out.stdout.contains("+two"), "{}", out.stdout);
+        assert!(!marker.exists(), "diff.external ran");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

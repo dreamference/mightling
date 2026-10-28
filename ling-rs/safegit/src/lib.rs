@@ -38,6 +38,7 @@ pub const FIXED_CONFIG: &[&str] = &[
     "gpg.ssh.program=ssh-keygen",
     "gpg.x509.program=gpgsm",
     "gpg.openpgp.program=gpg",
+    "gpg.ssh.defaultKeyCommand=",
     "log.showSignature=false",
     "protocol.ext.allow=never",
     "uploadpack.packObjectsHook=",
@@ -52,11 +53,18 @@ pub const FIXED_CONFIG: &[&str] = &[
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Environment variables the command must not inherit (they name a program for diff).
-pub const REMOVED_ENV: &[&str] = &["GIT_EXTERNAL_DIFF", "GIT_CONFIG_PARAMETERS", "GIT_PROXY_COMMAND"];
+pub const REMOVED_ENV: &[&str] = &["GIT_EXTERNAL_DIFF", "GIT_CONFIG_PARAMETERS"];
 
-/// Environment variables the command sets.
-pub const FIXED_ENV: &[(&str, &str)] =
-    &[("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_PAGER", "cat"), ("GIT_TERMINAL_PROMPT", "0"), ("GIT_OPTIONAL_LOCKS", "0")];
+/// Environment variables the command sets. `GIT_PROXY_COMMAND` is set empty rather than removed:
+/// `core.gitProxy` is first-value-wins, so a `-c` pair cannot replace the checkout's own value,
+/// but git reads no `core.gitProxy` at all once the variable is set, and an empty one means none.
+pub const FIXED_ENV: &[(&str, &str)] = &[
+    ("GIT_CONFIG_NOSYSTEM", "1"),
+    ("GIT_PAGER", "cat"),
+    ("GIT_TERMINAL_PROMPT", "0"),
+    ("GIT_OPTIONAL_LOCKS", "0"),
+    ("GIT_PROXY_COMMAND", ""),
+];
 
 /// The config entries the checkout itself supplies (its own `.git/config`, a linked worktree's, and
 /// anything the command line adds), as (key, value): section and variable lowercased by git, the
@@ -348,6 +356,48 @@ mod tests {
         }
         let out = output(&repo, &["push", "origin", "HEAD:refs/heads/probe"]).unwrap();
         let _ = out;
+        let ran = fs::read_to_string(&marker).unwrap_or_default();
+        assert!(ran.is_empty(), "a configured program ran: {ran}");
+    }
+
+    /// A repository whose own config names a `git://` proxy and an SSH signing-key command, both
+    /// of which git reads only from the first value it meets (so a `-c` pair alone does not win).
+    fn proxy_and_key_command(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let root = scratch(name);
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let marker = root.join("marker");
+        plain(&repo, &["init", "-q"]);
+        let proxy = script(&root, "proxy", &marker);
+        let key = script(&root, "keycommand", &marker);
+        for (k, v) in [
+            ("core.gitProxy", proxy.as_str()),
+            ("gpg.format", "ssh"),
+            ("commit.gpgSign", "true"),
+            ("gpg.ssh.defaultKeyCommand", key.as_str()),
+            ("user.name", "t"),
+            ("user.email", "t@t"),
+        ] {
+            plain(&repo, &["config", k, v]);
+        }
+        (repo, marker)
+    }
+
+    #[test]
+    fn a_git_proxy_and_a_signing_key_command_in_the_checkout_never_run() {
+        // Control: plain git runs both programs from this config.
+        let (repo, marker) = proxy_and_key_command("proxy-control");
+        let plain_git = |args: &[&str]| {
+            let _ = Command::new("git").arg("-C").arg(&repo).args(args).env("GIT_CONFIG_NOSYSTEM", "1").env_remove("GIT_PROXY_COMMAND").output();
+        };
+        plain_git(&["-c", "core.gitProxy=", "ls-remote", "git://127.0.0.1:1/x"]);
+        plain_git(&["commit", "-q", "--allow-empty", "-m", "m"]);
+        let ran = fs::read_to_string(&marker).unwrap_or_default();
+        assert!(ran.contains("ran-proxy") && ran.contains("ran-keycommand"), "control ran: {ran:?}");
+
+        let (repo, marker) = proxy_and_key_command("proxy");
+        let _ = output(&repo, &["ls-remote", "git://127.0.0.1:1/x"]);
+        let _ = output(&repo, &["commit", "-q", "--allow-empty", "-m", "m"]);
         let ran = fs::read_to_string(&marker).unwrap_or_default();
         assert!(ran.is_empty(), "a configured program ran: {ran}");
     }

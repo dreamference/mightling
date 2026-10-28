@@ -20,7 +20,8 @@ export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv
   const env: NodeJS.ProcessEnv = { ...base, GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat", GIT_EDITOR: "true", LC_ALL: "C", GIT_CONFIG_NOSYSTEM: "1", GIT_OPTIONAL_LOCKS: "0" };
   delete env.GIT_EXTERNAL_DIFF;
   delete env.GIT_CONFIG_PARAMETERS;
-  delete env.GIT_PROXY_COMMAND;
+  // Empty, not deleted: core.gitProxy is first-value-wins, so only the variable outranks the checkout's own value.
+  env.GIT_PROXY_COMMAND = "";
   return env;
 }
 
@@ -47,6 +48,7 @@ export const SAFE_CONFIG = [
   "gpg.ssh.program=ssh-keygen",
   "gpg.x509.program=gpgsm",
   "gpg.openpgp.program=gpg",
+  "gpg.ssh.defaultKeyCommand=",
   "log.showSignature=false",
   "protocol.ext.allow=never",
   "submodule.recurse=false",

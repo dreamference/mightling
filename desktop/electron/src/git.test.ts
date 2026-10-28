@@ -188,6 +188,11 @@ describe("git on a checkout the agent wrote the config of", () => {
     const listing = ["system", "filter.lfs.clean\ngit-lfs clean", "local", "filter.evil.smudge\nrm -rf", "local", "core.bare\nfalse", ""].join("\0");
     expect(git.driverOverridesFrom(listing)).toEqual(["filter.evil.smudge="]);
   });
+
+  it("names no git:// proxy (first value wins, so only the variable outranks the checkout's) and no signing-key command", () => {
+    expect(git.gitEnv({ GIT_PROXY_COMMAND: "/tmp/x" }).GIT_PROXY_COMMAND).toBe("");
+    expect(git.SAFE_CONFIG).toContain("gpg.ssh.defaultKeyCommand=");
+  });
 });
 
 describe("editors", () => {
