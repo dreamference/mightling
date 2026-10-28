@@ -106,6 +106,15 @@ def keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return folder
 
 
+REAL_LOOKUP_TOKEN = as_team.GitHub.lookup_token
+
+
+@pytest.fixture(autouse=True)
+def no_gh_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every test off the real `gh`; the lookup tests restore REAL_LOOKUP_TOKEN."""
+    monkeypatch.setattr(as_team.GitHub, "lookup_token", lambda self, team: None)
+
+
 def github(routes: dict[tuple[str, str], Any]) -> tuple[Any, FakeSession]:
     session = FakeSession(routes)
     return as_team.GitHub(session=session, signer=FakeSigner()), session
@@ -327,12 +336,36 @@ def test_the_token_is_minted_for_one_repository_and_cached(keys: Path):
     ]
 
 
-def test_the_commit_email_uses_the_bot_users_id(keys: Path):
-    client, _session = github({("GET", "/users/dreamference-engine%5Bbot%5D"): (200, {"id": 123})})
-    assert client.identity("engine") == (
+def test_the_commit_email_uses_the_bot_users_id(keys: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(as_team.GitHub, "lookup_token", REAL_LOOKUP_TOKEN)
+    monkeypatch.setattr(
+        as_team.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="gh-token\n", stderr=""),
+    )
+    client, session = github({("GET", "/users/dreamference-engine%5Bbot%5D"): (200, {"id": 123})})
+    expected = (
         "dreamference-engine[bot]",
         "123+dreamference-engine[bot]@users.noreply.github.com",
     )
+    assert client.identity("engine") == expected
+    assert session.calls[0]["auth"] == "Bearer gh-token"
+    # The second lookup is answered from the cache: no network call, file is private.
+    assert client.identity("engine") == expected
+    assert len(session.calls) == 1
+    assert (keys / "identities.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_the_identity_lookup_falls_back_to_the_app_jwt(keys: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(as_team.GitHub, "lookup_token", REAL_LOOKUP_TOKEN)
+
+    def no_gh(*_a, **_k):
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(as_team.subprocess, "run", no_gh)
+    client, session = github({("GET", "/users/dreamference-engine%5Bbot%5D"): (200, {"id": 5})})
+    client.identity("engine")
+    assert session.calls[0]["auth"] is not None
 
 
 def test_the_json_web_token_is_signed_with_the_apps_key(tmp_path: Path):

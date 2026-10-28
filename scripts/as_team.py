@@ -98,6 +98,9 @@ STRIPPED_LINES: Final[tuple[re.Pattern[str], ...]] = (
 )
 
 
+IDENTITY_CACHE_NAME: Final[str] = "identities.json"
+
+
 class Refusal(Exception):
     """A reason to stop before anything is sent; printed as is."""
 
@@ -512,15 +515,54 @@ class GitHub:
             self.tokens[(team, repo)] = granted["token"]
         return self.tokens[(team, repo)]
 
+    def lookup_token(self, team: str) -> str | None:
+        """Return a token for a public lookup: the local `gh auth token`, else the team's App JWT.
+
+        Never printed. None when neither is available (the lookup is then anonymous).
+        """
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "token"], capture_output=True, text=True, timeout=15
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
+            return str(self.signer.token(AppCredentials.load(team, self.key_directory)))
+        except (Refusal, OSError, ValueError):
+            return None
+
     def identity(self, team: str) -> tuple[str, str]:
         """Return the bot's login and the commit email GitHub links to it.
 
         The email is `<user id>+<login>@users.noreply.github.com`, where the id is the bot user's
-        (not the App's); it is looked up, never guessed.
+        (not the App's); it is looked up once, authenticated, and cached in `identities.json`
+        beside the App credentials (0600), so later commits need no network call.
         """
         login = bot_login(team)
-        user = self.call("GET", f"/users/{urllib.parse.quote(login)}")
-        return login, f"{user['id']}+{login}@users.noreply.github.com"
+        cache_path = (self.key_directory or key_dir()) / IDENTITY_CACHE_NAME
+        try:
+            cached = json.loads(cache_path.read_text())
+        except (OSError, ValueError):
+            cached = {}
+        entry = cached.get(team) if isinstance(cached, dict) else None
+        if isinstance(entry, dict) and entry.get("login") == login and entry.get("email"):
+            return login, str(entry["email"])
+        user = self.call("GET", f"/users/{urllib.parse.quote(login)}", self.lookup_token(team))
+        email = f"{user['id']}+{login}@users.noreply.github.com"
+        cached = cached if isinstance(cached, dict) else {}
+        cached[team] = {"login": login, "id": user["id"], "email": email}
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache_path.with_suffix(".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as handle:
+                json.dump(cached, handle, indent=2)
+            Path(tmp).replace(cache_path)
+        except OSError:
+            pass
+        return login, email
 
     def graphql(self, token: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         """Run one GraphQL operation and return its data, refusing on any error."""
