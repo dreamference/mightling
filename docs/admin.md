@@ -413,6 +413,20 @@ Print the resolved rate and what it was measured with.
 
 Runs, their progress, images and disk.
 
+#### `ling-admin swe-bench build-images`
+
+Build the arm64 instance images of a dataset nobody publishes them for (multilingual), from its task repository at the pinned commit.
+
+| Option | Description |
+|---|---|
+| `--dataset` | A dataset with a task repository (default multilingual) |
+| `--instances` | Comma-separated instance ids. |
+| `--subset` | A file of instance ids, one per line. |
+| `--languages` | Comma-separated languages to take: c, cpp, rust, go, java, js, ruby, php. |
+| `--limit` | Only the first N selected instances, sorted by id. |
+| `--force` | Build again an image already there. |
+| `--validate` | Then validate each built image: the reference patch must resolve, a no-op patch must not. |
+
 #### `ling-admin swe-bench shard`
 
 Split a task list into K balanced shards, written as lists of their own.

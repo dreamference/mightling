@@ -49,14 +49,16 @@ TEST_OUTPUT_START: Final[str] = ">>>>> Start Test Output"
 EVAL_RESET: Final[str] = "per-file"
 
 # Fetches a dataset's `test` split with the harness's own `datasets` package and prints its rows
-# sorted by instance id, with the snapshot's revision on the first line.
+# sorted by instance id, with the snapshot's revision on the first line. A second argument pins the
+# revision; without it the newest is fetched and its revision recorded.
 DATASET_DUMP: Final[str] = """
 import json, sys
 from datasets import load_dataset
-dataset = load_dataset(sys.argv[1], split="test")
+pinned = sys.argv[2] if len(sys.argv) > 2 else None
+dataset = load_dataset(sys.argv[1], split="test", revision=pinned)
 try:
     from huggingface_hub import HfApi
-    revision = HfApi().dataset_info(sys.argv[1]).sha or ""
+    revision = pinned or HfApi().dataset_info(sys.argv[1]).sha or ""
 except Exception:
     revision = ""
 print(json.dumps({"revision": revision, "rows": len(dataset)}))
@@ -146,7 +148,8 @@ class SweBenchHarness:
     def download_dataset(cls, dataset: str, force: bool = False) -> Optional[Dict[str, Any]]:
         """
         Downloads a dataset's `test` split once and keeps it as a local file, so `run` and
-        `eval` need no network and every run sees the same rows.
+        `eval` need no network and every run sees the same rows. A dataset pinned in
+        `DATASET_REVISIONS` is fetched at that revision.
 
         Args:
             dataset: A dataset name or id.
@@ -158,11 +161,17 @@ class SweBenchHarness:
         path = cls.snapshot_path(dataset)
         meta_path = path.with_suffix(".meta.json")
         if path.exists() and meta_path.exists() and not force:
-            return json.loads(meta_path.read_text())
+            meta = json.loads(meta_path.read_text())
+            pinned = swe_bench_settings.SweBenchSettings.revision(dataset)
+            if not pinned or meta.get("revision") == pinned:
+                return meta
+            # A snapshot of another revision than the pin: fetched again, never used as it is.
         path.parent.mkdir(parents=True, exist_ok=True)
         environment = dict(os.environ, HF_HOME=str(path.parent / "hf"))
+        pinned = swe_bench_settings.SweBenchSettings.revision(dataset)
         result = cls.execute([cls.tool("python"), "-c", DATASET_DUMP,
-                              swe_bench_settings.SweBenchSettings.dataset_id(dataset)], env=environment)
+                              swe_bench_settings.SweBenchSettings.dataset_id(dataset),
+                              *([pinned] if pinned else [])], env=environment)
         lines = result.stdout.splitlines()
         if result.returncode != 0 or len(lines) < 2:
             print(f"❌ Could not download {dataset}: {result.stderr.strip()[-400:]}")

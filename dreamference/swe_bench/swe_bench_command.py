@@ -1,4 +1,4 @@
-"""`ling-admin swe-bench {setup,smoke,run,eval,report,status,clean,shard,merge}`
+"""`ling-admin swe-bench {setup,build-images,smoke,run,eval,report,status,clean,shard,merge}`
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §3).
 
 The parser and the dispatch live here so the CLI controller only registers and calls them.
@@ -17,6 +17,7 @@ from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS, SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_hooks import HOOK_SETS
+from dreamference.swe_bench.swe_bench_image_builder import SweBenchImageBuilder
 from dreamference.swe_bench.swe_bench_image_cache import SweBenchImageCache
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_instance_run import REFINE_VERSIONS, TASK_RULES
@@ -29,6 +30,13 @@ from dreamference.swe_bench.swe_bench_shards import SweBenchShards
 
 # The commands on one list split across machines (`dispatch_lists`): `shard` first, then `merge`.
 LIST_COMMANDS: Final[tuple[str, str]] = ("shard", "merge")
+
+# Builds the images of a dataset nobody publishes arm64 images for.
+BUILD_COMMAND: Final[str] = "build-images"
+
+USAGE: Final[str] = (
+    "usage: ling-admin swe-bench {setup,build-images,smoke,run,eval,report,status,clean,shard,merge}"
+)
 
 
 class SweBenchCommand:
@@ -135,12 +143,52 @@ class SweBenchCommand:
         )
 
     @classmethod
+    def add_build_parser(cls, add: Callable[..., argparse.ArgumentParser]) -> None:
+        """Adds `swe-bench build-images`.
+
+        Args:
+            add: The `swe-bench` subparsers' `add_parser`.
+        """
+        build = add(
+            BUILD_COMMAND,
+            help="Build the arm64 instance images of a dataset nobody publishes them for "
+            "(multilingual), from its task repository at the pinned commit",
+        )
+        build.add_argument(
+            "--dataset",
+            default="multilingual",
+            help="A dataset with a task repository (default multilingual)",
+        )
+        build.add_argument("--instances", default=None, help="Comma-separated instance ids")
+        build.add_argument("--subset", default=None, help="A file of instance ids, one per line")
+        build.add_argument(
+            "--languages",
+            default=None,
+            help="Comma-separated languages to take: c, cpp, rust, go, java, js, ruby, php",
+        )
+        build.add_argument(
+            "--limit",
+            type=int,
+            default=None,
+            help="Only the first N selected instances, sorted by id",
+        )
+        build.add_argument(
+            "--force", action="store_true", help="Build again an image already there"
+        )
+        build.add_argument(
+            "--validate",
+            action="store_true",
+            help="Then validate each built image: the reference patch must resolve, a no-op patch must not",
+        )
+
+    @classmethod
     def add_list_parsers(cls, add: Callable[..., argparse.ArgumentParser]) -> None:
         """Adds `swe-bench shard` and `swe-bench merge`, the commands on a list split across machines.
 
         Args:
             add: The `swe-bench` subparsers' `add_parser`.
         """
+        cls.add_build_parser(add)
         shard = add(
             "shard", help="Split a task list into K balanced shards, written as lists of their own"
         )
@@ -508,7 +556,7 @@ class SweBenchCommand:
                 args.remove_images,
                 args.image_chunk,
             )
-        if command in LIST_COMMANDS:
+        if command in (*LIST_COMMANDS, BUILD_COMMAND):
             return cls.dispatch_lists(args)
         if command == "report":
             return cls.report(
@@ -518,12 +566,12 @@ class SweBenchCommand:
             return cls.status()
         if command == "clean":
             return cls.clean(args.run, args.images)
-        print("usage: ling-admin swe-bench {setup,smoke,run,eval,report,status,clean,shard,merge}")
+        print(USAGE)
         return 2
 
     @classmethod
     def dispatch_lists(cls, args: argparse.Namespace) -> int:
-        """Runs `swe-bench shard` or `swe-bench merge`.
+        """Runs `swe-bench shard`, `swe-bench merge` or `swe-bench build-images`.
 
         Args:
             args: The parsed command line, its `swe_bench_command` one of `LIST_COMMANDS`.
@@ -531,6 +579,8 @@ class SweBenchCommand:
         Returns:
             int: The command's exit status.
         """
+        if args.swe_bench_command == BUILD_COMMAND:
+            return cls.build_images(args)
         if args.swe_bench_command == LIST_COMMANDS[0]:
             return cls.shard(
                 Path(args.list),
@@ -590,10 +640,16 @@ class SweBenchCommand:
         )
         ids = [row["instance_id"] for row in SweBenchHarness.rows(dataset)]
         tags = SweBenchImages.tags(refresh=True)
-        with_image = [i for i in ids if SweBenchImages.image_for(i, tags)]
+        built = SweBenchImages.built_tags()
+        with_image = [i for i in ids if SweBenchImages.image_for(i, tags, built)]
         print(
             f"✅ {architecture} images: {len(with_image)} of {len(ids)} instances "
-            f"({swe_bench_settings.COMMUNITY_IMAGE_REPO}, third-party); the rest are not evaluable here"
+            f"({SweBenchRunner.image_source(dataset)}); the rest are not evaluable here"
+            + (
+                " until built (swe-bench build-images)"
+                if swe_bench_settings.SweBenchSettings.task_repo(dataset)
+                else ""
+            )
         )
         mightling_bin = SweBenchRuntime.installed_mightling()
         if not mightling_bin:
@@ -623,6 +679,75 @@ class SweBenchCommand:
                 f"✅ {len(good)} of {len(wanted)} validated; list: {SweBenchImages.validated_path()}"
             )
         return 0
+
+    # -- build-images --------------------------------------------------------------------------
+
+    @classmethod
+    def build_images(cls, args: argparse.Namespace) -> int:
+        """Builds a dataset's instance images here, then validates them when asked.
+
+        Args:
+            args: The parsed `build-images` command line.
+
+        Returns:
+            int: 0 when every selected image was built (and, with `--validate`, judged).
+        """
+        dataset = args.dataset
+        if swe_bench_settings.SweBenchSettings.task_repo(dataset) is None:
+            print(f"❌ {dataset} has no task repository: its images are pulled (swe-bench setup).")  # noqa: T201 — CLI output
+            return 2
+        if not SweBenchHarness.install() or SweBenchHarness.download_dataset(dataset) is None:
+            return 1
+        ids = cls.build_selection(dataset, args)
+        if ids is None:
+            return 2
+        settings = swe_bench_settings.SweBenchSettings()
+        print(  # noqa: T201 — CLI output
+            f"🔨 Building {len(ids)} image(s) in {swe_bench_settings.BUILDER_NAME} "
+            f"(memory {settings.build_memory}, cores {settings.build_cpus or 'all'})..."
+        )
+        outcome = SweBenchImageBuilder.build(dataset, ids, settings, force=args.force)
+        built = [i for i, problem in outcome.items() if problem is None]
+        print(f"✅ {len(built)} of {len(ids)} built; record: {SweBenchImageBuilder.record_path()}")  # noqa: T201 — CLI output
+        if args.validate and built:
+            judged = SweBenchEvaluator.validate(dataset, built, settings, force=args.force)
+            good = [i for i, problem in judged.items() if problem is None]
+            for instance_id, problem in sorted(judged.items()):
+                if problem:
+                    print(f"   {instance_id}: {problem}")  # noqa: T201 — CLI output
+            print(  # noqa: T201 — CLI output
+                f"✅ {len(good)} of {len(built)} validated; list: {SweBenchImages.validated_path()}"
+            )
+        return 0 if len(built) == len(ids) else 1
+
+    @classmethod
+    def build_selection(cls, dataset: str, args: argparse.Namespace) -> list[str] | None:
+        """The instances `build-images` was asked for, sorted by id.
+
+        Args:
+            dataset: The dataset (its snapshot is downloaded).
+            args: The parsed `build-images` command line (`instances`, `subset`, `languages`, `limit`).
+
+        Returns:
+            list[str] | None: The ids; None when one named is not in the dataset.
+        """
+        rows = SweBenchHarness.rows(dataset)
+        wanted = set(cls._ids(args.instances) or [])
+        if args.subset:
+            lines = Path(args.subset).read_text().splitlines()
+            wanted |= {line.strip() for line in lines if line.strip() and not line.startswith("#")}
+        unknown = sorted(wanted - {row["instance_id"] for row in rows})
+        if unknown:
+            print(f"❌ Not in {dataset}: {', '.join(unknown[:5])}")  # noqa: T201 — CLI output
+            return None
+        languages = set(cls._ids(args.languages) or [])
+        ids = sorted(
+            row["instance_id"]
+            for row in rows
+            if (not wanted or row["instance_id"] in wanted)
+            and (not languages or SweBenchImageBuilder.language(row) in languages)
+        )
+        return ids[: args.limit] if args.limit else ids
 
     # -- smoke ---------------------------------------------------------------------------------
 

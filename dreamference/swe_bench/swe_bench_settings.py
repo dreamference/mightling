@@ -32,7 +32,37 @@ DATASETS: Final[Dict[str, str]] = {
     "verified": "SWE-bench/SWE-bench_Verified",
     "lite": "SWE-bench/SWE-bench_Lite",
     "full": "SWE-bench/SWE-bench",
+    "multilingual": "SWE-bench/SWE-bench_Multilingual",
 }
+
+# Datasets downloaded at a fixed revision rather than the newest one: a weekly series compares
+# weeks only while the rows (and their eval scripts) stay the same. Verified keeps its snapshot as
+# it was downloaded. Multilingual: the revision of 2026-08-17 that carries the v5 harness's
+# `image`, `eval_script` and `log_parser` columns (owner's decision of 2026-10-28).
+DATASET_REVISIONS: Final[dict[str, str]] = {
+    "SWE-bench/SWE-bench_Multilingual": "846e647b9f33c0b51b739d005d13d85493c9af09",
+}
+
+# Datasets whose instance images nobody publishes for arm64: they are built here from the
+# dataset's task repository (`swe-bench build-images`, `SweBenchImageBuilder`), pinned to the
+# commit whose Dockerfiles match the dataset revision above.
+TASK_REPOS: Final[dict[str, dict[str, str]]] = {
+    "SWE-bench/SWE-bench_Multilingual": {
+        "url": "https://github.com/SWE-bench/swe-bench-multilingual-tasks",
+        "commit": "6e08cbcd763c869abd7aae4bcb9e1b3991180777",
+    },
+}
+
+# Where images built here are tagged (`<repo>:<instance id with __ written ->`). Never pushed, and
+# never removed by a run or by `clean --images`: rebuilding one takes minutes to an hour.
+BUILT_IMAGE_REPO: Final[str] = "mightling/swe-bench-built-arm64"
+
+# The BuildKit builder the images are built in: a container of its own, so its memory and cores
+# can be capped (the default builder runs inside dockerd, out of reach of any cap) beside a
+# resident model server.
+BUILDER_NAME: Final[str] = "mightling-swe-bench"
+DEFAULT_BUILD_MEMORY: Final[str] = "24g"
+DEFAULT_BUILD_CPUS: Final[str] = "0-11"
 
 # The only source of arm64 instance images: the task repository's own Dockerfiles are pinned to
 # linux/amd64 and an x86-64 Miniconda, so a local build produces images this machine cannot run.
@@ -117,6 +147,8 @@ class SweBenchSettings:
             [lists] if isinstance(lists, str) else [str(p) for p in lists]
         )
         self.image_cache_floor: str = str(table.get("image_cache_floor", DEFAULT_IMAGE_CACHE_FLOOR))
+        self.build_memory: str = str(table.get("build_memory", DEFAULT_BUILD_MEMORY))
+        self.build_cpus: str = str(table.get("build_cpus", DEFAULT_BUILD_CPUS))
         # Paired nodes serving the same model add lanes (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3).
         self.nodes: Any = table.get("nodes", "paired")
 
@@ -155,9 +187,33 @@ class SweBenchSettings:
         Resolves a dataset name.
 
         Args:
-            name: `verified`, `lite`, `full`, or a HuggingFace id.
+            name: `verified`, `lite`, `full`, `multilingual`, or a HuggingFace id.
 
         Returns:
             str: The HuggingFace dataset id.
         """
         return DATASETS.get(name.strip().lower(), name)
+
+    @classmethod
+    def revision(cls, name: str) -> str | None:
+        """The revision a dataset is pinned to.
+
+        Args:
+            name: A dataset name or id.
+
+        Returns:
+            str | None: The pinned revision; None for a dataset downloaded at its newest.
+        """
+        return DATASET_REVISIONS.get(cls.dataset_id(name))
+
+    @classmethod
+    def task_repo(cls, name: str) -> dict[str, str] | None:
+        """The task repository a dataset's images are built from here.
+
+        Args:
+            name: A dataset name or id.
+
+        Returns:
+            dict[str, str] | None: `{"url", "commit"}`; None for a dataset whose images are pulled.
+        """
+        return TASK_REPOS.get(cls.dataset_id(name))

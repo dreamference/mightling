@@ -2,10 +2,12 @@
 Instance images for this machine's architecture, and the list of instances that are known to
 grade correctly in them (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5.3, §12).
 
-On arm64 the only source is the community repository `greynewell/swe-bench-arm64`, whose tags
-are the instance ids with `__` written `-`. An image existing is not evidence that the instance
-works: it is **validated** when the reference patch resolves it here and a no-op patch does not.
-Only validated instances are run, and the rest are reported as excluded.
+On arm64 Verified's images come from the community repository `greynewell/swe-bench-arm64`, whose
+tags are the instance ids with `__` written `-`. A dataset nobody publishes arm64 images for
+(Multilingual) has its images built on this machine (`SweBenchImageBuilder`) and tagged the same
+way in `BUILT_IMAGE_REPO`; those are never pulled and never removed by a run. An image existing is
+not evidence that the instance works: it is **validated** when the reference patch resolves it here
+and a no-op patch does not. Only validated instances are run, and the rest are reported as excluded.
 """
 
 import json
@@ -20,6 +22,9 @@ from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 
 # The tag list is refetched after a day: the repository gains images rarely.
 TAG_LIST_MAX_AGE_S: int = 24 * 3600
+
+# How `docker images` shows an image without a tag.
+UNTAGGED: str = "<none>"
 
 
 class SweBenchImages:
@@ -82,20 +87,64 @@ class SweBenchImages:
         return fetched
 
     @classmethod
-    def image_for(cls, instance_id: str, tags: Optional[List[str]] = None) -> Optional[str]:
+    def image_for(
+        cls, instance_id: str, tags: Optional[List[str]] = None, built: list[str] | None = None
+    ) -> Optional[str]:
         """
         Names the image an instance runs in on this machine.
+
+        The community image when there is one, else an image built here.
 
         Args:
             instance_id: The instance.
             tags: The community repository's tags; None reads them.
+            built: The tags of the images built here; None lists them.
 
         Returns:
             Optional[str]: The image reference, or None when no arm64 image exists.
         """
         tag = instance_id.replace("__", "-")
         known = cls.tags() if tags is None else tags
-        return f"{swe_bench_settings.COMMUNITY_IMAGE_REPO}:{tag}" if tag in known else None
+        if tag in known:
+            return f"{swe_bench_settings.COMMUNITY_IMAGE_REPO}:{tag}"
+        here = cls.built_tags() if built is None else built
+        return cls.built_name(instance_id) if tag in here else None
+
+    @classmethod
+    def built_name(cls, instance_id: str) -> str:
+        """The reference an instance's image has when it is built here.
+
+        Args:
+            instance_id: The instance.
+
+        Returns:
+            str: The image reference.
+        """
+        return f"{swe_bench_settings.BUILT_IMAGE_REPO}:{instance_id.replace('__', '-')}"
+
+    @classmethod
+    def built_tags(cls) -> list[str]:
+        """The tags of the instance images built on this machine.
+
+        Returns:
+            list[str]: The tags, untagged images left out.
+        """
+        result = SweBenchDocker.run(
+            ["images", swe_bench_settings.BUILT_IMAGE_REPO, "--format", "{{.Tag}}"], timeout=60
+        )
+        return [tag for tag in result.stdout.split() if tag and tag != UNTAGGED]
+
+    @classmethod
+    def is_built(cls, image: str) -> bool:
+        """Says whether an image was built here, which nothing pulls back once it is gone.
+
+        Args:
+            image: An image reference.
+
+        Returns:
+            bool: True for an image in `BUILT_IMAGE_REPO`.
+        """
+        return image.startswith(f"{swe_bench_settings.BUILT_IMAGE_REPO}:")
 
     # -- the validated list --------------------------------------------------------------------
 
@@ -141,7 +190,8 @@ class SweBenchImages:
         record.setdefault("rejected", {}).pop(instance_id, None)
         if problem is None:
             record["instances"][instance_id] = {
-                "image": image, "digest": digest, "source": "community",
+                "image": image, "digest": digest,
+                "source": "built" if image and cls.is_built(image) else "community",
                 "harness": swe_bench_settings.HARNESS_VERSION,
                 "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             }
@@ -181,7 +231,11 @@ class SweBenchImages:
     @classmethod
     def remove(cls, images: List[str]) -> int:
         """
-        Removes instance images. Layers shared with images that stay are kept by Docker.
+        Removes instance images.
+
+        Layers shared with images that stay are kept by Docker. Images built here are kept:
+        nothing pulls them back, and building one again takes up to an hour (`docker rmi`
+        removes one by hand).
 
         Args:
             images: Image references.
@@ -191,6 +245,8 @@ class SweBenchImages:
         """
         removed = 0
         for image in images:
+            if cls.is_built(image):
+                continue
             if SweBenchDocker.run(["rmi", image], timeout=300).returncode == 0:
                 removed += 1
         return removed

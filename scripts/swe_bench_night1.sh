@@ -93,6 +93,10 @@ ARMS=${ARMS:-"default tests-v2"}
 # CHOOSER_SEED (v1's measured seed), and reports best-of-N against the first run
 # (scripts/swe_bench_best_of.py). 1, the default, is the two-arm night.
 BEST_OF=${BEST_OF:-1}
+# The dataset every smoke and round runs (`swe-bench run --dataset`): verified, or multilingual for the
+# weekly non-Python check (docs/dev/swe-bench.md), which runs one arm (ARMS names one arm, BEST_OF 1):
+# one round, its regrade and its report, no comparison. Its SMOKE_INSTANCE must be one of its own.
+DATASET=${DATASET:-verified}
 CHOOSER_SERVER=${CHOOSER_SERVER:-http://localhost:8000}
 CHOOSER_SEED=${CHOOSER_SEED:-20261013}
 # The harness commit the night runs: origin/main unless REF pins one (a night is pinned so that work
@@ -307,7 +311,7 @@ smoke() {
         echo "🔥 Smoke check of arm $arm: $SMOKE_INSTANCE as run $run (limit $SMOKE_TIMEOUT)..."
         ( cd "$WT" && export PYTHONPATH="$WT" DREAMFERENCE_CONFIG_PATH="$SMOKE_DIR/dreamference.toml" &&
           timeout -s INT -k 2m 25m "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" \
-              swe-bench run --instances "$SMOKE_INSTANCE" --name "$run" --code-index universal --mask off \
+              swe-bench run --dataset "$DATASET" --instances "$SMOKE_INSTANCE" --name "$run" --code-index universal --mask off \
               --prompt default $extra $(session_flags) --label "night $NIGHT smoke, $name arm" ) > "$SMOKE_DIR/$name.log" 2>&1
         rc=$?
         ( cd "$WT" && PYTHONPATH="$WT" "$PY" -c "import sys; from dreamference.swe_bench.swe_bench_arm_smoke import SweBenchArmSmoke; sys.exit(SweBenchArmSmoke.check(sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]))" \
@@ -506,7 +510,7 @@ print(f'🧹 {len(removed)} cached image(s) removed to make room for the night.'
     fi
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
         --description="SWE-bench night $NIGHT: $what" \
-        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
+        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=DATASET="$DATASET" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
         --setenv=IMAGE_CHUNK="$IMAGE_CHUNK" --setenv=SHARD="$SHARD" --setenv=LING_PIN_SHA256="$LING_PIN_SHA256" \
         --setenv=RESERVE_GB="$RESERVE_GB" --setenv=NIGHT_WINS="$NIGHT_WINS" --setenv=INDEX_WAIT_S="$INDEX_WAIT_S" \
         --setenv=BEST_OF="$BEST_OF" --setenv=CHOOSER_SERVER="$CHOOSER_SERVER" --setenv=CHOOSER_SEED="$CHOOSER_SEED" \
@@ -551,7 +555,7 @@ best_of_run() {
         check_pin
         log "round $round (attempt $k of $BEST_OF)"
         wait_out_index "before round $round"
-        admin swe-bench run --subset "$LIST" --name "$round" --code-index universal --mask off \
+        admin swe-bench run --dataset "$DATASET" --subset "$LIST" --name "$round" --code-index universal --mask off \
             --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) $(session_flags) \
             --label "night $NIGHT, $name arm, attempt $k of $BEST_OF"
         rc=$?
@@ -605,10 +609,12 @@ run() {
         best_of_run
         return
     fi
-    # ARMS names the two arms: the record arm first, then the candidate (spelling: `arm_flags`).
+    # ARMS names the two arms: the record arm first, then the candidate (spelling: `arm_flags`); or one
+    # arm alone (the weekly Multilingual run), which is one round with nothing to compare it with.
     set -- $ARMS
-    record=$1; candidate=$2
-    rname=$(arm_name "$record"); cname=$(arm_name "$candidate")
+    record=${1:-}; candidate=${2:-}
+    [ -n "$record" ] && [ $# -le 2 ] || fail "ARMS [$ARMS] (one or two arms)" 2
+    rname=$(arm_name "$record"); cname=$([ -n "$candidate" ] && arm_name "$candidate")
     # A misspelt arm ends the night before either round, not after the record arm's.
     for arm in $record $candidate; do
         arm_flags "$arm" > /dev/null || fail "arm $arm" 2
@@ -632,7 +638,7 @@ run() {
         while :; do
             # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
             wait_out_index "before round $PREFIX-$name"
-            admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
+            admin swe-bench run --dataset "$DATASET" --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
                 --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) $(session_flags) \
                 --label "night $NIGHT, $name arm"
             rc=$?
@@ -660,9 +666,11 @@ run() {
         admin swe-bench report "$PREFIX-$name" > "$D/report-$name.txt"
         admin swe-bench report "$PREFIX-$name" --drop-test-hunks --against "$PREFIX-$name" > "$D/drop-test-hunks-$name.txt"
     done
-    admin swe-bench report "$PREFIX-$cname" --against "$PREFIX-$rname" > "$D/$cname-against-$rname.txt"
-    admin swe-bench report "$PREFIX-$cname" --drop-test-hunks --against "$PREFIX-$rname" \
-        > "$D/$cname-dropped-against-$rname.txt"
+    if [ -n "$cname" ]; then
+        admin swe-bench report "$PREFIX-$cname" --against "$PREFIX-$rname" > "$D/$cname-against-$rname.txt"
+        admin swe-bench report "$PREFIX-$cname" --drop-test-hunks --against "$PREFIX-$rname" \
+            > "$D/$cname-dropped-against-$rname.txt"
+    fi
     touch "$D/done"
     log "all done; reports in $D"
 }

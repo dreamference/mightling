@@ -1336,3 +1336,29 @@ def test_the_compat_arm_reaches_only_the_candidates_round(tmp_path):
 def test_a_misspelt_compat_arm_ends_the_night_before_any_round(tmp_path, arm):
     status, recorded, folder = night(tmp_path, f"default default+{arm}")
     assert status == 2 and not runs(recorded) and (folder / "failed").exists()
+
+
+def test_a_one_arm_multilingual_night_runs_one_round_its_regrade_and_its_report(tmp_path):
+    status, recorded, folder = night(tmp_path, "default", DATASET="multilingual")
+    assert status == 0 and (folder / "done").exists()
+    (round_,) = runs(recorded)
+    assert "--dataset multilingual " in round_ and "--name n4-default " in round_
+    assert (
+        "swe-bench eval n4-default --drop-test-hunks --remove-images --image-chunk 25" in recorded
+    )
+    assert (folder / "report-default.txt").exists()
+    assert not any(
+        "--against n4-default" in line and "report n4-default " not in line for line in recorded
+    )
+    assert not list(folder.glob("*-against-*.txt"))
+
+
+def test_a_night_runs_verified_unless_told_otherwise(tmp_path):
+    status, recorded, _ = night(tmp_path, "default tests-v2")
+    assert status == 0
+    assert all("--dataset verified " in line for line in runs(recorded))
+
+
+def test_three_arms_end_the_night_before_any_round(tmp_path):
+    status, recorded, folder = night(tmp_path, "default tests-v2 issue-v1")
+    assert status == 2 and runs(recorded) == [] and (folder / "failed").exists()
