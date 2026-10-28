@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from dreamference.node.node_identity import NodeIdentity
 from dreamference.node.node_job import DEFAULT_MEMORY, DEFAULT_TIME, JOB_ID
 from dreamference.node.node_pairing import NodePairing
+from dreamference.runner.safe_git import SafeGit
 
 
 class NodeJobSender:
@@ -189,8 +190,8 @@ class NodeJobSender:
             return 1
         print(f"📤 Sending {commit[:10]} to {record['name']} as job {request['id']} "
               f"(memory {request['memory']}, time {request['time']})...")
-        pushed = subprocess.run(["git", "-C", repo, "push", "--quiet", url, f"{commit}:refs/jobs/{request['id']}"],
-                                env=cls.git_environment(record), capture_output=True, text=True, check=False)
+        pushed = SafeGit.run(["push", "--quiet", url, f"{commit}:refs/jobs/{request['id']}"], repo,
+                             env=cls.git_environment(record))
         if pushed.returncode != 0:
             print(f"❌ Could not push to the node: {pushed.stderr.strip()[-300:]}")
             return 1
@@ -338,9 +339,8 @@ class NodeJobSender:
             if not quiet_when_absent:
                 print(f"❌ {error}")
             return False
-        fetched = subprocess.run(["git", "-C", sent["repo"], "fetch", "--quiet", url,
-                                  f"refs/heads/{branch}:refs/heads/{branch}"],
-                                 env=cls.git_environment(record), capture_output=True, text=True, check=False)
+        fetched = SafeGit.run(["fetch", "--quiet", url, f"refs/heads/{branch}:refs/heads/{branch}"],
+                              sent["repo"], env=cls.git_environment(record))
         if fetched.returncode != 0:
             if not quiet_when_absent:
                 print(f"No result branch for {job_id}: the job changed no file, or has not finished.")
@@ -397,4 +397,4 @@ class NodeJobSender:
 
     @classmethod
     def _git(cls, cwd: str, *arguments: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", "-C", cwd, *arguments], capture_output=True, text=True, check=False)
+        return SafeGit.run(list(arguments), cwd)

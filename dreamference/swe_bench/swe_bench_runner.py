@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 from dreamference.night_shift.night_shift_host import NightShiftHost
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_runner import NightShiftRunner
+from dreamference.runner.safe_git import SafeGit
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_code_index import ARMS, SweBenchCodeIndex
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
@@ -420,7 +421,8 @@ class SweBenchRunner:
             "task_memory": settings.task_memory,
             "nudges": settings.nudges,
             "parallelism": parallel,
-            "repository_commit": cls._output(["git", "-C", REPO_ROOT, "rev-parse", "HEAD"]),
+            "repository_commit": SafeGit.run(["rev-parse", "HEAD"], REPO_ROOT).stdout.strip()
+            or None,
         }
 
     @classmethod

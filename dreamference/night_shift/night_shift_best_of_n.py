@@ -30,9 +30,7 @@ Rules kept on purpose:
 
 import hashlib
 import json
-import os
 import random
-import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -44,6 +42,7 @@ from dreamference.night_shift.night_shift_chooser import JUDGE_TIMEOUT_S, Compar
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
+from dreamference.runner.safe_git import SafeGit
 
 # Statuses of an attempt that ended without a candidate, worst last: what the task becomes when no
 # attempt left a change (`failed` only when every attempt failed).
@@ -600,12 +599,6 @@ class NightShiftBestOfN:
         return record.get("status") in ("cancel-requested", "cancelled")
 
     def _git(self, cwd: Path, *args: str) -> tuple[int, str]:
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
-        result = subprocess.run(
-            ["git", "-C", str(cwd), *args],
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            env=env,
-        )
+        # The worktree is the agent's to write: no config-named program runs (SafeGit).
+        result = SafeGit.run(args, cwd)
         return result.returncode, result.stdout + result.stderr

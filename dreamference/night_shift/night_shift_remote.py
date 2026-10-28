@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
 from dreamference.night_shift.night_shift_queue import FINAL_STATUSES, NightShiftQueue
+from dreamference.runner.safe_git import SafeGit
 
 # How often a waiting run asks the nodes about the tasks it sent.
 POLL_S: Final[float] = 120.0
@@ -88,10 +89,9 @@ class NightShiftRemote:
                 continue
             repo = task["repo"]
             slug = NodeJobSender.repo_slug(repo)
-            pushed = subprocess.run(
-                ["git", "-C", repo, "push", "--quiet", NodeJobSender.git_url(record, slug),
-                 f"{task['base']}:refs/night/{task['id']}"],
-                env=NodeJobSender.git_environment(record), capture_output=True, text=True, check=False)
+            pushed = SafeGit.run(
+                ["push", "--quiet", NodeJobSender.git_url(record, slug), f"{task['base']}:refs/night/{task['id']}"],
+                repo, env=NodeJobSender.git_environment(record))
             if pushed.returncode != 0:
                 notes.append(f"{task['id']}: could not reach {record['name']} ({pushed.stderr.strip()[-200:]}); "
                              f"the task stays queued for it.")
@@ -135,8 +135,7 @@ class NightShiftRemote:
         from dreamference.node.node_identity import NodeIdentity
         repo = Path(task["repo"])
         level = NightShiftTaskRun.airgapped_level(repo, None, night_dir.parent, repo)
-        git = lambda key: subprocess.run(["git", "-C", str(repo), "config", key], capture_output=True,
-                                         text=True, check=False).stdout.strip()
+        git = lambda key: SafeGit.run(["config", key], repo).stdout.strip()
         return {"id": task["id"], "repo": slug, "base": task["base"], "task": task["task"], "test": task.get("test"),
                 "airgapped": level, "author": {"name": git("user.name"), "email": git("user.email")},
                 "sender": NodeIdentity.read() or "", "sender_name": socket.gethostname()}
@@ -199,18 +198,16 @@ class NightShiftRemote:
         branch = result.get("branch")
         if branch:
             slug = (task.get("sent_to") or {}).get("slug") or NodeJobSender.repo_slug(task["repo"])
-            fetched = subprocess.run(
-                ["git", "-C", task["repo"], "fetch", "--quiet", NodeJobSender.git_url(record, slug),
-                 f"+refs/heads/{branch}:refs/heads/{branch}"],
-                env=NodeJobSender.git_environment(record), capture_output=True, text=True, check=False)
+            fetched = SafeGit.run(
+                ["fetch", "--quiet", NodeJobSender.git_url(record, slug), f"+refs/heads/{branch}:refs/heads/{branch}"],
+                task["repo"], env=NodeJobSender.git_environment(record))
             if fetched.returncode != 0:
                 result.pop("branch", None)
                 result["last_message"] = (f"the task finished on {record['name']}, but its branch could not be "
                                           f"fetched: {fetched.stderr.strip()[-200:]}")
                 NightShiftQueue.transition(night_dir, task["id"], "sent", note="fetch failed", result=result)
                 return
-            stat = subprocess.run(["git", "-C", task["repo"], "diff", "--stat", f"{task['base']}..{branch}"],
-                                  capture_output=True, text=True, check=False).stdout.rstrip()
+            stat = SafeGit.run(["diff", "--stat", f"{task['base']}..{branch}"], task["repo"]).stdout.rstrip()
             if stat:
                 result["diff_stat"] = stat
         NodePairing.run(record, f"night-fetched {task['id']}")
@@ -311,8 +308,7 @@ class NightShiftRemote:
         test = request.get("test")
         if test is not None and not isinstance(test, str):
             raise ValueError("the test command is a string")
-        known = subprocess.run(["git", "--git-dir", str(repo), "cat-file", "-e", f"{base}^{{commit}}"],
-                               capture_output=True, text=True, check=False)
+        known = SafeGit.run(["cat-file", "-e", f"{base}^{{commit}}"], git_dir=repo)
         if known.returncode != 0:
             raise ValueError("the base commit was not pushed to this node before the task was sent")
         # Refused now rather than failed at night: code from another machine never runs unsandboxed.
@@ -358,7 +354,7 @@ class NightShiftRemote:
         Returns:
             str: What will happen to the task, for the sender's report.
         """
-        from dreamference.night_shift.night_shift_scheduler import NightShiftScheduler, UNIT
+        from dreamference.night_shift.night_shift_scheduler import UNIT, NightShiftScheduler
         from dreamference.night_shift.night_shift_settings import NightShiftSettings
         if not (NightShiftScheduler.unit_dir() / f"{UNIT}.timer").exists():
             return ("Night Shift is not enabled on this node (`ling-admin night enable` there), so the task "
@@ -425,6 +421,7 @@ class NightShiftRemote:
             List[str]: The ids removed.
         """
         import shutil
+
         from dreamference.node.node_job import NodeJob
         now = now or datetime.now().astimezone()
         night_dir = NightShiftQueue.night_dir()
@@ -442,7 +439,7 @@ class NightShiftRemote:
             repo = task.get("repo") or ""
             if os.path.isdir(repo):
                 for ref in (f"refs/heads/{task.get('branch')}", f"refs/night/{task['id']}"):
-                    subprocess.run(["git", "--git-dir", repo, "update-ref", "-d", ref], capture_output=True, check=False)
+                    SafeGit.run(["update-ref", "-d", ref], git_dir=repo)
             for path in (night_dir / "tasks" / f"{task['id']}.json", night_dir / "tasks" / f"{task['id']}.lock"):
                 path.unlink(missing_ok=True)
             for log in (night_dir / "logs").glob(f"{task['id']}.*") if (night_dir / "logs").is_dir() else []:
