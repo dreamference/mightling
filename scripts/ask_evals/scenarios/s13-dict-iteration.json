@@ -1,5 +1,5 @@
 {
-  "id": "s13-dict-iteration-ultra",
+  "id": "s13-dict-iteration",
   "family": "S13",
   "failure": [
     6
@@ -35,6 +35,5 @@
     "connect": {
       "fault": "forbidden"
     }
-  },
-  "cave": "ultra"
+  }
 }

@@ -80,7 +80,6 @@ const LEGACY_LINKS: &[&str] = &[
 const CARRY_OVER: &[&str] = &[
     "session_index.jsonl",
     "airgapped",
-    "cave_mode",
     "audit",
     "night",
     "system-prompts",
@@ -442,7 +441,7 @@ mod tests {
         let home = scratch("full");
         legacy_layout(&home);
         let cwd = home.join("project");
-        write(&cwd.join("dreamference.toml"), "puffin_cave_mode = \"off\"\n");
+        write(&cwd.join("dreamference.toml"), "puffin_night_hour = \"3\"\n");
 
         let report = migrate(&home, &cwd, None);
         assert!(!report.is_empty());
@@ -468,7 +467,7 @@ mod tests {
         assert!(config.contains("vllm_host") && !config.contains("\npuffin_"));
         assert_eq!(
             std::fs::read_to_string(cwd.join("dreamference.toml")).unwrap(),
-            "mightling_cave_mode = \"off\"\n"
+            "mightling_night_hour = \"3\"\n"
         );
         assert!(home.join(".ssh/mightling-node_ed25519").is_file());
         assert!(home.join(".ssh/mightling-node_ed25519.pub").is_file());

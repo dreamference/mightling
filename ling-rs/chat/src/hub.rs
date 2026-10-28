@@ -118,7 +118,6 @@ pub const HELP: &str = "Mightling, from your phone. Each conversation is an Ask 
 /threads — your recent threads\n\
 /use <n> — continue thread n from /threads\n\
 /status — what Mightling is doing\n\
-/cavemode [off|lite|full|ultra] — how terse this thread's answers are; /cavemode default <level> for new threads\n\
 /night add <task> — queue a task for Night Shift tonight, with this thread's last exchange; /night status — the queue\n\
 /help — this list";
 
@@ -659,13 +658,6 @@ impl Hub {
             "/night" => {
                 let rest = text.trim()["/night".len()..].trim().to_string();
                 self.night(chat, &rest).await;
-            }
-            "/cavemode" => {
-                let rest = words.collect::<Vec<_>>().join(" ");
-                let answer = match self.agent.cavemode(self.current(chat), rest).await {
-                    Ok(said) | Err(said) => said,
-                };
-                self.notice(chat, answer);
             }
             "/help" | "/start" => self.notice(chat, HELP),
             "/pair" => self.notice(chat, "This chat is already paired."),

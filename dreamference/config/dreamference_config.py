@@ -40,7 +40,6 @@ DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "xgrammar"
 # `server start --engine` overrides it for one start.
 DEFAULT_SERVER_ENGINE: Final[str | None] = None
 SERVER_ENGINES: Final[tuple] = ("ling", "sglang", "vllm")
-DEFAULT_CAVE_MODE: Final[bool] = False
 DEFAULT_USE_TENSORIZER: Final[bool] = False
 # Whether the Mightling agent's prompt advertises `ling-admin gmail` when an account is connected.
 # Read by the Rust launcher too (DREAMFERENCE_MIGHTLING_GMAIL, then `mightling_gmail` in the TOML file).
@@ -50,13 +49,6 @@ DEFAULT_MIGHTLING_GMAIL: Final[bool] = True
 # (DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER, then `mightling_compaction_ledger` in the TOML file); a test
 # keeps this default equal to LEDGER_DEFAULT in ling-rs/src/compaction.rs.
 DEFAULT_MIGHTLING_COMPACTION_LEDGER: Final[bool] = True
-# How tersely the Mightling agent answers (`/cavemode`, specs/DREAMFERENCE_MIGHTLING_CAVE_MODE.md). Read by
-# the Rust launcher too (DREAMFERENCE_MIGHTLING_CAVE_MODE, then `mightling_cave_mode` in the TOML file);
-# a test keeps this default equal to DEFAULT_MIGHTLING_CAVE_MODE in ling-rs/src/cave.rs. `lite` since
-# 2026-10-20 (spec §11.5); the TUI's own default (`full`, TUI_DEFAULT in cave.rs) has no Python side,
-# and SWE-bench pins its level itself (SWE_BENCH_CAVE_MODE).
-DEFAULT_MIGHTLING_CAVE_MODE: Final[str] = "lite"
-MIGHTLING_CAVE_MODE_LEVELS: Final[tuple] = ("off", "lite", "full", "ultra")
 # How much of the internet a Mightling session may use (`/airgapped`,
 # specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md): everything or nothing. The Rust
 # side (ling-rs/airgapped) resolves it for the agent's commands; a test keeps this default equal
@@ -84,13 +76,6 @@ DEFAULT_MIGHTLING_REFINE: Final[bool] = False
 DEFAULT_MIGHTLING_REFINE_VERSION: Final[str] = "v1"
 MIGHTLING_REFINE_VERSIONS: Final[tuple] = ("v1", "v2")
 
-CAVE_MODE_PROMPT: Final[str] = (
-    "You are in Cave Mode. You are a senior Staff Engineer. "
-    "Do not explain your reasoning. Do not use pleasantries, greetings, or conclusions. "
-    "Do not apologize. Output only the exact shell commands, tool calls, or code modifications "
-    "required to complete the user's objective. If asked a question, answer in 15 words or less."
-)
-
 class DreamferenceConfig:
     """
     Unified configuration manager implementing the 4-tier precedence hierarchy:
@@ -112,13 +97,11 @@ class DreamferenceConfig:
         num_scheduler_steps: Optional[int] = None,
         attention_backend: Optional[str] = None,
         kv_cache_dtype: Optional[str] = None,
-        cave_mode: Optional[bool] = None,
         use_tensorizer: Optional[bool] = None,
         guided_decoding_backend: Optional[str] = None,
         server_engine: str | None = None,
         mightling_gmail: Optional[bool] = None,
         mightling_compaction_ledger: Optional[bool] = None,
-        mightling_cave_mode: Optional[str] = None,
         mightling_airgapped: Optional[str] = None,
         mightling_prompt: Optional[str] = None,
         mightling_refine: Optional[bool] = None,
@@ -271,12 +254,6 @@ class DreamferenceConfig:
             else self.file_data.get("kv_cache_dtype", DEFAULT_KV_CACHE_DTYPE)
         )
 
-        self.cave_mode: bool = bool(
-            cave_mode
-            if cave_mode is not None
-            else self.file_data.get("cave_mode", DEFAULT_CAVE_MODE)
-        )
-
         self.guided_decoding_backend: str = str(
             guided_decoding_backend
             if guided_decoding_backend is not None
@@ -316,13 +293,6 @@ class DreamferenceConfig:
             self.mightling_compaction_ledger = bool(
                 self.file_data.get("mightling_compaction_ledger", DEFAULT_MIGHTLING_COMPACTION_LEDGER))
 
-        # The same tiers the launcher reads, first valid value wins; an invalid one is skipped there
-        # too, so a typo in one tier falls through rather than switching cave mode off.
-        self.mightling_cave_mode: str = DEFAULT_MIGHTLING_CAVE_MODE
-        for candidate in (mightling_cave_mode, os.getenv("DREAMFERENCE_MIGHTLING_CAVE_MODE"), self.file_data.get("mightling_cave_mode")):
-            if isinstance(candidate, str) and candidate.strip().lower() in MIGHTLING_CAVE_MODE_LEVELS:
-                self.mightling_cave_mode = candidate.strip().lower()
-                break
 
         # The air-gap level, through the same tiers; an invalid value is skipped. This reads the one
         # configuration file this object resolved: the launcher also reads the user-level file and
@@ -521,7 +491,6 @@ class DreamferenceConfig:
         if self.num_scheduler_steps != DEFAULT_SCHEDULER_STEPS: data["num_scheduler_steps"] = self.num_scheduler_steps
         if self.attention_backend != DEFAULT_ATTENTION_BACKEND: data["attention_backend"] = self.attention_backend
         if self.kv_cache_dtype != DEFAULT_KV_CACHE_DTYPE: data["kv_cache_dtype"] = self.kv_cache_dtype
-        if self.cave_mode != DEFAULT_CAVE_MODE: data["cave_mode"] = self.cave_mode
         if self.guided_decoding_backend != DEFAULT_GUIDED_DECODING_BACKEND: data["guided_decoding_backend"] = self.guided_decoding_backend
         if self.use_tensorizer != DEFAULT_USE_TENSORIZER: data["use_tensorizer"] = self.use_tensorizer
         if self.server_engine != DEFAULT_SERVER_ENGINE:
@@ -529,7 +498,6 @@ class DreamferenceConfig:
         if self.mightling_gmail != DEFAULT_MIGHTLING_GMAIL: data["mightling_gmail"] = self.mightling_gmail
         if self.mightling_compaction_ledger != DEFAULT_MIGHTLING_COMPACTION_LEDGER:
             data["mightling_compaction_ledger"] = self.mightling_compaction_ledger
-        if self.mightling_cave_mode != DEFAULT_MIGHTLING_CAVE_MODE: data["mightling_cave_mode"] = self.mightling_cave_mode
         if self.mightling_airgapped != DEFAULT_MIGHTLING_AIRGAPPED: data["mightling_airgapped"] = self.mightling_airgapped
         if self.mightling_prompt != DEFAULT_MIGHTLING_PROMPT: data["mightling_prompt"] = self.mightling_prompt
         if self.mightling_refine != DEFAULT_MIGHTLING_REFINE: data["mightling_refine"] = self.mightling_refine

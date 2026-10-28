@@ -10,8 +10,7 @@
 //! The session's adapter, first match wins: `ling --adapter <name>` (removed from the arguments
 //! before Codex parses them), then for `resume` and `fork` the thread's own record
 //! (`$CODEX_HOME/adapter/<thread-id>`, written by `/adapter`), then `DREAMFERENCE_MIGHTLING_ADAPTER`,
-//! then `mightling_adapter` in the Dreamference TOML file, then the base. Unlike cave mode's tiers,
-//! a tier that is set but empty (or `off`) means the base and stops there: unattended callers set
+//! then `mightling_adapter` in the Dreamference TOML file, then the base. A tier that is set but empty (or `off`) means the base and stops there: unattended callers set
 //! the variable to `""` so that a user's `mightling_adapter` default never reaches a benchmark run
 //! (§10.4), and `/adapter off` writes `off` so that a resumed thread stays on the base.
 //!

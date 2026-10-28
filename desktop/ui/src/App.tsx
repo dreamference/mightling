@@ -2568,26 +2568,6 @@ export function App() {
           setAirgap(level);
           return setInfo({ title: "Airgapped", body: <p>Airgapped is <strong>{level.level}</strong> ({level.source}).</p> });
         }
-        case "cavemode": {
-          // CAVE_MODE §11.5: one thread's level (from its next model request), or the default for new threads.
-          const words = args.split(/\s+/).filter(Boolean).map((word) => word.toLowerCase());
-          const levels = ["off", "lite", "full", "ultra"];
-          if (words[0] === "default" && words.length === 2 && (levels.includes(words[1]) || words[1] === "built-in")) {
-            return setInfo({ title: "Cave mode", body: <pre className="info-pre">{await bridge.cavemode.set(words[1], null)}</pre> });
-          }
-          if (words.length === 1 && levels.includes(words[0])) {
-            if (!threadId) return notice("Send a message first, or set the default with /cavemode default <level>.");
-            return setInfo({ title: "Cave mode", body: <pre className="info-pre">{await bridge.cavemode.set(words[0], threadId)}</pre> });
-          }
-          if (words.length) return setInfo({ title: "Cave mode", body: <p>Usage: <code>/cavemode [off|lite|full|ultra]</code> or <code>/cavemode default &lt;level|built-in&gt;</code>.</p> });
-          const level = await bridge.cavemode.status(threadId);
-          return setInfo({ title: "Cave mode", body: (
-            <>
-              <p>Answers are <strong>{level.level}</strong> ({level.source}).</p>
-              <ul>{level.levels.map((entry) => <li key={entry.name}><code>{entry.name}</code>: {entry.summary}</li>)}</ul>
-            </>
-          ) });
-        }
       }
     } catch (error) {
       notice(error);

@@ -3,7 +3,7 @@
 //! On 2026-10-20 a phone question stalled for 15 minutes: the model looped inside a tool call's
 //! argument, which SGLang's tool parser buffers whole, so nothing reached `ling` until the 900 s
 //! idle timeout. Two layers answer that, both through Codex's own extension API, with no Codex
-//! patch (installed beside cave mode, [`install`]):
+//! patch (installed beside the air-gap section, [`install`]):
 //!
 //! - **A length cap per response**, the only bound SGLang's `/v1/responses` honours. The launcher
 //!   cannot write the request body, so it names the cap in the request's `client_metadata`
@@ -333,8 +333,8 @@ impl ContextContributor for Surfaces {
     }
 }
 
-/// Registers the guard. Called from `cave::install`, which the app server's registry and `ling
-/// debug prompt-input`'s already call, so it costs no patch bytes.
+/// Registers the guard. Called from `airgapped::install`, which the app server's registry and
+/// `ling debug prompt-input`'s already call, so it costs no patch bytes.
 pub fn install<C: Sync>(registry: &mut ExtensionRegistryBuilder<C>) {
     registry.prompt_contributor(Arc::new(Surfaces));
     registry.model_request_contributor(Arc::new(Guard));

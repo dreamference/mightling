@@ -4,7 +4,7 @@
 //! ```toml
 //! glossary = true                 # the tool glossary of §5, on or off
 //! enabled = ["deploy"]            # offered although the preflight says otherwise
-//! disabled = ["caveman-stats"]    # never offered
+//! disabled = ["terse-stats"]    # never offered
 //!
 //! [sources]
 //! hermes = false                  # a linked source switched off
@@ -135,7 +135,7 @@ mod tests {
         let settings = Settings {
             glossary: Some(false),
             enabled: ["deploy".to_string()].into(),
-            disabled: ["caveman-stats".to_string(), "/x/SKILL.md".to_string()].into(),
+            disabled: ["terse-stats".to_string(), "/x/SKILL.md".to_string()].into(),
             sources_off: ["hermes".to_string()].into(),
             announced: [("pdf".to_string(), "abc".to_string())].into(),
         };

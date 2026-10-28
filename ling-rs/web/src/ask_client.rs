@@ -181,30 +181,6 @@ pub async fn upload(port: u16, cookie: &str, thread: &str, name: &str, image: bo
     saved_from(&body)
 }
 
-/// `/cavemode <text>` from a phone bridge, as a signed-in client: what `ling cavemode` printed for
-/// `thread` (None before the first question), or why it was refused (cave.rs).
-pub async fn cavemode(port: u16, cookie: &str, thread: Option<&str>, text: &str) -> Result<String, String> {
-    let body = serde_json::to_vec(&json!({ "command": text, "thread": thread })).map_err(|err| err.to_string())?;
-    let mut request = format!(
-        "POST /api/cavemode HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    )
-    .into_bytes();
-    request.extend_from_slice(&body);
-    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
-        .await
-        .map_err(|err| format!("ling web is not answering on port {port}: {err}"))?;
-    stream.write_all(&request).await.map_err(|err| err.to_string())?;
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response).await.map_err(|err| err.to_string())?;
-    let split = response.windows(4).position(|w| w == b"\r\n\r\n").ok_or("ling web sent no HTTP response")?;
-    let value: Value = serde_json::from_slice(&response[split + 4..]).unwrap_or(Value::Null);
-    match value.get("said").and_then(Value::as_str) {
-        Some(said) => Ok(said.to_string()),
-        None => Err(value.get("error").and_then(Value::as_str).unwrap_or("ling web did not answer").to_string()),
-    }
-}
-
 /// A GET to `ling web` as a signed-in client: (status, body).
 pub async fn get(port: u16, cookie: &str, path_and_query: &str) -> Result<(u16, Vec<u8>), String> {
     let request = format!("GET {path_and_query} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n");

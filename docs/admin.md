@@ -43,7 +43,6 @@ Run an autonomous coding task.
 | `--agent` | Primary AI agent runner. One of: `codex`, `cline`, `continue`, `openhands`. |
 | `--hf-token` | HuggingFace API access token. |
 | `--debug` | Enable verbose debug output. |
-| `--cave` | Enable Cave Mode strict prompt (no explanations, only commands/code) |
 | `--compat` | The compatibility mode for this session (ling only; ling --compat) One of: `claude`, `off`. |
 
 ### `ling-admin status`

@@ -1657,7 +1657,6 @@ def test_the_manifest_records_what_was_measured(bench):
         "served_context",
         "codex_tag",
         "runtime_hash",
-        "cave_mode",
         "airgapped",
         "task_context",
         "task_timeout_s",
@@ -1672,12 +1671,18 @@ def test_the_manifest_records_what_was_measured(bench):
         SweBenchRunStore("r1").write_manifest({})
 
 
-def test_the_cave_level_is_pinned_not_the_products_default(bench, monkeypatch):
-    # Cave-mode spec §11.5: the nights keep `ultra` whatever the product's default or the user's
-    # variable says, so a change of default cannot move their baseline.
+def test_a_run_no_longer_records_a_cave_level_and_an_old_manifest_still_reads(bench, monkeypatch):
+    # Cave mode was removed (2026-10-28): new runs carry no `cave_mode` and set no variable for it,
+    # while a manifest written before still loads and renders, its field simply unused.
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_CAVE_MODE", "off")
     run(bench, instances=["acme__widget-1"])
+    store = SweBenchRunStore("r1")
+    assert "cave_mode" not in store.manifest()
+    old = dict(store.manifest(), cave_mode="ultra")
+    store._write(store.manifest_path, old)
     assert SweBenchRunStore("r1").manifest()["cave_mode"] == "ultra"
+    assert "Prompt default;" in SweBenchReport.render(SweBenchRunStore("r1"))
+    assert "cave" not in SweBenchReport.render(SweBenchRunStore("r1"))
 
 
 def test_the_report_counts_add_up_and_says_what_the_number_is_not(bench):
@@ -2346,7 +2351,7 @@ def test_without_prompt_the_run_records_and_passes_the_configured_one(bench, mon
     assert not any("system-prompts" in mount for mount in mounts)
     manifest = SweBenchRunStore("r1").manifest()
     assert (manifest["prompt"], manifest["prompt_sha256"]) == ("default", None)
-    assert "Prompt default; cave mode" in SweBenchReport.render(SweBenchRunStore("r1"))
+    assert "Prompt default;" in SweBenchReport.render(SweBenchRunStore("r1"))
 
 
 def test_masking_is_off_unless_asked_and_two_runs_are_told_apart_by_it(bench, monkeypatch):

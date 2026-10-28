@@ -8,7 +8,7 @@
 - the bridges' stand-ins: the scripted signal-cli of `ling-rs/signal/tests/daemon.rs`, the stand-in Bot API and homeserver of `ling chat`'s tests (CHAT §13);
 - `ling-admin audit egress` ([MIGHTLING_EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md)): strace on a real session;
 - named prompts ([MIGHTLING_PROMPT](./DREAMFERENCE_MIGHTLING_PROMPT.md)): `DREAMFERENCE_MIGHTLING_PROMPT=ask` gives `ling exec` the Ask prompt the bridges use.
-**Reads with:** [MIGHTLING_CAVE_MODE §1.1](./DREAMFERENCE_MIGHTLING_CAVE_MODE.md) (the only assistant-side measurement so far), [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md), [research/agent-survey-2026-10-09](./research/agent-survey-2026-10-09.md) (the same method, for coding).
+**Reads with:** MIGHTLING_CAVE_MODE §1.1 (spec removed 2026-10-28) (the only assistant-side measurement so far), [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md), [research/agent-survey-2026-10-09](./research/agent-survey-2026-10-09.md) (the same method, for coding).
 
 **Short answer.** No published benchmark reproduces the morning's failures. Nothing published puts a CAPTCHA in front of an agent's search tool. Nothing sends an image that reads as nothing through a messenger, keeps a thread open for two days, or asks the agent why it was slow and checks the answer against the log. So the first thing to build is **our own small suite, `ask-evals`** (§5). It has about 24 synthetic scenarios, stand-in search and fetch with fault injection, rule-based scores, offline, and about an hour a night. Around it, five outside sets are cheap, offline, mostly judge-free and permissively licensed, and each covers one failure better than we could:
 

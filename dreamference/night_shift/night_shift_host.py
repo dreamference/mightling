@@ -74,7 +74,6 @@ NON_INTERACTIVE: Final[frozenset] = frozenset(
         "notice",
         "refine",
         "compat",
-        "cavemode",
         "loop-guard",
         "guard",
         "worktree",

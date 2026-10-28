@@ -420,7 +420,7 @@ class SweBenchInstanceRun:
         model_url: The model server as the container reaches it (the network's gateway).
         deadline: `time.time()` by which the instance must stop (its timeout, or the run's
             `--until`).
-        extra_env: More environment for the container (the cave-mode and air-gap levels).
+        extra_env: More environment for the container (the air-gap level).
         code_index: How the container is given a code index (`mounts`, `env`, `path`, and
             the index's `record`); None for the arm without one.
         extra_mounts: More `docker run -v` values (a custom prompt's file, read-only).

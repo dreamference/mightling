@@ -20,7 +20,6 @@ import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeTheme, scree
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, FAILED, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped, setDefault } from "./airgapped";
-import { cavemodeSet, cavemodeStatus } from "./cavemode";
 import { serve } from "./app-protocol";
 import { auditPreview, type WorkTarget } from "./args";
 import { webUrl } from "./links";
@@ -802,12 +801,6 @@ export async function main(options: MainOptions): Promise<void> {
         const ling = findLing(resourcesPath());
         if (!ling) throw new Error("ling is not installed");
         return setDefault(ling, message.level);
-      }
-      case "cave/status":
-      case "cave/set": {
-        const ling = findLing(resourcesPath());
-        if (!ling) throw new Error("ling is not installed");
-        return message.type === "cave/status" ? cavemodeStatus(ling, message.thread) : cavemodeSet(ling, message.level, message.thread);
       }
       case "context-menu":
         showContextMenu(own, message);

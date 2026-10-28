@@ -90,8 +90,6 @@ def session_command(
     ]
     if socket_path:
         session += ["--model-socket", socket_path]
-    if args.cave:
-        session += ["--cave", args.cave]
     if args.no_jail:
         return session
     return ["bwrap", "--unshare-net", "--die-with-parent", "--dev-bind", "/", "/", "--", *session]
@@ -164,7 +162,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs", default=str(DEFAULT_RUNS / time.strftime("%Y%m%d-%H%M%S")))
     parser.add_argument("--model-port", type=int, default=8000)
     parser.add_argument("--ling", default="ling")
-    parser.add_argument("--cave", help="cave level for scenarios that do not set one")
     parser.add_argument("--plan", action="store_true", help="print the plan; run nothing")
     parser.add_argument("--rescore", help="score the runs under this directory again")
     parser.add_argument("--no-jail", action="store_true", help="tests only: run sessions unjailed")
@@ -183,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         for s in scenarios:
             print(
                 f"{s['id']:32} {s['family']:4} turns {len(s['turns'])}  failures {s['failure']}"
-                f"{'  vision' if s.get('requires_vision') else ''}{'  cave ' + s['cave'] if s.get('cave') else ''}"
+                f"{'  vision' if s.get('requires_vision') else ''}"
             )
         print(f"{len(scenarios)} scenarios x {len(reps)} repetitions")
         return 0

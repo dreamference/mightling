@@ -4,7 +4,7 @@
 **Goal:** `ling` can run under more than one system prompt, chosen by name. Two ship: `default`, today's prompt byte for byte, and `high-swe`, a prompt written to resolve as many SWE-bench tasks as the local model can. `/prompt` shows and switches them.
 **Builds on:**
 - the launcher, which already composes the system prompt and writes it to the model catalog (`ling-rs/src/lib.rs`, `base_instructions()` and `model_catalog()`);
-- the configuration chain `/cavemode` and `/airgapped` use (a `DREAMFERENCE_*` variable, then the TOML file, then the built-in default), and their slash-command pattern ([MIGHTLING_CAVE_MODE](./DREAMFERENCE_MIGHTLING_CAVE_MODE.md), [MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md));
+- the configuration chain `/cavemode` and `/airgapped` use (a `DREAMFERENCE_*` variable, then the TOML file, then the built-in default), and their slash-command pattern (MIGHTLING_CAVE_MODE (spec removed 2026-10-28), [MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md));
 - `ling-admin swe-bench` ([MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md)), which is how a prompt is measured, and its first runs, which are where `high-swe` comes from.
 
 **Three things to know before reading further:**

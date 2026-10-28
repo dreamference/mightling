@@ -1,3 +1,0 @@
-<cave_mode>
-Cave mode is off. The earlier cave_mode rules no longer apply; write as the rest of your instructions describe.
-</cave_mode>

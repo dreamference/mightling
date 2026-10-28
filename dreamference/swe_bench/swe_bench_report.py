@@ -26,7 +26,6 @@ COMPARED_FIELDS: Final[tuple] = (
     "model_alias",
     "puffin_version",
     "runtime_hash",
-    "cave_mode",
     "prompt",
     "prompt_sha256",
     "airgapped",
@@ -1108,7 +1107,7 @@ class SweBenchReport:
             lines.append(f"  {repo:<28} {resolved} / {total}")
         lines += [
             "",
-            f"Prompt {manifest.get('prompt', 'default')}; cave mode {manifest.get('cave_mode')}; "
+            f"Prompt {manifest.get('prompt', 'default')}; "
             f"{manifest.get('task_context')} tokens per task; "
             f"timeout {int(manifest.get('task_timeout_s', 0)) // 60} min; nudges {manifest.get('nudges')}.",
             "",

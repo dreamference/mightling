@@ -58,7 +58,7 @@ These options come before the subcommand (`ling-admin --agent cline run "…"`).
 | `--agent {codex,cline,continue,openhands}` | Choice | Agent runner (default `codex`) |
 | `--hf-token TOKEN` | String | HuggingFace token (else `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN`) |
 
-`--debug` and `--cave` belong to `run`; they are not global.
+`--debug` belongs to `run`; they are not global.
 
 ---
 
@@ -67,7 +67,7 @@ These options come before the subcommand (`ling-admin --agent cline run "…"`).
 | Subcommand | Description | Key Args |
 | :--- | :--- | :--- |
 | **`init`** | Download weights, write the config, force a workspace re-index | `[--model] [--vllm-host] [--draft-model] [--agent] [--hf-token]` |
-| **`run`** | Run one task with the selected agent | `PROMPT [--model] [--draft-model] [--agent] [--hf-token] [--debug] [--cave] [--compat claude\|off]` (`--compat` sets `DREAMFERENCE_MIGHTLING_COMPAT` for that `ling` session; refused for the other agents) |
+| **`run`** | Run one task with the selected agent | `PROMPT [--model] [--draft-model] [--agent] [--hf-token] [--debug] [--compat claude\|off]` (`--compat` sets `DREAMFERENCE_MIGHTLING_COMPAT` for that `ling` session; refused for the other agents) |
 | **`status`** | Hardware, vLLM and agent, and context-index panels | — |
 | **`index`** | AST + FTS5 + TF-IDF + embedding workspace index | `[--dir PATH] [--force]` |
 | **`mcp`** | stdio MCP server for JetBrains / VS Code | — |
@@ -143,7 +143,7 @@ ling-admin diffusion-model set MODEL
 ### 4.3. `ling-admin run`
 
 ```bash
-ling-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--hf-token …] [--debug] [--cave]
+ling-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--hf-token …] [--debug]
 ```
 
 **Behaviour:** dispatches on `config.agent_runner` to one of `CodexRunner` (also for any unrecognised value), `ClineRunner`, `ContinueRunner` or `OpenHandsRunner`, then calls `run_session(prompt=…, debug=…)`.
@@ -154,7 +154,6 @@ ling-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …
   - with `--debug`, sets `RUST_LOG=codex_mcp=trace,codex_core=debug,codex_app_server=debug,info`.
 - **Cline:** prints the prompt and opens VS Code.
 - **Continue / OpenHands:** launch their UI; the prompt is unused.
-- **`--cave`:** injects the terse Cave Mode prompt into `.clinerules` for Cline.
 
 ---
 
@@ -561,7 +560,6 @@ num_scheduler_steps = 8
 attention_backend = "auto"
 # kv_cache_dtype unset = use the model recipe's value
 mightling_gmail = true
-mightling_cave_mode = "lite"   # off | lite | full | ultra; unset: lite, the TUI full
 mightling_airgapped = "off"     # off | on
 mightling_compaction_ledger = true    # hand the agent a rule-built ledger after each compaction
 mightling_prompt = "default"    # the system prompt new sessions get (ling prompt use <name>)
@@ -606,7 +604,6 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
 | `DREAMFERENCE_MIGHTLING_GMAIL` | `true` | Add the Gmail section to `ling`'s prompt when an account is connected |
 | `DREAMFERENCE_MIGHTLING_CONTEXT_WINDOW` | unset | The model's context window in tokens, overriding what the server reports (also `mightling_context_window` in the config file). Without either, `ling` reads `max_model_len`, `context_length` or `max_context_length` from `/v1/models`, then llama.cpp's `/props` `n_ctx`, then its `n_ctx_train`, else assumes 32,768. Ollama reports none, so set it there |
-| `DREAMFERENCE_MIGHTLING_CAVE_MODE` | `lite` (the TUI: `full`) | Cave-mode level for new `ling` sessions (`off`, `lite`, `full`, `ultra`); also the config key `mightling_cave_mode` |
 | `DREAMFERENCE_MIGHTLING_COMPAT` | `off` | The compatibility mode (`claude` or `off`; `--compat` on the command line sets it for the process and what it starts); also the config key `mightling_compat`, which `ling compat use` writes and which is read only from `~/.config/dreamference/config.toml`, never from a repository's `dreamference.toml` or `DREAMFERENCE_CONFIG_PATH`. A value naming no mode stops the start, from the flag or the variable; from the file it is reported and the mode stays off. Fixed for a session's life (`DREAMFERENCE_MIGHTLING_LING_CLAUDE.md` §0.4) |
 | `DREAMFERENCE_MIGHTLING_CLAUDE_MD` | `off` | Outside the compatibility mode, makes a folder's `CLAUDE.md` Codex's fallback project document (`project_doc_fallback_filenames` gains `CLAUDE.md` for the session, read only where a folder has no `AGENTS.md`); also the config key `mightling_claude_md`. In the mode, `CLAUDE.md` comes through the memory hook instead (`DREAMFERENCE_MIGHTLING_LING_CLAUDE.md` §9.1) |
 | `DREAMFERENCE_MIGHTLING_PROMPT` | `default` | System prompt for new `ling` sessions (`default`, `offline`, `high-swe`, `ask`, or a custom one in `$CODEX_HOME/system-prompts/<name>.md`); also the config key `mightling_prompt`, which `ling prompt use` writes. An unknown name is skipped with a warning. A resumed session keeps the prompt it started with |

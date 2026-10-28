@@ -66,7 +66,7 @@ PROTECT = [
 ]
 SWE_ONLY = {"puffin_version", "puffin_code_calls", "puffin_code_users"}
 
-CRATES = r"(launcher|airgapped|masking|apps|skills|tools|node[-_]locator|cave|web|code|app|search|fetch|rs|desktop[-_]bridge)"
+CRATES = r"(launcher|airgapped|masking|apps|skills|tools|node[-_]locator|web|code|app|search|fetch|rs|desktop[-_]bridge)"
 
 RULES = [
     (r"DREAMFERENCE_PUFFIN_", "DREAMFERENCE_MIGHTLING_"),

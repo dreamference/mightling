@@ -35,7 +35,7 @@ pub const CODEX_COMMANDS: &[&str] = &[
     "statusline", "theme", "pets", "pet", "mcp", "apps", "plugins", "logout", "quit", "exit", "feedback", "rollout",
     "ps", "stop", "clean", "clear", "test-approval", "subagents", "debug-m-drop", "debug-m-update",
     // Mightling's, from its patches.
-    "cavemode", "adapter", "airgapped", "night", "node",
+    "adapter", "airgapped", "night", "node",
 ];
 
 /// Where a command comes from.

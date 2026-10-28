@@ -10,7 +10,7 @@ The phone-chat assistant's own regression suite: [specs/DREAMFERENCE_MIGHTLING_A
 ```
 
 - **Offline by construction.** Each session runs in `bwrap --unshare-net`: loopback only. The stand-in SearXNG and proxy (`askevals/standins.py`) listen there, and the model comes in through a Unix socket in `$XDG_RUNTIME_DIR`, joined to `127.0.0.1:<--model-port>` outside (`askevals/forward.py`). Codex's own sandbox (`workspace-write`) runs nested inside, as in production.
-- **One session per scenario run**, with a fresh `CODEX_HOME` and scratch folder under `~/.cache/dreamference/ask-evals/runs/`, never `/tmp`. The first turn is `ling exec --json`, each later one `ling exec … resume --last`. The prompt is `ask` (`DREAMFERENCE_MIGHTLING_PROMPT`). Cave mode is the shipped default unless the scenario or `--cave` names a level.
+- **One session per scenario run**, with a fresh `CODEX_HOME` and scratch folder under `~/.cache/dreamference/ask-evals/runs/`, never `/tmp`. The first turn is `ling exec --json`, each later one `ling exec … resume --last`. The prompt is `ask` (`DREAMFERENCE_MIGHTLING_PROMPT`).
 - **The harness's own bound:** a turn that prints nothing for 180 s, or runs past its limit (600 s by default), is cut and counted.
 - **Scenarios** are `scenarios/<id>.json`, all synthetic. A scenario holds:
   - `turns` (text, images drawn by `askevals/images.py`, an optional `faketime` offset);

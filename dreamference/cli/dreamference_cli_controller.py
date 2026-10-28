@@ -1314,7 +1314,6 @@ class DreamferenceCLIController:
         run_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         run_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
-        run_parser.add_argument("--cave", action="store_true", default=False, help="Enable Cave Mode strict prompt (no explanations, only commands/code)")
         run_parser.add_argument(
             "--compat",
             choices=["claude", "off"],
@@ -2026,7 +2025,6 @@ class DreamferenceCLIController:
         kv_cache_dtype = getattr(args, "kv_cache_dtype", None)
         max_num_batched_tokens = getattr(args, "max_num_batched_tokens", None)
         guided_decoding_backend = getattr(args, "guided_decoding_backend", None)
-        cave_mode = getattr(args, "cave", None)
         tensorize_opt = getattr(args, "tensorize", None)
 
         config = DreamferenceConfig(
@@ -2041,7 +2039,6 @@ class DreamferenceCLIController:
             num_scheduler_steps=num_scheduler_steps,
             attention_backend=attention_backend,
             kv_cache_dtype=kv_cache_dtype,
-            cave_mode=cave_mode,
             use_tensorizer=tensorize_opt,
             guided_decoding_backend=guided_decoding_backend
         )
