@@ -81,6 +81,8 @@ class SweBenchEvaluator:
         rows = {row["instance_id"]: row for row in SweBenchHarness.rows(dataset)}
         validated, rejected = SweBenchImages.validated(), SweBenchImages.rejected()
         tags = SweBenchImages.tags()
+        built = SweBenchImages.built_tags()
+        builds_here = swe_bench_settings.SweBenchSettings.task_repo(dataset) is not None
         outcome: Dict[str, Optional[str]] = {}
         images: Dict[str, str] = {}
         digests: Dict[str, Optional[str]] = {}
@@ -94,11 +96,9 @@ class SweBenchEvaluator:
             if instance_id not in rows:
                 outcome[instance_id] = f"not in {dataset}"
                 continue
-            image = SweBenchImages.image_for(instance_id, tags)
+            image = SweBenchImages.image_for(instance_id, tags, built)
             if image is None:
-                problem = f"no {swe_bench_settings.SweBenchSettings.architecture()} image"
-                SweBenchImages.record_validation(instance_id, None, None, problem)
-                outcome[instance_id] = problem
+                outcome[instance_id] = cls.no_image(instance_id, builds_here)
                 continue
             disk = cls.disk_problem(settings)
             if disk and SweBenchDocker.image_digest(image) is None:
@@ -133,6 +133,24 @@ class SweBenchEvaluator:
             SweBenchImages.record_validation(instance_id, images[instance_id], digests[instance_id], problem)
             outcome[instance_id] = problem
         return outcome
+
+    @classmethod
+    def no_image(cls, instance_id: str, builds_here: bool) -> str:
+        """Records an instance with no image here, unless its image is one built on request.
+
+        Args:
+            instance_id: The instance.
+            builds_here: Its dataset's images are built here (`swe-bench build-images`).
+
+        Returns:
+            str: Why it is not validated.
+        """
+        if builds_here:
+            # Not a verdict: the image is built here on request, and validated once it is.
+            return "not validated yet: its image is not built here (swe-bench build-images)"
+        problem = f"no {swe_bench_settings.SweBenchSettings.architecture()} image"
+        SweBenchImages.record_validation(instance_id, None, None, problem)
+        return problem
 
     @classmethod
     def validation_problem(cls, gold: Optional[Dict[str, Any]], noop: Optional[Dict[str, Any]]) -> Optional[str]:

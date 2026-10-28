@@ -8,7 +8,10 @@ container, pull an image or reach the network.
 
 import json
 import subprocess
-from typing import IO, Any, Dict, List, Optional
+from typing import IO, Any, Dict, Final, List, Optional
+
+# The variable `image_path` reads from an image's configuration.
+PATH_VARIABLE: Final[str] = "PATH"
 
 
 class SweBenchDocker:
@@ -73,6 +76,29 @@ class SweBenchDocker:
         except ValueError:
             listed = []
         return listed[0].split("@")[-1] if listed else image_id
+
+    @classmethod
+    def image_path(cls, image: str) -> str | None:
+        """Reads the PATH an image configures.
+
+        Args:
+            image: The image reference.
+
+        Returns:
+            str | None: The value of its `PATH` variable; None when the image is absent or sets none.
+        """
+        result = cls.run(["image", "inspect", image, "--format", "{{json .Config.Env}}"], timeout=60)
+        if result.returncode != 0:
+            return None
+        try:
+            variables = json.loads(result.stdout.strip() or "null") or []
+        except ValueError:
+            return None
+        for variable in variables:
+            name, _, value = str(variable).partition("=")
+            if name == PATH_VARIABLE:
+                return value
+        return None
 
     @classmethod
     def ensure_image(cls, image: str) -> Optional[str]:

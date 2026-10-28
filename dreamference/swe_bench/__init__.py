@@ -20,6 +20,7 @@ from dreamference.swe_bench.swe_bench_name_stripper import SweBenchNameStripper
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
 from dreamference.swe_bench.swe_bench_relay import SweBenchRelay
 from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
+from dreamference.swe_bench.swe_bench_image_builder import SweBenchImageBuilder
 from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
 from dreamference.swe_bench.swe_bench_difficulty import SweBenchDifficulty
 from dreamference.swe_bench.swe_bench_shards import SweBenchShards
@@ -39,6 +40,7 @@ __all__ = [
     "SweBenchGateHold",
     "SweBenchHarness",
     "SweBenchHooks",
+    "SweBenchImageBuilder",
     "SweBenchImageCache",
     "SweBenchImages",
     "SweBenchInstanceRun",

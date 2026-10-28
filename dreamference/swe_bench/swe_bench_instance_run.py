@@ -1250,14 +1250,35 @@ class SweBenchInstanceRun:
 
     # -- steps ---------------------------------------------------------------------------------
 
+    @classmethod
+    def container_path(cls, image_path: str | None) -> str:
+        """The agent's PATH: `CONTAINER_PATH`, then whatever else the image's own PATH names.
+
+        A Verified image's PATH holds nothing `CONTAINER_PATH` lacks, so its agent's PATH is as it
+        always was; a Multilingual image's toolchain (`/usr/local/cargo/bin`, `/usr/local/go/bin`, a
+        JDK) stays reachable instead of being replaced by conda's directories.
+
+        Args:
+            image_path: The image's configured PATH; None when it could not be read.
+
+        Returns:
+            str: The PATH the agent's container gets.
+        """
+        entries = CONTAINER_PATH.split(":")
+        for entry in (image_path or "").split(":"):
+            if entry and entry not in entries:
+                entries.append(entry)
+        return ":".join(entries)
+
     def _start_container(self) -> str | None:
         shutil.rmtree(self.scratch, ignore_errors=True)
         for sub in ("codex-home", "home"):
             (self.scratch / sub).mkdir(parents=True, exist_ok=True)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         SweBenchDocker.run(["rm", "-f", self.container], timeout=120)
+        container_path = self.container_path(SweBenchDocker.image_path(self.image))
         environment = {
-            "PATH": CONTAINER_PATH,
+            "PATH": container_path,
             "HOME": f"{SCRATCH_MOUNT}/home",
             "CODEX_HOME": f"{SCRATCH_MOUNT}/codex-home",
             "SCRATCH": SCRATCH_MOUNT,
@@ -1293,7 +1314,7 @@ class SweBenchInstanceRun:
             mounts.append(f"{SweBenchHooks.gate_source()}:{GATE_MOUNT}:ro")
         if self.code_index:
             environment.update(self.code_index["env"])
-            environment["PATH"] = f"{self.code_index['path']}:{CONTAINER_PATH}"
+            environment["PATH"] = f"{self.code_index['path']}:{container_path}"
             mounts += list(self.code_index["mounts"])
         command = [
             "run",

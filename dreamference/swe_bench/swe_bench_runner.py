@@ -186,6 +186,24 @@ class SweBenchRunner:
     # -- the manifest --------------------------------------------------------------------------
 
     @classmethod
+    def image_source(cls, dataset: str) -> str:
+        """Where a dataset's instance images come from, as a run's manifest records it.
+
+        Args:
+            dataset: A dataset name or id.
+
+        Returns:
+            str: The community repository, or the task repository and commit the images were built from.
+        """
+        task_repo = swe_bench_settings.SweBenchSettings.task_repo(dataset)
+        if task_repo:
+            return (
+                f"built here ({swe_bench_settings.BUILT_IMAGE_REPO}) from {task_repo['url']} "
+                f"at {task_repo['commit'][:12]}"
+            )
+        return f"community ({swe_bench_settings.COMMUNITY_IMAGE_REPO})"
+
+    @classmethod
     def model_name(cls, served_model: str) -> str:
         """Builds the predictions' `model_name_or_path`, so a result stays attributable to the build
         and the model that produced it.
@@ -357,7 +375,7 @@ class SweBenchRunner:
             "dataset_rows": meta.get("rows"),
             "harness": SweBenchHarness.installed_version(),
             "architecture": swe_bench_settings.SweBenchSettings.architecture(),
-            "image_source": f"community ({swe_bench_settings.COMMUNITY_IMAGE_REPO})",
+            "image_source": cls.image_source(dataset),
             "images": {
                 i: {"image": validated[i]["image"], "digest": validated[i].get("digest")}
                 for i in selected
