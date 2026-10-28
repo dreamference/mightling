@@ -83,6 +83,12 @@ PLATFORM_PIN: Final[str] = "--platform="
 MVND: Final[str] = "maven-mvnd-"
 GO_DOWNLOAD: Final[str] = "dl.google.com/go/"
 
+# A Maven test command of an eval script: the tool and the module it tests.
+MAVEN_TEST: Final[re.Pattern[str]] = re.compile(r"(mvnd|mvn|\./mvnw) test [^\n|&]*?-pl ([\w./-]+)")
+
+# The warm-up runs Maven without mvnd's daemon, which would outlive the build step.
+MAVEN_WITHOUT_DAEMON: Final[dict[str, str]] = {"mvnd": "mvn"}
+
 # The upstream Dockerfiles fetch mvnd from a mirror that keeps only current releases (1.0.2 is
 # gone from it); the archive keeps every one.
 MVND_MIRROR: Final[str] = "https://downloads.apache.org/maven/mvnd/"
@@ -206,11 +212,12 @@ class SweBenchImageBuilder:
     # -- the Dockerfile ------------------------------------------------------------------------
 
     @classmethod
-    def arm64_dockerfile(cls, text: str) -> tuple[str | None, str | None]:
+    def arm64_dockerfile(cls, text: str, eval_script: str = "") -> tuple[str | None, str | None]:
         """Rewrites one task Dockerfile for a native arm64 build and adds the agent's layer.
 
         Args:
             text: The task repository's Dockerfile.
+            eval_script: The instance's eval script, for the Maven warm-up (`maven_warmup`).
 
         Returns:
             Tuple[Optional[str], Optional[str]]: The rewritten Dockerfile, or None and why it
@@ -236,8 +243,34 @@ class SweBenchImageBuilder:
         if re.search(r"^FROM rust:", out, flags=re.M):
             layers += RUST_LAYER
         if re.search(r"^FROM maven:", out, flags=re.M):
-            layers += MAVEN_LAYER
+            layers += MAVEN_LAYER + cls.maven_warmup(eval_script)
         return out.rstrip("\n") + "\n" + layers + AGENT_LAYER, None
+
+    @classmethod
+    def maven_warmup(cls, eval_script: str) -> str:
+        """A layer that runs one existing test of the module the eval script tests, with the network.
+
+        Maven fetches the test runner's provider (`surefire-junit4` and the like) only when a test
+        runs, so without this the agent's offline `mvn test` fails before any test does. The test
+        run is one the repository already has, never one of the benchmark's.
+
+        Args:
+            eval_script: The instance's eval script.
+
+        Returns:
+            str: The `RUN` line; empty when the script runs no Maven test with `-pl`.
+        """
+        found = MAVEN_TEST.search(cls.test_command(eval_script) or "")
+        if not found:
+            return ""
+        tool, module = found.group(1), found.group(2)
+        tool = MAVEN_WITHOUT_DAEMON.get(tool, tool)
+        return (
+            f"RUN cd /testbed && cls=$(find {module}/src/test -name '*Test.java' 2>/dev/null | sort | head -1 "
+            "| xargs -r basename | sed 's/[.]java$//') && if [ -n \"$cls\" ]; then "
+            f'{tool} test -B -q -pl {module} -Dtest="$cls" -Dsurefire.failIfNoSpecifiedTests=false '
+            "-DfailIfNoTests=false || true; fi\n"
+        )
 
     # -- the builder ---------------------------------------------------------------------------
 
@@ -366,7 +399,9 @@ class SweBenchImageBuilder:
             except OSError:
                 outcome[instance_id] = f"no Dockerfile in the task repository at {commit[:12]}"
                 continue
-            dockerfile, problem = cls.arm64_dockerfile(text)
+            dockerfile, problem = cls.arm64_dockerfile(
+                text, rows.get(instance_id, {}).get("eval_script", "")
+            )
             if dockerfile is None:
                 outcome[instance_id] = problem
                 cls._record(

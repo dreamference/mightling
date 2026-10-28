@@ -412,3 +412,18 @@ def test_the_agent_check_applies_the_test_patch_and_the_fix_before_the_tests(mac
     tests = next(i for i, c in enumerate(execs) if "bash" in c)
     assert len(applies) == 2 and max(applies) < tests
     assert all(execs[i][execs[i].index("-u") + 1] != "0" for i in applies)
+
+
+def test_a_maven_image_runs_one_existing_test_of_the_graded_module_at_build():
+    script = (
+        "git apply -v - <<'EOF_1'\ndiff\nEOF_1\n"
+        "(mvnd test -B -T 1C -pl gson -Dtest=com.google.gson.FooTest#bar) | cat\n"
+        "git checkout abc gson/src/test/x.java\n"
+    )
+    out, _ = SweBenchImageBuilder.arm64_dockerfile(DOCKERFILE_JAVA, script)
+    warm = next(line for line in out.splitlines() if "failIfNoSpecifiedTests" in line)
+    assert "find gson/src/test -name '*Test.java'" in warm
+    assert 'mvn test -B -q -pl gson -Dtest="$cls"' in warm and "FooTest" not in warm
+    assert out.index("failIfNoSpecifiedTests") < out.index("chmod -R a+rwX")
+    plain, _ = SweBenchImageBuilder.arm64_dockerfile(DOCKERFILE_JAVA, "make test\n")
+    assert "failIfNoSpecifiedTests" not in plain
