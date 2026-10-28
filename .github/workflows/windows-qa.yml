@@ -1,0 +1,359 @@
+# The daily Windows QA run on the self-hosted x86-64 Windows runner (docs/dev/testing.md, "Daily QA
+# on the idle machines"): more than CI runs there. The Python package's whole test suite on
+# Windows, the launcher's cargo tests, the desktop app's unit tests, and the latest release
+# installed, updated and uninstalled as a normal user would.
+#
+# Dispatched only: GitHub's `schedule` trigger never fires in this repository (found 2026-10-28),
+# so a user timer on the node dispatches it every morning at 06:30 UTC (`gh workflow run
+# windows-qa.yml --ref main`). Never add pull_request or pull_request_target: this repository is
+# public and the runner is a persistent machine (windows.yml says why). The runner's job-started
+# hook names this workflow among the few it accepts.
+#
+# Release work comes first. The `gate` job, on GitHub's runner, waits while a release, a release dry
+# run or a Windows build is queued or running (up to three hours, then skips the day). The box's
+# jobs run one after another, each a separate job, so a release job queued meanwhile takes the
+# runner at the next job boundary: the runner serves its queue in order. The box lock
+# (C:\ci-lock\box.lock) is taken by the runner's hooks for every job, this workflow's included.
+#
+# A failure opens, or updates, the one issue titled "Windows QA failing"; the next green run on
+# main closes it. The node's timer alerts the owner as well.
+name: Windows QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows_x64_runner:
+        description: "box (the WINDOWS_X64_RUNNER variable's runner, if set) or github (windows-latest)"
+        type: choice
+        default: box
+        options:
+          - box
+          - github
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-qa
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.wait.outputs.run }}
+      latest: ${{ steps.releases.outputs.latest }}
+      previous: ${{ steps.releases.outputs.previous }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Wait for release work
+        id: wait
+        run: |
+          deadline=$(( $(date +%s) + 3 * 3600 ))
+          while true; do
+            busy=""
+            for workflow in release.yml release-dry-run.yml windows.yml; do
+              n="$(gh run list --workflow "$workflow" --limit 20 --json status \
+                --jq '[.[] | select(.status != "completed")] | length')"
+              [[ "$n" != "0" ]] && busy="$busy $workflow($n)"
+            done
+            if [[ -z "$busy" ]]; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if (( $(date +%s) > deadline )); then
+              echo "::notice::release work still running after 3 hours:$busy; today's Windows QA is skipped."
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "waiting for:$busy"
+            sleep 300
+          done
+      # The update check installs the release before the latest and updates it, so `ling update`
+      # has something to do.
+      - name: Releases
+        id: releases
+        run: |
+          tags="$(gh release list --exclude-drafts --exclude-pre-releases --limit 10 --json tagName,publishedAt \
+            --jq 'sort_by(.publishedAt) | reverse | map(.tagName | ltrimstr("v")) | .[0:2] | join(" ")')"
+          read -r latest previous <<< "$tags"
+          echo "latest $latest, previous $previous"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+
+  # The Python package's whole test suite on Windows. The package is the node's tool (Linux), and on
+  # 2026-10-28 the suite did not get past its conftest on Windows: module-level imports of POSIX-only
+  # modules (fcntl in forge/forge_github_mirror.py, swe_bench/swe_bench_issue_gate.py,
+  # night_shift/night_shift_host.py, night_shift/night_shift_queue.py and node/node_job.py; pwd and grp
+  # in node/node_prepare.py), and os.getuid in tests/test_anonymity.py and tests/test_forge.py. With
+  # stand-ins for those three modules, about a third of the suite ran with some 120 failures before a
+  # Gmail-service test hung. So the step runs and reports (its last lines in the run's summary, red in
+  # the run) but does not fail the job: remove `continue-on-error` once the suite collects on Windows.
+  python:
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ${{ fromJSON((inputs.windows_x64_runner != 'github' && !startsWith(github.event_name, 'pull_request') && vars.WINDOWS_X64_RUNNER) || '"windows-latest"') }}
+    timeout-minutes: 60
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Long paths
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/qa-venv"
+          "$RUNNER_TEMP/qa-venv/Scripts/python" -m pip install -q -e ".[dev]" pytest pytest-timeout
+      - name: Test suite
+        continue-on-error: true
+        timeout-minutes: 40
+        shell: bash
+        run: |
+          set -o pipefail
+          "$RUNNER_TEMP/qa-venv/Scripts/python" -m pytest tests/ -q -rfE -p no:cacheprovider --timeout 300 2>&1 | tee "$RUNNER_TEMP/pytest.log"
+          code=${PIPESTATUS[0]}
+          {
+            echo "### Python test suite on Windows (exit $code; not gating yet)"
+            echo
+            echo '```'
+            grep -E '^(FAILED|ERROR) |Error|passed|failed|error' "$RUNNER_TEMP/pytest.log" | tail -25
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
+  # The desktop app's unit tests and typecheck, as windows.yml's desktop job runs them, here on the
+  # box. Its end-to-end suite needs a display session (DISPLAY, a desktop to open windows on) and
+  # drives a POSIX stand-in for `ling`; the runner is a service in session 0, so it is skipped with a
+  # note.
+  desktop:
+    needs: [gate, python]
+    if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
+    runs-on: ${{ fromJSON((inputs.windows_x64_runner != 'github' && !startsWith(github.event_name, 'pull_request') && vars.WINDOWS_X64_RUNNER) || '"windows-latest"') }}
+    timeout-minutes: 45
+    steps:
+      - name: Long paths
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Work window frontend
+        working-directory: desktop/ui
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+      - name: Main process unit tests and typecheck
+        working-directory: desktop/electron
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          node node_modules/electron/install.js || { sleep 15; node node_modules/electron/install.js; }
+          npm run typecheck
+          npm test
+      - name: End-to-end tests
+        shell: pwsh
+        run: |
+          $session = (Get-Process -Id $PID).SessionId
+          $note = "skipped: the desktop e2e suite needs a display session and its stand-in for ling is a POSIX script; this runner is a service in session $session (interactive: $([Environment]::UserInteractive))"
+          Write-Host $note
+          "### Desktop end-to-end tests`n`n$note" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+  # The latest release as a normal user gets it: the release before it installed with install.ps1
+  # (the desktop app included) under Windows PowerShell 5.1, `ling update` to the latest (binaries
+  # and app), then `ling uninstall` and the app's own uninstaller, each checked. The runner's
+  # account is a standard user and the run has no desktop, so install.ps1 skips its one
+  # Administrator step (-NoSandbox says so explicitly).
+  install:
+    needs: [gate, desktop]
+    if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
+    runs-on: ${{ fromJSON((inputs.windows_x64_runner != 'github' && !startsWith(github.event_name, 'pull_request') && vars.WINDOWS_X64_RUNNER) || '"windows-latest"') }}
+    timeout-minutes: 45
+    env:
+      LATEST: ${{ needs.gate.outputs.latest }}
+      PREVIOUS: ${{ needs.gate.outputs.previous }}
+      # GitHub allows 60 unauthenticated API calls an hour per public address, which the box shares
+      # with the other machines on its network; install.ps1 and `ling update` send this job's own
+      # token, when set, to api.github.com only. A user has none: the one difference from their run.
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Install, update, uninstall
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bin = Join-Path $env:LOCALAPPDATA "Programs\Mightling\bin"
+          $ling = Join-Path $bin "ling.exe"
+          $appDir = Join-Path $env:LOCALAPPDATA "Programs\Mightling\App"
+          $appKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Mightling"
+          function Remove-App {
+            $uninstaller = Join-Path $appDir "Uninstall Mightling.exe"
+            if (Test-Path $uninstaller) {
+              # An NSIS uninstaller copies itself to the temporary folder and runs from there: wait for the folder.
+              Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait
+              $deadline = (Get-Date).AddSeconds(120)
+              while ((Test-Path $appDir) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+            }
+          }
+          function Wait-Gone([string]$Dir) {
+            for ($i = 0; $i -lt 120 -and (Test-Path $Dir); $i++) { Start-Sleep -Seconds 1 }
+            return -not (Test-Path $Dir)
+          }
+          # What an earlier failed run may have left on this persistent account.
+          if (Test-Path $ling) { & $ling uninstall --yes; $null = Wait-Gone $bin }
+          Remove-App
+          $envKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("Environment")
+          $noExpand = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+          $savedPath = $envKey.GetValue("Path", $null, $noExpand)
+          $savedKind = if ($null -ne $savedPath) { $envKey.GetValueKind("Path") } else { $null }
+          Write-Host "PowerShell $($PSVersionTable.PSVersion); latest $env:LATEST, previous $env:PREVIOUS"
+          $script = Join-Path $env:RUNNER_TEMP "install.ps1"
+          Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/dreamference/mightling/releases/latest/download/install.ps1" -OutFile $script
+          $failures = @()
+          try {
+            # 1. The release before the latest.
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Version $env:PREVIOUS -NoSandbox
+            if ($LASTEXITCODE -ne 0) { throw "install.ps1 -Version $env:PREVIOUS failed (exit $LASTEXITCODE)" }
+            $version = (& $ling --version | Select-Object -Last 1)
+            Write-Host "installed: $version"
+            if ($version -notmatch [regex]::Escape($env:PREVIOUS) + '$') { throw "install.ps1 installed '$version', not $env:PREVIOUS" }
+            $appVersion = (Get-ItemProperty $appKey -ErrorAction SilentlyContinue).DisplayVersion
+            if ($appVersion -ne $env:PREVIOUS) { $failures += "the desktop app installed is '$appVersion', not $env:PREVIOUS" }
+            if (-not ([Environment]::GetEnvironmentVariable("Path", "User") -split ";" -contains $bin)) { $failures += "install.ps1 did not put $bin on the user's PATH" }
+            # 2. `ling update`, as the user runs it.
+            $ErrorActionPreference = "Continue"
+            & $ling update 2>&1 | Write-Host
+            $updateExit = $LASTEXITCODE
+            $ErrorActionPreference = "Stop"
+            if ($updateExit -ne 0) { throw "ling update failed (exit $updateExit)" }
+            $version = (& $ling --version | Select-Object -Last 1)
+            Write-Host "after the update: $version"
+            if ($version -notmatch [regex]::Escape($env:LATEST) + '$') { $failures += "ling update left '$version', not $env:LATEST" }
+            $appVersion = (Get-ItemProperty $appKey -ErrorAction SilentlyContinue).DisplayVersion
+            if ($appVersion -ne $env:LATEST) { $failures += "ling update left the desktop app at '$appVersion', not $env:LATEST" }
+            # 3. `ling uninstall`, then the app's own uninstaller.
+            & $ling uninstall --yes
+            if ($LASTEXITCODE -ne 0) { $failures += "ling uninstall failed (exit $LASTEXITCODE)" }
+            if (-not (Wait-Gone $bin)) { $failures += "ling uninstall left $bin" }
+            if ([Environment]::GetEnvironmentVariable("Path", "User") -split ";" -contains $bin) { $failures += "ling uninstall left $bin on the user's PATH" }
+            Remove-App
+            if (Test-Path $appDir) { $failures += "the app's uninstaller left $appDir" }
+            if (Test-Path $appKey) { $failures += "the app's uninstaller left its Apps entry" }
+          } catch {
+            $failures += "$($_.Exception.Message)"
+          } finally {
+            # The runner account's own PATH back, whatever happened.
+            if ($null -ne $savedPath) { $envKey.SetValue("Path", $savedPath, $savedKind) }
+            $envKey.Close()
+          }
+          if ($failures.Count -gt 0) { throw ($failures -join "; ") }
+          Write-Host "install $env:PREVIOUS -> update $env:LATEST -> uninstall: ok"
+
+  # The launcher's own tests, as windows.yml's ling job runs them: the build first (its export, V8
+  # and target directory are what the tests reuse), then `cargo test -p ling-launcher`. Last, being
+  # the longest, so release work queued meanwhile waits for one job at most.
+  launcher:
+    needs: [gate, install]
+    if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
+    runs-on: ${{ fromJSON((inputs.windows_x64_runner != 'github' && !startsWith(github.event_name, 'pull_request') && vars.WINDOWS_X64_RUNNER) || '"windows-latest"') }}
+    timeout-minutes: 150
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Long paths
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Codex submodule
+        run: git submodule update --init --depth 1 codex
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install the builder
+        run: |
+          pip install --no-deps -e .
+          pip install requests rich
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: MSVC environment
+        uses: ./codex/.github/actions/setup-msvc-env
+        with:
+          target: x86_64-pc-windows-msvc
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Build ling
+        shell: bash
+        run: python -c "import sys; from dreamference.runner.codex_branded_builder import CodexBrandedBuilder as B; sys.exit(0 if B.build(force=True) else 1)"
+      - name: Launcher test environment
+        run: |
+          python -c "import os; from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR as C, CodexBrandedBuilder as B; src = os.path.join(C, 'src'); env = dict(B.fetch_rusty_v8(src), MIGHTLING_EXPORT=os.path.join(src, 'codex-rs'), CARGO_TARGET_DIR=os.path.join(C, 'target'), CARGO_PROFILE_RELEASE_DEBUG='none', CARGO_PROFILE_RELEASE_STRIP='debuginfo'); open(os.environ['GITHUB_ENV'], 'a').write(''.join(f'{k}={v}\n' for k, v in env.items()))"
+      - name: Launcher tests
+        shell: pwsh
+        run: |
+          Set-Location $env:MIGHTLING_EXPORT
+          cargo test --release -p ling-launcher
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  # One issue for a failing Windows QA run, found by its exact title, as the release dry run keeps
+  # its own: opened on the first failure, its body replaced and a comment added on each failure
+  # after, closed by the next green run on main. A skipped day leaves it as it is.
+  report:
+    needs: [gate, python, desktop, install, launcher]
+    if: ${{ !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.run == 'true') }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PASSED: ${{ needs.gate.result == 'success' && needs.python.result == 'success' && needs.desktop.result == 'success' && needs.install.result == 'success' && needs.launcher.result == 'success' }}
+      TITLE: Windows QA failing
+    steps:
+      - name: Open, update or close the issue
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          number="$(gh issue list --state open --limit 200 --json number,title \
+            --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")"
+          if [[ "$PASSED" == "true" ]]; then
+            if [[ -n "$number" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+              gh issue close "$number" --comment "Windows QA passes again at $GITHUB_SHA: $run_url"
+            fi
+            exit 0
+          fi
+          failed="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+            --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | "- [\(.name)](\(.html_url)) (\(.conclusion))"')"
+          [[ -n "$failed" ]] || failed="- (no job reported a failure; see the run)"
+          {
+            echo "The daily Windows QA run (windows-qa.yml, on the self-hosted x86-64 Windows runner) failed on \`$GITHUB_REF_NAME\` at $GITHUB_SHA."
+            echo
+            echo "Run: $run_url"
+            echo
+            echo "Failed jobs:"
+            echo
+            echo "$failed"
+            echo
+            echo "The next green run on main closes this issue."
+          } > body.md
+          cat body.md
+          if [[ -n "$number" ]]; then
+            gh issue edit "$number" --body-file body.md
+            gh issue comment "$number" --body "Still failing at $GITHUB_SHA: $run_url"
+          else
+            gh issue create --title "$TITLE" --body-file body.md
+          fi
