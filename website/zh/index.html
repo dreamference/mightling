@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-Hans" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mightling — 在你桌面上的极速 AI 编程</title>
+<meta name="description" content="一个离线运行在单台 NVIDIA DGX Spark 上的编程智能体,解决了 100 道 SWE-bench Verified 任务中的 68 道(全集估计约 69%),速度约 47 tokens/秒。无云、无账号、无 API 账单。">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="https://mightling.dreamference.ai/zh/">
+<link rel="alternate" hreflang="en" href="https://mightling.dreamference.ai/">
+<link rel="alternate" hreflang="zh-Hans" href="https://mightling.dreamference.ai/zh/">
+<link rel="alternate" hreflang="hi" href="https://mightling.dreamference.ai/hi/">
+<link rel="alternate" hreflang="es" href="https://mightling.dreamference.ai/es/">
+<link rel="alternate" hreflang="ar" href="https://mightling.dreamference.ai/ar/">
+<link rel="alternate" hreflang="fr" href="https://mightling.dreamference.ai/fr/">
+<link rel="alternate" hreflang="bn" href="https://mightling.dreamference.ai/bn/">
+<link rel="alternate" hreflang="pt" href="https://mightling.dreamference.ai/pt/">
+<link rel="alternate" hreflang="id" href="https://mightling.dreamference.ai/id/">
+<link rel="alternate" hreflang="ur" href="https://mightling.dreamference.ai/ur/">
+<link rel="alternate" hreflang="ru" href="https://mightling.dreamference.ai/ru/">
+<link rel="alternate" hreflang="de" href="https://mightling.dreamference.ai/de/">
+<link rel="alternate" hreflang="ja" href="https://mightling.dreamference.ai/ja/">
+<link rel="alternate" hreflang="pcm" href="https://mightling.dreamference.ai/pcm/">
+<link rel="alternate" hreflang="mr" href="https://mightling.dreamference.ai/mr/">
+<link rel="alternate" hreflang="vi" href="https://mightling.dreamference.ai/vi/">
+<link rel="alternate" hreflang="te" href="https://mightling.dreamference.ai/te/">
+<link rel="alternate" hreflang="sw" href="https://mightling.dreamference.ai/sw/">
+<link rel="alternate" hreflang="ha" href="https://mightling.dreamference.ai/ha/">
+<link rel="alternate" hreflang="tr" href="https://mightling.dreamference.ai/tr/">
+<link rel="alternate" hreflang="x-default" href="https://mightling.dreamference.ai/">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mightling">
+<meta property="og:title" content="Mightling — 在你桌面上的极速 AI 编程。SWE-bench Verified 约 69%。">
+<meta property="og:description" content="一台 DGX Spark 离线解决 100 道 SWE-bench Verified 任务中的 68 道,速度约 47 tokens/秒。无云、无账号、无 API 账单、无遥测。">
+<meta property="og:url" content="https://mightling.dreamference.ai/zh/">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://mightling.dreamference.ai/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<script src="/init.js"></script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+<div class="wrap">
+<a class="brand" href="#"><img alt="" height="34" src="/assets/favicon.svg" width="34"/>Mightling</a>
+<nav class="links">
+<a href="#install">安装</a>
+<a class="opt" href="#new">1.7 新功能</a>
+<a class="opt" href="#benchmark">基准测试</a>
+<a class="opt" href="#proof">实证</a>
+<a class="opt" href="#paper">论文</a>
+<a class="opt" href="#faq">常见问题</a>
+<a href="https://github.com/dreamference/mightling">GitHub</a>
+</nav>
+<div class="controls"><details class="lang"><summary aria-label="语言" title="语言"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="cur">简体中文</span><span class="cc">zh</span></summary><ul><li><a href="/en/" hreflang="en" lang="en" data-lang="en">English</a></li><li><a href="/zh/" hreflang="zh-Hans" lang="zh-Hans" data-lang="zh" aria-current="true">简体中文</a></li><li><a href="/hi/" hreflang="hi" lang="hi" data-lang="hi">हिन्दी</a></li><li><a href="/es/" hreflang="es" lang="es" data-lang="es">Español</a></li><li><a href="/ar/" hreflang="ar" lang="ar" dir="rtl" data-lang="ar">العربية</a></li><li><a href="/fr/" hreflang="fr" lang="fr" data-lang="fr">Français</a></li><li><a href="/bn/" hreflang="bn" lang="bn" data-lang="bn">বাংলা</a></li><li><a href="/pt/" hreflang="pt" lang="pt" data-lang="pt">Português</a></li><li><a href="/id/" hreflang="id" lang="id" data-lang="id">Bahasa Indonesia</a></li><li><a href="/ur/" hreflang="ur" lang="ur" dir="rtl" data-lang="ur">اردو</a></li><li><a href="/ru/" hreflang="ru" lang="ru" data-lang="ru">Русский</a></li><li><a href="/de/" hreflang="de" lang="de" data-lang="de">Deutsch</a></li><li><a href="/ja/" hreflang="ja" lang="ja" data-lang="ja">日本語</a></li><li><a href="/pcm/" hreflang="pcm" lang="pcm" data-lang="pcm">Naijá</a></li><li><a href="/mr/" hreflang="mr" lang="mr" data-lang="mr">मराठी</a></li><li><a href="/vi/" hreflang="vi" lang="vi" data-lang="vi">Tiếng Việt</a></li><li><a href="/te/" hreflang="te" lang="te" data-lang="te">తెలుగు</a></li><li><a href="/sw/" hreflang="sw" lang="sw" data-lang="sw">Kiswahili</a></li><li><a href="/ha/" hreflang="ha" lang="ha" data-lang="ha">Hausa</a></li><li><a href="/tr/" hreflang="tr" lang="tr" data-lang="tr">Türkçe</a></li></ul></details><button class="theme" type="button" hidden data-mode="system" aria-label="主题" title="主题" data-theme-label="主题" data-label-system="跟随系统" data-label-light="浅色" data-label-dark="深色"><svg class="ico ico-system" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><svg class="ico ico-light" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="ico ico-dark" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 13.5A9 9 0 1 1 10.5 3a7 7 0 0 0 10.5 10.5z"/></svg><span class="tl">跟随系统</span></button></div>
+</div>
+</header>
+<main>
+<div class="wrap">
+<div class="hero" id="install">
+<img alt="Mightling" class="logo logo-light" height="181" src="/assets/mightling-logo-light.svg" width="300"/>
+<img alt="Mightling" class="logo logo-dark" height="181" src="/assets/mightling-logo-dark.svg" width="300"/>
+<h1>桌面上的极速 AI 编程。<br/>SWE‑bench Verified 约 69%。</h1>
+<p class="lede"><strong>在一台 DGX Spark 上离线解决 100 道 SWE-bench Verified 任务中的 68 道</strong>,速度约 47 tokens/秒。编程智能体、聊天助手和桌面应用,全部完整运行在你自己的 GB10 上。无云。无账号。无 API 账单。无遥测。<a href="#benchmark">测量方法</a></p>
+<div class="install">
+<div class="cmd has-copy"><button class="copy" data-done="已复制" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">复制</button>
+<pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># 模型只下载一次(约 20 GB),随后即开始提供服务</span>
+<span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># 就这么简单</span></pre></div>
+<p class="note">适用于 NVIDIA DGX Spark 和所有 GB10 机器。脚本会对照发布版的校验和验证每个下载,并在运行每条 <code>sudo</code> 命令之前先打印出来。想看的话,可以<a href="https://github.com/dreamference/mightling/blob/main/install.sh">先读一下脚本</a>。</p>
+<div class="clients">
+<div class="client">
+<h3>Mac 和 Linux 客户端</h3>
+<p>你的其他电脑通过本地网络使用 GB10 上的模型。在 Mac 或另一台 Linux 机器上,运行上面同一条命令即可安装 <code>ling</code> 客户端,它会自动找到 GB10。</p>
+<p>从 1.7.2 起,它还会在 Mac 的“应用程序”中装好桌面应用,可直接打开(<code>--no-app</code> 可跳过)。</p>
+</div>
+<div class="client">
+<h3>Windows 客户端 <span class="tag">预览</span></h3>
+<div class="cmd has-copy"><button class="copy" data-done="已复制" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">复制</button>
+<pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
+<p>在 PowerShell 中运行。无需管理员权限即可安装(从 1.7.2 起桌面应用也一样),之后 Windows 会询问一次,以设置智能体的沙箱。尚未签名,因此必须关闭智能应用控制(Smart App Control)。<a href="https://github.com/dreamference/mightling/blob/main/install.ps1">阅读脚本</a>。</p>
+</div>
+</div>
+</div>
+<div class="numbers">
+<div><b>68/100</b><span>SWE-bench Verified 任务,在一台 DGX Spark 上离线完成</span></div>
+<div><b>~48 tok/s</b><span>智能体工作的生成速度,单流</span></div>
+<div><b>0</b><span>回传连接,已由出站审计验证</span></div>
+<div><b>$0</b><span>按 token 计费,永远为零</span></div>
+</div>
+</div>
+</div>
+<section id="new">
+<div class="wrap">
+<h2>1.7 新功能:适用于 Mac、Linux 和 Windows 的桌面应用</h2>
+<p class="sub">Mightling 1.7.0 的桌面应用把 Ask 和 Work 放在同一个窗口里。Work 是一个完整的智能体会话工作台:带文件、技能和命令的输入框,可暂存、还原和提交的审阅面板,工作树,终端标签页,以及对话旁边的文件树和文件标签页。在你的其他电脑上,它是 GB10 的客户端,会在本地网络中自动找到 GB10。</p>
+<div class="pillars">
+<div class="pillar">
+<h3>macOS <span class="tag">预览</span></h3>
+<p>从 1.7.2 起,<a href="#install">安装命令</a>会把 Mightling 与 <code>ling</code> 一起装进“应用程序”,像其他应用一样直接打开。支持 Apple 芯片和 Intel,macOS 12 或更高版本。<code>ling update</code> 会更新它。</p>
+</div>
+<div class="pillar">
+<h3>Linux</h3>
+<p>在 GB10 上,<code>mightling_1.7.0_arm64.deb</code> 会安装该应用、它的启动器条目和 <code>ling-app</code> 命令,以及所需的沙箱配置文件:</p>
+<div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
+<p>然后从应用程序菜单打开,或使用 <code>ling app</code>。<a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">详情</a>。</p>
+</div>
+<div class="pillar">
+<h3>Windows 11 <span class="tag">预览</span></h3>
+<p>从 1.7.2 起,<a href="#install">PowerShell 那一行命令</a>同样会安装该应用,仅为当前用户安装,无需管理员权限,并带开始菜单项;在“设置 → 应用”中即可卸载;<code>ling update</code> 会更新它。必须关闭智能应用控制(Smart App Control)。</p>
+</div>
+</div>
+<details class="other"><summary>其他安装方式</summary>
+<p>发布页还提供 Mac 的 dmg(<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>,Intel 用 <code>x64</code>)和 Windows 安装程序(<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>,或 <code>arm64</code>)。它们是未签名的预览版:用浏览器下载后,首次打开会被拦截。请先对照发布版已签名的 <code>SHA256SUMS</code> 逐一校验。</p>
+<ul>
+<li>macOS 15 及更高版本:把 Mightling 拖到“应用程序”并打开一次,然后进入 系统设置 › 隐私与安全性 › <b>仍要打开</b>。在 macOS 14 及更早版本上,按住 Control 点按该应用 › 打开。</li>
+<li>Windows:SmartScreen › <b>更多信息</b> › <b>仍要运行</b>。必须关闭智能应用控制(Smart App Control)。</li>
+</ul>
+</details>
+<p class="sub after">1.7.0 还带来:Night Shift 可以把一项任务尝试多次并保留最佳结果(<code>/night add --best-of N</code>),一台机器可运行多个 Signal 桥接,同一网络中有两个节点时,客户端可在二者之间选择,且不会丢掉已知的那个。<a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">发布说明与下载</a>。</p>
+</div>
+</section>
+<section id="benchmark">
+<div class="wrap">
+<h2>SWE-bench Verified,在一台 DGX Spark 上实测</h2>
+<p class="sub">2026-10-08,Mightling 1.5.1 的智能体搭配 Qwen3.8-27B,在一台 DGX Spark 上离线解决了 <b>100 道中的 68 道</b> SWE-bench Verified 任务:固定抽取 100 道任务,每道只尝试一次,默认模式。按全部 500 道任务折算,估计为 <b>≈69%</b>(95% 区间 63.9–73.4%)。这是我们在自己的机器上、基于子集的自测结果,不是排行榜成绩。</p>
+
+<div class="tablewrap">
+<table class="bench">
+<tr><th>系统</th><th>相同的 100<br/>道任务</th><th>全部 500<br/>道任务</th></tr>
+<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4),一台 DGX Spark,离线<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">估计</span></td></tr>
+<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4),refine 模式,一台 DGX Spark,离线<a class="fn" href="#fn1">1</a></td><td class="num">69/100</td><td class="num">≈70% <span class="est">估计</span></td></tr>
+<tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
+<tr><td>GLM-4.6 (智谱的智能体)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
+<tr><td>Kimi K2.5, high (mini-SWE-agent)<a class="fn" href="#fn4">4</a></td><td class="num">70/100</td><td class="num">70.8%</td></tr>
+<tr><td>DeepSeek V3.2, high (mini-SWE-agent)<a class="fn" href="#fn5">5</a></td><td class="num">70/100</td><td class="num">70.0%</td></tr>
+<tr><td>Claude Opus 4.5,四种智能体<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
+<tr><td>Gemini 3 Pro (live-SWE-agent)<a class="fn" href="#fn7">7</a></td><td class="num">79/100</td><td class="num">77.4%</td></tr>
+<tr class="group"><td colspan="3">较小的开源模型(20–40B 参数)</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E),测试时扩展<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E),单次尝试<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
+<tr><td>Devstral Small 2512 (mini-SWE-agent)<a class="fn" href="#fn9">9</a></td><td class="num">57/100</td><td class="num">56.4%</td></tr>
+<tr class="group"><td colspan="3">编程智能体产品,按其厂商公布的数据</td></tr>
+<tr><td>GitHub Copilot agent mode (VS Code),搭配 Claude 3.7 Sonnet<a class="fn" href="#fn10">10</a></td><td class="ns">未公布</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
+<tr><td>Claude Code<a class="fn" href="#fn11">11</a></td><td class="ns">未公布</td><td class="ns"><a href="https://www.anthropic.com/engineering/swe-bench-sonnet">未公布</a></td></tr>
+<tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">未公布</td><td class="ns"><a href="https://cursor.com/blog/composer">未公布</a></td></tr>
+</table>
+</div>
+<p class="sub after">请把它当作参照,而不是排名。在同样的 100 道任务上,Mightling 解决的数量与 Qwen3-Coder-480B 和 GLM-4.6 相当,而后两者的规模是它的许多倍;但每一行用的智能体不同、硬件不同,排行榜上的各行还使用官方的 x86 测试镜像,而我们用的是社区的 arm64 镜像。在 refine 模式下,第一个会话只研究任务、不改动任何东西,再由一个全新的会话动手:它比默认模式多解决了一道任务(69 对 68,双方各自赢下了对方没解出的任务),每道任务耗时约为 2.2 倍,所以它仍是可选项(<code>ling --refine</code>)。</p>
+<details class="method"><summary>≈69% 是如何估算的</summary>
+<p>100 道任务只占 Verified 的五分之一,所以全集数字是估计值。我们用单参数项目反应(Rasch)模型,拟合全部 175 份公开 Verified 提交的逐任务结果:每道任务有一个难度,每个系统有一个能力值。Mightling 的能力值,就是能解释这 100 道任务中解决 68 道的那一个;≈69% 是该能力值在全部 500 道任务上的期望得分(对已公布分数做普通回归,结果相差在一个百分点以内)。为了检验,我们只用这 100 道任务给每份公开提交打分,并用同样方式预测其总分:误差为 2.4 个百分点(RMSE),上面的区间就是它的 ±1.96 倍。表中的每个数字都可以用 <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> 根据 <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> 的公开逐任务数据复现。</p>
+<p>这 100 道任务按比例分布在 Verified 的各个代码仓库中,并且只取测试环境能在 arm64 上运行并通过验证的任务(标准补丁通过,空改动失败)。已发布的系统在这 100 道上的得分比在全部 500 道上低 1.0 到 1.5 个百分点,所以这个样本并不容易。它不是排行榜条目:排行榜成绩由 SWE-bench 团队在他们自己的基础设施上评测。</p>
+</details>
+<ol class="footnotes">
+<li id="fn1">Mightling:100 道任务,每道一次尝试;一台 DGX Spark (GB10, 128 GB),模型在本地提供服务,无云;默认模式测于 2026-10-08,refine 模式测于 2026-10-09。估计值来自 <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> 的逐任务数据。</li>
+<li id="fn2">500 道任务,一次尝试;未说明硬件。来源:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>。同一模型搭配 mini-SWE-agent:57/100,55.4%。</li>
+<li id="fn3">500 道任务,一次尝试,智能体未公开;未说明硬件。来源:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>。</li>
+<li id="fn4">500 道任务,一次尝试;未说明硬件。来源:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>。</li>
+<li id="fn5">500 道任务,一次尝试;未说明硬件。来源:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_deepseek-3-2-high">experiments, 20260217_mini-v2.0.0_deepseek-3-2-high</a>。</li>
+<li id="fn6">各 500 道任务;未说明硬件。四份提交:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251127_openhands_claude-opus-4-5">OpenHands</a>(80/100,77.6%)、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251215_livesweagent_claude-opus-4-5">live-SWE-agent</a>(80/100,79.2%)、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251205_sonar-foundation-agent_claude-opus-4-5">Sonar Foundation Agent</a>(77/100,79.2%)、<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_claude-4-5-opus-high">mini-SWE-agent, high</a>(79/100,76.8%)。更早的一次 <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251124_mini-v1.16.0_claude-opus-4-5-20251101">mini-SWE-agent 运行</a>得分为 74/100,74.4%。</li>
+<li id="fn7">500 道任务,一次尝试;未说明硬件。来源:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251120_livesweagent_gemini-3-pro-preview">experiments, 20251120_livesweagent_gemini-3-pro-preview</a>。同一模型搭配 mini-SWE-agent:72/100,74.2%。</li>
+<li id="fn8">排行榜上已发布成绩最好的 20–40B 模型。500 道任务;测试时扩展每道任务使用两次或更多尝试;未说明硬件。来源:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B_tts">测试时扩展</a>,<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B">单次尝试</a>。</li>
+<li id="fn9">500 道任务,一次尝试;未说明硬件。来源:<a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251209_mini-v1.17.2_devstral-small-2512">experiments, 20251209_mini-v1.17.2_devstral-small-2512</a>。</li>
+<li id="fn10">GitHub 自己公布的数字,2025 年 4 月:“agent mode achieves a pass rate of 56.0% on SWE-bench Verified with Claude 3.7 Sonnet”。未说明任务数、尝试次数和硬件;不在排行榜上。来源:<a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">GitHub 博客</a>。</li>
+<li id="fn11">Anthropic 公布的是其 Claude 模型在 SWE-bench Verified 上的成绩,运行在它自己的简单脚手架中(一个 bash 工具和一个编辑工具),而不是 Claude Code 这个产品。来源:<a href="https://claude.com/product/claude-code">Claude Code</a>,<a href="https://www.anthropic.com/engineering/swe-bench-sonnet">Anthropic 的 SWE-bench 方法</a>。</li>
+<li id="fn12">Cursor 公布的是它自己的基准 Cursor Bench 上的结果,而不是 SWE-bench Verified。来源:<a href="https://cursor.com/blog/composer">Cursor 博客,Composer</a>。</li>
+</ol>
+<p class="note-small">所有排行榜数字来自 <a href="https://www.swebench.com/">swebench.com</a> 和 <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> 仓库;“相同的 100 道任务”指各份提交已公布的逐任务结果中,限定于 Mightling 运行过的那些任务。</p>
+</div>
+</section>
+<section id="try">
+<div class="wrap">
+<h2>先试试这些</h2>
+<div class="cmd"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
+<span class="p">$ </span>ling "the tests are failing: find out why and fix them"
+<span class="p">$ </span>ling "add input validation to the signup form, with tests"</pre></div>
+<p class="sub after">或者用 <code>/night add &lt;task&gt;</code> 把任务排进今晚的队列:Mightling 在你睡觉时逐个处理,每个任务在各自的 git 分支上完成,你喝着咖啡审阅这些分支就行。</p>
+</div>
+</section>
+<section id="proof">
+<div class="wrap">
+<h2>你的代码不会离开你的桌面,而且你可以自己验证</h2>
+<p class="sub">云端编程智能体会把你的源代码发送到别人的服务器。Mightling 哪儿也不发:模型运行在你的 GB10 上,Mightling 里没有任何东西会回传数据。没有使用统计,没有指标,没有登录,也没有“匿名”崩溃报告。因此它可以用于你无权上传的代码:客户项目、受监管的数据、未发布的产品。</p>
+<div class="proof">
+<div>
+<p>一条命令就能在 <code>strace</code> 下运行一次真实的 Mightling 会话,并列出它建立的每一个网络连接:</p>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin audit egress
+<span class="ok">✔ Egress audit: pass</span>
+Network destinations:
+   127.0.0.1:8000     29x  model server
+   127.0.0.1:8767      1x  Gmail search service
+DNS queries: none
+Networked git commands: none</pre></div>
+<p>一切都留在 <code>127.0.0.1</code>。没有一次 DNS 查询。</p>
+</div>
+<div>
+<h3>需要硬性保证?</h3>
+<p>输入 <code>/airgapped on</code>,智能体运行的每条命令都会由 Linux 内核分配一个空的网络命名空间。这不是对模型的客气请求:根本就没有网络可连。同时,会绕过沙箱的 Full Access 也会被拒绝。</p>
+<h3>哪些会外发,何时外发</h3>
+<p>只有你或智能体要求的:网页搜索(经由你自己机器上的私有 SearXNG)、抓取网页、对你已连接的 Google 账号的只读请求,或检查更新。在 <code>/airgapped on</code> 下,这些全都不会发生。</p>
+</div>
+</div>
+</div>
+</section>
+<section id="why">
+<div class="wrap">
+<h2>为什么选 Mightling</h2>
+<div class="pillars">
+<div class="pillar">
+<h3>🔒 保密</h3>
+<p>模型、你的代码、你的提示词和得到的回答,都留在它们所在的那台机器上。</p>
+<ul>
+<li>无账号,无遥测</li>
+<li>可重复运行的出站审计</li>
+<li><code>/airgapped on</code>,由内核强制执行</li>
+</ul>
+</div>
+<div class="pillar">
+<h3>⚡ 快,而且没有账单</h3>
+<table>
+<tr><td>智能体工作</td><td class="num">~48 tok/s</td></tr>
+<tr><td>代码</td><td class="num">69 tok/s</td></tr>
+<tr><td>JSON</td><td class="num">84 tok/s</td></tr>
+<tr><td>文本</td><td class="num">32 tok/s</td></tr>
+<tr><td>读代码</td><td class="num">~1,800 tok/s</td></tr>
+<tr><td>上下文</td><td class="num">262K</td></tr>
+</table>
+<p class="note-small">GB10 上采用推测解码的单流速度。智能体工作的数据取自真实的智能体会话;代码、JSON 和文本按输出类型测得,采用贪心解码。可以同时运行四个智能体:没有配额,也没有“请稍候”。</p>
+</div>
+<div class="pillar">
+<h3>✨ 无需配置</h3>
+<ul>
+<li><b>无需调优:</b>模型、上下文、内核和推测解码都已针对 GB10 选定。</li>
+<li><b>不会让你的机器卡死:</b>加载期间会检查主机并监控内存压力。</li>
+<li><b>你的其他机器能自动找到它</b>,就在本地网络上。</li>
+<li><b>更新只需一条命令:</b><code>ling update</code>。</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section id="features">
+<div class="wrap">
+<h2>你能得到什么</h2>
+<div class="features">
+<div class="feature"><h3>🖥️ <code>ling</code>,终端智能体</h3><p>阅读你的仓库,运行命令和测试,编辑代码,并在任何有风险的操作之前先询问你。</p></div>
+<div class="feature"><h3>🌙 Night Shift</h3><p>睡前输入 <code>/night add &lt;task&gt;</code>;早上每个任务都已在各自的 git 分支上完成。没有你的许可,什么都不会被合并或推送。</p></div>
+<div class="feature"><h3>🔎 网页搜索与抓取</h3><p>通过你自己机器上的私有 SearXNG:无需搜索账号,无需 API 密钥。</p></div>
+<div class="feature"><h3>🧭 代码索引</h3><p>跨整个仓库的定义、调用方和影响范围,让智能体直接找到代码,而不是靠 grep 去碰。</p></div>
+<div class="feature"><h3>🧩 你现有的技能</h3><p>你为 Claude Code、Gemini CLI、OpenClaw 或 Hermes 写过的技能,无需修改即可使用。</p></div>
+<div class="feature"><h3>💬 浏览器里的 Ask</h3><p>带网页搜索、图片搜索和语音听写的问答,以及你的智能体会话,可在本机或已配对的手机上使用,背后是同一个本地模型。</p></div>
+<div class="feature"><h3>🪟 桌面应用 <span class="tag">预览</span></h3><p>Ask 和 Work 合在一个窗口里,可用于 GB10、Mac、Linux 或 Windows:带审批的智能体会话、审阅面板、工作树和撤销。<a href="#new">1.7 新功能</a>。</p></div>
+<div class="feature"><h3>📬 Gmail、Drive、Calendar <span class="tag">预览</span></h3><p>只读,通过只保存在你本机上的登录。在 <code>/airgapped on</code> 下完全关闭。</p></div>
+</div>
+</div>
+</section>
+<section id="compare">
+<div class="wrap">
+<h2>Mightling 与云端编程智能体</h2>
+<div class="tablewrap">
+<table>
+<tr><th></th><th>云端编程智能体</th><th>Mightling</th></tr>
+<tr><td>你的代码去向</td><td>他们的服务器</td><td class="yes">哪儿也不去</td></tr>
+<tr><td>需要账号</td><td>是</td><td class="yes">否</td></tr>
+<tr><td>每个 token 的成本</td><td>按量计费</td><td class="yes">零</td></tr>
+<tr><td>速率限制</td><td>有</td><td class="yes">没有</td></tr>
+<tr><td>断网也能用</td><td>不能</td><td class="yes">能</td></tr>
+<tr><td>可自行验证外发了什么</td><td>不能</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
+</table>
+</div>
+</div>
+</section>
+<section id="machines">
+<div class="wrap">
+<h2>适用于每一台 GB10</h2>
+<ul class="machines">
+<li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
+<li>Gigabyte AI TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
+</ul>
+<p class="sub flush">它们共用同一颗芯片、128 GB 统一内存和 DGX OS 7,所以一个安装程序就能覆盖全部。Mightling 每天都在华硕 Ascent GX10 上开发和测试;其他机型由测试覆盖。</p>
+</div>
+</section>
+<section id="paper">
+<div class="wrap">
+<h2>论文</h2>
+<div class="pillar">
+<h3><a href="paper/desktop-architecture.pdf">面向智能体结对编程的本地、可气隙桌面客户端架构:协议兼容性、进程隔离与主机内存安全</a></h3>
+<p class="note-small">dgxcoder · 2026 年 10 月</p>
+<p>我们介绍了 Mightling Desktop 的架构设计、形式化能力模型和实证评估。这是一个开源桌面环境:它使用与上游厂商桌面客户端相同的 app-server 协议,保留与 Codex 兼容的默认设置,在用户自己的硬件上运行推理,并在用户开启 <code>/airgapped on</code> 时把每条沙箱命令限制在工作站之内。</p>
+<p><a href="paper/desktop-architecture.pdf">阅读论文(PDF)</a></p>
+</div>
+</div>
+</section>
+<section id="faq">
+<div class="wrap">
+<h2>常见问题</h2>
+<details><summary>我必须有 GB10 吗?</summary>
+<p>运行模型需要。你的其他电脑则作为客户端使用它:Linux(Arm 或 x86)和 macOS 用同一条安装命令,Windows(Arm 或 x86,预览版)用<a href="#install">那一行 PowerShell 命令</a>。</p></details>
+<details><summary>我装过 Puffin,这就是它吗?</summary>
+<p>是的:Puffin 在 1.5 中更名为 Mightling。先运行一次 <code>puffin update</code>,再最后运行一次 <code>puffin</code>。它会迁移你的会话、设置和链接,此后命令就是 <code>ling</code>。</p></details>
+<details><summary>真的免费吗?</summary>
+<p>是的。Mightling 以 AGPL 开源,模型权重也是免费的。你唯一的运行成本是电费。</p></details>
+<details><summary>除了这台机器,我还需要什么?</summary>
+<p>它自带的操作系统(DGX OS 7,或厂商提供时的 Ubuntu 24.04)、装有 NVIDIA Container Toolkit 的 Docker、Python 3 和 Git。在普通 Ubuntu 上,<code>ling-admin host check</code> 会告诉你缺什么。</p></details>
+<details><summary>会有东西连到互联网吗?</summary>
+<p>只有你或智能体要求的内容,例如经由你自己机器上的 SearXNG 进行的网页搜索,以及首次下载。<code>/airgapped on</code> 会把这一切全部关闭。</p></details>
+<details><summary>它运行哪个模型?</summary>
+<p>NVIDIA 4 位 NVFP4 格式的 Qwen3.8-27B,由 SGLang 搭配 DFlash2 草稿模型提供服务,专为 GB10 选定并调优。权重约 20 GB;服务期间机器内存仍有约 38 GB 空闲。</p></details>
+</div>
+</section>
+<section class="cta">
+<div class="wrap">
+<h2>让你的代码留在你的桌面上</h2>
+<p class="sub centered">如果你也认为代码应该留在写下它的那张桌子上,请给仓库点个星:其他 GB10 用户就是这样发现 Mightling 的。</p>
+<div class="buttons">
+<a class="btn primary" href="https://github.com/dreamference/mightling">在 GitHub 上加星</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">最新版本</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">文档</a>
+</div>
+</div>
+</section>
+</main>
+<footer>
+<div class="wrap">
+<div class="row">
+<div>
+<p><b>Mightling,来自 Dreamference。</b>Dreamference 打造运行在你自己硬件上的保密 AI。</p>
+<p>以 GNU AGPL v3 开源。NVIDIA、GB10、DGX 和 DGX Spark 是 NVIDIA Corporation 的商标;其他名称是其各自所有者的商标。Mightling 和 Dreamference 与它们没有关联。</p>
+<p>本站不发起任何第三方请求:没有跟踪器,没有统计分析,没有外部字体。</p>
+</div>
+<div>
+<p><a href="https://github.com/dreamference/mightling">GitHub</a> · <a href="https://github.com/dreamference/mightling/issues">问题反馈</a> · <a href="https://github.com/dreamference/mightling/blob/main/LICENSE">许可证</a></p>
+</div>
+</div>
+</div>
+</footer>
+<script src="/copy.js"></script>
+</body>
+</html>

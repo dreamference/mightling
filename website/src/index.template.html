@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="[[lang]]" dir="[[dir]]"[[root]]>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{meta.title}}</title>
+<meta name="description" content="{{meta.description}}">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="[[canonical]]">
+[[alternates]]
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mightling">
+<meta property="og:title" content="{{meta.og_title}}">
+<meta property="og:description" content="{{meta.og_description}}">
+<meta property="og:url" content="[[canonical]]">
+<meta property="og:locale" content="[[og_locale]]">
+<meta property="og:image" content="https://mightling.dreamference.ai/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<script src="/init.js"></script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+<div class="wrap">
+<a class="brand" href="[[home]]"><img alt="" height="34" src="/assets/favicon.svg" width="34"/>Mightling</a>
+<nav class="links">
+<a href="#install">{{header.a01}}</a>
+<a class="opt" href="#new">{{header.a02}}</a>
+<a class="opt" href="#benchmark">{{header.a03}}</a>
+<a class="opt" href="#proof">{{header.a04}}</a>
+<a class="opt" href="#paper">{{header.a05}}</a>
+<a class="opt" href="#faq">{{header.a06}}</a>
+<a href="https://github.com/dreamference/mightling">{{header.a07}}</a>
+</nav>
+[[controls]]
+</div>
+</header>
+<main>
+<div class="wrap">
+<div class="hero" id="install">
+<img alt="Mightling" class="logo logo-light" height="181" src="/assets/mightling-logo-light.svg" width="300"/>
+<img alt="Mightling" class="logo logo-dark" height="181" src="/assets/mightling-logo-dark.svg" width="300"/>
+<h1>{{install.h101}}</h1>
+<p class="lede">{{install.p02}}</p>
+<div class="install">
+<div class="cmd has-copy"><button class="copy" data-done="{{ui.copied}}" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">{{install.button03}}</button>
+<pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c">{{install.span04}}</span>
+<span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c">{{install.span05}}</span></pre></div>
+<p class="note">{{install.p06}}</p>
+<div class="clients">
+<div class="client">
+<h3>{{install.h307}}</h3>
+<p>{{install.p08}}</p>
+<p>{{install.p09}}</p>
+</div>
+<div class="client">
+<h3>{{install.h310}}</h3>
+<div class="cmd has-copy"><button class="copy" data-done="{{ui.copied}}" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">{{install.button11}}</button>
+<pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
+<p>{{install.p12}}</p>
+</div>
+</div>
+</div>
+<div class="numbers">
+<div><b>68/100</b><span>{{install.span13}}</span></div>
+<div><b>~48 tok/s</b><span>{{install.span14}}</span></div>
+<div><b>0</b><span>{{install.span15}}</span></div>
+<div><b>$0</b><span>{{install.span16}}</span></div>
+</div>
+</div>
+</div>
+<section id="new">
+<div class="wrap">
+<h2>{{new.h201}}</h2>
+<p class="sub">{{new.p02}}</p>
+<div class="pillars">
+<div class="pillar">
+<h3>{{new.h303}}</h3>
+<p>{{new.p04}}</p>
+</div>
+<div class="pillar">
+<h3>{{new.h305}}</h3>
+<p>{{new.p06}}</p>
+<div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
+<p>{{new.p07}}</p>
+</div>
+<div class="pillar">
+<h3>{{new.h308}}</h3>
+<p>{{new.p09}}</p>
+</div>
+</div>
+<details class="other"><summary>{{new.summary10}}</summary>
+<p>{{new.p11}}</p>
+<ul>
+<li>{{new.li12}}</li>
+<li>{{new.li13}}</li>
+</ul>
+</details>
+<p class="sub after">{{new.p14}}</p>
+</div>
+</section>
+<section id="benchmark">
+<div class="wrap">
+<h2>{{benchmark.h201}}</h2>
+<p class="sub">{{benchmark.p02}}</p>
+
+<div class="tablewrap">
+<table class="bench">
+<tr><th>{{benchmark.th03}}</th><th>{{benchmark.th04}}</th><th>{{benchmark.th05}}</th></tr>
+<tr class="mine"><td>{{benchmark.td06}}</td><td class="num">68/100</td><td class="num">{{benchmark.td07}}</td></tr>
+<tr class="mine"><td>{{benchmark.td08}}</td><td class="num">69/100</td><td class="num">{{benchmark.td09}}</td></tr>
+<tr><td>{{benchmark.td10}}</td><td class="num">68/100</td><td class="num">69.6%</td></tr>
+<tr><td>{{benchmark.td11}}</td><td class="num">68/100</td><td class="num">68.2%</td></tr>
+<tr><td>{{benchmark.td12}}</td><td class="num">70/100</td><td class="num">70.8%</td></tr>
+<tr><td>{{benchmark.td13}}</td><td class="num">70/100</td><td class="num">70.0%</td></tr>
+<tr><td>{{benchmark.td14}}</td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
+<tr><td>{{benchmark.td15}}</td><td class="num">79/100</td><td class="num">77.4%</td></tr>
+<tr class="group"><td colspan="3">{{benchmark.td16}}</td></tr>
+<tr><td>{{benchmark.td17}}</td><td class="num">60/100</td><td class="num">60.4%</td></tr>
+<tr><td>{{benchmark.td18}}</td><td class="num">56/100</td><td class="num">52.2%</td></tr>
+<tr><td>{{benchmark.td19}}</td><td class="num">57/100</td><td class="num">56.4%</td></tr>
+<tr class="group"><td colspan="3">{{benchmark.td20}}</td></tr>
+<tr><td>{{benchmark.td21}}</td><td class="ns">{{benchmark.td22}}</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
+<tr><td>{{benchmark.td23}}</td><td class="ns">{{benchmark.td24}}</td><td class="ns">{{benchmark.td25}}</td></tr>
+<tr><td>{{benchmark.td26}}</td><td class="ns">{{benchmark.td27}}</td><td class="ns">{{benchmark.td28}}</td></tr>
+</table>
+</div>
+<p class="sub after">{{benchmark.p29}}</p>
+<details class="method"><summary>{{benchmark.summary30}}</summary>
+<p>{{benchmark.p31}}</p>
+<p>{{benchmark.p32}}</p>
+</details>
+<ol class="footnotes">
+<li id="fn1">{{benchmark.li33}}</li>
+<li id="fn2">{{benchmark.li34}}</li>
+<li id="fn3">{{benchmark.li35}}</li>
+<li id="fn4">{{benchmark.li36}}</li>
+<li id="fn5">{{benchmark.li37}}</li>
+<li id="fn6">{{benchmark.li38}}</li>
+<li id="fn7">{{benchmark.li39}}</li>
+<li id="fn8">{{benchmark.li40}}</li>
+<li id="fn9">{{benchmark.li41}}</li>
+<li id="fn10">{{benchmark.li42}}</li>
+<li id="fn11">{{benchmark.li43}}</li>
+<li id="fn12">{{benchmark.li44}}</li>
+</ol>
+<p class="note-small">{{benchmark.p45}}</p>
+</div>
+</section>
+<section id="try">
+<div class="wrap">
+<h2>{{try.h201}}</h2>
+<div class="cmd"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
+<span class="p">$ </span>ling "the tests are failing: find out why and fix them"
+<span class="p">$ </span>ling "add input validation to the signup form, with tests"</pre></div>
+<p class="sub after">{{try.p02}}</p>
+</div>
+</section>
+<section id="proof">
+<div class="wrap">
+<h2>{{proof.h201}}</h2>
+<p class="sub">{{proof.p02}}</p>
+<div class="proof">
+<div>
+<p>{{proof.p03}}</p>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin audit egress
+<span class="ok">✔ Egress audit: pass</span>
+Network destinations:
+   127.0.0.1:8000     29x  model server
+   127.0.0.1:8767      1x  Gmail search service
+DNS queries: none
+Networked git commands: none</pre></div>
+<p>{{proof.p04}}</p>
+</div>
+<div>
+<h3>{{proof.h305}}</h3>
+<p>{{proof.p06}}</p>
+<h3>{{proof.h307}}</h3>
+<p>{{proof.p08}}</p>
+</div>
+</div>
+</div>
+</section>
+<section id="why">
+<div class="wrap">
+<h2>{{why.h201}}</h2>
+<div class="pillars">
+<div class="pillar">
+<h3>{{why.h302}}</h3>
+<p>{{why.p03}}</p>
+<ul>
+<li>{{why.li04}}</li>
+<li>{{why.li05}}</li>
+<li>{{why.li06}}</li>
+</ul>
+</div>
+<div class="pillar">
+<h3>{{why.h307}}</h3>
+<table>
+<tr><td>{{why.td08}}</td><td class="num">~48 tok/s</td></tr>
+<tr><td>{{why.td09}}</td><td class="num">69 tok/s</td></tr>
+<tr><td>{{why.td10}}</td><td class="num">84 tok/s</td></tr>
+<tr><td>{{why.td11}}</td><td class="num">32 tok/s</td></tr>
+<tr><td>{{why.td12}}</td><td class="num">~1,800 tok/s</td></tr>
+<tr><td>{{why.td13}}</td><td class="num">262K</td></tr>
+</table>
+<p class="note-small">{{why.p14}}</p>
+</div>
+<div class="pillar">
+<h3>{{why.h315}}</h3>
+<ul>
+<li>{{why.li16}}</li>
+<li>{{why.li17}}</li>
+<li>{{why.li18}}</li>
+<li>{{why.li19}}</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section id="features">
+<div class="wrap">
+<h2>{{features.h201}}</h2>
+<div class="features">
+<div class="feature"><h3>{{features.h302}}</h3><p>{{features.p03}}</p></div>
+<div class="feature"><h3>{{features.h304}}</h3><p>{{features.p05}}</p></div>
+<div class="feature"><h3>{{features.h306}}</h3><p>{{features.p07}}</p></div>
+<div class="feature"><h3>{{features.h308}}</h3><p>{{features.p09}}</p></div>
+<div class="feature"><h3>{{features.h310}}</h3><p>{{features.p11}}</p></div>
+<div class="feature"><h3>{{features.h312}}</h3><p>{{features.p13}}</p></div>
+<div class="feature"><h3>{{features.h314}}</h3><p>{{features.p15}}</p></div>
+<div class="feature"><h3>{{features.h316}}</h3><p>{{features.p17}}</p></div>
+</div>
+</div>
+</section>
+<section id="compare">
+<div class="wrap">
+<h2>{{compare.h201}}</h2>
+<div class="tablewrap">
+<table>
+<tr><th></th><th>{{compare.th02}}</th><th>Mightling</th></tr>
+<tr><td>{{compare.td03}}</td><td>{{compare.td04}}</td><td class="yes">{{compare.td05}}</td></tr>
+<tr><td>{{compare.td06}}</td><td>{{compare.td07}}</td><td class="yes">{{compare.td08}}</td></tr>
+<tr><td>{{compare.td09}}</td><td>{{compare.td10}}</td><td class="yes">{{compare.td11}}</td></tr>
+<tr><td>{{compare.td12}}</td><td>{{compare.td13}}</td><td class="yes">{{compare.td14}}</td></tr>
+<tr><td>{{compare.td15}}</td><td>{{compare.td16}}</td><td class="yes">{{compare.td17}}</td></tr>
+<tr><td>{{compare.td18}}</td><td>{{compare.td19}}</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
+</table>
+</div>
+</div>
+</section>
+<section id="machines">
+<div class="wrap">
+<h2>{{machines.h201}}</h2>
+<ul class="machines">
+<li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
+<li>Gigabyte AI TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
+</ul>
+<p class="sub flush">{{machines.p02}}</p>
+</div>
+</section>
+<section id="paper">
+<div class="wrap">
+<h2>{{paper.h201}}</h2>
+<div class="pillar">
+<h3>{{paper.h302}}</h3>
+<p class="note-small">{{paper.p03}}</p>
+<p>{{paper.p04}}</p>
+<p>{{paper.p05}}</p>
+</div>
+</div>
+</section>
+<section id="faq">
+<div class="wrap">
+<h2>{{faq.h201}}</h2>
+<details><summary>{{faq.summary02}}</summary>
+<p>{{faq.p03}}</p></details>
+<details><summary>{{faq.summary04}}</summary>
+<p>{{faq.p05}}</p></details>
+<details><summary>{{faq.summary06}}</summary>
+<p>{{faq.p07}}</p></details>
+<details><summary>{{faq.summary08}}</summary>
+<p>{{faq.p09}}</p></details>
+<details><summary>{{faq.summary10}}</summary>
+<p>{{faq.p11}}</p></details>
+<details><summary>{{faq.summary12}}</summary>
+<p>{{faq.p13}}</p></details>
+</div>
+</section>
+<section class="cta">
+<div class="wrap">
+<h2>{{cta.h201}}</h2>
+<p class="sub centered">{{cta.p02}}</p>
+<div class="buttons">
+<a class="btn primary" href="https://github.com/dreamference/mightling">{{cta.a03}}</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">{{cta.a04}}</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">{{cta.a05}}</a>
+</div>
+</div>
+</section>
+</main>
+<footer>
+<div class="wrap">
+<div class="row">
+<div>
+<p>{{footer.p01}}</p>
+<p>{{footer.p02}}</p>
+<p>{{footer.p03}}</p>
+</div>
+<div>
+<p>{{footer.p04}}</p>
+</div>
+</div>
+</div>
+</footer>
+<script src="/copy.js"></script>
+</body>
+</html>

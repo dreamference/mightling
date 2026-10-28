@@ -1,0 +1,22 @@
+[
+ {"code": "en", "name": "English", "dir": "ltr", "locale": "en_US"},
+ {"code": "zh", "name": "简体中文", "dir": "ltr", "locale": "zh_CN", "html": "zh-Hans"},
+ {"code": "hi", "name": "हिन्दी", "dir": "ltr", "locale": "hi_IN"},
+ {"code": "es", "name": "Español", "dir": "ltr", "locale": "es_ES"},
+ {"code": "ar", "name": "العربية", "dir": "rtl", "locale": "ar_AR"},
+ {"code": "fr", "name": "Français", "dir": "ltr", "locale": "fr_FR"},
+ {"code": "bn", "name": "বাংলা", "dir": "ltr", "locale": "bn_BD"},
+ {"code": "pt", "name": "Português", "dir": "ltr", "locale": "pt_BR"},
+ {"code": "id", "name": "Bahasa Indonesia", "dir": "ltr", "locale": "id_ID"},
+ {"code": "ur", "name": "اردو", "dir": "rtl", "locale": "ur_PK"},
+ {"code": "ru", "name": "Русский", "dir": "ltr", "locale": "ru_RU"},
+ {"code": "de", "name": "Deutsch", "dir": "ltr", "locale": "de_DE"},
+ {"code": "ja", "name": "日本語", "dir": "ltr", "locale": "ja_JP"},
+ {"code": "pcm", "name": "Naijá", "dir": "ltr", "locale": "en_NG"},
+ {"code": "mr", "name": "मराठी", "dir": "ltr", "locale": "mr_IN"},
+ {"code": "vi", "name": "Tiếng Việt", "dir": "ltr", "locale": "vi_VN"},
+ {"code": "te", "name": "తెలుగు", "dir": "ltr", "locale": "te_IN"},
+ {"code": "sw", "name": "Kiswahili", "dir": "ltr", "locale": "sw_KE"},
+ {"code": "ha", "name": "Hausa", "dir": "ltr", "locale": "ha_NG"},
+ {"code": "tr", "name": "Türkçe", "dir": "ltr", "locale": "tr_TR"}
+]

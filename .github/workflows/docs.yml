@@ -65,6 +65,7 @@ jobs:
         run: |
           mkdir -p _site/paper
           cp -r website/. _site/
+          rm -rf _site/src _site/i18n
           cp paper/desktop-architecture.pdf _site/paper/desktop-architecture.pdf
           cp -r site _site/docs
 

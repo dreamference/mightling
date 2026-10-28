@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="te" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mightling — మీ డెస్క్ మీదే వేగవంతమైన AI కోడింగ్</title>
+<meta name="description" content="ఒక NVIDIA DGX Spark మీద ఆఫ్‌లైన్‌లో 100 లో 68 SWE-bench Verified టాస్క్‌లు పరిష్కరించిన కోడింగ్ ఏజెంట్, సెకనుకు సుమారు 47 టోకెన్లు. క్లౌడ్, ఖాతా, టెలిమెట్రీ లేవు.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="https://mightling.dreamference.ai/te/">
+<link rel="alternate" hreflang="en" href="https://mightling.dreamference.ai/">
+<link rel="alternate" hreflang="zh-Hans" href="https://mightling.dreamference.ai/zh/">
+<link rel="alternate" hreflang="hi" href="https://mightling.dreamference.ai/hi/">
+<link rel="alternate" hreflang="es" href="https://mightling.dreamference.ai/es/">
+<link rel="alternate" hreflang="ar" href="https://mightling.dreamference.ai/ar/">
+<link rel="alternate" hreflang="fr" href="https://mightling.dreamference.ai/fr/">
+<link rel="alternate" hreflang="bn" href="https://mightling.dreamference.ai/bn/">
+<link rel="alternate" hreflang="pt" href="https://mightling.dreamference.ai/pt/">
+<link rel="alternate" hreflang="id" href="https://mightling.dreamference.ai/id/">
+<link rel="alternate" hreflang="ur" href="https://mightling.dreamference.ai/ur/">
+<link rel="alternate" hreflang="ru" href="https://mightling.dreamference.ai/ru/">
+<link rel="alternate" hreflang="de" href="https://mightling.dreamference.ai/de/">
+<link rel="alternate" hreflang="ja" href="https://mightling.dreamference.ai/ja/">
+<link rel="alternate" hreflang="pcm" href="https://mightling.dreamference.ai/pcm/">
+<link rel="alternate" hreflang="mr" href="https://mightling.dreamference.ai/mr/">
+<link rel="alternate" hreflang="vi" href="https://mightling.dreamference.ai/vi/">
+<link rel="alternate" hreflang="te" href="https://mightling.dreamference.ai/te/">
+<link rel="alternate" hreflang="sw" href="https://mightling.dreamference.ai/sw/">
+<link rel="alternate" hreflang="ha" href="https://mightling.dreamference.ai/ha/">
+<link rel="alternate" hreflang="tr" href="https://mightling.dreamference.ai/tr/">
+<link rel="alternate" hreflang="x-default" href="https://mightling.dreamference.ai/">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mightling">
+<meta property="og:title" content="Mightling — మీ డెస్క్ మీదే వేగవంతమైన AI కోడింగ్. SWE-bench Verified లో సుమారు 69%.">
+<meta property="og:description" content="ఒక DGX Spark మీద ఆఫ్‌లైన్‌లో 100 లో 68 SWE-bench Verified టాస్క్‌లు, సెకనుకు సుమారు 47 టోకెన్లు. క్లౌడ్, ఖాతా, API బిల్లు, టెలిమెట్రీ లేవు.">
+<meta property="og:url" content="https://mightling.dreamference.ai/te/">
+<meta property="og:locale" content="te_IN">
+<meta property="og:image" content="https://mightling.dreamference.ai/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<script src="/init.js"></script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+<div class="wrap">
+<a class="brand" href="#"><img alt="" height="34" src="/assets/favicon.svg" width="34"/>Mightling</a>
+<nav class="links">
+<a href="#install">ఇన్‌స్టాల్</a>
+<a class="opt" href="#new">1.7 లో కొత్త</a>
+<a class="opt" href="#benchmark">బెంచ్‌మార్క్</a>
+<a class="opt" href="#proof">రుజువు</a>
+<a class="opt" href="#paper">పేపర్</a>
+<a class="opt" href="#faq">ప్రశ్నలు</a>
+<a href="https://github.com/dreamference/mightling">GitHub</a>
+</nav>
+<div class="controls"><details class="lang"><summary aria-label="భాష" title="భాష"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="cur">తెలుగు</span><span class="cc">te</span></summary><ul><li><a href="/en/" hreflang="en" lang="en" data-lang="en">English</a></li><li><a href="/zh/" hreflang="zh-Hans" lang="zh-Hans" data-lang="zh">简体中文</a></li><li><a href="/hi/" hreflang="hi" lang="hi" data-lang="hi">हिन्दी</a></li><li><a href="/es/" hreflang="es" lang="es" data-lang="es">Español</a></li><li><a href="/ar/" hreflang="ar" lang="ar" dir="rtl" data-lang="ar">العربية</a></li><li><a href="/fr/" hreflang="fr" lang="fr" data-lang="fr">Français</a></li><li><a href="/bn/" hreflang="bn" lang="bn" data-lang="bn">বাংলা</a></li><li><a href="/pt/" hreflang="pt" lang="pt" data-lang="pt">Português</a></li><li><a href="/id/" hreflang="id" lang="id" data-lang="id">Bahasa Indonesia</a></li><li><a href="/ur/" hreflang="ur" lang="ur" dir="rtl" data-lang="ur">اردو</a></li><li><a href="/ru/" hreflang="ru" lang="ru" data-lang="ru">Русский</a></li><li><a href="/de/" hreflang="de" lang="de" data-lang="de">Deutsch</a></li><li><a href="/ja/" hreflang="ja" lang="ja" data-lang="ja">日本語</a></li><li><a href="/pcm/" hreflang="pcm" lang="pcm" data-lang="pcm">Naijá</a></li><li><a href="/mr/" hreflang="mr" lang="mr" data-lang="mr">मराठी</a></li><li><a href="/vi/" hreflang="vi" lang="vi" data-lang="vi">Tiếng Việt</a></li><li><a href="/te/" hreflang="te" lang="te" data-lang="te" aria-current="true">తెలుగు</a></li><li><a href="/sw/" hreflang="sw" lang="sw" data-lang="sw">Kiswahili</a></li><li><a href="/ha/" hreflang="ha" lang="ha" data-lang="ha">Hausa</a></li><li><a href="/tr/" hreflang="tr" lang="tr" data-lang="tr">Türkçe</a></li></ul></details><button class="theme" type="button" hidden data-mode="system" aria-label="థీమ్" title="థీమ్" data-theme-label="థీమ్" data-label-system="సిస్టమ్" data-label-light="లైట్" data-label-dark="డార్క్"><svg class="ico ico-system" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><svg class="ico ico-light" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="ico ico-dark" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 13.5A9 9 0 1 1 10.5 3a7 7 0 0 0 10.5 10.5z"/></svg><span class="tl">సిస్టమ్</span></button></div>
+</div>
+</header>
+<main>
+<div class="wrap">
+<div class="hero" id="install">
+<img alt="Mightling" class="logo logo-light" height="181" src="/assets/mightling-logo-light.svg" width="300"/>
+<img alt="Mightling" class="logo logo-dark" height="181" src="/assets/mightling-logo-dark.svg" width="300"/>
+<h1>మీ డెస్క్ మీదే వేగవంతమైన AI కోడింగ్.<br/>SWE‑bench Verified లో సుమారు 69%.</h1>
+<p class="lede"><strong>ఒక DGX Spark మీద ఆఫ్‌లైన్‌లో 100 లో 68 SWE-bench Verified టాస్క్‌లు పరిష్కారమయ్యాయి</strong>, సెకనుకు సుమారు 47 టోకెన్ల వేగంతో. కోడింగ్ ఏజెంట్, చాట్ అసిస్టెంట్, డెస్క్‌టాప్ యాప్, అన్నీ పూర్తిగా మీ సొంత GB10 మీదే నడుస్తాయి. క్లౌడ్ లేదు. ఖాతా లేదు. API బిల్లు లేదు. టెలిమెట్రీ లేదు. <a href="#benchmark">ఎలా కొలిచామో చూడండి</a></p>
+<div class="install">
+<div class="cmd has-copy"><button class="copy" data-done="కాపీ అయింది" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">కాపీ</button>
+<pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># మోడల్‌ను ఒక్కసారి డౌన్‌లోడ్ చేస్తుంది (~20 GB), తర్వాత సర్వ్ చేస్తుంది</span>
+<span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># అంతే</span></pre></div>
+<p class="note">NVIDIA DGX Spark మీద, అన్ని GB10 మెషీన్ల మీద పనిచేస్తుంది. స్క్రిప్ట్ ప్రతి డౌన్‌లోడ్‌ను రిలీజ్ చెక్‌సమ్‌లతో సరిచూస్తుంది, ప్రతి <code>sudo</code> కమాండ్‌ను నడిపే ముందు చూపిస్తుంది. కావాలంటే <a href="https://github.com/dreamference/mightling/blob/main/install.sh">ముందు దాన్ని చదవండి</a>.</p>
+<div class="clients">
+<div class="client">
+<h3>Mac, Linux క్లయింట్లు</h3>
+<p>మీ ఇతర కంప్యూటర్లు లోకల్ నెట్‌వర్క్ ద్వారా GB10 మోడల్‌ను వాడుకుంటాయి. Mac లేదా మరో Linux మెషీన్‌లో పైన ఉన్న అదే కమాండ్ <code>ling</code> క్లయింట్‌ను ఇన్‌స్టాల్ చేస్తుంది; అది GB10 ను తనంతట తానే కనుగొంటుంది.</p>
+<p>1.7.2 నుండి ఇది Mac లో డెస్క్‌టాప్ యాప్‌ను కూడా Applications లో తెరవడానికి సిద్ధంగా ఉంచుతుంది (<code>--no-app</code> దాన్ని వదిలేస్తుంది).</p>
+</div>
+<div class="client">
+<h3>Windows క్లయింట్ <span class="tag">ప్రివ్యూ</span></h3>
+<div class="cmd has-copy"><button class="copy" data-done="కాపీ అయింది" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">కాపీ</button>
+<pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
+<p>PowerShell లో. అడ్మినిస్ట్రేటర్ హక్కులు లేకుండా ఇన్‌స్టాల్ అవుతుంది (1.7.2 నుండి డెస్క్‌టాప్ యాప్ కూడా), తర్వాత ఏజెంట్ శాండ్‌బాక్స్ సెటప్ కోసం Windows ఒక్కసారి అడుగుతుంది. ఇంకా సంతకం చేయలేదు, కాబట్టి Smart App Control ఆఫ్‌లో ఉండాలి. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">స్క్రిప్ట్ చదవండి</a>.</p>
+</div>
+</div>
+</div>
+<div class="numbers">
+<div><b>68/100</b><span>SWE-bench Verified టాస్క్‌లు, ఒక DGX Spark మీద ఆఫ్‌లైన్‌లో</span></div>
+<div><b>~48 tok/s</b><span>ఏజెంట్ పనిలో జనరేషన్, ఒకే స్ట్రీమ్</span></div>
+<div><b>0</b><span>బయటికి కనెక్షన్లు, ఎగ్రెస్ ఆడిట్ ధృవీకరించినది</span></div>
+<div><b>$0</b><span>ప్రతి టోకెన్‌కు, ఎప్పటికీ</span></div>
+</div>
+</div>
+</div>
+<section id="new">
+<div class="wrap">
+<h2>1.7 లో కొత్త: Mac, Linux, Windows లలో డెస్క్‌టాప్ యాప్</h2>
+<p class="sub">Mightling 1.7.0 డెస్క్‌టాప్ యాప్ Ask, Work లను ఒకే విండోలో ఉంచుతుంది. Work అనేది ఏజెంట్ సెషన్ల కోసం పూర్తి వర్క్‌బెంచ్: ఫైళ్లు, స్కిల్స్, కమాండ్లతో కంపోజర్, స్టేజ్ చేయడానికి, వెనక్కి తీసుకోవడానికి, కమిట్ చేయడానికి రివ్యూ పేన్, వర్క్‌ట్రీలు, టెర్మినల్ ట్యాబ్‌లు, థ్రెడ్ పక్కనే ఫైల్ ట్రీ, ఫైల్ ట్యాబ్‌లు. మీ ఇతర కంప్యూటర్లలో ఇది మీ GB10 కు క్లయింట్; లోకల్ నెట్‌వర్క్‌లో దాన్ని కనుగొంటుంది.</p>
+<div class="pillars">
+<div class="pillar">
+<h3>macOS <span class="tag">ప్రివ్యూ</span></h3>
+<p>1.7.2 నుండి <a href="#install">ఇన్‌స్టాల్ కమాండ్</a> Mightling ను <code>ling</code> పక్కనే Applications లో ఉంచుతుంది, ఇతర యాప్‌ల్లాగే తెరుచుకుంటుంది. Apple silicon, Intel, macOS 12 లేదా ఆ తర్వాత. <code>ling update</code> దాన్ని అప్‌డేట్ చేస్తుంది.</p>
+</div>
+<div class="pillar">
+<h3>Linux</h3>
+<p>GB10 మీద <code>mightling_1.7.0_arm64.deb</code> యాప్‌ను, దాని లాంచర్ ఎంట్రీని, <code>ling-app</code> కమాండ్‌ను, అవసరమైన శాండ్‌బాక్స్ ప్రొఫైల్‌తో సహా ఇన్‌స్టాల్ చేస్తుంది:</p>
+<div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
+<p>తర్వాత అప్లికేషన్ మెనూ నుండి లేదా <code>ling app</code> తో తెరవండి. <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">మరింత</a>.</p>
+</div>
+<div class="pillar">
+<h3>Windows 11 <span class="tag">ప్రివ్యూ</span></h3>
+<p>1.7.2 నుండి <a href="#install">PowerShell లైన్</a> యాప్‌ను కూడా ఇన్‌స్టాల్ చేస్తుంది, మీకు మాత్రమే, అడ్మినిస్ట్రేటర్ హక్కులు లేకుండా, Start మెనూ ఎంట్రీతో; Settings → Apps నుండి తొలగించవచ్చు; <code>ling update</code> అప్‌డేట్ చేస్తుంది. Smart App Control ఆఫ్‌లో ఉండాలి.</p>
+</div>
+</div>
+<details class="other"><summary>ఇన్‌స్టాల్ చేయడానికి ఇతర మార్గాలు</summary>
+<p>రిలీజ్ పేజీలో Mac dmg (<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>, Intel కోసం <code>x64</code>), Windows ఇన్‌స్టాలర్ (<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>, లేదా <code>arm64</code>) కూడా ఉంటాయి. ఇవి సంతకం లేని ప్రివ్యూలు: బ్రౌజర్‌లో డౌన్‌లోడ్ చేస్తే మొదటిసారి ఆపేస్తాయి. ముందు ప్రతిదాన్ని రిలీజ్ సంతకం చేసిన <code>SHA256SUMS</code> తో సరిచూడండి.</p>
+<ul>
+<li>macOS 15 మరియు తర్వాత: Mightling ను Applications లోకి లాగి ఒకసారి తెరవండి, తర్వాత System Settings › Privacy & Security › <b>Open Anyway</b>. macOS 14 మరియు అంతకు ముందు: యాప్ మీద Control-క్లిక్ › Open.</li>
+<li>Windows: SmartScreen › <b>More info</b> › <b>Run anyway</b>. Smart App Control ఆఫ్‌లో ఉండాలి.</li>
+</ul>
+</details>
+<p class="sub after">1.7.0 లో ఇంకా: Night Shift ఒక టాస్క్‌ను అనేకసార్లు ప్రయత్నించి ఉత్తమ ప్రయత్నాన్ని ఉంచుకోగలదు (<code>/night add --best-of N</code>), ఒక మెషీన్ అనేక Signal బ్రిడ్జ్‌లను నడపగలదు, ఒకే నెట్‌వర్క్‌లో రెండు నోడ్‌ల మధ్య క్లయింట్ ఎంచుకుంటుంది, తనకు తెలిసిన దాన్ని కోల్పోదు. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">రిలీజ్ నోట్స్, డౌన్‌లోడ్‌లు</a>.</p>
+</div>
+</section>
+<section id="benchmark">
+<div class="wrap">
+<h2>SWE-bench Verified, ఒక DGX Spark మీద కొలిచినది</h2>
+<p class="sub">2026-10-08 న Qwen3.8-27B తో Mightling 1.5.1 ఏజెంట్ ఒక DGX Spark మీద ఆఫ్‌లైన్‌లో SWE-bench Verified లో <b>100 లో 68</b> టాస్క్‌లు పరిష్కరించింది: 100 టాస్క్‌ల స్థిర నమూనా, ప్రతి టాస్క్‌కు ఒక ప్రయత్నం, డిఫాల్ట్ మోడ్. మొత్తం 500 టాస్క్‌లకు విస్తరిస్తే ఇది అంచనా <b>≈69%</b> (95% పరిధి 63.9–73.4%). ఇది మా సొంత యంత్రంపై, ఒక ఉపసమితిపై, మేమే చేసిన కొలత; లీడర్‌బోర్డ్ ఎంట్రీ కాదు.</p>
+
+<div class="tablewrap">
+<table class="bench">
+<tr><th>సిస్టమ్</th><th>అవే 100<br/>టాస్క్‌లు</th><th>మొత్తం 500<br/>టాస్క్‌లు</th></tr>
+<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4), ఒక DGX Spark, ఆఫ్‌లైన్<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">అంచనా</span></td></tr>
+<tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4), refine మోడ్, ఒక DGX Spark, ఆఫ్‌లైన్<a class="fn" href="#fn1">1</a></td><td class="num">69/100</td><td class="num">≈70% <span class="est">అంచనా</span></td></tr>
+<tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
+<tr><td>GLM-4.6 (Z.ai's agent)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
+<tr><td>Kimi K2.5, high (mini-SWE-agent)<a class="fn" href="#fn4">4</a></td><td class="num">70/100</td><td class="num">70.8%</td></tr>
+<tr><td>DeepSeek V3.2, high (mini-SWE-agent)<a class="fn" href="#fn5">5</a></td><td class="num">70/100</td><td class="num">70.0%</td></tr>
+<tr><td>Claude Opus 4.5, four agents<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
+<tr><td>Gemini 3 Pro (live-SWE-agent)<a class="fn" href="#fn7">7</a></td><td class="num">79/100</td><td class="num">77.4%</td></tr>
+<tr class="group"><td colspan="3">చిన్న ఓపెన్ మోడల్స్ (20–40B పారామీటర్లు)</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), test-time scaling<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), single attempt<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
+<tr><td>Devstral Small 2512 (mini-SWE-agent)<a class="fn" href="#fn9">9</a></td><td class="num">57/100</td><td class="num">56.4%</td></tr>
+<tr class="group"><td colspan="3">కోడింగ్ ఏజెంట్ ఉత్పత్తులు, వాటి తయారీదారులు ప్రచురించినట్లు</td></tr>
+<tr><td>GitHub Copilot agent mode (VS Code), with Claude 3.7 Sonnet<a class="fn" href="#fn10">10</a></td><td class="ns">ప్రచురించలేదు</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
+<tr><td>Claude Code<a class="fn" href="#fn11">11</a></td><td class="ns">ప్రచురించలేదు</td><td class="ns"><a href="https://www.anthropic.com/engineering/swe-bench-sonnet">ప్రచురించలేదు</a></td></tr>
+<tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">ప్రచురించలేదు</td><td class="ns"><a href="https://cursor.com/blog/composer">ప్రచురించలేదు</a></td></tr>
+</table>
+</div>
+<p class="sub after">దీన్ని ర్యాంకింగ్‌లా కాకుండా సహచర్యంలా చదవండి. అవే 100 టాస్క్‌లపై Mightling, తనకంటే ఎన్నో రెట్లు పెద్ద మోడల్స్ అయిన Qwen3-Coder-480B, GLM-4.6 లతో సమానంగా పరిష్కరించింది; కానీ ప్రతి వరుసలో ఏజెంట్ వేరు, హార్డ్‌వేర్ వేరు, లీడర్‌బోర్డ్ వరుసల్లో అధికారిక x86 టెస్ట్ ఇమేజ్‌లు, మాది కమ్యూనిటీ arm64 ఇమేజ్‌లపై నడిచింది. refine మోడ్‌లో మొదటి సెషన్ ఏమీ మార్చకుండా టాస్క్‌ను అధ్యయనం చేస్తుంది, కొత్త సెషన్ దాన్ని చేస్తుంది: ఇది డిఫాల్ట్ కంటే ఒక టాస్క్ ఎక్కువ పరిష్కరించింది (69 వర్సెస్ 68, ప్రతి వైపు మరో వైపు ఓడిన టాస్క్‌లు గెలిచింది), ప్రతి టాస్క్‌కు సుమారు 2.2 రెట్లు సమయంతో, అందుకే ఇది ఐచ్ఛికంగానే ఉంది (<code>ling --refine</code>).</p>
+<details class="method"><summary>≈69% ను ఎలా అంచనా వేశారు</summary>
+<p>100 టాస్క్‌లు Verified లో ఐదవ వంతు, కాబట్టి పూర్తి సెట్ సంఖ్య ఒక అంచనా. Verified కి సమర్పించిన మొత్తం 175 పబ్లిక్ ఫలితాల ప్రతి-టాస్క్ ఫలితాలపై ఒక-పారామీటర్ ఐటెమ్-రెస్పాన్స్ (Rasch) మోడల్‌ను ఫిట్ చేశారు: ప్రతి టాస్క్‌కు కష్టం, ప్రతి సిస్టమ్‌కు సామర్థ్యం. ఈ 100 టాస్క్‌లలో 68 పరిష్కారాన్ని వివరించేదే Mightling సామర్థ్యం; ≈69% అనేది ఆ సామర్థ్యం మొత్తం 500 పై పొందే అంచనా స్కోరు (ప్రచురిత స్కోర్లపై సాధారణ రిగ్రెషన్ ఒక పాయింట్ లోపే ఏకీభవిస్తుంది). ధృవీకరణ కోసం ప్రతి పబ్లిక్ సమర్పణను ఈ 100 టాస్క్‌లపైనే స్కోర్ చేసి, దాని మొత్తం స్కోరును అదే విధంగా అంచనా వేశారు: లోపం 2.4 పాయింట్లు (RMSE), పై పరిధి దానికి ±1.96 రెట్లు. పట్టికలోని ప్రతి సంఖ్యను <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> పునరుత్పత్తి చేస్తుంది, <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> లోని పబ్లిక్ ప్రతి-టాస్క్ డేటా నుండి.</p>
+<p>ఈ 100 టాస్క్‌లు Verified రిపాజిటరీలలో పూర్తి సెట్ నిష్పత్తిలో పంచబడ్డాయి; వాటి టెస్ట్ ఎన్విరాన్‌మెంట్ arm64 మీద నడిచి ధృవీకరణ అయ్యే టాస్క్‌ల నుండి (గోల్డ్ ప్యాచ్ పాస్ అవుతుంది, ఖాళీ మార్పు ఫెయిల్ అవుతుంది). ప్రచురిత సిస్టమ్‌లు ఈ 100 పై మొత్తం 500 కంటే 1.0 నుండి 1.5 పాయింట్లు తక్కువ స్కోరు చేస్తాయి, కాబట్టి నమూనా తేలికైనది కాదు. ఇది లీడర్‌బోర్డ్ ఎంట్రీ కాదు: అవి SWE-bench బృందం తమ సొంత ఇన్‌ఫ్రాస్ట్రక్చర్ మీద గ్రేడ్ చేస్తుంది.</p>
+</details>
+<ol class="footnotes">
+<li id="fn1">Mightling: 100 టాస్క్‌లు, ఒక్కొక్కటికి ఒక ప్రయత్నం; ఒక DGX Spark (GB10, 128 GB), మోడల్ స్థానికంగా సర్వ్ అవుతుంది, క్లౌడ్ లేదు; డిఫాల్ట్ మోడ్ 2026-10-08 న, refine మోడ్ 2026-10-09 న కొలిచారు. అంచనా <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> ప్రతి-టాస్క్ డేటా నుండి.</li>
+<li id="fn2">500 టాస్క్‌లు, ఒక ప్రయత్నం; హార్డ్‌వేర్ చెప్పలేదు. మూలం: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>. అదే మోడల్ mini-SWE-agent తో: 57/100, 55.4%.</li>
+<li id="fn3">500 టాస్క్‌లు, ఒక ప్రయత్నం, ఏజెంట్ వెల్లడించలేదు; హార్డ్‌వేర్ చెప్పలేదు. మూలం: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>.</li>
+<li id="fn4">500 టాస్క్‌లు, ఒక ప్రయత్నం; హార్డ్‌వేర్ చెప్పలేదు. మూలం: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>.</li>
+<li id="fn5">500 టాస్క్‌లు, ఒక ప్రయత్నం; హార్డ్‌వేర్ చెప్పలేదు. మూలం: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_deepseek-3-2-high">experiments, 20260217_mini-v2.0.0_deepseek-3-2-high</a>.</li>
+<li id="fn6">ఒక్కొక్కటికి 500 టాస్క్‌లు; హార్డ్‌వేర్ చెప్పలేదు. నాలుగు సమర్పణలు: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251127_openhands_claude-opus-4-5">OpenHands</a> (80/100, 77.6%), <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251215_livesweagent_claude-opus-4-5">live-SWE-agent</a> (80/100, 79.2%), <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251205_sonar-foundation-agent_claude-opus-4-5">Sonar Foundation Agent</a> (77/100, 79.2%), <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_claude-4-5-opus-high">mini-SWE-agent, high</a> (79/100, 76.8%). అంతకు ముందటి <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251124_mini-v1.16.0_claude-opus-4-5-20251101">mini-SWE-agent రన్</a> 74/100, 74.4% స్కోరు చేసింది.</li>
+<li id="fn7">500 టాస్క్‌లు, ఒక ప్రయత్నం; హార్డ్‌వేర్ చెప్పలేదు. మూలం: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251120_livesweagent_gemini-3-pro-preview">experiments, 20251120_livesweagent_gemini-3-pro-preview</a>. అదే మోడల్ mini-SWE-agent తో: 72/100, 74.2%.</li>
+<li id="fn8">లీడర్‌బోర్డ్‌లో ప్రచురితమైన ఉత్తమ 20–40B మోడల్. 500 టాస్క్‌లు; టెస్ట్-టైమ్ స్కేలింగ్ ప్రతి టాస్క్‌కు రెండు లేదా అంతకంటే ఎక్కువ ప్రయత్నాలు వాడుతుంది; హార్డ్‌వేర్ చెప్పలేదు. మూలాలు: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B_tts">టెస్ట్-టైమ్ స్కేలింగ్</a>, <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B">ఒక ప్రయత్నం</a>.</li>
+<li id="fn9">500 టాస్క్‌లు, ఒక ప్రయత్నం; హార్డ్‌వేర్ చెప్పలేదు. మూలం: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251209_mini-v1.17.2_devstral-small-2512">experiments, 20251209_mini-v1.17.2_devstral-small-2512</a>.</li>
+<li id="fn10">GitHub సొంత సంఖ్య, ఏప్రిల్ 2025: “agent mode achieves a pass rate of 56.0% on SWE-bench Verified with Claude 3.7 Sonnet”. టాస్క్‌ల సంఖ్య, ప్రయత్నాలు, హార్డ్‌వేర్ చెప్పలేదు; లీడర్‌బోర్డ్‌లో లేదు. మూలం: <a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">GitHub బ్లాగ్</a>.</li>
+<li id="fn11">Anthropic తన Claude మోడల్స్ కోసం SWE-bench Verified ప్రచురిస్తుంది, తన సొంత సరళమైన స్కాఫోల్డ్‌లో (bash టూల్, ఎడిట్ టూల్) నడిపినది; Claude Code ఉత్పత్తి కోసం కాదు. మూలాలు: <a href="https://claude.com/product/claude-code">Claude Code</a>, <a href="https://www.anthropic.com/engineering/swe-bench-sonnet">Anthropic SWE-bench పద్ధతి</a>.</li>
+<li id="fn12">Cursor తన సొంత బెంచ్‌మార్క్ Cursor Bench పై ఫలితాలు ప్రచురిస్తుంది, SWE-bench Verified పై కాదు. మూలం: <a href="https://cursor.com/blog/composer">Cursor బ్లాగ్, Composer</a>.</li>
+</ol>
+<p class="note-small">లీడర్‌బోర్డ్ సంఖ్యలన్నీ: <a href="https://www.swebench.com/">swebench.com</a>, <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> రిపాజిటరీ; “అవే 100 టాస్క్‌లు” అంటే ప్రతి సమర్పణ ప్రచురిత ప్రతి-టాస్క్ ఫలితాలు, Mightling నడిపిన టాస్క్‌లకు పరిమితం చేసినవి.</p>
+</div>
+</section>
+<section id="try">
+<div class="wrap">
+<h2>ముందు వీటిని ప్రయత్నించండి</h2>
+<div class="cmd"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
+<span class="p">$ </span>ling "the tests are failing: find out why and fix them"
+<span class="p">$ </span>ling "add input validation to the signup form, with tests"</pre></div>
+<p class="sub after">లేదా ఈ రాత్రికి పనిని క్యూలో పెట్టండి: <code>/night add &lt;task&gt;</code>. మీరు నిద్రపోయే సమయంలో Mightling క్యూను పూర్తి చేస్తుంది, ప్రతి టాస్క్ దాని సొంత git బ్రాంచ్‌లో, ఉదయం కాఫీ తాగుతూ బ్రాంచ్‌లను సమీక్షించండి.</p>
+</div>
+</section>
+<section id="proof">
+<div class="wrap">
+<h2>మీ కోడ్ మీ డెస్క్ దాటదు, అది మీరు నిరూపించవచ్చు</h2>
+<p class="sub">క్లౌడ్ కోడింగ్ ఏజెంట్లు మీ సోర్స్ కోడ్‌ను ఇతరుల సర్వర్లకు పంపుతాయి. Mightling దాన్ని ఎక్కడికీ పంపదు: మోడల్ మీ GB10 మీదే నడుస్తుంది, Mightling లో ఏదీ బయటికి సంప్రదించదు. వినియోగ విశ్లేషణలు, మెట్రిక్స్, సైన్-ఇన్, “అనామక” క్రాష్ రిపోర్టులు ఏవీ లేవు. అందువల్ల అప్‌లోడ్ చేయడానికి అనుమతి లేని కోడ్‌కు ఇది వాడదగినది: క్లయింట్ పని, నియంత్రిత డేటా, విడుదల కాని ఉత్పత్తులు.</p>
+<div class="proof">
+<div>
+<p>ఒక కమాండ్ నిజమైన Mightling సెషన్‌ను <code>strace</code> కింద నడిపి, అది చేసిన ప్రతి నెట్‌వర్క్ కనెక్షన్‌ను జాబితా చేస్తుంది:</p>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin audit egress
+<span class="ok">✔ Egress audit: pass</span>
+Network destinations:
+   127.0.0.1:8000     29x  model server
+   127.0.0.1:8767      1x  Gmail search service
+DNS queries: none
+Networked git commands: none</pre></div>
+<p>అంతా <code>127.0.0.1</code> లోనే ఉంది. ఒక్క DNS లుకప్ కూడా లేదు.</p>
+</div>
+<div>
+<h3>కచ్చితమైన హామీ కావాలా?</h3>
+<p><code>/airgapped on</code> అని టైప్ చేయండి; ఏజెంట్ నడిపే ప్రతి కమాండ్‌కు Linux కెర్నెల్ ఖాళీ నెట్‌వర్క్ నేమ్‌స్పేస్ ఇస్తుంది. ఇది మోడల్‌ను మర్యాదగా అడగడం కాదు: చేరుకోవడానికి నెట్‌వర్క్ అసలే ఉండదు. శాండ్‌బాక్స్‌ను దాటవేసే Full Access అదే సమయంలో తిరస్కరించబడుతుంది.</p>
+<h3>ఏమి బయటికి వెళ్లవచ్చు, ఎప్పుడు</h3>
+<p>మీరు లేదా ఏజెంట్ అడిగినదే: వెబ్ సెర్చ్ (మీ సొంత మెషీన్‌లోని ప్రైవేట్ SearXNG ద్వారా), పేజీ ఫెచ్, మీరు కనెక్ట్ చేసిన Google ఖాతాకు చదవడానికి మాత్రమే అభ్యర్థన, లేదా అప్‌డేట్ తనిఖీ. <code>/airgapped on</code> వద్ద వీటిలో ఏదీ లేదు.</p>
+</div>
+</div>
+</div>
+</section>
+<section id="why">
+<div class="wrap">
+<h2>ఎందుకు Mightling</h2>
+<div class="pillars">
+<div class="pillar">
+<h3>🔒 గోప్యం</h3>
+<p>మోడల్, మీ కోడ్, మీ ప్రాంప్ట్‌లు, సమాధానాలు అవి ఉన్న మెషీన్‌లోనే ఉంటాయి.</p>
+<ul>
+<li>ఖాతా లేదు, టెలిమెట్రీ లేదు</li>
+<li>మీరు మళ్లీ నడపగల ఎగ్రెస్ ఆడిట్</li>
+<li><code>/airgapped on</code>, కెర్నెల్ అమలు చేస్తుంది</li>
+</ul>
+</div>
+<div class="pillar">
+<h3>⚡ వేగంగా, బిల్లు లేకుండా</h3>
+<table>
+<tr><td>ఏజెంట్ పని</td><td class="num">~48 tok/s</td></tr>
+<tr><td>కోడ్</td><td class="num">69 tok/s</td></tr>
+<tr><td>JSON</td><td class="num">84 tok/s</td></tr>
+<tr><td>వచనం</td><td class="num">32 tok/s</td></tr>
+<tr><td>కోడ్ చదవడం</td><td class="num">~1,800 tok/s</td></tr>
+<tr><td>కాంటెక్స్ట్</td><td class="num">262K</td></tr>
+</table>
+<p class="note-small">GB10 మీద స్పెక్యులేటివ్ డీకోడింగ్‌తో ఒకే స్ట్రీమ్. ఏజెంట్ పనిని నిజమైన ఏజెంట్ సెషన్లపై కొలిచారు; కోడ్, JSON, వచనాన్ని ఔట్‌పుట్ రకం ప్రకారం, greedy డీకోడింగ్‌తో. నాలుగు ఏజెంట్లను ఒకేసారి నడపండి: కోటా లేదు, “దయచేసి వేచి ఉండండి” లేదు.</p>
+</div>
+<div class="pillar">
+<h3>✨ కాన్ఫిగర్ చేయాల్సింది ఏమీ లేదు</h3>
+<ul>
+<li><b>ట్యూనింగ్ లేదు:</b> మోడల్, కాంటెక్స్ట్, కెర్నెల్స్, స్పెక్యులేటివ్ డీకోడింగ్ GB10 కోసం ఎంచుకున్నవి.</li>
+<li><b>ఇది మీ మెషీన్‌ను ఫ్రీజ్ చేయదు:</b> లోడ్ సమయంలో హోస్ట్‌ను తనిఖీ చేసి, మెమరీ ఒత్తిడిని గమనిస్తుంది.</li>
+<li><b>మీ ఇతర మెషీన్లు దీన్ని కనుగొంటాయి</b>, లోకల్ నెట్‌వర్క్‌లో.</li>
+<li><b>అప్‌డేట్ ఒక్క కమాండ్:</b> <code>ling update</code>.</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section id="features">
+<div class="wrap">
+<h2>మీకు ఏమి లభిస్తుంది</h2>
+<div class="features">
+<div class="feature"><h3>🖥️ <code>ling</code>, టెర్మినల్ ఏజెంట్</h3><p>మీ రిపాజిటరీని చదువుతుంది, కమాండ్లు, టెస్టులు నడుపుతుంది, కోడ్‌ను ఎడిట్ చేస్తుంది, ప్రమాదకరమైన ఏదైనా చేసే ముందు అడుగుతుంది.</p></div>
+<div class="feature"><h3>🌙 Night Shift</h3><p>నిద్రకు ముందు <code>/night add &lt;task&gt;</code>; ఉదయానికి ప్రతి టాస్క్ దాని సొంత git బ్రాంచ్‌లో పూర్తి. మీ ప్రమేయం లేకుండా ఏదీ మెర్జ్ లేదా పుష్ కాదు.</p></div>
+<div class="feature"><h3>🔎 వెబ్ సెర్చ్, ఫెచ్</h3><p>మీ సొంత మెషీన్‌లోని ప్రైవేట్ SearXNG ద్వారా: సెర్చ్ ఖాతా లేదు, API కీ లేదు.</p></div>
+<div class="feature"><h3>🧭 కోడ్ ఇండెక్స్</h3><p>మీ రిపాజిటరీ అంతటా డెఫినిషన్లు, కాలర్లు, ప్రభావం, తద్వారా ఏజెంట్ కోడ్‌ను grep చేయకుండా కనుగొంటుంది.</p></div>
+<div class="feature"><h3>🧩 మీ ప్రస్తుత స్కిల్స్</h3><p>Claude Code, Gemini CLI, OpenClaw లేదా Hermes కోసం మీరు ఇప్పటికే రాసిన స్కిల్స్ మార్పు లేకుండా పనిచేస్తాయి.</p></div>
+<div class="feature"><h3>💬 Ask, బ్రౌజర్‌లో</h3><p>వెబ్ సెర్చ్, ఇమేజ్ సెర్చ్, డిక్టేషన్‌తో ప్రశ్నలు, మీ ఏజెంట్ సెషన్లు, ఈ మెషీన్ నుండి లేదా జత చేసిన ఫోన్ నుండి, అదే లోకల్ మోడల్‌పై.</p></div>
+<div class="feature"><h3>🪟 డెస్క్‌టాప్ యాప్ <span class="tag">ప్రివ్యూ</span></h3><p>Ask, Work ఒకే విండోలో, GB10, Mac, Linux లేదా Windows లో: ఆమోదాలు, రివ్యూ పేన్, వర్క్‌ట్రీలు, అన్‌డూతో ఏజెంట్ సెషన్లు. <a href="#new">1.7 లో కొత్త</a>.</p></div>
+<div class="feature"><h3>📬 Gmail, Drive, Calendar <span class="tag">ప్రివ్యూ</span></h3><p>చదవడానికి మాత్రమే, మీ మెషీన్‌లోనే ఉండే సైన్-ఇన్ ద్వారా. <code>/airgapped on</code> వద్ద పూర్తిగా ఆఫ్.</p></div>
+</div>
+</div>
+</section>
+<section id="compare">
+<div class="wrap">
+<h2>Mightling, క్లౌడ్ కోడింగ్ ఏజెంట్లు</h2>
+<div class="tablewrap">
+<table>
+<tr><th></th><th>క్లౌడ్ కోడింగ్ ఏజెంట్లు</th><th>Mightling</th></tr>
+<tr><td>మీ కోడ్ ఎక్కడికి వెళ్తుంది</td><td>వారి సర్వర్లకు</td><td class="yes">ఎక్కడికీ కాదు</td></tr>
+<tr><td>ఖాతా అవసరం</td><td>అవును</td><td class="yes">లేదు</td></tr>
+<tr><td>టోకెన్‌కు ఖర్చు</td><td>మీటర్ ప్రకారం</td><td class="yes">సున్నా</td></tr>
+<tr><td>రేట్ పరిమితులు</td><td>ఉన్నాయి</td><td class="yes">లేవు</td></tr>
+<tr><td>నెట్‌వర్క్ తీసేసినా పనిచేస్తుంది</td><td>లేదు</td><td class="yes">అవును</td></tr>
+<tr><td>ఏమి బయటికి వెళ్తుందో ధృవీకరించవచ్చు</td><td>లేదు</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
+</table>
+</div>
+</div>
+</section>
+<section id="machines">
+<div class="wrap">
+<h2>ప్రతి GB10 మీద నడుస్తుంది</h2>
+<ul class="machines">
+<li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
+<li>Gigabyte AI TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
+</ul>
+<p class="sub flush">అవన్నీ ఒకే చిప్, 128 GB యూనిఫైడ్ మెమరీ, DGX OS 7 పంచుకుంటాయి, కాబట్టి ఒక ఇన్‌స్టాలర్ అన్నిటినీ కవర్ చేస్తుంది. Mightling ను ASUS Ascent GX10 మీద రోజూ అభివృద్ధి చేసి పరీక్షిస్తారు; మిగిలినవి టెస్టులతో కవర్ అవుతాయి.</p>
+</div>
+</section>
+<section id="paper">
+<div class="wrap">
+<h2>పేపర్</h2>
+<div class="pillar">
+<h3><a href="paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
+<p class="note-small">dgxcoder · October 2026</p>
+<p>అప్‌స్ట్రీమ్ విక్రేత డెస్క్‌టాప్ క్లయింట్ మాట్లాడే అదే app-server ప్రోటోకాల్ మాట్లాడే, Codex-అనుకూల డిఫాల్ట్‌లు ఉంచే, వినియోగదారు సొంత హార్డ్‌వేర్‌పై ఇన్‌ఫరెన్స్ నడిపే, వినియోగదారు <code>/airgapped on</code> చేసినప్పుడు ప్రతి శాండ్‌బాక్స్ కమాండ్‌ను వర్క్‌స్టేషన్‌కే పరిమితం చేసే ఓపెన్-సోర్స్ డెస్క్‌టాప్ వాతావరణమైన Mightling Desktop యొక్క నిర్మాణ రూపకల్పన, అధికారిక సామర్థ్య నమూనా, ప్రయోగాత్మక మూల్యాంకనాన్ని మేము సమర్పిస్తున్నాము.</p>
+<p><a href="paper/desktop-architecture.pdf">పేపర్ చదవండి (PDF)</a></p>
+</div>
+</div>
+</section>
+<section id="faq">
+<div class="wrap">
+<h2>ప్రశ్నలు</h2>
+<details><summary>నాకు GB10 కావాలా?</summary>
+<p>అవును, మోడల్ నడపడానికి. మీ ఇతర కంప్యూటర్లు దాన్ని క్లయింట్లుగా వాడుతాయి: Linux (Arm లేదా x86), macOS అదే ఇన్‌స్టాల్ కమాండ్‌తో, Windows (Arm లేదా x86, ప్రివ్యూ) <a href="#install">PowerShell లైన్</a> తో.</p></details>
+<details><summary>నేను Puffin ఇన్‌స్టాల్ చేశాను. ఇదే అదా?</summary>
+<p>అవును: 1.5 లో Puffin పేరు Mightling గా మారింది. ఒకసారి <code>puffin update</code> నడపండి, ఆ తర్వాత చివరిసారి <code>puffin</code>. ఇది మీ సెషన్లు, సెట్టింగ్‌లు, లింక్‌లను తరలిస్తుంది; అప్పటి నుండి కమాండ్ <code>ling</code>.</p></details>
+<details><summary>ఇది నిజంగా ఉచితమేనా?</summary>
+<p>అవును. Mightling AGPL కింద ఓపెన్ సోర్స్, మోడల్ వెయిట్‌లు ఉచితం. మీకు అయ్యే నడుస్తున్న ఖర్చు కరెంటు మాత్రమే.</p></details>
+<details><summary>మెషీన్ కాకుండా నాకు ఇంకా ఏమి కావాలి?</summary>
+<p>దానితో వచ్చే OS (DGX OS 7, లేదా విక్రేత ఇచ్చే చోట Ubuntu 24.04), NVIDIA Container Toolkit తో Docker, Python 3, Git. సాధారణ Ubuntu లో <code>ling-admin host check</code> ఏమి లేదో చెబుతుంది.</p></details>
+<details><summary>ఏదైనా ఎప్పుడైనా ఇంటర్నెట్‌కు చేరుతుందా?</summary>
+<p>మీరు లేదా ఏజెంట్ అడిగినదే, ఉదాహరణకు మీ సొంత మెషీన్‌లోని SearXNG ద్వారా వెబ్ సెర్చ్, మొదటిసారి డౌన్‌లోడ్‌లు. <code>/airgapped on</code> వాటన్నిటినీ ఆపేస్తుంది.</p></details>
+<details><summary>ఇది ఏ మోడల్ నడుపుతుంది?</summary>
+<p>NVIDIA 4-బిట్ NVFP4 ఫార్మాట్‌లో Qwen3.8-27B, DFlash2 డ్రాఫ్టర్‌తో SGLang ద్వారా సర్వ్ అవుతుంది, GB10 కోసం ఎంచుకుని ట్యూన్ చేసినది. వెయిట్‌లు సుమారు 20 GB; సర్వ్ చేస్తున్నప్పుడు మెషీన్ మెమరీలో సుమారు 38 GB ఖాళీగా ఉంటుంది.</p></details>
+</div>
+</section>
+<section class="cta">
+<div class="wrap">
+<h2>మీ కోడ్‌ను మీ డెస్క్ మీదే ఉంచండి</h2>
+<p class="sub centered">కోడ్ రాసిన డెస్క్ మీదే ఉండాలని మీరు నమ్మితే, రిపాజిటరీకి స్టార్ ఇవ్వండి: అలా ఇతర GB10 యజమానులు Mightling ను కనుగొంటారు.</p>
+<div class="buttons">
+<a class="btn primary" href="https://github.com/dreamference/mightling">GitHub లో స్టార్</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">తాజా రిలీజ్</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">డాక్స్</a>
+</div>
+</div>
+</section>
+</main>
+<footer>
+<div class="wrap">
+<div class="row">
+<div>
+<p><b>Dreamference నుండి Mightling.</b> Dreamference మీ సొంత హార్డ్‌వేర్ మీద నడిచే గోప్యమైన AI ని నిర్మిస్తుంది.</p>
+<p>GNU AGPL v3 కింద ఓపెన్ సోర్స్. NVIDIA, GB10, DGX, DGX Spark NVIDIA Corporation యొక్క ట్రేడ్‌మార్క్‌లు; ఇతర పేర్లు వాటి యజమానుల ట్రేడ్‌మార్క్‌లు. Mightling, Dreamference లకు వీటితో సంబంధం లేదు.</p>
+<p>ఈ సైట్ ఏ థర్డ్-పార్టీ అభ్యర్థనలూ చేయదు: ట్రాకర్లు లేవు, అనలిటిక్స్ లేవు, బాహ్య ఫాంట్‌లు లేవు.</p>
+</div>
+<div>
+<p><a href="https://github.com/dreamference/mightling">GitHub</a> · <a href="https://github.com/dreamference/mightling/issues">ఇష్యూలు</a> · <a href="https://github.com/dreamference/mightling/blob/main/LICENSE">లైసెన్స్</a></p>
+</div>
+</div>
+</div>
+</footer>
+<script src="/copy.js"></script>
+</body>
+</html>
