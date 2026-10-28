@@ -22,6 +22,8 @@ import sys
 from pathlib import Path
 from typing import Final, List, Optional, Tuple
 
+from dreamference.runner.safe_git import SafeGit
+
 BUNDLE_ROOT: Final[str] = os.path.expanduser("~/.cache/dreamference/fleet")
 
 # The binaries a node needs, as the release names them; the first two are required. The optional
@@ -277,18 +279,8 @@ class FleetBundle:
         try:
             from dreamference.runner.codex_branded_builder import REPO_ROOT
 
-            head = subprocess.run(
-                ["git", "-C", REPO_ROOT, "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                check=False,
-            ).stdout.strip()
-            dirty = subprocess.run(
-                ["git", "-C", REPO_ROOT, "status", "--porcelain", "dreamference"],
-                capture_output=True,
-                text=True,
-                check=False,
-            ).stdout
+            head = SafeGit.run(["rev-parse", "HEAD"], REPO_ROOT).stdout.strip()
+            dirty = SafeGit.run(["status", "--porcelain", "dreamference"], REPO_ROOT).stdout
             digest.update(f"{head}:{hashlib.sha256(dirty.encode()).hexdigest()}".encode())
         except OSError:
             pass

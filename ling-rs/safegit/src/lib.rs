@@ -6,7 +6,7 @@
 //! `diff.external` and `diff.<driver>.textconv` (diff, show, log), `filter.<driver>.clean` and
 //! `.smudge` and `.process` (status, diff, add, checkout), `merge.<driver>.driver`, `core.sshCommand`
 //! and `core.gitProxy` (fetch, push), `remote.<name>.uploadpack` and `.receivepack`,
-//! `credential.helper`, `gpg.program` (signatures), `core.hooksPath` and the hooks themselves,
+//! `credential.helper`, `gpg.program` (signatures),
 //! `protocol.ext.allow` (the `ext::` transport), and `submodule.<name>.update`.
 //!
 //! The command-line `-c` scope outranks every file, so this crate pins the fixed keys there and, for
@@ -25,7 +25,6 @@ use std::time::{Duration, Instant};
 /// Keys pinned on the command line. Every value is either inert or what git does by default.
 pub const FIXED_CONFIG: &[&str] = &[
     "core.fsmonitor=false",
-    "core.hooksPath=/dev/null",
     "core.pager=cat",
     "core.sshCommand=ssh",
     "core.gitProxy=",
@@ -275,7 +274,7 @@ mod tests {
         path.display().to_string()
     }
 
-    /// A repository whose config names a program for every hook the module knows about.
+    /// A repository whose config names a program for every key the module neutralizes (not hooks: see `hooks_run_by_the_owners_choice`).
     fn hostile(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let root = scratch(name);
         let repo = root.join("repo");
@@ -298,17 +297,13 @@ mod tests {
         let cred = script(&tools, "cred", &marker);
         let up = script(&tools, "uploadpack", &marker);
         let cfg = format!(
-            "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tfsmonitor = {fsmon}\n\tpager = {pager}\n\tsshCommand = {ssh}\n\thooksPath = {hooks}\n\
+            "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tfsmonitor = {fsmon}\n\tpager = {pager}\n\tsshCommand = {ssh}\n\
              [diff]\n\texternal = {ext}\n[diff \"evil\"]\n\ttextconv = {textconv}\n\tcommand = {ext}\n\
              [filter \"evil\"]\n\tclean = {clean}\n\tsmudge = {smudge}\n\
              [credential]\n\thelper = {cred}\n[remote \"origin\"]\n\turl = {repo}\n\tuploadpack = {up}\n\treceivepack = {up}\n",
-            hooks = tools.display(),
             repo = repo.display(),
         );
         fs::write(repo.join(".git/config"), cfg).unwrap();
-        for hook in ["pre-commit", "post-checkout", "post-index-change"] {
-            fs::copy(tools.join("pager"), tools.join(hook)).unwrap();
-        }
         // Make the working file differ in size and time so status must re-read (and clean-filter) it.
         fs::write(repo.join("a.txt"), "one\ntwo changed\n").unwrap();
         (repo, marker)
@@ -355,6 +350,25 @@ mod tests {
         let _ = out;
         let ran = fs::read_to_string(&marker).unwrap_or_default();
         assert!(ran.is_empty(), "a configured program ran: {ran}");
+    }
+
+    #[test]
+    fn hooks_run_by_the_owners_choice() {
+        // Owner decision 2026-10-28 ("allow all for now"): repository hooks run from host-side git.
+        // The known risk (an agent-written hook runs on the host) is in docs/dev/host-safety.md.
+        let root = scratch("hooks");
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        plain(&repo, &["init", "-q"]);
+        let marker = root.join("marker");
+        let hooks = repo.join(".git/hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        script(&hooks, "pre-commit", &marker);
+        fs::write(repo.join("a.txt"), "x\n").unwrap();
+        output(&repo, &["add", "-A"]).unwrap();
+        let out = output(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "m"]).unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(fs::read_to_string(&marker).unwrap_or_default().contains("ran-pre-commit"));
     }
 
     #[test]

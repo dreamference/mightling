@@ -40,6 +40,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional, Sequence
 
+from dreamference.runner.safe_git import SafeGit
+
+GIT_DIR_FLAG: Final[str] = "--git-dir"
 JOB_ID: Final[re.Pattern] = re.compile(r"\d{8}-\d{4}-[0-9a-f]{3}")
 REPO_SLUG: Final[re.Pattern] = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
 COMMIT: Final[re.Pattern] = re.compile(r"[0-9a-f]{40}")
@@ -48,11 +51,11 @@ DEFAULT_MEMORY: Final[str] = "8G"
 DEFAULT_TIME: Final[str] = "90m"
 
 # The most a sender may ask for; this node's ceilings, not the sender's.
-MAX_MEMORY_BYTES: Final[int] = 32 * 1024 ** 3
+MAX_MEMORY_BYTES: Final[int] = 32 * 1024**3
 MAX_TIME_S: Final[int] = 8 * 3600
 
 # Free memory a job never eats into, as for a night task.
-MEMORY_RESERVE: Final[int] = 8 * 1024 ** 3
+MEMORY_RESERVE: Final[int] = 8 * 1024**3
 
 AIRGAP_LEVELS: Final[tuple] = ("off", "on")
 
@@ -66,9 +69,24 @@ KEEP_UNFETCHED: Final[timedelta] = timedelta(days=14)
 # The files whose content decides whether a job's environment can be reused: the same setup
 # command and the same lock files give the same environment.
 LOCK_FILES: Final[tuple] = (
-    "requirements.txt", "requirements-dev.txt", "requirements-test.txt", "pyproject.toml", "setup.py",
-    "setup.cfg", "poetry.lock", "uv.lock", "Pipfile.lock", "package.json", "package-lock.json", "yarn.lock",
-    "pnpm-lock.yaml", "Cargo.toml", "Cargo.lock", "go.mod", "go.sum")
+    "requirements.txt",
+    "requirements-dev.txt",
+    "requirements-test.txt",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "poetry.lock",
+    "uv.lock",
+    "Pipfile.lock",
+    "package.json",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "Cargo.toml",
+    "Cargo.lock",
+    "go.mod",
+    "go.sum",
+)
 
 # What `--out` may name: a path inside the worktree.
 OUT_PATH: Final[re.Pattern] = re.compile(r"[A-Za-z0-9._-][A-Za-z0-9._/-]{0,200}")
@@ -152,6 +170,7 @@ class NodeJob:
         """
         from dreamference.night_shift.night_shift_host import NightShiftHost
         from dreamference.night_shift.night_shift_settings import NightShiftSettings
+
         if not isinstance(request, dict):
             raise ValueError("a job is a JSON object")
         job_id = request.get("id")
@@ -160,7 +179,11 @@ class NodeJob:
         if not COMMIT.fullmatch(str(request.get("commit") or "")):
             raise ValueError("a job names the commit it runs at, as a full hash")
         command = request.get("command")
-        if not isinstance(command, list) or not command or not all(isinstance(word, str) and word for word in command):
+        if (
+            not isinstance(command, list)
+            or not command
+            or not all(isinstance(word, str) and word for word in command)
+        ):
             raise ValueError("a job has a command")
         # No job without a memory cap and a time limit: there is no default a sender can omit
         # them into. The sender's own tool fills in Night Shift's defaults before sending.
@@ -174,12 +197,16 @@ class NodeJob:
         if memory <= 0 or seconds <= 0:
             raise ValueError("a job needs a memory cap and a time limit")
         if memory > MAX_MEMORY_BYTES:
-            raise ValueError(f"this node allows a job at most {MAX_MEMORY_BYTES // 1024 ** 3}G of memory")
+            raise ValueError(
+                f"this node allows a job at most {MAX_MEMORY_BYTES // 1024**3}G of memory"
+            )
         if seconds > MAX_TIME_S:
             raise ValueError(f"this node allows a job at most {MAX_TIME_S // 3600}h")
         if request.get("gpu"):
-            raise ValueError("GPU jobs are not allowed on a node for now: a memory cap does not bound GPU "
-                             "memory on a GB10, where it is the same pool the model server uses")
+            raise ValueError(
+                "GPU jobs are not allowed on a node for now: a memory cap does not bound GPU "
+                "memory on a GB10, where it is the same pool the model server uses"
+            )
         test = request.get("test")
         if test is not None and not isinstance(test, str):
             raise ValueError("the test command is a string")
@@ -187,21 +214,41 @@ class NodeJob:
         if setup is not None and (not isinstance(setup, str) or not setup.strip()):
             raise ValueError("the setup command is a string")
         out = request.get("out")
-        if out is not None and (not isinstance(out, str) or not OUT_PATH.fullmatch(out)
-                                or ".." in out.split("/") or out.startswith("/")):
+        if out is not None and (
+            not isinstance(out, str)
+            or not OUT_PATH.fullmatch(out)
+            or ".." in out.split("/")
+            or out.startswith("/")
+        ):
             raise ValueError("--out names a folder inside the repository, such as `checkpoints`")
         binds = cls.allowed_binds(request.get("binds") or [])
         author = request.get("author") if isinstance(request.get("author"), dict) else {}
         return {
-            "id": job_id, "repo": request["repo"], "commit": request["commit"], "command": command,
-            "memory": str(request["memory"]), "memory_bytes": memory, "time": str(request["time"]),
-            "time_s": seconds, "test": test or None, "setup": setup or None,
-            "out": out.strip("/") if out else None, "binds": binds,
-            "airgapped": cls.stricter(str(request.get("airgapped") or "off"), cls.node_airgap_level()),
-            "author": {"name": str(author.get("name") or "Mightling Job")[:100],
-                       "email": str(author.get("email") or "mightling-job@localhost")[:200]},
+            "id": job_id,
+            "repo": request["repo"],
+            "commit": request["commit"],
+            "command": command,
+            "memory": str(request["memory"]),
+            "memory_bytes": memory,
+            "time": str(request["time"]),
+            "time_s": seconds,
+            "test": test or None,
+            "setup": setup or None,
+            "out": out.strip("/") if out else None,
+            "binds": binds,
+            "airgapped": cls.stricter(
+                str(request.get("airgapped") or "off"), cls.node_airgap_level()
+            ),
+            "author": {
+                "name": str(author.get("name") or "Mightling Job")[:100],
+                "email": str(author.get("email") or "mightling-job@localhost")[:200],
+            },
             "sender": str(request.get("sender") or "")[:100],
-            "status": "queued", "submitted": cls.now(), "branch": None, "exit_code": None, "note": None,
+            "status": "queued",
+            "submitted": cls.now(),
+            "branch": None,
+            "exit_code": None,
+            "note": None,
         }
 
     @classmethod
@@ -214,7 +261,9 @@ class NodeJob:
         Returns:
             str: The stricter of the two; an unknown name counts as `on`.
         """
-        rank = lambda level: AIRGAP_LEVELS.index(level) if level in AIRGAP_LEVELS else len(AIRGAP_LEVELS) - 1
+        rank = lambda level: (
+            AIRGAP_LEVELS.index(level) if level in AIRGAP_LEVELS else len(AIRGAP_LEVELS) - 1
+        )
         return AIRGAP_LEVELS[max(rank(first), rank(second))]
 
     @classmethod
@@ -226,12 +275,15 @@ class NodeJob:
             owner's decision, never the sender's.
         """
         from dreamference.night_shift.night_shift_settings import NightShiftSettings
+
         path = Path(os.path.expanduser("~/.config/dreamference/config.toml"))
         table = NightShiftSettings.read_table(path, section="node")
         roots = table.get("bindable") or []
         if isinstance(roots, str):
             roots = [roots]
-        return [os.path.realpath(os.path.expanduser(str(root))) for root in roots if str(root).strip()]
+        return [
+            os.path.realpath(os.path.expanduser(str(root))) for root in roots if str(root).strip()
+        ]
 
     @classmethod
     def allowed_binds(cls, binds: Any) -> List[str]:
@@ -247,7 +299,9 @@ class NodeJob:
         Raises:
             ValueError: If a path is malformed, missing, or outside every allowed root.
         """
-        if not isinstance(binds, list) or not all(isinstance(path, str) and path.startswith("/") for path in binds):
+        if not isinstance(binds, list) or not all(
+            isinstance(path, str) and path.startswith("/") for path in binds
+        ):
             raise ValueError("--bind names absolute paths on the node")
         if len(binds) > 16:
             raise ValueError("a job may bind at most 16 paths")
@@ -256,7 +310,9 @@ class NodeJob:
         for path in binds:
             real = os.path.realpath(path)
             if not any(real == root or real.startswith(root.rstrip("/") + "/") for root in roots):
-                allowed = ", ".join(roots) or "nothing ([node] bindable in its config.toml is empty)"
+                allowed = (
+                    ", ".join(roots) or "nothing ([node] bindable in its config.toml is empty)"
+                )
                 raise ValueError(f"this node does not allow binding {path}; it allows {allowed}")
             if not os.path.exists(real):
                 raise ValueError(f"{path} does not exist on this node")
@@ -270,6 +326,7 @@ class NodeJob:
             str: This node's configured `/airgapped` level.
         """
         from dreamference.config import DreamferenceConfig
+
         try:
             return DreamferenceConfig().mightling_airgapped
         except Exception:
@@ -339,10 +396,26 @@ class NodeJob:
         Returns:
             List[str]: The `systemd-run` argv.
         """
-        return ["systemd-run", "--user", "--quiet", "--collect", f"--unit={cls.unit_name(record['id'])}",
-                "-p", f"MemoryMax={record['memory_bytes']}", "-p", "MemorySwapMax=0",
-                "-p", f"RuntimeMaxSec={record['time_s']}", "-p", "CPUQuota=800%",
-                "--", admin, "node", "job-exec", record["id"]]
+        return [
+            "systemd-run",
+            "--user",
+            "--quiet",
+            "--collect",
+            f"--unit={cls.unit_name(record['id'])}",
+            "-p",
+            f"MemoryMax={record['memory_bytes']}",
+            "-p",
+            "MemorySwapMax=0",
+            "-p",
+            f"RuntimeMaxSec={record['time_s']}",
+            "-p",
+            "CPUQuota=800%",
+            "--",
+            admin,
+            "node",
+            "job-exec",
+            record["id"],
+        ]
 
     @classmethod
     def submit(cls, request: Dict[str, Any], admin: str) -> Dict[str, Any]:
@@ -364,8 +437,7 @@ class NodeJob:
         if cls.read(record["id"]) is not None:
             raise ValueError(f"job {record['id']} already exists on this node")
         repo = cls.repo_path(record["repo"])
-        known = subprocess.run(["git", "--git-dir", str(repo), "cat-file", "-e", f"{record['commit']}^{{commit}}"],
-                               capture_output=True, text=True, check=False)
+        known = SafeGit.run(["cat-file", "-e", f"{record['commit']}^{{commit}}"], git_dir=repo)
         if known.returncode != 0:
             raise ValueError("the commit was not pushed to this node before the job was sent")
         reason = cls.admission_blocker(record)
@@ -374,10 +446,18 @@ class NodeJob:
         cls.write(record)
         (cls.job_dir(record["id"]) / "output.log").touch()
         if cls.USE_UNIT:
-            started = subprocess.run(cls.unit_command(record, admin), capture_output=True, text=True,
-                                     env=cls.user_bus_environment(), check=False)
+            started = subprocess.run(
+                cls.unit_command(record, admin),
+                capture_output=True,
+                text=True,
+                env=cls.user_bus_environment(),
+                check=False,
+            )
             if started.returncode != 0:
-                record.update(status="failed", note=f"could not start the job's unit: {started.stderr.strip()[-200:]}")
+                record.update(
+                    status="failed",
+                    note=f"could not start the job's unit: {started.stderr.strip()[-200:]}",
+                )
                 cls.write(record)
                 raise ValueError(record["note"])
         return record
@@ -396,6 +476,7 @@ class NodeJob:
         """
         from dreamference.night_shift.night_shift_host import GIB, NightShiftHost
         from dreamference.night_shift.night_shift_queue import NightShiftQueue
+
         blocked = cls.sandbox_blocker()
         if blocked:
             return blocked
@@ -407,8 +488,10 @@ class NodeJob:
         available = NightShiftHost.mem_available_bytes()
         needed = MEMORY_RESERVE + record["memory_bytes"]
         if available < needed:
-            return (f"this node has {available / GIB:.1f} GiB of memory available; the job's "
-                    f"{record['memory']} cap needs {needed / GIB:.0f} with the reserve")
+            return (
+                f"this node has {available / GIB:.1f} GiB of memory available; the job's "
+                f"{record['memory']} cap needs {needed / GIB:.0f} with the reserve"
+            )
         return None
 
     @classmethod
@@ -426,23 +509,53 @@ class NodeJob:
             Optional[str]: The reason, with what to do on the node, or None when bubblewrap works
             in the context a job's unit runs in.
         """
-        probe = ["bwrap", "--die-with-parent", "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev",
-                 "--proc", "/proc", "true"]
+        probe = [
+            "bwrap",
+            "--die-with-parent",
+            "--unshare-pid",
+            "--ro-bind",
+            "/",
+            "/",
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            "true",
+        ]
         if cls.USE_UNIT:
             # Asked of a unit like the job's own: that is the context that has to be able to.
-            probe = ["systemd-run", "--user", "--quiet", "--wait", "--collect", "--pipe", "--", *probe]
+            probe = [
+                "systemd-run",
+                "--user",
+                "--quiet",
+                "--wait",
+                "--collect",
+                "--pipe",
+                "--",
+                *probe,
+            ]
         try:
-            result = subprocess.run(probe, capture_output=True, text=True, timeout=30,
-                                    env=cls.user_bus_environment(), check=False)
+            result = subprocess.run(
+                probe,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=cls.user_bus_environment(),
+                check=False,
+            )
         except (OSError, subprocess.SubprocessError) as error:
             return f"this node cannot sandbox a job: {error}"
         if result.returncode == 0:
             return None
         detail = (result.stderr or result.stdout).strip().splitlines()[-1:] or ["bubblewrap failed"]
-        return ("this node cannot sandbox a job, so it will not run one (" + detail[0] + "). On Ubuntu this is "
-                "AppArmor allowing user namespaces only to programs with a profile; on the node, as root, "
-                "give /usr/bin/bwrap a profile with `userns,` (the apparmor-profiles package has "
-                "bwrap-userns-restrict), then try again")
+        return (
+            "this node cannot sandbox a job, so it will not run one ("
+            + detail[0]
+            + "). On Ubuntu this is "
+            "AppArmor allowing user namespaces only to programs with a profile; on the node, as root, "
+            "give /usr/bin/bwrap a profile with `userns,` (the apparmor-profiles package has "
+            "bwrap-userns-restrict), then try again"
+        )
 
     @classmethod
     def user_bus_environment(cls) -> Dict[str, str]:
@@ -461,9 +574,16 @@ class NodeJob:
     # -- running it (inside the unit) ------------------------------------------------------------
 
     @classmethod
-    def sandbox_command(cls, tree: Path, command: List[str], network: bool, job_id: str,
-                        writable: Sequence[str] = (), readable: Sequence[str] = (),
-                        environment: Optional[Dict[str, str]] = None) -> List[str]:
+    def sandbox_command(
+        cls,
+        tree: Path,
+        command: List[str],
+        network: bool,
+        job_id: str,
+        writable: Sequence[str] = (),
+        readable: Sequence[str] = (),
+        environment: Optional[Dict[str, str]] = None,
+    ) -> List[str]:
         """
         The bubblewrap command line a job's command runs under.
 
@@ -481,7 +601,14 @@ class NodeJob:
             a bind made under a later tmpfs.
         """
         home = os.path.expanduser("~")
-        argv = ["bwrap", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts"]
+        argv = [
+            "bwrap",
+            "--die-with-parent",
+            "--new-session",
+            "--unshare-pid",
+            "--unshare-ipc",
+            "--unshare-uts",
+        ]
         if not network:
             argv.append("--unshare-net")
         # The system read-only; a /dev without the GPU's device nodes; nothing of /run, where the
@@ -496,10 +623,15 @@ class NodeJob:
             argv += ["--ro-bind", str(path), str(path)]
         argv.append("--clearenv")
         variables = {
-            "PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": home, "LANG": os.environ.get("LANG", "C.UTF-8"),
-            "TERM": "dumb", "MIGHTLING_JOB": job_id, "GIT_TERMINAL_PROMPT": "0",
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "HOME": home,
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "TERM": "dumb",
+            "MIGHTLING_JOB": job_id,
+            "GIT_TERMINAL_PROMPT": "0",
             # CPU-only: a job that reached CUDA would be outside its memory cap.
-            "CUDA_VISIBLE_DEVICES": "", "NVIDIA_VISIBLE_DEVICES": "none",
+            "CUDA_VISIBLE_DEVICES": "",
+            "NVIDIA_VISIBLE_DEVICES": "none",
         }
         variables.update(environment or {})
         for key, value in variables.items():
@@ -531,7 +663,9 @@ class NodeJob:
         cls.write(record)
         code = 1
         try:
-            added = cls._git(["--git-dir", str(repo), "worktree", "add", "--detach", str(tree), record["commit"]])
+            added = cls._git(
+                ["--git-dir", str(repo), "worktree", "add", "--detach", str(tree), record["commit"]]
+            )
             if added.returncode != 0:
                 record["note"] = f"git worktree add failed: {added.stderr.strip()[-200:]}"
                 return 1
@@ -543,8 +677,9 @@ class NodeJob:
                     return 1
                 readable = ([str(env_dir)] if env_dir else []) + list(record.get("binds") or [])
                 variables = cls.environment_variables(env_dir)
-                sandboxed = lambda command: cls.sandbox_command(tree, command, network, job_id,
-                                                                readable=readable, environment=variables)
+                sandboxed = lambda command: cls.sandbox_command(
+                    tree, command, network, job_id, readable=readable, environment=variables
+                )
                 code = cls._run(sandboxed(record["command"]), sink, tree)
                 record["exit_code"] = code
                 if code == 0 and record.get("test"):
@@ -554,9 +689,11 @@ class NodeJob:
                     record["test_exit_code"] = test_code
                     code = test_code
             if code != 0 and not env_dir and cls.missing_module(log):
-                record["note"] = ("an environment failure, not a failing job: a Python module was missing, and with "
-                                  "no setup command the job ran with the node's system interpreter "
-                                  "(send it with --setup, or set [night] setup in dreamference.toml)")
+                record["note"] = (
+                    "an environment failure, not a failing job: a Python module was missing, and with "
+                    "no setup command the job ran with the node's system interpreter "
+                    "(send it with --setup, or set [night] setup in dreamference.toml)"
+                )
             if record.get("out"):
                 record["out_files"] = cls._keep_out(record, tree, directory)
             record["branch"] = cls._commit(record, tree, repo)
@@ -590,6 +727,7 @@ class NodeJob:
         if record.get("setup"):
             return record["setup"]
         from dreamference.night_shift.night_shift_settings import NightShiftSettings
+
         configured = NightShiftSettings.read_table(tree / "dreamference.toml").get("setup")
         return str(configured) if configured else None
 
@@ -624,8 +762,11 @@ class NodeJob:
         """
         if not env_dir:
             return {}
-        return {"MIGHTLING_ENV": str(env_dir), "VIRTUAL_ENV": str(env_dir),
-                "PATH": f"{env_dir}/bin:/usr/local/bin:/usr/bin:/bin"}
+        return {
+            "MIGHTLING_ENV": str(env_dir),
+            "VIRTUAL_ENV": str(env_dir),
+            "PATH": f"{env_dir}/bin:/usr/local/bin:/usr/bin:/bin",
+        }
 
     @classmethod
     def _environment(cls, record: Dict[str, Any], tree: Path, network: bool, sink: Any) -> Any:
@@ -653,12 +794,21 @@ class NodeJob:
                 env_dir.mkdir()
                 sink.write(f"--- setup: {setup}\n".encode())
                 sink.flush()
-                argv = cls.sandbox_command(tree, ["bash", "-c", setup], network, record["id"],
-                                           writable=[str(env_dir)], environment=cls.environment_variables(env_dir))
+                argv = cls.sandbox_command(
+                    tree,
+                    ["bash", "-c", setup],
+                    network,
+                    record["id"],
+                    writable=[str(env_dir)],
+                    environment=cls.environment_variables(env_dir),
+                )
                 code = cls._run(argv, sink, tree)
                 if code != 0:
                     shutil.rmtree(env_dir, ignore_errors=True)
-                    return None, f"the environment's setup command failed (exit {code}); its output is in the log"
+                    return (
+                        None,
+                        f"the environment's setup command failed (exit {code}); its output is in the log",
+                    )
                 (env_dir / ".complete").write_text(setup + "\n")
                 sink.write(b"--- setup done\n")
                 record["environment"] = f"{key} (built)"
@@ -740,7 +890,9 @@ class NodeJob:
             return None
         try:
             if record.get("fetched"):
-                return (datetime.fromisoformat(record["fetched"]) + KEEP_AFTER_FETCH).isoformat(timespec="seconds")
+                return (datetime.fromisoformat(record["fetched"]) + KEEP_AFTER_FETCH).isoformat(
+                    timespec="seconds"
+                )
             finished = record.get("finished") or record.get("submitted")
             return (datetime.fromisoformat(finished) + KEEP_UNFETCHED).isoformat(timespec="seconds")
         except (TypeError, ValueError):
@@ -789,7 +941,16 @@ class NodeJob:
                 repo = None
             if repo is not None and repo.is_dir():
                 if (directory / "tree").exists():
-                    cls._git(["--git-dir", str(repo), "worktree", "remove", "--force", str(directory / "tree")])
+                    cls._git(
+                        [
+                            "--git-dir",
+                            str(repo),
+                            "worktree",
+                            "remove",
+                            "--force",
+                            str(directory / "tree"),
+                        ]
+                    )
                 cls._git(["--git-dir", str(repo), "worktree", "prune"])
                 cls._git(["--git-dir", str(repo), "update-ref", "-d", f"refs/jobs/{record['id']}"])
                 cls._git(["--git-dir", str(repo), "branch", "-D", f"job/{record['id']}"])
@@ -804,10 +965,18 @@ class NodeJob:
         if status.returncode != 0 or not status.stdout.strip():
             return None
         branch = f"job/{record['id']}"
-        identity = ["-c", f"user.name={record['author']['name']}", "-c", f"user.email={record['author']['email']}"]
+        identity = [
+            "-c",
+            f"user.name={record['author']['name']}",
+            "-c",
+            f"user.email={record['author']['email']}",
+        ]
         first_line = shlex.join(record["command"])[:72]
-        for step, arguments in (("checkout", ["checkout", "-q", "-b", branch]), ("add", ["add", "-A"]),
-                                ("commit", [*identity, "commit", "-q", "-m", f"job: {first_line}"])):
+        for step, arguments in (
+            ("checkout", ["checkout", "-q", "-b", branch]),
+            ("add", ["add", "-A"]),
+            ("commit", [*identity, "commit", "-q", "-m", f"job: {first_line}"]),
+        ):
             result = cls._git(["-C", str(tree), *arguments])
             if result.returncode != 0:
                 record["note"] = f"git {step} failed: {result.stderr.strip()[-200:]}"
@@ -817,17 +986,25 @@ class NodeJob:
     @classmethod
     def _run(cls, argv: List[str], sink: Any, tree: Path) -> int:
         try:
-            return subprocess.run(argv, cwd=tree, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
-                                  check=False).returncode
+            return subprocess.run(
+                argv,
+                cwd=tree,
+                stdin=subprocess.DEVNULL,
+                stdout=sink,
+                stderr=subprocess.STDOUT,
+                check=False,
+            ).returncode
         except OSError as error:
             sink.write(f"could not start: {error}\n".encode())
             return 127
 
     @classmethod
     def _git(cls, arguments: List[str]) -> subprocess.CompletedProcess:
-        environment = dict(os.environ, GIT_TERMINAL_PROMPT="0")
-        return subprocess.run(["git", *arguments], capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                              env=environment, check=False)
+        # `arguments` begin with `--git-dir <repo>` or `-C <tree>`: split that off for SafeGit.
+        flag, target, *rest = arguments
+        if flag == GIT_DIR_FLAG:
+            return SafeGit.run(rest, git_dir=target)
+        return SafeGit.run(rest, target)
 
     # -- watching and stopping it ----------------------------------------------------------------
 
@@ -868,7 +1045,11 @@ class NodeJob:
             print(f"\n{record['note']}", file=sys.stderr)
         if record.get("status") == "done":
             return 0
-        code = record.get("test_exit_code") if record.get("exit_code") == 0 else record.get("exit_code")
+        code = (
+            record.get("test_exit_code")
+            if record.get("exit_code") == 0
+            else record.get("exit_code")
+        )
         return code if isinstance(code, int) and code != 0 else 1
 
     @classmethod
@@ -892,9 +1073,12 @@ class NodeJob:
         # The unit may have finished between the read and the check: read once more.
         record = cls.read(job_id)
         if record and record.get("status") in ("queued", "running"):
-            record.update(status="failed", finished=cls.now(),
-                          note=f"the job was stopped without a result: it passed its time limit ({record['time']}), "
-                               f"its memory cap ({record['memory']}), or the node was restarted")
+            record.update(
+                status="failed",
+                finished=cls.now(),
+                note=f"the job was stopped without a result: it passed its time limit ({record['time']}), "
+                f"its memory cap ({record['memory']}), or the node was restarted",
+            )
             cls.write(record)
         return record
 
@@ -907,8 +1091,13 @@ class NodeJob:
         Returns:
             bool: True while the job's unit is starting or running.
         """
-        result = subprocess.run(["systemctl", "--user", "is-active", f"{cls.unit_name(job_id)}.service"],
-                                capture_output=True, text=True, env=cls.user_bus_environment(), check=False)
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", f"{cls.unit_name(job_id)}.service"],
+            capture_output=True,
+            text=True,
+            env=cls.user_bus_environment(),
+            check=False,
+        )
         return result.stdout.strip() in ("active", "activating")
 
     @classmethod
@@ -928,6 +1117,11 @@ class NodeJob:
         record.update(status="cancelled", finished=cls.now())
         cls.write(record)
         if cls.USE_UNIT:
-            subprocess.run(["systemctl", "--user", "stop", f"{cls.unit_name(job_id)}.service"],
-                           capture_output=True, text=True, env=cls.user_bus_environment(), check=False)
+            subprocess.run(
+                ["systemctl", "--user", "stop", f"{cls.unit_name(job_id)}.service"],
+                capture_output=True,
+                text=True,
+                env=cls.user_bus_environment(),
+                check=False,
+            )
         return True

@@ -28,14 +28,13 @@ export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv
  * Config pinned on every command: a checkout's `.git/config` is writable by the agent while this
  * runs outside the sandbox, and these keys make git execute a program (`core.fsmonitor` on status,
  * `core.pager`, `diff.external`, `core.sshCommand` and `core.gitProxy` on push, `credential.helper`,
- * `gpg.program`, hooks, the `ext::` transport). The command line outranks every config file.
+ * `gpg.program`, the `ext::` transport). The command line outranks every config file.
  * The keys whose names the agent chooses (`filter.<n>.clean`, `diff.<n>.textconv`, ...) are read
- * from the checkout's own config by `driverOverrides` and blanked there. Repository hooks do not
- * run from here for the same reason.
+ * from the checkout's own config by `driverOverrides` and blanked there. Repository hooks DO run from here
+ * (owner's choice 2026-10-28; see docs/dev/host-safety.md).
  */
 export const SAFE_CONFIG = [
   "core.fsmonitor=false",
-  "core.hooksPath=/dev/null",
   "core.pager=cat",
   "core.sshCommand=ssh",
   "core.gitProxy=",

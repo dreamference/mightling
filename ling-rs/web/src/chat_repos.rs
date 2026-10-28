@@ -1574,12 +1574,10 @@ pub fn count_porcelain_lines_sync(server: &Server, checkout_dir: &Path) -> u32 {
     if !checkout_dir.exists() {
         return 0;
     }
-    let base_url = forge_base_url(server);
-    let Ok((_, hooks_dir)) = ensure_git_helpers_for_forge(&server.config.state_dir, &base_url) else {
-        return 0;
-    };
-    let hooks_arg = format!("core.hooksPath={}", hooks_dir.display());
-    let mut cmd = std::process::Command::new("git");
+    // The agent can write the checkout's own git config and this runs outside the sandbox, so the
+    // command is ling_safegit's (every program-naming key pinned, the checkout's driver names
+    // blanked, a hung git killed after ten seconds), run in a clean environment.
+    let mut cmd = ling_safegit::command(checkout_dir, &["status", "--porcelain"]);
     cmd.env_clear();
     if let Some(path) = std::env::var_os("PATH") {
         cmd.env("PATH", path);
@@ -1587,43 +1585,14 @@ pub fn count_porcelain_lines_sync(server: &Server, checkout_dir: &Path) -> u32 {
     cmd.env("HOME", &server.config.codex_home);
     cmd.env("LANG", "C");
     cmd.env("LC_ALL", "C");
-    cmd.env("GIT_TERMINAL_PROMPT", "0");
-    cmd.env("GIT_CONFIG_NOSYSTEM", "1");
-    // The agent can write the checkout's own git config, so the helpers a config can name are
-    // switched off for this status, and a hung git is killed after a few seconds.
-    cmd.arg("-c")
-        .arg(&hooks_arg)
-        .arg("-c")
-        .arg("core.fsmonitor=false")
-        .arg("status")
-        .arg("--porcelain")
-        .current_dir(checkout_dir)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
-    let Ok(mut child) = cmd.spawn() else {
+    ling_safegit::apply_env(&mut cmd);
+    let Ok(output) = ling_safegit::run(cmd, Duration::from_secs(10)) else {
         return 0;
     };
-    let Some(mut stdout) = child.stdout.take() else {
-        let _ = child.kill();
+    if !output.status.success() {
         return 0;
-    };
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
-        let _ = tx.send(buf);
-    });
-    let Ok(buf) = rx.recv_timeout(Duration::from_secs(10)) else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return 0;
-    };
-    match child.wait() {
-        Ok(status) if status.success() => {}
-        _ => return 0,
     }
+    let buf = output.stdout;
     buf.split(|&b| b == b'\n').filter(|line| !line.is_empty()).count() as u32
 }
 
@@ -5466,6 +5435,40 @@ mod tests {
         ] {
             run_git_checked(&server, Some(&repo), &args, false).await.unwrap_or_else(|e| panic!("git {args:?}: {e}"));
         }
+        let ran = std::fs::read_to_string(&marker).unwrap_or_default();
+        assert!(ran.is_empty(), "a program named by the checkout's config ran: {ran}");
+    }
+
+    /// The turn-finished file count (G14) reads `git status` in a checkout the agent can write.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_file_count_runs_no_program_a_hostile_config_names() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = scratch("count-hostile");
+        let (server, _probe) = test_server(&s.dir, None, true);
+        let repo = s.dir.join("checkout");
+        std::fs::create_dir_all(&repo).unwrap();
+        git_sync(&repo, &["init", "--initial-branch=main"]);
+        git_sync(&repo, &["config", "user.email", "dev@127.0.0.1"]);
+        git_sync(&repo, &["config", "user.name", "dev"]);
+        std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+        std::fs::write(repo.join(".gitattributes"), "*.txt filter=evil\n").unwrap();
+        git_sync(&repo, &["add", "-A"]);
+        git_sync(&repo, &["commit", "-m", "init"]);
+        let marker = s.dir.join("ran");
+        let tool = s.dir.join("tool.sh");
+        std::fs::write(&tool, format!("#!/bin/sh\necho ran >> {}\ncat\n", marker.display())).unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let t = tool.display();
+        let config = std::fs::read_to_string(repo.join(".git/config")).unwrap();
+        std::fs::write(
+            repo.join(".git/config"),
+            format!("{config}[core]\n\tfsmonitor = {t}\n\tpager = {t}\n[filter \"evil\"]\n\tclean = {t}\n\tsmudge = {t}\n"),
+        )
+        .unwrap();
+        std::fs::write(repo.join("a.txt"), "one\ntwo, changed\n").unwrap();
+        std::fs::write(repo.join("b.txt"), "new\n").unwrap();
+        assert_eq!(count_porcelain_lines_sync(&server, &repo), 2);
         let ran = std::fs::read_to_string(&marker).unwrap_or_default();
         assert!(ran.is_empty(), "a program named by the checkout's config ran: {ran}");
     }

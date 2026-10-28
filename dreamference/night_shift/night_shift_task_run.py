@@ -30,6 +30,7 @@ from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 from dreamference.night_shift.refine_prompt import NIGHT_WRITES, RefinePrompt
 from dreamference.runner.codex_installer import ADAPTER_ENV
+from dreamference.runner.safe_git import SafeGit
 
 PREAMBLE: Final[
     str
@@ -754,14 +755,8 @@ class NightShiftTaskRun:
                 continue
 
     def _git(self, cwd: Path, *args: str) -> tuple[int, str]:
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
-        result = subprocess.run(
-            ["git", "-C", str(cwd), *args],
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            env=env,
-        )
+        # The worktree is the agent's to write: no config-named program runs (SafeGit).
+        result = SafeGit.run(args, cwd)
         return result.returncode, result.stdout + result.stderr
 
     def remote_sandbox(self, command: list[str], extra_env: dict[str, str]) -> list[str]:

@@ -11,18 +11,20 @@ import subprocess
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Set, Tuple, Final
+from typing import Any, Dict, Final, List, Optional, Set, Tuple
+
 try:
     import numpy as np
 except ImportError:
     np = None  # type: ignore
 
-from dreamference.context_engine.code_symbol import CodeSymbol
-from dreamference.context_engine.indexed_file import IndexedFile
 from dreamference.context_engine.ast_symbol_extractor import ASTSymbolExtractor
-from dreamference.context_engine.tfidf_calculator import TFIDFCalculator
-from dreamference.context_engine.sqlite_context_storage import SQLiteContextStorage
+from dreamference.context_engine.code_symbol import CodeSymbol
 from dreamference.context_engine.embedding_calculator import QUERY_PREFIX, EmbeddingCalculator
+from dreamference.context_engine.indexed_file import IndexedFile
+from dreamference.context_engine.sqlite_context_storage import SQLiteContextStorage
+from dreamference.context_engine.tfidf_calculator import TFIDFCalculator
+from dreamference.runner.safe_git import SafeGit
 
 # Directories ignored during indexing
 IGNORE_DIRS: Final[Set[str]] = {
@@ -101,10 +103,11 @@ class ContextEngine:
             List[Path]: Absolute paths of the files to index.
         """
         try:
-            listed = subprocess.run(
-                ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-                cwd=self.workspace_root, capture_output=True, check=True, timeout=60,
-            ).stdout.decode("utf-8", errors="surrogateescape")
+            result = SafeGit.run(["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                                 self.workspace_root, text=False, timeout=60)
+            if result.returncode != 0:
+                raise OSError("git ls-files failed")
+            listed = result.stdout.decode("utf-8", errors="surrogateescape")
             candidates = [self.workspace_root / name for name in listed.split("\0") if name]
         except (OSError, subprocess.SubprocessError):
             candidates = []
