@@ -52,7 +52,10 @@ the shared hub, so a repository's content does not reach Telegram or Discord.
 server, the launcher, the delegation plugin, the monitor, `ling-code` and the desktop app), git no
 longer runs a program that the checkout's own configuration names (an external diff, a filter, a
 hook or a pager). The same holds for the git that Night Shift, node jobs, the context engine and the
-SWE-bench harness run. Repository hooks run again, as you choose. Your checkouts behave as before.
+SWE-bench harness run. Repository hooks run again, as you choose. Your checkouts behave as before:
+git still reads your system git configuration, so on Windows line endings (`core.autocrlf`) and Git
+LFS work as installed, and no environment variable can point it at another configuration file or add
+settings to it.
 
 Full Access given to a phone Work thread now ends within five seconds of the node turning it off (or
 of `/airgapped on`), not at the thread's next turn.
@@ -70,7 +73,7 @@ bounded edit with one test, handed to the local model, with a ledger of how it d
 `~/.local/bin`.
 
 **Benchmarks.** The website has a Benchmarks page: only numbers tied to a release, with how each was
-measured. 1.7.3 carries no entry.
+measured. 1.7.3 carries no entry. The website is now in 20 languages, with a dark and light switch.
 
 **Also:** on a Mac, the code-mode helper is found beside the `ling` binary and `ling web start` and
 `stop` use a per-user launchd agent; the delegation plugin's test and lint gates run inside the
