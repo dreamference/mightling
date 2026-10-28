@@ -26,6 +26,13 @@ on:
         options:
           - box
           - github
+      macos_runner:
+        description: "Runner for the Apple silicon client build: mac (the MACOS_RUNNER variable's, if set) or github"
+        type: choice
+        default: mac
+        options:
+          - mac
+          - github
   push:
     branches: ["release-dry-run/**"]
 
@@ -92,6 +99,7 @@ jobs:
       sign: false
       # Scheduled and pushed runs have no inputs: the variable decides.
       windows_x64_runner: ${{ inputs.windows_x64_runner || 'box' }}
+      macos_runner: ${{ inputs.macos_runner || 'mac' }}
 
   # One issue for a failing dry run, found by its exact title: opened on the first failure, its body
   # replaced (and a comment added, so watchers hear of it) on each failure after, closed by the

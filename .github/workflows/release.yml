@@ -72,6 +72,15 @@ on:
         description: "Also build the client for Intel/AMD Linux and macOS (build-clients.yml)"
         type: boolean
         default: false
+      macos_runner:
+        # The Apple silicon client on the self-hosted Mac mini MACOS_RUNNER names (mac), or on
+        # GitHub's macos-15 (github) when that runner is offline. Signing stays as it is.
+        description: "Runner for the Apple silicon client build: mac (self-hosted, if the MACOS_RUNNER variable is set) or github"
+        type: choice
+        default: mac
+        options:
+          - mac
+          - github
       build_mac_preview:
         description: "Also build the Mac desktop app (.dmg, Apple silicon and Intel; preview, unsigned). Needs build_clients, whose macOS ling it bundles"
         type: boolean
@@ -144,6 +153,7 @@ jobs:
       build_windows: ${{ inputs.build_windows }}
       windows_x64_runner: ${{ inputs.windows_x64_runner }}
       build_clients: ${{ inputs.build_clients }}
+      macos_runner: ${{ inputs.macos_runner }}
       build_mac_preview: ${{ inputs.build_mac_preview }}
       # The macOS binaries and the dmgs signed and notarised with the Developer ID once the Apple
       # secrets are in the release environment; unsigned as before while they are not

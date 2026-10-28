@@ -48,6 +48,10 @@ on:
         description: "Build the Intel/AMD Linux and macOS clients (build-clients.yml)"
         type: boolean
         default: false
+      macos_runner:
+        description: "Runner for the Apple silicon client build: mac (the MACOS_RUNNER variable's self-hosted runner, if set) or github"
+        type: string
+        default: mac
       build_mac_preview:
         description: "Build the Mac dmgs (mac-preview.yml); needs build_clients"
         type: boolean
@@ -293,6 +297,7 @@ jobs:
     uses: ./.github/workflows/build-clients.yml
     with:
       version: ${{ inputs.version }}
+      macos_runner: ${{ inputs.macos_runner }}
       # The macOS binaries signed and notarised with the Developer ID when the caller asks (a release)
       # and the Apple secrets are in the release environment; unsigned while they are not
       # (docs/dev/macos-signing.md).

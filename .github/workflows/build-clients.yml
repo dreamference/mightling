@@ -11,14 +11,35 @@
 # environment, the binaries are signed with the Developer ID and the hardened runtime and notarised
 # before they are packaged, so the archives and their sums are of the signed files
 # (docs/dev/macos-signing.md). Without the secrets nothing changes.
+#
+# Where the Apple silicon build runs: the self-hosted Mac mini the repository variable MACOS_RUNNER
+# names (a JSON runs-on value), else GitHub's macos-15. The `macos_runner` input `github` forces
+# GitHub's runner for one run; deleting the variable does it for every run (the Mac is offline: a
+# job waiting for it would queue for a day). The Intel build stays on GitHub's macos-15-intel, since
+# the job runs what it builds. The self-hosted runner must never be reachable from a pull request
+# (this repository is public): this workflow has no pull_request trigger, its callers have none,
+# and the runner's own job-started hook refuses every event but push, workflow_dispatch and
+# schedule. Never add pull_request or pull_request_target here or in release-build.yml.
 name: Build clients
 
 on:
   push:
     branches: ["clients/**"]
   workflow_dispatch:
+    inputs:
+      macos_runner:
+        description: "Runner for the Apple silicon build: mac (the MACOS_RUNNER variable's, if set) or github"
+        type: choice
+        default: mac
+        options:
+          - mac
+          - github
   workflow_call:
     inputs:
+      macos_runner:
+        description: "mac (the MACOS_RUNNER variable's runner, if set) or github (macos-15)"
+        type: string
+        default: mac
       version:
         description: "Release version compiled into ling; empty for a source build"
         type: string
@@ -39,12 +60,13 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-24.04
+            runner: '"ubuntu-24.04"'
+          # JSON for runs-on: the self-hosted Mac's labels from MACOS_RUNNER, or macos-15.
           - target: aarch64-apple-darwin
-            runner: macos-15
+            runner: ${{ (inputs.macos_runner != 'github' && !startsWith(github.event_name, 'pull_request') && vars.MACOS_RUNNER) || '"macos-15"' }}
           - target: x86_64-apple-darwin
-            runner: macos-15-intel
-    runs-on: ${{ matrix.runner }}
+            runner: '"macos-15-intel"'
+    runs-on: ${{ fromJSON(matrix.runner) }}
     # The Apple secrets live only in the release environment (main and release/* only); asked for
     # only when signing is, so a push to clients/** runs as before.
     environment: ${{ inputs.sign && 'release' || '' }}

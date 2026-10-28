@@ -67,6 +67,8 @@ PLACEHOLDER_USERS: Final[frozenset] = frozenset(
         "bob",
         "sessions",
         "shell_snapshots",
+        # macOS's folder every account shares (the CI runner's stage and lock), not a person.
+        "shared",
         "...",
     }
 )
