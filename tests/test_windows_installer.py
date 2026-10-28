@@ -8,6 +8,7 @@ The workflow files and the NSIS script are read as text: nothing here runs maken
 named in `MIGHTLING_TEST_MAKENSIS` (with `NSISDIR` for a bundle such as electron-builder's).
 """
 
+import json
 import os
 import re
 import subprocess
@@ -91,6 +92,26 @@ def test_ci_checks_the_entry_the_installer_writes():
     assert '"Uninstall Mightling.exe"' in windows
 
 
+def test_the_uninstaller_keeps_the_users_data_and_says_so():
+    # The app's data folder (data-folder.ts, WINDOWS_ARM §23.4 W4) and ~\.mightling are the user's.
+    nsi = INSTALLER_NSI.read_text()
+    uninstall = nsi[nsi.index('Section "Uninstall"') :]
+    assert "dev.dreamference.mightling" not in uninstall.split("DetailPrint")[0]
+    assert ".mightling" not in "".join(
+        line for line in uninstall.splitlines() if "RMDir" in line or "Delete " in line
+    )
+    assert 'DetailPrint "Kept your data: $LOCALAPPDATA\\dev.dreamference.mightling' in uninstall
+    top = re.search(r'!define MUI_UNCONFIRMPAGE_TEXT_TOP "([^"]+)"', nsi).group(1)
+    assert (
+        "%LOCALAPPDATA%\\dev.dreamference.mightling" in top and "%USERPROFILE%\\.mightling" in top
+    )
+    assert nsi.index("MUI_UNCONFIRMPAGE_TEXT_TOP") < nsi.index("!insertmacro MUI_UNPAGE_CONFIRM")
+    # CI runs the app with a scratch profile and checks the folder lands under its LOCALAPPDATA.
+    windows = WINDOWS_YML.read_text()
+    assert '$env:LOCALAPPDATA = Join-Path $scratch "AppData\\Local"' in windows
+    assert '$data = Join-Path $env:LOCALAPPDATA "dev.dreamference.mightling"' in windows
+
+
 @pytest.mark.parametrize("version", ["1.7.0", "1.7.2", "1.8.0-rc.1"])
 def test_install_ps1_finds_the_installer_windows_yml_names_for_its_own_machine(version):
     text = INSTALL_PS1.read_text()
@@ -136,6 +157,59 @@ def test_ling_update_updates_the_app_install_ps1_recorded():
     # Run the same way: silently, after the same SHA256SUMS check.
     assert '.arg("/S")' in update
     assert "Mightling-win32" not in update
+
+
+def section(nsi: str, name: str) -> str:
+    """The body of an NSIS `Section "<name>"` or `Function <name>`, up to its end."""
+    start = re.search(
+        rf'^(?:Section "{re.escape(name)}"|Function \$\{{UN\}}{re.escape(name)})$', nsi, re.M
+    )
+    assert start, name
+    end = re.compile(r"^(?:SectionEnd|FunctionEnd)$", re.M).search(nsi, start.end())
+    return nsi[start.end() : end.start()]
+
+
+def test_a_running_app_is_closed_and_its_folder_replaced_whole_or_not_at_all():
+    nsi = INSTALLER_NSI.read_text()
+    free = section(nsi, "FreeAppFolder")
+    # Both the installer and the uninstaller free the folder first, and delete only what moved aside.
+    assert '!insertmacro FREE_APP_FOLDER ""' in nsi and '!insertmacro FREE_APP_FOLDER "un."' in nsi
+    install, uninstall = section(nsi, "Install"), section(nsi, "Uninstall")
+    assert install.index("Call FreeAppFolder") < install.index('SetOutPath "$INSTDIR"')
+    assert "Call un.FreeAppFolder" in uninstall
+    # No fixed wait and no delete over files in use: the folder is moved aside (which fails while
+    # anything in it is open) and retried; a folder without the app in it is never touched.
+    assert "Sleep 1000" not in nsi
+    assert 'IfFileExists "$INSTDIR\\${EXE}" 0 free_done' in free
+    assert 'Rename "$INSTDIR" "$INSTDIR.old"' in free
+    assert 'RMDir /r "$INSTDIR"\n  SetOutPath' not in install
+    # Asked to close first; then ended by path only, so the ling.exe install.ps1 put in ..\bin (a
+    # terminal may be running it) is never touched; then stopped, never installed over leftovers.
+    polite, force, failed = (
+        free.index("taskkill /im"),
+        free.index("free_force:"),
+        free.index("free_failed:"),
+    )
+    assert polite < force < failed
+    assert "/f" not in free.lower().split("free_force:")[0]
+    assert "ling.exe" not in free
+    assert "ExecutablePath.StartsWith($$folder" in free
+    assert 't "MIGHTLING_APP_FOLDER", t "$INSTDIR"' in free
+    assert 'Abort "' in free.split("free_failed:")[1].split("free_moved:")[0]
+    # CI runs both against a running app.
+    assert "Install over the running app, uninstall it running" in WINDOWS_YML.read_text()
+
+
+def test_ci_checks_the_start_menu_entry_carries_the_apps_own_id():
+    # Windows shows a desktop app's notifications only for an AppUserModelID that a Start menu
+    # shortcut carries; the app writes its identifier there (app-identity.ts), and CI reads it back.
+    identifier = json.loads((ROOT / "desktop" / "electron" / "app.json").read_text())["identifier"]
+    windows = WINDOWS_YML.read_text()
+    assert f'if ($id -ne "{identifier}")' in windows
+    assert 'ExtendedProperty("System.AppUserModel.ID")' in windows
+    nsi = INSTALLER_NSI.read_text()
+    assert 'CreateShortCut "$SMPROGRAMS\\${PRODUCT}.lnk" "$INSTDIR\\${EXE}"' in nsi
+    assert '!define PRODUCT "Mightling"' in nsi
 
 
 @pytest.mark.skipif(

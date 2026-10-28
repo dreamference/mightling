@@ -16,10 +16,13 @@ no sudo). It lets the box be checked before the node is touched; `setup` without
 
 import base64
 import ipaddress
+import json
+import os
 import platform
 import secrets
 import socket
 import time
+from pathlib import Path
 from typing import Any
 
 from dreamference.remote.remote_box import RemoteBox
@@ -741,7 +744,12 @@ class RemoteAccess:
 
     @classmethod
     def bundle(
-        cls, record: dict[str, Any], token: str, node_id: str, client: str
+        cls,
+        record: dict[str, Any],
+        token: str,
+        node_id: str,
+        client: str,
+        ephemeral: bool = False,
     ) -> dict[str, Any] | None:
         """Makes one client's bundle, minting its setup key.
 
@@ -750,11 +758,14 @@ class RemoteAccess:
             token: The management token.
             node_id: The node's id.
             client: The client's host name, for the key's name.
+            ephemeral: Whether the key enrols an ephemeral peer.
 
         Returns:
             Optional[Dict[str, Any]]: The bundle, or None.
         """
-        key = RemoteControlPlane.setup_key(record["dns_name"], token, f"client {client}")
+        key = RemoteControlPlane.setup_key(
+            record["dns_name"], token, f"client {client}", ephemeral=ephemeral
+        )
         if key is None:
             return None
         return {
@@ -769,6 +780,48 @@ class RemoteAccess:
             "netbird_version": NETBIRD_VERSION,
             "setup_key": key,
         }
+
+    @classmethod
+    def bundle_file(cls, path: str) -> int:
+        """Writes one ephemeral peer's bundle to a new 0600 file, with no code and no listener.
+
+        For a test runner off the LAN (the daily off-LAN acceptance): the bundle is the one
+        `code` would hand a client, but its key enrols an **ephemeral** peer (management deletes
+        it ten minutes after it goes offline), still one use and ten minutes. Whoever can run this
+        already holds the node's management token, so the file gives nothing new away; it holds a
+        live key until it is spent or expires, so the caller deletes it.
+
+        Args:
+            path: The file to create; an existing file is refused, never overwritten.
+
+        Returns:
+            int: The exit status.
+        """
+        record = RemoteSettings.read()
+        token = RemoteSettings.read_private("admin-token")
+        node_id = cls._node_id()
+        if record is None or not token or not node_id:
+            print("Remote access is not set up (ling-admin remote setup <box's DNS name>).")
+            return 3
+        target = Path(path).expanduser()
+        if target.exists() or not target.parent.is_dir():
+            print(f"❌ {target} exists or its folder does not; nothing was minted.")
+            return 1
+        bundle = cls.bundle(record, token, node_id, "bundle file", ephemeral=True)
+        if bundle is None:
+            return 1
+        try:
+            descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except OSError as error:
+            print(f"❌ Could not create {target}: {error}")
+            return 1
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(bundle, handle, sort_keys=True)
+        print(
+            f"✅ A bundle for one ephemeral peer (one use, valid {CODE_MINUTES} minutes) is in {target} (0600)."
+        )
+        print("   It holds a live setup key: delete the file once it is spent.")
+        return 0
 
     @classmethod
     def code(cls) -> int:

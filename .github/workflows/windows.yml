@@ -239,8 +239,15 @@ jobs:
             if ($rawPath -ne "$fresh;$($env:MIGHTLING_INSTALL_DIR)") { throw "the user's PATH is not its one entry and the install folder" }
             if ($envKey.GetValueKind("Path") -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) { throw "the user's PATH is no longer REG_EXPAND_SZ" }
             # The runner is already an administrator, so install.ps1's one elevated step ran without
-            # a prompt: the sandbox's accounts and the mDNS rule must exist now.
-            Get-NetFirewallRule -Name "Mightling-mDNS-ling" | Format-List Name, DisplayName, Profile, Enabled
+            # a prompt: the sandbox's accounts and the mDNS rule must exist now. One rule for this
+            # ling.exe after two installs, named by WINDOWS_ARM section 16.4's scheme, computed here
+            # by Python as the check (tests/test_install_ps1.py runs this same line on Linux).
+            $program = Join-Path $env:MIGHTLING_INSTALL_DIR "ling.exe"
+            $expected = python -c "import hashlib, sys; print('Mightling-mDNS-' + hashlib.sha256(sys.argv[1].lower().encode('utf-8')).hexdigest()[:8])" $program
+            $rules = @(Get-NetFirewallRule | Where-Object { $_.Name -like "Mightling-mDNS-*" } | Where-Object { ($_ | Get-NetFirewallApplicationFilter).Program -eq $program })
+            $rules | Format-List Name, DisplayName, Profile, Enabled
+            if ($rules.Count -ne 1) { throw "expected one mDNS rule for $program, found $($rules.Count)" }
+            if ($rules[0].Name -ne $expected) { throw "the mDNS rule for $program is $($rules[0].Name), not $expected" }
             Get-LocalUser | Where-Object { $_.Name -like "CodexSandbox*" } | Format-Table Name, Enabled
             if (-not (Get-LocalUser | Where-Object { $_.Name -like "CodexSandboxOffline*" })) { throw "the sandbox's offline account was not created" }
           } finally {
@@ -270,8 +277,8 @@ jobs:
             Write-Host "refusal: exit $refusedExit, $refused"
             if ($refusedExit -eq 0 -or $refused -notmatch "non-admin sandbox") { throw "the non-admin sandbox was not refused at on" }
             # The elevated sandbox: a command reaches the network at `off` and not at `on`. Plain
-            # HTTP: Windows' curl.exe uses Schannel, which cannot acquire credentials as the
-            # sandbox's account (SEC_E_NO_CREDENTIALS), so an https probe fails at off after connecting.
+            # HTTP: Windows' curl.exe uses Schannel, which acquires no credentials for a restricted
+            # token (SEC_E_NO_CREDENTIALS; WINDOWS_ARM §23.4 W3), so an https probe fails at off.
             $probe = @("sandbox", "-c", "sandbox_mode=workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--", "curl.exe", "-sS", "-m", "20", "-o", "NUL", "-w", "%{http_code}", "http://example.com")
             $env:DREAMFERENCE_MIGHTLING_AIRGAPPED = "off"
             $off = & $ling @probe 2>&1 | Out-String
@@ -291,6 +298,171 @@ jobs:
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
+      # A second user's elevated setup (WINDOWS_ARM §23.4 W11): the sandbox accounts get new passwords,
+      # and every user set up before must get them too. A stand-in second profile holds a passwords
+      # file from before; after this user's setup it must hold the new one, and this user's sandbox runs.
+      - name: Sandbox setup on a PC with two users
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          $mine = Join-Path $env:USERPROFILE ".mightling\.sandbox-secrets\sandbox_users.json"
+          $other = Join-Path (Split-Path $env:USERPROFILE) "mightling-ci-other\.mightling\.sandbox-secrets"
+          New-Item -ItemType Directory -Force $other | Out-Null
+          $otherFile = Join-Path $other "sandbox_users.json"
+          Copy-Item $mine $otherFile
+          $before = Get-Content -Raw $otherFile
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+          $ErrorActionPreference = "Continue"
+          $out = & $ling sandbox setup --elevated --user $user --codex-home (Join-Path $env:USERPROFILE ".mightling") 2>&1 | Out-String
+          Write-Host "setup: exit $LASTEXITCODE, $out"
+          $ErrorActionPreference = "Stop"
+          $after = Get-Content -Raw $otherFile
+          if ($after -eq $before) { throw "the other user's passwords file was not updated" }
+          if ($after -ne (Get-Content -Raw $mine)) { throw "the other user's passwords file differs from this user's" }
+          $echo = & $ling sandbox -- cmd.exe /c echo shared 2>&1 | Out-String
+          if ($echo -notmatch "shared") { throw "this user's sandbox did not run after the setup: $echo" }
+          Remove-Item -Recurse -Force (Split-Path (Split-Path $other))
+      # `ling doctor` on Windows (WINDOWS_ARM §23.4 W9): no vendor app in its endpoint check, and no
+      # warning for the rg.exe the release does not ship.
+      - name: ling doctor
+        shell: powershell
+        run: |
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          $out = & $ling doctor 2>&1 | Out-String
+          Write-Host $out
+          if ($out -match "Codex exclusions|Install ripgrep|signed Codex app") { throw "ling doctor still names Codex's exclusions or asks for ripgrep" }
+      # https inside the sandbox (WINDOWS_ARM §23.4 W3): Schannel cannot, so sessions set Git to
+      # OpenSSL; here the same setting, given to git directly, must reach GitHub from the sandbox.
+      - name: Git over https in the sandbox
+        shell: powershell
+        run: |
+          # Native commands write to stderr; that is output here, not a terminating error.
+          $ErrorActionPreference = "Continue"
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          $git = (Get-Command git.exe).Source
+          $out = & $ling sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- $git -c http.sslBackend=openssl ls-remote https://github.com/git/git HEAD 2>&1 | Out-String
+          Write-Host "openssl: exit $LASTEXITCODE, $out"
+          if ($LASTEXITCODE -ne 0 -or $out -notmatch "HEAD") { throw "git over OpenSSL did not reach https from the sandbox" }
+          $schannel = & $ling sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- $git -c http.sslBackend=schannel ls-remote https://github.com/git/git HEAD 2>&1 | Out-String
+          Write-Host "schannel (expected to fail while W3 stands): exit $LASTEXITCODE, $schannel"
+          # The session's own setting: a stand-in model asks for git ls-remote over https, which must
+          # answer from the sandbox with no -c of ours.
+          $ws = Join-Path $env:RUNNER_TEMP "git-tls"
+          New-Item -ItemType Directory -Force $ws | Out-Null
+          Set-Location $ws
+          git init -q
+          $record = Join-Path $env:RUNNER_TEMP "requests-git.jsonl"
+          $server = Start-Process -PassThru -NoNewWindow python -ArgumentList "$env:GITHUB_WORKSPACE\.github\scripts\stub_model_server.py", "8797", "--shell-call", '"git ls-remote https://github.com/git/git HEAD"', "--record", "`"$record`""
+          Start-Sleep -Seconds 3
+          try {
+            $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:8797"
+            $session = & $ling -c windows.sandbox=elevated -s workspace-write -c sandbox_workspace_write.network_access=true exec --skip-git-repo-check "list the remote's HEAD" 2>&1 | Out-String
+            Write-Host "session: exit $LASTEXITCODE, $session"
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+          $outputs = @(Get-Content $record | ForEach-Object { $_ | ConvertFrom-Json } | ForEach-Object { $_.input } | Where-Object { $_.type -like "*call_output" } | ForEach-Object { "$($_.output)" })
+          Write-Host "tool output: $outputs"
+          if (-not ($outputs -match "HEAD")) { throw "git over https did not answer in a sandboxed session" }
+      # The compatibility mode on Windows (WINDOWS_ARM §23.4 W1): Codex dispatches none of its
+      # hooks there yet, so CLAUDE.md, the settings files' hooks and the permission rules would be
+      # skipped. The mode must refuse to start, with its reason, in print mode, in a session and when
+      # switched on, and no request may reach the model server. On Linux and macOS the mode is
+      # unchanged; this step is Windows-only.
+      - name: Compatibility mode refuses on Windows
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          $expected = "compatibility mode isn't available on Windows yet"
+          $ws = Join-Path $env:RUNNER_TEMP "compat-refuses"
+          New-Item -ItemType Directory -Force $ws | Out-Null
+          Set-Location $ws
+          git init -q
+          Set-Content -Path CLAUDE.md -Value "The magic word for this project is BLUEBERRY."
+          $record = Join-Path $env:RUNNER_TEMP "requests-compat.jsonl"
+          $server = Start-Process -PassThru -NoNewWindow python -ArgumentList "$env:GITHUB_WORKSPACE\.github\scripts\stub_model_server.py", "8798", "--shell-call", '"echo probe > probe.txt"', "--record", "`"$record`""
+          Start-Sleep -Seconds 3
+          $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:8798"
+          $failures = @()
+          try {
+            $cases = [ordered]@{
+              "print mode" = @("--compat", "claude", "-p", "What is the magic word?", "--disallowedTools", "Bash(echo *)")
+              "a session" = @("--compat", "claude", "exec", "--skip-git-repo-check", "What is the magic word?")
+              "switched on" = @("compat", "use", "claude")
+            }
+            foreach ($case in $cases.Keys) {
+              $out = $null | & $ling @($cases[$case]) 2>&1 | Out-String
+              $code = $LASTEXITCODE
+              Write-Host "${case}: exit $code, $out"
+              if ($code -eq 0) { $failures += "${case}: exit 0" }
+              if ($out -notmatch [regex]::Escape($expected)) { $failures += "${case}: no refusal message" }
+            }
+            $env:DREAMFERENCE_MIGHTLING_COMPAT = "claude"
+            $out = $null | & $ling exec --skip-git-repo-check "What is the magic word?" 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Remove-Item Env:DREAMFERENCE_MIGHTLING_COMPAT
+            Write-Host "the variable: exit $code, $out"
+            if ($code -eq 0) { $failures += "the variable: exit 0" }
+            if ($out -notmatch [regex]::Escape($expected)) { $failures += "the variable: no refusal message" }
+            # Each refusal names what turned the mode on and how to turn it off (compat.rs,
+            # how_to_turn_off), the desktop app's own server too, whose window shows its last lines.
+            # Out-String wraps at the console's width, so the checks read the text with its whitespace collapsed.
+            if (($out -replace '\s+', ' ') -notmatch [regex]::Escape("Remove-Item Env:DREAMFERENCE_MIGHTLING_COMPAT")) { $failures += "the variable: the refusal does not say how to remove it" }
+            $env:DREAMFERENCE_MIGHTLING_COMPAT = "claude"
+            $out = $null | & $ling app-server 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Remove-Item Env:DREAMFERENCE_MIGHTLING_COMPAT
+            Write-Host "the app's server: exit $code, $out"
+            if ($code -eq 0 -or ($out -replace '\s+', ' ') -notmatch [regex]::Escape("Remove-Item Env:DREAMFERENCE_MIGHTLING_COMPAT")) { $failures += "the app's server: no refusal saying how to remove the variable" }
+            $out = $null | & $ling --compat claude exec --skip-git-repo-check "What is the magic word?" 2>&1 | Out-String
+            if (($out -replace '\s+', ' ') -notmatch [regex]::Escape("on this command line: leave that out")) { $failures += "the flag: the refusal does not name it" }
+            $compatHome = Join-Path $env:RUNNER_TEMP "compat-home"
+            New-Item -ItemType Directory -Force (Join-Path $compatHome ".config\dreamference") | Out-Null
+            Set-Content -Path (Join-Path $compatHome ".config\dreamference\config.toml") -Value 'mightling_compat = "claude"'
+            $ownHome = $env:HOME
+            $env:HOME = $compatHome
+            $out = $null | & $ling exec --skip-git-repo-check "What is the magic word?" 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            $env:HOME = $ownHome
+            Write-Host "the user's file: exit $code, $out"
+            if ($code -eq 0 -or ($out -replace '\s+', ' ') -notmatch [regex]::Escape("ling compat use off")) { $failures += "the user's file: no refusal naming ling compat use off" }
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+          if ((Test-Path $record) -and (Get-Item $record).Length -gt 0) { $failures += "a request reached the model server" }
+          if (Test-Path probe.txt) { $failures += "probe.txt exists: a command ran" }
+          if ($failures.Count -gt 0) { throw ($failures -join "; ") }
+          # The refusals left a non-zero $LASTEXITCODE, which the runner would take as the step's result.
+          exit 0
+      # `ling uninstall` (WINDOWS_ARM section 16.4) on what install.ps1 installed: the folder (the
+      # running ling.exe by a detached step once it exits), the user's Path entry and the mDNS rule.
+      # The runner is an administrator, so the firewall step runs without a prompt.
+      # Runs even when an earlier test step failed, so the uninstall is always checked.
+      - name: ling uninstall
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "mightling-install\bin"
+          $program = Join-Path $dir "ling.exe"
+          & $program uninstall --yes
+          if ($LASTEXITCODE -ne 0) { throw "ling uninstall failed (exit $LASTEXITCODE)" }
+          $ErrorActionPreference = "Stop"
+          # The detached removal waits for ling.exe to exit, then starts a PowerShell, which can take
+          # a while on a fresh runner ("Preparing modules for first use").
+          for ($i = 0; $i -lt 90 -and (Test-Path $dir); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $dir) {
+            Get-ChildItem -Force $dir | Format-Table Name
+            $left = Join-Path $env:TEMP "mightling-uninstall-left.txt"
+            if (Test-Path $left) { Write-Host "left: $(Get-Content -Raw $left)" } else { Write-Host "no left file: the removal has not finished" }
+            Get-Process | Where-Object { $_.Path -like "$dir*" } | Format-Table Id, Name, Path
+            throw "$dir is still there"
+          }
+          $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if (($userPath -split ";") -contains $dir) { throw "the install folder is still on the user's PATH" }
+          $rules = @(Get-NetFirewallRule | Where-Object { $_.Name -like "Mightling-mDNS-*" } | Where-Object { ($_ | Get-NetFirewallApplicationFilter).Program -eq $program })
+          if ($rules.Count -ne 0) { throw "the mDNS rule for $program is still there" }
 
   # The desktop app for Windows (DESKTOP_PARITY Phase 3 item 12; WINDOWS_ARM §11, superseded by
   # Electron): desktop/electron packaged natively on each runner with this run's ling.exe and
@@ -413,7 +585,10 @@ jobs:
           $scratch = Join-Path $env:RUNNER_TEMP "mightling-app-home"
           New-Item -ItemType Directory -Force -Path $scratch | Out-Null
           $ownProfile = $env:USERPROFILE
+          $ownLocal = $env:LOCALAPPDATA
           $env:USERPROFILE = $scratch
+          # The app's data folder is %LOCALAPPDATA%\dev.dreamference.mightling (data-folder.ts, W4).
+          $env:LOCALAPPDATA = Join-Path $scratch "AppData\Local"
           $env:CODEX_HOME = Join-Path $scratch ".mightling"
           $env:MIGHTLING_APP_AUDIT = "8"
           $env:ELECTRON_ENABLE_LOGGING = "1"
@@ -421,8 +596,17 @@ jobs:
           $null = $started.Handle  # kept, so ExitCode is there after the app has gone
           if (-not $started.WaitForExit(90000)) { Stop-Process -Id $started.Id -Force; throw "the app did not quit by itself" }
           if ($started.ExitCode -ne 0) { throw "the app exited with $($started.ExitCode)" }
+          $data = Join-Path $env:LOCALAPPDATA "dev.dreamference.mightling"
+          if (-not (Test-Path $data)) { throw "the app wrote no data folder at $data" }
+          if (Test-Path (Join-Path $scratch ".local\share\dev.dreamference.mightling")) { throw "the app wrote its data under .local\share" }
+          # The app wrote its Application User Model ID into the Start menu entry, without which
+          # Windows shows none of its notifications (app-identity.ts; installer.nsi cannot write it).
+          $entry = (New-Object -ComObject Shell.Application).NameSpace((Split-Path $shortcut)).ParseName((Split-Path -Leaf $shortcut))
+          $id = $entry.ExtendedProperty("System.AppUserModel.ID")
+          if ($id -ne "dev.dreamference.mightling") { throw "the Start menu entry's AppUserModelID is '$id', not the app's" }
           # The uninstaller with the runner's own profile: Windows finds the Start menu from USERPROFILE.
           $env:USERPROFILE = $ownProfile
+          $env:LOCALAPPDATA = $ownLocal
           # An NSIS uninstaller copies itself to the temporary folder and runs from there, so -Wait
           # returns at once: wait for the folder to go.
           Start-Process -FilePath (Join-Path $installed "Uninstall Mightling.exe") -ArgumentList "/S" -Wait
@@ -431,6 +615,49 @@ jobs:
           if (Test-Path $app) { throw "the uninstaller left Mightling.exe" }
           if (Test-Path $shortcut) { throw "the uninstaller left the Start menu entry" }
           if (Test-Path $key) { throw "the uninstaller left its Apps entry" }
+      # The installer and the uninstaller while the app runs, as a user's update or removal meets it:
+      # the app and the ling.exe serving it hold their files, and the installer must close them and
+      # replace the folder whole, or stop with exit code 2; never mix two versions (installer.nsi,
+      # FreeAppFolder). The app runs normally here (no audit), so it waits until it is closed.
+      - name: Install over the running app, uninstall it running
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist-desktop\Mightling-Setup-*.exe | Select-Object -First 1).FullName
+          $installed = Join-Path $env:LOCALAPPDATA "Programs\Mightling\App"
+          $app = Join-Path $installed "Mightling.exe"
+          $scratch = Join-Path $env:RUNNER_TEMP "mightling-app-running"
+          New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+          $env:CODEX_HOME = Join-Path $scratch ".mightling"
+          $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:9"
+          function Start-App {
+            $started = Start-Process -FilePath $app -PassThru
+            $null = $started.Handle
+            $deadline = (Get-Date).AddSeconds(60)
+            do {
+              Start-Sleep -Seconds 2
+              $running = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith("$installed\", [StringComparison]::OrdinalIgnoreCase) })
+            } while (-not ($running | Where-Object { $_.Name -eq "ling.exe" }) -and (Get-Date) -lt $deadline)
+            Write-Host "running from the app's folder: $(($running | ForEach-Object { $_.Name }) -join ', ')"
+            if ($started.HasExited) { throw "the app exited at once ($($started.ExitCode))" }
+            return $started
+          }
+          $process = Start-Process -FilePath $setup -ArgumentList "/S" -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "the installer exited with $($process.ExitCode)" }
+          $started = Start-App
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          $process = Start-Process -FilePath $setup -ArgumentList "/S" -PassThru -Wait
+          Write-Host "installed over the running app in $([int]$clock.Elapsed.TotalSeconds) s (over 10 s: it was ended, not closed)"
+          if ($process.ExitCode -ne 0) { throw "the installer over the running app exited with $($process.ExitCode)" }
+          if (-not $started.HasExited) { throw "the installer left the old app running" }
+          if (-not (Test-Path (Join-Path $installed "resources\ling.exe"))) { throw "the new app has no ling.exe" }
+          if (Test-Path "$installed.old") { throw "the old app's folder was left beside the new one" }
+          $started = Start-App
+          Start-Process -FilePath (Join-Path $installed "Uninstall Mightling.exe") -ArgumentList "/S" -Wait
+          $deadline = (Get-Date).AddSeconds(120)
+          while (((Test-Path $installed) -or (Test-Path "$installed.old")) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+          if (Test-Path $installed) { throw "the uninstaller left the running app's folder" }
+          if (Test-Path "$installed.old") { throw "the uninstaller left the folder it moved aside" }
+          if (-not $started.HasExited) { throw "the uninstaller left the app running" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:

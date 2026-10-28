@@ -4,6 +4,7 @@ desktop` builds and installs, and what the Electron project must keep.
 
 import json
 import os
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -45,6 +46,24 @@ def test_bundle_icons_exist_at_the_sizes_the_package_names():
     # 32x32 is the tray's.
     for name in ("icon.png", "32x32.png", "128x128.png", "128x128@2x.png"):
         assert (ELECTRON / "icons" / name).is_file(), name
+
+
+def test_the_windows_icon_holds_every_size_windows_draws_and_the_installer_is_dpi_aware():
+    # forge.config.js writes resources/icon.ico from ICO_IMAGES: each entry must be a PNG of the size
+    # its directory entry declares, and together they cover 16 to 48 (small icons at 100-300 %
+    # scaling), 64 and 256, so Windows never scales a 32- or 128-pixel image to fit.
+    forge = (ELECTRON / "forge.config.js").read_text()
+    listed = re.search(r"const ICO_IMAGES = \[(.*?)\n\];", forge, re.S).group(1)
+    entries = [(name, int(size)) for name, size in re.findall(r'\["([^"]+)", (\d+)\]', listed)]
+    assert {size for _name, size in entries} >= {16, 20, 24, 32, 40, 48, 64, 256}
+    for name, size in entries:
+        data = (ELECTRON / "icons" / name).read_bytes()
+        assert data[:8] == b"\x89PNG\r\n\x1a\n", name
+        assert int.from_bytes(data[16:20], "big") == int.from_bytes(data[20:24], "big") == size, (
+            name
+        )
+    # The installer's own window is drawn at the display's scaling, not stretched from 96 DPI.
+    assert "\nManifestDPIAware true\n" in (ELECTRON / "windows" / "installer.nsi").read_text()
 
 
 def test_electron_is_pinned_exactly_and_stock():
@@ -549,9 +568,23 @@ def test_identifier_comes_from_the_app_config():
     # Repeating it here would let the data directory drift from the one the app really uses.
     assert DesktopRunner._app_identifier() == "dev.dreamference.mightling"
     bootstrap = (ELECTRON / "src" / "early-bootstrap.ts").read_text(encoding="utf-8")
-    assert (
-        'app.setPath("userData", path.join(home, ".local", "share", appConfig.identifier))'
-        in bootstrap
+    assert "dataFolder(process.platform, process.env, appConfig.identifier)" in bootstrap
+    assert 'app.setPath("userData", settleDataFolder(legacy, data))' in bootstrap
+    # Off Windows the folder is still `~/.local/share/<identifier>`, where this runner empties the
+    # cache (data-folder.ts; the cases both it and `ling app` are tested against).
+    rule = (ELECTRON / "src" / "data-folder.ts").read_text(encoding="utf-8")
+    assert 'joined(home, false, [".local", "share", identifier])' in rule
+    vectors = json.loads(
+        (ELECTRON.parent.parent / "ling-rs" / "vectors" / "app-data-folder.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert vectors["identifier"] == DesktopRunner._app_identifier()
+    linux = [case for case in vectors["cases"] if case["platform"] == "linux" and case["expected"]]
+    assert any(
+        case["expected"]
+        == case["env"]["HOME"].rstrip("/") + "/.local/share/" + vectors["identifier"]
+        for case in linux
     )
 
 
@@ -784,3 +817,22 @@ def test_the_script_changes_nothing_when_nothing_is_needed(tmp_path):
         subprocess.run([script], env=env, capture_output=True, text=True, timeout=30).returncode
         == 1
     )
+
+
+def test_no_two_modules_differ_only_in_case():
+    # Windows and macOS file systems ignore case, so `./SideChat` there resolves to sidechat.ts
+    # before SideChat.tsx and the UI does not build (windows.yml, 2026-10-27).
+    suffixes = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+    stems: dict[tuple[Path, str], set[str]] = {}
+    for root in (Path(UI_DIR) / "src", ELECTRON / "src"):
+        for path in root.rglob("*"):
+            stem = path.name.split(".")[0]
+            # A test file is never imported, so only modules can be mistaken for one another.
+            if (
+                path.suffix in suffixes
+                and "node_modules" not in path.parts
+                and ".test." not in path.name
+            ):
+                stems.setdefault((path.parent, stem.lower()), set()).add(stem)
+    clashes = {str(folder / key): names for (folder, key), names in stems.items() if len(names) > 1}
+    assert not clashes

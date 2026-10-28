@@ -677,7 +677,10 @@ impl Context {
         } else if let Some(error) = &self.graph_error {
             answer.notes.push(format!("universal layer unavailable: {error}"));
         } else if self.graph.is_none() {
-            answer.notes.push("universal layer not built yet; run `ling-code index`".to_string());
+            answer.notes.push(format!(
+                "universal layer not built yet; {}",
+                crate::paths::run_index_command(crate::paths::indexing_here(), "ling-code index")
+            ));
         }
         for error in &self.store_errors {
             answer.notes.push(format!("exact layer unavailable: {error}"));
@@ -1319,6 +1322,13 @@ impl Context {
 
     /// `status`.
     pub fn status(&self) -> Vec<String> {
+        self.status_on(crate::paths::indexing_here())
+    }
+
+    /// [`Context::status`] on a system that builds indexes (`indexing`) or only reads them, where
+    /// it names no command that cannot run there (MIGHTLING_WINDOWS_ARM §23.4 W8).
+    pub fn status_on(&self, indexing: bool) -> Vec<String> {
+        let build = |command: &str| crate::paths::index_command(indexing, command);
         let mut lines = Vec::new();
         match (&self.graph, &self.graph_error) {
             (Some(graph), _) => lines.push(format!(
@@ -1329,7 +1339,7 @@ impl Context {
             )),
             (None, Some(error)) => lines.push(format!("universal: unavailable: {error}")),
             (None, None) if self.settings.exact_only() => lines.push("universal: off (layers = exact)".to_string()),
-            (None, None) => lines.push("universal: not built yet (`ling-code index`)".to_string()),
+            (None, None) => lines.push(format!("universal: not built yet ({})", build("ling-code index"))),
         }
         if !self.changed.is_empty() || !self.deleted.is_empty() {
             let listed: Vec<String> = self.changed.iter().chain(self.deleted.iter()).take(8).cloned().collect();
@@ -1373,12 +1383,14 @@ impl Context {
             let executing = target.kind == crate::index::host::Kind::Executing;
             let untrusted = if executing { crate::index::plan::untrusted_reason(&self.repo, trusted, &self.submodules, &target) } else { None };
             let why = match tools.unavailable(target.indexer) {
+                // The tools' absence is no news where nothing indexes, and their setup command is not there.
+                _ if !indexing => format!("not built ({})", crate::paths::BUILT_ON_LINUX),
                 Some(why) => why,
                 None if untrusted.is_some() && target.submodule.is_empty() => continue, // the untrusted line below says it
                 None if untrusted.is_some() => untrusted.unwrap_or_default(),
-                None if executing => "not built yet (`ling-code index --exact`)".to_string(),
-                None if target.on_demand => "not built yet; runs on demand (`ling-code index`)".to_string(),
-                None => "not built yet (`ling-code index`)".to_string(),
+                None if executing => format!("not built yet ({})", build("ling-code index --exact")),
+                None if target.on_demand => format!("not built yet; runs on demand ({})", build("ling-code index")),
+                None => format!("not built yet ({})", build("ling-code index")),
             };
             lines.push(format!("exact: {} for {}: {why}", target.indexer, crate::index::plan::display_root(&target.root)));
         }

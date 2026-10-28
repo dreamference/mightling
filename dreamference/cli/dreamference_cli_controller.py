@@ -1717,9 +1717,13 @@ class DreamferenceCLIController:
         remote_remove_parser.add_argument("--purge", action="store_true",
                                           help="Also delete the control plane, the CA and every enrolment")
         remote_remove_parser.add_argument("--yes", action="store_true", help="Do not ask")
-        remote_subparsers.add_parser(
+        remote_code_parser = remote_subparsers.add_parser(
             "code", help="Print a one-time code and wait for one client to enrol with it on this LAN"
         )
+        remote_code_parser.add_argument(
+            "--bundle-file", metavar="PATH", default=None,
+            help="Instead: write one ephemeral peer's bundle (one-use, 10-minute key) to a new 0600 file, "
+                 "no code and no listener (an off-LAN test runner)")
         remote_subparsers.add_parser("peers", help="List the enrolled peers")
         remote_revoke_parser = remote_subparsers.add_parser(
             "revoke", help="Delete a peer: its key is forgotten; it can rejoin only on the LAN"
@@ -3165,7 +3169,8 @@ class DreamferenceCLIController:
                                                     box_only=args.box_only, ca_scope=args.ca_scope),
                 "status": RemoteAccess.status,
                 "remove": lambda: RemoteAccess.remove(purge=args.purge, yes=args.yes),
-                "code": RemoteAccess.code,
+                "code": lambda: (RemoteAccess.bundle_file(args.bundle_file) if args.bundle_file
+                                 else RemoteAccess.code()),
                 "peers": RemoteAccess.peers,
                 "revoke": lambda: RemoteAccess.revoke(args.peer),
             }

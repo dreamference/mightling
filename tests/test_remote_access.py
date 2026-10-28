@@ -292,6 +292,8 @@ def test_a_setup_key_is_one_off_one_use_ten_minutes(monkeypatch):
         "usage_limit": 1,
         "ephemeral": False,
     }
+    RemoteControlPlane.setup_key(BOX, "tok", "bundle file", ephemeral=True)
+    assert seen["body"]["ephemeral"] is True and seen["body"]["usage_limit"] == 1
 
 
 # -- the box ----------------------------------------------------------------------------------------
@@ -1240,7 +1242,9 @@ def test_a_bundle_carries_names_the_ca_and_a_fresh_key(monkeypatch):
     RemoteCertificateAuthority.ca_certificate().parent.mkdir(parents=True, exist_ok=True)
     RemoteCertificateAuthority.ca_certificate().write_text("-----BEGIN CERTIFICATE-----\n")
     monkeypatch.setattr(
-        RemoteControlPlane, "setup_key", classmethod(lambda cls, d, t, n: f"KEY for {n}")
+        RemoteControlPlane,
+        "setup_key",
+        classmethod(lambda cls, d, t, n, ephemeral=False: f"KEY for {n}"),
     )
     bundle = RemoteAccess.bundle(RemoteSettings.read(), "tok", NODE_ID, "laptop")
     assert bundle["setup_key"] == "KEY for client laptop" and bundle["node"] == NODE_ID
@@ -1249,6 +1253,57 @@ def test_a_bundle_carries_names_the_ca_and_a_fresh_key(monkeypatch):
     assert bundle["overlay_name"] == f"mightling-{NODE_ID}.netbird.selfhosted" and bundle[
         "ca"
     ].startswith("-----BEGIN")
+
+
+def _bundle_file_ready(monkeypatch):
+    _set_up()
+    RemoteCertificateAuthority.ca_certificate().parent.mkdir(parents=True, exist_ok=True)
+    RemoteCertificateAuthority.ca_certificate().write_text("-----BEGIN CERTIFICATE-----\n")
+    monkeypatch.setattr(RemoteAccess, "_node_id", classmethod(lambda cls: NODE_ID))
+    minted = []
+
+    def setup_key(cls, dns_name, token, name, ephemeral=False):
+        minted.append((name, ephemeral))
+        return "SECRET-KEY-1"
+
+    monkeypatch.setattr(RemoteControlPlane, "setup_key", classmethod(setup_key))
+    monkeypatch.setattr(
+        RemoteEnrolment,
+        "serve",
+        classmethod(lambda cls, *a, **k: pytest.fail("a bundle file opens no listener")),
+    )
+    return minted
+
+
+def test_a_bundle_file_holds_an_ephemeral_peers_bundle_in_a_private_file(
+    monkeypatch, tmp_path, capsys
+):
+    minted = _bundle_file_ready(monkeypatch)
+    target = tmp_path / "bundle.json"
+    assert RemoteAccess.bundle_file(str(target)) == 0
+    assert minted == [("client bundle file", True)]
+    assert target.stat().st_mode & 0o777 == 0o600
+    bundle = json.loads(target.read_text())
+    assert bundle["setup_key"] == "SECRET-KEY-1" and bundle["node"] == NODE_ID
+    assert bundle["overlay_name"] == f"mightling-{NODE_ID}.netbird.selfhosted"
+    assert bundle["management_url"] == "https://relay.example.org:443"
+    assert bundle["ca"].startswith("-----BEGIN")
+    assert "SECRET-KEY-1" not in capsys.readouterr().out
+
+
+def test_a_bundle_file_never_overwrites_and_mints_nothing_when_refused(monkeypatch, tmp_path):
+    minted = _bundle_file_ready(monkeypatch)
+    target = tmp_path / "bundle.json"
+    target.write_text("keep")
+    assert RemoteAccess.bundle_file(str(target)) == 1
+    assert RemoteAccess.bundle_file(str(tmp_path / "missing" / "bundle.json")) == 1
+    assert target.read_text() == "keep" and minted == []
+
+
+def test_a_bundle_file_needs_remote_access_set_up(tmp_path, capsys):
+    assert RemoteAccess.bundle_file(str(tmp_path / "bundle.json")) == 3
+    assert not (tmp_path / "bundle.json").exists()
+    assert "not set up" in capsys.readouterr().out
 
 
 def test_status_without_setup_says_so(capsys):
@@ -1283,6 +1338,11 @@ def test_the_cli_has_the_remote_group():
     staged = parser.parse_args(["remote", "setup", BOX, "--ssh", "my-box", "--box-only"])
     assert staged.ssh_to == "my-box" and staged.box_only
     assert parser.parse_args(["remote", "remove", "--purge"]).purge
+    assert parser.parse_args(["remote", "code"]).bundle_file is None
+    assert (
+        parser.parse_args(["remote", "code", "--bundle-file", "/x/b.json"]).bundle_file
+        == "/x/b.json"
+    )
     assert "remote" in parser.command_groups
 
 

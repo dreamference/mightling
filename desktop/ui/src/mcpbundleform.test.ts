@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BundleSetting } from "./bridge";
-import { bundleRemoval, bundleWrite, commandLine, configuredServer, formValues, initialForm, missingSettings, sizeText } from "./mcpbundles";
+import { bundleRemoval, bundleWrite, commandLine, configuredServer, formValues, initialForm, missingSettings, sizeText } from "./mcpbundleform";
 
 const setting = (key: string, type: BundleSetting["type"], extra: Partial<BundleSetting> = {}): BundleSetting => ({
   key, type, title: key.toUpperCase(), description: "", required: false, sensitive: false, multiple: false, default: null, min: null, max: null, ...extra,

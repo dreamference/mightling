@@ -24,7 +24,7 @@ import type { ConfigBatchWriteParams } from "./protocol/v2/ConfigBatchWriteParam
 import type { HookMetadata } from "./protocol/v2/HookMetadata";
 import { offeredServers } from "./mcprecommended";
 import { RULE_LABELS, ruleEdits, toolRules, type ToolRule } from "./mcptools";
-import { bundleRemoval } from "./mcpbundles";
+import { bundleRemoval } from "./mcpbundleform";
 import { configured, removable, serverEnabled, serverForm, serverValue, startupLabel, type McpServerForm, type Startup } from "./mcpservers";
 import { McpServerAdd } from "./McpServerAdd";
 import { PluginsTab } from "./PluginsTab";
