@@ -84,6 +84,10 @@ $ReleaseUrl = if ($Version) { "$Api/repos/$Repo/releases/tags/v$($Version.TrimSt
 try {
     $Release = Invoke-RestMethod -Uri $ReleaseUrl -Headers $Headers -UseBasicParsing
 } catch {
+    $Status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+    if (($Status -eq 403 -or $Status -eq 429) -and "$($_.ErrorDetails.Message) $($_.Exception.Message)" -match "rate limit") {
+        Fail "GitHub's API rate limit is used up for this network ($ReleaseUrl). Wait a while, or set GH_TOKEN to any GitHub token and run this again."
+    }
     Fail "could not read $ReleaseUrl ($($_.Exception.Message)). Drafts and pre-releases are not offered; a private fork needs GH_TOKEN."
 }
 $Tag = $Release.tag_name
