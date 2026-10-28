@@ -187,7 +187,84 @@ def test_the_environment_drops_program_variables_and_keeps_the_callers_ssh():
     assert "GIT_EXTERNAL_DIFF" not in env
     assert env["GIT_PROXY_COMMAND"] == ""
     assert env["GIT_SSH_COMMAND"] == "ssh -i k"
-    assert env["GIT_CONFIG_NOSYSTEM"] == "1" and env["GIT_PAGER"] == "cat"
+    assert env["GIT_PAGER"] == "cat"
+
+
+def test_the_environment_moves_no_config_file_and_adds_no_config():
+    env = SafeGit.environment(
+        {
+            "GIT_CONFIG_SYSTEM": "/x",
+            "GIT_CONFIG_GLOBAL": "/x",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.fsmonitor",
+            "GIT_CONFIG_VALUE_0": "/x",
+            "GIT_CONFIG_PARAMETERS": "'core.fsmonitor'='/x'",
+            "PATH": "/usr/bin",
+        }
+    )
+    assert not [name for name in env if name.startswith("GIT_CONFIG_")], env
+    assert env["PATH"] == "/usr/bin"
+
+
+def _hostile_system(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """A repository with a changed file and a system-config file naming programs."""
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    marker = tmp_path / "marker"
+    _plain(repo, "init", "-q")
+    (repo / "a.txt").write_text("one\n")
+    _plain(repo, "add", "-A")
+    _plain(repo, "commit", "-q", "-m", "init")
+    (repo / "a.txt").write_text("one\ntwo changed\n")
+    s = {
+        name: _script(tmp_path, name, marker)
+        for name in ("fsmonitor", "ssh", "pager", "cred", "external")
+    }
+    system = tmp_path / "system-gitconfig"
+    system.write_text(
+        f"[core]\n\tfsmonitor = {s['fsmonitor']}\n\tsshCommand = {s['ssh']}\n\tpager = {s['pager']}\n"
+        f"[credential]\n\thelper = {s['cred']}\n[diff]\n\texternal = {s['external']}\n"
+    )
+    return repo, system, marker
+
+
+def test_the_system_config_is_read_but_a_program_it_names_loses_to_the_pins(tmp_path):
+    """Git for Windows keeps core.autocrlf=true in its system config: the helper reads it."""
+    repo, system, marker = _hostile_system(tmp_path)
+    plain_env = {k: v for k, v in PLAIN_ENV.items() if k != "GIT_CONFIG_NOSYSTEM"}
+    subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain"],
+        capture_output=True,
+        env=dict(plain_env, GIT_CONFIG_SYSTEM=str(system)),
+    )
+    assert "ran-fsmonitor" in _ran(marker), "the control should run the system fsmonitor"
+
+    repo, system, marker = _hostile_system(tmp_path / "proof")
+    env = dict(SafeGit.environment(), GIT_CONFIG_SYSTEM=str(system))
+    assert "GIT_CONFIG_NOSYSTEM" not in SafeGit.environment({})
+    for args in (["status", "--porcelain"], ["diff"], ["log", "-p", "-1"]):
+        done = subprocess.run(SafeGit.command(args, repo), capture_output=True, text=True, env=env)
+        assert done.returncode == 0, done.stderr
+    for key, pin in (
+        ("core.fsmonitor", "false"),
+        ("core.sshCommand", "ssh"),
+        ("core.pager", "cat"),
+        ("credential.helper", ""),
+        ("diff.external", ""),
+    ):
+        done = subprocess.run(
+            SafeGit.command(["config", "--get", key], repo), capture_output=True, text=True, env=env
+        )
+        assert done.stdout.rstrip("\n") == pin, key
+    (system.parent / "autocrlf").write_text("[core]\n\tautocrlf = true\n")
+    done = subprocess.run(
+        SafeGit.command(["config", "--get", "core.autocrlf"], repo),
+        capture_output=True,
+        text=True,
+        env=dict(SafeGit.environment(), GIT_CONFIG_SYSTEM=str(system.parent / "autocrlf")),
+    )
+    assert done.stdout.strip() == "true"
+    assert _ran(marker) == ""
 
 
 def test_driver_names_come_from_the_checkouts_own_config(tmp_path):

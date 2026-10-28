@@ -13,7 +13,12 @@ local, worktree and command only, so the user's global git-lfs filter keeps work
 name by name. `--no-ext-diff --no-textconv` follow `diff`, `show` and `log`, and the stock
 `--upload-pack=` and `--receive-pack=` follow `fetch`, `pull`, `ls-remote` and `push`
 (`remote.<n>.uploadpack` is first-value-wins, so a `-c` cannot replace it but a flag outranks it).
-The environment drops `GIT_EXTERNAL_DIFF` and friends and sets `GIT_CONFIG_NOSYSTEM`.
+The environment drops `GIT_EXTERNAL_DIFF` and the variables that add config or move a config file
+(`GIT_CONFIG_SYSTEM`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_COUNT` and its numbered pairs,
+`GIT_CONFIG_PARAMETERS`). The system config is read, like the global one: only an administrator can
+write it (a per-user Git for Windows install keeps it in the user's own install folder, the user's,
+not the checkout's), it carries Git for Windows' `core.autocrlf=true` and git-lfs filter, and a
+program it names loses to the `-c` pairs.
 
 Repository hooks RUN (`core.hooksPath` is not overridden and nothing passes `--no-verify`): the
 owner's choice of 2026-10-28, "allow all for now". The known risk is that a hook the agent wrote
@@ -59,9 +64,13 @@ FIXED_CONFIG: Final[tuple[str, ...]] = (
 REMOVED_ENV: Final[tuple[str, ...]] = (
     "GIT_EXTERNAL_DIFF",
     "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_COUNT",
 )
+REMOVED_ENV_PREFIXES: Final[tuple[str, ...]] = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+# No GIT_CONFIG_NOSYSTEM: the system config is trusted (see the module docstring).
 FIXED_ENV: Final[dict[str, str]] = {
-    "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_PAGER": "cat",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_OPTIONAL_LOCKS": "0",
@@ -92,6 +101,8 @@ class SafeGit:
         env = dict(os.environ if base is None else base)
         for name in REMOVED_ENV:
             env.pop(name, None)
+        for name in [n for n in env if n.startswith(REMOVED_ENV_PREFIXES)]:
+            del env[name]
         env.update(FIXED_ENV)
         return env
 

@@ -15,7 +15,7 @@ const saved = { HOME: process.env.HOME, GIT_CONFIG_GLOBAL: process.env.GIT_CONFI
 
 beforeAll(() => {
   process.env.HOME = scratchHome;
-  process.env.GIT_CONFIG_GLOBAL = path.join(scratchHome, "gitconfig");
+  process.env.GIT_CONFIG_GLOBAL = path.join(scratchHome, ".gitconfig");
   process.env.GIT_CONFIG_NOSYSTEM = "1";
   fs.writeFileSync(process.env.GIT_CONFIG_GLOBAL, "[user]\n\tname = Test\n\temail = test@example.invalid\n[init]\n\tdefaultBranch = main\n");
 });
