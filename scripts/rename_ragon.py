@@ -321,7 +321,12 @@ SCIP_HELPER = """/// A store written before the rename (1.8 and earlier) calls i
 /// with it); the next index run writes a store with the new names (spec DREAMFERENCE_RENAME_RAGON.md §3).
 fn expose_legacy_tables(conn: &Connection) -> Result<()> {
     let present = |name: &str| -> rusqlite::Result<bool> {
-        conn.query_row("SELECT count(*) FROM sqlite_master WHERE name = ?1", [name], |r| r.get::<_, i64>(0))
+        conn.query_row(
+            "SELECT count(*) FROM (SELECT name FROM sqlite_master UNION ALL SELECT name FROM sqlite_temp_master)
+             WHERE name = ?1",
+            [name],
+            |r| r.get::<_, i64>(0),
+        )
             .map(|n| n > 0)
     };
     for table in ["names", "relationships", "meta"] {
