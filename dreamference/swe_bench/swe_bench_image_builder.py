@@ -103,7 +103,12 @@ AGENT_LAYER: Final[str] = (
     "RUN chmod 755 /root && for d in /usr/local/cargo /usr/local/rustup /root/go /root/.cache "
     '/root/.m2 /root/.gradle /root/.ivy2; do if [ -e "$d" ]; then chmod -R a+rwX "$d"; fi; done\n'
 )
-GO_LAYER: Final[str] = "ENV GOPATH=/root/go GOCACHE=/root/.cache/go-build GOTOOLCHAIN=local\n"
+# Go: root's module cache for the agent too, and every module the repository's go.sum names fetched while the
+# network is there (a test package can need one its build did not: caddy's tests, 2026-10-28).
+GO_LAYER: Final[str] = (
+    "ENV GOPATH=/root/go GOCACHE=/root/.cache/go-build GOTOOLCHAIN=local\n"
+    "RUN cd /testbed && (go mod download all || go mod download || true)\n"
+)
 # Crates fetched while the network is there: tokio's and axum's Dockerfiles build nothing.
 RUST_LAYER: Final[str] = "RUN cd /testbed && cargo fetch\n"
 MAVEN_LAYER: Final[str] = (

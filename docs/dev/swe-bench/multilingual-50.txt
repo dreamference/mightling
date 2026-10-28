@@ -1,0 +1,54 @@
+# 50 SWE-bench Multilingual tasks for the weekly non-Python night (owner, 2026-10-28), drawn 2026-10-28
+# from the 64 of 65 build candidates validated on this machine (images built here from the task repository at
+# 6e08cbcd763c, dataset revision 846e647b9f33) whose agent check was clean, seed 20261028, round-robin over each language's repositories.
+# Wanted c 12, cpp 8, rust 16, go 8, java 6 (Maven only); drawn rust 16, c 12, cpp 8, go 8, java 6. Smoke task, kept out: jqlang__jq-2235.
+astral-sh__ruff-15330
+astral-sh__ruff-15394
+astral-sh__ruff-15626
+burntsushi__ripgrep-2209
+burntsushi__ripgrep-2576
+caddyserver__caddy-4774
+caddyserver__caddy-4943
+fmtlib__fmt-1683
+fmtlib__fmt-2310
+fmtlib__fmt-2457
+fmtlib__fmt-3158
+fmtlib__fmt-3750
+fmtlib__fmt-3863
+fmtlib__fmt-3901
+gin-gonic__gin-1805
+gin-gonic__gin-2121
+gohugoio__hugo-12171
+gohugoio__hugo-12562
+google__gson-1093
+google__gson-1100
+google__gson-2134
+google__gson-2311
+hashicorp__terraform-35543
+javaparser__javaparser-4538
+javaparser__javaparser-4561
+jqlang__jq-2681
+jqlang__jq-2728
+jqlang__jq-2919
+micropython__micropython-10095
+micropython__micropython-12158
+micropython__micropython-13039
+micropython__micropython-13569
+nlohmann__json-4237
+nushell__nushell-12950
+nushell__nushell-13246
+nushell__nushell-13831
+prometheus__prometheus-13845
+redis__redis-10068
+redis__redis-11279
+redis__redis-9733
+sharkdp__bat-2260
+sharkdp__bat-2835
+tokio-rs__axum-1934
+tokio-rs__axum-2096
+tokio-rs__tokio-6603
+tokio-rs__tokio-6724
+uutils__coreutils-6377
+uutils__coreutils-6731
+valkey-io__valkey-1499
+valkey-io__valkey-1842

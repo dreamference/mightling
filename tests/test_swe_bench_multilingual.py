@@ -222,6 +222,7 @@ def test_the_dockerfile_loses_its_amd64_pin_and_gains_the_agent_layer():
         "FROM --platform=linux/amd64 ubuntu:jammy\nRUN url='https://dl.google.com/go/go1.23.8.linux-arm64.tar.gz'\n"
     )
     assert "ENV GOPATH=/root/go GOCACHE=/root/.cache/go-build GOTOOLCHAIN=local" in go
+    assert "RUN cd /testbed && (go mod download all" in go
 
 
 def test_maven_images_take_mvnd_from_the_archive_with_its_jvm_client():
