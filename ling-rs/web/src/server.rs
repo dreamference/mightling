@@ -1211,6 +1211,24 @@ pub async fn serve(
                 .await
         }));
     }
+    // Full Access ends within one interval of the node taking it away, not at the thread's next turn.
+    let mut stopped = stop.subscribe();
+    let sweeper = server.clone();
+    tasks.push(tokio::spawn(async move {
+        let mut tick = tokio::time::interval(crate::chat_repos::FULL_ACCESS_SWEEP_INTERVAL);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = stopped.recv() => break,
+                // Inside the branch, so stopping does not wait for a sweep's app-server answers.
+                _ = async {
+                    tick.tick().await;
+                    crate::chat_repos::sweep_full_access(&sweeper).await;
+                } => {}
+            }
+        }
+        Ok(())
+    }));
     shutdown.await;
     let _ = stop.send(());
     for task in tasks {
