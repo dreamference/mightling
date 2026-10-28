@@ -735,10 +735,15 @@ class DreamferenceCLIController:
             "issue": lambda: RemoteAccess.certificate_issue(staging=args.staging),
             "renew": RemoteAccess.certificate_renew,
             "off": RemoteAccess.certificate_off,
+            "relay": lambda: RemoteAccess.certificate_relay(staging=args.staging, name=args.name),
+            "relay-off": RemoteAccess.certificate_relay_off,
         }
         action = actions.get(getattr(args, "certificate_command", None) or "")
         if action is None:
-            print("usage: ling-admin remote certificate {issue [--staging],renew,off}")
+            print(
+                "usage: ling-admin remote certificate "
+                "{issue [--staging],renew,off,relay [--staging] [--name N],relay-off}"
+            )
             return 2
         return action()
 
@@ -1591,6 +1596,10 @@ class DreamferenceCLIController:
         node_provision_parser.add_argument("--match", default=None, help="With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-")
         node_provision_parser.add_argument("--start-timeout", type=int, default=None, help="Seconds to wait for a started model server (default 1200)")
         node_provision_parser.add_argument(
+            "--model-source", choices=["copy", "hf"], default="copy",
+            help="copy (default): rsync the weights from here; hf: the node downloads the public weights from "
+                 "Hugging Face, each file is checked by SHA-256, only what the Hub lacks is sent from here")
+        node_provision_parser.add_argument(
             "--role", choices=["night", "engine"], default=None,
             help="Also leave it as a night or engine node: main key, docker, agents' sudoers, key-only SSH, "
                  "the role's setup and a readiness report (docs/dev/node.md)")
@@ -1807,7 +1816,17 @@ class DreamferenceCLIController:
         remote_certificate_issue_parser.add_argument(
             "--staging", action="store_true",
             help="Test against Let's Encrypt's staging CA; its certificate is never served")
-        remote_certificate_subparsers.add_parser("renew", help="Renew it when due (the timer's command)")
+        remote_certificate_relay_parser = remote_certificate_subparsers.add_parser(
+            "relay", help="Give the relay its own public certificate under its own name (relay.<domain>)"
+        )
+        remote_certificate_relay_parser.add_argument(
+            "--staging", action="store_true",
+            help="Test against Let's Encrypt's staging CA; nothing changes on the box")
+        remote_certificate_relay_parser.add_argument(
+            "--name", default=None, help="The relay's name (default: relay. and the box's parent domain)")
+        remote_certificate_subparsers.add_parser(
+            "relay-off", help="Put the node CA's certificate and the box's name back on the relay")
+        remote_certificate_subparsers.add_parser("renew", help="Renew them when due (the timer's command)")
         remote_certificate_subparsers.add_parser(
             "off", help="Serve the node CA's certificate again and stop renewing")
 
@@ -3041,7 +3060,7 @@ class DreamferenceCLIController:
                 from dreamference.node.node_provisioner import NodeProvisioner
                 options = {name: getattr(args, name) for name in (
                     "all", "user", "model", "source", "per_host_password", "mesh", "web", "no_start", "no_forge",
-                    "restart", "os_update", "dry_run", "via", "match", "start_timeout", "role")}
+                    "restart", "os_update", "dry_run", "via", "match", "start_timeout", "role", "model_source")}
                 sys.exit(NodeProvisioner(args.hosts, options).run())
             if args.node_command == "prepare":
                 from dreamference.node.node_prepare import NodePrepare

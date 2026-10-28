@@ -674,6 +674,7 @@ Set up new GB10s from this one: install Mightling, the root half, the model, pai
 | `--via` | With one host: copy and install over this address instead (a QSFP link's) |
 | `--match` | With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-. |
 | `--start-timeout` | Seconds to wait for a started model server (default 1200) |
+| `--model-source` | copy (default): rsync the weights from here; hf: the node downloads the public weights from Hugging Face, each file is checked by SHA-256, only what the Hub lacks is sent from here. One of: `copy`, `hf`. |
 | `--role` | Also leave it as a night or engine node: main key, docker, agents' sudoers, key-only SSH, the role's setup and a readiness report (docs/dev/node.md) One of: `night`, `engine`. |
 
 #### `ling-admin node prepare`
@@ -1109,9 +1110,22 @@ Get it and serve it from the control plane; renewed daily by a user timer.
 |---|---|
 | `--staging` | Test against Let's Encrypt's staging CA; its certificate is never served. |
 
+#### `ling-admin remote certificate relay`
+
+Give the relay its own public certificate under its own name (relay.<domain>).
+
+| Option | Description |
+|---|---|
+| `--staging` | Test against Let's Encrypt's staging CA; nothing changes on the box. |
+| `--name` | The relay's name (default: relay. and the box's parent domain) |
+
+#### `ling-admin remote certificate relay-off`
+
+Put the node CA's certificate and the box's name back on the relay.
+
 #### `ling-admin remote certificate renew`
 
-Renew it when due (the timer's command).
+Renew them when due (the timer's command).
 
 #### `ling-admin remote certificate off`
 

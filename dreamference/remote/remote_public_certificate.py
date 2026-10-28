@@ -41,6 +41,7 @@ from dreamference.remote.remote_control_plane import RemoteControlPlane
 from dreamference.remote.remote_settings import (
     ACME_PRODUCTION,
     ACME_STAGING,
+    CERTIFICATE_ALERT_UNIT,
     CERTIFICATE_SERVICE_UNIT,
     CERTIFICATE_TIMER_UNIT,
     CLOUDFLARE_API,
@@ -325,13 +326,16 @@ class RemotePublicCertificate:
         return env
 
     @classmethod
-    def lego_argv(cls, binary: Path, command: list[str], staging: bool) -> list[str]:
+    def lego_argv(
+        cls, binary: Path, command: list[str], staging: bool, account_id: str = ACCOUNT_ID
+    ) -> list[str]:
         """One lego command line against Let's Encrypt.
 
         Args:
             binary: lego.
             command: The subcommand and its own options.
             staging: The staging CA.
+            account_id: lego's account name.
 
         Returns:
             List[str]: The argv.
@@ -345,23 +349,24 @@ class RemotePublicCertificate:
             "--path",
             str(cls.folder(staging)),
             "--account-id",
-            ACCOUNT_ID,
+            account_id,
             "--key-type",
             KEY_TYPE,
         ]
 
     @classmethod
-    def account_url(cls, staging: bool = False) -> str | None:
+    def account_url(cls, staging: bool = False, account_id: str = ACCOUNT_ID) -> str | None:
         """The ACME account's URL, which the CAA record names.
 
         Args:
             staging: The staging CA's account.
+            account_id: lego's account name: the control plane's, or the relay's own.
 
         Returns:
             Optional[str]: The URL, or None before the account exists.
         """
         host = urllib.parse.urlsplit(ACME_STAGING if staging else ACME_PRODUCTION).hostname or ""
-        path = cls.folder(staging) / "accounts" / host / ACCOUNT_ID / "account.json"
+        path = cls.folder(staging) / "accounts" / host / account_id / "account.json"
         try:
             record = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -371,34 +376,37 @@ class RemotePublicCertificate:
         return url if isinstance(url, str) and url.startswith("https://") else None
 
     @classmethod
-    def register(cls, binary: Path, staging: bool) -> str | None:
+    def register(cls, binary: Path, staging: bool, account_id: str = ACCOUNT_ID) -> str | None:
         """Registers the ACME account once.
 
         Args:
             binary: lego.
             staging: The staging CA.
+            account_id: lego's account name.
 
         Returns:
             Optional[str]: The account's URL.
         """
-        url = cls.account_url(staging)
+        url = cls.account_url(staging, account_id)
         if url:
             return url
         result = cls._run(
-            cls.lego_argv(binary, ["accounts", "register"], staging), env=cls.lego_env()
+            cls.lego_argv(binary, ["accounts", "register"], staging, account_id),
+            env=cls.lego_env(),
         )
         if result.returncode != 0:
             LOG.error(f"❌ lego could not register the ACME account: {cls._tail(result)}")
             return None
-        return cls.account_url(staging)
+        return cls.account_url(staging, account_id)
 
     @classmethod
-    def obtain(cls, dns_name: str, staging: bool = False) -> bool:
+    def obtain(cls, dns_name: str, staging: bool = False, account_id: str = ACCOUNT_ID) -> bool:
         """Gets the certificate, or renews it when it is due (lego's `run` is both).
 
         Args:
-            dns_name: The box's public DNS name.
+            dns_name: The name the certificate is for: the box's, or the relay's own.
             staging: Let's Encrypt's staging CA.
+            account_id: lego's account, the only one the name's CAA record then allows.
 
         Returns:
             bool: True when a current certificate is in lego's folder afterwards.
@@ -409,14 +417,18 @@ class RemotePublicCertificate:
         binary = cls.lego()
         if binary is None:
             return False
-        if cls.register(binary, staging) is None:
+        if cls.register(binary, staging, account_id) is None:
             return False
-        accounts = [url for url in (cls.account_url(False), cls.account_url(True)) if url]
+        accounts = [
+            url
+            for url in (cls.account_url(False, account_id), cls.account_url(True, account_id))
+            if url
+        ]
         if not cls.ensure_caa(dns_name, accounts):
             return False
         command = ["run", "--dns", "cloudflare", "--domains", dns_name]
         command += ["--renew-days", str(PUBLIC_RENEW_DAYS), "--no-random-sleep"]
-        result = cls._run(cls.lego_argv(binary, command, staging), env=cls.lego_env())
+        result = cls._run(cls.lego_argv(binary, command, staging, account_id), env=cls.lego_env())
         if result.returncode != 0 or not cls.files(dns_name, staging)[0].is_file():
             LOG.error(f"❌ lego could not get the certificate: {cls._tail(result)}")
             return False
@@ -570,25 +582,41 @@ class RemotePublicCertificate:
 
     @classmethod
     def timer_units(cls) -> dict[str, str]:
-        """The renewal's two user units: daily, run in the batch slice.
+        """The renewal's user units: daily, run in the batch slice, with an alert on failure.
 
         Returns:
             Dict[str, str]: Unit file name → text.
         """
+        header = "# Written by `ling-admin remote certificate issue` (REMOTE_ACCESS §15).\n"
         service = (
-            "# Written by `ling-admin remote certificate issue` (REMOTE_ACCESS §15).\n"
-            "[Unit]\nDescription=Mightling remote access: renew the control plane's public certificate\n"
-            "Wants=network-online.target\nAfter=network-online.target\n\n"
-            "[Service]\nType=oneshot\nSlice=mightling-batch.slice\nNice=10\n"
-            "ExecStart=%h/.local/bin/ling-admin remote certificate renew\n"
+            header
+            + "[Unit]\nDescription=Mightling remote access: renew the public certificates (control plane and relay)\n"
+            + "Wants=network-online.target\nAfter=network-online.target\n"
+            + f"OnFailure={CERTIFICATE_ALERT_UNIT}\n\n"
+            + "[Service]\nType=oneshot\nSlice=mightling-batch.slice\nNice=10\n"
+            + "ExecStart=%h/.local/bin/ling-admin remote certificate renew\n"
+        )
+        # A failed renewal tells the owner the day it fails (the same Telegram path as the acceptance
+        # run), long before a certificate expires.
+        alert = (
+            header
+            + "[Unit]\nDescription=Mightling remote access: tell the owner a certificate renewal failed\n\n"
+            + "[Service]\nType=oneshot\nSlice=mightling-batch.slice\nNice=10\n"
+            + "ExecStart=%h/.local/bin/owner-notify 'Remote access: the public certificate renewal "
+            + "failed. See: journalctl --user -u mightling-remote-certificate.service; "
+            + "ling-admin remote status shows the days left.'\n"
         )
         timer = (
-            "# Written by `ling-admin remote certificate issue` (REMOTE_ACCESS §15).\n"
-            "[Unit]\nDescription=Mightling remote access: renew the public certificate daily\n\n"
-            "[Timer]\nOnCalendar=*-*-* 04:17:00 UTC\nRandomizedDelaySec=45min\nPersistent=true\n\n"
-            "[Install]\nWantedBy=timers.target\n"
+            header
+            + "[Unit]\nDescription=Mightling remote access: renew the public certificates daily\n\n"
+            + "[Timer]\nOnCalendar=*-*-* 04:17:00 UTC\nRandomizedDelaySec=45min\nPersistent=true\n\n"
+            + "[Install]\nWantedBy=timers.target\n"
         )
-        return {CERTIFICATE_SERVICE_UNIT: service, CERTIFICATE_TIMER_UNIT: timer}
+        return {
+            CERTIFICATE_SERVICE_UNIT: service,
+            CERTIFICATE_ALERT_UNIT: alert,
+            CERTIFICATE_TIMER_UNIT: timer,
+        }
 
     @classmethod
     def install_timer(cls) -> bool:

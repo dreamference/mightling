@@ -34,6 +34,7 @@ from typing import Any, Final
 
 from dreamference.node.fleet_askpass import FleetAskpass
 from dreamference.node.fleet_bundle import FleetBundle
+from dreamference.node.fleet_hub_fetch import FleetHubFetch
 from dreamference.node.fleet_model_plan import GIB, FleetModelPlan
 from dreamference.node.fleet_probe import FleetProbe
 from dreamference.node.fleet_session import REMOTE_ADMIN, FleetSession
@@ -58,6 +59,9 @@ CONTAINER_RUNNING: Final[str] = "true"
 # another site, reached over the internet), with a pause between: carrying on from the partial file.
 COPY_ATTEMPTS: Final[int] = 30
 
+# `--model-source` value: the node downloads the public weights itself.
+HUB_SOURCE: Final[str] = "hf"
+
 # A single-label host name (`spark-1a2b`), which this LAN resolves only as `<name>.local`.
 BARE_NAME: Final[re.Pattern] = re.compile(r"[A-Za-z0-9-]+")
 
@@ -72,7 +76,8 @@ class NodeProvisioner:
             hosts: The machines named on the command line (names, addresses or paired nodes).
             options: The parsed flags: `all`, `user`, `model`, `source`, `per_host_password`,
                 `mesh`, `web`, `no_start`, `restart`, `os_update`, `dry_run`, `via`, `match`,
-                `start_timeout`, `role`.
+                `start_timeout`, `role`, `model_source` (`copy`, or `hf`: the node downloads the
+                public weights itself and only the rest is sent from here).
         """
         self.hosts = hosts
         self.options = options
@@ -496,17 +501,8 @@ class NodeProvisioner:
                 "free space there, then re-run",
             )
         started = time.monotonic()
-        for folder in FleetModelPlan.local_folders(missing):
-            copied = session.rsync(
-                folder, f"{state.get('hub')}/{folder.name}", attempts=COPY_ATTEMPTS
-            )
-            if copied.returncode != 0:
-                return self._fail(
-                    host,
-                    "copy the model",
-                    copied.stderr.strip()[-200:],
-                    f"ling-admin node provision {host}",
-                )
+        if not self._fetch_models(host, session, missing):
+            return False
         if not self._images(host, session):
             return False
         self._record_copy(host, needed, time.monotonic() - started)
@@ -521,6 +517,90 @@ class NodeProvisioner:
                 f"ssh {self._user(host)}@{host} ling-admin searxng start",
             )
         return True
+
+    def _fetch_models(self, host: str, session: FleetSession, missing: list[str]) -> bool:
+        """Brings the missing folders to the machine: rsync from here, or from Hugging Face (`hf`)."""
+        if self.options.get("model_source") == HUB_SOURCE:
+            return self._models_from_hub(host, session, missing)
+        hub = self._state(host).get("hub")
+        for folder in FleetModelPlan.local_folders(missing):
+            copied = session.rsync(folder, f"{hub}/{folder.name}", attempts=COPY_ATTEMPTS)
+            if copied.returncode != 0:
+                return self._fail(
+                    host,
+                    "copy the model",
+                    copied.stderr.strip()[-200:],
+                    f"ling-admin node provision {host}",
+                )
+        return True
+
+    def _models_from_hub(self, host: str, session: FleetSession, missing: list[str]) -> bool:
+        """`--model-source hf`: the node downloads the public weights, this machine checks them.
+
+        Each repository is fetched by the node from Hugging Face (resuming, retried), every file is
+        compared with this machine's by SHA-256, and only what differs or is not on the Hub is sent
+        from here. A download that keeps failing is replaced by a copy from another machine of this
+        run that already has the model, over their shared LAN (`FleetHubFetch.lan_copy`).
+
+        Args:
+            host: The machine.
+            session: Its provisioning session.
+            missing: The folders it lacks.
+
+        Returns:
+            bool: True when every folder is there and checked (a failure is already recorded).
+        """
+        state = self._state(host)
+        fetch = FleetHubFetch(session, str(state.get("hub")), FleetModelPlan.hub())
+        for path in FleetModelPlan.local_folders(missing):
+            folder = path.name
+            sys.stdout.write(f"⏬ {host}: {folder} from Hugging Face (the node downloads it).\n")
+            outcome = fetch.ensure(folder, attempts=COPY_ATTEMPTS)
+            if not outcome["ok"] and outcome["hub_failed"]:
+                outcome["ok"] = self._lan_fallback(host, fetch, folder)
+            if not outcome["ok"]:
+                return self._fail(
+                    host,
+                    "fetch the model",
+                    f"{folder}: {outcome['why']}",
+                    f"ling-admin node provision {host} --model-source hf",
+                )
+            if outcome["sent"]:
+                self._done(
+                    host, f"{folder}: {outcome['sent']} file(s) sent from here, not on the Hub"
+                )
+        self.results[host]["models_verified"] = True
+        return True
+
+    def _lan_fallback(self, host: str, fetch: FleetHubFetch, folder: str) -> bool:
+        """Copies a folder from a machine of this run that holds it, then checks it.
+
+        Args:
+            host: The machine whose download failed.
+            fetch: Its fetch.
+            folder: The folder.
+
+        Returns:
+            bool: True when a donor gave it and every file checks out.
+        """
+        for donor in self.sessions:
+            if donor == host or not self.results.get(donor, {}).get("models_verified"):
+                continue
+            donor_state = self._state(donor)
+            lan_name = f"{donor_state.get('hostname')}.local"
+            sys.stdout.write(
+                f"🏠 {host}: the download failed; copying {folder} from {donor} over their LAN.\n"
+            )
+            if fetch.lan_copy(
+                folder,
+                self.sessions[donor],
+                lan_name,
+                self._user(donor),
+                str(donor_state.get("hub")),
+            ) and fetch.verify(folder):
+                self._done(host, f"{folder}: copied from {donor} over the LAN")
+                return True
+        return False
 
     def _images(self, host: str, session: FleetSession) -> bool:
         state = self._state(host)
@@ -753,8 +833,10 @@ class NodeProvisioner:
         """The weights, images, SearXNG and assignment a dry run names for one probed machine."""
         from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
 
+        from_hub = self.options.get("model_source") == HUB_SOURCE
+        verb = "download from Hugging Face" if from_hub else "copy"
         changes = [
-            f"copy {folder}" for folder in FleetProbe.missing_models(state, self.plan["folders"])
+            f"{verb} {folder}" for folder in FleetProbe.missing_models(state, self.plan["folders"])
         ]
         changes += [
             f"image {image}"

@@ -115,10 +115,12 @@ ASK_EVALS_LING=${ASK_EVALS_LING:-$HOME/.local/share/dreamference/mightling/bin/l
 # The engine A/B (the production bar's night, engine MILESTONES §14): an arm part `on-sglang` or `on-engine` runs
 # the arm against that model server on the engine's development machine instead of this machine's, served there
 # by scripts/engine_ab_remote.sh over ssh, one at a time; production there (m0-prod8000) comes back at the end,
-# on a failure and on a stop. REMOTE is its ssh name, REMOTE_HOST the name the run reaches it by (resolved at
-# use time, never stored as an address).
+# on a failure and on a stop. REMOTE is its name (an ssh alias, a `.local` name, or a machine at another site by
+# its short name, which the remote-access overlay's DNS resolves), REMOTE_HOST the name the run reaches its model
+# server by. Both are resolved at use time by `remote_names`, overlay first and mDNS second, never an address.
 REMOTE=${REMOTE:-}
-REMOTE_HOST=${REMOTE_HOST:-${REMOTE:+$REMOTE.local}}
+REMOTE_HOST=${REMOTE_HOST:-}
+OVERLAY_DOMAIN=${OVERLAY_DOMAIN:-netbird.selfhosted}
 # The helper's folder there (its ling-serve, serve.py, lease and logs), when not its default ~/ab-n12.
 REMOTE_AB_DIR=${REMOTE_AB_DIR:-}
 # A series of nights pinned to one commit and one `ling` build (the owner's decision of 2026-10-20 for nights
@@ -219,14 +221,28 @@ arm_name() { echo "$1" | tr ,+ --; }
 # The arm's model server on REMOTE (`sglang` or `engine`), or nothing: this machine's server.
 arm_server() { echo "$1" | tr + '\n' | sed -n 's/^on-//p' | head -1; }
 uses_remote() { case "$ARMS" in *on-sglang*|*on-engine*) return 0 ;; esac; return 1; }
+# Sets REMOTE_SSH (what ssh connects to) and REMOTE_HOST (the model server's host). A short name that the overlay's
+# DNS knows is used as `<name>.<overlay domain>` (a machine at another site is never on this LAN, so `.local`
+# would never answer); a name with a dot is used as given; any other is the ssh alias and `<name>.local`.
+remote_names() {
+    REMOTE_SSH=$REMOTE
+    case "$REMOTE" in
+        *.*) : ;;
+        *) getent hosts "$REMOTE.$OVERLAY_DOMAIN" >/dev/null 2>&1 && REMOTE_SSH="$REMOTE.$OVERLAY_DOMAIN" ;;
+    esac
+    if [ -z "$REMOTE_HOST" ]; then
+        case "$REMOTE_SSH" in *.*) REMOTE_HOST=$REMOTE_SSH ;; *) REMOTE_HOST="$REMOTE_SSH.local" ;; esac
+    fi
+}
 # Serves the arm's model server on REMOTE (stopping production and the other arm there) and points the run at it.
 remote_serve() {
     local server=$1 port out
     case "$server" in sglang) port=30000 ;; engine) port=8300 ;; *) return 2 ;; esac
     [ -n "$REMOTE" ] || { echo "❌ REMOTE is not set: name the engine's machine (its ssh name) for an on-$server arm."; return 1; }
+    remote_names
     # The helper first waits for REMOTE's GPU lock (up to 14 h, while day-time engine work holds it), then up to
     # about 45 min for the arm: the ssh session outlasts both.
-    out=$(timeout "${REMOTE_SERVE_TIMEOUT:-15h}" ssh -o BatchMode=yes "$REMOTE" ${REMOTE_AB_DIR:+AB_DIR=$REMOTE_AB_DIR} bash -s -- serve "$server" < "$WT/scripts/engine_ab_remote.sh" 2>&1)
+    out=$(timeout "${REMOTE_SERVE_TIMEOUT:-15h}" ssh -o BatchMode=yes "$REMOTE_SSH" ${REMOTE_AB_DIR:+AB_DIR=$REMOTE_AB_DIR} bash -s -- serve "$server" < "$WT/scripts/engine_ab_remote.sh" 2>&1)
     local rc=$?
     echo "$out" | tail -3 | sed 's/^/   /'
     [ "$rc" -eq 0 ] && echo "$out" | grep -q '^ready ' || return 1
@@ -235,7 +251,8 @@ remote_serve() {
 }
 # Production back on REMOTE, both arms stopped; `remote_restore keep`: the arms stopped and the GPU lock kept.
 remote_restore() {
-    timeout 30m ssh -o BatchMode=yes "$REMOTE" ${REMOTE_AB_DIR:+AB_DIR=$REMOTE_AB_DIR} bash -s -- restore ${1:-} < "$WT/scripts/engine_ab_remote.sh" 2>&1 | tail -2 | sed 's/^/   /'
+    remote_names
+    timeout 30m ssh -o BatchMode=yes "$REMOTE_SSH" ${REMOTE_AB_DIR:+AB_DIR=$REMOTE_AB_DIR} bash -s -- restore ${1:-} < "$WT/scripts/engine_ab_remote.sh" 2>&1 | tail -2 | sed 's/^/   /'
     unset DREAMFERENCE_VLLM_HOST
 }
 free_gb() { df --output=avail -BG "${DISK_PATH:-$HOME/.cache}" | tail -1 | tr -dc '0-9'; }

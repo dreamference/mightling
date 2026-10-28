@@ -9,14 +9,12 @@
 # What it uploads stays as this run's artifacts. On failure it opens, or updates, the one issue
 # titled "Release dry run failing" with the failed jobs; the next green run closes it.
 #
-# Scheduled runs are skipped when main has not moved since the last successful dry run. A hand
-# dispatch always runs, on any branch, and so does a push to release-dry-run/** (to try a change to
+# There is no `schedule:` here: gx10's timer mightling-release-dry-run.timer (02:07 UTC) dispatches
+# this workflow, and a second scheduler ran it twice a day. A dispatch always runs, on any branch, and so does a push to release-dry-run/** (to try a change to
 # the pipeline before it reaches main).
 name: Release dry run
 
 on:
-  schedule:
-    - cron: "7 2 * * *"
   workflow_dispatch:
     inputs:
       windows_x64_runner:

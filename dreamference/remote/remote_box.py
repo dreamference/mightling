@@ -498,6 +498,79 @@ class RemoteBox:
         return True
 
     @classmethod
+    def update_relay(
+        cls,
+        dns_name: str,
+        certificate: str,
+        key: str,
+        ssh_to: str | None = None,
+    ) -> bool:
+        """Replaces the relay's certificate and key (and its unit) on the box and restarts the relay.
+
+        Nothing else on the box is touched: not haproxy, not the tunnel's account, not the
+        firewall, and none of the box owner's own services. The unit is rendered from
+        `RemoteSettings.relay_address`, so it carries the relay's current exposed address.
+
+        Args:
+            dns_name: The box's public DNS name.
+            certificate: The relay's certificate with its chain (PEM).
+            key: Its key (PEM); it goes to the box and nowhere else.
+            ssh_to: The user's SSH destination for the box, when not the DNS name.
+
+        Returns:
+            bool: True when the box reported the relay active again.
+        """
+        destination = ssh_to or dns_name
+        archive = cls.stage(
+            {
+                "relay.crt": certificate.encode(),
+                "relay.key": key.encode(),
+                RELAY_UNIT: cls.relay_unit(dns_name).encode(),
+            }
+        )
+        copied = cls._run(
+            cls.ssh(destination, f"umask 077; cat > {shlex.quote(STAGE)}"), input_bytes=archive
+        )
+        if copied.returncode != 0:
+            LOG.error(f"❌ Could not copy the files to {dns_name}: {copied.stderr.strip()[:300]}")
+            return False
+        done = cls._run(
+            cls.ssh(destination, AS_ROOT), input_bytes=cls.update_relay_script().encode()
+        )
+        if done.returncode != 0 or READY_MARK not in done.stdout:
+            LOG.error(
+                f"❌ Updating the relay on {dns_name} failed:\n{(done.stderr or done.stdout).strip()[-600:]}"
+            )
+            return False
+        return True
+
+    @classmethod
+    def update_relay_script(cls) -> str:
+        """The root script behind `update_relay`.
+
+        Returns:
+            str: Installs the staged certificate, key and unit, restarts the relay unit alone and
+            checks that it is active.
+        """
+        return "\n".join(
+            [
+                "set -eu",
+                "stage=$(mktemp -d)",
+                f'tar -xzf {STAGE} -C "$stage" && rm -f {STAGE}',
+                f'install -m 0644 -o {RELAY_USER} "$stage"/relay.crt {BOX_RELAY_DIR}/relay.crt',
+                f'install -m 0600 -o {RELAY_USER} "$stage"/relay.key {BOX_RELAY_DIR}/relay.key',
+                f'install -m 0644 "$stage"/{RELAY_UNIT} /etc/systemd/system/{RELAY_UNIT}',
+                "systemctl daemon-reload",
+                f"systemctl restart {RELAY_UNIT}",
+                "sleep 3",
+                f"systemctl is-active --quiet {RELAY_UNIT}",
+                'rm -rf "$stage"',
+                f"echo {READY_MARK}",
+                "",
+            ]
+        )
+
+    @classmethod
     def remove(cls, dns_name: str, ssh_to: str | None = None) -> bool:
         """Removes everything `deploy` installed.
 

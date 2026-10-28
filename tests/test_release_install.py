@@ -31,11 +31,16 @@ TARGET = "aarch64-unknown-linux-gnu"
 
 # -- a stand-in for GitHub's releases API ----------------------------------------------------------
 
+RATE_LIMIT_BODY = b'{"message":"API rate limit exceeded for 203.0.113.7.","documentation_url":"https://docs.github.com/rest"}'
+
+
 class FakeRelease:
     """Serves one release the way api.github.com prints it: pretty JSON, an asset's `url` before
     its `name`, and the uploader's own `url` between them."""
 
-    def __init__(self, assets, tag="v9.9.9", need_token=None):
+    def __init__(self, assets, tag="v9.9.9", need_token=None, indent=2, rate_limited=False):
+        self.indent = indent
+        self.rate_limited = rate_limited
         self.assets = dict(assets)
         self.tag = tag
         self.need_token = need_token
@@ -48,6 +53,8 @@ class FakeRelease:
 
             def do_GET(self):
                 release.requests.append((self.path, self.headers.get("Authorization")))
+                if release.rate_limited:
+                    return self._send(403, RATE_LIMIT_BODY)
                 if release.need_token and self.headers.get("Authorization") != f"Bearer {release.need_token}":
                     return self._send(404, b'{"message": "Not Found"}')
                 if self.path.endswith("/releases/latest") or self.path.endswith(f"/releases/tags/{release.tag}"):
@@ -80,7 +87,7 @@ class FakeRelease:
                  "uploader": {"login": "bot", "url": "http://127.0.0.1/users/bot"}, "size": len(body)}
                 for index, (name, body) in enumerate(self.assets.items())
             ],
-        }, indent=2)
+        }, indent=self.indent, separators=None if self.indent else (",", ":"))
 
     def close(self):
         self.server.shutdown()
@@ -369,6 +376,34 @@ def test_a_private_repository_without_a_token_says_what_to_set(tmp_path, release
     result = run_install(tmp_path, server, "--role", "client", token="s3cret")
     assert result.returncode == 0, result.stdout + result.stderr
     assert all(auth == "Bearer s3cret" for _, auth in server.requests[1:])
+
+
+@pytest.mark.parametrize("indent", [2, None, 0], ids=["pretty", "compact", "newlines-only"])
+def test_the_release_parses_whether_the_api_prints_it_pretty_or_compact(tmp_path, release_server, indent):
+    """Finds the tag and the assets when a proxy re-prints the API's answer as one line."""
+    server = release_server(binaries(), tag="v1.7.2", indent=indent)
+    result = run_install(tmp_path, server, "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Mightling v1.7.2" in result.stdout
+    assert "ling from the release" in subprocess.run(
+        [str(tmp_path / ".local/bin/ling")], capture_output=True, text=True, check=False).stdout
+
+
+def test_a_compact_answer_with_spaced_colons_still_has_its_tag(tmp_path, release_server):
+    server = release_server(binaries(), tag="v1.7.2")
+    base = server.document
+    server.document = lambda port: re.sub(r'"\s*:\s*', '" :   ', json.dumps(json.loads(base(port))))
+    result = run_install(tmp_path, server, "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Mightling v1.7.2" in result.stdout
+
+
+def test_a_rate_limited_api_is_named_not_reported_as_a_missing_tag(tmp_path, release_server):
+    server = release_server(binaries(), rate_limited=True)
+    result = run_install(tmp_path, server, "--role", "client")
+    assert result.returncode == 1
+    assert "rate limit" in result.stderr and "GH_TOKEN" in result.stderr
+    assert "no tag" not in result.stderr
 
 
 def test_a_named_version_is_fetched_by_its_tag(tmp_path, release_server):

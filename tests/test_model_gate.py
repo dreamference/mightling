@@ -678,6 +678,7 @@ def _quiet_start(monkeypatch, mgr, gate_starts):
     monkeypatch.setattr(mgr, "ensure_docker_image", lambda image: True)
     monkeypatch.setattr(mgr, "check_host_safety", lambda: None)
     monkeypatch.setattr(mgr, "_evict_model_page_cache", lambda model: 0.0)
+    monkeypatch.setattr(mgr, "ling_serve_plan", lambda *a, **k: None)
     monkeypatch.setattr(mgr, "_reset_stale_compile_cache", lambda *a, **k: None)
     monkeypatch.setattr("dreamference.hardware.download_model", lambda *a, **k: True)
     # The template is read from the checkpoint in the HuggingFace cache, which the test's home lacks.

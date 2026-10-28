@@ -178,6 +178,28 @@ class RemoteControlPlane:
         )
 
     @classmethod
+    def rewrite_config(cls, dns_name: str) -> bool:
+        """Writes `config.yaml` again from the secret and store key already on disk.
+
+        The container reads it at start, so a change of the relay's address (spec §15.5) takes a
+        `restart` after this.
+
+        Args:
+            dns_name: The box's public DNS name.
+
+        Returns:
+            bool: False when the secret or the store key is missing (nothing was written).
+        """
+        secret = RemoteSettings.read_private("relay-secret")
+        store_key = RemoteSettings.read_private("store-key")
+        if not secret or not store_key:
+            return False
+        RemoteSettings.write_private(
+            "server/config.yaml", cls.render_config(dns_name, secret, store_key)
+        )
+        return True
+
+    @classmethod
     def write_files(
         cls, dns_name: str, secret: str, store_key: str, certificate: str, key: str
     ) -> None:
