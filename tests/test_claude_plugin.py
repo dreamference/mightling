@@ -35,11 +35,11 @@ def test_manifest_and_marketplace_name_mightling_at_the_package_version() -> Non
 
 
 def test_the_mcp_server_is_ling_delegate_mcp() -> None:
-    """`.mcp.json` declares one stdio server, `mightling`, running `ling delegate mcp`."""
+    """`.mcp.json` declares one stdio server, `mightling`, running `ling-delegate mcp`, not the `ling` on PATH."""
     servers = _json(PLUGIN / ".mcp.json")["mcpServers"]
     assert list(servers) == ["mightling"]
-    assert servers["mightling"]["command"] == "ling"
-    assert servers["mightling"]["args"] == ["delegate", "mcp"]
+    assert servers["mightling"]["command"] == "ling-delegate"
+    assert servers["mightling"]["args"] == ["mcp"]
 
 
 def test_the_subagent_reaches_only_watch_and_read() -> None:

@@ -11,7 +11,7 @@ Both crates depend only on `chrono`, `serde`, `serde_json`, `toml` (and `regex-l
 
 ## The `ling-delegate` binary
 
-On Linux, `ling-admin codex build` builds `ling-delegate` in the same Cargo run as `ling` (`-p ling-delegate --bin ling-delegate`) and installs it beside `ling` in `~/.local/share/dreamference/mightling/bin/`. It is **not** linked into `~/.local/bin` (the plugin starts `ling delegate mcp`; the standalone binary exists for a machine whose installed `ling` predates the command). A build is not current without it (`is_current`). The release carries `ling-delegate-<target>.gz` (Linux only, optional in `install.sh`, which also installs it without a link; listed in `scripts/package_mightling.sh`, `release-build.yml` and the fleet bundle). A release install has no source and no build: it gets the asset.
+On Linux, `ling-admin codex build` builds `ling-delegate` in the same Cargo run as `ling` (`-p ling-delegate --bin ling-delegate`) and installs it beside `ling` in `~/.local/share/dreamference/mightling/bin/`. It **is** linked into `~/.local/bin` (`link_onto_path`, `install.sh`), because the plugin starts `ling-delegate mcp` and must not depend on the `ling` version: the benchmark harness replaces the installed `ling` nightly with a pinned older build that has no `delegate` command. A build is not current without it (`is_current`). The release carries `ling-delegate-<target>.gz` (Linux only, optional in `install.sh`, which also installs and links it; listed in `scripts/package_mightling.sh`, `release-build.yml` and the fleet bundle). A release install has no source and no build: it gets the asset.
 
 ## Installing the plugin into Claude Code from a checkout
 
@@ -26,7 +26,7 @@ claude-plugin/
   skills/delegate/SKILL.md
 ```
 
-Prerequisite: `ling` on `PATH` (`~/.local/bin/ling`), built from a tree that has `ling delegate` (`.mcp.json` runs `ling delegate mcp` over stdio).
+Prerequisite: `ling-delegate` on `PATH` (`~/.local/bin/ling-delegate`, linked by `ling-admin codex build` and `install.sh`; `.mcp.json` runs `ling-delegate mcp` over stdio, so the plugin does not depend on the installed `ling`).
 
 Persistent install (the marketplace path), from the checkout's root:
 

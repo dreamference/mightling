@@ -314,11 +314,11 @@ def test_on_linux_a_build_without_the_delegate_binary_is_not_current(tmp_path, m
     assert CodexBrandedBuilder.is_current() is True
 
 
-def test_the_delegate_binary_is_installed_beside_ling_and_never_linked_onto_path():
+def test_the_delegate_binary_is_installed_beside_ling_and_linked_onto_path():
     script = (Path(__file__).resolve().parent.parent / "install.sh").read_text()
     assert "ling-signal ling-delegate" in script
-    assert "codex-code-mode-host|ling-signal|ling-delegate) ;;" in script
-    assert not hasattr(builder_module, "DELEGATE_PATH_LINK")
+    assert "codex-code-mode-host|ling-signal) ;;" in script
+    assert builder_module.DELEGATE_PATH_LINK.endswith("/.local/bin/ling-delegate")
 
 
 def test_on_linux_a_build_without_the_signal_bridge_is_not_current(tmp_path, monkeypatch):
@@ -378,7 +378,7 @@ def test_mightling_admin_and_the_web_commands_are_linked_onto_path_for_the_model
     assert not os.path.lexists(builder.SEARCH_PATH_LINK) and not os.path.lexists(builder.FETCH_PATH_LINK)
 
     installed = {}
-    for name in ("ling-search", "ling-fetch"):
+    for name in ("ling-search", "ling-fetch", "ling-delegate"):
         path = tmp_path / "install" / "bin" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("#!/bin/sh\n")
@@ -388,6 +388,7 @@ def test_mightling_admin_and_the_web_commands_are_linked_onto_path_for_the_model
     # The Rust binaries, not a console script of this virtualenv.
     assert os.readlink(builder.SEARCH_PATH_LINK) == installed["ling-search"]
     assert os.readlink(builder.FETCH_PATH_LINK) == installed["ling-fetch"]
+    assert str(Path(builder.DELEGATE_PATH_LINK).readlink()) == installed["ling-delegate"]
 
     # A real file of that name belongs to someone else and is left alone.
     os.remove(builder.ADMIN_PATH_LINK)

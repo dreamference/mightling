@@ -78,6 +78,10 @@ ADMIN_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-admin")
 SEARCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-search")
 FETCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-fetch")
 
+# The delegation plugin starts `ling-delegate mcp`, not `ling delegate mcp`: the installed `ling` can be
+# replaced by an older pinned build (the benchmark harness does) that has no `delegate` command.
+DELEGATE_PATH_LINK: Final[str] = str(Path.home() / ".local" / "bin" / "ling-delegate")
+
 # The agent's web commands, `ling-search` and `ling-fetch`: a small Rust crate of its own rather
 # than part of the launcher, so changing them never relinks Codex, and a static binary rather than
 # a console script, so they do not depend on this virtualenv. Built with its own lockfile into its
@@ -1087,6 +1091,7 @@ class CodexBrandedBuilder:
             ("ling-fetch", FETCH_PATH_LINK),
             ("ling-code", CODE_PATH_LINK),
             ("ling-docs", DOCS_PATH_LINK),
+            (DELEGATE_BIN_NAME, DELEGATE_PATH_LINK),
         ):
             binary = os.path.join(INSTALL_DIR, "bin", name)
             if os.access(binary, os.X_OK):
