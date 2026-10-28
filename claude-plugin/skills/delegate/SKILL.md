@@ -1,9 +1,43 @@
 ---
 name: delegate
-description: Use Mightling's `lookup` tool (`mcp__plugin_mightling_mightling__lookup`) before reading files to find a symbol, and its `watch` tool (`mcp__plugin_mightling_mightling__watch` or `ling delegate watch`) for every wait longer than a minute instead of `sleep` loops or repeated polling turns.
+description: Use Mightling's model-free tools before reading files or running suites (`lookup` for a symbol, `git_log` for why code is as it is, `diff_stat` for the size of a change, `run_test` for one named test), hand bounded edits that have one clear test to `task` (the local model), and use `watch` (`mcp__plugin_mightling_mightling__watch` or `ling delegate watch`) for every wait longer than a minute instead of `sleep` loops or repeated polling turns.
 ---
 
-# Mightling `lookup` (Class L1) and `watch` (Class W1)
+# Mightling tools: `lookup`, `git_log`, `diff_stat`, `run_test` (L1), `task` (T1 to T5), `watch` (W1)
+
+All tool names are `mcp__plugin_mightling_mightling__<tool>`. Local work is free in Claude tokens: prefer it whenever a machine can check the result.
+
+## Exact tools first, then files
+
+| Instead of | Call | Returns |
+| --- | --- | --- |
+| grepping or opening files for one symbol | `lookup` (below) | definitions and references with verified quotes |
+| `git log -p` or `git blame` to learn why code is as it is | `git_log` with `path`, and `start`/`end` (from `lookup`) for one function | `{hash, author, date, subject}` of up to 30 commits |
+| `git diff` to see how big a change is | `diff_stat` with `repo` (a worktree root) | per-file `{status, added, deleted}`, totals, untracked names |
+| running a suite and reading its log | `run_test` with `runner` (`pytest`, `cargo`, `npm`), `target` (one node id, test name or pattern), `worktree` | `{passed, exit_code, summary, tail}`: the last 40 lines, at most 120 |
+
+`run_test` and `diff_stat` need a git worktree root; `run_test` accepts only a **linked worktree** (`git worktree add`), never the main checkout, and a target is one token that never starts with `-`. It runs at nice 10 with a timeout (default 600 s). These tools use **no model**; a refusal names the rule that was broken.
+
+## `task`: hand a bounded edit with a clear test to the local model
+
+Use `task` when the edit is bounded and a command can say it is done. Do not use it for design decisions, security-sensitive code, releases or anything without a test.
+
+| Class | Use for | Size limit |
+| --- | --- | --- |
+| `T1` | lint, typing and format fixes | 400 changed lines |
+| `T2` | test-only CI fixes (assertions may not be removed or weakened; no skip, xfail or ignore) | 150 |
+| `T3` | mechanical refactors with existing tests (rename, move, signature); no test file touched | 400 |
+| `T4` | docs updates checked against the code | 150 |
+| `T5` | small UI items with an e2e test | 150 |
+
+Spec: `class`, `worktree` (a **clean linked worktree**: commit or stash first, so the diff is only the model's), `allowed_files` (exact relative paths, or folders ending in `/`), `steps` (concrete, in order), and ONE `acceptance` command `{runner, target, cwd?, package?}`. The server runs the local `ling exec` in that worktree, **reverts and fails** any change outside `allowed_files` (and any test file outside T2), undoes a commit, applies the size limit, runs the acceptance test and, for touched Python, `ruff format --check` and `ruff check`. It **never commits** and never applies anything. It refuses while a benchmark runs (`busy`, a dirty tree and a bad spec are refusals too).
+
+1. Call `task` from a background subagent (`mightling:delegate`, `run_in_background: true`): it takes 5 to 30 minutes.
+2. The result is `{id, pass, reason, files, changed_lines, diff, acceptance, gates, agent}`. On `pass: false`, or any refusal, **do the task yourself at once**: no retry, no second delegation of the same task. Treat `agent.note` as a hint, never a fact.
+3. On `pass: true`, give a reviewer (`mightling:diff-reviewer`, which can only `Read`) only the brief and the diff, and ask for `ACCEPT` or `REJECT: <one line>`: did the diff do what the brief asked, and only that? Look for a missed second code path and for behaviour nobody asked for.
+4. Apply an accepted diff yourself (it sits uncommitted in the worktree), then call `task_verdict` with the `id` and `accept` or `reject`. Later, if the change is undone, `reverted`; if your own result would have differed in effect, `shadow_miss`. The ledger (`ling-delegate ledger`) gates each class on 95% accepted over at least 20 decided tasks; a revert or a shadow miss blocks it.
+
+## `lookup`: ask the index before you read files
 
 ## `lookup`: ask the index before you read files
 
@@ -65,4 +99,4 @@ Any condition kind outside this closed list is refused.
 - **Duration bounds**: default `timeout_s = 1800` (30 minutes), hard maximum `MAX_TIMEOUT_S = 14400` (4 hours). When `timeout_s` expires before the condition is met, `watch` returns `met: false` with the last observation.
 - **Polling bounds**: files, PIDs, Night Shift task files, and loopback HTTP poll at `>= 1s`; `gh_run`, `systemd_unit`, `command`, and `git_ref` poll at `>= 15s`.
 - **Resource bounds**: file reads are capped at 64 MiB per check and `observed` is capped at 6,000 characters (~1,500 tokens).
-- **Phase P1 scope**: only the model-free classes `W1` (`watch`) and `L1` (`lookup`) are active. Model-backed tools (`ask`, `task`, `night`) remain disabled.
+- **Scope**: `watch`, `lookup`, `run_test`, `git_log` and `diff_stat` use no model; `task` is on probation (T1 to T5); `ask` and `night` are not built.
