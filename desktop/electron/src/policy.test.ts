@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { POLICY, airgapThread, namedPrompt, parsePolicy, threadPlace, vetOutgoing, type PromptSource, type WorkspaceSandbox } from "./policy";
+import { POLICY, airgapThread, levelMatters, namedPrompt, parsePolicy, threadPlace, vetOutgoing, type PromptSource, type WorkspaceSandbox } from "./policy";
 
 const WEB = path.join(__dirname, "..", "..", "..", "ling-rs", "web");
 
@@ -162,5 +162,29 @@ describe("the policy", () => {
     const file = JSON.parse(fs.readFileSync(path.join(WEB, "policy.json"), "utf8"));
     expect(() => parsePolicy({ ...file, scratchPrompts: ["unnamed"] })).toThrow();
     expect(() => parsePolicy({ ...file, promptOpeners: ["turn/start"] })).toThrow();
+  });
+
+  it("validates every section of policy.json and reports levelMatters accurately", () => {
+    const file = JSON.parse(fs.readFileSync(path.join(WEB, "policy.json"), "utf8"));
+    expect(() => parsePolicy(null)).toThrow();
+    expect(() => parsePolicy({ ...file, allowedRequests: "not-a-list" })).toThrow();
+    expect(() => parsePolicy({ ...file, allowedRequests: [123] })).toThrow();
+    expect(() => parsePolicy({ ...file, forkRequest: 123 })).toThrow();
+    expect(() => parsePolicy({ ...file, airgappedRefusalReasons: null })).toThrow();
+    expect(() => parsePolicy({ ...file, repoThreadParams: null })).toThrow();
+    expect(() => parsePolicy({ ...file, airgappedThreadConfig: null })).toThrow();
+    expect(() => parsePolicy({ ...file, promptThreadConfig: null })).toThrow();
+    expect(() => parsePolicy({ ...file, promptThreadConfig: { ask: null } })).toThrow();
+    expect(() => parsePolicy({ ...file, windowTools: null })).toThrow();
+    expect(() => parsePolicy({ ...file, windowTools: { bad: {} } })).toThrow();
+    expect(() => parsePolicy({ ...file, repoPrompts: ["unnamed"] })).toThrow();
+    expect(() => parsePolicy({ ...file, repoPrompts: ["ask"] })).toThrow();
+    expect(() => parsePolicy({ ...file, airgappedRefusedRequests: ["not/allowed"] })).toThrow();
+
+    expect(levelMatters(null)).toBe(false);
+    expect(levelMatters({ method: "initialized" })).toBe(false);
+    expect(levelMatters({ id: 1, method: "thread/shellCommand", params: {} })).toBe(true);
+    expect(levelMatters({ id: 1, method: "thread/start", params: {} })).toBe(true);
+    expect(levelMatters({ id: 1, method: "thread/list", params: {} })).toBe(false);
   });
 });

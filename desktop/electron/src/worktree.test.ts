@@ -140,6 +140,12 @@ describe("managed worktrees", () => {
     expect(fs.readFileSync(path.join(created.root, "src", "main.py"), "utf8")).toBe("print('from the worktree')\n");
     expect(run(source, "status", "--porcelain")).toBe("");
     await expect(worktree.handOff("toLocal", source, source, root, "t1")).rejects.toThrow("not a managed worktree");
+    await expect(worktree.handOff("toLocal", created.root, "relative", root, "t1")).rejects.toThrow("absolute path");
+    await expect(worktree.handOff("toWorktree", created.root, source, root, "t1")).rejects.toThrow("the worktree has uncommitted changes");
+
+    expect(worktree.defaultRoot(scratchHome)).toContain("worktrees");
+    expect(() => worktree.checkWorktreeRoot("relative")).toThrow("must be an absolute path");
+    await expect(worktree.restore(source, root, "not-a-sha")).rejects.toThrow("not a snapshot");
   });
 });
 

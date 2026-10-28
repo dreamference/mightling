@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { findEditors, execProgram, openCommand } from "./editors";
+import { findEditors, execProgram, openCommand, systemDataDirs } from "./editors";
 import * as git from "./git";
 
 const scratchHome = fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-home-"));
@@ -237,6 +237,80 @@ describe("git on a checkout the agent wrote the config of", () => {
     expect(git.gitEnv({ GIT_PROXY_COMMAND: "/tmp/x" }).GIT_PROXY_COMMAND).toBe("");
     expect(git.SAFE_CONFIG).toContain("gpg.ssh.defaultKeyCommand=");
   });
+
+  it("parses porcelain v2 headers, renames and conflicts, and handles diff/apply/discard/PR URL edge cases", async () => {
+    const raw = [
+      "# branch.oid (initial)",
+      "# branch.head (detached)",
+      "# branch.upstream origin/main",
+      "# branch.ab +2 -1",
+      "1 M. N... 100644 100644 100644 aaaaaaa bbbbbbb mod.txt",
+      "2 R. N... 100644 100644 100644 aaaaaaa bbbbbbb R100 new.txt",
+      "old.txt",
+      "u UU N... 100644 100644 100644 100644 aaaaaaa bbbbbbb ccccccc conflict.txt",
+      "? untracked.txt",
+      "",
+    ].join("\0");
+    const parsed = git.parseStatus("/repo", raw);
+    expect(parsed).toMatchObject({
+      root: "/repo",
+      branch: null,
+      head: null,
+      upstream: "origin/main",
+      ahead: 2,
+      behind: 1,
+    });
+    expect(parsed.files.map((f) => [f.path, f.from, f.staged, f.unstaged])).toEqual([
+      ["mod.txt", null, "M", "."],
+      ["new.txt", "old.txt", "R", "."],
+      ["conflict.txt", null, "U", "U"],
+      ["untracked.txt", null, ".", "?"],
+    ]);
+
+    const drivers = [
+      "worktree", "filter.a.process\nx",
+      "local", "filter.a.required\ntrue",
+      "local", "diff.b.textconv\nx",
+      "local", "diff.b.command\nx",
+      "local", "merge.c.driver\nx",
+      "local", "submodule.d.update\n!sh",
+      "local", "bad=key\nx",
+      "",
+    ].join("\0");
+    expect(git.driverOverridesFrom(drivers)).toEqual([
+      "diff.b.command=",
+      "diff.b.textconv=",
+      "filter.a.process=",
+      "filter.a.required=false",
+      "merge.c.driver=false",
+      "submodule.d.update=none",
+    ]);
+    expect(git.hardenedArgs(["-c", "k=v", "-C", "/r", "--git-dir=/g", "--bare", "fetch", "origin"]).slice(-3)).toEqual([
+      "fetch", "--upload-pack=git-upload-pack", "origin",
+    ]);
+
+    const r = repo();
+    await expect(git.discard(r, [])).rejects.toThrow("name at least one file");
+    await expect(git.apply(r, "   ", {})).rejects.toThrow();
+
+    const unborn = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-unborn-")));
+    run(unborn, "init", "-q");
+    expect(await git.log(unborn)).toEqual([]);
+    expect(await git.baseBranch(unborn)).toBeNull();
+    expect((await git.diff(unborn, "branch")).diff).toBe("");
+    expect(await git.originUrl(unborn)).toBeNull();
+    await expect(git.pullRequestUrl(unborn)).rejects.toThrow();
+    await expect(git.checkRoot("relative/path")).rejects.toThrow();
+
+    run(r, "checkout", "-q", "-b", "feat/test");
+    run(r, "remote", "add", "origin", "git@github.com:acme/widget.git");
+    expect(await git.originUrl(r)).toBe("git@github.com:acme/widget.git");
+    expect(await git.pullRequestUrl(r)).toContain("github.com/acme/widget/compare");
+    expect((await git.branches(r)).current).toBe("feat/test");
+    run(r, "remote", "set-url", "origin", "ssh://custom/repo");
+    run(r, "checkout", "-q", "--detach");
+    await expect(git.pullRequestUrl(r)).rejects.toThrow();
+  });
 });
 
 describe("editors", () => {
@@ -258,11 +332,16 @@ describe("editors", () => {
       expect(openCommand(found[0], "/r/a.txt", 12)).toEqual({ command: "/usr/share/code/code", args: ["--goto", "/r/a.txt:12"] });
       expect(openCommand(found[1], "/r/a.txt", 12)).toEqual({ command: "/opt/pycharm/bin/pycharm.sh", args: ["--line", "12", "/r/a.txt"] });
       expect(openCommand(found[1], "/r/a.txt", null).args).toEqual(["/r/a.txt"]);
+      expect(openCommand({ id: "sublime", name: "Sublime Text", command: "/bin/subl" }, "/r/a.txt", 9).args).toEqual(["/r/a.txt:9"]);
+      expect(openCommand({ id: "gedit", name: "gedit", command: "/bin/gedit" }, "/r/a.txt", 9).args).toEqual(["+9", "/r/a.txt"]);
+      expect(openCommand({ id: "gnome-text-editor", name: "Text Editor", command: "/bin/gte" }, "/r/a.txt", 9).args).toEqual(["/r/a.txt"]);
+      expect(() => openCommand({ id: "unknown", name: "Other", command: "/bin/other" }, "/r/a.txt", 9)).toThrow("no editor named unknown");
     } finally {
       process.env.PATH = savedPath;
     }
     expect(execProgram("env BAMF=1 subl %F")).toBe("subl");
     expect(execProgram("%F")).toBeNull();
+    expect(systemDataDirs().length).toBeGreaterThan(0);
   });
 });
 

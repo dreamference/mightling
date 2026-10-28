@@ -272,4 +272,73 @@ describe("incognito questions (DESKTOP_PARITY_CLAUDE §4.3)", () => {
     expect(sweepIncognito(root)).toBe(0);
     expect(sweepIncognito(path.join(root, "missing"))).toBe(0);
   });
+
+  it("tracks readiness, busy turns, serverRequests, observers, protocol errors and incognito through AppServer", async () => {
+    const dir = scratch("server-lifecycle");
+    nodeScript(dir, "ling", `const fs = require("fs");
+const args = process.argv.slice(2);
+if (args[0] === "prompt") { process.stdout.write("COMPOSED " + args[2]); process.exit(0); }
+if (args[0] === "airgapped") { process.stdout.write("Airgapped: off (stub)\\n"); process.exit(0); }
+let buf = "";
+process.stdin.on("data", (chunk) => {
+  buf += chunk;
+  let nl;
+  while ((nl = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, nl);
+    buf = buf.slice(nl + 1);
+    const msg = JSON.parse(line);
+    if (msg.method === "initialize") {
+      process.stdout.write(JSON.stringify({ id: msg.id, result: { userAgent: "ling" } }) + "\\n");
+    } else if (msg.method === "thread/start") {
+      process.stdout.write("\\n");
+      process.stdout.write("not-json-at-all\\n");
+      process.stdout.write(JSON.stringify({ id: msg.id, result: { thread: { id: "t-ask", cwd: msg.params.cwd } } }) + "\\n");
+      process.stdout.write(JSON.stringify({ method: "turn/started", params: { threadId: "t-ask", turn: { id: "turn-1" } } }) + "\\n");
+      process.stdout.write(JSON.stringify({ id: "req-1", method: "item/commandExecution/requestApproval", params: { threadId: "t-ask" } }) + "\\n");
+      process.stdout.write(JSON.stringify({ method: "serverRequest/resolved", params: { requestId: "req-1" } }) + "\\n");
+      process.stdout.write(JSON.stringify({ method: "turn/completed", params: { threadId: "t-ask", turn: { id: "turn-1" } } }) + "\\n");
+    }
+  }
+});
+`);
+    const delivered: ForView[] = [];
+    const observed: Record<string, unknown>[] = [];
+    const busyStates: boolean[] = [];
+    const server = new AppServer(dir, {
+      deliver: (message) => delivered.push(message),
+      busyChanged: (busy) => busyStates.push(busy),
+    });
+    server.observe((message) => {
+      observed.push(message as Record<string, unknown>);
+      return false;
+    });
+    const savedHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = dir;
+    try {
+      expect(server.running).toBe(false);
+      await expect(server.send({ id: 1, method: "thread/list", params: {} })).rejects.toThrow("not running");
+      expect(server.start().started).toBe(true);
+      expect(server.start().started).toBe(false);
+      expect(server.running).toBe(true);
+      expect(server.ready).toBe(false);
+
+      await server.send({ id: 1, method: "initialize", params: {} });
+      await until(() => delivered.some((m) => m.channel === "work://message" && typeof m.payload === "object" && m.payload !== null && "result" in m.payload));
+      await server.send({ method: "initialized" });
+      expect(server.ready).toBe(true);
+
+      await server.send({ id: 2, method: "thread/start", params: { prompt: "ask" } });
+      await until(() => busyStates.includes(true) && busyStates.at(-1) === false);
+      expect(delivered.some((m) => m.channel === "work://protocol-error" && m.payload === "not-json-at-all")).toBe(true);
+      expect(observed.some((m) => m.method === "turn/started")).toBe(true);
+
+      expect(typeof server.incognito("mark", "t-ask")).toBe("string");
+      expect(server.incognito("forget", "t-ask")).toBe(true);
+      expect(server.incognito("sweep")).toBe(0);
+    } finally {
+      server.stop();
+      if (savedHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = savedHome;
+    }
+  });
 });

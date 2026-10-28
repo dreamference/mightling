@@ -43,7 +43,15 @@ describe("the tab's comments and reviews, and Create pull request", () => {
 const fs = require("fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd() }) + "\\n");
-if (args[1] === "view") console.log(JSON.stringify({ comments: [{ author: { login: "ada" }, body: "Why 2 s?", createdAt: "2026-10-20T09:00:00Z" }], reviews: [] }));
+if (args[0] === "auth") {
+  if (process.env.GH_AUTH_FAIL === "1") { process.stderr.write("not logged in\\n"); process.exit(1); }
+  process.exit(0);
+}
+if (args[1] === "list") console.log(JSON.stringify([{ number: 5, title: "Fix cache", state: "OPEN", isDraft: false, author: { login: "ada" }, headRefName: "fix", baseRefName: "main", reviewDecision: null, updatedAt: "2026-10-20T09:00:00Z", url: "https://github.example/acme/fetcher/pull/5", additions: 3, deletions: 1 }]));
+else if (args[1] === "view" && args.includes("comments,reviews")) console.log(JSON.stringify({ comments: [{ author: { login: "ada" }, body: "Why 2 s?", createdAt: "2026-10-20T09:00:00Z" }], reviews: [] }));
+else if (args[1] === "view") console.log(JSON.stringify({ number: 12, title: "Retry", state: "OPEN", isDraft: false, author: { login: "ada" }, headRefName: "retry", baseRefName: "main", reviewDecision: "APPROVED", updatedAt: "2026-10-20T09:00:00Z", url: "https://github.example/acme/fetcher/pull/12", additions: 10, deletions: 2, body: "Details" }));
+else if (args[1] === "diff") console.log("diff --git a/a.ts b/a.ts\\n");
+else if (args[1] === "review") process.exit(0);
 else if (args[1] === "create") console.log("https://github.example/acme/fetcher/pull/16");
 `);
     fs.chmodSync(gh, 0o755);
@@ -106,5 +114,28 @@ else if (args[1] === "create") console.log("https://github.example/acme/fetcher/
     expect(ran()).toEqual([]);
     expect(branchName("release/1.7")).toBe("release/1.7");
     for (const bad of ["-x", "a b", "a..b", "a;b", "main.lock", "", 3]) expect(() => branchName(bad)).toThrow();
+  });
+
+  it.skipIf(scriptOnly)("handles pr/list across all inboxes, pr/view, pr/diff, pr/review, auth status and missing gh", async () => {
+    const off = gate("off");
+    expect((await handle({ type: "pr/list", root: dir, inbox: "review", thread: "w1" }, off) as unknown[]).length).toBe(1);
+    expect(await handle({ type: "pr/list", root: dir, inbox: "mine", thread: "w1" }, off)).toHaveLength(1);
+    expect(await handle({ type: "pr/list", root: dir, inbox: "open", thread: "w1" }, off)).toHaveLength(1);
+    await expect(handle({ type: "pr/list", root: dir, inbox: "closed" as never, thread: "w1" }, off)).rejects.toThrow("not an inbox");
+    expect((await handle({ type: "pr/view", root: dir, number: 12, thread: "w1" }, off) as { body: string }).body).toBe("Details");
+    expect(await handle({ type: "pr/diff", root: dir, number: 12, thread: "w1" }, off)).toContain("diff --git");
+    expect(await handle({ type: "pr/review", root: dir, number: 12, verdict: "approve", body: "", thread: "w1" }, off)).toBe("Submitted.");
+    expect(await handle({ type: "pr/review", root: dir, number: 12, verdict: "comment", body: "Looks good", thread: "w1" }, off)).toBe("Submitted.");
+
+    const { status } = await import("./prs");
+    expect(await status(dir)).toBe("Signed in.");
+    process.env.GH_AUTH_FAIL = "1";
+    try {
+      expect(await status(dir)).toContain("not logged in");
+    } finally {
+      delete process.env.GH_AUTH_FAIL;
+    }
+    process.env.MIGHTLING_GH = path.join(dir, "no-such-gh");
+    expect(await status(dir)).toContain("not installed");
   });
 });

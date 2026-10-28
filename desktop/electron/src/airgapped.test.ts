@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 
-import { airgappedOn, parseStatus, type StatusRun } from "./airgapped";
+import { airgapped, airgappedOn, parseStatus, setDefault, type StatusRun } from "./airgapped";
+import { nodeScript } from "./test-ling";
 
 describe("the air-gap status line", () => {
   it("is read from ling airgapped's first line", () => {
@@ -40,5 +43,24 @@ describe("the level a binding refusal reads", () => {
     const gone = answering({ here: "off" });
     expect(await airgappedOn("ling", "../x", "/no/such/folder", gone.run)).toBe(false);
     expect(gone.asked).toEqual([[["airgapped"], null]]);
+  });
+
+  it("runs the launcher binary to read status and set the default level", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-airgapped-test-"));
+    try {
+      const log = path.join(dir, "args.json");
+      const ling = nodeScript(dir, "ling", `const fs = require("fs");
+const args = process.argv.slice(2);
+fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify(args));
+if (args[1] === "fail") process.exit(1);
+process.stdout.write("Airgapped: " + (args[2] || "off") + " (user config)\\n");
+`);
+      expect(await airgapped(ling, null)).toEqual({ level: "off", source: "user config" });
+      expect(await setDefault(ling, "on")).toBe("Airgapped: on (user config)");
+      expect(JSON.parse(fs.readFileSync(log, "utf8"))).toEqual(["airgapped", "default", "on"]);
+      expect(await airgapped(path.join(dir, "missing-ling"), null)).toEqual({ level: "off", source: "unknown (ling airgapped did not answer)" });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
