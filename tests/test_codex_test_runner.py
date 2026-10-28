@@ -542,16 +542,19 @@ def test_run_guard_failures_and_build_abort(tmp_path, monkeypatch):
     )
 
     # 2. Disk space check handles OSError on lstat and returns False when free < needed.
+    real_lstat = runner_module.os.lstat
     (tmp_path / "target").mkdir(parents=True)
     (tmp_path / "target" / "blob").write_bytes(b"x")
     monkeypatch.setattr(
-        runner_module.os, "lstat", lambda path: (_ for _ in ()).throw(OSError("gone"))
+        runner_module.os, "lstat", lambda path, **kw: (_ for _ in ()).throw(OSError("gone"))
     )
     Usage = namedtuple("Usage", ["total", "used", "free"])
     monkeypatch.setattr(
         runner_module.shutil, "disk_usage", lambda path: Usage(100, 99, 1 * 2**30)
     )
     assert CodexTestRunner.run() == 1
+    # shutil.rmtree calls os.lstat too; give it the real one back before anything else runs.
+    monkeypatch.setattr(runner_module.os, "lstat", real_lstat)
 
     monkeypatch.setattr(
         runner_module.shutil, "disk_usage", lambda path: Usage(100 * 2**30, 0, 100 * 2**30)
