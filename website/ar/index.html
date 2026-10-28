@@ -92,7 +92,7 @@
 <div class="numbers">
 <div><b>68/100</b><span>مهمة من SWE-bench Verified، دون اتصال على DGX Spark واحد</span></div>
 <div><b>~48 tok/s</b><span>سرعة التوليد في عمل الوكيل، مسار واحد</span></div>
-<div><b>0</b><span>اتصالات بجهات خارجية، تؤكده مراجعة الخروج</span></div>
+<div><b>0</b><span>اتصالات بجهات خارجية، تؤكدها مراجعة الخروج</span></div>
 <div><b>$0</b><span>لكل رمز، إلى الأبد</span></div>
 </div>
 </div>
@@ -138,24 +138,24 @@
 <tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4)، DGX Spark واحد، دون اتصال<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">تقديري</span></td></tr>
 <tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4)، وضع refine، DGX Spark واحد، دون اتصال<a class="fn" href="#fn1">1</a></td><td class="num">69/100</td><td class="num">≈70% <span class="est">تقديري</span></td></tr>
 <tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
-<tr><td>GLM-4.6 (Z.ai's agent)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
+<tr><td>GLM-4.6 (وكيل Z.ai)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
 <tr><td>Kimi K2.5, high (mini-SWE-agent)<a class="fn" href="#fn4">4</a></td><td class="num">70/100</td><td class="num">70.8%</td></tr>
 <tr><td>DeepSeek V3.2, high (mini-SWE-agent)<a class="fn" href="#fn5">5</a></td><td class="num">70/100</td><td class="num">70.0%</td></tr>
-<tr><td>Claude Opus 4.5, four agents<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
+<tr><td>Claude Opus 4.5، أربعة وكلاء<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
 <tr><td>Gemini 3 Pro (live-SWE-agent)<a class="fn" href="#fn7">7</a></td><td class="num">79/100</td><td class="num">77.4%</td></tr>
 <tr class="group"><td colspan="3">نماذج مفتوحة أصغر (20–40 مليار معامل)</td></tr>
 <tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), test-time scaling<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
-<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), single attempt<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E)، محاولة واحدة<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
 <tr><td>Devstral Small 2512 (mini-SWE-agent)<a class="fn" href="#fn9">9</a></td><td class="num">57/100</td><td class="num">56.4%</td></tr>
 <tr class="group"><td colspan="3">منتجات وكلاء البرمجة، كما تنشرها جهاتها</td></tr>
-<tr><td>GitHub Copilot agent mode (VS Code), with Claude 3.7 Sonnet<a class="fn" href="#fn10">10</a></td><td class="ns">غير منشور</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
+<tr><td>GitHub Copilot agent mode (VS Code)، مع Claude 3.7 Sonnet<a class="fn" href="#fn10">10</a></td><td class="ns">غير منشور</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
 <tr><td>Claude Code<a class="fn" href="#fn11">11</a></td><td class="ns">غير منشور</td><td class="ns"><a href="https://www.anthropic.com/engineering/swe-bench-sonnet">غير منشور</a></td></tr>
 <tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">غير منشور</td><td class="ns"><a href="https://cursor.com/blog/composer">غير منشور</a></td></tr>
 </table>
 </div>
 <p class="sub after">اقرأها بوصفها وضعًا بين أقران لا ترتيبًا. على المهام المئة نفسها حلّ Mightling عددًا مساويًا لما حلّه Qwen3-Coder-480B وGLM-4.6، وهما نموذجان أكبر منه بأضعاف، لكن لكل صف وكيلًا مختلفًا وعتادًا مختلفًا، وفي صفوف لوحة الصدارة صور الاختبار الرسمية لمعمارية x86، بينما عملنا على صور مجتمعية لمعمارية arm64. في وضع refine تدرس جلسة أولى المهمة دون تغيير أي شيء، ثم تنفذها جلسة جديدة: فحلّ مهمة واحدة أكثر من الوضع الافتراضي (69 مقابل 68، وكل وضع حلّ مهام أخفق فيها الآخر)، بنحو 2.2 ضعف الوقت لكل مهمة، ولذلك يبقى اختياريًا (<code>ling --refine</code>).</p>
 <details class="method"><summary>كيف قُدِّرت نسبة ≈69%</summary>
-<p>المئة مهمة خُمس Verified، لذا فالرقم على المجموعة الكاملة تقدير. جرى ضبط نموذج استجابة المفردة (Rasch) ذي المعامل الواحد على النتائج لكل مهمة في جميع الإرسالات العامة الـ175 إلى Verified: لكل مهمة صعوبة ولكل نظام قدرة. وقدرة Mightling هي التي تفسّر حلّ 68 مهمة من هذه المئة؛ ونسبة ≈69% هي الدرجة المتوقعة لهذه القدرة على المهام الخمسمئة كلها (ويتفق معها انحدار بسيط على الدرجات المنشورة في حدود نقطة واحدة). وللتحقق، قُيِّمت كل إرسالة عامة على هذه المئة وحدها وتُنبِّئ درجتها الكلية بالطريقة نفسها: فبلغ الخطأ 2.4 نقطة (RMSE)، والنطاق أعلاه هو ±1.96 ضعف ذلك. كل رقم في الجدول يعيد إنتاجه <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> من البيانات العامة لكل مهمة في <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
+<p>المئة مهمة خُمس Verified، لذا فالرقم على المجموعة الكاملة تقدير. جرى ضبط نموذج استجابة المفردة (Rasch) ذي المعامل الواحد على النتائج لكل مهمة في جميع الإرسالات العامة الـ175 إلى Verified: لكل مهمة صعوبة ولكل نظام قدرة. وقدرة Mightling هي التي تفسّر حلّ 68 مهمة من هذه المئة؛ ونسبة ≈69% هي الدرجة المتوقعة لهذه القدرة على المهام الخمسمئة كلها (ويتفق معها انحدار بسيط على الدرجات المنشورة في حدود نقطة واحدة). وللتحقق، قُيِّمت كل إرسالة عامة على هذه المئة وحدها وجرى التنبؤ بدرجتها الكلية بالطريقة نفسها: فبلغ الخطأ 2.4 نقطة (RMSE)، والنطاق أعلاه هو ±1.96 ضعف ذلك. كل رقم في الجدول يعيد إنتاجه <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> من البيانات العامة لكل مهمة في <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
 <p>المئة مهمة موزعة على مستودعات Verified بنسبة مجموعتها الكاملة، من بين المهام التي تعمل بيئة اختبارها وتُتحقَّق على arm64 (يجتاز الإصلاح المرجعي الاختبار ويفشل التغيير الفارغ). تسجّل الأنظمة المنشورة درجة أقل بنقطة إلى نقطة ونصف على هذه المئة منها على الخمسمئة كلها، فالعيّنة ليست سهلة. وهي ليست إدراجًا في لوحة الصدارة: فتلك يصحّحها فريق SWE-bench على بنيته التحتية.</p>
 </details>
 <ol class="footnotes">
@@ -269,7 +269,7 @@ Networked git commands: none</pre></div>
 <tr><th></th><th>وكلاء البرمجة السحابية</th><th>Mightling</th></tr>
 <tr><td>وجهة شيفرتك</td><td>خوادمهم</td><td class="yes">لا مكان</td></tr>
 <tr><td>يتطلب حسابًا</td><td>نعم</td><td class="yes">لا</td></tr>
-<tr><td>التكلفة لكل رمز</td><td>بالقياس</td><td class="yes">صفر</td></tr>
+<tr><td>التكلفة لكل رمز</td><td>حسب الاستخدام</td><td class="yes">صفر</td></tr>
 <tr><td>حدود الاستخدام</td><td>نعم</td><td class="yes">لا</td></tr>
 <tr><td>يعمل مع فصل الشبكة</td><td>لا</td><td class="yes">نعم</td></tr>
 <tr><td>يمكنك التحقق مما يخرج</td><td>لا</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
@@ -292,7 +292,7 @@ Networked git commands: none</pre></div>
 <h2>الورقة</h2>
 <div class="pillar">
 <h3><a href="paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
-<p class="note-small">dgxcoder · October 2026</p>
+<p class="note-small">dgxcoder · أكتوبر 2026</p>
 <p>نعرض التصميم المعماري ونموذج القدرات الصوري والتقييم التجريبي لـ Mightling Desktop، وهو بيئة سطح مكتب مفتوحة المصدر تتحدث بروتوكول app-server نفسه الذي يتحدثه عميل سطح المكتب لدى المورّد الأصلي، وتحتفظ بالإعدادات الافتراضية المتوافقة مع Codex، وتشغّل الاستدلال على عتاد المستخدم نفسه، وتحصر كل أمر معزول داخل محطة العمل حين يفعّل المستخدم <code>/airgapped on</code>.</p>
 <p><a href="paper/desktop-architecture.pdf">اقرأ الورقة (PDF)</a></p>
 </div>
@@ -336,7 +336,7 @@ Networked git commands: none</pre></div>
 <p>لا يجري هذا الموقع أي طلبات إلى جهات خارجية: بلا متتبّعات ولا تحليلات ولا خطوط خارجية.</p>
 </div>
 <div>
-<p><a href="https://github.com/dreamference/mightling">GitHub</a> · <a href="https://github.com/dreamference/mightling/issues">المشكلات</a> · <a href="https://github.com/dreamference/mightling/blob/main/LICENSE">الرخصة</a></p>
+<p><a href="https://github.com/dreamference/mightling">GitHub</a> · <a href="https://github.com/dreamference/mightling/issues">Issues</a> · <a href="https://github.com/dreamference/mightling/blob/main/LICENSE">الرخصة</a></p>
 </div>
 </div>
 </div>
