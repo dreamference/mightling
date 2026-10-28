@@ -2,19 +2,32 @@
 //! (`specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md` §4.2).
 
 use crate::classes::{CLASSES, format_table};
+use crate::exec::SystemRunner;
 use crate::lookup::{LookupRequest, SystemIndex, execute as lookup_execute};
 use crate::mcp::serve_stdio;
+use crate::task::{Ledger, TaskEnv, TaskRequest, execute as task_execute, format_stats, record_verdict};
+use crate::tools::{DiffStatRequest, GitLogRequest, RunTestRequest, diff_stat, git_log, run_test};
 use crate::watch::{Probe, SystemProbe, WatchRequest, execute};
 
 const USAGE: &str = "\
 Usage: ling delegate <command> [options]
 
 Commands:
-  mcp                       Run the Mightling delegation MCP stdio server (Phase P1: watch and lookup)
+  mcp                       Run the Mightling delegation MCP stdio server
   lookup <op> <name> [opts] Exact answers from the code index, no model: op is def, refs, callers, impl
                             or outline (name is then a file); opts: --scope <path>, --repo <dir>, --limit <n>
+  run_test <runner> <target> --worktree <dir> [--cwd <dir>] [--package <p>] [--timeout <s>] [--lines <n>]
+                            Run one named test (pytest, cargo or npm) and print a bounded result
+  git_log <path> [--start <n> --end <n>] [--repo <dir>] [--limit <n>]
+                            History of a file or a line range
+  diff_stat [--repo <dir>]  The working tree's change summary against HEAD
+  task --json <file|->      Hand a bounded edit with one acceptance test to the local model
+                            (needs `task` in DREAMFERENCE_DELEGATE_ALLOW_CLASSES)
+  verdict <task-id> <accept|reject|reverted|shadow_miss>
+                            Record the reviewer's verdict in the ledger
+  ledger [--json]           Per-class acceptance of `task` from the ledger
   watch [options]           Wait for one condition from the closed list and print {met, observed, at}
-  classes [--json]          Show delegation task classes and their Phase P1 status
+  classes [--json]          Show delegation task classes and their status
 
 Watch options:
   --kind <kind>             Condition kind: file_line, pid_exit, http_status, gh_run,
@@ -69,10 +82,14 @@ pub fn run(args: &[String]) -> i32 {
         }
         "classes" => run_classes(rest),
         "lookup" => run_lookup(rest),
-        "ask" | "task" | "night" => {
-            eprintln!(
-                "ling delegate {sub}: disabled in Phase P1 (only the model-free classes W1 `watch` and L1 `lookup` are active)."
-            );
+        "run_test" | "run-test" => run_exact(rest, parse_run_test_args, |r| run_test(r, &SystemRunner)),
+        "git_log" | "git-log" => run_exact(rest, parse_git_log_args, |r| git_log(r, &SystemRunner)),
+        "diff_stat" | "diff-stat" => run_exact(rest, parse_diff_stat_args, |r| diff_stat(r, &SystemRunner)),
+        "task" => run_task(rest),
+        "verdict" => run_verdict(rest),
+        "ledger" => run_ledger(rest),
+        "ask" | "night" => {
+            eprintln!("ling delegate {sub}: not built (only watch, lookup, run_test, git_log, diff_stat and task are).");
             2
         }
         other => {
@@ -130,6 +147,169 @@ pub fn parse_lookup_args(args: &[String]) -> Result<LookupRequest, String> {
         i += 1;
     }
     Ok(req)
+}
+
+fn flag_pairs(args: &[String], known: &[&str], what: &str) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let flag = args[i].as_str();
+        if !known.contains(&flag) {
+            return Err(format!("unknown option for `ling delegate {what}`: {flag}"));
+        }
+        let value = args.get(i + 1).cloned().ok_or_else(|| format!("missing value for {flag}"))?;
+        out.push((flag.to_string(), value));
+        i += 2;
+    }
+    Ok(out)
+}
+
+fn number(value: &str, flag: &str) -> Result<usize, String> {
+    value.parse::<usize>().map_err(|_| format!("invalid {flag} value: {value:?}"))
+}
+
+/// Parses `run_test <runner> <target> --worktree W [--cwd D] [--package P] [--timeout S] [--lines N]`.
+pub fn parse_run_test_args(args: &[String]) -> Result<RunTestRequest, String> {
+    let (Some(runner), Some(target)) = (args.first(), args.get(1)) else {
+        return Err(format!("usage: ling delegate run_test <runner> <target> --worktree <dir>\n\n{USAGE}"));
+    };
+    let mut req = RunTestRequest { runner: runner.clone(), target: target.clone(), ..Default::default() };
+    for (flag, value) in flag_pairs(&args[2..], &["--worktree", "--cwd", "--package", "--timeout", "--lines"], "run_test")? {
+        match flag.as_str() {
+            "--worktree" => req.worktree = value,
+            "--cwd" => req.cwd = Some(value),
+            "--package" => req.package = Some(value),
+            "--timeout" => req.timeout_s = Some(number(&value, "--timeout")? as u64),
+            _ => req.lines = Some(number(&value, "--lines")?),
+        }
+    }
+    if req.worktree.is_empty() {
+        return Err("run_test needs --worktree <dir>".to_string());
+    }
+    Ok(req)
+}
+
+/// Parses `git_log <path> [--start N --end N] [--repo R] [--limit N]`.
+pub fn parse_git_log_args(args: &[String]) -> Result<GitLogRequest, String> {
+    let Some(path) = args.first() else {
+        return Err(format!("usage: ling delegate git_log <path> [options]\n\n{USAGE}"));
+    };
+    let mut req = GitLogRequest { path: path.clone(), ..Default::default() };
+    for (flag, value) in flag_pairs(&args[1..], &["--start", "--end", "--repo", "--limit"], "git_log")? {
+        match flag.as_str() {
+            "--start" => req.start = Some(number(&value, "--start")?),
+            "--end" => req.end = Some(number(&value, "--end")?),
+            "--repo" => req.repo = Some(value),
+            _ => req.limit = Some(number(&value, "--limit")?),
+        }
+    }
+    Ok(req)
+}
+
+/// Parses `diff_stat [--repo R]`.
+pub fn parse_diff_stat_args(args: &[String]) -> Result<DiffStatRequest, String> {
+    let mut req = DiffStatRequest::default();
+    for (_, value) in flag_pairs(args, &["--repo"], "diff_stat")? {
+        req.repo = Some(value);
+    }
+    Ok(req)
+}
+
+fn run_exact<A, T: serde::Serialize>(
+    args: &[String],
+    parse: fn(&[String]) -> Result<A, String>,
+    run: impl FnOnce(&A) -> Result<T, String>,
+) -> i32 {
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        print!("{USAGE}");
+        return 0;
+    }
+    match parse(args).and_then(|req| run(&req)) {
+        Ok(res) => {
+            println!("{}", serde_json::to_string(&res).unwrap_or_else(|_| "{}".to_string()));
+            0
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            2
+        }
+    }
+}
+
+fn run_task(args: &[String]) -> i32 {
+    let [flag, source] = args else {
+        eprintln!("usage: ling delegate task --json <file|->\n\n{USAGE}");
+        return 2;
+    };
+    if flag != "--json" {
+        eprintln!("unknown option for `ling delegate task`: {flag}");
+        return 2;
+    }
+    let raw = if source == "-" {
+        let mut buf = String::new();
+        let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf);
+        buf
+    } else {
+        match std::fs::read_to_string(source) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("{source}: {e}");
+                return 2;
+            }
+        }
+    };
+    let req: TaskRequest = match serde_json::from_str(&raw) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("invalid task spec: {e}");
+            return 2;
+        }
+    };
+    let allow = std::env::var(crate::classes::ALLOW_CLASSES_ENV).ok();
+    if !crate::classes::is_task_enabled(allow.as_deref().or(Some(crate::classes::DEFAULT_ALLOW_CLASSES)), &req.class) {
+        eprintln!("class {} is not enabled by {}", req.class, crate::classes::ALLOW_CLASSES_ENV);
+        return 2;
+    }
+    match task_execute(&req, &SystemRunner, &TaskEnv::from_env()) {
+        Ok(res) => {
+            println!("{}", serde_json::to_string(&res).unwrap_or_else(|_| "{}".to_string()));
+            if res.pass { 0 } else { 1 }
+        }
+        Err(err) => {
+            eprintln!("refused: {err}");
+            2
+        }
+    }
+}
+
+fn run_verdict(args: &[String]) -> i32 {
+    let [id, verdict] = args else {
+        eprintln!("usage: ling delegate verdict <task-id> <accept|reject|reverted|shadow_miss>");
+        return 2;
+    };
+    match record_verdict(&TaskEnv::from_env(), id, verdict) {
+        Ok(v) => {
+            println!("{v}");
+            0
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            2
+        }
+    }
+}
+
+fn run_ledger(args: &[String]) -> i32 {
+    let stats = Ledger::new(&TaskEnv::from_env()).stats();
+    match args {
+        [] => print!("{}", format_stats(&stats)),
+        [f] if f == "--json" => println!("{}", serde_json::to_string_pretty(&stats).unwrap_or_default()),
+        _ => {
+            eprintln!("usage: ling delegate ledger [--json]");
+            return 2;
+        }
+    }
+    0
 }
 
 fn run_classes(args: &[String]) -> i32 {
@@ -318,6 +498,20 @@ mod tests {
         assert_eq!(req.limit, Some(5));
         assert!(parse_lookup_args(&["def".to_string()]).is_err());
         assert!(parse_lookup_args(&["def".into(), "x".into(), "--bogus".into(), "1".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_the_exact_tool_flags() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let r = parse_run_test_args(&a(&["pytest", "t.py::x", "--worktree", "/w", "--timeout", "30", "--cwd", "c"])).unwrap();
+        assert_eq!((r.runner.as_str(), r.worktree.as_str(), r.timeout_s), ("pytest", "/w", Some(30)));
+        assert!(parse_run_test_args(&a(&["pytest", "t"])).is_err(), "worktree is required");
+        assert!(parse_run_test_args(&a(&["pytest", "t", "--worktree", "/w", "--bogus", "1"])).is_err());
+        let g = parse_git_log_args(&a(&["src/a.rs", "--start", "3", "--end", "9", "--limit", "5"])).unwrap();
+        assert_eq!((g.start, g.end, g.limit), (Some(3), Some(9), Some(5)));
+        assert!(parse_git_log_args(&a(&["a", "--start", "x"])).is_err());
+        assert_eq!(parse_diff_stat_args(&a(&["--repo", "/r"])).unwrap().repo.as_deref(), Some("/r"));
+        assert!(parse_diff_stat_args(&a(&["--nope", "1"])).is_err());
     }
 
     #[test]

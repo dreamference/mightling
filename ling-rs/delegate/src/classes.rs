@@ -1,13 +1,12 @@
 //! Task classes (`specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md` §6.1).
 //!
-//! Phase P1 builds the two model-free classes: `W1` (`watch`, turned on by the owner on 2026-10-27)
-//! and `L1` (`lookup`, exact answers from the code index). Every model-backed class is off and
-//! unbuilt here.
+//! The model-free classes `W1` (`watch`) and `L1` (`lookup`, `run_test`, `git_log`, `diff_stat`)
+//! are active; `T1` to `T5` (`task`) are built and on probation; `L2`, `L3` and `N1` are unbuilt.
 
 use serde::Serialize;
 
-/// Default value of `DREAMFERENCE_DELEGATE_ALLOW_CLASSES` in Phase P1.
-pub const DEFAULT_ALLOW_CLASSES: &str = "W1,L1";
+/// Default value of `DREAMFERENCE_DELEGATE_ALLOW_CLASSES`.
+pub const DEFAULT_ALLOW_CLASSES: &str = "W1,L1,task";
 
 /// Environment variable overriding enabled task classes.
 pub const ALLOW_CLASSES_ENV: &str = "DREAMFERENCE_DELEGATE_ALLOW_CLASSES";
@@ -16,8 +15,11 @@ pub const ALLOW_CLASSES_ENV: &str = "DREAMFERENCE_DELEGATE_ALLOW_CLASSES";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClassStatus {
-    /// Built and on (`W1`).
+    /// Built and on (`W1`, `L1`).
     Active,
+    /// Built and on, but still on probation: its results are reviewed, and its ledger decides
+    /// promotion (`T1` to `T5`).
+    Probation,
     /// Not built in P1.
     Off,
 }
@@ -26,6 +28,7 @@ impl ClassStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Active => "active",
+            Self::Probation => "probation",
             Self::Off => "off",
         }
     }
@@ -81,40 +84,40 @@ pub const CLASSES: &[ClassInfo] = &[
         name: "Lint, typing and format fixes",
         tool: "task",
         uses_model: true,
-        status: ClassStatus::Off,
-        note: "not built in P1",
+        status: ClassStatus::Probation,
+        note: "built; on probation: the caller reviews each diff and records task_verdict, the ledger gates promotion",
     },
     ClassInfo {
         code: "T2",
         name: "Test-only CI fixes",
         tool: "task",
         uses_model: true,
-        status: ClassStatus::Off,
-        note: "not built in P1",
+        status: ClassStatus::Probation,
+        note: "built; on probation: the caller reviews each diff and records task_verdict, the ledger gates promotion",
     },
     ClassInfo {
         code: "T3",
         name: "Mechanical refactors with tests",
         tool: "task",
         uses_model: true,
-        status: ClassStatus::Off,
-        note: "not built in P1",
+        status: ClassStatus::Probation,
+        note: "built; on probation: the caller reviews each diff and records task_verdict, the ledger gates promotion",
     },
     ClassInfo {
         code: "T4",
         name: "Docs updates checked against the code",
         tool: "task",
         uses_model: true,
-        status: ClassStatus::Off,
-        note: "not built in P1",
+        status: ClassStatus::Probation,
+        note: "built; on probation: the caller reviews each diff and records task_verdict, the ledger gates promotion",
     },
     ClassInfo {
         code: "T5",
         name: "Small UI items with e2e tests",
         tool: "task",
         uses_model: true,
-        status: ClassStatus::Off,
-        note: "not built in P1",
+        status: ClassStatus::Probation,
+        note: "built; on probation: the caller reviews each diff and records task_verdict, the ledger gates promotion",
     },
     ClassInfo {
         code: "N1",
@@ -135,6 +138,23 @@ pub fn is_w1_enabled(allow_classes_raw: Option<&str>) -> bool {
 /// Returns true if class `L1` (`lookup`) is allowed by the given `allow_classes` setting.
 pub fn is_l1_enabled(allow_classes_raw: Option<&str>) -> bool {
     is_class_enabled(allow_classes_raw, &["L1", "lookup"])
+}
+
+/// Returns true if the exact tools `run_test`, `git_log` and `diff_stat` (model-free, part of the
+/// `L1` family) are allowed: by `L1` or by the tool's own name.
+pub fn is_exact_tool_enabled(allow_classes_raw: Option<&str>, tool: &str) -> bool {
+    is_class_enabled(allow_classes_raw, &["L1", tool])
+}
+
+/// Returns true if `task` may serve `class` (`T1` to `T5`). Unlike the model-free classes, an
+/// empty or unset value does not enable it: a model-backed class is named explicitly, as `task`,
+/// as the class code, or as `all`.
+pub fn is_task_enabled(allow_classes_raw: Option<&str>, class: &str) -> bool {
+    let raw = allow_classes_raw.unwrap_or("").trim();
+    if raw.is_empty() {
+        return false;
+    }
+    is_class_enabled(Some(raw), &["task", class])
 }
 
 fn is_class_enabled(allow_classes_raw: Option<&str>, names: &[&str]) -> bool {
@@ -174,6 +194,25 @@ pub fn format_table() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_task_classes_are_on_probation_and_never_implicit() {
+        let t: Vec<_> = CLASSES.iter().filter(|c| c.tool == "task").collect();
+        assert_eq!(t.len(), 5);
+        assert!(t.iter().all(|c| c.status == ClassStatus::Probation && c.uses_model));
+        assert!(!is_task_enabled(None, "T1"));
+        assert!(!is_task_enabled(Some(""), "T1"));
+        assert!(!is_task_enabled(Some("W1,L1"), "T1"));
+        assert!(is_task_enabled(Some("W1,L1,task"), "T5"));
+        assert!(is_task_enabled(Some("T2"), "T2"));
+        assert!(!is_task_enabled(Some("T2"), "T1"));
+        assert!(is_task_enabled(Some("all"), "T4"));
+        assert!(!is_task_enabled(Some("none"), "T4"));
+        assert!(is_exact_tool_enabled(None, "run_test"));
+        assert!(is_exact_tool_enabled(Some("L1"), "git_log"));
+        assert!(is_exact_tool_enabled(Some("diff_stat"), "diff_stat"));
+        assert!(!is_exact_tool_enabled(Some("W1"), "diff_stat"));
+    }
 
     #[test]
     fn only_the_model_free_classes_are_active_in_p1() {

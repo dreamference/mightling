@@ -31,7 +31,7 @@ def test_manifest_and_marketplace_name_mightling_at_the_package_version() -> Non
         ("mightling", "./claude-plugin", __version__)
     ]
     assert set(manifest["userConfig"]) == {"node", "max_parallel", "allow_classes"}
-    assert manifest["userConfig"]["allow_classes"]["default"] == "W1,L1"
+    assert manifest["userConfig"]["allow_classes"]["default"] == "W1,L1,task"
 
 
 def test_the_mcp_server_is_ling_delegate_mcp() -> None:
@@ -42,12 +42,28 @@ def test_the_mcp_server_is_ling_delegate_mcp() -> None:
     assert servers["mightling"]["args"] == ["mcp"]
 
 
-def test_the_subagent_reaches_only_watch_and_read() -> None:
-    """`agents/delegate.md` lists the `watch` tool and `Read`, nothing else."""
+def test_the_subagent_reaches_only_the_plugin_tools_and_read() -> None:
+    """`agents/delegate.md` lists the plugin's own tools and `Read`: no shell, no editor, no `task_verdict`."""
     text = (PLUGIN / "agents" / "delegate.md").read_text(encoding="utf-8")
     front = text.split("---")[1]
     tools = [line.strip()[2:] for line in front.splitlines() if line.strip().startswith("- ")]
-    assert tools == ["mcp__plugin_mightling_mightling__watch", "Read"]
+    prefix = "mcp__plugin_mightling_mightling__"
+    assert tools == [
+        prefix + t for t in ("watch", "task", "lookup", "run_test", "git_log", "diff_stat")
+    ] + ["Read"]
+    assert "Bash" not in tools and "Edit" not in tools and "Write" not in tools
+
+
+def test_the_skill_hands_bounded_edits_to_task_with_its_rules() -> None:
+    """The skill names `task`, its classes, the review step and the verdict that feeds the ledger."""
+    text = (PLUGIN / "skills" / "delegate" / "SKILL.md").read_text(encoding="utf-8")
+    assert "mcp__plugin_mightling_mightling__<tool>" in text
+    for tool in ("run_test", "git_log", "diff_stat", "task_verdict"):
+        assert f"`{tool}`" in text
+    for cls in ("T1", "T2", "T3", "T4", "T5"):
+        assert f"| `{cls}` |" in text
+    for rule in ("never commits", "do the task yourself at once", "clean linked worktree", "95%"):
+        assert rule in text
 
 
 def test_the_skill_sends_every_long_wait_to_watch() -> None:
@@ -80,3 +96,12 @@ def test_nothing_in_the_repository_enables_the_plugin() -> None:
     for name in tracked:
         if name.endswith(".json") and (name.startswith(".claude/") or "/.claude/" in name):
             assert "enabledPlugins" not in (REPO / name).read_text(encoding="utf-8"), name
+
+
+def test_the_diff_reviewer_reads_and_nothing_else() -> None:
+    """`agents/diff-reviewer.md` can only `Read` and answers `ACCEPT` or `REJECT: <one line>`."""
+    text = (PLUGIN / "agents" / "diff-reviewer.md").read_text(encoding="utf-8")
+    front = text.split("---")[1]
+    tools = [line.strip()[2:] for line in front.splitlines() if line.strip().startswith("- ")]
+    assert tools == ["Read"]
+    assert "`ACCEPT`" in text and "`REJECT: <one line" in text

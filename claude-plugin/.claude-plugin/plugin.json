@@ -1,7 +1,7 @@
 {
   "name": "mightling",
   "version": "1.7.2",
-  "description": "Mightling local delegation plugin for Claude Code (Phase P1: the model-free classes, the W1 watch tool and the L1 lookup tool).",
+  "description": "Mightling local delegation plugin for Claude Code (the model-free tools watch, lookup, run_test, git_log and diff_stat, and the task tool that hands bounded edits with one test to the local model, on probation).",
   "author": {
     "name": "Dreamference"
   },
@@ -10,20 +10,20 @@
     "node": {
       "type": "string",
       "title": "Mightling node",
-      "description": "Optional Mightling node name or id (unused while only W1 and L1 are built: both are local).",
+      "description": "Optional Mightling node name or id (the host of the model server for task; empty means this machine).",
       "default": ""
     },
     "max_parallel": {
       "type": "number",
       "title": "Maximum parallel tasks",
-      "description": "Maximum concurrent delegated tasks (default 2; unused while only W1 and L1 are built).",
+      "description": "Maximum concurrent delegated tasks (default 2; the limit on running task calls).",
       "default": 2
     },
     "allow_classes": {
       "type": "string",
       "title": "Enabled delegation classes",
-      "description": "Comma-separated enabled delegation classes (Phase P1 supports the model-free W1 and L1).",
-      "default": "W1,L1"
+      "description": "Comma-separated enabled delegation classes: the model-free W1 and L1 (watch, lookup, run_test, git_log, diff_stat), and task (T1 to T5, on probation) or a class code such as T2.",
+      "default": "W1,L1,task"
     }
   }
 }
