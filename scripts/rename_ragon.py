@@ -38,17 +38,22 @@ EXCLUDE_FILES = {
     "dreamference/chat/retired_web_chat.py",
     "install.sh",
     "install.ps1",
+    "desktop/electron/predecessor.json",  # names Mightling on purpose (the desktop identity)
+    "desktop/electron/windows/predecessor.nsh",
     ".github/workflows/release.yml",
     # the migration modules: the overlay brings them in their final names
     "ling-rs/src/rename.rs",
+    "ragon-rs/src/rename.rs",
     "dreamference/cli/legacy_name_migration.py",
     "tests/test_legacy_name_migration.py",
 }
 EXCLUDE_PREFIXES = (
     "codex/",
+    "docs/dev/ragon-release/",  # the release notes for the rename name Mightling on purpose
     "desktop/ui/src/protocol/",
     "tests/fixtures/code_index/",
     "ling-docs-rs/eval/",  # content only: the corpus and its checksums stay as published
+    "ragon-docs-rs/eval/",  # the same folder after the rename (the leftover check runs on both)
     "specs/DREAMFERENCE_RELEASE_1.",  # release notes 1.4 to 1.8 (history)
     "paper/puffin.",
     "scripts/ragon_overlay/",
@@ -112,8 +117,10 @@ COMPILED = [(re.compile(a), b) for a, b in RULES]
 LINK_RULE = re.compile(r"DREAMFERENCE_(MIGHTLING_LING|MIGHTLING|LING_ENGINE)_([A-Z0-9_]*)(?=\.md)")
 LINK_REPL = {"MIGHTLING_LING": "RAGON", "MIGHTLING": "RAGON", "LING_ENGINE": "RAGON_ENGINE"}
 
+# Puffin is the name before Mightling: the bird, the 1.4.x transition assets and the legacy names stay
+# (the rename of the build caches and the AppArmor profile is in RULES), so the check does not look for it.
 # What the leftover check looks for, after the protected words are masked.
-LEFTOVER = re.compile(r"mightling|(?<![A-Za-z0-9])ling(?![A-Za-z])|puffin|\.lingignore", re.I)
+LEFTOVER = re.compile(r"mightling|(?<![A-Za-z0-9])ling(?![A-Za-z])|\.lingignore", re.I)
 
 # A prose line that talks about the rename itself or names an old name on purpose stays as it is.
 LEGACY_LINE = re.compile(
@@ -301,13 +308,20 @@ def run(root, files, dry, report):
             sys.exit(f"collision: {old} and {seen.get(target, target)} both become {target}")
         seen[target] = old
     if not dry:
+        subprocess.run(
+            ["git", "-C", root, "add", "-A"], check=True
+        )  # git mv of a submodule wants .gitmodules staged
         for old, target in renames:
-            pathlib.Path(os.path.dirname(os.path.join(root, target)) or root).mkdir(exist_ok=True, parents=True)
+            pathlib.Path(os.path.dirname(os.path.join(root, target)) or root).mkdir(
+                exist_ok=True, parents=True
+            )
             subprocess.run(["git", "-C", root, "mv", old, target], check=True)
         for old, _ in renames:
             folder = os.path.dirname(os.path.join(root, old))
             while (
-                folder != os.path.abspath(root) and pathlib.Path(folder).is_dir() and not os.listdir(folder)
+                folder != os.path.abspath(root)
+                and pathlib.Path(folder).is_dir()
+                and not os.listdir(folder)
             ):
                 pathlib.Path(folder).rmdir()
                 folder = os.path.dirname(folder)

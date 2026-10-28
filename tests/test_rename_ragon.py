@@ -192,3 +192,13 @@ def test_overlay_hash_guard(tree):
     with pytest.raises(SystemExit):
         rr.apply_overlay(str(tree), False)
     assert Path(tree / "docs/new.md").exists()
+
+
+def test_predecessor_files_and_the_webview_id():
+    for path in (
+        "desktop/electron/predecessor.json",
+        "desktop/electron/windows/predecessor.nsh",
+        "docs/dev/ragon-release/notes.md",
+    ):
+        assert rr.content_excluded(path)
+    assert rr.transform('"dev.dreamference.mightling"') == '"dev.dreamference.ragon"'
