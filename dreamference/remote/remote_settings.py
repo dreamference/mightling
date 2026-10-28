@@ -46,6 +46,27 @@ CLIENT_URL: Final[str] = (
     "https://github.com/netbirdio/netbird/releases/download/v{version}/netbird_{version}_linux_{arch}.tar.gz"
 )
 
+# The public certificate for the box's name (owner's decision, 2026-10-28, spec §15): lego, the ACME
+# client, pinned by release and SHA-256 (lego_5.5.2_checksums.txt), run as the user with a DNS-01
+# challenge in the owner's Cloudflare zone. The key and the certificate stay on the node.
+LEGO_VERSION: Final[str] = "5.5.2"
+LEGO_ARCHIVES: Final[dict[str, str]] = {
+    "amd64": "2a35505089e7772c92e1e9ac144df91151ef2eca8568630db0ff91fca06d9bef",
+    "arm64": "15b14ec2ab14fde69cc8396eb0204c5ce4327e31a486953225a6059b26db3e8c",
+}
+LEGO_URL: Final[str] = (
+    "https://github.com/go-acme/lego/releases/download/v{version}/lego_v{version}_linux_{arch}.tar.gz"
+)
+ACME_PRODUCTION: Final[str] = "https://acme-v02.api.letsencrypt.org/directory"
+ACME_STAGING: Final[str] = "https://acme-staging-v02.api.letsencrypt.org/directory"
+# The Cloudflare API token with DNS edit on the zone (the owner's file, never printed).
+CLOUDFLARE_TOKEN_FILE: Final[str] = "~/.config/dreamference/cloudflare-token"
+CLOUDFLARE_API: Final[str] = "https://api.cloudflare.com/client/v4"
+# Renewed when fewer days remain (or earlier when the CA's renewal information asks).
+PUBLIC_RENEW_DAYS: Final[int] = 30
+CERTIFICATE_SERVICE_UNIT: Final[str] = "mightling-remote-certificate.service"
+CERTIFICATE_TIMER_UNIT: Final[str] = "mightling-remote-certificate.timer"
+
 # The overlay's DNS domain: NetBird's default (the user's decision, 2026-10-10).
 OVERLAY_DOMAIN: Final[str] = "netbird.selfhosted"
 
@@ -169,6 +190,16 @@ class RemoteSettings:
         except OSError:
             return None
         return text or None
+
+    @classmethod
+    def public_certificate(cls) -> bool:
+        """Whether the control plane presents the public certificate.
+
+        Returns:
+            bool: True when `remote.json` records it (`remote certificate issue`).
+        """
+        record = cls.read()
+        return bool(record and record.get("public_certificate"))
 
     @classmethod
     def node_peer_name(cls, node_id: str) -> str:
