@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from dreamference.node.node_provisioner import NodeProvisioner
 
 ENGINE: Final[str] = "engine"
+DERIVE_FLAG: Final[str] = "-y"
 
 DOCKER_DAEMON_JSON: Final[str] = "/etc/docker/daemon.json"
 DOCKER_SETTINGS: Final[dict[str, Any]] = {
@@ -182,11 +183,25 @@ class NodeRoleProvisioner:
         Returns:
             bool: True once the key is in `~/.ssh/authorized_keys`.
         """
+        if session.identity is None:
+            return self.provisioner._fail(host, "authorise the key", "no key here", "")
         public = Path(f"{session.identity}.pub")
-        if session.identity is None or not public.is_file():
-            return self.provisioner._fail(
-                host, "authorise the key", f"no {public} here", "ssh-keygen -t ed25519"
-            )
+        if not public.is_file():
+            # A main node with no `~/.ssh/id_ed25519` (its keys are named per machine) makes the one
+            # key the role needs, as `ssh-keygen -t ed25519` would, or restores the missing half.
+            private = Path(session.identity)
+            if private.is_file():
+                command = ["ssh-keygen", DERIVE_FLAG, "-f", str(private)]
+            else:
+                command = ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(private)]
+            if not self._change(
+                host,
+                f"make {public.name} on this machine (the key the role authorises)",
+                lambda: self._make_key(command, private, public),
+            ):
+                return False
+            if self.dry_run:
+                return True
         key = public.read_text().strip()
         found = session.run(
             f"grep -qF {shlex.quote(' '.join(key.split()[:2]))} ~/.ssh/authorized_keys"
@@ -201,6 +216,27 @@ class NodeRoleProvisioner:
                 input_text=key + "\n",
             ),
         )
+
+    @staticmethod
+    def _make_key(command: list[str], private: Path, public: Path) -> subprocess.CompletedProcess:
+        """Run `ssh-keygen` for the main node's key; a derived public half is written to `public`.
+
+        Args:
+            command: The `ssh-keygen` command line.
+            private: The private key's path.
+            public: The public key's path.
+
+        Returns:
+            subprocess.CompletedProcess: The result, a failure when `ssh-keygen` is missing.
+        """
+        try:
+            private.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            answer = subprocess.run(command, capture_output=True, text=True, check=False)
+            if answer.returncode == 0 and command[1] == DERIVE_FLAG:
+                public.write_text(answer.stdout)
+            return answer
+        except OSError as error:
+            return subprocess.CompletedProcess(command, 1, "", str(error))
 
     def docker_daemon(self, host: str, session: FleetSession) -> bool:
         """Merge the nvidia runtime and `max-download-attempts` into daemon.json, keeping the rest.

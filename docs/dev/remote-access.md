@@ -124,6 +124,7 @@ New GB10s and a laptop that are not on the node's LAN and have never had `ling`.
    ```
 
    A bare name is tried as `<name>.netbird.selfhosted` before `<name>.local`; the pairing record keeps `overlay_name`, so every later connection (`node run`, lanes, `sync-model`, Night Shift) resolves that name and never browses mDNS. A node that is on the LAN as well still falls back to the browse. Steps 1 to 10 of "Provisioning a node with a role" in [node.md](node.md) run unchanged: nothing in them needs the LAN (the advert `node enable` publishes goes to the house LAN and is harmless).
+   Rehearsed 2026-10-28 in a fresh arm64 Ubuntu 24.04 container with systemd (join line, overlay, `gx10-remote` alias, `provision --dry-run --model-source hf`, one small Hub file): the join works on a machine with no curl or sshd. Found and fixed: a main node with no `~/.ssh/id_ed25519` (this one names its keys per machine) failed `--role` at "authorise the key"; provision now makes that key (named in the dry run). The password is asked even for one host with `--role`.
 5. **Check the path before the big copy:** `netbird status -d` on the main node must show the new peer as `P2P`, not `Relayed`. A relayed path sends 24 GB through the rented box.
 
 ### The model from Hugging Face (`--model-source hf`)

@@ -45,7 +45,8 @@ printf '%s\n' "$KEY" > "$work/key"
 need() { command -v "$1" >/dev/null 2>&1; }
 if ! need curl || ! need sshd; then
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq && apt-get install -y -qq curl openssh-server
+  echo "Installing curl and the SSH server..."
+  apt-get update -qq >/dev/null && apt-get install -y -qq curl openssh-server >/dev/null
 fi
 if ! need netbird || [ "$(netbird version 2>/dev/null | head -n1)" != "$VERSION" ]; then
   url="@URL@"
