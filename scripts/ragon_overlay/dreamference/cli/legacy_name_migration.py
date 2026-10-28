@@ -95,8 +95,18 @@ LEGACY_LINKS: Final[tuple] = (
     "ling-delegate",
     "ling-admin",
 )
-# Units that must not be running while the install folder moves.
-BUSY_UNIT_PATTERNS: Final[tuple] = ("ling-swe-*", "ragon-swe-*", "mightling-night*", "ragon-night*")
+# Units that must not be running while anything moves: SWE-bench runs, Night Shift and node jobs (`ragon`
+# waits for the same ones, rename.rs).
+BUSY_UNIT_PATTERNS: Final[tuple] = (
+    "ling-swe-*",
+    "mightling-swe-*",
+    "ragon-swe-*",
+    "mightling-night*",
+    "ragon-night*",
+    "puffin-night*",
+    "mightling-job-*",
+    "ragon-job-*",
+)
 # `1` migrates even from a source tree (to test the migration on purpose, in a scratch HOME); `0`
 # never migrates. Unset, the migration runs only from an installed release. `ragon` reads the same.
 OPT_IN_ENV: Final[str] = "RAGON_LEGACY_MIGRATION"
@@ -153,7 +163,7 @@ class LegacyNameMigration:
 
     @classmethod
     def busy_units(cls) -> list[str]:
-        """The running user units of a SWE-bench run or Night Shift.
+        """The running user units of a SWE-bench run, Night Shift or a node job.
 
         Returns:
             list[str]: The unit names; empty when none (or when systemctl cannot be asked).
@@ -182,8 +192,9 @@ class LegacyNameMigration:
     def run(cls) -> list[str]:
         """Runs every step and prints a notice when one did something.
 
-        From a source tree it does nothing and says nothing (`allowed`); while a SWE-bench run or Night Shift
-        is active it waits for the next command.
+        From a source tree it does nothing and says nothing (`allowed`); while a SWE-bench run, Night Shift
+        or a node job is active it changes nothing and waits for the next command (saying so when anything
+        old is left).
 
         Returns:
             List[str]: What was done, one line per step; empty when there was nothing old.
@@ -191,11 +202,12 @@ class LegacyNameMigration:
         if not cls.allowed():
             return []
         busy = cls.busy_units()
-        if busy and cls.anything_old():
-            print(
-                f"Mightling is now Ragon: the migration waits for {', '.join(busy)} to finish.",
-                file=sys.stderr,
-            )
+        if busy:
+            if cls.anything_old():
+                print(
+                    f"Mightling is now Ragon: the migration waits for {', '.join(busy)} to finish.",
+                    file=sys.stderr,
+                )
             return []
         done: list[str] = []
         for step in (

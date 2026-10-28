@@ -160,6 +160,25 @@ const WINDOWS_PROGRAMS: &[(&str, &str)] = &[
 ];
 /// Folders of the moved home that hold git worktrees, repaired after the move.
 const WORKTREE_FOLDERS: &[&str] = &["worktrees", "chat-repos", "night"];
+/// User units of a SWE-bench run, a Night Shift run or a node job: nothing moves under them
+/// (specs/DREAMFERENCE_RENAME_RAGON.md §7). `ragon-admin` waits for the same units.
+#[cfg(target_os = "linux")]
+const BUSY_UNIT_PATTERNS: &[&str] = &[
+    "ling-swe-*",
+    "mightling-swe-*",
+    "ragon-swe-*",
+    "mightling-night*",
+    "ragon-night*",
+    "puffin-night*",
+    "mightling-job-*",
+    "ragon-job-*",
+];
+/// The lock a Night Shift run holds, under the old home.
+#[cfg(target_os = "linux")]
+const NIGHT_RUNNER_LOCK: &str = "night/runner.lock";
+/// How long `systemctl` may take to answer before the units count as not running.
+#[cfg(target_os = "linux")]
+const SYSTEMCTL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// What a migration did, one line per step; empty when there was nothing to do.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -197,8 +216,21 @@ impl Report {
 /// The `~/.puffin` home is copied by [`carry_over_home`], which `use_ragon_home` calls when it
 /// creates the new home; `~/.mightling` is moved here, because a move is what keeps the sessions,
 /// worktrees and queues whole.
+///
+/// While anything old is left and a SWE-bench run, a Night Shift run or a node job is active
+/// ([`busy`]), nothing moves: the report says what the migration waits for and the next start tries
+/// again. Once nothing old is left, `systemctl` is not asked at all (no process on every start).
 pub fn migrate(home: &Path, cwd: &Path, config_path: Option<&Path>) -> Report {
     let mut report = Report::default();
+    if anything_old(home) {
+        let busy = busy(home);
+        if !busy.is_empty() {
+            report
+                .lines
+                .push(format!("the migration waits for {} to finish", busy.join(", ")));
+            return report;
+        }
+    }
     move_install_dir(home, &mut report);
     copy_windows_install(home, &mut report);
     relink(home, &mut report);
@@ -232,6 +264,92 @@ pub fn migrate(home: &Path, cwd: &Path, config_path: Option<&Path>) -> Report {
         rename_if_free(&home.join(old), &home.join(new), &mut report);
     }
     report
+}
+
+/// What must finish before anything moves: the running units of [`BUSY_UNIT_PATTERNS`] and a Night
+/// Shift run holding its lock in `~/.mightling`. Linux only; any failure to ask counts as not busy.
+pub fn busy(home: &Path) -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut found = busy_units();
+        if night_runner_holds(&home.join(MIGHTLING_HOME_DIR).join(NIGHT_RUNNER_LOCK)) {
+            found.push("the Night Shift run".to_string());
+        }
+        found
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = home;
+        Vec::new()
+    }
+}
+
+/// The running user units that match [`BUSY_UNIT_PATTERNS`]. Never asked under `cargo test`, where
+/// the answer would be the developer's machine's.
+#[cfg(all(target_os = "linux", not(test)))]
+fn busy_units() -> Vec<String> {
+    use std::io::Read;
+    use std::process::Command;
+    use std::process::Stdio;
+    let Ok(mut child) = Command::new("systemctl")
+        .args(["--user", "list-units", "--state=running", "--no-legend", "--plain"])
+        .args(BUSY_UNIT_PATTERNS)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return Vec::new();
+    };
+    let started = std::time::Instant::now();
+    let succeeded = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if started.elapsed() < SYSTEMCTL_TIMEOUT => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+        }
+    };
+    let mut text = String::new();
+    if !succeeded || child.stdout.take().is_none_or(|mut out| out.read_to_string(&mut text).is_err()) {
+        return Vec::new();
+    }
+    text.lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .map(str::to_string)
+        .collect()
+}
+
+#[cfg(all(target_os = "linux", test))]
+fn busy_units() -> Vec<String> {
+    let _ = (SYSTEMCTL_TIMEOUT, BUSY_UNIT_PATTERNS);
+    Vec::new()
+}
+
+/// Whether another process holds the Night Shift runner's lock (`flock`, as the runner takes it).
+/// A missing file, or one that cannot be opened, is not held.
+#[cfg(target_os = "linux")]
+fn night_runner_holds(lock: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(lock) else {
+        return false;
+    };
+    matches!(file.try_lock_shared(), Err(std::fs::TryLockError::WouldBlock))
+}
+
+/// Whether anything of an old installation is left to move: an old install folder, an old command
+/// link or an unmoved `~/.mightling`.
+pub fn anything_old(home: &Path) -> bool {
+    LEGACY_INSTALL_DIRS.iter().any(|dir| home.join(dir).is_dir())
+        || LEGACY_LINKS.iter().any(|name| {
+            std::fs::symlink_metadata(home.join(".local/bin").join(name))
+                .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        })
+        || unmoved_home(home).is_some()
 }
 
 fn rename_if_free(from: &Path, to: &Path, report: &mut Report) {
