@@ -906,3 +906,37 @@ def test_bundle_from_release_downloads_with_gh_and_caches_tagged_release(
     assert latest is not None and FleetBundle.version(latest) == "latest"
     assert len(gh_calls) == 3
 
+
+def test_bundle_rejects_empty_release_version_and_passes_valid_version(
+    tmp_path, monkeypatch, capsys
+):
+    from dreamference.node.fleet_bundle import FleetBundle
+
+    release_calls = []
+    monkeypatch.setattr(
+        FleetBundle,
+        "from_release",
+        classmethod(lambda cls, version: release_calls.append(version) or (tmp_path / "rel")),
+    )
+    assert FleetBundle.build("release=") is None
+    assert "needs a version" in capsys.readouterr().out
+    assert release_calls == []
+
+    for empty in ("release=", "release=v"):
+        with pytest.raises(ValueError, match="needs a version"):
+            FleetBundle.expected_version(empty)
+
+    assert FleetBundle.expected_version("release=1.2.3") == "v1.2.3"
+    assert FleetBundle.build("release=1.2.3") == tmp_path / "rel"
+    assert release_calls == ["1.2.3"]
+
+
+def test_a_dry_run_with_empty_release_version_prints_error_and_does_not_crash(fleet, capsys):
+    FakeSession.machines = {"spark-1": StandIn()}
+    assert provision(["spark-1"], dry_run=True, source="release=") == 0
+    assert FakeSession.machines["spark-1"].commands == []
+    out = capsys.readouterr().out
+    assert "needs a version" in out
+    assert "nothing, --from release= needs a version" in out
+
+

@@ -4112,6 +4112,28 @@ def test_what_counts_as_an_edit(tmp_path):
         assert edit("Bash", harmless) is None, harmless
 
 
+def test_edit_of_ignores_redirects_inside_quotes(tmp_path):
+    repo, _ = gate_world(tmp_path)
+    assert (repo / "widget.py").is_file()
+    for quoted in (
+        'grep "x > widget.py" pkg/core.py',
+        "grep 'x > widget.py' pkg/core.py",
+        'python -c "print(\'a > widget.py\')"',
+        "python -c 'print(\"a > widget.py\")'",
+    ):
+        assert SweBenchIssueGate.edit_of("Bash", quoted, str(repo), str(repo)) is None, quoted
+    for real_redirect in (
+        "echo hi > widget.py",
+        "echo hi >> widget.py",
+        'echo "a b" > "widget.py"',
+        'grep "a > b" x.py > widget.py',
+    ):
+        assert SweBenchIssueGate.edit_of("Bash", real_redirect, str(repo), str(repo)) == {
+            "kind": "redirect",
+            "paths": ["widget.py"],
+        }, real_redirect
+
+
 def test_what_counts_as_reading_a_target():
     targets = [
         {"id": "file:a/b.py", "kind": "file", "path": "a/b.py"},

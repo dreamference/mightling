@@ -807,7 +807,10 @@ class NodeProvisioner:
     def _dry_run_install(self, state: dict[str, str]) -> list[str]:
         """The install, root and advertising changes a dry run names for one probed machine."""
         source = self.options.get("source") or "this"
-        expected = FleetBundle.expected_version(source)
+        try:
+            expected = FleetBundle.expected_version(source)
+        except ValueError as error:
+            return [f"nothing, {error}"]
         changes = []
         if state.get("venv", PROBE_YES) != PROBE_YES:
             changes.append("sudo apt-get install python3-venv (DGX OS lacks it)")

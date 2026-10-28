@@ -80,8 +80,11 @@ class FleetBundle:
             from dreamference import __version__
 
             version = __version__
-        if source not in ("this", "release") and not source.startswith("release="):
-            print(f"❌ --from is `this` or `release[=X.Y.Z]`, not `{source}`.")
+        empty = version is not None and not version.strip().lstrip("v")
+        if empty or (source not in ("this", "release") and not source.startswith("release=")):
+            print(
+                f"❌ --from is `this` or `release[=X.Y.Z]` (a release needs a version after `=`), not `{source}`."
+            )
             return None
         return cls.from_release(version)
 
@@ -233,6 +236,10 @@ class FleetBundle:
 
             return f"v{__version__.lstrip('v')}"
         if source.startswith(RELEASE_PREFIX):
+            if not source.partition("=")[2].strip().lstrip("v"):
+                raise ValueError(
+                    "--from release= needs a version: `release=X.Y.Z`, or `release` for the latest."
+                )
             return f"v{source.partition('=')[2].lstrip('v')}"
         return None
 

@@ -51,6 +51,9 @@ KEEP = 40
 PYTHON = re.compile(r"(^|/)(i?python[0-9.]*)$")
 PYTEST = re.compile(r"(^|/)(py\.?test)$")
 CALL = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+BACKSLASH = "\\"
+DOUBLE_QUOTE = '"'
+QUOTES = "'\""
 REDIRECT = re.compile(r"(?:^|[^0-9&<>])>>?\s*([^\s;|&<>()]+)")
 HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?[^\n]*\n(.*?)\n\s*\1\s*(?:\n|$)", re.S)
 PATCH_FILE = re.compile(r"^\*\*\* (Update|Delete|Add) File: (.+?)\s*$", re.M)
@@ -152,6 +155,34 @@ class SweBenchIssueGate:
         return relative
 
     @classmethod
+    def quoted_mask(cls, command: str) -> list[bool]:
+        """Per character of a shell command line, whether it sits inside quotes.
+
+        Args:
+            command: A shell command line.
+
+        Returns:
+            list[bool]: True for each character inside single or double quotes.
+        """
+        mask: list[bool] = []
+        quote, index = None, 0
+        while index < len(command):
+            char = command[index]
+            if quote:
+                mask.append(True)
+                if char == BACKSLASH and quote == DOUBLE_QUOTE and index + 1 < len(command):
+                    index += 1
+                    mask.append(True)
+                elif char == quote:
+                    quote = None
+            else:
+                mask.append(False)
+                if char in QUOTES:
+                    quote = char
+            index += 1
+        return mask
+
+    @classmethod
     def segments(cls, command: str) -> List[str]:
         """
         Args:
@@ -240,7 +271,10 @@ class SweBenchIssueGate:
                 paths = [path for path in paths if path]
                 if paths:
                     return {"kind": "tee", "paths": paths}
+        quoted = cls.quoted_mask(body)
         for match in REDIRECT.finditer(body):
+            if quoted[body.index(">", match.start())]:
+                continue
             path = cls.repository_file(match.group(1), cwd, root)
             if path:
                 return {"kind": "redirect", "paths": [path]}
