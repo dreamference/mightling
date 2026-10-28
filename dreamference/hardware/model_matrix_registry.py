@@ -437,6 +437,27 @@ QWEN38_LING_ENGINE_COMMIT: Final[str] = "8d112d0d25393bca95e3e5c9227d0135eba6f2e
 # ancestry. Empty at 8d112d0 (bdda3a2's features).
 QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ()
 
+# The last commit of ling-engine's P4b (BATCHING §5.3: `--kv-pages` with the KV page pool, admission by
+# pages, reclaim of idle sessions, the last resort), which is what lets four sessions at 262,144 tokens
+# fit where the flat KV cannot (~19 GB each). A ling-engine recipe lists "kv-pages" in `engine_features`
+# exactly when its `engine_commit` descends from it (tests/test_hardware.py checks that against the
+# submodule), and only then does the launch pass `--sessions`/`--batch` and `--kv-pages` (an engine
+# before it either exits 2 on `--kv-pages` or, flat, would allocate four full contexts).
+LING_ENGINE_KV_PAGES_SINCE: Final[str] = "f180b44a40369d7dd03f9ae97e7fa8be4ece1380"
+
+# The sessions and the batch the recipe asks of a paged engine (1.8.0: four conversations at the full
+# context, the owner's bar of 2026-10-28; BATCHING §5.3 P4d). `--sessions` and `--batch` are parsed by
+# every ling-serve since 8d112d0, but without the "kv-pages" feature they stay the engine's own
+# (auto-sized from MemAvailable at the 262,144 context, at most four, on an engine that has auto-size).
+QWEN38_LING_SESSIONS: Final[int] = 4
+QWEN38_LING_BATCH: Final[int] = 4
+
+# The engine `server start` uses when neither `--engine` nor `server_engine` says. THE 1.8.0 SWITCH:
+# ENGINE_LING makes ling-serve the default and SGLang the `--engine sglang` fallback; nothing else
+# changes (`ModelMatrixRegistry.engine_recipes_for`). Not before the checklist of
+# docs/dev/release-1.8.0.md has passed.
+QWEN38_DEFAULT_ENGINE: Final[str] = ENGINE_SGLANG
+
 # ling-serve's image (docker/ling-serve/Dockerfile, built by scripts/build_ling_serve_image.sh on an
 # aarch64 machine from QWEN38_LING_ENGINE_COMMIT), pinned by the digest GHCR gave the push
 # (ghcr.io/dreamference/ling-serve:8d112d0d2539, pushed again 2026-10-27; linux/arm64, 681 MB).
@@ -500,7 +521,35 @@ QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
     # programmatic dependent launch. Tree verification, the megakernel stages, two sessions and a
     # batch of two are the engine's defaults at QWEN38_LING_ENGINE_COMMIT.
     "extra_args": ["--graphs", "--pdl"],
+    # Four conversations at once (QWEN38_LING_SESSIONS/BATCH), applied only by an engine that has
+    # the KV page pool ("kv-pages" in `engine_features`).
+    "sessions": QWEN38_LING_SESSIONS,
+    "batch": QWEN38_LING_BATCH,
 }
+
+
+def split_engine_recipes(
+    default_engine: str, recipes: dict[str, dict[str, Any]]
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Splits a model's recipes into the default one and the others, for `ModelSpec`.
+
+    Args:
+        default_engine: The engine that is the default (a key of `recipes`).
+        recipes: Every engine's recipe, by engine name.
+
+    Returns:
+        tuple: The default engine's recipe (`launch_overrides`), then the rest (`engine_recipes`).
+    """
+    return recipes[default_engine], {name: r for name, r in recipes.items() if name != default_engine}
+
+
+_QWEN38_LAUNCH_OVERRIDES, _QWEN38_ENGINE_RECIPES = split_engine_recipes(
+    QWEN38_DEFAULT_ENGINE,
+    {
+        ENGINE_SGLANG: {**QWEN38_SGLANG_RECIPE, "lora": QWEN38_LORA_RECIPE},
+        ENGINE_LING: QWEN38_LING_RECIPE,
+    },
+)
 
 
 class ModelMatrixRegistry:
@@ -550,11 +599,12 @@ class ModelMatrixRegistry:
                 "reasoning-effort default."
             ),
             hf_repo_id="RadixArk/Qwen3.8-27B-NVFP4",
-            launch_overrides={**QWEN38_SGLANG_RECIPE, "lora": QWEN38_LORA_RECIPE},
-            # ling-serve, opt-in in 1.7.2 (`server start --engine ling`, `server_engine = "ling"`):
-            # the default once it reads images, serves adapters and runs more than two requests at
-            # once (the owner's decision of 2026-10-26).
-            engine_recipes={ENGINE_LING: QWEN38_LING_RECIPE},
+            # The default engine's recipe and the other's (QWEN38_DEFAULT_ENGINE): SGLang by default
+            # and ling-serve opt-in (`server start --engine ling`, `server_engine = "ling"`) until
+            # 1.8.0, when ling-serve becomes the default with four sessions at the full context
+            # (the owner's decisions of 2026-10-26 and 2026-10-28) and SGLang the rollback.
+            launch_overrides=_QWEN38_LAUNCH_OVERRIDES,
+            engine_recipes=_QWEN38_ENGINE_RECIPES,
             supports_vision=True,
         ),
         # Night 2's candidate (specs/DREAMFERENCE_MODELS.md §2.2), not a default: production

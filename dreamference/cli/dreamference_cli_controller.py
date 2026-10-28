@@ -375,10 +375,10 @@ class DreamferenceCLIController:
         running = engine or (engines[0] if engines else None)
         if running != ENGINE_LING or ENGINE_SGLANG not in engines:
             return
-        print(f"💡 ling-serve failed {what}. SGLang, the default engine, serves the same model:\n"
+        print(f"💡 ling-serve failed {what}. SGLang serves the same model:\n"
               "     ling-admin server stop && ling-admin server start --engine sglang\n"
-              "   To stay on it, remove server_engine = \"ling\" from ~/.config/dreamference/config.toml "
-              "(or DREAMFERENCE_SERVER_ENGINE). "
+              "   To stay on it, set server_engine = \"sglang\" in ~/.config/dreamference/config.toml "
+              "(or DREAMFERENCE_SERVER_ENGINE), and remove server_engine = \"ling\" if it is there. "
               "Please report the failure with `docker logs dreamference-vllm-<port>`.")
 
     @classmethod

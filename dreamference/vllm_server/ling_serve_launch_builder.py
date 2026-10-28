@@ -22,6 +22,10 @@ LING_ENGINE_COMMIT_LABEL: Final[str] = "ai.dreamference.ling-engine.commit"
 # ling-serve's flag for captured CUDA graphs per speculative step.
 STEP_GRAPHS_FLAG: Final[str] = "--graphs"
 
+# The engine feature (a recipe's `engine_features`) of the KV page pool, and ling-serve's flag for it.
+KV_PAGES_FEATURE: Final[str] = "kv-pages"
+KV_PAGES_FLAG: Final[str] = "--kv-pages"
+
 # What `owned_by` says in ling-serve's /v1/models.
 LING_SERVE_OWNER: Final[str] = "ling-engine"
 
@@ -93,6 +97,15 @@ class LingServeLaunchBuilder:
             )
             if speculative.get("num_speculative_tokens"):
                 args.extend(["--draft-block", str(speculative["num_speculative_tokens"])])
+        if KV_PAGES_FEATURE in (recipe.get("engine_features") or []):
+            # A paged engine holds many sessions in one pool, so the recipe's conversation count
+            # (1.8.0: four at the full context) is affordable; an engine without the pool keeps its
+            # own sessions and batch.
+            if recipe.get("sessions"):
+                args.extend(["--sessions", str(recipe["sessions"])])
+            if recipe.get("batch"):
+                args.extend(["--batch", str(recipe["batch"])])
+            args.append(KV_PAGES_FLAG)
         args.extend(str(a) for a in recipe.get("extra_args") or [])
         return args
 
@@ -139,4 +152,10 @@ class LingServeLaunchBuilder:
                 else "Disabled"
             ),
             "Step graphs": "On" if STEP_GRAPHS_FLAG in args else "Off",
+            **(
+                {"Sessions": f"{value('--sessions')} (batch {value('--batch') or 'default'})"}
+                if value("--sessions")
+                else {}
+            ),
+            **({"KV cache": "Paged"} if KV_PAGES_FLAG in args else {}),
         }

@@ -468,3 +468,27 @@ def test_a_ling_engine_recipe_lists_the_sparse_head_exactly_when_its_commit_read
             ["git", "-C", str(engine), "merge-base", "--is-ancestor", since, commit], capture_output=True
         ).returncode == 0
         assert ("sparse-head" in (recipe.get("engine_features") or [])) == descends, commit
+
+
+def test_a_ling_engine_recipe_lists_kv_pages_exactly_when_its_commit_has_the_page_pool():
+    # Same rule as the sparse head's: the feature list is for an install that cannot run git, and a checkout keeps
+    # it honest against the ling-engine submodule. Only then does the launch pass --sessions/--batch/--kv-pages.
+    from pathlib import Path
+
+    import pytest
+
+    import dreamference.hardware.model_matrix_registry as registry
+    engine = Path(__file__).resolve().parent.parent / "ling-engine"
+    since = registry.LING_ENGINE_KV_PAGES_SINCE
+    recipe = registry.ModelMatrixRegistry.get_launch_overrides(registry.DEFAULT_MODEL_ALIAS, "ling")
+    commit = recipe.get("engine_commit", "")
+    known = [
+        subprocess.run(["git", "-C", str(engine), "cat-file", "-e", c + "^{commit}"], capture_output=True)
+        for c in (since, commit)
+    ]
+    if not commit or any(r.returncode != 0 for r in known):
+        pytest.skip("the ling-engine submodule lacks the commits (fetch it)")
+    descends = subprocess.run(
+        ["git", "-C", str(engine), "merge-base", "--is-ancestor", since, commit], capture_output=True
+    ).returncode == 0
+    assert ("kv-pages" in (recipe.get("engine_features") or [])) == descends, commit

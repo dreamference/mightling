@@ -502,3 +502,156 @@ def test_the_tool_call_checks_hints_name_ling_serves_own_parsing():
     assert "compiled into ling-serve" in ling["template"]
     sglang = ToolCallCanary.parsers(DEFAULT_MODEL_ALIAS)
     assert sglang["tool"] == "--tool-call-parser qwen3_coder"
+
+
+# --- 1.8.0: four paged sessions, the default switch and the pin plumbing -------------------------
+
+
+def _paged_recipe(**changes):
+    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    recipe["engine_features"] = ["kv-pages"]
+    return {**recipe, **changes}
+
+
+def test_the_recipe_asks_for_four_sessions_but_an_engine_without_the_pool_does_not_get_them():
+    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    assert recipe["sessions"] == recipe["batch"] == 4
+    # At the 1.7.2 pin (no "kv-pages"): the engine's own sessions, no flag it may not parse.
+    flat = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", recipe, 8000, 262144)
+    assert not {"--sessions", "--batch", "--kv-pages"} & set(flat)
+    paged = LingServeLaunchBuilder.server_args(
+        "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(), 8000, 262144
+    )
+    assert flag(paged, "--sessions") == flag(paged, "--batch") == "4"
+    assert "--kv-pages" in paged and flag(paged, "--max-context") == "262144"
+    assert paged.index("--kv-pages") < paged.index("--graphs")
+
+
+def test_the_paged_launch_uses_only_flags_ling_serve_parses():
+    # ling-engine main's parser (src/serve/main.cpp) beside the shipped commit's.
+    known = {
+        "--model",
+        "--host",
+        "--port",
+        "--served-model-name",
+        "--max-context",
+        "--draft",
+        "--draft-block",
+        "--graphs",
+        "--pdl",
+        "--sessions",
+        "--batch",
+        "--kv-pages",
+        "--plan-only",
+    }
+    args = LingServeLaunchBuilder.server_args(
+        "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(), 8000, 262144
+    )
+    assert {a for a in args if a.startswith("--")} <= known
+
+
+def test_server_status_reports_sessions_and_paging():
+    args = LingServeLaunchBuilder.server_args(
+        "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(), 8000, 262144
+    )
+    facts = LingServeLaunchBuilder.facts("img", {}, args)
+    assert facts["Sessions"] == "4 (batch 4)" and facts["KV cache"] == "Paged"
+    flat = LingServeLaunchBuilder.server_args(
+        "RadixArk/Qwen3.8-27B-NVFP4",
+        get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING),
+        8000,
+        262144,
+    )
+    assert "Sessions" not in LingServeLaunchBuilder.facts("img", {}, flat)
+
+
+def test_the_plan_only_check_follows_the_same_arguments_as_the_launch(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+
+        class Done:
+            returncode = 0
+            stdout = '{"sessions": 4, "batch": 4, "max_context": 262144, "planned_bytes": 1}\n'
+
+        return Done()
+
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    plan = VLLMServerManager.ling_serve_plan(
+        QWEN38_LING_IMAGE, DEFAULT_MODEL_ALIAS, _paged_recipe()
+    )
+    assert plan and plan["sessions"] == 4
+    cmd = seen["cmd"]
+    assert cmd[-1] == "--plan-only" and "--kv-pages" in cmd and flag(cmd, "--sessions") == "4"
+
+
+def test_flipping_the_default_engine_is_one_constant_and_keeps_sglang_as_the_fallback():
+    from dreamference.hardware.model_matrix_registry import (
+        QWEN38_DEFAULT_ENGINE,
+        QWEN38_LING_RECIPE,
+        QWEN38_SGLANG_RECIPE,
+        split_engine_recipes,
+    )
+
+    # Today's switch position: SGLang (the checklist of docs/dev/release-1.8.0.md flips it).
+    assert QWEN38_DEFAULT_ENGINE == ENGINE_SGLANG
+    recipes = {ENGINE_SGLANG: dict(QWEN38_SGLANG_RECIPE), ENGINE_LING: QWEN38_LING_RECIPE}
+    default, others = split_engine_recipes(ENGINE_LING, recipes)
+    assert default is QWEN38_LING_RECIPE and list(others) == [ENGINE_SGLANG]
+    default, others = split_engine_recipes(ENGINE_SGLANG, recipes)
+    assert default["engine"] == ENGINE_SGLANG and list(others) == [ENGINE_LING]
+
+
+def test_with_ling_serve_as_the_default_sglang_is_still_one_flag_away(monkeypatch):
+    # The matrix as it would read after the switch: the same two recipes, the roles swapped.
+    from dreamference.hardware import model_matrix_registry as registry
+
+    default, others = registry.split_engine_recipes(
+        ENGINE_LING,
+        {
+            ENGINE_SGLANG: {**registry.QWEN38_SGLANG_RECIPE, "lora": registry.QWEN38_LORA_RECIPE},
+            ENGINE_LING: registry.QWEN38_LING_RECIPE,
+        },
+    )
+    spec = registry.ModelMatrixRegistry.MATRIX[DEFAULT_MODEL_ALIAS]
+    swapped = type(spec)(**{**spec.__dict__, "launch_overrides": default, "engine_recipes": others})
+    monkeypatch.setitem(registry.ModelMatrixRegistry.MATRIX, DEFAULT_MODEL_ALIAS, swapped)
+
+    assert ModelMatrixRegistry.engines(DEFAULT_MODEL_ALIAS) == [ENGINE_LING, ENGINE_SGLANG]
+    assert get_model_launch_overrides(DEFAULT_MODEL_ALIAS)["engine"] == ENGINE_LING
+    assert (
+        get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG)["docker_image"]
+        == QWEN38_SGLANG_IMAGE
+    )
+    cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS)
+    assert QWEN38_LING_IMAGE in cmd
+    rollback = VLLMServerManager().build_launch_command(
+        model=DEFAULT_MODEL_ALIAS, engine=ENGINE_SGLANG
+    )
+    assert QWEN38_SGLANG_IMAGE in rollback and QWEN38_LING_IMAGE not in rollback
+
+
+def test_the_pin_script_moves_the_three_constants_and_refuses_bad_input():
+    import importlib.util
+
+    path = Path(__file__).resolve().parent.parent / "scripts" / "pin_ling_serve_image.py"
+    spec = importlib.util.spec_from_file_location("pin_ling_serve_image", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    text = module.REGISTRY.read_text()
+    commit, digest = "a" * 40, "sha256:" + "b" * 64
+    new = module.repin(text, commit, digest, ["kv-pages"])
+    assert f'QWEN38_LING_ENGINE_COMMIT: Final[str] = "{commit}"' in new
+    assert f"ling-serve@{digest}" in new
+    assert 'QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ("kv-pages",)' in new
+    assert new.count("\n") == text.count("\n")
+    assert (
+        'QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ("kv-pages", "sparse-head")'
+        in module.repin(text, commit, digest, ["kv-pages", "sparse-head"])
+    )
+    for bad in (("abc", digest, []), (commit, "sha256:12", []), (commit, digest, ["nope"])):
+        with pytest.raises(ValueError):
+            module.repin(text, *bad)
