@@ -33,6 +33,8 @@ Name "${PRODUCT}"
 OutFile "${OUTFILE}"
 Unicode true
 RequestExecutionLevel user
+; Drawn at the display's scaling, not stretched from 96 DPI (blurred text at 150 %).
+ManifestDPIAware true
 InstallDir "$LOCALAPPDATA\Programs\Mightling\App"
 InstallDirRegKey HKCU "${UNINSTALL_KEY}" "InstallLocation"
 SetCompressor /SOLID lzma

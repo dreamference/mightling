@@ -81,8 +81,17 @@ export function showContextMenu(window: BrowserWindow, request: { x: number; y: 
 
 let tray: Tray | null = null;
 
+/**
+ * The tray's image in icons/. Windows draws it 16 pixels high at 100 % scaling and up to 48 at 300 %:
+ * `tray.png` is the 16-pixel one, and `nativeImage` loads its `@1.25x` … `@3x` siblings beside it, so
+ * each display gets one drawn at its size, never the 32-pixel image squeezed. Elsewhere, as before.
+ */
+export function trayIconFile(platform: NodeJS.Platform): string {
+  return platform === "win32" ? "tray.png" : "32x32.png";
+}
+
 export function installTray(iconsDir: string, actions: ShellActions): void {
-  let icon = nativeImage.createFromPath(path.join(iconsDir, "32x32.png"));
+  let icon = nativeImage.createFromPath(path.join(iconsDir, trayIconFile(process.platform)));
   if (icon.isEmpty()) return;
   // The macOS menu bar is 22 points tall; the 32-pixel image would be drawn 32 points high there.
   if (process.platform === "darwin") icon = icon.resize({ height: 18 });

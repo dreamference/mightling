@@ -4,6 +4,7 @@ desktop` builds and installs, and what the Electron project must keep.
 
 import json
 import os
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -45,6 +46,24 @@ def test_bundle_icons_exist_at_the_sizes_the_package_names():
     # 32x32 is the tray's.
     for name in ("icon.png", "32x32.png", "128x128.png", "128x128@2x.png"):
         assert (ELECTRON / "icons" / name).is_file(), name
+
+
+def test_the_windows_icon_holds_every_size_windows_draws_and_the_installer_is_dpi_aware():
+    # forge.config.js writes resources/icon.ico from ICO_IMAGES: each entry must be a PNG of the size
+    # its directory entry declares, and together they cover 16 to 48 (small icons at 100-300 %
+    # scaling), 64 and 256, so Windows never scales a 32- or 128-pixel image to fit.
+    forge = (ELECTRON / "forge.config.js").read_text()
+    listed = re.search(r"const ICO_IMAGES = \[(.*?)\n\];", forge, re.S).group(1)
+    entries = [(name, int(size)) for name, size in re.findall(r'\["([^"]+)", (\d+)\]', listed)]
+    assert {size for _name, size in entries} >= {16, 20, 24, 32, 40, 48, 64, 256}
+    for name, size in entries:
+        data = (ELECTRON / "icons" / name).read_bytes()
+        assert data[:8] == b"\x89PNG\r\n\x1a\n", name
+        assert int.from_bytes(data[16:20], "big") == int.from_bytes(data[20:24], "big") == size, (
+            name
+        )
+    # The installer's own window is drawn at the display's scaling, not stretched from 96 DPI.
+    assert "\nManifestDPIAware true\n" in (ELECTRON / "windows" / "installer.nsi").read_text()
 
 
 def test_electron_is_pinned_exactly_and_stock():
