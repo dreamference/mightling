@@ -2181,10 +2181,15 @@ fn build_git_command(
     cmd.env("LANG", "C");
     cmd.env("LC_ALL", "C");
     cmd.env("GIT_TERMINAL_PROMPT", "0");
-    cmd.env("GIT_CONFIG_NOSYSTEM", "1");
+    for (name, value) in ling_safegit::FIXED_ENV {
+        cmd.env(name, value);
+    }
     if with_askpass {
         cmd.env("GIT_ASKPASS", &askpass);
     }
+    // A checkout's config is the agent's to write and this runs outside the sandbox: pin every
+    // key that executes a program (ling_safegit), then the empty hooks folder.
+    cmd.args(ling_safegit::config_args(cwd));
     cmd.arg("-c").arg(&hooks_arg);
     if server.chat_repos.allow_file_protocol.load(std::sync::atomic::Ordering::Relaxed) {
         cmd.arg("-c").arg("protocol.file.allow=always");
@@ -2192,7 +2197,7 @@ fn build_git_command(
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
-    cmd.args(args);
+    cmd.args(ling_safegit::safe_flags(args));
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
@@ -5414,6 +5419,55 @@ mod tests {
         assert_eq!(custom.work_answer_seconds, 600);
         assert_eq!(custom.work_tool_calls, 50);
         assert_eq!(custom.work_command_seconds, 120);
+    }
+
+    /// A checkout whose `.git/config` and `.gitattributes` name a program for every hook that
+    /// executes during a read (the agent can write both). No program may run.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_hostile_checkout_config_runs_no_program_when_the_server_reads_git() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = scratch("hostile");
+        let (server, _probe) = test_server(&s.dir, None, true);
+        let repo = s.dir.join("checkout");
+        std::fs::create_dir_all(&repo).unwrap();
+        git_sync(&repo, &["init", "--initial-branch=main"]);
+        git_sync(&repo, &["config", "user.email", "dev@127.0.0.1"]);
+        git_sync(&repo, &["config", "user.name", "dev"]);
+        std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+        std::fs::write(repo.join(".gitattributes"), "*.txt filter=evil diff=evil\n").unwrap();
+        git_sync(&repo, &["add", "-A"]);
+        git_sync(&repo, &["commit", "-m", "init"]);
+
+        let marker = s.dir.join("ran");
+        let tool = s.dir.join("tool.sh");
+        std::fs::write(&tool, format!("#!/bin/sh\necho ran >> {}\ncat\n", marker.display())).unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let t = tool.display();
+        let config = std::fs::read_to_string(repo.join(".git/config")).unwrap();
+        std::fs::write(
+            repo.join(".git/config"),
+            format!(
+                "{config}[core]\n\tfsmonitor = {t}\n\tpager = {t}\n\tsshCommand = {t}\n[diff]\n\texternal = {t}\n\
+                 [diff \"evil\"]\n\ttextconv = {t}\n[filter \"evil\"]\n\tclean = {t}\n\tsmudge = {t}\n\
+                 [credential]\n\thelper = {t}\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(repo.join("a.txt"), "one\ntwo, changed\n").unwrap();
+
+        for args in [
+            vec!["status", "--porcelain=v1"],
+            vec!["diff", "HEAD"],
+            vec!["diff", "--cached"],
+            vec!["show", "HEAD"],
+            vec!["log", "-p", "-1"],
+            vec!["add", "-A"],
+        ] {
+            run_git_checked(&server, Some(&repo), &args, false).await.unwrap_or_else(|e| panic!("git {args:?}: {e}"));
+        }
+        let ran = std::fs::read_to_string(&marker).unwrap_or_default();
+        assert!(ran.is_empty(), "a program named by the checkout's config ran: {ran}");
     }
 
     #[tokio::test]

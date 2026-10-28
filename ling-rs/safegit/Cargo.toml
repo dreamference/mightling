@@ -1,0 +1,15 @@
+# Safe `git` for the host side (specs: security hardening): the agent can write a checkout's
+# `.git/config` and `.gitattributes`, and the launcher, the web server and the helper crates run
+# `git` in those checkouts outside the sandbox. This crate builds every such command with the config
+# keys that execute programs turned off. No dependencies (std only) so each crate's tests run
+# without the Codex workspace; the crates that run git point at it by path.
+[package]
+name = "ling-safegit"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_safegit"
+path = "src/lib.rs"

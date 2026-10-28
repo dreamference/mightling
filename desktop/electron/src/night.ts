@@ -7,6 +7,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { command } from "./platform";
+import { driverOverrides, gitEnv, hardenedArgs } from "./git";
 import fs from "node:fs";
 import path from "node:path";
 import * as userFs from "./userfs";
@@ -257,8 +258,10 @@ export function transcriptOf(log: string): { text: string; session: string | nul
 /** The diff of a task's branch against the commit it started from, from git in its repository. */
 function branchDiff(repo: string, base: string, branch: string): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile("git", ["diff", "--no-color", `${base}..${branch}`], { cwd: repo, timeout: 15_000, maxBuffer: DETAIL_LIMIT * 2, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }, (error, stdout) => {
-      resolve(error ? null : stdout.length > DETAIL_LIMIT ? `${stdout.slice(0, DETAIL_LIMIT)}\n[cut]` : stdout);
+    void driverOverrides(repo).then((drivers) => {
+      execFile("git", hardenedArgs(["diff", "--no-color", `${base}..${branch}`], drivers), { cwd: repo, timeout: 15_000, maxBuffer: DETAIL_LIMIT * 2, env: gitEnv() }, (error, stdout) => {
+        resolve(error ? null : stdout.length > DETAIL_LIMIT ? `${stdout.slice(0, DETAIL_LIMIT)}\n[cut]` : stdout);
+      });
     });
   });
 }

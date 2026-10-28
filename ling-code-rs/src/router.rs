@@ -623,10 +623,13 @@ impl Context {
         let (Some(extension), true) = (extension, self.repo.is_git) else { return Vec::new() };
         // `safe.directory`: the files may belong to another user (a SWE-bench image's root), and
         // an MCP server is not given the agent's git configuration.
+        let pattern = format!("*.{extension}");
         let output = std::process::Command::new("git")
             .args(["-c", "safe.directory=*", "-C"])
             .arg(&self.repo.root)
-            .args(["grep", "-n", "-I", "-w", "-F", "--no-color", "-e", &candidate.name, "--", &format!("*.{extension}")])
+            .args(ling_safegit::hardened_args(Some(&self.repo.root), &["grep", "-n", "-I", "-w", "-F", "--no-color", "-e", &candidate.name, "--", &pattern]))
+            .envs(ling_safegit::FIXED_ENV.iter().copied())
+            .env_remove("GIT_EXTERNAL_DIFF")
             .output();
         let Ok(output) = output else { return Vec::new() };
         let mut rows = Vec::new();

@@ -20,7 +20,6 @@ use std::fs::OpenOptions;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
-use std::process::Stdio;
 
 use serde_json::Value;
 use serde_json::json;
@@ -701,15 +700,9 @@ pub fn native_path(path: PathBuf) -> PathBuf {
 }
 
 fn git(cwd: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .arg("--no-optional-locks")
-        .args(args)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
+    let mut all = vec!["--no-optional-locks"];
+    all.extend_from_slice(args);
+    let output = ling_safegit::output(cwd, &all).ok()?;
     output
         .status
         .success()

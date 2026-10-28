@@ -149,7 +149,7 @@ impl Probe for SystemProbe {
     }
 
     fn git(&self, dir: &Path, args: &[&str]) -> Option<String> {
-        let output = Command::new("git").arg("-C").arg(dir).args(args).output().ok()?;
+        let output = ling_safegit::output(dir, args).ok()?;
         output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
     }
 }

@@ -143,6 +143,53 @@ describe("window-side git", () => {
   });
 });
 
+describe("git on a checkout the agent wrote the config of", () => {
+  it("runs no program the config names, on any read the window makes", async () => {
+    const root = repo();
+    const marker = path.join(root, "..", `ran-${path.basename(root)}`);
+    const tool = path.join(root, "..", `tool-${path.basename(root)}.sh`);
+    fs.writeFileSync(tool, `#!/bin/sh\necho ran >> '${marker}'\ncat\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(root, ".gitattributes"), "*.txt filter=evil diff=evil\n");
+    const config = path.join(root, ".git", "config");
+    fs.appendFileSync(
+      config,
+      [
+        "[core]", `\tfsmonitor = ${tool}`, `\tpager = ${tool}`, `\tsshCommand = ${tool}`,
+        "[diff]", `\texternal = ${tool}`,
+        '[diff "evil"]', `\ttextconv = ${tool}`,
+        '[filter "evil"]', `\tclean = ${tool}`, `\tsmudge = ${tool}`,
+        "[credential]", `\thelper = ${tool}`,
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(path.join(root, "a.txt"), "changed once more\n");
+    // The control: plain git does run the configured program here, so an empty marker means something.
+    try {
+      execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1" } });
+      execFileSync("git", ["diff"], { cwd: root, encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_PAGER: "" } });
+    } catch {
+      /* a failing hook does not matter for the control */
+    }
+    expect(fs.existsSync(marker)).toBe(true);
+    fs.rmSync(marker);
+
+    await git.git(root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+    await git.git(root, ["diff"]);
+    await git.git(root, ["diff", "--cached"]);
+    await git.git(root, ["show", "HEAD"]);
+    await git.git(root, ["log", "-p", "-1"]);
+    await git.diff(root, "unstaged");
+    expect(fs.existsSync(marker), "a configured program ran").toBe(false);
+  });
+
+  it("puts the diff flags after the subcommand and blanks only the checkout's own drivers", () => {
+    expect(git.hardenedArgs(["diff", "HEAD"]).slice(-4)).toEqual(["diff", "--no-ext-diff", "--no-textconv", "HEAD"]);
+    expect(git.hardenedArgs(["push", "origin"]).includes("--receive-pack=git-receive-pack")).toBe(true);
+    const listing = ["system", "filter.lfs.clean\ngit-lfs clean", "local", "filter.evil.smudge\nrm -rf", "local", "core.bare\nfalse", ""].join("\0");
+    expect(git.driverOverridesFrom(listing)).toEqual(["filter.evil.smudge="]);
+  });
+});
+
 describe("editors", () => {
   it("are found from .desktop entries and opened at a line with their own arguments", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-editors-"));

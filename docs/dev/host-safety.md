@@ -49,3 +49,15 @@ The profile was loaded on this machine on 2026-10-03: from a throwaway systemd u
 The desktop app's Chromium sandbox meets the same rule; see [desktop.md](desktop.md).
 
 **Without sudo** (specs/DREAMFERENCE_MIGHTLING_NO_SUDO.md, 2026-10-22): there is no route for `ling`'s sandbox on 24.04 (the pinned Codex's Landlock fallback refuses a restricted filesystem), so `ling` probes `bwrap` at start (`ling-rs/src/userns.rs`) and prints the exact one-time command an administrator runs, and refuses `/airgapped on` while the sandbox cannot start. Ubuntu 25.04 and later ship `bwrap-userns-restrict` for `/usr/bin/bwrap`, and the sandbox works there with no step (measured on 26.04). Two profiles attaching to the same binary make AppArmor attach neither (openai/codex#38715), so `host setup` loads a profile already there instead of writing `puffin-bwrap` beside it, and removes ours where both are.
+
+## Host-side git in a checkout the agent can write
+
+The agent can write a checkout's `.git/config`, `.gitattributes` and `.git/info/attributes`, and the web server, the launcher, `ling delegate`, `ling monitor`, `ling-code` and the desktop app's main process run `git` there outside the sandbox. Config keys that make git execute a program (`core.fsmonitor`, `core.pager`, `diff.external`, `filter.<n>.clean`/`smudge`/`process`, `diff.<n>.textconv`, `core.sshCommand`, `core.gitProxy`, `credential.helper`, `gpg.program`, hooks, `protocol.ext.allow`, `merge.<n>.driver`) would run a command of the agent's choosing. Every such call goes through `ling-rs/safegit` (`ling_safegit`) or, in the desktop app, `hardenedArgs` in `desktop/electron/src/git.ts`:
+
+- fixed `-c` pairs on the command line, which outrank every config file;
+- the driver names are the agent's to choose, so they are read from the checkout's own config (scopes local, worktree, command; the user's global git-lfs filter keeps working) and blanked one by one;
+- `--no-ext-diff --no-textconv` after `diff`, `show`, `log`;
+- `--upload-pack=` and `--receive-pack=` after `fetch`, `pull`, `ls-remote`, `push`: `remote.<n>.uploadpack` and `.receivepack` are first-value-wins in git, so a `-c` cannot replace the checkout's value but a flag outranks it;
+- `GIT_EXTERNAL_DIFF` removed, `GIT_PAGER=cat`, `GIT_CONFIG_NOSYSTEM=1`, and a timeout on the Rust side.
+
+Repository hooks therefore do not run from these calls (a click's commit in the desktop app skips `pre-commit`). One window stays: a driver name added between the config read and the command. New host-side git in a checkout uses these helpers; Python callers (Night Shift, the node jobs) are not yet covered.

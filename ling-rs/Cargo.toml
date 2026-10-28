@@ -32,6 +32,8 @@ futures = { workspace = true, features = ["std"] }
 # Pure-Rust mDNS browsing, one code path on Linux, macOS and Windows; no async runtime, no logging.
 mdns-sd = { version = "0.21.4", default-features = false }
 ling-airgapped = { path = "airgapped" }
+# Host-side git with the program-running config keys turned off (src/*.rs that run git in a checkout).
+ling-safegit = { path = "safegit" }
 # The loop guard's detector: three checks on streamed text (src/loop_guard.rs).
 ling-loop-guard = { path = "loop-guard" }
 # Mightling's apps for `/apps` (patch 0022) and as MCP tools (src/apps.rs).

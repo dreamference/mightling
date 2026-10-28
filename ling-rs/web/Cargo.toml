@@ -22,6 +22,8 @@ futures = { version = "0.3", default-features = false, features = ["std"] }
 hyper = { version = "1", default-features = false, features = ["client", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 ling-airgapped = { path = "../airgapped" }
+# Host-side git with the program-running config keys turned off (chat_repos.rs).
+ling-safegit = { path = "../safegit" }
 # The pairing QR code (src/qr.rs), drawn here: no dependencies of its own, no service asked.
 qrcodegen = "1.8"
 rand = "0.9"

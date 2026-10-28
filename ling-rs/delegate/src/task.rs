@@ -791,7 +791,7 @@ mod tests {
 
     impl Runner for World {
         fn run(&self, spec: &RunSpec) -> Result<RunOutput, String> {
-            let j = spec.argv.join(" ");
+            let j = ling_safegit::plain_argv(&spec.argv).join(" ");
             self.log.borrow_mut().push(j.clone());
             let ok = |out: &str| Ok(RunOutput { exit: Some(0), output: out.to_string(), timed_out: false, elapsed_s: 2 });
             if j.starts_with("systemctl") {
@@ -1026,7 +1026,7 @@ mod tests {
         struct Broken(World);
         impl Runner for Broken {
             fn run(&self, spec: &RunSpec) -> Result<RunOutput, String> {
-                let j = spec.argv.join(" ");
+                let j = ling_safegit::plain_argv(&spec.argv).join(" ");
                 if j.starts_with("git diff") {
                     return Ok(RunOutput { exit: Some(128), output: "fatal".into(), timed_out: false, elapsed_s: 0 });
                 }

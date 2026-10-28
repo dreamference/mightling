@@ -741,15 +741,7 @@ fn git_root(cwd: &Path) -> Option<PathBuf> {
 
 /// A git command's output, or `None` when it failed.
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(["-c", "core.quotepath=off"])
-        .args(args)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
+    let output = ling_safegit::output(dir, args).ok()?;
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 

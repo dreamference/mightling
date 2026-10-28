@@ -21,6 +21,8 @@ name = "ling-delegate"
 path = "src/main.rs"
 
 [dependencies]
+# Host-side git with the program-running config keys turned off.
+ling-safegit = { path = "../safegit" }
 chrono = "0.4.43"
 regex-lite = "0.1"
 serde = { version = "1", features = ["derive"] }

@@ -17,7 +17,95 @@ export const MAX_OUTPUT = 16 * 1024 * 1024;
 
 /** git's environment: never a prompt for credentials (a click must not hang), never a pager or an editor. */
 export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return { ...base, GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat", GIT_EDITOR: "true", LC_ALL: "C" };
+  const env: NodeJS.ProcessEnv = { ...base, GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat", GIT_EDITOR: "true", LC_ALL: "C", GIT_CONFIG_NOSYSTEM: "1", GIT_OPTIONAL_LOCKS: "0" };
+  delete env.GIT_EXTERNAL_DIFF;
+  delete env.GIT_CONFIG_PARAMETERS;
+  delete env.GIT_PROXY_COMMAND;
+  return env;
+}
+
+/**
+ * Config pinned on every command: a checkout's `.git/config` is writable by the agent while this
+ * runs outside the sandbox, and these keys make git execute a program (`core.fsmonitor` on status,
+ * `core.pager`, `diff.external`, `core.sshCommand` and `core.gitProxy` on push, `credential.helper`,
+ * `gpg.program`, hooks, the `ext::` transport). The command line outranks every config file.
+ * The keys whose names the agent chooses (`filter.<n>.clean`, `diff.<n>.textconv`, ...) are read
+ * from the checkout's own config by `driverOverrides` and blanked there. Repository hooks do not
+ * run from here for the same reason.
+ */
+export const SAFE_CONFIG = [
+  "core.fsmonitor=false",
+  "core.hooksPath=/dev/null",
+  "core.pager=cat",
+  "core.sshCommand=ssh",
+  "core.gitProxy=",
+  "core.askPass=",
+  "core.editor=true",
+  "sequence.editor=true",
+  "diff.external=",
+  "credential.helper=",
+  "gpg.program=gpg",
+  "gpg.ssh.program=ssh-keygen",
+  "gpg.x509.program=gpgsm",
+  "gpg.openpgp.program=gpg",
+  "log.showSignature=false",
+  "protocol.ext.allow=never",
+  "submodule.recurse=false",
+  "status.submoduleSummary=false",
+  "gc.auto=0",
+  "maintenance.auto=false",
+];
+
+/** Flags that config cannot override, placed right after the subcommand (the remote's program keys are first-value-wins in git). */
+const SUBCOMMAND_FLAGS: Record<string, string[]> = {
+  diff: ["--no-ext-diff", "--no-textconv"],
+  show: ["--no-ext-diff", "--no-textconv"],
+  log: ["--no-ext-diff", "--no-textconv"],
+  fetch: ["--upload-pack=git-upload-pack"],
+  pull: ["--upload-pack=git-upload-pack"],
+  "ls-remote": ["--upload-pack=git-upload-pack"],
+  push: ["--receive-pack=git-receive-pack"],
+};
+
+/** The `-c key=` pairs that blank each driver program the checkout's own config (not the user's) names. */
+export function driverOverridesFrom(listing: string): string[] {
+  const out = new Set<string>();
+  const fields = listing.split("\0");
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const scope = fields[i];
+    if (scope !== "local" && scope !== "worktree" && scope !== "command") continue;
+    const key = fields[i + 1].split("\n")[0];
+    const m = /^(filter|diff|merge|submodule)\.(.+)\.([^.]+)$/.exec(key);
+    if (!m || m[2].includes("=")) continue;
+    const variable = m[3].toLowerCase();
+    let blank: string | null = null;
+    if (m[1] === "filter" && ["clean", "smudge", "process"].includes(variable)) blank = "";
+    else if (m[1] === "filter" && variable === "required") blank = "false";
+    else if (m[1] === "diff" && ["textconv", "command"].includes(variable)) blank = "";
+    else if (m[1] === "merge" && variable === "driver") blank = "false";
+    else if (m[1] === "submodule" && variable === "update") blank = "none";
+    if (blank !== null) out.add(`${key}=${blank}`);
+  }
+  return [...out].sort();
+}
+
+/** What the checkout's own config names as driver programs, as `-c` pairs; none when git cannot say. */
+export function driverOverrides(cwd: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    execFile("git", ["-C", cwd, "config", "--list", "--null", "--show-scope"], { env: gitEnv(), timeout: 10_000, maxBuffer: MAX_OUTPUT, encoding: "utf8" }, (error, stdout) => {
+      resolve(error ? [] : driverOverridesFrom(stdout));
+    });
+  });
+}
+
+/** `args` with the safe config before the subcommand and the unoverridable flags after it. */
+export function hardenedArgs(args: string[], drivers: string[] = []): string[] {
+  const prefix = ["--no-pager"];
+  for (const pair of [...SAFE_CONFIG, ...drivers]) prefix.push("-c", pair);
+  let i = 0;
+  while (i < args.length && args[i].startsWith("-")) i += ["-c", "-C", "--git-dir", "--work-tree"].includes(args[i]) ? 2 : 1;
+  const extra = i < args.length ? SUBCOMMAND_FLAGS[args[i]] : undefined;
+  return [...prefix, ...args.slice(0, i + 1), ...(extra ?? []), ...args.slice(i + 1)];
 }
 
 export class GitError extends Error {}
@@ -80,15 +168,15 @@ export function gitToolsMissing(now = Date.now()): string | null {
 export function git(cwd: string, args: string[], input?: string, timeoutMs = 60_000, extraEnv: Record<string, string> = {}): Promise<string> {
   const missing = gitToolsMissing();
   if (missing) return Promise.reject(new GitError(missing));
-  return new Promise((resolve, reject) => {
-    const child = execFile("git", args, { cwd, env: { ...gitEnv(), ...extraEnv }, maxBuffer: MAX_OUTPUT, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) => {
+  return driverOverrides(cwd).then((drivers) => new Promise<string>((resolve, reject) => {
+    const child = execFile("git", hardenedArgs(args, drivers), { cwd, env: { ...gitEnv(), ...extraEnv }, maxBuffer: MAX_OUTPUT, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) => {
       if (error) {
         const tooBig = (error as { code?: string }).code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
         reject(new GitError(tooBig ? "the output is too large to show here" : String(stderr || error.message).trim()));
       } else resolve(stdout);
     });
     if (input !== undefined) child.stdin?.end(input);
-  });
+  }));
 }
 
 /** The repository `root` really is: absolute, and git's own top level for it. */
@@ -216,7 +304,7 @@ export async function status(root: string): Promise<Status> {
 
 export type Scope = "unstaged" | "staged" | "commit" | "branch";
 
-const DIFF_FLAGS = ["--no-color", "--no-ext-diff", "--no-renames", "-U3"];
+const DIFF_FLAGS = ["--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "-U3"];
 
 /** The branch a feature branch is compared with: the remote's default, else main or master. */
 export async function baseBranch(root: string): Promise<string | null> {
@@ -246,8 +334,10 @@ function notShown(file: string, why: string): string {
 function diffNoIndex(root: string, file: string): Promise<string> {
   return new Promise((resolve) => {
     if (gitToolsMissing()) return resolve("");
-    execFile("git", ["diff", ...DIFF_FLAGS, "--no-index", "--", "/dev/null", file], { cwd: root, env: gitEnv(), maxBuffer: MAX_OUTPUT, encoding: "utf8" },
-      (_error, stdout) => resolve(stdout));
+    void driverOverrides(root).then((drivers) => {
+      execFile("git", hardenedArgs(["diff", ...DIFF_FLAGS, "--no-index", "--", "/dev/null", file], drivers), { cwd: root, env: gitEnv(), maxBuffer: MAX_OUTPUT, encoding: "utf8" },
+        (_error, stdout) => resolve(stdout));
+    });
   });
 }
 

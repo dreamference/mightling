@@ -271,9 +271,13 @@ pub struct StatusEntry {
 
 /// Runs `git` in `repo` and returns stdout, or the failure.
 pub fn git(runner: &dyn Runner, repo: &Path, args: &[&str]) -> Result<String, String> {
+    // The checkout's config is the agent's to write: no program it names may run (ling_safegit).
+    let hardened: Vec<String> = ling_safegit::hardened_args(Some(repo), args).iter().map(|a| a.to_string_lossy().into_owned()).collect();
     let mut argv = vec!["git"];
-    argv.extend_from_slice(args);
-    let out = runner.run(&RunSpec::new(&argv, repo, 30))?;
+    argv.extend(hardened.iter().map(String::as_str));
+    let mut spec = RunSpec::new(&argv, repo, 30);
+    spec.env.extend(ling_safegit::FIXED_ENV.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())));
+    let out = runner.run(&spec)?;
     if out.timed_out || out.exit != Some(0) {
         let (tail, _) = tail_of(&out.output, 3, 300);
         return Err(format!("git {} failed: {tail}", args.first().copied().unwrap_or("")));
