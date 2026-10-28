@@ -14,6 +14,7 @@ pub mod hub;
 pub mod limits;
 pub mod matrix;
 pub mod render;
+pub mod repo_notice;
 pub mod store;
 pub mod telegram;
 

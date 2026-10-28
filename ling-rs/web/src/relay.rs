@@ -348,6 +348,12 @@ impl Tab {
             let mut pending = self.shared.pending.lock().unwrap_or_else(|p| p.into_inner());
             policy.vet_outgoing(&message, &mut pending, &prompts)?
         };
+        if vetted.get("method").is_none()
+            && let Some(id) = vetted.get("id")
+        {
+            self.server.chat_repos.resolve_pending_approval(&id.to_string());
+        }
+        check_bridge_repo_turn(&self.server, self.bridge, &vetted)?;
         if let Some(thread_id) = vetted.pointer("/params/threadId").and_then(Value::as_str) {
             self.server.chat_repos.note_tab_thread(self.shared.tab_id, thread_id);
         }
@@ -408,6 +414,29 @@ impl Tab {
             }
         }
     }
+}
+
+/// Defense in depth: refuses a `bridge=1` session's `turn/start` or `turn/steer` on a repository
+/// thread whose record's `bridge` is `telegram` or `discord` (CHAT_REPOS §2, §5.3).
+pub fn check_bridge_repo_turn(server: &Server, bridge: bool, vetted: &Value) -> Result<(), String> {
+    if !bridge {
+        return Ok(());
+    }
+    let method = vetted.get("method").and_then(Value::as_str);
+    if !matches!(method, Some("turn/start") | Some("turn/steer")) {
+        return Ok(());
+    }
+    let Some(thread_id) = vetted.pointer("/params/threadId").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    if let Some(record) = server
+        .chat_repos
+        .find_by_app_thread(&server.config.codex_home, thread_id)
+        && matches!(record.bridge.as_str(), "telegram" | "discord")
+    {
+        return Err("Repo work happens in the app.".to_string());
+    }
+    Ok(())
 }
 
 fn send_steer(
@@ -554,15 +583,63 @@ pub fn handle_notification_repo_limits(
             let thread_id = params.get("threadId").and_then(Value::as_str).unwrap_or_default();
             let turn_id = params.pointer("/turn/id").and_then(Value::as_str);
             server.chat_repos.remove_turn_watch(turn_id, thread_id);
+            server.chat_repos.clear_pending_approvals_for_thread(thread_id);
             let err_msg = params.pointer("/turn/error/message").and_then(Value::as_str).unwrap_or("");
             let details = params.pointer("/turn/error/additionalDetails").and_then(Value::as_str).unwrap_or("");
             let err_str = params.pointer("/turn/error").and_then(Value::as_str).unwrap_or("");
-            if err_msg.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK)
+            let is_busy = err_msg.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK)
                 || details.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK)
-                || err_str.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK)
-            {
-                if let Some(record) = server.chat_repos.find_by_app_thread(&server.config.codex_home, thread_id) {
-                    server.chat_repos.record_notice(&record.chat_key(), &record.repo, "busy");
+                || err_str.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK);
+            if let Some(record) = server.chat_repos.find_by_app_thread(&server.config.codex_home, thread_id) {
+                let dedup_key = turn_id.unwrap_or("turn");
+                if is_busy {
+                    server.chat_repos.record_event_for_record(
+                        &record,
+                        Some(thread_id),
+                        Some(dedup_key),
+                        crate::chat_repos::RepoEventKind::Busy,
+                    );
+                } else {
+                    let status = params
+                        .pointer("/turn/status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("completed");
+                    match status {
+                        "interrupted" => {
+                            server.chat_repos.record_event_for_record(
+                                &record,
+                                Some(thread_id),
+                                Some(dedup_key),
+                                crate::chat_repos::RepoEventKind::TurnStopped,
+                            );
+                        }
+                        "failed" => {
+                            server.chat_repos.record_event_for_record(
+                                &record,
+                                Some(thread_id),
+                                Some(dedup_key),
+                                crate::chat_repos::RepoEventKind::TurnFailed,
+                            );
+                        }
+                        "completed" => {
+                            if !server
+                                .chat_repos
+                                .has_event_dedup(thread_id, dedup_key, "turn_finished")
+                            {
+                                let files = crate::chat_repos::count_porcelain_lines_sync(
+                                    server,
+                                    std::path::Path::new(&record.dir),
+                                );
+                                server.chat_repos.record_event_for_record(
+                                    &record,
+                                    Some(thread_id),
+                                    Some(dedup_key),
+                                    crate::chat_repos::RepoEventKind::TurnFinished { files },
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -575,13 +652,20 @@ pub fn handle_notification_repo_limits(
             if err_msg.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK) {
                 let thread_id = params.get("threadId").and_then(Value::as_str).unwrap_or_default();
                 if let Some(record) = server.chat_repos.find_by_app_thread(&server.config.codex_home, thread_id) {
-                    server.chat_repos.record_notice(&record.chat_key(), &record.repo, "busy");
+                    let turn_id = params.get("turnId").and_then(Value::as_str).unwrap_or("error");
+                    server.chat_repos.record_event_for_record(
+                        &record,
+                        Some(thread_id),
+                        Some(turn_id),
+                        crate::chat_repos::RepoEventKind::Busy,
+                    );
                 }
             }
         }
         "thread/closed" => {
             let thread_id = params.get("threadId").and_then(Value::as_str).unwrap_or_default();
             server.chat_repos.remove_thread_watches(thread_id);
+            server.chat_repos.clear_pending_approvals_for_thread(thread_id);
         }
         _ => {}
     }
@@ -613,8 +697,22 @@ pub fn deliver(
         server.chat_repos.note_tab_thread(shared.tab_id, &thread);
     }
     match kind {
-        Incoming::ServerRequest { key, .. } => {
-            shared.pending.lock().unwrap_or_else(|p| p.into_inner()).insert(key);
+        Incoming::ServerRequest { key, method } => {
+            shared.pending.lock().unwrap_or_else(|p| p.into_inner()).insert(key.clone());
+            if matches!(
+                method.as_str(),
+                "item/commandExecution/requestApproval"
+                    | "item/fileChange/requestApproval"
+                    | "item/permissions/requestApproval"
+            ) && let Some(thread_id) = value.pointer("/params/threadId").and_then(Value::as_str)
+                && let Some(record) = server
+                    .chat_repos
+                    .find_by_app_thread(&server.config.codex_home, thread_id)
+            {
+                server
+                    .chat_repos
+                    .record_approval_waiting(&record, thread_id, &key);
+            }
         }
         Incoming::Notification { method } => {
             server.observe_busy(tab, &method, value.get("params"));
@@ -652,7 +750,12 @@ pub fn deliver(
                 if err_msg.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK) {
                     if let Some(thread_id) = turn_thread {
                         if let Some(record) = server.chat_repos.find_by_app_thread(&server.config.codex_home, &thread_id) {
-                            server.chat_repos.record_notice(&record.chat_key(), &record.repo, "busy");
+                            server.chat_repos.record_event_for_record(
+                                &record,
+                                Some(&thread_id),
+                                Some(&key),
+                                crate::chat_repos::RepoEventKind::Busy,
+                            );
                         }
                     }
                 }

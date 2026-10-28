@@ -25,6 +25,8 @@ use crate::hub::HELP;
 use crate::hub::Inbound;
 use crate::hub::Outbound;
 use crate::render;
+use crate::repo_notice::AppThreadId;
+use crate::repo_notice::RepoName;
 use crate::store;
 use crate::store::TelegramConfig;
 
@@ -354,7 +356,9 @@ impl Poller {
     /// last topic was deleted or closed.
     async fn resolve_topic(&self, chat_id: i64, message_topic: Option<i64>) -> Option<i64> {
         if let Some(topic) = message_topic {
-            store::set_last_topic(&self.dir, chat_id, Some(topic));
+            if !store::is_repo_topic(&self.dir, chat_id, topic) {
+                store::set_last_topic(&self.dir, chat_id, Some(topic));
+            }
             return Some(topic);
         }
         if !self.topics {
@@ -543,6 +547,8 @@ struct RenderState {
     last_draft: HashMap<i64, (Instant, String)>,
     /// Approvals on screen, by nonce: (chat, topic, message id, text).
     approvals: HashMap<String, (i64, Option<i64>, i64, String)>,
+    /// In-memory repository topics when `dir` is not set: `(chat_id, repo) -> topic_id`.
+    repo_topics: HashMap<(i64, String), i64>,
 }
 
 /// How the renderer draws (`[chat] telegram_rich`; MOONSHOT §3.2).
@@ -557,6 +563,8 @@ pub struct Renderer {
     pub api: TelegramApi,
     pub style: Style,
     pub dir: Option<PathBuf>,
+    pub topics: bool,
+    pub mini_app_url: Option<String>,
     state: Arc<Mutex<RenderState>>,
 }
 
@@ -604,12 +612,73 @@ impl Renderer {
     }
 
     pub fn styled(api: TelegramApi, style: Style) -> Renderer {
-        Renderer { api, style, dir: None, state: Arc::default() }
+        Renderer {
+            api,
+            style,
+            dir: None,
+            topics: false,
+            mini_app_url: None,
+            state: Arc::default(),
+        }
     }
 
     pub fn with_dir(mut self, dir: PathBuf) -> Renderer {
         self.dir = Some(dir);
         self
+    }
+
+    pub fn with_topics(mut self, topics: bool) -> Renderer {
+        self.topics = topics;
+        self
+    }
+
+    pub fn with_mini_app_url(mut self, mini_app_url: Option<String>) -> Renderer {
+        self.mini_app_url = mini_app_url;
+        self
+    }
+
+    fn open_repo_keyboard(&self, repo: &RepoName, app_thread: Option<&AppThreadId>, approval: bool) -> Option<Value> {
+        let front = self.mini_app_url.as_deref()?;
+        let url = match app_thread {
+            Some(tid) => ling_web_server::telegram_app::open_thread_url(front, tid.as_str(), approval),
+            None => ling_web_server::telegram_app::open_repo_url(front, repo.as_str()),
+        }?;
+        Some(json!({
+            "inline_keyboard": [[{ "text": "Open", "web_app": { "url": url } }]]
+        }))
+    }
+
+    async fn existing_repo_topic(&self, chat_id: i64, repo: &RepoName) -> Option<i64> {
+        if let Some(dir) = &self.dir
+            && let Some(id) = store::repo_topic(dir, chat_id, repo.as_str())
+        {
+            return Some(id);
+        }
+        self.state.lock().await.repo_topics.get(&(chat_id, repo.as_str().to_string())).copied()
+    }
+
+    async fn create_repo_topic(&self, chat_id: i64, repo: &RepoName) -> Option<i64> {
+        let topic = self
+            .api
+            .call("createForumTopic", json!({ "chat_id": chat_id, "name": repo.as_str() }))
+            .await
+            .ok()?;
+        let thread = topic.get("message_thread_id").and_then(Value::as_i64)?;
+        if let Some(dir) = &self.dir {
+            store::set_repo_topic(dir, chat_id, repo.as_str(), thread);
+        }
+        self.state.lock().await.repo_topics.insert((chat_id, repo.as_str().to_string()), thread);
+        Some(thread)
+    }
+
+    async fn resolve_repo_topic(&self, chat_id: i64, repo: &RepoName) -> Option<i64> {
+        if !self.topics {
+            return None;
+        }
+        if let Some(existing) = self.existing_repo_topic(chat_id, repo).await {
+            return Some(existing);
+        }
+        self.create_repo_topic(chat_id, repo).await
     }
 
     pub async fn run(self, mut outbound: mpsc::UnboundedReceiver<Outbound>) {
@@ -715,6 +784,45 @@ impl Renderer {
                     let _ = self.api.call("sendMessage", in_topic(json!({ "chat_id": chat_id, "text": part }), topic)).await;
                 }
             }
+            Outbound::RepoNotice { notice, .. } => {
+                let target_topic = if self.topics {
+                    self.resolve_repo_topic(chat_id, &notice.repo).await.or(topic)
+                } else {
+                    topic
+                };
+                let text = notice.text();
+                let markup = self.open_repo_keyboard(&notice.repo, notice.app_thread.as_ref(), notice.is_approval());
+                let build_params = |t: Option<i64>| {
+                    let mut params = in_topic(json!({ "chat_id": chat_id, "text": text }), t);
+                    if let Some(kb) = &markup {
+                        params["reply_markup"] = kb.clone();
+                    }
+                    params
+                };
+                match self.api.call("sendMessage", build_params(target_topic)).await {
+                    Err(err) if self.topics && target_topic.is_some() && err.is_topic_gone() => {
+                        if let Some(new_topic) = self.create_repo_topic(chat_id, &notice.repo).await {
+                            let _ = self.api.call("sendMessage", build_params(Some(new_topic))).await;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Outbound::RepoTypedRefusal { repo, .. } => {
+                let target_topic = match topic {
+                    Some(t) => Some(t),
+                    None if self.topics => self.existing_repo_topic(chat_id, &repo).await,
+                    None => None,
+                };
+                let mut params = in_topic(
+                    json!({ "chat_id": chat_id, "text": "Repo work happens in the app." }),
+                    target_topic,
+                );
+                if let Some(kb) = self.open_repo_keyboard(&repo, None, false) {
+                    params["reply_markup"] = kb;
+                }
+                let _ = self.api.call("sendMessage", params).await;
+            }
             Outbound::Approval { id, text, options, .. } => {
                 let keyboard = approval_keyboard(&id, &options);
                 let params = in_topic(json!({ "chat_id": chat_id, "text": render::to_html(&text), "parse_mode": "HTML", "reply_markup": keyboard }), topic);
@@ -790,9 +898,16 @@ pub async fn start(
         }
     }
     let has_topics = me.as_ref().is_ok_and(|me| me.get("has_topics_enabled") == Some(&Value::Bool(true)));
-    tokio::spawn(Renderer::styled(api.clone(), Style { rich: options.rich }).with_dir(dir.clone()).run(outbound));
+    let use_topics = has_topics && options.topics;
+    tokio::spawn(
+        Renderer::styled(api.clone(), Style { rich: options.rich })
+            .with_dir(dir.clone())
+            .with_topics(use_topics)
+            .with_mini_app_url(options.mini_app_url.clone())
+            .run(outbound),
+    );
     let mut poller = Poller::new(api, dir, hub);
-    poller.topics = has_topics && options.topics;
+    poller.topics = use_topics;
     poller.mini_app_url = options.mini_app_url.clone();
     tokio::spawn(poller.run());
     me.map(|me| me.get("username").and_then(Value::as_str).unwrap_or_default().to_string())

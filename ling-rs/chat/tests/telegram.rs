@@ -672,7 +672,7 @@ async fn launch_pairing_sends_buttons_to_telegram_and_pairs_only_on_the_approve_
     let mut hub = Hub::new(HubConfig::new(dir.clone()), agent, Box::new(|| false));
     hub.add_adapter("telegram", out_tx);
     let mut poller = Poller::new(api.clone(), dir.clone(), inbound_tx);
-    let mut renderer = Renderer::new(api);
+    let renderer = Renderer::new(api);
 
     // Hub polls `/api/telegram/pending-pairs` and emits the approval prompt to the Telegram adapter.
     hub.push_pending_pairs().await;
@@ -755,4 +755,939 @@ async fn launch_pairing_sends_buttons_to_telegram_and_pairs_only_on_the_approve_
     );
     assert_eq!(auth::load_devices(&state).len(), 1);
 }
+
+/// End-to-end repository notices to Telegram (`specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md` §2, §2.1,
+/// §2.2, §5.3, §12.2 G14): runs a scripted turn on a Telegram-recorded checkout with sentinels in
+/// every channel (approval command, command output, filename, file body, diff, agent answer, thread
+/// title, commit message, denylist line), followed by a commit, an anonymity-refused push, and a
+/// clean push and merge against a local bare repo + fake Forgejo, while the real `Hub` polls
+/// `ling web` and renders to the Telegram Bot API stand-in. Verifies that no sentinel ever reaches
+/// Telegram, that all six counts-only notices arrive in the repository's forum topic with the
+/// `Open` `web_app` button, that a typed Telegram message in the repository's topic is answered
+/// with `"Repo work happens in the app."` without reaching the app-server, and that the same
+/// scripted turn on a Matrix-recorded checkout produces `SENTINEL_ANSWER` at the Matrix stand-in.
+#[tokio::test(flavor = "multi_thread")]
+async fn repo_turns_send_no_content_to_telegram_or_discord() {
+    use futures::{SinkExt, StreamExt};
+    use ling_chat::agent::{AgentHandle, WebTarget};
+    use ling_chat::hub::{Hub, HubConfig};
+    use ling_chat::matrix::MatrixApi;
+    use ling_web_server::app_server::Launch;
+    use ling_web_server::auth::{self, DeviceKind};
+    use ling_web_server::server::{self, Config, Server};
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::http::{HeaderValue, header};
+
+    const SENTINELS: &[&str] = &[
+        "SENTINEL_CMD",
+        "SENTINEL_OUT",
+        "SENTINEL_NAME",
+        "SENTINEL_BODY",
+        "SENTINEL_DIFF",
+        "SENTINEL_ANSWER",
+        "SENTINEL_TITLE",
+        "SENTINEL_COMMIT",
+        "SENTINEL_DENY",
+    ];
+    const FORGE_TOKEN: &str = "forge-secret-token";
+
+    fn git_sync(cwd: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("HOME", cwd)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .args(["-c", "protocol.file.allow=always"])
+            .current_dir(cwd)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed in {}", cwd.display());
+    }
+
+    fn make_bare_repo(root: &std::path::Path, org_repo: &str) -> std::path::PathBuf {
+        let bare = root.join("forge-bares").join(format!("{org_repo}.git"));
+        std::fs::create_dir_all(&bare).unwrap();
+        git_sync(&bare, &["init", "--bare", "--initial-branch=main"]);
+
+        let work = root.join("seed-work").join(org_repo.replace('/', "_"));
+        std::fs::create_dir_all(&work).unwrap();
+        git_sync(&work, &["init", "--initial-branch=main"]);
+        git_sync(&work, &["config", "user.email", "dev@127.0.0.1"]);
+        git_sync(&work, &["config", "user.name", "dev"]);
+        std::fs::write(work.join("README.md"), "# Demo\nline two\n").unwrap();
+        git_sync(&work, &["add", "README.md"]);
+        git_sync(&work, &["commit", "-m", "initial commit"]);
+        git_sync(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        git_sync(&work, &["push", "origin", "main"]);
+        bare
+    }
+
+    async fn start_fake_forge(repos_json: Value) -> String {
+        let pulls: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let p_list = pulls.clone();
+        let p_create = pulls.clone();
+        let p_get = pulls.clone();
+        let p_merge = pulls.clone();
+
+        let app = Router::new()
+            .route(
+                "/api/v1/version",
+                axum::routing::get(|| async {
+                    (StatusCode::OK, [("content-type", "application/json")], "{\"version\":\"1.22.0\"}")
+                }),
+            )
+            .route(
+                "/api/v1/repos/search",
+                axum::routing::get(move |axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>| {
+                    let repos = repos_json.clone();
+                    async move {
+                        let page = q.get("page").and_then(|p| p.parse::<usize>().ok()).unwrap_or(1);
+                        let body = if page == 1 {
+                            json!({ "ok": true, "data": repos })
+                        } else {
+                            json!({ "ok": true, "data": [] })
+                        };
+                        (StatusCode::OK, [("content-type", "application/json")], body.to_string())
+                    }
+                }),
+            )
+            .route(
+                "/api/v1/repos/{owner}/{repo}/pulls",
+                axum::routing::get(move || {
+                    let pulls = p_list.clone();
+                    async move {
+                        let list: Vec<Value> = pulls
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|p| p.get("merged").and_then(Value::as_bool) != Some(true))
+                            .cloned()
+                            .collect();
+                        (StatusCode::OK, [("content-type", "application/json")], Value::Array(list).to_string())
+                    }
+                })
+                .post(move |axum::extract::Path((owner, repo)): axum::extract::Path<(String, String)>, body: axum::body::Bytes| {
+                    let pulls = p_create.clone();
+                    async move {
+                        let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                        let mut list = pulls.lock().unwrap();
+                        let number = (list.len() as u64) + 1;
+                        let pr = json!({
+                            "number": number,
+                            "mergeable": true,
+                            "merged": false,
+                            "html_url": format!("http://127.0.0.1:3200/{owner}/{repo}/pulls/{number}"),
+                            "title": payload.get("title").and_then(Value::as_str).unwrap_or(""),
+                            "head": { "ref": payload.get("head").and_then(Value::as_str).unwrap_or("") },
+                            "base": { "ref": payload.get("base").and_then(Value::as_str).unwrap_or("main") },
+                        });
+                        list.push(pr.clone());
+                        (StatusCode::CREATED, [("content-type", "application/json")], pr.to_string())
+                    }
+                }),
+            )
+            .route(
+                "/api/v1/repos/{owner}/{repo}/pulls/{index}",
+                axum::routing::get(move |axum::extract::Path((_owner, _repo, index)): axum::extract::Path<(String, String, u64)>| {
+                    let pulls = p_get.clone();
+                    async move {
+                        let list = pulls.lock().unwrap();
+                        let pr = list.iter().find(|p| p.get("number").and_then(Value::as_u64) == Some(index)).cloned().unwrap();
+                        (StatusCode::OK, [("content-type", "application/json")], pr.to_string())
+                    }
+                }),
+            )
+            .route(
+                "/api/v1/repos/{owner}/{repo}/commits/{sha}/status",
+                axum::routing::get(|| async {
+                    (StatusCode::OK, [("content-type", "application/json")], "{\"state\":\"success\",\"total_count\":0}")
+                }),
+            )
+            .route(
+                "/api/v1/repos/{owner}/{repo}/pulls/{index}/merge",
+                axum::routing::post(move |axum::extract::Path((_owner, _repo, index)): axum::extract::Path<(String, String, u64)>| {
+                    let pulls = p_merge.clone();
+                    async move {
+                        let mut list = pulls.lock().unwrap();
+                        if let Some(pr) = list.iter_mut().find(|p| p.get("number").and_then(Value::as_u64) == Some(index)) {
+                            pr["merged"] = json!(true);
+                        }
+                        (StatusCode::OK, [("content-type", "application/json")], "{\"sha\":\"merged\"}")
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        url
+    }
+
+    type Frames = mpsc::UnboundedReceiver<(Value, mpsc::UnboundedSender<Value>)>;
+
+    async fn fake_app_server(socket: &std::path::Path) -> Frames {
+        ling_web_server::app_server::prepare_socket_dir(socket).unwrap();
+        let listener = tokio::net::UnixListener::bind(socket).unwrap();
+        let (frames, received) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let frames = frames.clone();
+                tokio::spawn(async move {
+                    let websocket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                    let (mut sink, mut stream) = websocket.split();
+                    let (reply, mut replies) = mpsc::unbounded_channel::<Value>();
+                    tokio::spawn(async move {
+                        while let Some(value) = replies.recv().await {
+                            if sink.send(Message::Text(value.to_string().into())).await.is_err() {
+                                break;
+                            }
+                        }
+                    });
+                    while let Some(Ok(Message::Text(text))) = stream.next().await {
+                        let _ = frames.send((serde_json::from_str::<Value>(text.as_str()).unwrap(), reply.clone()));
+                    }
+                });
+            }
+        });
+        received
+    }
+
+    async fn next_frame(frames: &mut Frames) -> (Value, mpsc::UnboundedSender<Value>) {
+        tokio::time::timeout(Duration::from_secs(10), frames.recv())
+            .await
+            .expect("the app-server heard nothing")
+            .unwrap()
+    }
+
+    async fn next_frame_at(frames: &mut Frames, line: u32) -> (Value, mpsc::UnboundedSender<Value>) {
+        tokio::time::timeout(Duration::from_secs(10), frames.recv())
+            .await
+            .unwrap_or_else(|_| panic!("the app-server heard nothing at line {line}"))
+            .unwrap()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_scripted_turn_approval(
+        replies: &[&mpsc::UnboundedSender<Value>],
+        thread_id: &str,
+        turn_id: &str,
+        approval_id: u64,
+        worktree_dir: &std::path::Path,
+        include_deny_line: bool,
+    ) {
+        let body = if include_deny_line {
+            "SENTINEL_BODY\nSENTINEL_DENY\n"
+        } else {
+            "SENTINEL_BODY\n"
+        };
+        std::fs::write(worktree_dir.join("SENTINEL_NAME.txt"), body).unwrap();
+        let req = json!({
+            "id": approval_id,
+            "method": "item/commandExecution/requestApproval",
+            "params": {
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "itemId": "cmd-1",
+                "startedAtMs": 0,
+                "command": "SENTINEL_CMD"
+            }
+        });
+        for reply in replies {
+            let _ = reply.send(req.clone());
+        }
+    }
+
+    fn emit_scripted_turn_rest(
+        replies: &[&mpsc::UnboundedSender<Value>],
+        thread_id: &str,
+        turn_id: &str,
+    ) {
+        let events = [
+            json!({
+                "method": "item/commandExecution/outputDelta",
+                "params": {
+                    "threadId": thread_id,
+                    "turnId": turn_id,
+                    "itemId": "cmd-1",
+                    "delta": "SENTINEL_OUT"
+                }
+            }),
+            json!({
+                "method": "item/completed",
+                "params": {
+                    "threadId": thread_id,
+                    "turnId": turn_id,
+                    "item": {
+                        "id": "fc-1",
+                        "type": "fileChange",
+                        "changes": [{ "path": "SENTINEL_NAME.txt", "diff": "SENTINEL_DIFF" }]
+                    }
+                }
+            }),
+            json!({
+                "method": "item/agentMessage/delta",
+                "params": {
+                    "threadId": thread_id,
+                    "turnId": turn_id,
+                    "itemId": "msg-1",
+                    "delta": "SENTINEL_ANSWER"
+                }
+            }),
+            json!({
+                "method": "item/completed",
+                "params": {
+                    "threadId": thread_id,
+                    "turnId": turn_id,
+                    "item": {
+                        "id": "msg-1",
+                        "type": "agentMessage",
+                        "text": "SENTINEL_ANSWER"
+                    }
+                }
+            }),
+            json!({
+                "method": "thread/name/updated",
+                "params": {
+                    "threadId": thread_id,
+                    "threadName": "SENTINEL_TITLE"
+                }
+            }),
+            json!({
+                "method": "turn/completed",
+                "params": {
+                    "threadId": thread_id,
+                    "turn": { "id": turn_id, "status": "completed" }
+                }
+            }),
+        ];
+        for ev in events {
+            for reply in replies {
+                let _ = reply.send(ev.clone());
+            }
+        }
+    }
+
+    let root_dir = scratch("g14-e2e");
+    let bare = make_bare_repo(&root_dir, "org/app");
+    let forge_url = start_fake_forge(json!([
+        {
+            "full_name": "org/app",
+            "default_branch": "main",
+            "private": false,
+            "archived": false,
+            "mirror": false,
+            "updated_at": "2026-10-20T12:00:00Z",
+            "permissions": { "push": true },
+            "clone_url": format!("file://{}", bare.display())
+        }
+    ]))
+    .await;
+
+    let codex_home = root_dir.join("home");
+    let state_dir = auth::state_dir(&codex_home);
+    std::fs::create_dir_all(&state_dir).unwrap();
+    auth::write_private(&state_dir.join("forge-phone-token"), &format!("{FORGE_TOKEN}\n")).unwrap();
+
+    let user_home = root_dir.join("user");
+    let user_config = user_home.join(".config/dreamference/config.toml");
+    std::fs::create_dir_all(user_config.parent().unwrap()).unwrap();
+    std::fs::write(&user_config, "").unwrap();
+    std::fs::write(
+        user_home.join(".gitconfig"),
+        "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+    )
+    .unwrap();
+    std::fs::write(
+        user_home.join(".config/dreamference/anonymity-denylist.txt"),
+        "SENTINEL_DENY\n",
+    )
+    .unwrap();
+    let codex_denylist = codex_home.join(".config/dreamference/anonymity-denylist.txt");
+    std::fs::create_dir_all(codex_denylist.parent().unwrap()).unwrap();
+    std::fs::write(&codex_denylist, "SENTINEL_DENY\n").unwrap();
+
+    let fake_ling = root_dir.join("ling");
+    std::fs::write(
+        &fake_ling,
+        "#!/bin/sh\nif [ \"$1\" = prompt ] && [ \"$2\" = show ] && [ \"$4\" = --composed ]; then printf 'COMPOSED:%s' \"$3\"; exit 0; fi\nexit 0\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake_ling, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let socket_path = root_dir.join("run").join("s.sock");
+    let mut app_server = fake_app_server(&socket_path).await;
+    let config = Config {
+        codex_home: codex_home.clone(),
+        socket: socket_path,
+        launch: Launch { ling: fake_ling, env: Vec::new(), log: state_dir.join("app-server.log") },
+        images_dir: root_dir.join("images"),
+        speech_addr: "127.0.0.1:9".to_string(),
+        user_config: Some(user_config),
+        forge_url: Some(forge_url),
+        state_dir: state_dir.clone(),
+        port,
+        lan_names: Vec::new(),
+        public_names: Vec::new(),
+    };
+    let server = Server::new(config).unwrap();
+    /// A host with plenty of disk and no night running, whatever the real machine says.
+    struct RoomyHost;
+    impl ling_web_server::chat_repos::HostProbe for RoomyHost {
+        fn free_bytes(&self, _path: &std::path::Path) -> Result<u64, String> {
+            Ok(1 << 50)
+        }
+        fn swe_night_running(&self) -> bool {
+            false
+        }
+    }
+    server.chat_repos.set_probe(Arc::new(RoomyHost));
+    server.chat_repos.set_allow_file_protocol(true);
+    std::fs::write(state_dir.join("server.json"), json!({ "port": port }).to_string()).unwrap();
+    let (_stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(server::serve(server.clone(), vec![listener], async move {
+        let _ = stopped.await;
+    }));
+
+    // Telegram stand-in with forum topics enabled.
+    let tg_answer: Answer = Arc::new(|method, body, _| match method {
+        "createForumTopic" => ok(json!({ "message_thread_id": 42, "name": body["name"] })),
+        "sendMessage" => ok(json!({ "message_id": 900 })),
+        _ => ok(json!(true)),
+    });
+    let (tg_stand, tg_api) = stand_in(tg_answer).await;
+
+    // Matrix stand-in for the positive control.
+    let mx_calls: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
+    let mx_calls_handler = mx_calls.clone();
+    let mx_app = Router::new().fallback(move |uri: axum::http::Uri, body: axum::body::Bytes| {
+        let calls = mx_calls_handler.clone();
+        async move {
+            let path = uri.path().to_string();
+            let parsed = serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null);
+            calls.lock().unwrap().push((path, parsed));
+            Json(json!({ "event_id": "$mx1" }))
+        }
+    });
+    let mx_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mx_root = format!("http://{}", mx_listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(mx_listener, mx_app).await.unwrap() });
+
+    // Start the real `ling-chat` link and `Hub`.
+    let (agent, commands) = AgentHandle::channel();
+    let (events_tx, events) = mpsc::unbounded_channel();
+    let (link_tx, mut from_link) = mpsc::unbounded_channel::<Value>();
+    let (connected_tx, mut connected) = mpsc::unbounded_channel::<()>();
+    tokio::spawn(async move {
+        while let Some(event) = from_link.recv().await {
+            let is_connected = event["method"] == ling_chat::agent::CONNECTED;
+            if events_tx.send(event).is_err() {
+                break;
+            }
+            if is_connected {
+                let _ = connected_tx.send(());
+            }
+        }
+    });
+    tokio::spawn(ling_chat::agent::run_link(
+        WebTarget { state: state_dir.clone(), ling: None },
+        commands,
+        link_tx,
+    ));
+
+    let hub_dir = root_dir.clone();
+    let mut hub_cfg = HubConfig::new(hub_dir.clone());
+    hub_cfg.repo_notice_interval = Duration::from_millis(50);
+    let mut hub = Hub::new(hub_cfg, agent, Box::new(|| false));
+
+    let (tg_out_tx, mut tg_out_rx) = mpsc::unbounded_channel();
+    hub.add_adapter("telegram", tg_out_tx);
+    let tg_renderer = Renderer::new(tg_api.clone())
+        .with_dir(hub_dir.clone())
+        .with_topics(true)
+        .with_mini_app_url(Some(MINI_APP.to_string()));
+    tokio::spawn(async move {
+        while let Some(out) = tg_out_rx.recv().await {
+            tg_renderer.render(out).await;
+        }
+    });
+
+    let (mx_out_tx, mut mx_out_rx) = mpsc::unbounded_channel();
+    hub.add_adapter("matrix", mx_out_tx);
+    let (mx_dummy_tx, _mx_dummy_rx) = mpsc::unbounded_channel();
+    let (_, mx_renderer) = ling_chat::matrix::pair_for_tests(
+        MatrixApi::new(&mx_root, "bot-token"),
+        root_dir.join("mx-state"),
+        "@mightling:node.tail.ts.net",
+        mx_dummy_tx,
+    );
+    tokio::spawn(async move {
+        while let Some(out) = mx_out_rx.recv().await {
+            mx_renderer.render(out).await;
+        }
+    });
+
+    let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
+    let mut poller = Poller::new(tg_api, hub_dir.clone(), inbound_tx.clone());
+    poller.topics = true;
+    poller.mini_app_url = Some(MINI_APP.to_string());
+    tokio::spawn(hub.run(inbound_rx, events));
+
+    // Wait for `ling-chat` link to connect and initialize.
+    let (frame, bridge_reply) = next_frame(&mut app_server).await;
+    assert_eq!(frame["method"], "initialize");
+    assert_eq!(frame["params"]["clientInfo"]["name"], "ling-chat");
+    bridge_reply.send(json!({ "id": frame["id"], "result": {} })).unwrap();
+    let (frame, _) = next_frame(&mut app_server).await;
+    assert_eq!(frame["method"], "initialized");
+    tokio::time::timeout(Duration::from_secs(10), connected.recv()).await.unwrap().unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Issue a browser device cookie for the page tab.
+    let (_dev_id, dev_token) =
+        auth::add_device_of(&state_dir, "page", DeviceKind::Browser).unwrap();
+    let page_cookie = format!("{}={dev_token}", auth::DEVICE_COOKIE);
+    let origin = format!("http://127.0.0.1:{port}");
+    let web_root = format!("http://127.0.0.1:{port}");
+    let http = reqwest::Client::new();
+
+    // 1. Open a checkout recorded with `bridge: telegram`.
+    let open_tg: Value = http
+        .post(format!("{web_root}/api/repos/open"))
+        .header("Origin", &origin)
+        .header("Cookie", &page_cookie)
+        .json(&json!({ "repo": "org/app", "bridge": "telegram", "chat": "111" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let tg_thread = open_tg["thread"].as_str().unwrap_or_else(|| panic!("open: {open_tg}")).to_string();
+    let tg_wt = std::path::PathBuf::from(open_tg["cwd"].as_str().unwrap());
+
+    // 2. Connect a page tab on `/ws` and start a thread in the Telegram checkout.
+    let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let mut ws_req = format!("ws://127.0.0.1:{port}/ws").into_client_request().unwrap();
+    ws_req.headers_mut().insert(header::ORIGIN, HeaderValue::from_str(&origin).unwrap());
+    ws_req.headers_mut().insert(header::COOKIE, HeaderValue::from_str(&page_cookie).unwrap());
+    let (mut page_ws, _) = tokio_tungstenite::client_async(ws_req, tcp).await.unwrap();
+
+    page_ws
+        .send(Message::Text(json!({ "call": 1, "message": { "type": "work/start" } }).to_string().into()))
+        .await
+        .unwrap();
+    // Wait for `{"answer": 1}`.
+    while let Some(Ok(Message::Text(txt))) = page_ws.next().await {
+        let v: Value = serde_json::from_str(&txt).unwrap();
+        if v.get("answer").and_then(Value::as_u64) == Some(1) {
+            break;
+        }
+    }
+
+    page_ws
+        .send(Message::Text(
+            json!({
+                "call": 2,
+                "message": {
+                    "type": "work/send",
+                    "message": { "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    let (frame, page_reply) = next_frame_at(&mut app_server, 1300).await;
+    assert_eq!(frame["method"], "initialize");
+    page_reply.send(json!({ "id": frame["id"], "result": {} })).unwrap();
+
+    page_ws
+        .send(Message::Text(
+            json!({
+                "call": 3,
+                "message": {
+                    "type": "work/send",
+                    "message": { "jsonrpc": "2.0", "method": "initialized", "params": {} }
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    let (frame, _) = next_frame_at(&mut app_server, 1318).await;
+    assert_eq!(frame["method"], "initialized");
+
+    let tg_app_thread = "0195f0a0-1111";
+    page_ws
+        .send(Message::Text(
+            json!({
+                "call": 4,
+                "message": {
+                    "type": "work/send",
+                    "message": {
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "thread/start",
+                        "params": { "prompt": "chat-work", "cwd": tg_wt.to_str().unwrap() }
+                    }
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    let (frame, _) = next_frame_at(&mut app_server, 1341).await;
+    assert_eq!(frame["method"], "thread/start");
+    page_reply
+        .send(json!({ "id": frame["id"], "result": { "thread": { "id": tg_app_thread } } }))
+        .unwrap();
+    while let Some(Ok(Message::Text(txt))) = page_ws.next().await {
+        let v: Value = serde_json::from_str(&txt).unwrap();
+        if v.pointer("/event/payload/id").and_then(Value::as_u64) == Some(2) {
+            break;
+        }
+    }
+
+    page_ws
+        .send(Message::Text(
+            json!({
+                "call": 5,
+                "message": {
+                    "type": "work/send",
+                    "message": {
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "turn/start",
+                        "params": {
+                            "threadId": tg_app_thread,
+                            "input": [{ "type": "text", "text": "fix the bug" }]
+                        }
+                    }
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    let (frame, _) = next_frame_at(&mut app_server, 1375).await;
+    assert_eq!(frame["method"], "turn/start");
+    page_reply
+        .send(json!({ "id": frame["id"], "result": { "turn": { "id": "turn-tg-1" } } }))
+        .unwrap();
+
+    // 3. Run the scripted turn on the Telegram checkout (sending to both the page tab and the bridge).
+    emit_scripted_turn_approval(
+        &[&page_reply, &bridge_reply],
+        tg_app_thread,
+        "turn-tg-1",
+        901,
+        &tg_wt,
+        true,
+    );
+    while let Some(Ok(Message::Text(txt))) = page_ws.next().await {
+        let v: Value = serde_json::from_str(&txt).unwrap();
+        if v.pointer("/event/payload/id").and_then(Value::as_u64) == Some(901) {
+            break;
+        }
+    }
+    page_ws
+        .send(Message::Text(
+            json!({
+                "call": 6,
+                "message": {
+                    "type": "work/send",
+                    "message": { "jsonrpc": "2.0", "id": 901, "result": { "decision": "accept" } }
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    let (frame, _) = next_frame_at(&mut app_server, 1410).await;
+    assert_eq!(frame["id"], 901);
+
+    emit_scripted_turn_rest(&[&page_reply, &bridge_reply], tg_app_thread, "turn-tg-1");
+    while let Some(Ok(Message::Text(txt))) = page_ws.next().await {
+        let v: Value = serde_json::from_str(&txt).unwrap();
+        if v.pointer("/event/payload/method").and_then(Value::as_str) == Some("turn/completed") {
+            break;
+        }
+    }
+
+    let get_nonce = |thread: String, intent: &'static str| {
+        let http = http.clone();
+        let web_root = web_root.clone();
+        let page_cookie = page_cookie.clone();
+        async move {
+            let state: Value = http
+                .get(format!("{web_root}/api/repos/state?thread={thread}&intent={intent}"))
+                .header("Cookie", &page_cookie)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            state["confirm"].as_str().unwrap().to_string()
+        }
+    };
+
+    // 4. Commit with `SENTINEL_COMMIT`, then attempt a push refused by the anonymity check (`SENTINEL_DENY`).
+    let c_nonce = get_nonce(tg_thread.clone(), "commit").await;
+    let commit_resp = http
+        .post(format!("{web_root}/api/repos/commit"))
+        .header("Origin", &origin)
+        .header("Cookie", &page_cookie)
+        .json(&json!({ "thread": tg_thread, "message": "SENTINEL_COMMIT", "confirm": c_nonce }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(commit_resp.status(), StatusCode::OK);
+
+    let p_nonce_refused = get_nonce(tg_thread.clone(), "push").await;
+    let refused_push = http
+        .post(format!("{web_root}/api/repos/push"))
+        .header("Origin", &origin)
+        .header("Cookie", &page_cookie)
+        .json(&json!({ "thread": tg_thread, "confirm": p_nonce_refused }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused_push.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Replace the commit so `SENTINEL_NAME.txt` holds `SENTINEL_BODY` without `SENTINEL_DENY` while
+    // keeping `SENTINEL_COMMIT` as the commit message and `SENTINEL_DENY` in the node's denylist,
+    // then push and merge against the local bare repo and fake forge.
+    git_sync(&tg_wt, &["reset", "--soft", "origin/main"]);
+    std::fs::write(tg_wt.join("SENTINEL_NAME.txt"), "SENTINEL_BODY\n").unwrap();
+    let c_nonce_clean = get_nonce(tg_thread.clone(), "commit").await;
+    let commit_clean_resp = http
+        .post(format!("{web_root}/api/repos/commit"))
+        .header("Origin", &origin)
+        .header("Cookie", &page_cookie)
+        .json(&json!({ "thread": tg_thread, "message": "SENTINEL_COMMIT", "confirm": c_nonce_clean }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(commit_clean_resp.status(), StatusCode::OK);
+
+    let p_nonce_ok = get_nonce(tg_thread.clone(), "push").await;
+    let ok_push = http
+        .post(format!("{web_root}/api/repos/push"))
+        .header("Origin", &origin)
+        .header("Cookie", &page_cookie)
+        .json(&json!({ "thread": tg_thread, "confirm": p_nonce_ok }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok_push.status(), StatusCode::OK);
+
+    let m_nonce = get_nonce(tg_thread.clone(), "merge").await;
+    let ok_merge = http
+        .post(format!("{web_root}/api/repos/merge"))
+        .header("Origin", &origin)
+        .header("Cookie", &page_cookie)
+        .json(&json!({ "thread": tg_thread, "confirm": m_nonce }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok_merge.status(), StatusCode::OK);
+
+    // 5. Wait for the Hub to drain and render all 6 notices to the Telegram stand-in.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if tg_stand.bodies("sendMessage").len() >= 6 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for 6 Telegram repo notices; got {:?}",
+            tg_stand.bodies("sendMessage")
+        );
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+
+    let tg_messages = tg_stand.bodies("sendMessage");
+    assert_eq!(tg_messages.len(), 6);
+    let tg_texts: Vec<&str> = tg_messages.iter().map(|b| b["text"].as_str().unwrap()).collect();
+    let expected_branch = format!("phone/{tg_thread}");
+    let expected_switched = format!("Working in org/app on {expected_branch}.");
+    let expected_merged = format!("Merged {expected_branch} into main in org/app.");
+    assert_eq!(
+        tg_texts,
+        vec![
+            expected_switched.as_str(),
+            "Approval waiting in org/app.",
+            "Turn finished in org/app: 1 files changed.",
+            "Push refused in org/app; open the app.",
+            "Pushed 1 commits of org/app.",
+            expected_merged.as_str(),
+        ]
+    );
+
+    // Topic creation and Open web_app buttons.
+    let topics_created = tg_stand.bodies("createForumTopic");
+    assert_eq!(topics_created.len(), 1);
+    assert_eq!(topics_created[0]["name"], "org/app");
+    for (idx, msg) in tg_messages.iter().enumerate() {
+        assert_eq!(msg["chat_id"], 111);
+        assert_eq!(msg["message_thread_id"], 42);
+        let btn = &msg["reply_markup"]["inline_keyboard"][0][0];
+        assert_eq!(btn["text"], "Open");
+        let url = btn["web_app"]["url"].as_str().unwrap();
+        if idx == 0 {
+            assert_eq!(url, format!("{MINI_APP}?open=thread:{tg_thread}"));
+        } else if idx == 1 {
+            assert_eq!(url, format!("{MINI_APP}?open=thread:{tg_app_thread}&approval=1"));
+        } else {
+            assert_eq!(url, format!("{MINI_APP}?open=thread:{tg_app_thread}"));
+        }
+    }
+
+    // 6. A typed Telegram message in a repository's topic is answered with the fixed text,
+    // and no `turn/start` reaches the fake app-server.
+    let typed_in_repo_topic = json!({
+        "update_id": 77,
+        "message": {
+            "message_id": 78,
+            "message_thread_id": 42,
+            "is_topic_message": true,
+            "from": { "id": 111 },
+            "chat": { "id": 111, "type": "private" },
+            "text": "please run cargo test"
+        }
+    });
+    poller.handle(&typed_in_repo_topic).await;
+    let refusal_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if tg_stand.bodies("sendMessage").len() >= 7 {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < refusal_deadline, "timed out waiting for typed-text refusal: {:?} dir {}", tg_stand.bodies("sendMessage").iter().map(|b| b["text"].clone()).collect::<Vec<_>>(), root_dir.display());
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    let refusal_msg = tg_stand.bodies("sendMessage").pop().unwrap();
+    assert_eq!(refusal_msg["chat_id"], 111);
+    assert_eq!(refusal_msg["message_thread_id"], 42);
+    assert_eq!(refusal_msg["text"], "Repo work happens in the app.");
+    assert_eq!(
+        refusal_msg["reply_markup"]["inline_keyboard"][0][0]["web_app"]["url"],
+        format!("{MINI_APP}?open=repo:org/app")
+    );
+    assert!(app_server.try_recv().is_err(), "no turn/start may reach the fake app-server");
+
+    // 7. Positive control: the same scripted turn on a Matrix-recorded checkout through the Matrix
+    // stand-in shows `SENTINEL_ANSWER`, so the sentinels were really produced.
+    let open_mx: Value = http
+        .post(format!("{web_root}/api/repos/open"))
+        .header("Origin", &origin)
+        .header("Cookie", &page_cookie)
+        .json(&json!({ "repo": "org/app", "bridge": "matrix", "chat": "!dm:node.tail.ts.net" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mx_wt = std::path::PathBuf::from(open_mx["cwd"].as_str().unwrap());
+    let mx_app_thread = "0195f0a0-2222";
+
+    // Attach `mx_app_thread` to the Matrix checkout record via the page tab.
+    page_ws
+        .send(Message::Text(
+            json!({
+                "call": 7,
+                "message": {
+                    "type": "work/send",
+                    "message": {
+                        "jsonrpc": "2.0",
+                        "id": 10,
+                        "method": "thread/start",
+                        "params": { "prompt": "chat-work", "cwd": mx_wt.to_str().unwrap() }
+                    }
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    let (frame, _) = next_frame_at(&mut app_server, 1619).await;
+    assert_eq!(frame["method"], "thread/start");
+    page_reply
+        .send(json!({ "id": frame["id"], "result": { "thread": { "id": mx_app_thread } } }))
+        .unwrap();
+    while let Some(Ok(Message::Text(txt))) = page_ws.next().await {
+        let v: Value = serde_json::from_str(&txt).unwrap();
+        if v.pointer("/event/payload/id").and_then(Value::as_u64) == Some(10) {
+            break;
+        }
+    }
+
+    // Start a turn from Matrix through the Hub.
+    inbound_tx
+        .send(Inbound::Text {
+            chat: "matrix:!dm:node.tail.ts.net".into(),
+            text: "run matrix turn".into(),
+        })
+        .unwrap();
+    let (frame, _) = next_frame_at(&mut app_server, 1638).await;
+    assert_eq!(frame["method"], "thread/start");
+    bridge_reply
+        .send(json!({ "id": frame["id"], "result": { "thread": { "id": mx_app_thread } } }))
+        .unwrap();
+    let (frame, _) = next_frame_at(&mut app_server, 1643).await;
+    assert_eq!(frame["method"], "thread/name/set");
+    bridge_reply.send(json!({ "id": frame["id"], "result": {} })).unwrap();
+    let (frame, _) = next_frame_at(&mut app_server, 1646).await;
+    assert_eq!(frame["method"], "turn/start");
+    bridge_reply
+        .send(json!({ "id": frame["id"], "result": { "turn": { "id": "turn-mx-1" } } }))
+        .unwrap();
+
+    emit_scripted_turn_approval(&[&bridge_reply], mx_app_thread, "turn-mx-1", 902, &mx_wt, false);
+    emit_scripted_turn_rest(&[&bridge_reply], mx_app_thread, "turn-mx-1");
+
+    let mx_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let dump = serde_json::to_string(&*mx_calls.lock().unwrap()).unwrap();
+        if dump.contains("SENTINEL_ANSWER") && dump.contains("SENTINEL_CMD") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < mx_deadline,
+            "timed out waiting for SENTINEL_ANSWER on Matrix stand-in; got {dump}"
+        );
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+
+    // 8. Final sentinel check across every request body the Telegram stand-in received
+    // (text, reply_markup, callback_data, topic names, drafts).
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    let tg_all_calls = serde_json::to_string(&*tg_stand.calls.lock().unwrap()).unwrap();
+    for sentinel in SENTINELS {
+        assert!(
+            !tg_all_calls.contains(sentinel),
+            "sentinel {sentinel} leaked to Telegram stand-in: {tg_all_calls}"
+        );
+    }
+    assert_eq!(
+        tg_stand.bodies("sendMessage").len(),
+        7,
+        "Matrix checkout events must not drain to Telegram"
+    );
+}
+
 

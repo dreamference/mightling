@@ -385,22 +385,186 @@ impl CheckoutRecord {
     }
 }
 
-/// A pending notice queued by `ChatRepos` for phone bridges to drain (`budget80`, `busy`, or `unbounded`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PendingNotice {
-    pub chat: String,
-    pub repo: String,
-    pub kind: String,
+/// Maximum number of repository events retained in the in-memory ring buffer.
+pub const EVENT_RING_CAP: usize = 256;
+
+/// Maximum number of deduplication keys retained across tabs.
+const EVENT_DEDUP_CAP: usize = 512;
+
+/// Milliseconds before a pending approval triggers an `ApprovalDeclineSoon` event (9 minutes).
+pub const APPROVAL_DECLINE_SOON_MS: u64 = 9 * 60 * 1000;
+
+/// Fixed set of repository actions that can be refused (CHAT_REPOS §5.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RefusedAction {
+    Commit,
+    Push,
+    Update,
+    Merge,
+    Pr,
+    Branch,
 }
 
-impl PendingNotice {
+impl RefusedAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Commit => "Commit",
+            Self::Push => "Push",
+            Self::Update => "Update",
+            Self::Merge => "Merge",
+            Self::Pr => "Pr",
+            Self::Branch => "Branch",
+        }
+    }
+}
+
+/// Typed repository event kinds recorded by `ling web` (CHAT_REPOS §5.3).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RepoEventKind {
+    Switched { branch: String },
+    TurnFinished { files: u32 },
+    TurnStopped,
+    TurnFailed,
+    ApprovalWaiting,
+    ApprovalDeclineSoon,
+    Pushed { commits: u32 },
+    Merged { branch: String, into: String },
+    Refused { action: RefusedAction },
+    Budget80,
+    Busy,
+    RepoOff { uncommitted: u32 },
+    Unbounded,
+}
+
+impl RepoEventKind {
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Switched { .. } => "switched",
+            Self::TurnFinished { .. } => "turn_finished",
+            Self::TurnStopped => "turn_stopped",
+            Self::TurnFailed => "turn_failed",
+            Self::ApprovalWaiting => "approval_waiting",
+            Self::ApprovalDeclineSoon => "approval_decline_soon",
+            Self::Pushed { .. } => "pushed",
+            Self::Merged { .. } => "merged",
+            Self::Refused { .. } => "refused",
+            Self::Budget80 => "budget80",
+            Self::Busy => "busy",
+            Self::RepoOff { .. } => "repo_off",
+            Self::Unbounded => "unbounded",
+        }
+    }
+
+    fn dedup_tag(&self) -> String {
+        match self {
+            Self::Refused { action } => format!("refused:{}", action.as_str()),
+            other => other.kind_name().to_string(),
+        }
+    }
+}
+
+impl PartialEq<&str> for RepoEventKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.kind_name() == *other
+    }
+}
+
+/// A typed repository event queued by `ChatRepos` in an in-memory ring (max 256) with a monotonic `seq`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepoEvent {
+    pub seq: u64,
+    pub chat: String,
+    pub repo: String,
+    pub app_thread: Option<String>,
+    pub kind: RepoEventKind,
+}
+
+impl RepoEvent {
+    pub fn bridge(&self) -> &str {
+        self.chat.split(':').next().unwrap_or("")
+    }
+
     pub fn to_json(&self) -> Value {
-        json!({
-            "chat": self.chat,
-            "repo": self.repo,
-            "kind": self.kind,
+        self.to_notice_json().unwrap_or_else(|| {
+            json!({
+                "seq": self.seq,
+                "chat_key": self.chat,
+                "repo": self.repo,
+                "app_thread": self.app_thread,
+                "kind": self.kind.kind_name(),
+            })
         })
     }
+
+    /// Serializes this event to the `RepoNotice` wire format for `/api/repos/notices`.
+    /// Returns `None` for internal-only `Unbounded` events.
+    pub fn to_notice_json(&self) -> Option<Value> {
+        if matches!(self.kind, RepoEventKind::Unbounded) {
+            return None;
+        }
+        let mut obj = serde_json::Map::new();
+        obj.insert("seq".to_string(), json!(self.seq));
+        obj.insert("chat_key".to_string(), json!(self.chat));
+        obj.insert("repo".to_string(), json!(self.repo));
+        obj.insert(
+            "app_thread".to_string(),
+            match &self.app_thread {
+                Some(t) => json!(t),
+                None => Value::Null,
+            },
+        );
+        obj.insert("kind".to_string(), json!(self.kind.kind_name()));
+        match &self.kind {
+            RepoEventKind::Switched { branch } => {
+                obj.insert("branch".to_string(), json!(branch));
+            }
+            RepoEventKind::TurnFinished { files } => {
+                obj.insert("files".to_string(), json!(files));
+            }
+            RepoEventKind::TurnStopped
+            | RepoEventKind::TurnFailed
+            | RepoEventKind::ApprovalWaiting
+            | RepoEventKind::ApprovalDeclineSoon
+            | RepoEventKind::Budget80
+            | RepoEventKind::Busy => {}
+            RepoEventKind::Pushed { commits } => {
+                obj.insert("commits".to_string(), json!(commits));
+            }
+            RepoEventKind::Merged { branch, into } => {
+                obj.insert("branch".to_string(), json!(branch));
+                obj.insert("into".to_string(), json!(into));
+            }
+            RepoEventKind::Refused { action } => {
+                obj.insert("action".to_string(), json!(action.as_str()));
+            }
+            RepoEventKind::RepoOff { uncommitted } => {
+                obj.insert("uncommitted".to_string(), json!(uncommitted));
+            }
+            RepoEventKind::Unbounded => return None,
+        }
+        Some(Value::Object(obj))
+    }
+}
+
+/// Alias kept for internal compatibility where tests refer to `PendingNotice`.
+pub type PendingNotice = RepoEvent;
+
+#[derive(Default)]
+struct EventRing {
+    seq: u64,
+    events: std::collections::VecDeque<RepoEvent>,
+    dedup_order: std::collections::VecDeque<(String, String, String)>,
+    dedup_set: std::collections::HashSet<(String, String, String)>,
+}
+
+#[derive(Clone, Debug)]
+struct PendingRepoApproval {
+    chat_key: String,
+    repo: String,
+    app_thread: String,
+    request_key: String,
+    created_ms: u64,
+    warned: bool,
 }
 
 struct CachedListing {
@@ -419,7 +583,7 @@ struct ConfirmNonce {
 
 /// Runtime state held by `Server` for `/api/repos`: the 60-second listing cache, per-repository
 /// git locks, `index.json` lock, single-use confirmation nonces, host probe, daily per-chat token
-/// budget, pending notices, server-wide turn watches, and running-thread tracking for concurrency warnings.
+/// budget, typed event ring, server-wide turn watches, and running-thread tracking for concurrency warnings.
 pub struct ChatRepos {
     listing: tokio::sync::Mutex<Option<CachedListing>>,
     repo_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -429,7 +593,8 @@ pub struct ChatRepos {
     probe: Mutex<Arc<dyn HostProbe>>,
     allow_file_protocol: std::sync::atomic::AtomicBool,
     budget: Mutex<crate::repo_limits::Budget>,
-    notices: Mutex<Vec<PendingNotice>>,
+    events: Mutex<EventRing>,
+    pending_approvals: Mutex<HashMap<String, PendingRepoApproval>>,
     watches: Mutex<HashMap<String, crate::relay::ActiveTurnWatch>>,
     tab_threads: Mutex<HashMap<u64, std::collections::HashSet<String>>>,
     running_threads: Mutex<HashMap<String, bool>>,
@@ -456,7 +621,8 @@ impl ChatRepos {
             probe: Mutex::new(Arc::new(SystemHostProbe)),
             allow_file_protocol: std::sync::atomic::AtomicBool::new(cfg!(test)),
             budget: Mutex::new(crate::repo_limits::Budget::default()),
-            notices: Mutex::new(Vec::new()),
+            events: Mutex::new(EventRing::default()),
+            pending_approvals: Mutex::new(HashMap::new()),
             watches: Mutex::new(HashMap::new()),
             tab_threads: Mutex::new(HashMap::new()),
             running_threads: Mutex::new(HashMap::new()),
@@ -627,22 +793,268 @@ impl ChatRepos {
         true
     }
 
-    /// Queues a pending bot notice (`{chat, repo, kind}`).
-    pub fn record_notice(&self, chat: &str, repo: &str, kind: &str) {
-        self.notices
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push(PendingNotice {
-                chat: chat.to_string(),
-                repo: repo.to_string(),
-                kind: kind.to_string(),
-            });
+    /// Records a typed repository event in the bounded ring (max 256) with optional deduplication
+    /// on `(app_thread, dedup_key, kind)`. Returns `Some(seq)` if recorded, or `None` if deduplicated.
+    pub fn record_event(
+        &self,
+        chat: &str,
+        repo: &str,
+        app_thread: Option<&str>,
+        dedup_key: Option<&str>,
+        kind: RepoEventKind,
+    ) -> Option<u64> {
+        let mut ring = self.events.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(dkey) = dedup_key {
+            let tuple = (
+                app_thread.unwrap_or("").to_string(),
+                dkey.to_string(),
+                kind.dedup_tag(),
+            );
+            if ring.dedup_set.contains(&tuple) {
+                return None;
+            }
+            ring.dedup_set.insert(tuple.clone());
+            ring.dedup_order.push_back(tuple);
+            while ring.dedup_order.len() > EVENT_DEDUP_CAP {
+                if let Some(old) = ring.dedup_order.pop_front() {
+                    ring.dedup_set.remove(&old);
+                }
+            }
+        }
+        ring.seq += 1;
+        let seq = ring.seq;
+        let valid_app_thread = app_thread
+            .filter(|id| crate::telegram_app::valid_open_thread_id(id))
+            .map(str::to_string);
+        ring.events.push_back(RepoEvent {
+            seq,
+            chat: chat.to_string(),
+            repo: repo.to_string(),
+            app_thread: valid_app_thread,
+            kind,
+        });
+        while ring.events.len() > EVENT_RING_CAP {
+            ring.events.pop_front();
+        }
+        Some(seq)
     }
 
-    /// Drains and returns all pending notices (`budget80`, `busy`, `unbounded`).
-    pub fn take_notices(&self) -> Vec<PendingNotice> {
-        let mut notices = self.notices.lock().unwrap_or_else(|p| p.into_inner());
-        std::mem::take(&mut *notices)
+    /// Records a typed repository event for `record`, resolving `app_thread` from the provided
+    /// thread id, `record.app_threads`, or `record.thread`.
+    pub fn record_event_for_record(
+        &self,
+        record: &CheckoutRecord,
+        app_thread: Option<&str>,
+        dedup_key: Option<&str>,
+        kind: RepoEventKind,
+    ) -> Option<u64> {
+        let resolved_thread = app_thread
+            .filter(|id| crate::telegram_app::valid_open_thread_id(id))
+            .or_else(|| {
+                record
+                    .app_threads
+                    .iter()
+                    .rev()
+                    .map(String::as_str)
+                    .find(|id| crate::telegram_app::valid_open_thread_id(id))
+            })
+            .or_else(|| {
+                crate::telegram_app::valid_open_thread_id(&record.thread).then_some(record.thread.as_str())
+            });
+        let mut ring = self.events.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(dkey) = dedup_key {
+            let tuple = (
+                app_thread.unwrap_or(&record.thread).to_string(),
+                dkey.to_string(),
+                kind.dedup_tag(),
+            );
+            if ring.dedup_set.contains(&tuple) {
+                return None;
+            }
+            ring.dedup_set.insert(tuple.clone());
+            ring.dedup_order.push_back(tuple);
+            while ring.dedup_order.len() > EVENT_DEDUP_CAP {
+                if let Some(old) = ring.dedup_order.pop_front() {
+                    ring.dedup_set.remove(&old);
+                }
+            }
+        }
+        ring.seq += 1;
+        let seq = ring.seq;
+        ring.events.push_back(RepoEvent {
+            seq,
+            chat: record.chat_key(),
+            repo: record.repo.clone(),
+            app_thread: resolved_thread.map(str::to_string),
+            kind,
+        });
+        while ring.events.len() > EVENT_RING_CAP {
+            ring.events.pop_front();
+        }
+        Some(seq)
+    }
+
+    /// Checks whether `(app_thread, dedup_key, kind_tag)` has already been recorded.
+    pub fn has_event_dedup(&self, app_thread: &str, dedup_key: &str, kind_tag: &str) -> bool {
+        let ring = self.events.lock().unwrap_or_else(|p| p.into_inner());
+        ring.dedup_set.contains(&(
+            app_thread.to_string(),
+            dedup_key.to_string(),
+            kind_tag.to_string(),
+        ))
+    }
+
+    /// Records `ApprovalWaiting` for `record` and schedules the 9-minute `ApprovalDeclineSoon` check.
+    pub fn record_approval_waiting(
+        &self,
+        record: &CheckoutRecord,
+        thread_id: &str,
+        request_key: &str,
+    ) {
+        if self
+            .record_event_for_record(
+                record,
+                Some(thread_id),
+                Some(request_key),
+                RepoEventKind::ApprovalWaiting,
+            )
+            .is_some()
+        {
+            let now_ms = self.now_ms();
+            let resolved_thread = if crate::telegram_app::valid_open_thread_id(thread_id) {
+                thread_id.to_string()
+            } else if let Some(valid) = record
+                .app_threads
+                .iter()
+                .rev()
+                .find(|id| crate::telegram_app::valid_open_thread_id(id))
+            {
+                valid.clone()
+            } else {
+                record.thread.clone()
+            };
+            self.pending_approvals
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(
+                    format!("{thread_id}:{request_key}"),
+                    PendingRepoApproval {
+                        chat_key: record.chat_key(),
+                        repo: record.repo.clone(),
+                        app_thread: resolved_thread,
+                        request_key: request_key.to_string(),
+                        created_ms: now_ms,
+                        warned: false,
+                    },
+                );
+        }
+    }
+
+    /// Marks an approval request key as answered so `ApprovalDeclineSoon` will not fire for it.
+    pub fn resolve_pending_approval(&self, request_key: &str) {
+        if request_key.is_empty() {
+            return;
+        }
+        self.pending_approvals
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|_, v| v.request_key != request_key);
+    }
+
+    /// Clears all pending approvals for `thread_id` (e.g. when the turn completes or thread closes).
+    pub fn clear_pending_approvals_for_thread(&self, thread_id: &str) {
+        if thread_id.is_empty() {
+            return;
+        }
+        let prefix = format!("{thread_id}:");
+        self.pending_approvals
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|k, v| !k.starts_with(&prefix) && v.app_thread != thread_id);
+    }
+
+    /// Checks whether any pending approval has waited at least 9 minutes (`APPROVAL_DECLINE_SOON_MS`)
+    /// and records `ApprovalDeclineSoon` once per approval.
+    pub fn check_pending_approvals(&self) {
+        let now_ms = self.now_ms();
+        let due: Vec<PendingRepoApproval> = {
+            let mut map = self.pending_approvals.lock().unwrap_or_else(|p| p.into_inner());
+            let mut list = Vec::new();
+            for entry in map.values_mut() {
+                if !entry.warned && now_ms.saturating_sub(entry.created_ms) >= APPROVAL_DECLINE_SOON_MS {
+                    entry.warned = true;
+                    list.push(entry.clone());
+                }
+            }
+            list
+        };
+        for item in due {
+            self.record_event(
+                &item.chat_key,
+                &item.repo,
+                Some(&item.app_thread),
+                Some(&item.request_key),
+                RepoEventKind::ApprovalDeclineSoon,
+            );
+        }
+    }
+
+    /// Queues a pending bot notice by kind name (`budget80`, `busy`, `unbounded`).
+    pub fn record_notice(&self, chat: &str, repo: &str, kind: &str) {
+        let typed = match kind {
+            "budget80" => RepoEventKind::Budget80,
+            "busy" => RepoEventKind::Busy,
+            "unbounded" => RepoEventKind::Unbounded,
+            _ => return,
+        };
+        self.record_event(chat, repo, None, None, typed);
+    }
+
+    /// Drains and returns the budget, unbounded and busy events of the ring (used by unit tests).
+    pub fn take_notices(&self) -> Vec<RepoEvent> {
+        self.check_pending_approvals();
+        let mut ring = self.events.lock().unwrap_or_else(|p| p.into_inner());
+        let (taken, kept): (Vec<RepoEvent>, Vec<RepoEvent>) = std::mem::take(&mut ring.events)
+            .into_iter()
+            .partition(|ev| matches!(ev.kind.kind_name(), "budget80" | "unbounded" | "busy"));
+        ring.events = kept.into_iter().collect();
+        taken
+    }
+
+    /// Returns `(notices, seq)` for `GET /api/repos/notices?after=<seq>`: only events with
+    /// `seq > after` whose `bridge` is `telegram` or `discord` (CHAT_REPOS §5.2, §5.3).
+    pub fn notices_after(&self, after: u64) -> (Vec<Value>, u64) {
+        self.check_pending_approvals();
+        let ring = self.events.lock().unwrap_or_else(|p| p.into_inner());
+        let notices = ring
+            .events
+            .iter()
+            .filter(|ev| ev.seq > after && matches!(ev.bridge(), "telegram" | "discord"))
+            .filter_map(RepoEvent::to_notice_json)
+            .collect();
+        (notices, ring.seq)
+    }
+
+    /// Sets `current_repo[chat_key] = repo` in `$CODEX_HOME/chat-repos/current.json`.
+    pub fn set_current_repo(&self, codex_home: &Path, chat_key: &str, repo: &str) {
+        let _io_guard = self.index_io_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut current = load_current_repos(codex_home);
+        current.insert(chat_key.to_string(), repo.to_string());
+        let _ = save_current_repos(codex_home, &current);
+    }
+
+    /// Clears `current_repo[chat_key]` in `$CODEX_HOME/chat-repos/current.json` and returns the previous repo.
+    pub fn clear_current_repo(&self, codex_home: &Path, chat_key: &str) -> Option<String> {
+        let _io_guard = self.index_io_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut current = load_current_repos(codex_home);
+        let prev = current.remove(chat_key);
+        let _ = save_current_repos(codex_home, &current);
+        prev
+    }
+
+    /// Reads `current_repo[chat_key]` from `$CODEX_HOME/chat-repos/current.json`.
+    pub fn current_repo(&self, codex_home: &Path, chat_key: &str) -> Option<String> {
+        load_current_repos(codex_home).remove(chat_key)
     }
 
     /// Records that relay tab `tab` is connected to `thread_id`.
@@ -695,6 +1107,7 @@ impl ChatRepos {
 
     /// Evaluates all active turn watches owned by `tab` at `now_ms()`.
     pub fn check_watches_for_tab(&self, tab: u64) -> Vec<(String, String, crate::repo_limits::RepoVerdict)> {
+        self.check_pending_approvals();
         let now_ms = self.now_ms();
         let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
         let mut out = Vec::new();
@@ -846,7 +1259,7 @@ impl ChatRepos {
                         entry.owner_tab = *next_tab;
                     } else {
                         to_remove.push(turn_id.clone());
-                        unbounded.push((entry.chat_key.clone(), entry.repo.clone()));
+                        unbounded.push((entry.chat_key.clone(), entry.repo.clone(), entry.thread_id.clone(), turn_id.clone()));
                     }
                 }
             }
@@ -854,8 +1267,8 @@ impl ChatRepos {
                 watches.remove(&turn_id);
             }
         }
-        for (chat, repo) in unbounded {
-            self.record_notice(&chat, &repo, "unbounded");
+        for (chat, repo, thread_id, turn_id) in unbounded {
+            self.record_event(&chat, &repo, Some(&thread_id), Some(&turn_id), RepoEventKind::Unbounded);
         }
     }
 
@@ -929,7 +1342,7 @@ impl ChatRepos {
             (budget.crossed_80(&chat), budget.exhausted(&chat, now))
         };
         if crossed_80 {
-            self.record_notice(&chat, &record.repo, "budget80");
+            self.record_event_for_record(record, Some(thread), None, RepoEventKind::Budget80);
         }
         exhausted
     }
@@ -1081,6 +1494,9 @@ pub fn routes() -> Router<Arc<Server>> {
     Router::new()
         .route("/api/repos", get(list_repos))
         .route("/api/repos/open", post(open_repo))
+        .route("/api/repos/off", post(repo_off))
+        .route("/api/repos/notices", get(repo_notices))
+        .route("/api/repos/current", get(repo_current))
         .route("/api/repos/state", get(repo_state))
         .route("/api/repos/diff", get(repo_diff))
         .route("/api/repos/log", get(repo_log))
@@ -1117,6 +1533,98 @@ pub fn root_dir(codex_home: &Path) -> PathBuf {
 /// Path of `index.json` under `$CODEX_HOME/chat-repos`.
 pub fn index_path(codex_home: &Path) -> PathBuf {
     root_dir(codex_home).join("index.json")
+}
+
+/// Path of `current.json` under `$CODEX_HOME/chat-repos`.
+pub fn current_repos_path(codex_home: &Path) -> PathBuf {
+    root_dir(codex_home).join("current.json")
+}
+
+/// Reads `$CODEX_HOME/chat-repos/current.json` (`chat_key -> repo`).
+pub fn load_current_repos(codex_home: &Path) -> HashMap<String, String> {
+    let Ok(text) = std::fs::read_to_string(current_repos_path(codex_home)) else {
+        return HashMap::new();
+    };
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&text) else {
+        return HashMap::new();
+    };
+    map.into_iter()
+        .filter_map(|(k, v)| Some((k, v.as_str()?.to_string())))
+        .collect()
+}
+
+/// Atomically writes `$CODEX_HOME/chat-repos/current.json` via a temp file + rename (`0600`).
+pub fn save_current_repos(codex_home: &Path, map: &HashMap<String, String>) -> std::io::Result<()> {
+    let root = root_dir(codex_home);
+    auth::private_dir(&root)?;
+    let mut obj = serde_json::Map::new();
+    let mut keys: Vec<_> = map.keys().collect();
+    keys.sort();
+    for k in keys {
+        if let Some(v) = map.get(k) {
+            obj.insert(k.clone(), Value::String(v.clone()));
+        }
+    }
+    let text = serde_json::to_string_pretty(&Value::Object(obj)).map_err(std::io::Error::other)?;
+    auth::write_private(&current_repos_path(codex_home), &text)
+}
+
+/// Counts `git status --porcelain` lines in `checkout_dir` synchronously without returning any path or name.
+pub fn count_porcelain_lines_sync(server: &Server, checkout_dir: &Path) -> u32 {
+    if !checkout_dir.exists() {
+        return 0;
+    }
+    let base_url = forge_base_url(server);
+    let Ok((_, hooks_dir)) = ensure_git_helpers_for_forge(&server.config.state_dir, &base_url) else {
+        return 0;
+    };
+    let hooks_arg = format!("core.hooksPath={}", hooks_dir.display());
+    let mut cmd = std::process::Command::new("git");
+    cmd.env_clear();
+    if let Some(path) = std::env::var_os("PATH") {
+        cmd.env("PATH", path);
+    }
+    cmd.env("HOME", &server.config.codex_home);
+    cmd.env("LANG", "C");
+    cmd.env("LC_ALL", "C");
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+    cmd.env("GIT_CONFIG_NOSYSTEM", "1");
+    // The agent can write the checkout's own git config, so the helpers a config can name are
+    // switched off for this status, and a hung git is killed after a few seconds.
+    cmd.arg("-c")
+        .arg(&hooks_arg)
+        .arg("-c")
+        .arg("core.fsmonitor=false")
+        .arg("status")
+        .arg("--porcelain")
+        .current_dir(checkout_dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let Ok(mut child) = cmd.spawn() else {
+        return 0;
+    };
+    let Some(mut stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        return 0;
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+    let Ok(buf) = rx.recv_timeout(Duration::from_secs(10)) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return 0;
+    };
+    match child.wait() {
+        Ok(status) if status.success() => {}
+        _ => return 0,
+    }
+    buf.split(|&b| b == b'\n').filter(|line| !line.is_empty()).count() as u32
 }
 
 /// Reads `$CODEX_HOME/chat-repos/index.json` (empty list when missing).
@@ -2142,6 +2650,20 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
     let worktree_path = PathBuf::from(&record.dir);
     let notes = inspect_and_init_submodules_and_lfs(&server, &worktree_path, &base_url, &forge_repo).await;
 
+    let chat_key = record.chat_key();
+    server
+        .chat_repos
+        .set_current_repo(&server.config.codex_home, &chat_key, &record.repo);
+    let switched_branch = record.branch.clone().unwrap_or_else(|| record.base.clone());
+    server.chat_repos.record_event_for_record(
+        &record,
+        record.app_threads.last().map(String::as_str),
+        None,
+        RepoEventKind::Switched {
+            branch: switched_branch,
+        },
+    );
+
     json_response(
         StatusCode::OK,
         json!({
@@ -2150,6 +2672,156 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
             "branch": record.branch,
             "read_only": record.read_only,
             "notes": notes,
+        }),
+    )
+}
+
+/// `POST /api/repos/off {bridge, chat}`: clears `current_repo` for `bridge:chat`, counts
+/// uncommitted files (`git status --porcelain` lines) in the checkout, and records `RepoOff`.
+async fn repo_off(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
+    if let Err(resp) = require_control_caller(&server, &headers) {
+        return resp;
+    }
+    let Ok(request) = serde_json::from_slice::<Value>(&body) else {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "send JSON {bridge, chat}" }));
+    };
+    let bridge = request.get("bridge").and_then(Value::as_str).unwrap_or("").trim();
+    let chat = request.get("chat").and_then(Value::as_str).unwrap_or("").trim();
+    if !KNOWN_BRIDGES.contains(&bridge) || chat.is_empty() || chat.len() > 200 {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "valid bridge and chat are required" }));
+    }
+    let chat_key = format!("{bridge}:{chat}");
+    let prev_repo = server
+        .chat_repos
+        .clear_current_repo(&server.config.codex_home, &chat_key);
+    let records = load_index(&server.config.codex_home);
+    let matching_record = prev_repo
+        .as_deref()
+        .and_then(|repo| {
+            records
+                .iter()
+                .filter(|r| r.bridge == bridge && r.chat == chat && r.repo == repo)
+                .max_by_key(|r| r.last_used)
+                .cloned()
+        })
+        .or_else(|| {
+            records
+                .iter()
+                .filter(|r| r.bridge == bridge && r.chat == chat)
+                .max_by_key(|r| r.last_used)
+                .cloned()
+        });
+
+    if let Some(rec) = matching_record {
+        let uncommitted = count_porcelain_lines_sync(&server, Path::new(&rec.dir));
+        server.chat_repos.record_event_for_record(
+            &rec,
+            rec.app_threads.last().map(String::as_str),
+            None,
+            RepoEventKind::RepoOff { uncommitted },
+        );
+        json_response(
+            StatusCode::OK,
+            json!({
+                "ok": true,
+                "repo": rec.repo,
+                "uncommitted": uncommitted,
+            }),
+        )
+    } else if let Some(repo) = prev_repo {
+        server.chat_repos.record_event(
+            &chat_key,
+            &repo,
+            None,
+            None,
+            RepoEventKind::RepoOff { uncommitted: 0 },
+        );
+        json_response(
+            StatusCode::OK,
+            json!({
+                "ok": true,
+                "repo": repo,
+                "uncommitted": 0,
+            }),
+        )
+    } else {
+        json_response(
+            StatusCode::OK,
+            json!({
+                "ok": true,
+                "repo": Value::Null,
+                "uncommitted": 0,
+            }),
+        )
+    }
+}
+
+/// `GET /api/repos/notices?after=<seq>`: drains repository notices for Telegram and Discord.
+/// Auth: `server.bridge_session(&headers)` only.
+async fn repo_notices(
+    State(server): State<Arc<Server>>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    if !server.bridge_session(&headers) {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "error": "only ling chat may drain repository notices" }),
+        );
+    }
+    let after = query
+        .get("after")
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let (notices, seq) = server.chat_repos.notices_after(after);
+    json_response(
+        StatusCode::OK,
+        json!({
+            "notices": notices,
+            "seq": seq,
+        }),
+    )
+}
+
+/// `GET /api/repos/current?bridge=&chat=`: returns `{repo, topic_repo_names}` for the hub's
+/// typed-text check. Auth: `server.bridge_session(&headers)` only.
+async fn repo_current(
+    State(server): State<Arc<Server>>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    if !server.bridge_session(&headers) {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "error": "only ling chat may query the current repository" }),
+        );
+    }
+    let bridge = query.get("bridge").map(String::as_str).unwrap_or("").trim();
+    let chat = query.get("chat").map(String::as_str).unwrap_or("").trim();
+    if !KNOWN_BRIDGES.contains(&bridge) || chat.is_empty() {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({ "error": "bridge and chat query parameters are required" }),
+        );
+    }
+    let chat_key = format!("{bridge}:{chat}");
+    let current = server
+        .chat_repos
+        .current_repo(&server.config.codex_home, &chat_key);
+    let mut topic_repos: Vec<String> = Vec::new();
+    if let Some(repo) = &current {
+        topic_repos.push(repo.clone());
+    }
+    for rec in load_index(&server.config.codex_home) {
+        if rec.bridge == bridge && rec.chat == chat && !topic_repos.contains(&rec.repo) {
+            topic_repos.push(rec.repo);
+        }
+    }
+    json_response(
+        StatusCode::OK,
+        json!({
+            "repo": current,
+            "topic_repo_names": topic_repos,
         }),
     )
 }
@@ -3056,11 +3728,25 @@ fn consume_mutation_nonce(server: &Server, req: &MutationRequest, intent: &str) 
     Ok(())
 }
 
+fn record_refused(server: &Server, record: &CheckoutRecord, action: RefusedAction) {
+    server.chat_repos.record_event_for_record(
+        record,
+        record.app_threads.last().map(String::as_str),
+        None,
+        RepoEventKind::Refused { action },
+    );
+}
+
 fn read_only_response() -> Response {
     json_response(
         StatusCode::FORBIDDEN,
         json!({ "error": "this repository is read-only on the forge" }),
     )
+}
+
+fn read_only_response_for(server: &Server, record: &CheckoutRecord, action: RefusedAction) -> Response {
+    record_refused(server, record, action);
+    read_only_response()
 }
 
 /// `POST /api/repos/commit {thread, message, confirm}` (§4.4): stages all changes and commits with
@@ -3071,7 +3757,7 @@ async fn repo_commit(State(server): State<Arc<Server>>, headers: HeaderMap, body
         Err(resp) => return resp,
     };
     if mreq.record.read_only {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Commit);
     }
     let message = mreq.request.get("message").and_then(Value::as_str).unwrap_or("").trim();
     if message.is_empty() || message.chars().count() > MAX_COMMIT_MESSAGE_CHARS {
@@ -3183,7 +3869,8 @@ async fn lookup_forge_repo(server: &Server, base_url: &str, token: &str, repo_na
     })
 }
 
-fn anonymity_error_response() -> Response {
+fn anonymity_error_response_for(server: &Server, record: &CheckoutRecord, action: RefusedAction) -> Response {
+    record_refused(server, record, action);
     json_response(
         StatusCode::UNPROCESSABLE_ENTITY,
         json!({
@@ -3202,21 +3889,24 @@ async fn push_worktree_branch(
     record: &CheckoutRecord,
     worktree_dir: &Path,
     forge_repo: &ForgeRepo,
+    action: RefusedAction,
 ) -> Result<Value, Response> {
     if record.read_only || forge_repo.read_only || forge_repo.archived {
-        return Err(read_only_response());
+        return Err(read_only_response_for(server, record, action));
     }
     let Some(branch) = record.branch.as_deref() else {
-        return Err(read_only_response());
+        return Err(read_only_response_for(server, record, action));
     };
     let expected_phone = format!("phone/{}", record.thread);
     if branch != expected_phone && branch != record.base {
+        record_refused(server, record, action);
         return Err(json_response(
             StatusCode::BAD_REQUEST,
             json!({ "error": "refusing to push an unrecognized branch" }),
         ));
     }
     if branch == record.base && !settings.allow_main.iter().any(|r| r == &record.repo) {
+        record_refused(server, record, action);
         return Err(json_response(
             StatusCode::FORBIDDEN,
             json!({
@@ -3244,7 +3934,7 @@ async fn push_worktree_branch(
     } else {
         merge_base(server, worktree_dir, &record.base).await.map_err(|err| {
             if !forge_repo.private {
-                anonymity_error_response()
+                anonymity_error_response_for(server, record, action)
             } else {
                 json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }))
             }
@@ -3256,7 +3946,7 @@ async fn push_worktree_branch(
         .await
         .map_err(|err| {
             if !forge_repo.private {
-                anonymity_error_response()
+                anonymity_error_response_for(server, record, action)
             } else {
                 json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }))
             }
@@ -3273,7 +3963,7 @@ async fn push_worktree_branch(
             },
             None => crate::anonymity::load_denylist(&server.config.codex_home),
         };
-        let denylist_text = denylist_res.map_err(|_| anonymity_error_response())?;
+        let denylist_text = denylist_res.map_err(|_| anonymity_error_response_for(server, record, action))?;
         match denylist_text {
             None => {
                 anonymity_note = Some("no denylist on this node");
@@ -3297,7 +3987,7 @@ async fn push_worktree_branch(
                             false,
                         )
                         .await
-                        .map_err(|_| anonymity_error_response())?;
+                        .map_err(|_| anonymity_error_response_for(server, record, action))?;
                         {
                             let mut parts = meta.splitn(5, '\0');
                             let an = parts.next().unwrap_or("");
@@ -3326,7 +4016,7 @@ async fn push_worktree_branch(
                             false,
                         )
                         .await
-                        .map_err(|_| anonymity_error_response())?;
+                        .map_err(|_| anonymity_error_response_for(server, record, action))?;
                         {
                             let paths: Vec<String> = names_out
                                 .lines()
@@ -3357,10 +4047,11 @@ async fn push_worktree_branch(
                             false,
                         )
                         .await
-                        .map_err(|_| anonymity_error_response())?;
+                        .map_err(|_| anonymity_error_response_for(server, record, action))?;
                         crate::anonymity::scan_unified_patch(&patterns, &patch, &mut findings);
                     }
                     if !findings.is_empty() {
+                        record_refused(server, record, action);
                         let findings_json: Vec<Value> =
                             findings.iter().map(crate::anonymity::Finding::to_json).collect();
                         return Err(json_response(
@@ -3383,9 +4074,13 @@ async fn push_worktree_branch(
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
     let push_out = run_git(server, Some(worktree_dir), &["push", "origin", &refspec], true)
         .await
-        .map_err(|err| json_response(StatusCode::BAD_GATEWAY, json!({ "refused": "forge", "reason": err })))?;
+        .map_err(|err| {
+            record_refused(server, record, action);
+            json_response(StatusCode::BAD_GATEWAY, json!({ "refused": "forge", "reason": err }))
+        })?;
 
     if !push_out.status.success() {
+        record_refused(server, record, action);
         let combined = format!(
             "{}\n{}",
             String::from_utf8_lossy(&push_out.stderr),
@@ -3449,18 +4144,19 @@ async fn repo_push(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
         Err(resp) => return resp,
     };
     if mreq.record.read_only {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Push);
     }
     let forge_repo = match lookup_forge_repo(&server, &mreq.base_url, &mreq.token, &mreq.record.repo).await {
         Ok(r) => r,
         Err(resp) => return resp,
     };
     if forge_repo.read_only || forge_repo.archived {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Push);
     }
     if mreq.record.branch.as_deref() == Some(mreq.record.base.as_str())
         && !mreq.settings.allow_main.iter().any(|r| r == &mreq.record.repo)
     {
+        record_refused(&server, &mreq.record, RefusedAction::Push);
         return json_response(
             StatusCode::FORBIDDEN,
             json!({
@@ -3478,8 +4174,17 @@ async fn repo_push(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
     let repo_lock = server.chat_repos.repo_mutex(&mreq.record.repo);
     let _repo_guard = repo_lock.lock().await;
 
-    match push_worktree_branch(&server, &mreq.settings, &mreq.record, &mreq.worktree_dir, &forge_repo).await {
-        Ok(payload) => json_response(StatusCode::OK, payload),
+    match push_worktree_branch(&server, &mreq.settings, &mreq.record, &mreq.worktree_dir, &forge_repo, RefusedAction::Push).await {
+        Ok(payload) => {
+            let commits = payload.get("pushed").and_then(Value::as_u64).unwrap_or(0) as u32;
+            server.chat_repos.record_event_for_record(
+                &mreq.record,
+                mreq.record.app_threads.last().map(String::as_str),
+                None,
+                RepoEventKind::Pushed { commits },
+            );
+            json_response(StatusCode::OK, payload)
+        }
         Err(resp) => resp,
     }
 }
@@ -3492,14 +4197,14 @@ async fn repo_update(State(server): State<Arc<Server>>, headers: HeaderMap, body
         Err(resp) => return resp,
     };
     if mreq.record.read_only {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Update);
     }
     let forge_repo = match lookup_forge_repo(&server, &mreq.base_url, &mreq.token, &mreq.record.repo).await {
         Ok(r) => r,
         Err(resp) => return resp,
     };
     if forge_repo.read_only || forge_repo.archived {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Update);
     }
     if let Err(resp) = consume_mutation_nonce(&server, &mreq, "update") {
         return resp;
@@ -3630,17 +4335,17 @@ async fn repo_pr(State(server): State<Arc<Server>>, headers: HeaderMap, body: By
         Err(resp) => return resp,
     };
     if mreq.record.read_only {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Pr);
     }
     let forge_repo = match lookup_forge_repo(&server, &mreq.base_url, &mreq.token, &mreq.record.repo).await {
         Ok(r) => r,
         Err(resp) => return resp,
     };
     if forge_repo.read_only || forge_repo.archived {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Pr);
     }
     let Some(branch) = mreq.record.branch.clone() else {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Pr);
     };
     if let Err(resp) = consume_mutation_nonce(&server, &mreq, "pr") {
         return resp;
@@ -3650,7 +4355,7 @@ async fn repo_pr(State(server): State<Arc<Server>>, headers: HeaderMap, body: By
     let _repo_guard = repo_lock.lock().await;
 
     if branch_is_ahead_of_remote(&server, &mreq.worktree_dir, &branch).await
-        && let Err(resp) = push_worktree_branch(&server, &mreq.settings, &mreq.record, &mreq.worktree_dir, &forge_repo).await
+        && let Err(resp) = push_worktree_branch(&server, &mreq.settings, &mreq.record, &mreq.worktree_dir, &forge_repo, RefusedAction::Pr).await
     {
         return resp;
     }
@@ -3685,17 +4390,17 @@ async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body:
         Err(resp) => return resp,
     };
     if mreq.record.read_only {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Merge);
     }
     let forge_repo = match lookup_forge_repo(&server, &mreq.base_url, &mreq.token, &mreq.record.repo).await {
         Ok(r) => r,
         Err(resp) => return resp,
     };
     if forge_repo.read_only || forge_repo.archived {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Merge);
     }
     let Some(branch) = mreq.record.branch.clone() else {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Merge);
     };
     if let Err(resp) = consume_mutation_nonce(&server, &mreq, "merge") {
         return resp;
@@ -3709,7 +4414,7 @@ async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body:
     let _repo_guard = repo_lock.lock().await;
 
     if branch_is_ahead_of_remote(&server, &worktree_dir, &branch).await
-        && let Err(resp) = push_worktree_branch(&server, &mreq.settings, &record, &worktree_dir, &forge_repo).await
+        && let Err(resp) = push_worktree_branch(&server, &mreq.settings, &record, &worktree_dir, &forge_repo, RefusedAction::Merge).await
     {
         return resp;
     }
@@ -3740,9 +4445,11 @@ async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body:
                     .or_else(|| status_json.get("statuses").and_then(Value::as_array).map(|a| a.len() as u64))
                     .unwrap_or(0);
                 if state == "failure" || state == "error" {
+                    record_refused(&server, &record, RefusedAction::Merge);
                     return json_response(StatusCode::CONFLICT, json!({ "error": "a required check is red" }));
                 }
                 if state == "pending" && total_count > 0 {
+                    record_refused(&server, &record, RefusedAction::Merge);
                     return json_response(StatusCode::CONFLICT, json!({ "error": "checks are still running" }));
                 }
             }
@@ -3767,6 +4474,7 @@ async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body:
             if let Ok(pr_json) = serde_json::from_slice::<Value>(&p_body)
                 && pr_json.get("mergeable").and_then(Value::as_bool) == Some(false)
             {
+                record_refused(&server, &record, RefusedAction::Merge);
                 return json_response(
                     StatusCode::CONFLICT,
                     json!({ "error": format!("conflicts with {}: /update, then /merge", record.base) }),
@@ -3789,18 +4497,32 @@ async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body:
 
     let merge_path = format!("/api/v1/repos/{}/pulls/{pr_number}/merge", record.repo);
     match forge_post(&base_url, &merge_path, &token, &json!({ "Do": "merge" }), FORGE_TIMEOUT).await {
-        Ok((200 | 204, _)) => json_response(
-            StatusCode::OK,
-            json!({
-                "merged": true,
-                "branch": branch,
-                "into": record.base,
-            }),
-        ),
-        Ok((405 | 409, _)) => json_response(
-            StatusCode::CONFLICT,
-            json!({ "error": format!("conflicts with {}: /update, then /merge", record.base) }),
-        ),
+        Ok((200 | 204, _)) => {
+            server.chat_repos.record_event_for_record(
+                &record,
+                record.app_threads.last().map(String::as_str),
+                None,
+                RepoEventKind::Merged {
+                    branch: branch.clone(),
+                    into: record.base.clone(),
+                },
+            );
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "merged": true,
+                    "branch": branch,
+                    "into": record.base,
+                }),
+            )
+        }
+        Ok((405 | 409, _)) => {
+            record_refused(&server, &record, RefusedAction::Merge);
+            json_response(
+                StatusCode::CONFLICT,
+                json!({ "error": format!("conflicts with {}: /update, then /merge", record.base) }),
+            )
+        }
         Ok((code, _)) => json_response(
             StatusCode::BAD_GATEWAY,
             json!({ "error": format!("forge returned HTTP {code} when merging pull request") }),
@@ -3864,9 +4586,10 @@ async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
         Err(resp) => return resp,
     };
     if mreq.record.read_only {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Branch);
     }
     if !mreq.settings.allow_main.iter().any(|r| r == &mreq.record.repo) {
+        record_refused(&server, &mreq.record, RefusedAction::Branch);
         return json_response(
             StatusCode::FORBIDDEN,
             json!({
@@ -3883,7 +4606,7 @@ async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
         Err(resp) => return resp,
     };
     if forge_repo.read_only || forge_repo.archived {
-        return read_only_response();
+        return read_only_response_for(&server, &mreq.record, RefusedAction::Branch);
     }
     let record = mreq.record.clone();
     let worktree_dir = mreq.worktree_dir.clone();
@@ -8050,5 +8773,312 @@ mod tests {
         std::fs::write(&user_config, "[chat_repos]\nfull_access = true\n").unwrap();
         let (_, state_on, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread}")).await;
         assert_eq!(state_on["full_access"], false, "an old grant does not come back");
+    }
+
+    async fn bridge_session_cookie(server: &Arc<Server>) -> String {
+        let code = auth::issue_login_code(&server.config.state_dir).unwrap();
+        let login = Request::builder()
+            .uri(format!("/login?code={code}&bridge=1"))
+            .header(header::HOST, HOST)
+            .body(Body::empty())
+            .unwrap();
+        let response = server::router(server.clone()).oneshot(login).await.unwrap();
+        response.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn g14_drain_route_auth_and_signal_matrix_exclusion() {
+        let s = scratch("g14-drain-auth");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let repos_json = json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]);
+        let (forge_url, _forge_handle) = start_fake_forge(repos_json).await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+
+        let owner = owner_cookie(&server).await;
+        let bridge = bridge_session_cookie(&server).await;
+        let (_, dev_tok) = auth::add_device(&server.config.state_dir, "laptop").unwrap();
+        let device = format!("{}={dev_tok}", auth::DEVICE_COOKIE);
+
+        // No cookie -> 401
+        let req_no_cookie = Request::builder()
+            .uri("/api/repos/notices?after=0")
+            .header(header::HOST, HOST)
+            .body(Body::empty())
+            .unwrap();
+        let resp_no_cookie = server::router(server.clone()).oneshot(req_no_cookie).await.unwrap();
+        assert_eq!(resp_no_cookie.status(), StatusCode::UNAUTHORIZED);
+
+        // Owner session (not bridge=1) -> 403
+        let (st_owner, _, _) = get_json(&server, &owner, "/api/repos/notices?after=0").await;
+        assert_eq!(st_owner, StatusCode::FORBIDDEN);
+        let (st_curr_owner, _, _) =
+            get_json(&server, &owner, "/api/repos/current?bridge=telegram&chat=123").await;
+        assert_eq!(st_curr_owner, StatusCode::FORBIDDEN);
+
+        // Paired device -> 403
+        let (st_dev, _, _) = get_json(&server, &device, "/api/repos/notices?after=0").await;
+        assert_eq!(st_dev, StatusCode::FORBIDDEN);
+
+        // Record events across signal, matrix, telegram, discord
+        server.chat_repos.record_event(
+            "signal:s1",
+            "org/widget",
+            Some("3f2a9c1e"),
+            None,
+            RepoEventKind::TurnStopped,
+        );
+        server.chat_repos.record_event(
+            "matrix:m1",
+            "org/widget",
+            Some("3f2a9c1e"),
+            None,
+            RepoEventKind::TurnStopped,
+        );
+        server.chat_repos.record_event(
+            "telegram:123",
+            "org/widget",
+            Some("3f2a9c1e"),
+            None,
+            RepoEventKind::TurnFinished { files: 2 },
+        );
+        server.chat_repos.record_event(
+            "discord:456",
+            "org/widget",
+            Some("3f2a9c1e"),
+            None,
+            RepoEventKind::ApprovalWaiting,
+        );
+
+        // Bridge session drains only telegram and discord
+        let (st_bridge, drained, _) = get_json(&server, &bridge, "/api/repos/notices?after=0").await;
+        assert_eq!(st_bridge, StatusCode::OK);
+        let notices = drained["notices"].as_array().unwrap();
+        assert_eq!(notices.len(), 2);
+        assert_eq!(notices[0]["chat_key"], "telegram:123");
+        assert_eq!(notices[0]["kind"], "turn_finished");
+        assert_eq!(notices[0]["files"], 2);
+        assert_eq!(notices[1]["chat_key"], "discord:456");
+        assert_eq!(notices[1]["kind"], "approval_waiting");
+        let last_seq = drained["seq"].as_u64().unwrap();
+        assert_eq!(last_seq, 4);
+
+        // Polling after=last_seq returns empty
+        let (_, drained2, _) =
+            get_json(&server, &bridge, &format!("/api/repos/notices?after={last_seq}")).await;
+        assert_eq!(drained2["notices"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn g14_recording_points_deduplicated_across_two_tabs_and_bridge_turn_refusal() {
+        let s = scratch("g14-dedup-and-events");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, _forge_state, _forge_handle) = start_fake_forge_with_state(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": true },
+                "clone_url": format!("file://{}", bare.display())
+            }
+        ]))
+        .await;
+        let (server, probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        let owner = owner_cookie(&server).await;
+        let bridge = bridge_session_cookie(&server).await;
+
+        // 1. Open repo for telegram:chat42 -> records Switched and sets current_repo
+        let (st, opened, _) = post_json(
+            &server,
+            &owner,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "telegram", "chat": "chat42" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let thread = opened["thread"].as_str().unwrap().to_string();
+        let wt_dir = PathBuf::from(opened["cwd"].as_str().unwrap());
+        let app_thread = "0195f0a0-0042";
+        server
+            .chat_repos
+            .record_app_thread(&server.config.codex_home, &wt_dir, app_thread)
+            .unwrap();
+
+        let (st_curr, curr, _) =
+            get_json(&server, &bridge, "/api/repos/current?bridge=telegram&chat=chat42").await;
+        assert_eq!(st_curr, StatusCode::OK);
+        assert_eq!(curr["repo"], "org/widget");
+        assert!(
+            curr["topic_repo_names"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("org/widget"))
+        );
+
+        // 2. Defense in depth: bridge=1 session cannot send turn/start or turn/steer on Telegram checkout
+        for method in ["turn/start", "turn/steer"] {
+            let msg = json!({
+                "id": 1,
+                "method": method,
+                "params": { "threadId": app_thread }
+            });
+            let res = crate::relay::check_bridge_repo_turn(&server, true, &msg);
+            assert!(res.is_err(), "{method} from bridge=1 on telegram repo must be refused");
+            let res_owner = crate::relay::check_bridge_repo_turn(&server, false, &msg);
+            assert!(res_owner.is_ok(), "{method} from owner tab must be allowed");
+        }
+
+        // 3. ApprovalWaiting deduplicated across two tabs, and ApprovalDeclineSoon after 9 minutes
+        let tab1 = Arc::new(crate::relay::Shared::for_tab(101));
+        let tab2 = Arc::new(crate::relay::Shared::for_tab(102));
+        let (out1, _rx1) = tokio::sync::mpsc::unbounded_channel();
+        let (out2, _rx2) = tokio::sync::mpsc::unbounded_channel();
+        let (up1, _urx1) = tokio::sync::mpsc::unbounded_channel();
+        let (up2, _urx2) = tokio::sync::mpsc::unbounded_channel();
+
+        probe.set_now_ms(1_000_000);
+        let approval_req = json!({
+            "id": 77,
+            "method": "item/commandExecution/requestApproval",
+            "params": {
+                "threadId": app_thread,
+                "turnId": "turn-1",
+                "itemId": "cmd-1",
+                "command": "cargo test"
+            }
+        })
+        .to_string();
+        crate::relay::deliver(&server, &tab1, &out1, 101, &approval_req, &up1);
+        crate::relay::deliver(&server, &tab2, &out2, 102, &approval_req, &up2);
+
+        // Advance clock by 9 minutes -> ApprovalDeclineSoon recorded once
+        probe.set_now_ms(1_000_000 + 9 * 60 * 1000);
+        server.chat_repos.check_pending_approvals();
+        server.chat_repos.check_pending_approvals();
+
+        // 4. Write two dirty files in checkout and deliver turn/completed on both tabs -> TurnFinished { files: 2 } once
+        std::fs::write(wt_dir.join("a.txt"), "hello\n").unwrap();
+        std::fs::write(wt_dir.join("b.txt"), "world\n").unwrap();
+        let turn_done = json!({
+            "method": "turn/completed",
+            "params": {
+                "threadId": app_thread,
+                "turn": { "id": "turn-1", "status": "completed" }
+            }
+        })
+        .to_string();
+        crate::relay::deliver(&server, &tab1, &out1, 101, &turn_done, &up1);
+        crate::relay::deliver(&server, &tab2, &out2, 102, &turn_done, &up2);
+
+        // 5. Commit, refused push (denylist), clean push, and merge
+        std::fs::write(
+            s.dir.join("user/.config/dreamference/anonymity-denylist.txt"),
+            "SECRET_DENY_TOKEN\n",
+        )
+        .unwrap();
+        std::fs::write(wt_dir.join("a.txt"), "contains SECRET_DENY_TOKEN\n").unwrap();
+        let nonce_c1 = get_nonce(&server, &owner, &thread, "commit").await;
+        let (st_c1, _, _) = post_json(
+            &server,
+            &owner,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "first", "confirm": nonce_c1 }),
+        )
+        .await;
+        assert_eq!(st_c1, StatusCode::OK);
+
+        let nonce_p1 = get_nonce(&server, &owner, &thread, "push").await;
+        let (st_p1, _, _) = post_json(
+            &server,
+            &owner,
+            "/api/repos/push",
+            json!({ "thread": thread, "confirm": nonce_p1 }),
+        )
+        .await;
+        assert_eq!(st_p1, StatusCode::UNPROCESSABLE_ENTITY);
+
+        // Remove denylist and push + merge
+        std::fs::remove_file(s.dir.join("user/.config/dreamference/anonymity-denylist.txt")).unwrap();
+        let nonce_p2 = get_nonce(&server, &owner, &thread, "push").await;
+        let (st_p2, _, _) = post_json(
+            &server,
+            &owner,
+            "/api/repos/push",
+            json!({ "thread": thread, "confirm": nonce_p2 }),
+        )
+        .await;
+        assert_eq!(st_p2, StatusCode::OK);
+
+        let nonce_m = get_nonce(&server, &owner, &thread, "merge").await;
+        let (st_m, _, _) = post_json(
+            &server,
+            &owner,
+            "/api/repos/merge",
+            json!({ "thread": thread, "confirm": nonce_m }),
+        )
+        .await;
+        assert_eq!(st_m, StatusCode::OK);
+
+        // 6. /api/repos/off -> clears current_repo and records RepoOff { uncommitted: 1 } (b.txt was committed with a.txt, add 1 dirty file first)
+        std::fs::write(wt_dir.join("dirty.txt"), "uncommitted\n").unwrap();
+        let (st_off, off_res, _) = post_json(
+            &server,
+            &owner,
+            "/api/repos/off",
+            json!({ "bridge": "telegram", "chat": "chat42" }),
+        )
+        .await;
+        assert_eq!(st_off, StatusCode::OK);
+        assert_eq!(off_res["uncommitted"], 1);
+        let (_, curr_after, _) =
+            get_json(&server, &bridge, "/api/repos/current?bridge=telegram&chat=chat42").await;
+        assert!(curr_after["repo"].is_null());
+
+        let (_, drained, _) = get_json(&server, &bridge, "/api/repos/notices?after=0").await;
+        let kinds: Vec<&str> = drained["notices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                "switched",
+                "approval_waiting",
+                "approval_decline_soon",
+                "turn_finished",
+                "refused",
+                "pushed",
+                "merged",
+                "repo_off"
+            ]
+        );
+        let finished_notice = &drained["notices"].as_array().unwrap()[3];
+        assert_eq!(finished_notice["files"], 2);
     }
 }
