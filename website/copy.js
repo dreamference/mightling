@@ -1,4 +1,4 @@
-/* The page's only script besides init.js: copy buttons, the language menu and the theme button. */
+/* The page's only script besides init.js: copy buttons, use-case tabs, the language menu and the theme button. */
 document.addEventListener("DOMContentLoaded", function () {
   var root = document.documentElement;
 
@@ -10,6 +10,26 @@ document.addEventListener("DOMContentLoaded", function () {
       navigator.clipboard.writeText(text).then(function () {
         button.textContent = button.getAttribute("data-done") || label;
         setTimeout(function () { button.textContent = label; }, 1600);
+      });
+    });
+  });
+
+  document.querySelectorAll(".tabs-box").forEach(function (box) {
+    var tabs = box.querySelectorAll("button.tab-btn");
+    var panels = box.querySelectorAll(".tab-panel");
+    tabs.forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        var target = tab.getAttribute("data-tab");
+        tabs.forEach(function (t) {
+          var active = t === tab;
+          t.classList.toggle("active", active);
+          t.setAttribute("aria-selected", active ? "true" : "false");
+        });
+        panels.forEach(function (panel) {
+          var match = panel.id === target;
+          panel.classList.toggle("active", match);
+          panel.hidden = !match;
+        });
       });
     });
   });

@@ -27,28 +27,119 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header class="top">
+<header class="top" id="top">
 <div class="wrap">
 <a class="brand" href="[[home]]"><img alt="" height="34" src="/assets/favicon.svg" width="34"/>Mightling</a>
 <nav class="links">
-<a href="#install">{{header.a01}}</a>
 <a class="opt" href="#new">{{header.a02}}</a>
-<a class="opt" href="#benchmark">{{header.a03}}</a>
+<a class="opt" href="#workflows">{{try.h201}}</a>
+<a class="opt" href="#surfaces">{{features.h201}}</a>
 <a class="opt" href="#proof">{{header.a04}}</a>
+<a class="opt" href="#benchmark">{{header.a03}}</a>
 <a class="opt" href="#paper">{{header.a05}}</a>
 <a class="opt" href="#faq">{{header.a06}}</a>
 <a href="https://github.com/dreamference/mightling">{{header.a07}}</a>
 </nav>
+<div class="header-end">
+<a class="btn primary sm" href="#install">{{header.a01}}</a>
 [[controls]]
+</div>
 </div>
 </header>
 <main>
 <div class="wrap">
-<div class="hero" id="install">
+<div class="hero" id="hero">
 <img alt="Mightling" class="logo logo-light" height="181" src="/assets/mightling-logo-light.svg" width="300"/>
 <img alt="Mightling" class="logo logo-dark" height="181" src="/assets/mightling-logo-dark.svg" width="300"/>
 <h1>{{install.h101}}</h1>
 <p class="lede">{{install.p02}}</p>
+<div class="buttons hero-btns">
+<a class="btn primary" href="#install">{{header.a01}}</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">{{cta.a05}}</a>
+<a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">{{cta.a04}}</a>
+</div>
+<div class="surface-strip">
+<a href="#surface-terminal">{{features.h302}}</a>
+<a href="#surface-desktop">{{features.h314}}</a>
+<a href="#surface-web">{{features.h312}}</a>
+<a href="#surface-editor">{{hero.surf_mcp}}</a>
+<a href="#surface-phone">{{hero.surf_phone}}</a>
+</div>
+<div class="mock-window" id="demo">
+<div class="mock-bar">
+<div class="mock-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+<div class="mock-title">Mightling — Work · ~/project</div>
+<div class="mock-badges">
+<span class="mock-pill">Qwen3.8-27B NVFP4 · 127.0.0.1:8000</span>
+<span class="mock-pill ok">/airgapped on</span>
+</div>
+</div>
+<div class="mock-body">
+<aside class="mock-side">
+<div class="mock-modes"><span class="active">Work</span><span>Ask</span></div>
+<ul class="mock-threads">
+<li class="active">{{mock.s1}}</li>
+<li>{{mock.s2}}</li>
+<li>{{mock.s3}}</li>
+<li>{{mock.s4}}</li>
+</ul>
+<div class="mock-node">GB10 · ~48 tok/s · 0 egress</div>
+</aside>
+<div class="mock-main">
+<div class="mock-msg user">{{mock.user}}</div>
+<div class="mock-tools">
+<div class="mock-tool"><span class="ok">✔</span> <code>ling-code def validate_signup</code> <span class="c">→ src/auth/signup.py:42</span></div>
+<div class="mock-tool"><span class="ok">✔</span> <code>pytest tests/test_signup.py -q</code> <span class="c">→ 1 failed, 14 passed</span></div>
+<div class="mock-tool"><span class="ok">✔</span> <code>apply_patch src/auth/signup.py</code> <span class="diff-add">+12</span> <span class="diff-del">-2</span> · <code>tests/test_signup.py</code> <span class="diff-add">+8</span></div>
+<div class="mock-tool"><span class="ok">✔</span> <code>pytest tests/test_signup.py -q</code> <span class="c">→ 15 passed in 0.41s</span></div>
+</div>
+<div class="mock-msg agent">{{mock.agent}}</div>
+<div class="mock-composer">
+<span class="mock-files">src/auth/signup.py (+12 -2) · tests/test_signup.py (+8 -0)</span>
+</div>
+</div>
+</div>
+</div>
+<div class="numbers">
+<div><b>68/100</b><span>{{install.span13}}</span></div>
+<div><b>~48 tok/s</b><span>{{install.span14}}</span></div>
+<div><b>0</b><span>{{install.span15}}</span></div>
+<div><b>$0</b><span>{{install.span16}}</span></div>
+</div>
+</div>
+</div>
+<section id="new">
+<div class="wrap">
+<div class="sec-head">
+<h2>{{new.h201}}</h2>
+<a class="sec-more" href="https://github.com/dreamference/mightling/releases">{{cta.a04}} →</a>
+</div>
+<div class="news-cards">
+<article class="news-card">
+<div class="news-meta"><span class="tag">v1.7.2</span><time datetime="2026-10-28">2026-10-28</time></div>
+<h3>{{new.c1_h3}}</h3>
+<p>{{new.c1_p}}</p>
+<a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.2">v1.7.2 →</a>
+</article>
+<article class="news-card">
+<div class="news-meta"><span class="tag">v1.7.1</span><time datetime="2026-10-26">2026-10-26</time></div>
+<h3>{{new.c2_h3}}</h3>
+<p>{{new.c2_p}}</p>
+<a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.1">v1.7.1 →</a>
+</article>
+<article class="news-card">
+<div class="news-meta"><span class="tag">v1.7.0</span><time datetime="2026-10-20">2026-10-20</time></div>
+<h3>{{new.c3_h3}}</h3>
+<p>{{new.c3_p}}</p>
+<a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">v1.7.0 →</a>
+</article>
+</div>
+<p class="sub after">{{new.p14}}</p>
+</div>
+</section>
+<section id="install">
+<div class="wrap">
+<h2>{{header.a01}}</h2>
 <div class="install">
 <div class="cmd has-copy"><button class="copy" data-done="{{ui.copied}}" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">{{install.button03}}</button>
 <pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
@@ -68,20 +159,93 @@
 <p>{{install.p12}}</p>
 </div>
 </div>
+<details class="other"><summary>{{new.summary10}}</summary>
+<p>{{new.p11}}</p>
+<ul>
+<li>{{new.li12}}</li>
+<li>{{new.li13}}</li>
+</ul>
+</details>
 </div>
-<div class="numbers">
-<div><b>68/100</b><span>{{install.span13}}</span></div>
-<div><b>~48 tok/s</b><span>{{install.span14}}</span></div>
-<div><b>0</b><span>{{install.span15}}</span></div>
-<div><b>$0</b><span>{{install.span16}}</span></div>
+<div class="machines-block" id="machines">
+<h3>{{machines.h201}}</h3>
+<ul class="machines">
+<li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
+<li>Gigabyte TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
+</ul>
+<p class="sub flush">{{machines.p02}}</p>
 </div>
 </div>
-</div>
-<section id="new">
+</section>
+<section id="workflows">
 <div class="wrap">
-<h2>{{new.h201}}</h2>
+<h2>{{try.h201}}</h2>
+<p class="sub">{{try.p02}}</p>
+<div class="tabs-box">
+<div class="tab-bar" role="tablist">
+<button class="tab-btn active" type="button" role="tab" aria-selected="true" data-tab="tab-onboard">{{workflows.t1}}</button>
+<button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-fix">{{workflows.t2}}</button>
+<button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-night">{{workflows.t3}}</button>
+</div>
+<div class="cmd tab-panel active" id="tab-onboard" role="tabpanel"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
+<span class="c"># reads the code index (ling-code outline, def, refs, callers) instead of grepping,</span>
+<span class="c"># then walks you through the layout, the entry points and how they connect</span></pre></div>
+<div class="cmd tab-panel" id="tab-fix" role="tabpanel" hidden><pre><span class="p">$ </span>ling "the tests are failing: find out why and fix them"
+<span class="c"># runs the tests, reads the failure, edits the code and runs the tests again,</span>
+<span class="c"># asking before anything risky</span></pre></div>
+<div class="cmd tab-panel" id="tab-night" role="tabpanel" hidden><pre><span class="p">&gt; </span>/night add --best-of 3 add input validation to the signup form, with tests
+<span class="c"># tonight: three attempts, each in its own git worktree; the one the chooser picks</span>
+<span class="c"># is committed on its own branch, and nothing is merged or pushed</span>
+<span class="p">$ </span>ling-admin night status      <span class="c"># the timer, the window and the queue</span>
+<span class="p">&gt; </span>/night apply &lt;id&gt;            <span class="c"># in the morning: bring the branch back as uncommitted changes</span></pre></div>
+</div>
+<div class="pillars workflow-cards">
+<div class="pillar">
+<h3>{{features.h308}}</h3>
+<p>{{features.p09}}</p>
+</div>
+<div class="pillar">
+<h3>{{features.h306}}</h3>
+<p>{{features.p07}}</p>
+</div>
+<div class="pillar">
+<h3>{{features.h304}}</h3>
+<p>{{features.p05}}</p>
+</div>
+</div>
+</div>
+</section>
+<section id="surfaces">
+<div class="wrap">
+<h2>{{features.h201}}</h2>
 <p class="sub">{{new.p02}}</p>
-<div class="pillars">
+<div class="surface-rows">
+<div class="surface-row" id="surface-terminal">
+<div class="surf-copy">
+<div class="eyebrow"><code>ling</code> · <code>ling-code</code> · <code>ling-docs</code></div>
+<h3>{{features.h302}}</h3>
+<p>{{features.p03}}</p>
+<div class="surf-actions"><a class="btn ghost sm" href="#install">{{header.a01}} →</a></div>
+</div>
+<div class="surf-media">
+<div class="cmd"><pre><span class="p">$ </span>ling worktree on   <span class="c"># new sessions start in their own worktree</span>
+<span class="p">$ </span>cd ~/your-project &amp;&amp; ling
+<span class="p">&gt; </span>/airgapped on      <span class="c"># no network for any command it runs</span>
+<span class="p">&gt; </span>/worktree apply    <span class="c"># bring the changes back to your checkout</span></pre></div>
+<div class="feature single-feature"><h3>{{features.h310}}</h3><p>{{features.p11}}</p></div>
+</div>
+</div>
+<div class="surface-row reverse" id="surface-desktop">
+<div class="surf-copy">
+<span id="surface-web"></span>
+<div class="eyebrow"><code>ling app</code> · <code>ling web</code></div>
+<h3>{{features.h314}}</h3>
+<p>{{features.p15}}</p>
+<p>{{features.p13}}</p>
+<div class="surf-actions"><a class="btn ghost sm" href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">{{cta.a05}} →</a></div>
+</div>
+<div class="surf-media">
+<div class="pillars os-cards">
 <div class="pillar">
 <h3>{{new.h303}}</h3>
 <p>{{new.p04}}</p>
@@ -97,74 +261,27 @@
 <p>{{new.p09}}</p>
 </div>
 </div>
-<details class="other"><summary>{{new.summary10}}</summary>
-<p>{{new.p11}}</p>
-<ul>
-<li>{{new.li12}}</li>
-<li>{{new.li13}}</li>
-</ul>
-</details>
-<p class="sub after">{{new.p14}}</p>
+</div>
+</div>
+<div class="surface-row" id="surface-editor">
+<div class="surf-copy">
+<span id="surface-phone"></span>
+<div class="eyebrow"><code>ling-admin mcp</code> · <code>ling signal</code> · <code>ling chat</code></div>
+<h3>{{surfaces.r3_h3}}</h3>
+<p>{{surfaces.r3_p}}</p>
+<div class="surf-actions"><a class="btn ghost sm" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">{{cta.a05}} →</a></div>
+</div>
+<div class="surf-media">
+<div class="cmd"><pre><span class="p">$ </span>ling-admin mcp            <span class="c"># stdio MCP for JetBrains and VS Code</span>
+<span class="p">$ </span>ling signal setup         <span class="c"># Note to Self only, off until linked</span>
+<span class="p">$ </span>ling chat telegram setup  <span class="c"># topics and the Mini App</span></pre></div>
+<div class="feature single-feature"><h3>{{features.h316}}</h3><p>{{features.p17}}</p></div>
+</div>
+</div>
+</div>
 </div>
 </section>
-<section id="benchmark">
-<div class="wrap">
-<h2>{{benchmark.h201}}</h2>
-<p class="sub">{{benchmark.p02}}</p>
-
-<div class="tablewrap">
-<table class="bench">
-<tr><th>{{benchmark.th03}}</th><th>{{benchmark.th04}}</th><th>{{benchmark.th05}}</th></tr>
-<tr class="mine"><td>{{benchmark.td06}}</td><td class="num">68/100</td><td class="num">{{benchmark.td07}}</td></tr>
-<tr class="mine"><td>{{benchmark.td08}}</td><td class="num">69/100</td><td class="num">{{benchmark.td09}}</td></tr>
-<tr><td>{{benchmark.td10}}</td><td class="num">68/100</td><td class="num">69.6%</td></tr>
-<tr><td>{{benchmark.td11}}</td><td class="num">68/100</td><td class="num">68.2%</td></tr>
-<tr><td>{{benchmark.td12}}</td><td class="num">70/100</td><td class="num">70.8%</td></tr>
-<tr><td>{{benchmark.td13}}</td><td class="num">70/100</td><td class="num">70.0%</td></tr>
-<tr><td>{{benchmark.td14}}</td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
-<tr><td>{{benchmark.td15}}</td><td class="num">79/100</td><td class="num">77.4%</td></tr>
-<tr class="group"><td colspan="3">{{benchmark.td16}}</td></tr>
-<tr><td>{{benchmark.td17}}</td><td class="num">60/100</td><td class="num">60.4%</td></tr>
-<tr><td>{{benchmark.td18}}</td><td class="num">56/100</td><td class="num">52.2%</td></tr>
-<tr><td>{{benchmark.td19}}</td><td class="num">57/100</td><td class="num">56.4%</td></tr>
-<tr class="group"><td colspan="3">{{benchmark.td20}}</td></tr>
-<tr><td>{{benchmark.td21}}</td><td class="ns">{{benchmark.td22}}</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
-<tr><td>{{benchmark.td23}}</td><td class="ns">{{benchmark.td24}}</td><td class="ns">{{benchmark.td25}}</td></tr>
-<tr><td>{{benchmark.td26}}</td><td class="ns">{{benchmark.td27}}</td><td class="ns">{{benchmark.td28}}</td></tr>
-</table>
-</div>
-<p class="sub after">{{benchmark.p29}}</p>
-<details class="method"><summary>{{benchmark.summary30}}</summary>
-<p>{{benchmark.p31}}</p>
-<p>{{benchmark.p32}}</p>
-</details>
-<ol class="footnotes">
-<li id="fn1">{{benchmark.li33}}</li>
-<li id="fn2">{{benchmark.li34}}</li>
-<li id="fn3">{{benchmark.li35}}</li>
-<li id="fn4">{{benchmark.li36}}</li>
-<li id="fn5">{{benchmark.li37}}</li>
-<li id="fn6">{{benchmark.li38}}</li>
-<li id="fn7">{{benchmark.li39}}</li>
-<li id="fn8">{{benchmark.li40}}</li>
-<li id="fn9">{{benchmark.li41}}</li>
-<li id="fn10">{{benchmark.li42}}</li>
-<li id="fn11">{{benchmark.li43}}</li>
-<li id="fn12">{{benchmark.li44}}</li>
-</ol>
-<p class="note-small">{{benchmark.p45}}</p>
-</div>
-</section>
-<section id="try">
-<div class="wrap">
-<h2>{{try.h201}}</h2>
-<div class="cmd"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
-<span class="p">$ </span>ling "the tests are failing: find out why and fix them"
-<span class="p">$ </span>ling "add input validation to the signup form, with tests"</pre></div>
-<p class="sub after">{{try.p02}}</p>
-</div>
-</section>
-<section id="proof">
+<section class="band-full" id="proof">
 <div class="wrap">
 <h2>{{proof.h201}}</h2>
 <p class="sub">{{proof.p02}}</p>
@@ -224,26 +341,8 @@ Networked git commands: none</pre></div>
 </ul>
 </div>
 </div>
-</div>
-</section>
-<section id="features">
-<div class="wrap">
-<h2>{{features.h201}}</h2>
-<div class="features">
-<div class="feature"><h3>{{features.h302}}</h3><p>{{features.p03}}</p></div>
-<div class="feature"><h3>{{features.h304}}</h3><p>{{features.p05}}</p></div>
-<div class="feature"><h3>{{features.h306}}</h3><p>{{features.p07}}</p></div>
-<div class="feature"><h3>{{features.h308}}</h3><p>{{features.p09}}</p></div>
-<div class="feature"><h3>{{features.h310}}</h3><p>{{features.p11}}</p></div>
-<div class="feature"><h3>{{features.h312}}</h3><p>{{features.p13}}</p></div>
-<div class="feature"><h3>{{features.h314}}</h3><p>{{features.p15}}</p></div>
-<div class="feature"><h3>{{features.h316}}</h3><p>{{features.p17}}</p></div>
-</div>
-</div>
-</section>
-<section id="compare">
-<div class="wrap">
-<h2>{{compare.h201}}</h2>
+<div class="compare-block" id="compare">
+<h3>{{compare.h201}}</h3>
 <div class="tablewrap">
 <table>
 <tr><th></th><th>{{compare.th02}}</th><th>Mightling</th></tr>
@@ -256,25 +355,78 @@ Networked git commands: none</pre></div>
 </table>
 </div>
 </div>
+</div>
 </section>
-<section id="machines">
+<section id="benchmark">
 <div class="wrap">
-<h2>{{machines.h201}}</h2>
-<ul class="machines">
-<li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
-<li>Gigabyte AI TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
-</ul>
-<p class="sub flush">{{machines.p02}}</p>
+<h2>{{benchmark.h201}}</h2>
+<p class="sub">{{benchmark.p02}}</p>
+<div class="tablewrap">
+<table class="bench">
+<tr><th>{{benchmark.th03}}</th><th>{{benchmark.th04}}</th><th>{{benchmark.th05}}</th></tr>
+<tr class="mine"><td>{{benchmark.td06}}</td><td class="num">68/100</td><td class="num">{{benchmark.td07}}</td></tr>
+<tr class="mine"><td>{{benchmark.td08}}</td><td class="num">69/100</td><td class="num">{{benchmark.td09}}</td></tr>
+<tr><td>{{benchmark.td10}}</td><td class="num">68/100</td><td class="num">69.6%</td></tr>
+<tr><td>{{benchmark.td11}}</td><td class="num">68/100</td><td class="num">68.2%</td></tr>
+<tr><td>{{benchmark.td12}}</td><td class="num">70/100</td><td class="num">70.8%</td></tr>
+<tr><td>{{benchmark.td13}}</td><td class="num">70/100</td><td class="num">70.0%</td></tr>
+<tr><td>{{benchmark.td14}}</td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
+<tr><td>{{benchmark.td15}}</td><td class="num">79/100</td><td class="num">77.4%</td></tr>
+<tr class="group"><td colspan="3">{{benchmark.td16}}</td></tr>
+<tr><td>{{benchmark.td17}}</td><td class="num">60/100</td><td class="num">60.4%</td></tr>
+<tr><td>{{benchmark.td18}}</td><td class="num">56/100</td><td class="num">52.2%</td></tr>
+<tr><td>{{benchmark.td19}}</td><td class="num">57/100</td><td class="num">56.4%</td></tr>
+<tr class="group"><td colspan="3">{{benchmark.td20}}</td></tr>
+<tr><td>{{benchmark.td21}}</td><td class="ns">{{benchmark.td22}}</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
+<tr><td>{{benchmark.td23}}</td><td class="ns">{{benchmark.td24}}</td><td class="ns">{{benchmark.td25}}</td></tr>
+<tr><td>{{benchmark.td26}}</td><td class="ns">{{benchmark.td27}}</td><td class="ns">{{benchmark.td28}}</td></tr>
+</table>
+</div>
+<p class="sub after">{{benchmark.p29}}</p>
+<details class="method"><summary>{{benchmark.summary30}}</summary>
+<p>{{benchmark.p31}}</p>
+<p>{{benchmark.p32}}</p>
+</details>
+<ol class="footnotes">
+<li id="fn1">{{benchmark.li33}}</li>
+<li id="fn2">{{benchmark.li34}}</li>
+<li id="fn3">{{benchmark.li35}}</li>
+<li id="fn4">{{benchmark.li36}}</li>
+<li id="fn5">{{benchmark.li37}}</li>
+<li id="fn6">{{benchmark.li38}}</li>
+<li id="fn7">{{benchmark.li39}}</li>
+<li id="fn8">{{benchmark.li40}}</li>
+<li id="fn9">{{benchmark.li41}}</li>
+<li id="fn10">{{benchmark.li42}}</li>
+<li id="fn11">{{benchmark.li43}}</li>
+<li id="fn12">{{benchmark.li44}}</li>
+</ol>
+<p class="note-small">{{benchmark.p45}}</p>
 </div>
 </section>
 <section id="paper">
 <div class="wrap">
 <h2>{{paper.h201}}</h2>
-<div class="pillar">
+<div class="resources-grid">
+<div class="pillar resource-card featured">
+<span class="tag">PDF</span>
 <h3>{{paper.h302}}</h3>
 <p class="note-small">{{paper.p03}}</p>
 <p>{{paper.p04}}</p>
 <p>{{paper.p05}}</p>
+</div>
+<div class="pillar resource-card">
+<span class="tag">{{cta.a05}}</span>
+<h3>{{resources.c2_h3}}</h3>
+<p>{{resources.c2_p}}</p>
+<p><a href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">{{cta.a05}} →</a></p>
+</div>
+<div class="pillar resource-card">
+<span class="tag">{{header.a03}}</span>
+<h3>{{resources.c3_h3}}</h3>
+<p>{{resources.c3_p}}</p>
+<p><a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>swe_bench_compare.py</code> →</a></p>
+</div>
 </div>
 </div>
 </section>
@@ -299,6 +451,8 @@ Networked git commands: none</pre></div>
 <div class="wrap">
 <h2>{{cta.h201}}</h2>
 <p class="sub centered">{{cta.p02}}</p>
+<div class="cmd has-copy cta-cmd"><button class="copy" data-done="{{ui.copied}}" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">{{install.button03}}</button>
+<pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
 <div class="buttons">
 <a class="btn primary" href="https://github.com/dreamference/mightling">{{cta.a03}}</a>
 <a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">{{cta.a04}}</a>
@@ -309,11 +463,45 @@ Networked git commands: none</pre></div>
 </main>
 <footer>
 <div class="wrap">
-<div class="row">
-<div>
+<div class="footer-grid">
+<div class="footer-brand">
+<a class="brand" href="[[home]]"><img alt="" height="28" src="/assets/favicon.svg" width="28"/>Mightling</a>
 <p>{{footer.p01}}</p>
-<p>{{footer.p02}}</p>
 <p>{{footer.p03}}</p>
+</div>
+<div class="footer-col">
+<h4>{{features.h201}}</h4>
+<ul>
+<li><a href="#install">{{header.a01}}</a></li>
+<li><a href="#new">{{header.a02}}</a></li>
+<li><a href="#workflows">{{try.h201}}</a></li>
+<li><a href="#surfaces">{{features.h201}}</a></li>
+<li><a href="#machines">{{machines.h201}}</a></li>
+</ul>
+</div>
+<div class="footer-col">
+<h4>{{header.a04}}</h4>
+<ul>
+<li><a href="#proof">{{header.a04}}</a></li>
+<li><a href="#why">{{why.h201}}</a></li>
+<li><a href="#compare">{{compare.h201}}</a></li>
+<li><a href="#benchmark">{{header.a03}}</a></li>
+</ul>
+</div>
+<div class="footer-col">
+<h4>{{header.a05}}</h4>
+<ul>
+<li><a href="#paper">{{header.a05}}</a></li>
+<li><a href="#faq">{{header.a06}}</a></li>
+<li><a href="https://github.com/dreamference/mightling">{{header.a07}}</a></li>
+<li><a href="https://github.com/dreamference/mightling/releases/latest">{{cta.a04}}</a></li>
+<li><a href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">{{cta.a05}}</a></li>
+</ul>
+</div>
+</div>
+<div class="row footer-bottom">
+<div>
+<p>{{footer.p02}}</p>
 </div>
 <div>
 <p>{{footer.p04}}</p>
