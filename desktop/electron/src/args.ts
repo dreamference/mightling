@@ -6,6 +6,7 @@
 // `mightling://thread/<id>` and `mightling://work?cwd=<folder>`.
 
 import app from "../app.json";
+import predecessor from "../predecessor.json";
 
 export interface WorkTarget {
   cwd: string | null;
@@ -24,7 +25,7 @@ export interface WorkTarget {
   origin?: string;
 }
 
-const SCHEMES = [app.scheme, ...app.legacySchemes];
+const SCHEMES = [app.scheme, ...predecessor.legacySchemes];
 
 /** The Work target in `args`, or `null` when they open Ask. Chromium's own switches are ignored. */
 export function workTarget(args: readonly string[]): WorkTarget | null {

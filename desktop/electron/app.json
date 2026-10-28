@@ -1,16 +1,13 @@
 {
-  "productName": "Mightling",
-  "identifier": "dev.dreamference.mightling",
-  "scheme": "ling",
-  "legacySchemes": [
-    "mightling"
-  ],
-  "executable": "Mightling",
-  "command": "ling-app",
-  "packageName": "mightling",
+  "productName": "Ragon",
+  "identifier": "dev.dreamference.ragon",
+  "scheme": "ragon",
+  "executable": "Ragon",
+  "command": "ragon-app",
+  "packageName": "ragon",
   "work": {
     "label": "work",
-    "title": "Mightling",
+    "title": "Ragon",
     "width": 1280,
     "height": 860,
     "minWidth": 480,

@@ -46,6 +46,33 @@ export function legacyDataFolder(platform: string, env: Env, identifier: string)
   return home ? joined(home, true, [".local", "share", identifier]) : null;
 }
 
+/**
+ * Every folder an earlier run of the app may have kept its data in, newest first: the Windows
+ * `.local\share` folder of 1.7.1 under the current identifier, then each earlier identifier's
+ * folder (the rename of 1.9.0 changed the identifier), and on Windows that identifier's 1.7.1 folder.
+ */
+export function predecessorDataFolders(platform: string, env: Env, identifier: string, earlier: readonly string[]): string[] {
+  const found: string[] = [];
+  for (const id of [identifier, ...earlier]) {
+    const candidates = id === identifier ? [legacyDataFolder(platform, env, id)] : [dataFolder(platform, env, id), legacyDataFolder(platform, env, id)];
+    for (const folder of candidates) if (folder && !found.includes(folder)) found.push(folder);
+  }
+  return found;
+}
+
+/**
+ * The folder to use this run, moving the first of `predecessors` that exists to `current`
+ * (`settleDataFolder`'s rules, for a list).
+ */
+export function settleFromPredecessors(
+  predecessors: readonly string[],
+  current: string,
+  ops: FolderOps = fs,
+  log: (line: string) => void = (line) => console.error(line),
+): string {
+  return settleDataFolder(predecessors.find((folder) => ops.existsSync(folder)) ?? null, current, ops, log);
+}
+
 /** The file system calls `settleDataFolder` makes, replaceable in tests. */
 export interface FolderOps {
   existsSync(target: string): boolean;

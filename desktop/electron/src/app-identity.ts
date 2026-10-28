@@ -12,6 +12,7 @@ import path from "node:path";
 import { app, shell } from "electron";
 
 import appConfig from "../app.json";
+import predecessor from "../predecessor.json";
 import { pathKey } from "./platform";
 
 export const APP_USER_MODEL_ID: string = appConfig.identifier;
@@ -29,6 +30,18 @@ export function shortcutFolders(env: NodeJS.ProcessEnv): { entry: string | null;
 export function needsId(link: { target: string; appUserModelId?: string }, exe: string, platform: NodeJS.Platform = process.platform): boolean {
   if (!link.target || link.appUserModelId === APP_USER_MODEL_ID) return false;
   return pathKey(link.target, platform) === pathKey(exe, platform);
+}
+
+/**
+ * Whether a shortcut belongs to the app this one replaced (1.9.0 changed the identifier): it carries
+ * one of the old IDs, or starts the executable of the old per-user install. A pin or entry of any
+ * other copy is not the old app's, and is left alone. Pure.
+ */
+export function isPredecessorLink(link: { target: string; appUserModelId?: string }, env: NodeJS.ProcessEnv): boolean {
+  if (link.appUserModelId && predecessor.appUserModelIds.includes(link.appUserModelId)) return true;
+  if (!link.target || !env.LOCALAPPDATA) return false;
+  const old = path.win32.join(env.LOCALAPPDATA, predecessor.installedExe);
+  return pathKey(link.target, "win32") === pathKey(old, "win32");
 }
 
 /** What claimAppIdentity touches, Electron's and the file system's by default (tests give stand-ins). */
@@ -66,6 +79,8 @@ export function claimAppIdentity(host: IdentityHost = electronHost()): string[] 
   if (!host.packaged) return [];
   const { entry, pins } = shortcutFolders(host.env);
   const candidates: string[] = entry ? [entry] : [];
+  // The desktop shortcut installer.nsi makes.
+  if (host.env.USERPROFILE) candidates.push(path.win32.join(host.env.USERPROFILE, "Desktop", `${appConfig.productName}.lnk`));
   if (pins) {
     try {
       candidates.push(...host.list(pins).filter((name) => name.toLowerCase().endsWith(".lnk")).map((name) => path.win32.join(pins, name)));
@@ -77,6 +92,11 @@ export function claimAppIdentity(host: IdentityHost = electronHost()): string[] 
   for (const file of candidates) {
     try {
       const link = host.read(file);
+      // The old app's pin or entry follows the app: pointed at this executable, with the new ID.
+      if (isPredecessorLink(link, host.env) && pathKey(link.target, host.platform) !== pathKey(host.exe, host.platform)) {
+        if (host.update(file, host.exe, APP_USER_MODEL_ID)) written.push(file);
+        continue;
+      }
       if (needsId(link, host.exe, host.platform) && host.update(file, link.target, APP_USER_MODEL_ID)) written.push(file);
     } catch {
       // Missing, or not a shortcut Windows can read: left as it is.

@@ -10,9 +10,10 @@ import fs from "node:fs";
 import { app } from "electron";
 
 import appConfig from "../app.json";
+import predecessor from "../predecessor.json";
 import { registerScheme } from "./app-protocol";
 import { bootstrap } from "./bootstrap";
-import { dataFolder, legacyDataFolder, settleDataFolder } from "./data-folder";
+import { dataFolder, predecessorDataFolders, settleFromPredecessors } from "./data-folder";
 import { applySwitches } from "./egress";
 import { versionText, wantsVersion } from "./version";
 
@@ -26,8 +27,9 @@ function start(): void {
   app.setName(appConfig.productName);
   const data = dataFolder(process.platform, process.env, appConfig.identifier);
   if (data) {
-    const legacy = legacyDataFolder(process.platform, process.env, appConfig.identifier);
-    app.setPath("userData", settleDataFolder(legacy, data));
+    // Folders of earlier identifiers move here once too (the Mightling app's, in 1.9.0).
+    const earlier = predecessorDataFolders(process.platform, process.env, appConfig.identifier, [predecessor.identifier]);
+    app.setPath("userData", settleFromPredecessors(earlier, data));
   }
 
   app.whenReady().then(bootstrap).catch((error) => {

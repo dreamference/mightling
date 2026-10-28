@@ -96,20 +96,20 @@ def test_the_uninstaller_keeps_the_users_data_and_says_so():
     # The app's data folder (data-folder.ts, WINDOWS_ARM §23.4 W4) and ~\.mightling are the user's.
     nsi = INSTALLER_NSI.read_text()
     uninstall = nsi[nsi.index('Section "Uninstall"') :]
-    assert "dev.dreamference.mightling" not in uninstall.split("DetailPrint")[0]
+    assert "dev.dreamference.ragon" not in uninstall.split("DetailPrint")[0]
     assert ".mightling" not in "".join(
         line for line in uninstall.splitlines() if "RMDir" in line or "Delete " in line
     )
-    assert 'DetailPrint "Kept your data: $LOCALAPPDATA\\dev.dreamference.mightling' in uninstall
+    assert 'DetailPrint "Kept your data: $LOCALAPPDATA\\dev.dreamference.ragon' in uninstall
     top = re.search(r'!define MUI_UNCONFIRMPAGE_TEXT_TOP "([^"]+)"', nsi).group(1)
     assert (
-        "%LOCALAPPDATA%\\dev.dreamference.mightling" in top and "%USERPROFILE%\\.mightling" in top
+        "%LOCALAPPDATA%\\dev.dreamference.ragon" in top and "%USERPROFILE%\\.mightling" in top
     )
     assert nsi.index("MUI_UNCONFIRMPAGE_TEXT_TOP") < nsi.index("!insertmacro MUI_UNPAGE_CONFIRM")
     # CI runs the app with a scratch profile and checks the folder lands under its LOCALAPPDATA.
     windows = WINDOWS_YML.read_text()
     assert '$env:LOCALAPPDATA = Join-Path $scratch "AppData\\Local"' in windows
-    assert '$data = Join-Path $env:LOCALAPPDATA "dev.dreamference.mightling"' in windows
+    assert '$data = Join-Path $env:LOCALAPPDATA "dev.dreamference.ragon"' in windows
 
 
 @pytest.mark.parametrize("version", ["1.7.0", "1.7.2", "1.8.0-rc.1"])

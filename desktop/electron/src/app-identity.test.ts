@@ -6,7 +6,7 @@ vi.mock("electron", () => ({ app: {}, shell: {} }));
 
 import { APP_USER_MODEL_ID, claimAppIdentity, needsId, shortcutFolders, type IdentityHost } from "./app-identity";
 
-const exe = "/apps/Mightling/App/Mightling.exe";
+const exe = "/apps/Ragon/App/Ragon.exe";
 const appData = "/users/u/AppData/Roaming";
 
 function host(links: Record<string, { target: string; appUserModelId?: string } | Error>, overrides: Partial<IdentityHost> = {}) {
@@ -41,13 +41,13 @@ function host(links: Record<string, { target: string; appUserModelId?: string } 
 
 describe("the app's ID on Windows", () => {
   it("is the app's identifier", () => {
-    expect(APP_USER_MODEL_ID).toBe("dev.dreamference.mightling");
+    expect(APP_USER_MODEL_ID).toBe("dev.dreamference.ragon");
   });
 
   it("finds the Start menu entry the installer makes and the taskbar pins in APPDATA", () => {
     expect(shortcutFolders({})).toEqual({ entry: null, pins: null });
     const { entry, pins } = shortcutFolders({ APPDATA: "C:\\Users\\u\\AppData\\Roaming" });
-    expect(entry).toBe("C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Mightling.lnk");
+    expect(entry).toBe("C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Ragon.lnk");
     expect(pins).toBe("C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar");
   });
 
@@ -57,7 +57,7 @@ describe("the app's ID on Windows", () => {
     expect(needsId({ target: exe.toUpperCase() }, exe, "linux")).toBe(false);
     expect(needsId({ target: exe, appUserModelId: APP_USER_MODEL_ID }, exe, "win32")).toBe(false);
     expect(needsId({ target: exe, appUserModelId: "electron.app.Mightling" }, exe, "win32")).toBe(true);
-    expect(needsId({ target: "/elsewhere/Mightling.exe" }, exe, "win32")).toBe(false);
+    expect(needsId({ target: "/elsewhere/Ragon.exe" }, exe, "win32")).toBe(false);
     expect(needsId({ target: "" }, exe, "win32")).toBe(false);
   });
 
@@ -65,15 +65,15 @@ describe("the app's ID on Windows", () => {
     const { entry, pins } = shortcutFolders({ APPDATA: appData });
     const { value, ids, updated } = host({
       [entry!]: { target: exe },
-      [`${pins}\\Mightling.lnk`]: { target: exe, appUserModelId: "electron.app.Mightling" },
-      [`${pins}\\Other copy.lnk`]: { target: "/old/Mightling.exe" },
+      [`${pins}\\Ragon.lnk`]: { target: exe, appUserModelId: "electron.app.Mightling" },
+      [`${pins}\\Other copy.lnk`]: { target: "/old/Ragon.exe" },
       [`${pins}\\Done.lnk`]: { target: exe, appUserModelId: APP_USER_MODEL_ID },
       [`${pins}\\Broken.lnk`]: new Error("not a shortcut"),
       [`${pins}\\notes.txt`]: { target: exe },
     });
-    expect(claimAppIdentity(value)).toEqual([entry, `${pins}\\Mightling.lnk`]);
+    expect(claimAppIdentity(value)).toEqual([entry, `${pins}\\Ragon.lnk`]);
     expect(ids).toEqual([APP_USER_MODEL_ID]);
-    expect(updated).toEqual([`${entry}=${APP_USER_MODEL_ID}`, `${pins}\\Mightling.lnk=${APP_USER_MODEL_ID}`]);
+    expect(updated).toEqual([`${entry}=${APP_USER_MODEL_ID}`, `${pins}\\Ragon.lnk=${APP_USER_MODEL_ID}`]);
   });
 
   it("writes nothing when the shortcuts carry it, there are none, or the pins folder is missing", () => {

@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import predecessor from "../predecessor.json";
 
 const require = createRequire(import.meta.url);
 const { ownRelationsInstaller } = require("../linux/deb-maker.js");
@@ -48,12 +49,12 @@ describe.skipIf(process.platform === "win32")("the .deb's control file", () => {
       await installer.createControl();
       const control = fs.readFileSync(path.join(installer.stagingDir, "DEBIAN", "control"), "utf8");
       const field = (name: string) => control.match(new RegExp(`^${name}: (.*)$`, "m"))?.[1];
-      expect(field("Package")).toBe("mightling");
+      expect(field("Package")).toBe("ragon");
       expect(field("Depends")).toBe(ours.depends.join(", "));
       expect(field("Recommends")).toBeUndefined();
       expect(field("Suggests")).toBeUndefined();
-      expect(field("Conflicts")).toBe("puffin, mightling-app");
-      expect(field("Replaces")).toBe("puffin, mightling-app");
+      expect(field("Conflicts")).toBe(predecessor.debPackages.join(", "));
+      expect(field("Replaces")).toBe(predecessor.debPackages.join(", "));
       expect(control).not.toMatch(/libsecret|trash-cli|gvfs/);
       // Description, with its continuation lines, still ends the paragraph.
       expect(control.trimEnd().split("\n").slice(-1)[0]).toMatch(/^ /);

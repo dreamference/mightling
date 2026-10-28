@@ -8,6 +8,7 @@
 ; so it is made from NUMERIC_VERSION (1.7.0), which defaults to VERSION.
 
 !include "MUI2.nsh"
+!include "predecessor.nsh"
 
 !ifndef VERSION
   !error "VERSION is required"
@@ -53,10 +54,10 @@ VIAddVersionKey "LegalCopyright" "Copyright (C) 2026 Dreamference contributors. 
 ; (a chosen folder could be one that holds other things).
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
-; The app's data (%LOCALAPPDATA%\dev.dreamference.mightling: the window state, the preferences,
+; The app's data (%LOCALAPPDATA%\dev.dreamference.ragon: the window state, the preferences,
 ; Chromium's profile) and ling's (%USERPROFILE%\.mightling: threads, settings) are the user's, kept
 ; for a reinstall; the confirmation page and the log say so, and where they are.
-!define MUI_UNCONFIRMPAGE_TEXT_TOP "${PRODUCT} will be removed from your computer. Your data stays: the app's in %LOCALAPPDATA%\dev.dreamference.mightling, your threads and settings in %USERPROFILE%\.mightling. Delete those folders yourself to remove it too."
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "${PRODUCT} will be removed from your computer. Your data stays: the app's in %LOCALAPPDATA%\dev.dreamference.ragon, your threads and settings in %USERPROFILE%\.mightling. Delete those folders yourself to remove it too."
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
@@ -113,6 +114,8 @@ FunctionEnd
 
 Section "Install"
   SetShellVarContext current
+  ; The app this one replaced (1.9.0), its shortcuts and registrations (predecessor.nsh).
+  Call RemovePredecessor
   ; An earlier install is replaced whole (FreeAppFolder above).
   Call FreeAppFolder
   StrCmp $0 "moved" 0 install_files
@@ -122,6 +125,7 @@ Section "Install"
   File /r "${SOURCE}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall Mightling.exe"
   CreateShortCut "$SMPROGRAMS\${PRODUCT}.lnk" "$INSTDIR\${EXE}"
+  CreateShortCut "$DESKTOP\${PRODUCT}.lnk" "$INSTDIR\${EXE}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${PRODUCT}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "Dreamference"
@@ -137,6 +141,7 @@ Section "Uninstall"
   SetShellVarContext current
   Call un.FreeAppFolder
   Delete "$SMPROGRAMS\${PRODUCT}.lnk"
+  Delete "$DESKTOP\${PRODUCT}.lnk"
   StrCmp $0 "moved" 0 remove_in_place
     RMDir /r "$INSTDIR.old"
     Goto removed
@@ -147,5 +152,5 @@ Section "Uninstall"
   ; The links the app registered for itself (ling://, mightling://) go with it; ~\.mightling stays.
   DeleteRegKey HKCU "Software\Classes\ling"
   DeleteRegKey HKCU "Software\Classes\mightling"
-  DetailPrint "Kept your data: $LOCALAPPDATA\dev.dreamference.mightling (the app) and $PROFILE\.mightling (threads, settings)."
+  DetailPrint "Kept your data: $LOCALAPPDATA\dev.dreamference.ragon (the app) and $PROFILE\.mightling (threads, settings)."
 SectionEnd

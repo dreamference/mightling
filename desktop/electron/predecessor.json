@@ -1,0 +1,9 @@
+{
+  "note": "The names the desktop app had before 1.9.0 (Mightling). EXEMPT from scripts/rename_ragon.py: this file is the one place the app knows them, to carry its data, shortcuts and links over once. Remove the file when 2.0 drops the transition.",
+  "productName": "Mightling",
+  "identifier": "dev.dreamference.mightling",
+  "appUserModelIds": ["electron.app.Mightling", "dev.dreamference.mightling"],
+  "installedExe": "Programs\\Mightling\\App\\Mightling.exe",
+  "legacySchemes": ["ling", "mightling"],
+  "debPackages": ["puffin", "mightling", "mightling-app"]
+}

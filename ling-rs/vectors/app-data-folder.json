@@ -1,48 +1,48 @@
 {
  "comment": "The desktop app's data folder (Electron's userData), one rule for the app (desktop/electron/src/data-folder.ts, dataFolder) and `ling app` (ling-rs/src/app.rs, data_dir_for), each tested against these cases. On Windows: %LOCALAPPDATA%\\<identifier>, else %USERPROFILE%\\AppData\\Local\\<identifier>; elsewhere <HOME, else USERPROFILE>/.local/share/<identifier>, the folder the Tauri app used. An empty variable counts as unset; separators at the end of a variable are dropped. `legacy` is the folder 1.7.1 and earlier used on Windows, which the app moves to the new one once (the app's test only; null where nothing moves). specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md §11, §23.4 W4.",
- "identifier": "dev.dreamference.mightling",
+ "identifier": "dev.dreamference.ragon",
  "cases": [
   {
    "name": "Windows: LOCALAPPDATA",
    "platform": "win32",
    "env": {"LOCALAPPDATA": "C:\\Users\\Jane Doe\\AppData\\Local", "USERPROFILE": "C:\\Users\\Jane Doe"},
-   "expected": "C:\\Users\\Jane Doe\\AppData\\Local\\dev.dreamference.mightling",
-   "legacy": "C:\\Users\\Jane Doe\\.local\\share\\dev.dreamference.mightling"
+   "expected": "C:\\Users\\Jane Doe\\AppData\\Local\\dev.dreamference.ragon",
+   "legacy": "C:\\Users\\Jane Doe\\.local\\share\\dev.dreamference.ragon"
   },
   {
    "name": "Windows: LOCALAPPDATA wins over HOME, which Git Bash sets",
    "platform": "win32",
    "env": {"LOCALAPPDATA": "D:\\Profiles\\jane\\AppData\\Local", "USERPROFILE": "D:\\Profiles\\jane", "HOME": "C:\\Users\\jane"},
-   "expected": "D:\\Profiles\\jane\\AppData\\Local\\dev.dreamference.mightling",
-   "legacy": "C:\\Users\\jane\\.local\\share\\dev.dreamference.mightling"
+   "expected": "D:\\Profiles\\jane\\AppData\\Local\\dev.dreamference.ragon",
+   "legacy": "C:\\Users\\jane\\.local\\share\\dev.dreamference.ragon"
   },
   {
    "name": "Windows: a separator at the end of LOCALAPPDATA",
    "platform": "win32",
    "env": {"LOCALAPPDATA": "C:\\Users\\jane\\AppData\\Local\\", "USERPROFILE": "C:\\Users\\jane"},
-   "expected": "C:\\Users\\jane\\AppData\\Local\\dev.dreamference.mightling",
-   "legacy": "C:\\Users\\jane\\.local\\share\\dev.dreamference.mightling"
+   "expected": "C:\\Users\\jane\\AppData\\Local\\dev.dreamference.ragon",
+   "legacy": "C:\\Users\\jane\\.local\\share\\dev.dreamference.ragon"
   },
   {
    "name": "Windows: an accented user name",
    "platform": "win32",
    "env": {"LOCALAPPDATA": "C:\\Users\\Jösé\\AppData\\Local", "USERPROFILE": "C:\\Users\\Jösé"},
-   "expected": "C:\\Users\\Jösé\\AppData\\Local\\dev.dreamference.mightling",
-   "legacy": "C:\\Users\\Jösé\\.local\\share\\dev.dreamference.mightling"
+   "expected": "C:\\Users\\Jösé\\AppData\\Local\\dev.dreamference.ragon",
+   "legacy": "C:\\Users\\Jösé\\.local\\share\\dev.dreamference.ragon"
   },
   {
    "name": "Windows: no LOCALAPPDATA, so USERPROFILE's AppData\\Local",
    "platform": "win32",
    "env": {"USERPROFILE": "C:\\Users\\jane"},
-   "expected": "C:\\Users\\jane\\AppData\\Local\\dev.dreamference.mightling",
-   "legacy": "C:\\Users\\jane\\.local\\share\\dev.dreamference.mightling"
+   "expected": "C:\\Users\\jane\\AppData\\Local\\dev.dreamference.ragon",
+   "legacy": "C:\\Users\\jane\\.local\\share\\dev.dreamference.ragon"
   },
   {
    "name": "Windows: an empty LOCALAPPDATA counts as unset",
    "platform": "win32",
    "env": {"LOCALAPPDATA": "", "USERPROFILE": "C:\\Users\\jane"},
-   "expected": "C:\\Users\\jane\\AppData\\Local\\dev.dreamference.mightling",
-   "legacy": "C:\\Users\\jane\\.local\\share\\dev.dreamference.mightling"
+   "expected": "C:\\Users\\jane\\AppData\\Local\\dev.dreamference.ragon",
+   "legacy": "C:\\Users\\jane\\.local\\share\\dev.dreamference.ragon"
   },
   {
    "name": "Windows: neither variable, no folder",
@@ -55,35 +55,35 @@
    "name": "Linux: HOME, unchanged",
    "platform": "linux",
    "env": {"HOME": "/home/jane", "LOCALAPPDATA": "/ignored"},
-   "expected": "/home/jane/.local/share/dev.dreamference.mightling",
+   "expected": "/home/jane/.local/share/dev.dreamference.ragon",
    "legacy": null
   },
   {
    "name": "Linux: a separator at the end of HOME",
    "platform": "linux",
    "env": {"HOME": "/home/jane/"},
-   "expected": "/home/jane/.local/share/dev.dreamference.mightling",
+   "expected": "/home/jane/.local/share/dev.dreamference.ragon",
    "legacy": null
   },
   {
    "name": "Linux: HOME is /",
    "platform": "linux",
    "env": {"HOME": "/"},
-   "expected": "/.local/share/dev.dreamference.mightling",
+   "expected": "/.local/share/dev.dreamference.ragon",
    "legacy": null
   },
   {
    "name": "Linux: no HOME, so USERPROFILE",
    "platform": "linux",
    "env": {"HOME": "", "USERPROFILE": "/srv/jane"},
-   "expected": "/srv/jane/.local/share/dev.dreamference.mightling",
+   "expected": "/srv/jane/.local/share/dev.dreamference.ragon",
    "legacy": null
   },
   {
    "name": "macOS: HOME, unchanged",
    "platform": "darwin",
    "env": {"HOME": "/Users/jane"},
-   "expected": "/Users/jane/.local/share/dev.dreamference.mightling",
+   "expected": "/Users/jane/.local/share/dev.dreamference.ragon",
    "legacy": null
   },
   {

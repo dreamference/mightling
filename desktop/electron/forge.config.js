@@ -14,6 +14,7 @@ const path = require("node:path");
 const { FuseV1Options, FuseVersion, flipFuses } = require("@electron/fuses");
 
 const app = require("./app.json");
+const predecessor = require("./predecessor.json");
 const { MakerDebOwnRelations } = require("./linux/deb-maker");
 const pkg = require("./package.json");
 
@@ -106,7 +107,7 @@ module.exports = {
     // macOS only (the packager ignores these elsewhere). The scheme, so `mightling://` links reach
     // `open-url`; the category; and the Local Network entries macOS 15 asks about before the app
     // (or the bundled `ling` it starts) may browse for a node or connect to one on the LAN.
-    protocols: [{ name: app.productName, schemes: [app.scheme, ...app.legacySchemes] }],
+    protocols: [{ name: app.productName, schemes: [app.scheme, ...predecessor.legacySchemes] }],
     appCategoryType: "public.app-category.developer-tools",
     extendInfo: {
       NSLocalNetworkUsageDescription:
@@ -139,7 +140,7 @@ module.exports = {
         bin: app.executable,
         icon: path.join(__dirname, "icons", "icon.png"),
         categories: ["Utility", "Development"],
-        mimeType: [app.scheme, ...app.legacySchemes].map((scheme) => `x-scheme-handler/${scheme}`),
+        mimeType: [app.scheme, ...predecessor.legacySchemes].map((scheme) => `x-scheme-handler/${scheme}`),
         section: "devel",
         priority: "optional",
         homepage: "https://github.com/dreamference/mightling",
@@ -172,8 +173,8 @@ module.exports = {
         ],
         // The Tauri-era package names, so an upgrade replaces them (written into the control
         // file by linux/deb-maker.js: electron-installer-debian's template has neither field).
-        conflicts: ["puffin", "mightling-app"],
-        replaces: ["puffin", "mightling-app"],
+        conflicts: predecessor.debPackages,
+        replaces: predecessor.debPackages,
       },
     }),
     { name: "@electron-forge/maker-zip", platforms: ["linux", "darwin", "win32"] },
