@@ -194,7 +194,7 @@ def content_excluded(path):
 
 def masked(line):
     """`line` with the protected words blanked, for the leftover check."""
-    for word in PROTECT:
+    for word in PROTECT + COMPAT_KEEP:
         line = line.replace(word, " ")
     return line
 
@@ -230,6 +230,93 @@ def leftovers(root, files=None):
         if transform(path) != path and new_path(path) != path:
             hits.append(f"{path}: path still has an old name")
     return hits
+
+
+# Old names the compatibility edits write on purpose: the leftover check lets them through.
+COMPAT_KEEP = [
+    "MIGHTLING_LEGACY_MIGRATION",
+    "_mightling-node._tcp",
+    "ling-swe-*",
+    "still runs Mightling: `ling update` there",
+]
+
+# Compatibility edits applied to the renamed tree (spec §4 and §5): the older name stays readable for
+# one release. Each is (path, old text, new text, expected occurrences); a missing anchor aborts.
+SWE_UNIT_OLD = '                    "ragon-swe-*",\n'
+COMPAT_EDITS = [
+    (
+        "dreamference/forge/forge_storage.py",
+        SWE_UNIT_OLD,
+        SWE_UNIT_OLD + '                    "ling-swe-*",\n',
+        1,
+    ),
+    (
+        "dreamference/night_shift/night_shift_autofill.py",
+        SWE_UNIT_OLD,
+        SWE_UNIT_OLD + '                    "ling-swe-*",\n',
+        1,
+    ),
+    (
+        "dreamference/node/node_service_file.py",
+        'SERVICE_TYPE: Final[str] = "_ragon-node._tcp"\n',
+        'SERVICE_TYPE: Final[str] = "_ragon-node._tcp"\n'
+        "# The type 1.5 to 1.8 clients browse for: published beside the new one for one release.\n"
+        'LEGACY_SERVICE_TYPE: Final[str] = "_mightling-node._tcp"\n',
+        1,
+    ),
+    (
+        "dreamference/node/node_service_file.py",
+        '        lines.append("  </service>")\n        if forge is not None:',
+        '        lines.append("  </service>")\n'
+        '        lines += ["  <service>", f"    <type>{LEGACY_SERVICE_TYPE}</type>", f"    <port>{int(port)}</port>"]\n'
+        '        lines += [f"    <txt-record>{escape(record)}</txt-record>" for record in records]\n'
+        '        lines.append("  </service>")\n        if forge is not None:',
+        1,
+    ),
+    (
+        "dreamference/node/node_browser.py",
+        "from dreamference.node.node_service_file import SERVICE_TYPE\n",
+        "from dreamference.node.node_service_file import LEGACY_SERVICE_TYPE, SERVICE_TYPE\n",
+        1,
+    ),
+    (
+        "dreamference/node/node_browser.py",
+        "        return cls.parse(result.stdout)\n",
+        "        entries = cls.parse(result.stdout)\n"
+        '        seen = {entry.get("node") for entry in entries}\n'
+        "        for entry in cls.browse_service(LEGACY_SERVICE_TYPE, timeout=timeout):\n"
+        '            if entry.get("node") not in seen:\n'
+        '                entry["legacy"] = "1"  # still runs Mightling: `ling update` there\n'
+        "                entries.append(entry)\n"
+        "        return entries\n",
+        1,
+    ),
+    (
+        "tests/conftest.py",
+        'monkeypatch.delenv("RAGON_LEGACY_MIGRATION", raising=False)\n',
+        'monkeypatch.delenv("RAGON_LEGACY_MIGRATION", raising=False)\n'
+        '    monkeypatch.delenv("MIGHTLING_LEGACY_MIGRATION", raising=False)\n',
+        1,
+    ),
+]
+
+
+def apply_compat(root, dry):
+    """Applies COMPAT_EDITS under `root`; aborts when an anchor is missing or ambiguous."""
+    done = 0
+    for path, old, new, count in COMPAT_EDITS:
+        full = pathlib.Path(root) / path
+        text = full.read_text(encoding="utf-8")
+        if new in text and old != new and text.count(new) >= 1 and text.count(old) == 0:
+            continue
+        if text.count(old) != count:
+            sys.exit(
+                f"compat edit anchor not found {count}x in {path}: {old.strip()[:70]!r} ({text.count(old)}x)"
+            )
+        if not dry:
+            full.write_text(text.replace(old, new), encoding="utf-8")
+        done += 1
+    return done
 
 
 def build_manifest(root):
@@ -424,6 +511,8 @@ def main(argv=None):
     for old, target in renames:
         print(f"  {old} -> {target}")
     overlays = [] if args.repo == "engine" else apply_overlay(root, args.dry)
+    if args.repo == "main" and not args.paths and not args.dry:
+        print(f"compat edits: {apply_compat(root, args.dry)}")
     print(
         f"contents changed: {len(changed)} files; renamed: {len(renames)} paths; overlays: {len(overlays)}"
     )
