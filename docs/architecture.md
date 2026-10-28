@@ -14,7 +14,7 @@ flowchart LR
     W["ling web<br/>:3100"]
     H["Helpers<br/>SearXNG · Whisper<br/>Google · Image search"]
     subgraph models["Model server"]
-        V["ling-serve, main model<br/>:8000"]
+        V["SGLang, main model<br/>:8000"]
     end
     T --> V
     T -- "search, fetch, apps, images" --> H
@@ -27,7 +27,7 @@ flowchart LR
 
 | Part | What it is | Where it runs |
 |---|---|---|
-| Model server | ling-serve (or SGLang, or vLLM) serving the main model through the standard `/v1` chat API | Docker container, port 8000 |
+| Model server | SGLang (or vLLM) serving the main model through the standard `/v1` chat API | Docker container, port 8000 |
 | `ling` | The terminal agent | A native binary, linked from `~/.local/bin` |
 | `ling web` | Ask and Work in a browser, relayed to `ling app-server` | Part of `ling`, port 3100 |
 | SearXNG | Metasearch: queries public search engines for web search | Docker container, reachable only from this machine |
