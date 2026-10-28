@@ -335,3 +335,304 @@ def test_a_command_the_filter_leaves_empty_does_not_fail_the_run():
         commands = CodexTestRunner.commands(skips, "/ws", {}, "package(codex-tui)", 8)
     for command in commands[1:]:
         assert command[command.index("--no-tests") + 1] == "pass"
+
+
+def test_ensure_nextest_handles_stamp_unsupported_target_network_error_and_valid_archive(
+    tmp_path, monkeypatch
+):
+    import hashlib
+    import io
+    import tarfile
+    import urllib.request
+    from pathlib import Path
+
+    tools = tmp_path / "tools"
+    monkeypatch.setattr(runner_module, "TOOLS_DIR", str(tools))
+
+    # Unsupported target returns None.
+    monkeypatch.setattr(
+        runner_module.CodexBrandedBuilder,
+        "host_target",
+        classmethod(lambda cls: "riscv64-unknown-linux-gnu"),
+    )
+    assert CodexTestRunner.ensure_nextest() is None
+
+    target = "aarch64-unknown-linux-gnu"
+    monkeypatch.setattr(
+        runner_module.CodexBrandedBuilder, "host_target", classmethod(lambda cls: target)
+    )
+
+    # Download failure returns None.
+    def fail_download(url, dest):
+        raise OSError("network unreachable")
+
+    monkeypatch.setattr(urllib.request, "urlretrieve", fail_download)
+    assert CodexTestRunner.ensure_nextest() is None
+
+    # Valid archive extracts binary, writes stamp, and subsequent call returns from stamp.
+    tar_bytes = io.BytesIO()
+    with tarfile.open(fileobj=tar_bytes, mode="w:gz") as tar:
+        payload = b"#!/bin/sh\necho nextest\n"
+        info = tarfile.TarInfo("cargo-nextest")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    raw_archive = tar_bytes.getvalue()
+    digest = hashlib.sha256(raw_archive).hexdigest()
+    monkeypatch.setitem(runner_module.NEXTEST_SHA256, target, digest)
+    monkeypatch.setattr(
+        urllib.request,
+        "urlretrieve",
+        lambda url, dest: Path(dest).write_bytes(raw_archive),
+    )
+    assert CodexTestRunner.ensure_nextest() == str(tools)
+    assert (tools / "cargo-nextest").read_bytes() == b"#!/bin/sh\necho nextest\n"
+    assert (tools / "cargo-nextest.version").read_text().strip() == runner_module.NEXTEST_VERSION
+
+    # Stamp hit skips download.
+    monkeypatch.setattr(
+        urllib.request,
+        "urlretrieve",
+        lambda url, dest: pytest.fail("should use cached cargo-nextest"),
+    )
+    assert CodexTestRunner.ensure_nextest() == str(tools)
+
+
+def test_apply_test_overlay_refuses_broken_patch(tmp_path, monkeypatch):
+    export = tmp_path / "export"
+    (export / "codex-rs").mkdir(parents=True)
+    patches = tmp_path / "patches"
+    patches.mkdir()
+    (patches / "0001-bad.patch").write_text("not a valid git patch\n")
+    monkeypatch.setattr(runner_module, "SNAPSHOT_OVERLAY_DIR", str(tmp_path / "no-snaps"))
+    monkeypatch.setattr(runner_module, "TEST_PATCHES_DIR", str(patches))
+    assert not CodexTestRunner.apply_test_overlay(str(export))
+
+
+def test_snapshot_hashes_and_accept_snapshots_classify_name_only_refused_and_pending(
+    tmp_path, monkeypatch
+):
+    export = tmp_path / "export"
+    ws = export / "codex-rs"
+    (ws / "tui" / "snapshots").mkdir(parents=True)
+    (ws / "target" / "debug").mkdir(parents=True)
+    (ws / "target" / "debug" / "ignored.snap").write_text("ignored\n")
+    good_snap = ws / "tui" / "snapshots" / "ok.snap"
+    bad_snap = ws / "tui" / "snapshots" / "bad.snap"
+    good_snap.write_text("---\nsource: tui\n---\nOpenAI Codex\n")
+    bad_snap.write_text("---\nsource: tui\n---\nOpenAI Codex\n")
+
+    before = CodexTestRunner.snapshot_hashes(str(ws))
+    assert set(before) == {"tui/snapshots/ok.snap", "tui/snapshots/bad.snap"}
+
+    # Rewrite both snapshots: ok.snap changes only the name, bad.snap changes content.
+    good_snap.write_text("---\nsource: tui\n---\nMightling\n")
+    bad_snap.write_text("---\nsource: tui\n---\nMightling something else\n")
+    (ws / "tui" / "snapshots" / "inline.pending-snap").write_text("pending\n")
+
+    overlay = tmp_path / "overlay"
+    monkeypatch.setattr(runner_module, "TEST_SOURCE_DIR", str(export))
+    monkeypatch.setattr(runner_module, "SNAPSHOT_OVERLAY_DIR", str(overlay))
+    monkeypatch.setattr(
+        runner_module.CodexBrandedBuilder, "source_commit", classmethod(lambda cls: "deadbeef")
+    )
+    monkeypatch.setattr(
+        runner_module.subprocess,
+        "run",
+        lambda argv, **kw: subprocess.CompletedProcess(
+            argv, 0, "---\nsource: tui\n---\nOpenAI Codex\n", ""
+        ),
+    )
+    assert CodexTestRunner.accept_snapshots(before) == 1
+    assert (overlay / "tui" / "snapshots" / "ok.snap").read_text().endswith("Mightling\n")
+    assert not (overlay / "tui" / "snapshots" / "bad.snap").exists()
+
+    # Without refused or pending snapshots, accept_snapshots returns 0.
+    (ws / "tui" / "snapshots" / "inline.pending-snap").unlink()
+    before_clean = dict(before)
+    before_clean["tui/snapshots/bad.snap"] = CodexTestRunner.snapshot_hashes(str(ws))[
+        "tui/snapshots/bad.snap"
+    ]
+    assert CodexTestRunner.accept_snapshots(before_clean) == 0
+
+
+def test_lld_dir_test_targets_scoped_and_temp_dir_collision(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+
+    target = "aarch64-unknown-linux-gnu"
+    monkeypatch.setattr(
+        runner_module.CodexBrandedBuilder, "host_target", classmethod(lambda cls: target)
+    )
+    monkeypatch.setenv("RUSTUP_HOME", str(tmp_path / "missing-rustup"))
+    assert CodexTestRunner.lld_dir() is None
+
+    rustup = tmp_path / "rustup"
+    (rustup / "toolchains" / f"1.80.0-{target}").mkdir(parents=True)
+    monkeypatch.setenv("RUSTUP_HOME", str(rustup))
+    assert CodexTestRunner.lld_dir() is None
+
+    gcc_ld = (
+        rustup / "toolchains" / f"1.95.0-{target}" / "lib" / "rustlib" / target / "bin" / "gcc-ld"
+    )
+    gcc_ld.mkdir(parents=True)
+    (gcc_ld / "ld.lld").write_text("")
+    assert CodexTestRunner.lld_dir() == str(gcc_ld)
+    env = CodexTestRunner.environment({}, "/tools", 2, "/tmp/pct12345678901")
+    assert f"-B{gcc_ld}" in env["RUSTFLAGS"]
+
+    # test_targets parses cargo metadata and raises ValueError for unknown package.
+    meta = {
+        "packages": [
+            {
+                "name": "codex-core",
+                "targets": [
+                    {"name": "lib", "kind": ["lib"]},
+                    {"name": "suite", "kind": ["test"]},
+                ],
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        runner_module.subprocess,
+        "run",
+        lambda argv, **kw: subprocess.CompletedProcess(argv, 0, json.dumps(meta), ""),
+    )
+    assert CodexTestRunner.test_targets("/ws", "codex-core", {}) == ["suite"]
+    with pytest.raises(ValueError, match="no package missing"):
+        CodexTestRunner.test_targets("/ws", "missing", {})
+
+    # scoped() returns command unchanged when systemd-run is absent.
+    monkeypatch.setattr(runner_module.shutil, "which", lambda name: None)
+    assert CodexTestRunner.scoped(["cargo", "test"], "22G") == ["cargo", "test"]
+
+    # make_temp_dir retries on FileExistsError.
+    attempts = []
+    real_mkdir = os.mkdir
+
+    def flaky_mkdir(path, mode=0o777):
+        attempts.append(path)
+        if len(attempts) == 1:
+            raise FileExistsError(path)
+        return real_mkdir(path, mode)
+
+    monkeypatch.setattr(runner_module.os, "mkdir", flaky_mkdir)
+    created = CodexTestRunner.make_temp_dir()
+    try:
+        assert len(attempts) == 2
+    finally:
+        Path(created).rmdir()
+
+
+def test_run_guard_failures_and_build_abort(tmp_path, monkeypatch):
+    import fcntl
+    from collections import namedtuple
+
+    monkeypatch.setattr(runner_module, "BUILD_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(runner_module, "TEST_SOURCE_DIR", str(tmp_path / "src"))
+    monkeypatch.setattr(runner_module, "TEST_TARGET_DIR", str(tmp_path / "target"))
+    monkeypatch.setattr(runner_module, "TEST_HOME_DIR", str(tmp_path / "home"))
+
+    # 1. Rust missing.
+    monkeypatch.setattr(
+        runner_module.DesktopInstaller, "install_rust", classmethod(lambda cls: False)
+    )
+    assert CodexTestRunner.run() == 1
+    monkeypatch.setattr(
+        runner_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+    )
+
+    # 2. Disk space check handles OSError on lstat and returns False when free < needed.
+    (tmp_path / "target").mkdir(parents=True)
+    (tmp_path / "target" / "blob").write_bytes(b"x")
+    monkeypatch.setattr(
+        runner_module.os, "lstat", lambda path: (_ for _ in ()).throw(OSError("gone"))
+    )
+    Usage = namedtuple("Usage", ["total", "used", "free"])
+    monkeypatch.setattr(
+        runner_module.shutil, "disk_usage", lambda path: Usage(100, 99, 1 * 2**30)
+    )
+    assert CodexTestRunner.run() == 1
+
+    monkeypatch.setattr(
+        runner_module.shutil, "disk_usage", lambda path: Usage(100 * 2**30, 0, 100 * 2**30)
+    )
+
+    # 3. Lock contention returns 1.
+    monkeypatch.setattr(
+        fcntl,
+        "flock",
+        lambda fd, op: (_ for _ in ()).throw(BlockingIOError("locked")),
+    )
+    assert CodexTestRunner.run() == 1
+    monkeypatch.setattr(fcntl, "flock", lambda fd, op: None)
+
+    # 4. prepare_source failure returns 1.
+    monkeypatch.setattr(
+        CodexTestRunner, "stray_project_markers", classmethod(lambda cls: ["/tmp/.git"])
+    )
+    monkeypatch.setattr(
+        runner_module.CodexBrandedBuilder,
+        "prepare_source",
+        classmethod(lambda cls, d: False),
+    )
+    assert CodexTestRunner.run() == 1
+
+    # 5. apply_test_overlay failure returns 1.
+    (tmp_path / "src" / "codex-rs").mkdir(parents=True)
+    (tmp_path / "src" / "codex-rs" / "Cargo.toml").write_text(
+        '[workspace.package]\nversion = "0.158.0"\n'
+    )
+    monkeypatch.setattr(
+        runner_module.CodexBrandedBuilder,
+        "prepare_source",
+        classmethod(lambda cls, d: True),
+    )
+    monkeypatch.setattr(
+        CodexTestRunner, "apply_test_overlay", classmethod(lambda cls, d: False)
+    )
+    assert CodexTestRunner.run() == 1
+
+    # 6. Missing rusty_v8 or nextest returns 1.
+    monkeypatch.setattr(
+        CodexTestRunner, "apply_test_overlay", classmethod(lambda cls, d: True)
+    )
+    monkeypatch.setattr(
+        runner_module.CodexBrandedBuilder,
+        "fetch_rusty_v8",
+        classmethod(lambda cls, d: None),
+    )
+    monkeypatch.setattr(
+        CodexTestRunner, "ensure_nextest", classmethod(lambda cls: None)
+    )
+    assert CodexTestRunner.run() == 1
+
+    # 7. _run_commands stops immediately when `cargo build` fails, and run() reports new stray markers.
+    monkeypatch.setattr(
+        runner_module.CodexBrandedBuilder,
+        "fetch_rusty_v8",
+        classmethod(lambda cls, d: {"RUSTY_V8_ARCHIVE": "/v8.a"}),
+    )
+    monkeypatch.setattr(
+        CodexTestRunner, "ensure_nextest", classmethod(lambda cls: "/tools")
+    )
+    markers = [["/tmp/.git"], ["/tmp/.git", "/tmp/AGENTS.md"]]
+    monkeypatch.setattr(
+        CodexTestRunner, "stray_project_markers", classmethod(lambda cls: markers.pop(0))
+    )
+    monkeypatch.setattr(
+        CodexTestRunner,
+        "commands",
+        classmethod(lambda cls, *a: [["cargo", "build"], ["cargo", "nextest", "run"]]),
+    )
+    called = []
+    monkeypatch.setattr(
+        runner_module.subprocess,
+        "call",
+        lambda cmd, **kw: called.append(cmd) or 2,
+    )
+    monkeypatch.setattr(
+        CodexTestRunner, "accept_snapshots", classmethod(lambda cls, before: 0)
+    )
+    assert CodexTestRunner.run(accept_snapshots=True) == 2
+    assert len(called) == 1
+

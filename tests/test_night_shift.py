@@ -1269,3 +1269,284 @@ def test_a_task_from_another_machine_runs_in_the_job_sandbox_with_its_own_home(s
     assert variables["DREAMFERENCE_MIGHTLING_ADAPTER"] == ""                  # the base (adapters §10.4)
     assert variables["NO_PROXY"] == variables["no_proxy"] == "localhost,127.0.0.1,::1"
     assert run.last_message_path.parent == home
+
+
+def test_remote_hand_off_collect_and_bring_back_error_branches(two_nodes, monkeypatch):
+    from dreamference.night_shift import NightShiftRemote
+    from dreamference.node import NodeJobSender, NodePairing
+    from dreamference.runner.safe_git import SafeGit
+
+    assert NightShiftRemote.json_line("plain text\n") is None
+    assert NightShiftRemote.json_line("{broken json\n") is None
+
+    night_dir = two_nodes["night"]
+    repo = two_nodes["repo"]
+
+    # 1. Unpaired node in hand_off transitions task to failed.
+    t_unpaired = queue(night_dir, repo, task_id="20261001-0200-a01")
+    p_unpaired = night_dir / "tasks" / f"{t_unpaired['id']}.json"
+    p_unpaired.write_text(json.dumps(dict(json.loads(p_unpaired.read_text()), on="missing-node")))
+
+    # 2. Paired node push failure and 255 timeout keep task queued and append notes.
+    t_push = queue(night_dir, repo, task_id="20261001-0200-a02")
+    p_push = night_dir / "tasks" / f"{t_push['id']}.json"
+    p_push.write_text(json.dumps(dict(json.loads(p_push.read_text()), on="spark-2")))
+
+    record = {"node": "2222-bbbb", "name": "spark-2", "address": "192.168.50.106", "user": "owner"}
+    monkeypatch.setattr(
+        NodePairing,
+        "find",
+        classmethod(lambda cls, name, browse=True: dict(record) if name in ("spark-2", "2222-bbbb") else None),
+    )
+    monkeypatch.setattr(
+        NodeJobSender, "git_url", classmethod(lambda cls, rec, slug: str(night_dir / "missing.git"))
+    )
+    notes = []
+    sent = NightShiftRemote.hand_off(night_dir, NightShiftQueue.tasks(night_dir), notes)
+    assert sent == []
+    assert NightShiftQueue.read(night_dir, t_unpaired["id"])["status"] == "failed"
+    assert NightShiftQueue.read(night_dir, t_push["id"])["status"] == "queued"
+    assert any("could not reach spark-2" in note for note in notes)
+
+    # Restore valid git_url, make NodePairing.run return 255 on night-submit.
+    bare = night_dir / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    monkeypatch.setattr(NodeJobSender, "git_url", classmethod(lambda cls, rec, slug: str(bare)))
+    monkeypatch.setattr(
+        NodePairing,
+        "run",
+        classmethod(lambda cls, rec, req, **kw: subprocess.CompletedProcess([], 255, "", "")),
+    )
+    notes.clear()
+    assert NightShiftRemote.hand_off(night_dir, NightShiftQueue.tasks(night_dir), notes) == []
+    assert any("did not answer; the task stays queued" in note for note in notes)
+
+    # 3. collect() handles already-done task, unpaired node, silent node, and _bring_back fetch failure.
+    t_done = queue(night_dir, repo, task_id="20261001-0200-b01")
+    NightShiftQueue.transition(night_dir, t_done["id"], "done")
+
+    t_gone = queue(night_dir, repo, task_id="20261001-0200-b02")
+    NightShiftQueue.transition(
+        night_dir, t_gone["id"], "sent", sent_to={"node": "gone-id", "name": "gone-node"}
+    )
+
+    t_silent1 = queue(night_dir, repo, task_id="20261001-0200-b03")
+    NightShiftQueue.transition(
+        night_dir, t_silent1["id"], "sent", sent_to={"node": "2222-bbbb", "name": "spark-2"}
+    )
+    t_silent2 = queue(night_dir, repo, task_id="20261001-0200-b04")
+    NightShiftQueue.transition(
+        night_dir, t_silent2["id"], "sent", sent_to={"node": "2222-bbbb", "name": "spark-2"}
+    )
+
+    notes.clear()
+    NightShiftRemote.collect(
+        night_dir,
+        [t_done, t_gone, t_silent1, t_silent2],
+        far_end(),
+        notes,
+        wait=False,
+    )
+    assert any("gone-node is no longer paired" in note for note in notes)
+    assert sum("spark-2 did not answer about its tasks" in note for note in notes) == 1
+    assert SafeGit is not None
+
+
+def test_remote_bring_back_fetch_failure_and_accept_duplicates(two_nodes, monkeypatch):
+    from dreamference.night_shift import NightShiftRemote
+    from dreamference.night_shift import night_shift_remote as remote_module
+    from dreamference.node import NodeJob, NodeJobSender, NodePairing
+
+    night_dir = two_nodes["night"]
+    repo = two_nodes["repo"]
+    bare = night_dir / "remote2.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    monkeypatch.setattr(NodeJobSender, "git_url", classmethod(lambda cls, rec, slug: str(bare)))
+
+    t_fetch_fail = queue(night_dir, repo, task_id="20261001-0200-b05")
+    NightShiftQueue.transition(
+        night_dir,
+        t_fetch_fail["id"],
+        "sent",
+        sent_to={"node": "2222-bbbb", "name": "spark-2", "slug": "slug"},
+    )
+    monkeypatch.setattr(
+        NodePairing,
+        "run",
+        classmethod(
+            lambda cls, rec, req, **kw: subprocess.CompletedProcess(
+                [],
+                0,
+                json.dumps(
+                    {
+                        "status": "done",
+                        "result": {"branch": f"night/{t_fetch_fail['id']}"},
+                    }
+                )
+                + "\n",
+                "",
+            )
+        ),
+    )
+    NightShiftRemote.collect(night_dir, [t_fetch_fail], far_end(), [], wait=False)
+    after_fail = NightShiftQueue.read(night_dir, t_fetch_fail["id"])
+    assert after_fail["status"] == "sent"
+    assert "branch" not in after_fail["result"]
+    assert "could not be fetched" in after_fail["result"]["last_message"]
+
+    with pytest.raises(ValueError, match="JSON object"):
+        NightShiftRemote.accept(["not-a-dict"])  # type: ignore[arg-type]
+
+    task_id = "20261001-0300-c01"
+    slug = "calc-0123456789"
+    node_bare = NodeJob.repo_path(slug)
+    node_bare.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "--bare", str(node_bare)], check=True)
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "push",
+            "--quiet",
+            str(node_bare),
+            f"{head}:refs/night/{task_id}",
+        ],
+        check=True,
+    )
+    req = {"id": task_id, "repo": slug, "base": head, "task": "Fix bug"}
+    assert NightShiftRemote.accept(req)["status"] == "queued"
+    with pytest.raises(ValueError, match="already exists on this node"):
+        NightShiftRemote.accept(req)
+
+    race_id = "20261001-0300-c02"
+    monkeypatch.setattr(
+        remote_module.os,
+        "link",
+        lambda src, dst: (_ for _ in ()).throw(FileExistsError(dst)),
+    )
+    with pytest.raises(ValueError, match=f"a task {race_id} already exists"):
+        NightShiftRemote.accept(dict(req, id=race_id))
+
+    NightShiftQueue.transition(NightShiftQueue.night_dir(), task_id, "running")
+    assert NightShiftRemote.cancel(task_id) == "cancel-requested"
+    assert (
+        NightShiftQueue.read(NightShiftQueue.night_dir(), task_id)["status"]
+        == "cancel-requested"
+    )
+
+
+def test_remote_start_runner_and_prune(two_nodes, monkeypatch):
+    from datetime import datetime, timedelta
+
+    from dreamference.night_shift import NightShiftRemote, NightShiftScheduler
+    from dreamference.night_shift import night_shift_remote as remote_module
+    from dreamference.night_shift.night_shift_scheduler import UNIT
+    from dreamference.node import NodeJob
+
+    unit_dir = NightShiftScheduler.unit_dir()
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    (unit_dir / f"{UNIT}.timer").write_text("[Timer]\n")
+    monkeypatch.setattr(NightShiftQueue, "runner_active", classmethod(lambda cls: True))
+    monkeypatch.setattr(NightShiftQueue, "runner_holder", classmethod(lambda cls: "pid 99"))
+    assert "pid 99 is in progress" in NightShiftRemote.start_runner()
+
+    monkeypatch.setattr(NightShiftQueue, "runner_active", classmethod(lambda cls: False))
+    monkeypatch.setattr(
+        NightShiftSettings,
+        "parse_window",
+        classmethod(lambda cls, w: (_ for _ in ()).throw(ValueError("bad"))),
+    )
+    assert "window could not be read" in NightShiftRemote.start_runner()
+
+    now_h = datetime.now().time().hour
+    closed_start = (now_h + 2) % 24
+    closed_end = (now_h + 3) % 24
+    monkeypatch.setattr(
+        NightShiftSettings,
+        "parse_window",
+        classmethod(
+            lambda cls, w: (
+                datetime.strptime(f"{closed_start:02d}:00", "%H:%M").time(),
+                datetime.strptime(f"{closed_end:02d}:00", "%H:%M").time(),
+            )
+        ),
+    )
+    assert "outside this node's window" in NightShiftRemote.start_runner()
+
+    open_start = (now_h - 1) % 24
+    open_end = (now_h + 2) % 24
+    monkeypatch.setattr(
+        NightShiftSettings,
+        "parse_window",
+        classmethod(
+            lambda cls, w: (
+                datetime.strptime(f"{open_start:02d}:00", "%H:%M").time(),
+                datetime.strptime(f"{open_end:02d}:00", "%H:%M").time(),
+            )
+        ),
+    )
+    real_run = remote_module.subprocess.run
+    monkeypatch.setattr(
+        remote_module.subprocess,
+        "run",
+        lambda argv, **kw: (
+            subprocess.CompletedProcess(argv, 1, "", "bus down")
+            if argv[0] == "systemctl"
+            else real_run(argv, **kw)
+        ),
+    )
+    assert "could not start this node's night run (bus down)" in NightShiftRemote.start_runner()
+
+    monkeypatch.setattr(
+        remote_module.subprocess,
+        "run",
+        lambda argv, **kw: (
+            subprocess.CompletedProcess(argv, 0, "", "")
+            if argv[0] == "systemctl"
+            else real_run(argv, **kw)
+        ),
+    )
+    assert NightShiftRemote.start_runner() == "this node's night run was started for it"
+
+    nd = NightShiftQueue.night_dir()
+    task_id = "20261001-0300-c09"
+    (nd / "tasks").mkdir(parents=True, exist_ok=True)
+    (nd / "tasks" / f"{task_id}.json").write_text(
+        json.dumps(
+            {
+                "id": task_id,
+                "repo": str(two_nodes["repo"]),
+                "branch": f"night/{task_id}",
+                "status": "done",
+                "remote": {"sender": "x"},
+                "fetched": NightShiftQueue.now(),
+                "history": [{"at": NightShiftQueue.now()}],
+            }
+        )
+    )
+    (nd / "logs").mkdir(parents=True, exist_ok=True)
+    (nd / "logs" / f"{task_id}.log").write_text("log\n")
+    NodeJob.job_dir(task_id).mkdir(parents=True, exist_ok=True)
+
+    bad_id = "20261001-0300-c03"
+    (nd / "tasks" / f"{bad_id}.json").write_text(
+        json.dumps(
+            {
+                "id": bad_id,
+                "status": "done",
+                "remote": {"sender": "x"},
+                "fetched": "not-an-iso-date",
+                "history": [{"at": "not-an-iso-date"}],
+            }
+        )
+    )
+
+    now = datetime.now().astimezone()
+    assert NightShiftRemote.prune(now) == []
+    assert NightShiftRemote.prune(now + timedelta(days=2)) == [task_id]
+    assert NightShiftQueue.read(nd, task_id) is None
+    assert not (nd / "logs" / f"{task_id}.log").exists()
+    assert not NodeJob.job_dir(task_id).exists()
+

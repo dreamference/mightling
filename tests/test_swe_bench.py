@@ -4284,6 +4284,76 @@ def test_the_gate_process_blocks_with_exit_2_waits_for_its_conditions_and_never_
     assert gate("stop", "not json").returncode == 0
 
 
+def test_issue_gate_parsing_edge_cases_and_in_process_main(tmp_path, monkeypatch, capsys):
+    import io
+
+    assert SweBenchIssueGate.text_of({"a": ["x", ("y", 42)], "b": None}) == "x\ny\n42\n"
+    assert SweBenchIssueGate.segments('echo "a\\"b;c" && ls') == ['echo "a\\"b;c" ', " ls"]
+    assert SweBenchIssueGate.words("echo 'unclosed quote") == ["echo", "'unclosed", "quote"]
+    assert not SweBenchIssueGate.code_matches(
+        "x = 1", {"kind": "python", "key_lines": ["other()"], "calls": []}
+    )
+
+    repo, conditions = gate_world(tmp_path)
+    assert SweBenchIssueGate.edit_of("Bash", "patch -p1 < /tmp/a.diff", str(repo), str(repo)) == {
+        "kind": "patch",
+        "paths": [],
+    }
+    monkeypatch.setattr(SweBenchIssueGate, "words", classmethod(lambda cls, seg: []))
+    assert SweBenchIssueGate.edit_of("Bash", "sed -i 's/1/2/' widget.py", str(repo), str(repo)) is None
+    monkeypatch.undo()
+
+    directory = tmp_path / "inproc"
+    directory.mkdir()
+    edit_payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "sed -i 's/1/2/' widget.py"},
+        "cwd": str(repo),
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(edit_payload)))
+    assert SweBenchIssueGate.main(["pre-tool-use", str(directory)]) == 0
+
+    (directory / "conditions.json").write_text(json.dumps(conditions))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(edit_payload)))
+    assert SweBenchIssueGate.main(["pre-tool-use", str(directory)]) == 2
+    assert "Not yet: read what the issue names" in capsys.readouterr().err
+
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "cat widget.py"},
+                    "tool_response": "def frob():",
+                }
+            )
+        ),
+    )
+    assert SweBenchIssueGate.main(["post-tool-use", str(directory)]) == 0
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+    assert SweBenchIssueGate.main(["stop", str(directory)]) == 0
+
+    # Fault in handler is caught and recorded in state["errors"] without blocking.
+    (directory / "conditions.json").write_text(
+        json.dumps(dict(conditions, targets=[{"id": "x", "kind": "invalid"}]))
+    )
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}})),
+    )
+    assert SweBenchIssueGate.main(["pre-tool-use", str(directory)]) == 0
+
+    # Malformed stdin or missing argv returns 0 without raising.
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{not-json"))
+    assert SweBenchIssueGate.main(["stop", str(directory)]) == 0
+    assert SweBenchIssueGate.main([]) == 0
+
+
+
 def test_hooks_are_off_unless_asked_and_the_report_says_so(bench):
     assert run(bench, instances=["acme__widget-1"]) == 0
     store = SweBenchRunStore("r1")

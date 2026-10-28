@@ -2484,3 +2484,209 @@ def test_a_lane_and_a_job_follow_the_node_to_its_new_address(monkeypatch):
     assert NodeJobSender.git_url(record, "repo-abc").startswith("ssh://owner@192.168.50.200:22/")
     with pytest.raises(LookupError):
         NodeJobSender.git_url(NodePairing.find("spark-5", browse=False), "repo-abc")
+
+
+def test_job_sender_run_handles_dirty_tree_unreachable_node_push_failure_drop_and_success(
+    tmp_path, monkeypatch, capsys
+):
+    from dreamference.config import DreamferenceConfig
+    from dreamference.node import NodeJobSender, NodePairing
+    from dreamference.runner.safe_git import SafeGit
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@x"], check=True)
+    (repo / "a.txt").write_text("1\n")
+    subprocess.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True)
+    (repo / "dirty.txt").write_text("untracked\n")
+
+    # compose falls back to airgapped="on" when DreamferenceConfig fails.
+    monkeypatch.setattr(
+        DreamferenceConfig,
+        "__init__",
+        lambda self, *a, **kw: (_ for _ in ()).throw(RuntimeError("bad config")),
+    )
+    head = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert NodeJobSender.compose(str(repo), head, ["true"], None, None, None)["airgapped"] == "on"
+
+    record = paired_record()
+    monkeypatch.setattr(
+        NodePairing, "find", classmethod(lambda cls, name, browse=True: dict(record))
+    )
+
+    # 1. git_url LookupError returns 1.
+    monkeypatch.setattr(
+        NodeJobSender,
+        "git_url",
+        classmethod(lambda cls, rec, slug: (_ for _ in ()).throw(LookupError("not on LAN"))),
+    )
+    assert NodeJobSender.run("spark-2", ["true"], cwd=str(repo)) == 1
+    out = capsys.readouterr().out
+    assert "Uncommitted changes are not sent" in out and "not on LAN" in out
+
+    # 2. git push failure returns 1.
+    bare = tmp_path / "remote.git"
+    monkeypatch.setattr(NodeJobSender, "git_url", classmethod(lambda cls, rec, slug: str(bare)))
+    monkeypatch.setattr(
+        NodeJobSender, "git_environment", classmethod(lambda cls, rec: dict(os.environ))
+    )
+    assert NodeJobSender.run("spark-2", ["true"], cwd=str(repo)) == 1
+    assert "Could not push to the node" in capsys.readouterr().out
+
+    # 3. Connection drop (exit 255) during job-submit returns 255 without fetching.
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    monkeypatch.setattr(
+        NodePairing,
+        "run",
+        classmethod(
+            lambda cls, rec, req, capture=True, input_text=None: subprocess.CompletedProcess(
+                [], 255, "", ""
+            )
+        ),
+    )
+    assert NodeJobSender.run("spark-2", ["true"], cwd=str(repo)) == 255
+    assert "connection to spark-2 ended" in capsys.readouterr().out
+
+    # 4. Successful job-submit with --out fetches branch, fetches out files, and marks job-fetched.
+    calls = []
+    monkeypatch.setattr(
+        NodePairing,
+        "run",
+        classmethod(
+            lambda cls, rec, req, capture=True, input_text=None: (
+                calls.append(req) or subprocess.CompletedProcess([], 0, "", "")
+            )
+        ),
+    )
+    monkeypatch.setattr(NodeJobSender, "_fetch_branch", classmethod(lambda cls, jid, **kw: True))
+    monkeypatch.setattr(NodeJobSender, "_fetch_out", classmethod(lambda cls, jid, **kw: True))
+    assert NodeJobSender.run("spark-2", ["true"], cwd=str(repo), out="ckpt") == 0
+    assert any(req.startswith("job-submit ") for req in calls)
+    assert any(req.startswith("job-fetched ") for req in calls)
+    assert SafeGit is not None
+
+
+def test_job_sender_jobs_logs_cancel_and_fetch_branches(tmp_path, monkeypatch, capsys):
+    from dreamference.node import NodeJobSender, NodePairing
+
+    # jobs() with no paired nodes and with an unknown node name.
+    assert NodeJobSender.jobs() == 0
+    assert "No node is paired" in capsys.readouterr().out
+    assert NodeJobSender.jobs("unknown-node") == 1
+    assert "not a paired node" in capsys.readouterr().out
+
+    record_a = paired_record()
+    record_b = {
+        "node": "3333-cccc",
+        "name": "spark-3",
+        "address": "192.168.50.107",
+        "user": "owner",
+        "ssh_port": 22,
+    }
+    NodePairing._save(record_b)
+
+    answers = [
+        subprocess.CompletedProcess([], 255, "", "ssh timeout"),
+        subprocess.CompletedProcess([], 0, "", ""),
+        subprocess.CompletedProcess(
+            [],
+            0,
+            json.dumps(
+                {
+                    "id": "20261002-1200-abc",
+                    "status": "done",
+                    "command": ["pytest", "-q"],
+                    "branch": "job/20261002-1200-abc",
+                    "out_files": 2,
+                    "prune_after": "2026-10-03T12:00:00+00:00",
+                }
+            )
+            + "\n",
+            "",
+        ),
+    ]
+    monkeypatch.setattr(
+        NodePairing,
+        "run",
+        classmethod(lambda cls, rec, req, capture=True, input_text=None: answers.pop(0)),
+    )
+    assert NodeJobSender.jobs() == 0
+    assert NodeJobSender.jobs("spark-2") == 0
+    out = capsys.readouterr().out
+    assert "not answering (ssh timeout)" in out
+    assert "no jobs" in out
+    assert (
+        "branch job/20261002-1200-abc  2 --out file(s)  (pruned after 2026-10-03 12:00)" in out
+    )
+
+    # cancel(), logs(), fetch(), _fetch_branch() and _fetch_out() edge cases.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@x"], check=True)
+    (repo / "f.txt").write_text("v1\n")
+    subprocess.run(["git", "-C", str(repo), "add", "f.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "v1"], check=True)
+
+    job_id = "20261002-1200-abc"
+    NodeJobSender._remember(job_id, record_a, str(repo), "repo-slug")
+    sent_reqs = []
+    monkeypatch.setattr(
+        NodePairing,
+        "run",
+        classmethod(
+            lambda cls, rec, req, capture=True, input_text=None: (
+                sent_reqs.append(req) or subprocess.CompletedProcess([], 0, "", "")
+            )
+        ),
+    )
+    assert NodeJobSender.cancel(job_id) == 0
+    assert NodeJobSender.logs(job_id) == 0
+    assert sent_reqs == [f"job-cancel {job_id}", f"job-logs {job_id}"]
+
+    # _fetch_branch and _fetch_out when node cannot be resolved on network.
+    monkeypatch.setattr(
+        NodeJobSender,
+        "git_url",
+        classmethod(lambda cls, rec, slug: (_ for _ in ()).throw(LookupError("offline"))),
+    )
+    monkeypatch.setattr(
+        NodePairing,
+        "ssh_command",
+        classmethod(lambda cls, rec, req: (_ for _ in ()).throw(LookupError("offline"))),
+    )
+    assert NodeJobSender.fetch(job_id) == 1
+    assert "offline" in capsys.readouterr().out
+
+    # _fetch_branch when remote has no branch yet, and _fetch_out when stream is empty.
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    monkeypatch.setattr(NodeJobSender, "git_url", classmethod(lambda cls, rec, slug: str(bare)))
+    monkeypatch.setattr(
+        NodeJobSender, "git_environment", classmethod(lambda cls, rec: dict(os.environ))
+    )
+    monkeypatch.setattr(
+        NodePairing, "ssh_command", classmethod(lambda cls, rec, req: ["true"])
+    )
+    assert NodeJobSender.fetch(job_id) == 1
+    assert "No result branch" in capsys.readouterr().out
+    assert not NodeJobSender._fetch_out(job_id, quiet_when_absent=False)
+    assert "No --out files" in capsys.readouterr().out
+
+    # _fetch_branch when remote has the branch -> fetch() returns 0 and sends job-fetched.
+    subprocess.run(
+        ["git", "-C", str(repo), "push", "--quiet", str(bare), f"HEAD:refs/heads/job/{job_id}"],
+        check=True,
+    )
+    assert NodeJobSender.fetch(job_id) == 0
+    assert f"job-fetched {job_id}" in sent_reqs
+

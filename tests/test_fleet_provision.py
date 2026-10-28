@@ -753,3 +753,156 @@ def test_a_model_copy_that_loses_its_connection_resumes_and_a_real_failure_does_
     assert session.rsync(tmp_path, "~/x", attempts=5).returncode == 23 and len(calls) == 1
     session, calls = _session_with(tmp_path, [255] * 3, sleeps)
     assert session.rsync(tmp_path, "~/x", attempts=3).returncode == 255 and len(calls) == 3
+
+
+# -- the release and checkout bundle (FleetBundle) ---------------------------------------------------
+
+
+def test_bundle_target_and_expected_version_across_install_modes(tmp_path, monkeypatch):
+    from dreamference.node import fleet_bundle as bundle_module
+    from dreamference.node.fleet_bundle import FleetBundle
+    from dreamference.runner import codex_branded_builder as builder_module
+
+    monkeypatch.setattr(bundle_module.platform, "machine", lambda: "arm64")
+    assert FleetBundle.target() == "aarch64-unknown-linux-gnu"
+    monkeypatch.setattr(bundle_module.platform, "machine", lambda: "amd64")
+    assert FleetBundle.target() == "x86_64-unknown-linux-gnu"
+
+    install_dir = tmp_path / "install"
+    (install_dir / "bin").mkdir(parents=True)
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(install_dir))
+    monkeypatch.setattr(
+        builder_module.CodexBrandedBuilder, "has_source", classmethod(lambda cls: True)
+    )
+    assert FleetBundle.expected_version("this") is None
+
+    (install_dir / "bin" / "ling").write_bytes(b"ling-bin")
+    expected = FleetBundle.expected_version("this")
+    assert expected is not None and expected.startswith("this-") and len(expected) == 17
+
+    monkeypatch.setattr(
+        builder_module.CodexBrandedBuilder, "has_source", classmethod(lambda cls: False)
+    )
+    release_ver = FleetBundle.expected_version("this")
+    assert release_ver is not None and release_ver.startswith("v")
+    assert FleetBundle.expected_version("release=v1.7.2") == "v1.7.2"
+    assert FleetBundle.expected_version("release") is None
+    assert FleetBundle.version(tmp_path / "nonexistent") == "bundle"
+
+
+def test_bundle_from_this_packs_binaries_builds_wheel_and_reuses_cache(
+    tmp_path, monkeypatch, capsys
+):
+    from dreamference.node import fleet_bundle as bundle_module
+    from dreamference.node.fleet_bundle import FleetBundle
+    from dreamference.runner import codex_branded_builder as builder_module
+
+    install_dir = tmp_path / "install"
+    bin_dir = install_dir / "bin"
+    bin_dir.mkdir(parents=True)
+    bundle_root = tmp_path / "bundles"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "install.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(install_dir))
+    monkeypatch.setattr(builder_module, "REPO_ROOT", str(repo_root))
+    monkeypatch.setattr(bundle_module, "BUNDLE_ROOT", str(bundle_root))
+    monkeypatch.setattr(
+        builder_module.CodexBrandedBuilder, "has_source", classmethod(lambda cls: True)
+    )
+
+    assert FleetBundle.build("bogus") is None
+    assert "--from is `this` or `release[=X.Y.Z]`" in capsys.readouterr().out
+
+    assert FleetBundle.build("this") is None
+    assert "ling, codex-code-mode-host not installed" in capsys.readouterr().out
+
+    (bin_dir / "ling").write_bytes(b"ling-binary")
+    (bin_dir / "codex-code-mode-host").write_bytes(b"host-binary")
+    (bin_dir / "ling-search").write_bytes(b"search-binary")
+
+    monkeypatch.setattr(
+        bundle_module.SafeGit,
+        "run",
+        classmethod(lambda cls, *a, **k: subprocess.CompletedProcess([], 0, "abc123\n", "")),
+    )
+    wheel_calls = []
+
+    def fail_wheel(argv, **kwargs):
+        wheel_calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1, "", "pip failed")
+
+    monkeypatch.setattr(bundle_module.subprocess, "run", fail_wheel)
+    assert FleetBundle.from_this() is None
+    assert "Could not build a wheel" in capsys.readouterr().out
+
+    def make_wheel(argv, **kwargs):
+        wheel_calls.append(argv)
+        staging = Path(argv[argv.index("-w") + 1])
+        (staging / "dreamference-1.7.2-py3-none-any.whl").write_bytes(b"wheel")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(bundle_module.subprocess, "run", make_wheel)
+    monkeypatch.setattr(
+        bundle_module.SafeGit,
+        "run",
+        classmethod(lambda cls, *a, **k: (_ for _ in ()).throw(OSError("no git"))),
+    )
+    built = FleetBundle.build("this")
+    assert built is not None and built.is_dir()
+    assert len(wheel_calls) == 2
+    assert FleetBundle.version(built).startswith("this-")
+    target = FleetBundle.target()
+    with gzip.open(built / f"ling-{target}.gz", "rb") as handle:
+        assert handle.read() == b"ling-binary"
+    sums = (built / f"ling-{target}.sha256sums").read_text(encoding="utf-8")
+    assert f"ling-{target}.gz" in sums and f"ling-search-{target}.gz" in sums
+    (built / "subdir").mkdir()
+    assert all(path.is_file() for path in FleetBundle.files(built))
+
+    # Second call hits the cached bundle without invoking pip wheel again.
+    assert FleetBundle.from_this() == built
+    assert len(wheel_calls) == 2
+
+
+def test_bundle_from_release_downloads_with_gh_and_caches_tagged_release(
+    tmp_path, monkeypatch, capsys
+):
+    from dreamference.node import fleet_bundle as bundle_module
+    from dreamference.node.fleet_bundle import FleetBundle
+    from dreamference.runner import codex_branded_builder as builder_module
+
+    monkeypatch.setattr(bundle_module, "BUNDLE_ROOT", str(tmp_path / "bundles"))
+    monkeypatch.setattr(
+        builder_module.CodexBrandedBuilder, "has_source", classmethod(lambda cls: False)
+    )
+    monkeypatch.setattr(bundle_module.shutil, "which", lambda name: None)
+    assert FleetBundle.build("this") is None
+    assert "not installed here" in capsys.readouterr().out
+
+    monkeypatch.setattr(bundle_module.shutil, "which", lambda name: "/usr/bin/gh")
+    gh_calls = []
+
+    def fake_gh(argv, **kwargs):
+        gh_calls.append(argv)
+        if len(gh_calls) == 1:
+            return subprocess.CompletedProcess(argv, 1, "", "release not found")
+        dest = Path(argv[argv.index("-D") + 1])
+        (dest / f"ling-{FleetBundle.target()}.sha256sums").write_text("ok\n", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(bundle_module.subprocess, "run", fake_gh)
+    assert FleetBundle.build("release=1.7.0") is None
+    assert "Could not download the release" in capsys.readouterr().out
+
+    tagged = FleetBundle.build("release=1.7.0")
+    assert tagged is not None and FleetBundle.version(tagged) == "v1.7.0"
+    assert len(gh_calls) == 2
+    assert FleetBundle.build("release=v1.7.0") == tagged
+    assert len(gh_calls) == 2
+
+    latest = FleetBundle.build("release")
+    assert latest is not None and FleetBundle.version(latest) == "latest"
+    assert len(gh_calls) == 3
+
