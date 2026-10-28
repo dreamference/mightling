@@ -302,6 +302,8 @@ describe("the sync host", () => {
     unpaired.host.start();
     const nohub = await rig("nohub", { status: false });
     nohub.host.start();
+    // Slow runners start the stand-in server late: wait for the handshake rather than a fixed time.
+    await until(() => methods(unpaired).length >= 2 && methods(nohub).length >= 2, 20_000);
     await pause(400);
     expect(unpaired.hub.posts).toHaveLength(0);
     expect(nohub.hub.posts).toHaveLength(0);
