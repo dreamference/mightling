@@ -406,6 +406,28 @@ jobs:
             Write-Host "the variable: exit $code, $out"
             if ($code -eq 0) { $failures += "the variable: exit 0" }
             if ($out -notmatch [regex]::Escape($expected)) { $failures += "the variable: no refusal message" }
+            # Each refusal names what turned the mode on and how to turn it off (compat.rs,
+            # how_to_turn_off), the desktop app's own server too, whose window shows its last lines.
+            # Out-String wraps at the console's width, so the checks read the text with its whitespace collapsed.
+            if (($out -replace '\s+', ' ') -notmatch [regex]::Escape("Remove-Item Env:DREAMFERENCE_MIGHTLING_COMPAT")) { $failures += "the variable: the refusal does not say how to remove it" }
+            $env:DREAMFERENCE_MIGHTLING_COMPAT = "claude"
+            $out = $null | & $ling app-server 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Remove-Item Env:DREAMFERENCE_MIGHTLING_COMPAT
+            Write-Host "the app's server: exit $code, $out"
+            if ($code -eq 0 -or ($out -replace '\s+', ' ') -notmatch [regex]::Escape("Remove-Item Env:DREAMFERENCE_MIGHTLING_COMPAT")) { $failures += "the app's server: no refusal saying how to remove the variable" }
+            $out = $null | & $ling --compat claude exec --skip-git-repo-check "What is the magic word?" 2>&1 | Out-String
+            if (($out -replace '\s+', ' ') -notmatch [regex]::Escape("on this command line: leave that out")) { $failures += "the flag: the refusal does not name it" }
+            $compatHome = Join-Path $env:RUNNER_TEMP "compat-home"
+            New-Item -ItemType Directory -Force (Join-Path $compatHome ".config\dreamference") | Out-Null
+            Set-Content -Path (Join-Path $compatHome ".config\dreamference\config.toml") -Value 'mightling_compat = "claude"'
+            $ownHome = $env:HOME
+            $env:HOME = $compatHome
+            $out = $null | & $ling exec --skip-git-repo-check "What is the magic word?" 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            $env:HOME = $ownHome
+            Write-Host "the user's file: exit $code, $out"
+            if ($code -eq 0 -or ($out -replace '\s+', ' ') -notmatch [regex]::Escape("ling compat use off")) { $failures += "the user's file: no refusal naming ling compat use off" }
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }

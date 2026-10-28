@@ -330,7 +330,11 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         })
     {
         // Refused before any child or model server where the mode's rules cannot be enforced.
-        if let Err(err) = compat::refuse_where_unenforced(compat::Mode::Claude, cfg!(windows)) {
+        let refused = match compat::resolve() {
+            Ok(resolved) => compat::refuse_with_cause(&resolved, compat::flag_value(&with_compat).is_some(), cfg!(windows)),
+            Err(_) => compat::refuse_where_unenforced(compat::Mode::Claude, cfg!(windows)),
+        };
+        if let Err(err) = refused {
             eprintln!("{err}");
             std::process::exit(1);
         }

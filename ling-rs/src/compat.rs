@@ -271,16 +271,47 @@ pub fn refuse_where_unenforced(mode: Mode, windows: bool) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// What turned the mode on and how to turn it off, for a refusal: the flag on this command line,
+/// the variable (set by hand, by a script or in Windows' environment variables), or the user's file.
+/// `flag_given`: this command line carries `--compat` (which `main()` has already turned into the
+/// variable). Empty when nothing turned it on.
+pub fn how_to_turn_off(resolved: &Resolved, flag_given: bool) -> String {
+    match &resolved.source {
+        Source::Variable if flag_given => format!("It was asked for with `{FLAG} claude` on this command line: leave that out."),
+        Source::Variable => format!(
+            "It is on through the {ENV} environment variable: remove it (PowerShell: `Remove-Item Env:{ENV}`), and from Windows' environment variables if it is set there."
+        ),
+        Source::UserFile(path) => {
+            format!("It is on through `{KEY} = \"claude\"` in {}: `ling compat use off` turns it off.", path.display())
+        }
+        Source::Default => String::new(),
+    }
+}
+
+/// [`refuse_where_unenforced`] for a resolved setting, the refusal naming what turned the mode on
+/// and how to turn it off ([`how_to_turn_off`]).
+pub fn refuse_with_cause(resolved: &Resolved, flag_given: bool, windows: bool) -> anyhow::Result<()> {
+    if let Err(err) = refuse_where_unenforced(resolved.mode, windows) {
+        let how = how_to_turn_off(resolved, flag_given);
+        if how.is_empty() {
+            return Err(err);
+        }
+        anyhow::bail!("{err}. {how}");
+    }
+    Ok(())
+}
+
 /// Refuses a session whose setting names no mode, with the words the user typed, and the mode
-/// where it cannot be enforced ([`refuse_where_unenforced`]). Returns the setting otherwise.
+/// where it cannot be enforced ([`refuse_with_cause`]). Returns the setting otherwise.
 pub fn check_at_start(original_args: &[OsString]) -> anyhow::Result<Resolved> {
-    if let Some(value) = flag_value(original_args)
-        && Mode::parse(&value).is_none()
+    let flag = flag_value(original_args);
+    if let Some(value) = &flag
+        && Mode::parse(value).is_none()
     {
         anyhow::bail!("{}", unknown_value(&format!("`{FLAG} {value}`")));
     }
     let resolved = resolve().map_err(|err| anyhow::anyhow!(err))?;
-    refuse_where_unenforced(resolved.mode, cfg!(windows))?;
+    refuse_with_cause(&resolved, flag.is_some(), cfg!(windows))?;
     Ok(resolved)
 }
 
@@ -558,6 +589,27 @@ mod tests {
         assert!(refuse_where_unenforced(Mode::Claude, false).is_ok());
         assert!(refuse_where_unenforced(Mode::Off, true).is_ok());
         assert!(refuse_where_unenforced(Mode::Off, false).is_ok());
+    }
+
+    #[test]
+    fn the_refusal_names_what_turned_the_mode_on_and_how_to_turn_it_off() {
+        let user = Path::new("/h/.config/dreamference/config.toml");
+        let on = format!("{KEY} = \"claude\"\n");
+        let from_file = resolve_from(None, Some((user, &on)), &[]).unwrap();
+        let refused = refuse_with_cause(&from_file, false, true).unwrap_err().to_string();
+        assert!(refused.starts_with(UNAVAILABLE_ON_WINDOWS), "{refused}");
+        assert!(refused.contains(&format!("in {}", user.display())), "{refused}");
+        assert!(refused.contains("`ling compat use off`"), "{refused}");
+        let from_variable = resolve_from(Some("claude"), Some((user, &on)), &[]).unwrap();
+        let refused = refuse_with_cause(&from_variable, false, true).unwrap_err().to_string();
+        assert!(refused.contains(&format!("`Remove-Item Env:{ENV}`")), "{refused}");
+        assert!(!refused.contains("compat use off"), "{refused}");
+        let refused = refuse_with_cause(&from_variable, true, true).unwrap_err().to_string();
+        assert!(refused.contains("`--compat claude` on this command line: leave that out"), "{refused}");
+        // Off, or anywhere but Windows: no refusal at all.
+        assert!(refuse_with_cause(&from_file, false, false).is_ok());
+        let off = resolve_from(Some("off"), Some((user, &on)), &[]).unwrap();
+        assert!(refuse_with_cause(&off, true, true).is_ok());
     }
 
     fn os(args: &[&str]) -> Vec<OsString> {
