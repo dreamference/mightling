@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::exec::{
     NumStat, RunSpec, Runner, check_relative, git, linked_worktree, parse_numstat, repo_root,
-    status_entries, tail_of, under_submodule, venv_tool,
+    sandbox_check, sandbox_env, sandboxed, status_entries, tail_of, under_submodule, venv_tool,
 };
 
 /// The closed list of test runners.
@@ -161,15 +161,18 @@ fn summary_line(output: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Runs one test with a timeout and returns a bounded tail.
-pub fn run_test(req: &RunTestRequest, runner: &dyn Runner) -> Result<RunTestResult, String> {
-    let (argv, dir, _worktree) = test_command(req)?;
+/// Runs one test with a timeout and returns a bounded tail. The test runs inside `ling sandbox`
+/// (`ling_bin`): a worktree's tests, `conftest.py` and build scripts are code the model may have
+/// written. `Err` when the sandbox does not start; the test then never runs.
+pub fn run_test(req: &RunTestRequest, runner: &dyn Runner, ling_bin: &str) -> Result<RunTestResult, String> {
+    let (argv, dir, worktree) = test_command(req)?;
     let timeout = req.timeout_s.unwrap_or(DEFAULT_TEST_TIMEOUT_S).clamp(1, MAX_TEST_TIMEOUT_S);
     let lines = req.lines.unwrap_or(DEFAULT_TAIL_LINES).clamp(1, MAX_TAIL_LINES);
+    sandbox_check(runner, ling_bin, &worktree)?;
     let spec = RunSpec {
-        argv,
-        cwd: dir,
-        env: vec![("CI".into(), "1".into())],
+        argv: sandboxed(ling_bin, &worktree, &dir, &argv),
+        cwd: worktree,
+        env: sandbox_env(),
         timeout_s: timeout,
         batch: true,
     };
@@ -422,26 +425,83 @@ pub(crate) mod tests {
         }
     }
 
+    /// The command inside a sandboxed argv and the folder it starts in; `None` when the argv is
+    /// not `ling sandbox -P :workspace --sandbox-state-disable-network -C <wt> -- sh -c … <dir> …`.
+    pub(crate) fn unwrap_sandbox(argv: &[String]) -> Option<(Vec<String>, String)> {
+        let head: Vec<&str> = argv.iter().take(8).map(String::as_str).collect();
+        if head.len() < 8 || head[1..6] != ["sandbox", "-P", ":workspace", "--sandbox-state-disable-network", "-C"] || head[7] != "--" {
+            return None;
+        }
+        let rest = &argv[8..];
+        if rest.len() < 6 || rest[0] != "sh" || rest[1] != "-c" || rest[3] != "sh" {
+            return None;
+        }
+        Some((rest[5..].to_vec(), rest[4].clone()))
+    }
+
     #[test]
-    fn run_test_builds_one_fixed_command_per_runner_in_the_batch_slice() {
+    fn run_test_builds_one_fixed_command_per_runner_in_the_sandbox_and_the_batch_slice() {
         let dir = scratch_worktree("rt");
-        let s = Script::new(vec![("pytest", 0, "x\n1 passed in 0.1s\n".into()), ("cargo", 101, "test result: FAILED. 0 passed; 1 failed\n".into())]);
-        let ok = run_test(&req(&dir, "pytest", "tests/test_a.py::test_b[x-1]"), &s).unwrap();
+        let s = Script::new(vec![
+            ("-- true", 0, String::new()),
+            ("pytest", 0, "x\n1 passed in 0.1s\n".into()),
+            ("cargo", 101, "test result: FAILED. 0 passed; 1 failed\n".into()),
+        ]);
+        let ok = run_test(&req(&dir, "pytest", "tests/test_a.py::test_b[x-1]"), &s, "ling").unwrap();
         assert!(ok.passed);
         assert_eq!(ok.summary, "1 passed in 0.1s");
-        let (argv, _, batch) = s.seen.borrow()[0].clone();
+        let seen = s.seen.borrow().clone();
+        // First the sandbox is checked, then the test runs inside it, never bare on the host.
+        assert_eq!(seen[0].0.last().map(String::as_str), Some("true"));
+        let (argv, cwd, batch) = seen[1].clone();
         assert!(batch);
-        assert_eq!(&argv[1..5], ["-m", "pytest", "tests/test_a.py::test_b[x-1]", "-q"]);
+        assert_eq!(argv[0], "ling");
+        assert_eq!(cwd, dir.canonicalize().unwrap());
+        let (inner, start) = unwrap_sandbox(&argv).expect("sandboxed");
+        assert_eq!(&inner[1..5], ["-m", "pytest", "tests/test_a.py::test_b[x-1]", "-q"]);
+        assert!(inner[0].contains("python"), "{inner:?}");
+        assert_eq!(start, dir.canonicalize().unwrap().display().to_string());
 
         let mut r = req(&dir, "cargo", "lookup::tests");
         r.cwd = Some("crate".into());
         r.package = Some("ling-delegate".into());
-        let bad = run_test(&r, &s).unwrap();
+        let bad = run_test(&r, &s, "/opt/ling").unwrap();
         assert!(!bad.passed);
         assert_eq!(bad.exit_code, Some(101));
-        let (argv, cwd, _) = s.seen.borrow()[1].clone();
-        assert_eq!(argv, ["cargo", "test", "-p", "ling-delegate", "lookup::tests"]);
-        assert!(cwd.ends_with("crate"));
+        let (argv, _, _) = s.seen.borrow()[3].clone();
+        assert_eq!(argv[0], "/opt/ling");
+        let (inner, start) = unwrap_sandbox(&argv).expect("sandboxed");
+        assert!(inner[0].ends_with("cargo"));
+        assert_eq!(&inner[1..], ["test", "-p", "ling-delegate", "lookup::tests"]);
+        assert!(start.ends_with("crate"));
+        assert!(s.seen.borrow().iter().all(|(a, _, _)| a[1] == "sandbox"), "nothing ran outside the sandbox");
+    }
+
+    #[test]
+    fn run_test_refuses_when_the_sandbox_does_not_start_and_never_runs_on_the_host() {
+        let dir = scratch_worktree("rt-nosbx");
+        let s = Script::new(vec![
+            ("-- true", 1, "bwrap: setting up uid map: Permission denied\n".into()),
+            ("pytest", 0, "1 passed\n".into()),
+        ]);
+        let err = run_test(&req(&dir, "pytest", "tests/test_a.py"), &s, "ling").unwrap_err();
+        assert!(err.contains("sandbox does not start") && err.contains("uid map"), "{err}");
+        assert_eq!(s.seen.borrow().len(), 1, "only the check ran");
+        // No `ling` at all: refused the same way.
+        let none = Script::new(vec![]);
+        assert!(run_test(&req(&dir, "pytest", "tests/test_a.py"), &none, "ling").unwrap_err().contains("sandbox"));
+        assert_eq!(none.seen.borrow().len(), 1);
+    }
+
+    #[test]
+    fn the_tools_never_take_the_worktrees_own_interpreter() {
+        let dir = scratch_worktree("rt-venv");
+        std::fs::create_dir_all(dir.join(".venv/bin")).unwrap();
+        std::fs::write(dir.join(".venv/bin/python"), "#!/bin/sh\n").unwrap();
+        std::fs::write(dir.join(".venv/bin/ruff"), "#!/bin/sh\n").unwrap();
+        for tool in ["python", "ruff"] {
+            assert!(!venv_tool(&dir, tool).starts_with(&dir.display().to_string()), "{tool}");
+        }
     }
 
     #[test]
@@ -449,25 +509,25 @@ pub(crate) mod tests {
         let dir = scratch_worktree("rt-closed");
         let s = Script::new(vec![]);
         for (runner, target) in [("make", "x"), ("pytest", "--co"), ("pytest", "a b"), ("pytest", "x;rm"), ("pytest", "$(id)"), ("pytest", "")] {
-            assert!(run_test(&req(&dir, runner, target), &s).is_err(), "{runner} {target}");
+            assert!(run_test(&req(&dir, runner, target), &s, "ling").is_err(), "{runner} {target}");
         }
         let mut r = req(&dir, "pytest", "t.py");
         r.cwd = Some("../..".into());
-        assert!(run_test(&r, &s).is_err());
+        assert!(run_test(&r, &s, "ling").is_err());
         std::fs::write(dir.join(".gitmodules"), "[submodule \"codex\"]\n\tpath = codex\n\turl = x\n").unwrap();
         std::fs::create_dir_all(dir.join("codex/codex-rs")).unwrap();
         r.runner = "cargo".into();
         r.cwd = Some("codex/codex-rs".into());
-        assert!(run_test(&r, &s).unwrap_err().contains("submodule"));
+        assert!(run_test(&r, &s, "ling").unwrap_err().contains("submodule"));
         r.runner = "pytest".into();
         r.cwd = None;
         r.cwd = None;
         r.package = Some("p".into());
-        assert!(run_test(&r, &s).is_err(), "package is cargo-only");
+        assert!(run_test(&r, &s, "ling").is_err(), "package is cargo-only");
         // The main checkout is not a worktree.
         let main = std::env::temp_dir().join(format!("ling-tools-main-{}", std::process::id()));
         std::fs::create_dir_all(main.join(".git")).unwrap();
-        assert!(run_test(&req(&main, "pytest", "t.py"), &s).is_err());
+        assert!(run_test(&req(&main, "pytest", "t.py"), &s, "ling").is_err());
         assert!(s.seen.borrow().is_empty(), "nothing started");
     }
 
@@ -475,11 +535,11 @@ pub(crate) mod tests {
     fn run_test_bounds_its_output_and_clamps_the_timeout() {
         let dir = scratch_worktree("rt-bound");
         let long = (0..500).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
-        let s = Script::new(vec![("npm", 1, long)]);
+        let s = Script::new(vec![("-- true", 0, String::new()), ("npm", 1, long)]);
         let mut r = req(&dir, "npm", "ui.test");
         r.lines = Some(10_000);
         r.timeout_s = Some(999_999);
-        let res = run_test(&r, &s).unwrap();
+        let res = run_test(&r, &s, "ling").unwrap();
         assert!(res.truncated);
         assert!(res.tail.lines().count() <= MAX_TAIL_LINES);
         assert!(res.tail.chars().count() <= MAX_TAIL_CHARS);

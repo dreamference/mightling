@@ -5,9 +5,10 @@ that runs Night Shift), up to five bounded tasks are drawn from three sources an
 launcher's own ``ling night add``, so each is an ordinary task (best-of-N, the window and the report
 treat it as any other, and the result is a branch ``night/<id>`` that Night Shift never merges):
 
-1. failing CI tests: the latest failed run on ``main`` (``gh``), only test ids that look like test ids;
+1. failing CI tests: the latest failed push, scheduled or dispatched run on ``main`` (``gh``; never a
+   fork's pull request, whose branch may also be called ``main``), only test ids that look like ids;
 2. QA findings: the failing checks of the daily desktop QA report, and the open "Windows QA failing"
-   issue (its number and title only, never its body: the repository is public);
+   issue the workflow opened (its number and title only, never its body: the repository is public);
 3. open items in ``specs/``: unchecked ``- [ ]`` boxes and ``TODO:`` lines.
 
 A finding is skipped when it is already queued or was queued within ``COOLDOWN_DAYS`` (the ledger
@@ -67,8 +68,17 @@ FORBIDDEN_PATHS: Final[tuple[str, ...]] = (
     "anything that signs a release or holds a key",
 )
 
-#: Test ids as pytest prints them; anything else from a CI log is dropped.
-TEST_ID: Final[re.Pattern[str]] = re.compile(r"^tests/[\w./-]+\.py::[\w.\[\]-]+$")
+#: Test ids as pytest prints them; anything else from a CI log is dropped (no ``..`` segment).
+TEST_ID: Final[re.Pattern[str]] = re.compile(r"^tests/(?!.*\.\.)[\w./-]+\.py::[\w.\[\]-]+$")
+
+#: The events whose runs on ``main`` are the repository's own. A pull request from a fork whose
+#: branch is named ``main`` also lists under ``--branch main``, with a workflow name and a log its
+#: author wrote, so only these events are read.
+TRUSTED_EVENTS: Final[frozenset[str]] = frozenset({"push", "schedule", "workflow_dispatch"})
+
+#: Who opens the Windows QA issue (the workflow's ``GITHUB_TOKEN``); anyone can open an issue with
+#: the same title on a public repository.
+WINDOWS_ISSUE_AUTHOR: Final[str] = "app/github-actions"
 
 #: A spec line shorter than this is not an item worth a task.
 MIN_ITEM_CHARS: Final[int] = 12
@@ -203,7 +213,7 @@ class NightShiftAutofill:
                     "--limit",
                     "10",
                     "--json",
-                    "databaseId,workflowName",
+                    "databaseId,workflowName,event",
                 )
                 or "[]"
             )
@@ -212,6 +222,7 @@ class NightShiftAutofill:
         for entry in runs:
             if (
                 not isinstance(entry, dict)
+                or entry.get("event") not in TRUSTED_EVENTS
                 or QA_WORKFLOW in str(entry.get("workflowName", "")).lower()
             ):
                 continue
@@ -281,7 +292,7 @@ class NightShiftAutofill:
                     "--state",
                     "open",
                     "--search",
-                    f"{WINDOWS_ISSUE} in:title",
+                    f"{WINDOWS_ISSUE} in:title author:{WINDOWS_ISSUE_AUTHOR}",
                     "--json",
                     "number,title",
                 ],

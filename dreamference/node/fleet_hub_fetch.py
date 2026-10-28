@@ -38,6 +38,10 @@ HF_WAIT_S: Final[float] = 30.0
 # One download may take this long (22 GiB at 50 Mbit/s is about an hour).
 HF_TIMEOUT_S: Final[int] = 6 * 60 * 60
 
+#: How long the LAN copy's ephemeral key stays valid on the donor if its removal never arrives: the
+#: copy's own limit and an hour.
+KEY_EXPIRY_HOURS: Final[int] = HF_TIMEOUT_S // 3600 + 1
+
 # The remote script's exit for "the Hub does not have this repository or commit".
 NOT_ON_HUB: Final[int] = 3
 
@@ -329,9 +333,13 @@ class FleetHubFetch:
             fields = (hostkey.stdout or "").split()
             if hostkey.returncode != 0 or len(fields) < KEY_FIELDS:
                 return False
+            # `expiry-time` (the donor's own clock) ends the key even when the removal below never
+            # reaches the donor: the link is failing, which is why this copy runs at all.
             authorised = donor.run(
                 "umask 077; mkdir -p ~/.ssh && "
-                f"printf '%s\\n' {shlex.quote('restrict ' + public)} >> ~/.ssh/authorized_keys"
+                f"expires=\"$(date -d '+{KEY_EXPIRY_HOURS} hours' +%Y%m%d%H%M)\" && "
+                'printf \'restrict,expiry-time="%s" %s\\n\' "$expires" '
+                f"{shlex.quote(public)} >> ~/.ssh/authorized_keys"
             )
             if authorised.returncode != 0:
                 return False
@@ -351,5 +359,13 @@ class FleetHubFetch:
             )
             return self.session.run(copy, timeout=HF_TIMEOUT_S).returncode == 0
         finally:
-            donor.run(f"sed -i '/{token}/d' ~/.ssh/authorized_keys")
+            removed = donor.run(f"sed -i '/{token}/d' ~/.ssh/authorized_keys")
+            if removed.returncode != 0:
+                LOG.warning(
+                    "The LAN copy's key %s is still authorised on %s until it expires (%d h); "
+                    "remove its line from ~/.ssh/authorized_keys there.",
+                    token,
+                    donor_name,
+                    KEY_EXPIRY_HOURS,
+                )
             self.session.run(f"rm -rf {shlex.quote(workdir)}")
