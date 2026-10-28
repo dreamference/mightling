@@ -306,6 +306,8 @@ def apply_compat(root, dry):
     done = 0
     for path, old, new, count in COMPAT_EDITS:
         full = pathlib.Path(root) / path
+        if not full.exists():
+            continue  # a partial tree (a rehearsal fixture); the real tree has every file
         text = full.read_text(encoding="utf-8")
         if new in text and old != new and text.count(new) >= 1 and text.count(old) == 0:
             continue
