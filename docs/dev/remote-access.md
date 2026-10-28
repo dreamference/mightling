@@ -14,7 +14,7 @@ A client off the LAN reaches its node **by name** over a NetBird overlay whose m
 
 - **Node** (`dreamference/remote/`): `RemoteSettings` (paths, pins, `remote.json`), `RemoteCertificateAuthority` (`openssl`, name-constrained to the CA scope and `netbird.selfhosted`), `RemoteControlPlane` (the container, its configuration, the loopback proxy, the management API), `RemoteBox` (probe, relay extraction, haproxy and the relay over SSH, the port-443 check), `RemoteTunnel`, `RemoteNodePeer`, `RemoteEnrolment` (the code, HMAC both ways, the LAN listener on 3190), `RemoteAccess` (the commands). Only `RemoteAccess` prints (a per-file `T201` ignore, console-facing); the others report failures through their module logger, which prints the bare line to standard error.
 - **Launcher** (`ling-rs/`): `remote_join.rs` (`ling node remote join`), the overlay tier in `node.rs`, the overlay name in `NO_PROXY`, and the `remote` field in both byte-identical locator copies.
-- **Commands:** `ling-admin remote setup <dns-name> [--ssh <alias>] [--ca-scope <domain>] [--box-only] [--yes]`, `status`, `remove [--purge]`, `code`, `peers`, `revoke <peer>`.
+- **Commands:** `ling-admin remote setup <dns-name> [--ssh <alias>] [--ca-scope <domain>] [--box-only] [--yes]`, `status`, `remove [--purge]`, `code`, `code --bundle-file <path>` (one ephemeral peer's bundle, one-use 10-minute key, written to a new 0600 file with no code and no LAN listener: for the off-LAN acceptance runner), `peers`, `revoke <peer>`.
 
 ## Fixed on 2026-10-20 (ported from the Phase 1 that was reverted)
 
