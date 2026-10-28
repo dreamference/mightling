@@ -601,6 +601,7 @@ pub struct ChatRepos {
     thread_places: Mutex<HashMap<String, PathBuf>>,
     turn_warnings: Mutex<HashMap<String, Vec<String>>>,
     full_access_grants: Mutex<std::collections::HashSet<String>>,
+    sandbox_resets_due: Mutex<HashMap<String, u64>>,
 }
 
 impl Default for ChatRepos {
@@ -629,6 +630,7 @@ impl ChatRepos {
             thread_places: Mutex::new(HashMap::new()),
             turn_warnings: Mutex::new(HashMap::new()),
             full_access_grants: Mutex::new(std::collections::HashSet::new()),
+            sandbox_resets_due: Mutex::new(HashMap::new()),
         }
     }
 
@@ -753,11 +755,43 @@ impl ChatRepos {
     }
 
     /// Removes the in-memory Full Access grant for the checkout identified by its 8-hex `thread` id.
+    /// A grant that was held leaves its checkout due for `reset_checkout_sandbox`
+    /// (`sweep_full_access` runs it).
     pub fn revoke_full_access(&self, thread: &str) {
-        self.full_access_grants
+        let held = self
+            .full_access_grants
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(thread);
+        if held {
+            self.mark_sandbox_reset_due([thread.to_string()]);
+        }
+    }
+
+    /// The checkouts (8-hex `thread` ids) holding a Full Access grant now.
+    pub fn full_access_granted_threads(&self) -> Vec<String> {
+        self.full_access_grants.lock().unwrap_or_else(|p| p.into_inner()).iter().cloned().collect()
+    }
+
+    /// Notes that `threads` lost their grant now; the earliest loss of each is kept.
+    fn mark_sandbox_reset_due(&self, threads: impl IntoIterator<Item = String>) {
+        let now = self.now_secs();
+        let mut due = self.sandbox_resets_due.lock().unwrap_or_else(|p| p.into_inner());
+        for thread in threads {
+            due.entry(thread).or_insert(now);
+        }
+    }
+
+    /// Takes the reset due for one checkout, if any: the caller runs `reset_checkout_sandbox` itself.
+    pub fn take_sandbox_reset_due(&self, thread: &str) -> Option<u64> {
+        self.sandbox_resets_due.lock().unwrap_or_else(|p| p.into_inner()).remove(thread)
+    }
+
+    /// Takes every reset due: checkout `thread` id and the Unix second its grant was dropped.
+    pub fn take_sandbox_resets_due(&self) -> Vec<(String, u64)> {
+        std::mem::take(&mut *self.sandbox_resets_due.lock().unwrap_or_else(|p| p.into_inner()))
+            .into_iter()
+            .collect()
     }
 
     /// Returns whether the checkout identified by its 8-hex `thread` id currently holds an
@@ -769,9 +803,11 @@ impl ChatRepos {
             .contains(thread)
     }
 
-    /// Drops every Full Access grant: the node's `[chat_repos] full_access` was seen off.
+    /// Drops every Full Access grant: the node's `[chat_repos] full_access` was seen off. Every
+    /// checkout that held one is due for `reset_checkout_sandbox`.
     pub fn clear_full_access(&self) {
-        self.full_access_grants.lock().unwrap_or_else(|p| p.into_inner()).clear();
+        let held = std::mem::take(&mut *self.full_access_grants.lock().unwrap_or_else(|p| p.into_inner()));
+        self.mark_sandbox_reset_due(held);
     }
 
     /// Whether `record`'s checkout has Full Access now: a grant made with the typed phrase, the
@@ -4740,7 +4776,8 @@ async fn repo_access(State(server): State<Arc<Server>>, headers: HeaderMap, body
                 Err(resp) => return resp,
             };
             server.chat_repos.revoke_full_access(&record.thread);
-            reset_checkout_sandbox(&server, &record, &worktree_dir).await;
+            server.chat_repos.take_sandbox_reset_due(&record.thread);
+            reset_checkout_sandbox(&server, &record, &worktree_dir, None).await;
             json_response(StatusCode::OK, json!({ "level": "workspace" }))
         }
         "full" => {
@@ -4792,13 +4829,52 @@ async fn repo_access(State(server): State<Arc<Server>>, headers: HeaderMap, body
 /// How long ending Full Access waits for each answer of the app-server.
 const RESET_ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How often the server checks that every Full Access grant still stands (`sweep_full_access`).
+pub const FULL_ACCESS_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Ends the Full Access that no longer stands, at most `FULL_ACCESS_SWEEP_INTERVAL` after the
+/// node took it away. `effective_full_access` drops a grant only when something evaluates it, and
+/// turning `[chat_repos] full_access` off or the air gap on is a file a CLI writes, so without this
+/// a thread would keep its unsandboxed `sandboxPolicy` through reviews, queued messages and a
+/// goal's turns. Every grant held is checked against the settings read now, and every checkout
+/// whose grant was dropped, here or anywhere else, has its threads taken back to their sandbox,
+/// interrupting only a turn started before the grant was dropped (a turn started after it was
+/// started with the sandbox). Nothing is read and nothing connects while no grant was held.
+pub async fn sweep_full_access(server: &Server) {
+    let codex_home = &server.config.codex_home;
+    let granted = server.chat_repos.full_access_granted_threads();
+    if !granted.is_empty() {
+        let settings = ChatReposSettings::load_from(server.config.user_config.as_deref());
+        let records = load_index(codex_home);
+        for thread in granted {
+            match records.iter().find(|r| r.thread == thread) {
+                Some(record) => {
+                    server.chat_repos.effective_full_access(&settings, record);
+                }
+                None => server.chat_repos.revoke_full_access(&thread),
+            }
+        }
+    }
+    let due = server.chat_repos.take_sandbox_resets_due();
+    if due.is_empty() {
+        return;
+    }
+    let records = load_index(codex_home);
+    for (thread, dropped_at) in due {
+        if let Some(record) = records.iter().find(|r| r.thread == thread) {
+            reset_checkout_sandbox(server, record, Path::new(&record.dir), Some(dropped_at)).await;
+        }
+    }
+}
+
 /// Takes a checkout's app-server threads back to their sandbox now that its Full Access ended.
 /// A turn's `sandboxPolicy` holds for the turns after it, so without this a thread would keep
 /// running with no sandbox until its next `turn/start`, through a review, a queued message or a
 /// goal's own turns. Over a connection of its own: `thread/settings/update` with the sandbox the
 /// policy writes on a repository turn, and `turn/interrupt` for a turn still running. With no
-/// app-server listening no thread is loaded, and the next resume pins the sandbox anyway.
-async fn reset_checkout_sandbox(server: &Server, record: &CheckoutRecord, worktree_dir: &Path) {
+/// app-server listening no thread is loaded, and the next resume pins the sandbox anyway. With
+/// `started_before` (a Unix second), a running turn is interrupted only when it started before it.
+async fn reset_checkout_sandbox(server: &Server, record: &CheckoutRecord, worktree_dir: &Path, started_before: Option<u64>) {
     use futures::SinkExt;
     use tokio_tungstenite::tungstenite::Message;
 
@@ -4827,6 +4903,10 @@ async fn reset_checkout_sandbox(server: &Server, record: &CheckoutRecord, worktr
             .as_ref()
             .and_then(|answer| answer.pointer("/result/data/0"))
             .filter(|turn| turn.get("status").and_then(Value::as_str) == Some("inProgress"))
+            .filter(|turn| match (started_before, turn.get("startedAt").and_then(Value::as_u64)) {
+                (Some(before), Some(started)) => started < before,
+                _ => true,
+            })
             .and_then(|turn| turn.get("id").and_then(Value::as_str))
             .map(str::to_string);
         if let Some(turn) = running {
@@ -8507,7 +8587,7 @@ mod tests {
         };
         let checkout = s.dir.join("checkout");
         std::fs::create_dir_all(&checkout).unwrap();
-        reset_checkout_sandbox(&server, &record, &checkout).await;
+        reset_checkout_sandbox(&server, &record, &checkout, None).await;
 
         let mut methods = Vec::new();
         while let Ok(request) = seen.try_recv() {
@@ -8537,6 +8617,121 @@ mod tests {
                 "turn/interrupt app-run",
             ]
         );
+    }
+
+    /// Turning `[chat_repos] full_access` off at the node ends a grant at the next sweep, with no
+    /// request in between: the checkout's threads get their sandbox back, a turn started before the
+    /// grant was dropped is interrupted and one started after it (with the sandbox) runs on. A
+    /// sweep while the grant still stands connects to nothing.
+    #[tokio::test]
+    async fn the_sweep_ends_full_access_the_node_turned_off_without_a_request() {
+        use futures::SinkExt;
+        use futures::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let s = scratch("full-access-sweep");
+        let (server, probe) = test_server(&s.dir, None, true);
+        crate::app_server::prepare_socket_dir(&server.config.socket).unwrap();
+        let listener = tokio::net::UnixListener::bind(&server.config.socket).unwrap();
+        let (seen_tx, mut seen) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while let Some(Ok(Message::Text(text))) = ws.next().await {
+                let request: Value = serde_json::from_str(text.as_str()).unwrap();
+                let _ = seen_tx.send(request.clone());
+                let Some(id) = request.get("id").cloned() else { continue };
+                let result = match (request["method"].as_str().unwrap(), request["params"]["threadId"].as_str()) {
+                    ("thread/turns/list", Some("app-old")) => {
+                        json!({ "data": [{ "id": "turn-old", "status": "inProgress", "startedAt": 1_000 }] })
+                    }
+                    ("thread/turns/list", _) => {
+                        json!({ "data": [{ "id": "turn-new", "status": "inProgress", "startedAt": 2_000 }] })
+                    }
+                    _ => json!({}),
+                };
+                ws.send(Message::Text(json!({ "id": id, "result": result }).to_string().into())).await.unwrap();
+            }
+        });
+
+        let checkout = s.dir.join("checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        let record = CheckoutRecord {
+            thread: "deadbeef".to_string(),
+            repo: "org/widget".to_string(),
+            bridge: "telegram".to_string(),
+            chat: "c1".to_string(),
+            device: "telegram-app".to_string(),
+            dir: checkout.to_string_lossy().into_owned(),
+            branch: Some("phone/deadbeef".to_string()),
+            base: "main".to_string(),
+            app_threads: vec!["app-old".to_string(), "app-new".to_string()],
+            read_only: false,
+            created: 1,
+            last_used: 1,
+        };
+        save_index(&server.config.codex_home, std::slice::from_ref(&record)).unwrap();
+        let user_config = server.config.user_config.clone().unwrap();
+        std::fs::write(&user_config, "[chat_repos]\nfull_access = true\n").unwrap();
+        server.chat_repos.grant_full_access("deadbeef");
+
+        sweep_full_access(&server).await;
+        assert!(server.chat_repos.is_full_access_granted("deadbeef"));
+        assert!(seen.try_recv().is_err(), "a grant that stands is left alone");
+
+        // The node turns it off (`ling chat repos full-access off` writes the file); nothing asks.
+        std::fs::write(&user_config, "[chat_repos]\nfull_access = false\n").unwrap();
+        probe.set_now_secs(1_500);
+        sweep_full_access(&server).await;
+        assert!(!server.chat_repos.is_full_access_granted("deadbeef"));
+        assert!(server.chat_repos.take_sandbox_resets_due().is_empty());
+
+        let mut methods = Vec::new();
+        while let Ok(request) = seen.try_recv() {
+            methods.push(format!("{} {}", request["method"].as_str().unwrap(), request["params"]["threadId"].as_str().unwrap_or("")));
+        }
+        assert_eq!(
+            methods,
+            vec![
+                "initialize ",
+                "initialized ",
+                "thread/settings/update app-old",
+                "thread/turns/list app-old",
+                "turn/interrupt app-old",
+                "thread/settings/update app-new",
+                "thread/turns/list app-new",
+            ]
+        );
+    }
+
+    /// A grant dropped anywhere (the air gap seen on at a turn, the workspace route, the setting
+    /// seen off) leaves its checkout due for a reset once, at the Unix second it was dropped; one
+    /// never held leaves nothing.
+    #[test]
+    fn a_dropped_grant_leaves_its_checkout_due_for_a_sandbox_reset() {
+        let repos = ChatRepos::new();
+        let probe = StubProbe::new(500 * GB, false);
+        probe.set_now_secs(42);
+        repos.set_probe(probe.clone());
+
+        repos.revoke_full_access("never");
+        assert!(repos.take_sandbox_resets_due().is_empty());
+
+        repos.grant_full_access("aaaa0001");
+        repos.revoke_full_access("aaaa0001");
+        probe.set_now_secs(50);
+        repos.grant_full_access("aaaa0001");
+        repos.grant_full_access("bbbb0002");
+        repos.clear_full_access();
+        let mut due = repos.take_sandbox_resets_due();
+        due.sort();
+        assert_eq!(due, vec![("aaaa0001".to_string(), 42), ("bbbb0002".to_string(), 50)]);
+        assert!(repos.take_sandbox_resets_due().is_empty());
+
+        repos.grant_full_access("cccc0003");
+        repos.revoke_full_access("cccc0003");
+        assert_eq!(repos.take_sandbox_reset_due("cccc0003"), Some(50));
+        assert!(repos.take_sandbox_resets_due().is_empty());
     }
 
     #[tokio::test]
