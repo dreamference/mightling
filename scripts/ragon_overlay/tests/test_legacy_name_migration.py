@@ -494,3 +494,166 @@ def test_the_sudo_line_names_the_signal_account_only_when_the_old_unit_is_there(
     unit.write_text("[Unit]\n")
     line = LegacyNameMigration.privileged_line()
     assert "usermod -l ragon-signal mightling-signal" in line and "groupmod -n" in line
+
+
+def test_a_second_run_after_a_full_migration_with_delegate_and_app_changes_nothing(
+    opted_in, monkeypatch, tmp_home, tmp_path, capsys
+):
+    from dreamference.runner.codex_branded_builder import INSTALL_DIR
+
+    monkeypatch.setattr(
+        NightShiftScheduler,
+        "systemctl",
+        staticmethod(lambda args: subprocess.CompletedProcess(args, 1, "", "")),
+    )
+    venv_bin = tmp_path / "venv/bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "python").write_text("")
+    (venv_bin / "ragon-admin").write_text("#!/bin/sh\n")
+    monkeypatch.setattr("sys.executable", str(venv_bin / "python"))
+
+    old_bin = tmp_home / ".local/share/dreamference/mightling/bin"
+    old_bin.mkdir(parents=True)
+    for name in (
+        "ling",
+        "ling-search",
+        "ling-fetch",
+        "ling-code",
+        "ling-docs",
+        "ling-app",
+        "ling-delegate",
+        "ling-signal",
+        "codex-code-mode-host",
+    ):
+        (old_bin / name).write_text(name)
+    links = tmp_home / ".local/bin"
+    links.mkdir(parents=True, exist_ok=True)
+    for name in (
+        "ling",
+        "ling-search",
+        "ling-fetch",
+        "ling-code",
+        "ling-docs",
+        "ling-app",
+        "ling-delegate",
+    ):
+        (links / name).symlink_to(old_bin / name)
+    (links / "ling-admin").symlink_to(venv_bin / "ling-admin")
+
+    first = LegacyNameMigration.run()
+    assert first
+    capsys.readouterr()
+
+    new_bin = Path(INSTALL_DIR) / "bin"
+    for name in ("ragon-delegate", "ragon-app", "ragon-signal"):
+        assert (new_bin / name).is_file()
+    for name in ("ragon-delegate", "ragon-app"):
+        assert (links / name).resolve() == (new_bin / name).resolve()
+    assert not (links / "ragon-signal").exists() and not (links / "ragon-signal").is_symlink()
+
+    second = LegacyNameMigration.run()
+    assert second == []
+    assert capsys.readouterr().err == ""
+    for name in ("ragon-delegate", "ragon-app"):
+        assert (links / name).resolve() == (new_bin / name).resolve()
+    assert not (links / "ragon-signal").exists() and not (links / "ragon-signal").is_symlink()
+
+
+def test_ragon_admin_before_ragon_links_all_new_binaries_and_leaves_real_files_alone(
+    opted_in, monkeypatch, tmp_home, tmp_path
+):
+    from dreamference.runner.codex_branded_builder import INSTALL_DIR
+
+    monkeypatch.setattr(
+        NightShiftScheduler,
+        "systemctl",
+        staticmethod(lambda args: subprocess.CompletedProcess(args, 1, "", "")),
+    )
+    no_admin_bin = tmp_path / "no-admin-venv/bin"
+    no_admin_bin.mkdir(parents=True)
+    (no_admin_bin / "python").write_text("")
+    monkeypatch.setattr("sys.executable", str(no_admin_bin / "python"))
+
+    old_bin = tmp_home / ".local/share/dreamference/mightling/bin"
+    old_bin.mkdir(parents=True)
+    for name in (
+        "ling",
+        "ling-search",
+        "ling-fetch",
+        "ling-code",
+        "ling-docs",
+        "ling-app",
+        "ling-delegate",
+        "ling-signal",
+    ):
+        (old_bin / name).write_text(name)
+    links = tmp_home / ".local/bin"
+    links.mkdir(parents=True, exist_ok=True)
+    for name in (
+        "ling",
+        "ling-search",
+        "ling-fetch",
+        "ling-code",
+        "ling-docs",
+        "ling-app",
+        "ling-delegate",
+        "ling-admin",
+    ):
+        (links / name).symlink_to(old_bin / name)
+    (links / "ragon-app").write_text("real file")
+
+    done = LegacyNameMigration.run()
+    assert done
+    new_bin = Path(INSTALL_DIR) / "bin"
+    for name in (
+        "ragon",
+        "ragon-search",
+        "ragon-fetch",
+        "ragon-code",
+        "ragon-docs",
+        "ragon-delegate",
+    ):
+        assert (links / name).is_symlink()
+        assert (links / name).resolve() == (new_bin / name).resolve()
+    assert not (links / "ragon-signal").exists() and not (links / "ragon-signal").is_symlink()
+    assert not (links / "ragon-admin").exists() and not (links / "ragon-admin").is_symlink()
+    assert (
+        not (links / "ragon-app").is_symlink() and (links / "ragon-app").read_text() == "real file"
+    )
+
+    with_admin_bin = tmp_path / "with-admin-venv/bin"
+    with_admin_bin.mkdir(parents=True)
+    (with_admin_bin / "python").write_text("")
+    (with_admin_bin / "ragon-admin").write_text("#!/bin/sh\n")
+    monkeypatch.setattr("sys.executable", str(with_admin_bin / "python"))
+    (links / "ragon-app").unlink()
+
+    line = LegacyNameMigration.remove_old_links()
+    assert line and "linked ragon-app, ragon-admin" in line and "removed" not in line
+    assert (links / "ragon-app").resolve() == (new_bin / "ragon-app").resolve()
+    assert (links / "ragon-admin").resolve() == (with_admin_bin / "ragon-admin").resolve()
+    assert not (links / "ragon-signal").exists() and not (links / "ragon-signal").is_symlink()
+    assert LegacyNameMigration.remove_old_links() is None
+
+
+def test_an_active_unit_prints_the_wait_line_only_when_something_old_is_left(
+    opted_in, monkeypatch, tmp_home, capsys
+):
+    monkeypatch.setattr(
+        LegacyNameMigration, "busy_units", classmethod(lambda cls: ["ling-swe-night1.service"])
+    )
+    assert not LegacyNameMigration.anything_old()
+    assert LegacyNameMigration.run() == []
+    assert capsys.readouterr().err == ""
+
+    old_bin = tmp_home / ".local/share/dreamference/mightling/bin"
+    old_bin.mkdir(parents=True)
+    (old_bin / "ling").write_text("ling")
+    links = tmp_home / ".local/bin"
+    links.mkdir(parents=True, exist_ok=True)
+    (links / "ling").symlink_to(old_bin / "ling")
+
+    assert LegacyNameMigration.anything_old()
+    assert LegacyNameMigration.run() == []
+    assert (old_bin / "ling").is_file() and (links / "ling").is_symlink()
+    assert "waits for ling-swe-night1.service" in capsys.readouterr().err

@@ -974,6 +974,216 @@ mod tests {
         assert!(new_home.join("auth.json").is_file(), "~/.mightling moved whole all the same");
         assert!(report.lines.iter().any(|line| line.contains("aside")));
         assert_eq!(unmoved_home(&home), None);
+        assert_eq!(migrate(&home, &home, None), Report::default(), "a second run is empty");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_second_run_after_a_full_migration_with_delegate_and_app_is_empty() {
+        let home = scratch("second-run");
+        mightling_layout(&home);
+        let old_bin = home.join(LEGACY_INSTALL_DIRS[0]).join("bin");
+        write(&old_bin.join("ling-delegate"), "ling-delegate");
+        write(&old_bin.join("ling-signal"), "ling-signal");
+        make_symlink(old_bin.join("ling-delegate"), home.join(".local/bin/ling-delegate")).unwrap();
+
+        let first = migrate(&home, &home, None);
+        assert!(!first.is_empty());
+        let new_bin = home.join(INSTALL_DIR).join("bin");
+        for name in ["ragon-delegate", "ragon-app", "ragon-signal"] {
+            assert!(new_bin.join(name).is_file(), "{name} in the new install folder");
+        }
+        let links = home.join(".local/bin");
+        for name in ["ragon-delegate", "ragon-app"] {
+            assert_eq!(std::fs::read_link(links.join(name)).unwrap(), new_bin.join(name));
+        }
+        assert!(std::fs::symlink_metadata(links.join("ragon-signal")).is_err());
+
+        let second = migrate(&home, &home, None);
+        assert_eq!(second, Report::default());
+        for name in ["ragon-delegate", "ragon-app"] {
+            assert_eq!(std::fs::read_link(links.join(name)).unwrap(), new_bin.join(name));
+        }
+        assert!(std::fs::symlink_metadata(links.join("ragon-signal")).is_err());
+        assert!(home.join(crate::home::RAGON_HOME_DIR).join("auth.json").is_file());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn an_interrupted_run_with_the_install_folder_already_moved_finishes_the_links() {
+        let home = scratch("half-done");
+        let new_bin = home.join(INSTALL_DIR).join("bin");
+        for name in [
+            "ragon",
+            "ragon-search",
+            "ragon-fetch",
+            "ragon-code",
+            "ragon-docs",
+            "ragon-app",
+            "ragon-delegate",
+            "ragon-signal",
+        ] {
+            write(&new_bin.join(name), name);
+        }
+        let old_bin = home.join(LEGACY_INSTALL_DIRS[0]).join("bin");
+        let links = home.join(".local/bin");
+        std::fs::create_dir_all(&links).unwrap();
+        for name in [
+            "ling",
+            "ling-search",
+            "ling-fetch",
+            "ling-code",
+            "ling-docs",
+            "ling-app",
+            "ling-delegate",
+        ] {
+            make_symlink(old_bin.join(name), links.join(name)).unwrap();
+        }
+
+        let report = migrate(&home, &home, None);
+        assert!(!report.is_empty());
+        for name in ["ling", "ling-delegate"] {
+            assert!(std::fs::symlink_metadata(links.join(name)).is_err());
+        }
+        for name in [
+            "ragon",
+            "ragon-search",
+            "ragon-fetch",
+            "ragon-code",
+            "ragon-docs",
+            "ragon-app",
+            "ragon-delegate",
+        ] {
+            assert_eq!(std::fs::read_link(links.join(name)).unwrap(), new_bin.join(name));
+        }
+        assert!(std::fs::symlink_metadata(links.join("ragon-signal")).is_err());
+        assert_eq!(migrate(&home, &home, None), Report::default());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn when_ragon_admin_already_moved_the_binaries_and_links_migrate_adds_no_link_line() {
+        let home = scratch("after-admin");
+        let new_bin = home.join(INSTALL_DIR).join("bin");
+        let links = home.join(".local/bin");
+        std::fs::create_dir_all(&links).unwrap();
+        for name in [
+            "ragon",
+            "ragon-search",
+            "ragon-fetch",
+            "ragon-code",
+            "ragon-docs",
+            "ragon-app",
+            "ragon-delegate",
+        ] {
+            write(&new_bin.join(name), name);
+            make_symlink(new_bin.join(name), links.join(name)).unwrap();
+        }
+        write(&new_bin.join("ragon-signal"), "ragon-signal");
+        let venv_admin = home.join(".local/share/dreamference/venv/bin/ragon-admin");
+        write(&venv_admin, "admin");
+        make_symlink(&venv_admin, links.join("ragon-admin")).unwrap();
+        write(&home.join(MIGHTLING_HOME_DIR).join("auth.json"), "{}");
+
+        let report = migrate(&home, &home, None);
+        assert!(!report.is_empty());
+        assert!(!report.lines.iter().any(|line| line.contains("linked") || line.contains("links")));
+        assert!(std::fs::symlink_metadata(links.join("ragon-signal")).is_err());
+        assert!(home.join(crate::home::RAGON_HOME_DIR).join("auth.json").is_file());
+        assert_eq!(migrate(&home, &home, None), Report::default());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn missing_new_links_are_created_when_old_links_are_already_gone_and_real_files_stay() {
+        let home = scratch("missing-links");
+        let new_bin = home.join(INSTALL_DIR).join("bin");
+        for name in [
+            "ragon",
+            "ragon-search",
+            "ragon-fetch",
+            "ragon-code",
+            "ragon-docs",
+            "ragon-app",
+            "ragon-delegate",
+            "ragon-signal",
+        ] {
+            write(&new_bin.join(name), name);
+        }
+        let links = home.join(".local/bin");
+        write(&links.join("ragon-app"), "real file");
+
+        let report = migrate(&home, &home, None);
+        assert_eq!(report.lines.len(), 1);
+        assert!(report.lines[0].starts_with("linked ragon, ragon-search, ragon-fetch, ragon-code, ragon-docs, ragon-delegate in "));
+        for name in [
+            "ragon",
+            "ragon-search",
+            "ragon-fetch",
+            "ragon-code",
+            "ragon-docs",
+            "ragon-delegate",
+        ] {
+            assert_eq!(std::fs::read_link(links.join(name)).unwrap(), new_bin.join(name));
+        }
+        assert!(std::fs::symlink_metadata(links.join("ragon-signal")).is_err());
+        assert!(!std::fs::symlink_metadata(links.join("ragon-app")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(links.join("ragon-app")).unwrap(), "real file");
+        assert_eq!(migrate(&home, &home, None), Report::default());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_held_night_runner_lock_waits_without_moving_anything_until_released() {
+        let home = scratch("night-lock");
+        mightling_layout(&home);
+        let lock_path = home.join(MIGHTLING_HOME_DIR).join(NIGHT_RUNNER_LOCK);
+        write(&lock_path, "locked");
+        let lock_file = std::fs::File::open(&lock_path).unwrap();
+        lock_file.try_lock().unwrap();
+
+        let waiting = migrate(&home, &home, None);
+        assert_eq!(waiting.lines.len(), 1);
+        assert!(waiting.lines[0].contains("waits for"));
+        assert!(home.join(LEGACY_INSTALL_DIRS[0]).join("bin/ling").is_file());
+        assert!(!home.join(INSTALL_DIR).exists());
+        assert!(std::fs::symlink_metadata(home.join(".local/bin/ling")).unwrap().file_type().is_symlink());
+        assert!(home.join(MIGHTLING_HOME_DIR).join("auth.json").is_file());
+        assert!(!home.join(crate::home::RAGON_HOME_DIR).exists());
+
+        drop(lock_file);
+        let migrated = migrate(&home, &home, None);
+        assert!(!migrated.is_empty());
+        assert!(!migrated.lines.iter().any(|line| line.contains("waits for")));
+        assert!(home.join(INSTALL_DIR).join("bin/ragon").is_file());
+        assert!(home.join(crate::home::RAGON_HOME_DIR).join("auth.json").is_file());
+
+        write(&lock_path, "locked");
+        let held_after = std::fs::File::open(&lock_path).unwrap();
+        held_after.try_lock().unwrap();
+        assert!(!anything_old(&home));
+        assert_eq!(migrate(&home, &home, None), Report::default());
+        drop(held_after);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn unmoved_home_is_kept_until_moved_and_legacy_home_falls_back_to_puffin_only_after() {
+        let home = scratch("unmoved-home");
+        let mightling = home.join(MIGHTLING_HOME_DIR);
+        write(&mightling.join("auth.json"), "{}");
+        assert_eq!(unmoved_home(&home), Some(mightling.clone()));
+        assert_eq!(legacy_home(&home), None);
+
+        let puffin = home.join(".puffin");
+        write(&puffin.join("history.jsonl"), "{}\n");
+        assert_eq!(unmoved_home(&home), Some(mightling));
+        assert_eq!(legacy_home(&home), None);
+
+        migrate(&home, &home, None);
+        assert_eq!(unmoved_home(&home), None);
+        assert_eq!(legacy_home(&home), Some(puffin));
         let _ = std::fs::remove_dir_all(&home);
     }
 

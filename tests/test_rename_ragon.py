@@ -256,3 +256,14 @@ def test_a_compat_edit_is_applied_once_and_a_second_run_does_nothing(tmp_path, m
     assert rr.apply_compat(tmp_path, False) == 1
     assert (tmp_path / "a.txt").read_text() == "keep\nanchor\nextra\n"
     assert rr.apply_compat(tmp_path, False) == 0
+
+
+def test_home_compat_edit_keeps_using_unmoved_home(tmp_path):
+    home_rs = tmp_path / "ragon-rs/src/home.rs"
+    home_rs.parent.mkdir(parents=True)
+    home_rs.write_text(
+        f"pub fn use_ragon_home() {{\n{rr.HOME_ANCHOR}        return;\n    }};\n}}\n"
+    )
+    assert rr.apply_compat(tmp_path, False) == 1
+    assert "crate::rename::unmoved_home(&home)" in home_rs.read_text()
+    assert rr.apply_compat(tmp_path, False) == 0
