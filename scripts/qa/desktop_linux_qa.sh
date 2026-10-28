@@ -105,6 +105,7 @@ if curl -fsSL -m 120 -o "$WORK/install.sh" "$REPO_URL/releases/latest/download/i
         # What the API answered, for the log: install.sh reads the tag from it line by line.
         curl -s -m 20 -H "Accept: application/vnd.github+json" https://api.github.com/repos/dreamference/mightling/releases/latest \
             | head -c 300 | head -3 | sed 's/^/   api: /'
+        echo  # head -c leaves no final newline, and a result line must start its own line
         result "install.sh into a throwaway HOME" fail "exit $code: $(echo "$out" | tail -3)" "$(since "$t")"
     fi
 else
