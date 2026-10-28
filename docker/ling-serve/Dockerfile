@@ -7,8 +7,10 @@
 # runtime (libcudart 13.0.96, the toolkit the binary was compiled with) and the driver from the
 # NVIDIA container toolkit at `docker run --gpus all`.
 #
-# An engine with vision (not bdda3a2) also needs libpng16-16t64, libwebp7 and libjpeg-turbo8 here
-# (libnvjpeg optional): with `--vision on`, its default, it does not start without them.
+# An engine with vision (not bdda3a2) links libpng, libwebp and libjpeg-turbo (image input, CMake's
+# IMAGE_LIBS), so the image carries libpng16-16t64, libwebp7 and libjpeg-turbo8: with `--vision on`,
+# its default, it does not start without them. libnvjpeg is optional (the engine opens it at run
+# time and falls back to libjpeg-turbo) and is not installed.
 #
 # python3 is here for the model gate, which runs its stdlib-only proxy in the engine's image
 # (ModelGate.run_command), so the gate needs no image of its own.
@@ -26,13 +28,16 @@ RUN apt-get update \
         libevent-2.1-7t64 \
         libgflags2.2 \
         libicu74 \
+        libjpeg-turbo8 \
         liblz4-1 \
         liblzma5 \
         libpcre2-8-0 \
+        libpng16-16t64 \
         libsnappy1v5 \
         libsodium23 \
         libssl3t64 \
         libunwind8 \
+        libwebp7 \
         libzstd1 \
         python3 \
         zlib1g \
