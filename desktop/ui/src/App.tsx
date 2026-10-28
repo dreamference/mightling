@@ -76,7 +76,7 @@ import { MessageBoardView } from "./MessageBoardView";
 import { boardOn, sqliteHome } from "./board";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { SideChat } from "./SideChat";
-import { firstMessage, keptMessage, keptName, sideChatParams, sideMessages } from "./sidechat";
+import { firstMessage, keptMessage, keptName, sideChatParams, sideMessages } from "./sidechatstate";
 import { agentsPath, initPrompt } from "./init";
 import { editedTurn, recordVersion, stepVersion, versionsAt, type MessageVersions } from "./versions";
 import { attemptKey, nextToSummarize, serverIdle, summarize, summaryMatches, summaryOf, withSummary } from "./summaries";
@@ -1853,7 +1853,7 @@ export function App() {
     }
   };
 
-  // The side chat beside the thread (Ctrl+Alt+S, `/side`; DESKTOP §16 B37, sidechat.ts): an unkept
+  // The side chat beside the thread (Ctrl+Alt+S, `/side`; DESKTOP §16 B37, sidechatstate.ts): an unkept
   // thread, its first message carrying the thread's recap. Closed (or the thread left), it is gone:
   // its turn stopped and the server let go of it; it had no folder of its own to delete.
   const [side, setSide] = useState<{ id: string; parent: Thread; title: string; recap: string[]; asked: boolean; keeping: boolean } | null>(null);

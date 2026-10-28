@@ -14,7 +14,9 @@ describe("office previews", () => {
     expect(isOfficeFile("/d/docx")).toBe(false);
   });
 
-  it("run LibreOffice in bubblewrap with the network unshared, the root read-only, a profile of its own", () => {
+  // bubblewrap is Linux's, and officePreview builds this command only there; on Windows the profile's
+  // path would come out with backslashes.
+  it.skipIf(process.platform === "win32")("run LibreOffice in bubblewrap with the network unshared, the root read-only, a profile of its own", () => {
     const { command, args } = conversionCommand("/usr/bin/bwrap", "/usr/bin/soffice", "/d/a.docx", "/tmp/s");
     expect(command).toBe("/usr/bin/bwrap");
     expect(args).toContain("--unshare-net");

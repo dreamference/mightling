@@ -255,15 +255,64 @@ pub fn export_flag() {
     }
 }
 
-/// Refuses a session whose setting names no mode, with the words the user typed. Returns the
-/// setting otherwise.
+/// Why the mode cannot run on Windows yet: Codex there dispatches none of the hooks the mode
+/// registers (and would run them through PowerShell, which the hook lines are not written for), so
+/// `CLAUDE.md`, the settings files' hooks and the permission rules would all be silently skipped.
+/// The mode refuses to start instead (WINDOWS_ARM §23.4 W1).
+pub const UNAVAILABLE_ON_WINDOWS: &str =
+    "compatibility mode isn't available on Windows yet: its hooks and permission rules can't be enforced there";
+
+/// Refuses `mode` where its hooks cannot be enforced: the mode on Windows. Never a session with the
+/// rules ignored.
+pub fn refuse_where_unenforced(mode: Mode, windows: bool) -> anyhow::Result<()> {
+    if mode == Mode::Claude && windows {
+        anyhow::bail!("{UNAVAILABLE_ON_WINDOWS}");
+    }
+    Ok(())
+}
+
+/// What turned the mode on and how to turn it off, for a refusal: the flag on this command line,
+/// the variable (set by hand, by a script or in Windows' environment variables), or the user's file.
+/// `flag_given`: this command line carries `--compat` (which `main()` has already turned into the
+/// variable). Empty when nothing turned it on.
+pub fn how_to_turn_off(resolved: &Resolved, flag_given: bool) -> String {
+    match &resolved.source {
+        Source::Variable if flag_given => format!("It was asked for with `{FLAG} claude` on this command line: leave that out."),
+        Source::Variable => format!(
+            "It is on through the {ENV} environment variable: remove it (PowerShell: `Remove-Item Env:{ENV}`), and from Windows' environment variables if it is set there."
+        ),
+        Source::UserFile(path) => {
+            format!("It is on through `{KEY} = \"claude\"` in {}: `ling compat use off` turns it off.", path.display())
+        }
+        Source::Default => String::new(),
+    }
+}
+
+/// [`refuse_where_unenforced`] for a resolved setting, the refusal naming what turned the mode on
+/// and how to turn it off ([`how_to_turn_off`]).
+pub fn refuse_with_cause(resolved: &Resolved, flag_given: bool, windows: bool) -> anyhow::Result<()> {
+    if let Err(err) = refuse_where_unenforced(resolved.mode, windows) {
+        let how = how_to_turn_off(resolved, flag_given);
+        if how.is_empty() {
+            return Err(err);
+        }
+        anyhow::bail!("{err}. {how}");
+    }
+    Ok(())
+}
+
+/// Refuses a session whose setting names no mode, with the words the user typed, and the mode
+/// where it cannot be enforced ([`refuse_with_cause`]). Returns the setting otherwise.
 pub fn check_at_start(original_args: &[OsString]) -> anyhow::Result<Resolved> {
-    if let Some(value) = flag_value(original_args)
-        && Mode::parse(&value).is_none()
+    let flag = flag_value(original_args);
+    if let Some(value) = &flag
+        && Mode::parse(value).is_none()
     {
         anyhow::bail!("{}", unknown_value(&format!("`{FLAG} {value}`")));
     }
-    resolve().map_err(|err| anyhow::anyhow!(err))
+    let resolved = resolve().map_err(|err| anyhow::anyhow!(err))?;
+    refuse_with_cause(&resolved, flag.is_some(), cfg!(windows))?;
+    Ok(resolved)
 }
 
 /// The lines a session's start shows about the mode: what was ignored, and, for a session someone
@@ -291,6 +340,9 @@ fn use_mode(value: &str) -> (Vec<String>, i32) {
     let Some(mode) = Mode::parse(value) else {
         return (vec![unknown_value(&format!("`{value}`"))], 2);
     };
+    if let Err(err) = refuse_where_unenforced(mode, cfg!(windows)) {
+        return (vec![err.to_string()], 1);
+    }
     let Some(path) = user_config_file() else {
         return (vec!["Could not find the configuration file to write: HOME is not set.".to_string()], 1);
     };
@@ -528,6 +580,37 @@ pub fn run_cli(args: &[String]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mode_refuses_to_start_on_windows_and_only_there() {
+        let refused = refuse_where_unenforced(Mode::Claude, true).unwrap_err().to_string();
+        assert_eq!(refused, UNAVAILABLE_ON_WINDOWS);
+        assert!(refused.contains("isn't available on Windows yet"));
+        assert!(refuse_where_unenforced(Mode::Claude, false).is_ok());
+        assert!(refuse_where_unenforced(Mode::Off, true).is_ok());
+        assert!(refuse_where_unenforced(Mode::Off, false).is_ok());
+    }
+
+    #[test]
+    fn the_refusal_names_what_turned_the_mode_on_and_how_to_turn_it_off() {
+        let user = Path::new("/h/.config/dreamference/config.toml");
+        let on = format!("{KEY} = \"claude\"\n");
+        let from_file = resolve_from(None, Some((user, &on)), &[]).unwrap();
+        let refused = refuse_with_cause(&from_file, false, true).unwrap_err().to_string();
+        assert!(refused.starts_with(UNAVAILABLE_ON_WINDOWS), "{refused}");
+        assert!(refused.contains(&format!("in {}", user.display())), "{refused}");
+        assert!(refused.contains("`ling compat use off`"), "{refused}");
+        let from_variable = resolve_from(Some("claude"), Some((user, &on)), &[]).unwrap();
+        let refused = refuse_with_cause(&from_variable, false, true).unwrap_err().to_string();
+        assert!(refused.contains(&format!("`Remove-Item Env:{ENV}`")), "{refused}");
+        assert!(!refused.contains("compat use off"), "{refused}");
+        let refused = refuse_with_cause(&from_variable, true, true).unwrap_err().to_string();
+        assert!(refused.contains("`--compat claude` on this command line: leave that out"), "{refused}");
+        // Off, or anywhere but Windows: no refusal at all.
+        assert!(refuse_with_cause(&from_file, false, false).is_ok());
+        let off = resolve_from(Some("off"), Some((user, &on)), &[]).unwrap();
+        assert!(refuse_with_cause(&off, true, true).is_ok());
+    }
 
     fn os(args: &[&str]) -> Vec<OsString> {
         args.iter().map(OsString::from).collect()

@@ -16,7 +16,7 @@ use crate::watch::{
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 const SERVER_NAME: &str = "mightling";
-const SERVER_VERSION: &str = "1.7.1";
+const SERVER_VERSION: &str = "1.7.2";
 
 /// Runs the MCP stdio loop over `stdin` and `stdout` until EOF.
 pub fn serve_stdio() -> i32 {

@@ -1022,6 +1022,10 @@ Remove the box's relay and haproxy and the tunnel; keep the CA and the enrolment
 
 Print a one-time code and wait for one client to enrol with it on this LAN.
 
+| Option | Description |
+|---|---|
+| `--bundle-file` | Instead: write one ephemeral peer's bundle (one-use, 10-minute key) to a new 0600 file, no code and no listener (an off-LAN test runner) |
+
 #### `ling-admin remote peers`
 
 List the enrolled peers.

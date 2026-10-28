@@ -1,7 +1,7 @@
 // A side chat that is not kept (DESKTOP §16 B37): its thread, its first message, what its pane shows, its saved copy.
 import { describe, expect, it } from "vitest";
 
-import { firstMessage, keptMessage, keptName, sideChatParams, sideMessages, withoutRecap } from "./sidechat";
+import { firstMessage, keptMessage, keptName, sideChatParams, sideMessages, withoutRecap } from "./sidechatstate";
 import { threadContext } from "./tonight";
 
 const view = (texts: [string, string][]) => ({

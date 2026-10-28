@@ -497,6 +497,8 @@ pub(crate) mod tests {
         assert!(reason.contains("cannot be enforced") && reason.contains("sudo tee") && reason.contains("ling airgapped default off"));
     }
 
+    // The probe is bubblewrap's, so the command asks it on Linux only (on_refusal_now).
+    #[cfg(target_os = "linux")]
     #[test]
     fn the_airgapped_command_asks_the_probe_before_on() {
         fake(Some(refused()));

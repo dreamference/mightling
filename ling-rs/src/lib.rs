@@ -75,6 +75,7 @@ pub mod refine;
 pub mod release_signature;
 pub mod remote_join;
 pub mod rename;
+pub mod sandbox_share;
 #[cfg(target_os = "linux")]
 pub mod signal;
 pub mod skills;
@@ -82,12 +83,15 @@ pub mod summary_cap;
 #[cfg(unix)]
 pub mod sync;
 
+pub mod uninstall;
 pub mod update;
 pub mod usage;
 pub mod userns;
 pub mod vision;
 #[cfg(unix)]
 pub mod web;
+pub mod windows_tls;
+pub mod winsta;
 pub mod worktree;
 
 /// Where Dreamference serves its model unless configured otherwise.
@@ -129,6 +133,7 @@ const COMMANDS_WITHOUT_MODEL: &[&str] = &[
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
     "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync", "monitor", "delegate",
+    "uninstall",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -324,6 +329,15 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
             command.find_subcommand(word).is_some() || LAUNCHER_SUBCOMMANDS.contains(&word)
         })
     {
+        // Refused before any child or model server where the mode's rules cannot be enforced.
+        let refused = match compat::resolve() {
+            Ok(resolved) => compat::refuse_with_cause(&resolved, compat::flag_value(&with_compat).is_some(), cfg!(windows)),
+            Err(_) => compat::refuse_where_unenforced(compat::Mode::Claude, cfg!(windows)),
+        };
+        if let Err(err) = refused {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
         std::process::exit(compat_print::run(&user_args).await);
     }
     let subcommand = first_positional(command, &user_args);
@@ -335,6 +349,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "app"
     {
         std::process::exit(app::open(&user_args[index + 1..]).await);
+    }
+    // `uninstall` removes this release install of the client (uninstall.rs; WINDOWS_ARM §16.4).
+    if let Some(index) = subcommand
+        && user_args[index] == "uninstall"
+    {
+        std::process::exit(uninstall::run_cli(&user_args[index + 1..]));
     }
     // `night` is Night Shift's queue (night.rs): `/night` from a shell, for scripts and cron.
     if let Some(index) = subcommand
@@ -504,6 +524,16 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(worktree::run_cli(&user_args[index + 1..]));
     }
+    // An elevated sandbox setup on Windows gives the machine-wide sandbox accounts new passwords:
+    // the launcher runs it as a child, then hands them to every user set up before, whose sandbox
+    // would otherwise stop logging on (sandbox_share.rs; WINDOWS_ARM §23.4 W11).
+    if cfg!(windows)
+        && let Some(index) = subcommand
+        && sandbox_share::is_elevated_setup(&user_args, index)
+        && std::env::var_os(sandbox_share::CHILD_ENV).is_none()
+    {
+        std::process::exit(sandbox_share::run(&user_args));
+    }
     // `ling plugin add` and `marketplace add|upgrade` fetch with git outside the sandbox: refused
     // at a configured `on` (plugins.rs).
     // Codex's own subcommand, not the launcher's: it runs on in Codex unless refused here.
@@ -515,6 +545,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         if let Some(reason) = plugins::install_refusal(&user_args[index + 1..], configured.level, &configured.source.label()) {
             bail!("{reason}");
         }
+    }
+    // Over SSH the process lives in a service window station the sandbox's processes cannot open;
+    // let them in, or say why commands will not run (winsta.rs; WINDOWS_ARM §23.4 W2).
+    if std::env::var_os(UPSTREAM_TESTS_ENV).is_none()
+        && let Some(line) = winsta::prepare_for_sandbox()
+    {
+        eprintln!("⚠️  {line}");
     }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
@@ -776,6 +813,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         loop_guard::Process::Tui
     };
     loop_guard::configure(process, &codex_home);
+    // Git over OpenSSL in a sandboxed Windows session: Schannel cannot reach https under the
+    // sandbox's restricted token (windows_tls.rs; WINDOWS_ARM §23.4 W3).
+    let args = windows_tls::with_git_openssl(args, &user_args, airgapped::full_access_selected(&user_args));
     Ok(if app_server { with_configured_model(args, &session_model) } else { args })
 }
 
@@ -1141,7 +1181,13 @@ async fn wait_for_model(host: &str) -> anyhow::Result<(ServedModel, Vec<adapter:
 /// `models.json`, whose templates are each one JSON line of ~20 KB, so a patch touching them was
 /// ~390 KB of diff.
 pub fn base_instructions() -> String {
-    rebrand(&codex_template()) + WEB_ACCESS_INSTRUCTIONS
+    rebrand(&codex_template()) + WEB_ACCESS_INSTRUCTIONS + windows_tls_note()
+}
+
+/// What the system prompt says on Windows after the web section: which tools cannot reach https
+/// from inside the sandbox (windows_tls.rs). Empty elsewhere.
+pub fn windows_tls_note() -> &'static str {
+    if cfg!(windows) { windows_tls::PROMPT_NOTE } else { "" }
 }
 
 /// Codex's longest bundled prompt template, as Codex ships it. The shorter ones are trimmed

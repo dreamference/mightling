@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { mcpBundles, type BundleSummary, type InstalledBundle } from "./bridge";
-import { bundleRemoval, bundleWrite, commandLine, configuredServer, formValues, initialForm, missingSettings, sizeText, type BundleForm } from "./mcpbundles";
+import { bundleRemoval, bundleWrite, commandLine, configuredServer, formValues, initialForm, missingSettings, sizeText, type BundleForm } from "./mcpbundleform";
 import type { RpcClient } from "./rpc";
 
 export function McpBundles(props: { client: RpcClient; config: unknown; airgapped?: boolean; notice: (error: unknown) => void; onChanged: () => void }) {

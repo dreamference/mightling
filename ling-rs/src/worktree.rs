@@ -204,7 +204,17 @@ pub fn session_at(codex_home: &Path, dir: &Path) -> Option<Session> {
 }
 
 fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    plain(std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
+}
+
+/// A canonical path in the form other programs take. Windows canonicalizes to `\\?\C:\…`, which
+/// `git worktree add` cannot create ("could not create leading directories of '//?/C:/…'"), so
+/// every worktree session failed there; a drive path loses the prefix (a UNC one keeps it).
+fn plain(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
+        _ => path,
+    }
 }
 
 #[cfg(unix)]
@@ -215,7 +225,12 @@ fn process_alive(pid: u32) -> bool {
     result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    crate::airgapped::process_alive(pid)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn process_alive(_pid: u32) -> bool {
     // Without a cheap check, a session worktree is treated as in use and never pruned.
     true
@@ -779,6 +794,13 @@ fn git_with_input(dir: &Path, args: &[&str], input: &[u8]) -> Option<Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_paths_lose_windows_verbatim_prefix_for_git() {
+        assert_eq!(plain(PathBuf::from(r"\\?\C:\Users\a\repo")), PathBuf::from(r"C:\Users\a\repo"));
+        assert_eq!(plain(PathBuf::from(r"\\?\UNC\server\share")), PathBuf::from(r"\\?\UNC\server\share"));
+        assert_eq!(plain(PathBuf::from("/home/a/repo")), PathBuf::from("/home/a/repo"));
+    }
 
     struct Fixture {
         root: PathBuf,

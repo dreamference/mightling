@@ -27,6 +27,10 @@ describe("the pull-request tab's gh", () => {
 
 // DESKTOP §16 B32: comments and reviews, and Create pull request, through a stand-in `gh` (MIGHTLING_GH)
 // that records its arguments; a real `gh` never runs here.
+// The stand-in is a script with a shebang, which Windows runs only through a shell; prs.ts runs gh.exe
+// without one, as it should, so the two tests that reach the stand-in run on Linux and macOS.
+const scriptOnly = process.platform === "win32";
+
 describe("the tab's comments and reviews, and Create pull request", () => {
   let dir = "";
   let log = "";
@@ -83,12 +87,12 @@ else if (args[1] === "create") console.log("https://github.example/acme/fetcher/
     expect(ran()).toEqual([]);
   });
 
-  it("reads comments and reviews with gh pr view --json comments,reviews", async () => {
+  it.skipIf(scriptOnly)("reads comments and reviews with gh pr view --json comments,reviews", async () => {
     expect(await handle({ ...activity, root: dir } as Message, gate("off"))).toEqual({ comments: [{ author: { login: "ada" }, body: "Why 2 s?", createdAt: "2026-10-20T09:00:00Z" }], reviews: [] });
     expect(ran()).toEqual([{ args: ["pr", "view", "12", "--json", "comments,reviews"], cwd: dir }]);
   });
 
-  it("creates the pull request with the user's title and description, each joined to its flag", async () => {
+  it.skipIf(scriptOnly)("creates the pull request with the user's title and description, each joined to its flag", async () => {
     const url = await handle(create({ title: "-Retry with backoff\nnow", body: "Waits 0.5 s, 1 s, 2 s.", base: "main", draft: true }), gate("off"));
     expect(url).toBe("https://github.example/acme/fetcher/pull/16");
     expect(ran()).toEqual([{ args: ["pr", "create", "--title=-Retry with backoff now", "--body=Waits 0.5 s, 1 s, 2 s.", "--base=main", "--draft"], cwd: dir }]);
