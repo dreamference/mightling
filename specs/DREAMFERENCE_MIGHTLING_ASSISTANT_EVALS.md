@@ -3,7 +3,7 @@
 **Status:** decided 2026-10-20 (the owner's decisions D1–D6, §0.1): `ask-evals` is to be built. **Phase 0 done the same day (§9); three industry benchmarks added on the owner's request, planned in §10; the harness built and tested without a model (§11), its first model run after the nights:** runs happen in a `bwrap --unshare-net` jail that keeps production's sandbox and is offline by construction; nothing else built yet. Proposed the same day as a moonshot spec from research only: no model job was run, no benchmark was downloaded or started, nothing was written to any tracker. It ranks what to adopt, what to build and what to skip.
 **Goal:** measure, every night, the faults that made the phone-chat assistant useless on the morning of 2026-10-20 ([MIGHTLING_SIGNAL §19](./DREAMFERENCE_MIGHTLING_SIGNAL.md), [MIGHTLING_CHAT §16](./DREAMFERENCE_MIGHTLING_CHAT.md)). Each fix then gets a number that shows when it regresses, as SWE-bench gives the coding agent.
 **Builds on:**
-- `scripts/cave_mode_bench/` (`run.py`, `drift.py`): real `ling exec` runs with a fresh `CODEX_HOME`, multi-turn through `exec resume --last`, a `check.py` per task, tokens counted with the served model's tokenizer;
+- `scripts/cave_mode_bench/` (`run.py`, `drift.py`; *removed 2026-10-28, `ef443182`*): real `ling exec` runs with a fresh `CODEX_HOME`, multi-turn through `exec resume --last`, a `check.py` per task, tokens counted with the served model's tokenizer;
 - the SWE-bench harness ([MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md)): `ling` in a container on its own Docker network, the model gate (§18), the night scripts (`scripts/swe_bench_night2.sh` and successors);
 - the bridges' stand-ins: the scripted signal-cli of `ling-rs/signal/tests/daemon.rs`, the stand-in Bot API and homeserver of `ling chat`'s tests (CHAT §13);
 - `ling-admin audit egress` ([MIGHTLING_EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md)): strace on a real session;
@@ -57,7 +57,7 @@ From SIGNAL §19 and the owner's account of the same morning, stated as classes.
 | 3 | The agent scraped search engines with `curl`, hit CAPTCHAs and retried with long sleeps, 92 tool calls for a simple question | Tool choice, tool-call budget, giving up | Not fixed; `ling-search` already reports "SearXNG could not reach any search engine: …" plainly |
 | 4 | A repetition loop: about 15 minutes of decoding with nothing streamed, until Codex's stream idle timeout ended it | Degeneration in long generation, in answers and in tool-call arguments | SIGNAL §19 says only the bridge can bound it and refers to a §19.3 that does not exist on `main` yet. Today the only bound is Codex's stream idle timeout (900 s in the owner's config). SGLang has no loop detector (§3.4) |
 | 5 | An under-specified question got a confident wrong reading, and a question about its own slowness got an invented explanation | Calibration, abstention, clarifying questions, honest self-report | Ask's prompt already says "say what you do not know" and "ask a short question back only when …" (`ling-rs/prompts/ask.md`); not measured |
-| 6 | The terse default (cave mode `ultra`) may have cost correctness | Correctness against brevity | Measured once on coding and how-to questions (CAVE_MODE §1.1: 35 of 36 checks at `ultra`); never on research questions or in chat |
+| 6 | The terse default (cave mode `ultra`; *cave mode removed 2026-10-28, `ef443182`*) may have cost correctness | Correctness against brevity | Measured once on coding and how-to questions (CAVE_MODE §1.1: 35 of 36 checks at `ultra`); never on research questions or in chat |
 | 7 | Russian, Ukrainian, French and English mixed in one thread | Reply language; correctness parity across languages | Not measured |
 | 8 | Every search engine rate-limited at once | Behaviour when tools fail | Not measured; on 2026-10-20 the local SearXNG answered every query with CAPTCHAs and "too many requests" (this spec's own research hit it) |
 
@@ -247,7 +247,7 @@ Each row is a family with two or three variants (wording, language, order), abou
 | S10 | Under-specified question | 5 | a question with no referent in the thread, or one with two plausible readings that the scenario lists | one short question back, or the reading stated in the first sentence |
 | S11 | Asked why it was slow | 5 | after a turn the stand-in made slow (a stalled search, a cold start), the user asks why | the cause the harness injected, or "I don't know". Any other cause (the GPU, the network, "thinking") fails |
 | S12 | Unknowable | 5 | an answer that is neither in the frozen set nor knowable (a private fact, a future figure) | says it does not know; no number or source invented |
-| S13 | Brevity against correctness | 6 | five questions, each with a fact the answer must contain, at `ultra` and `off` | the fact present at both levels, `ultra` shorter (CAVE_MODE §1.1's rule) |
+| S13 | Brevity against correctness | 6 | five questions, each with a fact the answer must contain, at `ultra` and `off` *(since cave mode was removed on 2026-10-28, `ef443182`, S13 runs two baseline scenarios, `s13-dict-iteration.json` and `s13-tcp-udp.json`, without a cave level)* | the fact present at both levels, `ultra` shorter (CAVE_MODE §1.1's rule) |
 | S14 | Language follows the question | 7 | a thread in English, then questions in Russian, Ukrainian, French | each answer in the question's language (fastText `lid.176` or `lingua`, offline); Ukrainian never answered in Russian |
 | S15 | Mixed-language message | 7 | one message mixing two languages | the message's main language or the thread's, never a third |
 | S16 | Long answer asked for | 4 | a request for a long list | finishes; no loop (§5.5); under the token cap |
@@ -273,7 +273,7 @@ Each run writes one JSONL record per scenario: the pass, plus these columns, so 
 
 ### 5.6 Where it lives
 
-`scripts/ask_evals/`, beside `cave_mode_bench`. It is not under `tests/`: it drives the real `ling` and model server, which `tests/conftest.py` forbids. Contents:
+`scripts/ask_evals/` (originally beside `cave_mode_bench`, which was removed on 2026-10-28, `ef443182`). It is not under `tests/`: it drives the real `ling` and model server, which `tests/conftest.py` forbids. Contents:
 
 - `run.py`;
 - `scenarios/<family>/<variant>/{thread.json,check.py,assets/}`;
@@ -497,9 +497,9 @@ Phase 1's code, tested with no model. The first run against the model waits unti
   - `askevals/metrics.py`: loops, language, abstain/ask/answer;
   - `askevals/gate.py`: the slot's hold on the model gate;
   - a `README.md`.
-- **The scenarios.** 31 synthetic scenarios in `scenarios/`, covering failure classes 1 to 8 (S1–S17 of §5.4). S13 runs each question at `off`, at `lite` (the shipped default for Ask, the bridges and `exec` since 2026-10-20, CAVE_MODE §11.5) and at `ultra`.
+- **The scenarios.** 31 synthetic scenarios in `scenarios/` when built (**27 since 2026-10-28**, `ef443182`, when cave mode was removed and the `-lite`/`-ultra` S13 variants and `--cave` flag were dropped, leaving `s13-dict-iteration.json` and `s13-tcp-udp.json`), covering failure classes 1 to 8 (S1–S17 of §5.4). Originally S13 ran each question at `off`, at `lite` (the shipped default for Ask, the bridges and `exec` from 2026-10-20 until 2026-10-28, CAVE_MODE §11.5) and at `ultra`.
 - **The night step.** `ASK_EVALS=1` in `scripts/swe_bench_night1.sh` runs the suite before the arms, with `--model-port 18000 --hold-gate "night N, assistant evals"`, under `timeout ASK_EVALS_LIMIT` (90 min), with the installed binary by its real path (`ASK_EVALS_LING`), so a rebuild mid-slot changes nothing. A stop runs the clean-up: SIGTERM opens the gate and removes the forwarder and its socket. The step is **off by default** (D2), and its result never fails the night.
-- **Tests.** `tests/test_ask_evals.py`, 65 tests:
+- **Tests.** `tests/test_ask_evals.py`, 65 tests (63 since 2026-10-28 after removing the cave-mode tests):
   - the metrics on known texts;
   - the stand-ins over real loopback HTTP, faults and log included;
   - every image kind;
@@ -530,7 +530,7 @@ Built after the `ask-evals` core (§11), each on its own branch, tested with no 
   - NLTK's `punkt` and `punkt_tab`.
 
   It builds a virtualenv for the scorers. The pins come from IFBench's own `uv.lock` (absl-py, langdetect, nltk, immutabledict, emoji, syllapy and their peers), because IFEval's `requirements.txt` names its four unpinned. `manifest.json` records each source, revision and licence.
-- **`scripts/industry_evals/ifeval.py`.** Each prompt is one ask-evals scenario. That means one turn of `ling exec` in the jail, with the prompt (`--prompt`, `ask` by default) and the cave level (`--cave shipped,off,ultra`) as the variables, three at a time.
+- **`scripts/industry_evals/ifeval.py`.** Each prompt is one ask-evals scenario. That means one turn of `ling exec` in the jail, with the prompt (`--prompt`, `ask` by default; `--cave shipped,off,ultra` was also a variable until cave mode was removed on 2026-10-28, `ef443182`), three at a time.
   - The answers go to each set's reference scorer in its virtualenv, with no network.
   - It reports strict and loose, prompt-level and instruction-level, per set and level, plus the count of empty answers.
   - `--hold-gate LABEL` holds the gate as the suite does, and a stop clears the hold.

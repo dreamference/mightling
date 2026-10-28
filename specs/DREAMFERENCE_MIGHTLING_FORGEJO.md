@@ -8,7 +8,7 @@
 - LAN only.
 - The pre-rewrite history goes into a private repository that a server-side rule and a test keep off GitHub.
 
-**Built (2026-10-27):** the forge of record, mirrors, `move`, backups, the GitHub mirror and the private archive (P0–P2's core); `ling web`'s `/forge/` with sign-in for paired devices (§2.2) and the phone account (§2.7). Next, in this order: the Code view, Night Shift results as pull requests, the runners and CPU gates.
+**Built (2026-10-27, `dreamference/forge/`):** the forge of record, mirrors, `move` (and `move here` / `--back`), `promote`, backups, the GitHub mirror (`ForgeGithubMirror`) and the private archive (P0–P2's core); `ling web`'s `/forge/` with sign-in for paired devices (§2.2), the Code view in `ling web` (§2.4), and the phone account (§2.7, `ForgePhone`). Next, in this order: the Code view in the desktop app, Night Shift results as pull requests, the runners and CPU gates (P3–P4).
 
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`). Machines are written with the repository's placeholders: `gx10-1a2b` (this project's main node), `node-b`, `node-c`, `node-d` (the other GB10s). Real names and addresses are never written here; nodes are resolved by name at use time ([NODE](./DREAMFERENCE_MIGHTLING_NODE.md)).
 
@@ -79,10 +79,10 @@ Clients (laptops, the AMD box, the Mac) run no forge; they use the main node's.
 
 ### 2.1 On install
 
-`ling-admin node install` (and `enable` on an existing node):
-- pulls the pinned image and writes `app.ini` (§2.3);
-- starts the container as a user unit, `mightling-forge.service`;
-- advertises the forge on mDNS as `_mightling-forge._tcp`, with the node id and `role=record` or `role=mirror` in its TXT record.
+`ling-admin node enable` (which `install.sh` runs on a node; `ling-admin forge on` directly):
+- pulls the pinned image (`codeberg.org/forgejo/forgejo:15.0.11-rootless` by digest, `dreamference/forge/forge_container.py`) and writes `app.ini` (§2.3, `ForgeAppIni`);
+- starts the container as a user unit, `mightling-forge.service` (`ForgeService`), alongside `mightling-forge-tick.timer` (10 min), `mightling-forge-backup.timer` (06:30, record only), `mightling-forge-check.timer` (monthly `restore --check`) and `mightling-forge-mirror.path`;
+- advertises the forge on mDNS as `_mightling-forge._tcp`, with the node id and `role=record` or `role=mirror` in its TXT record (`NodeServiceFile.render(forge=(role, 3200))`).
 
 On a mirror node, it finds the forge of record by that record, creates a `mirror` account there with a read token, and sets up pull mirrors of every non-private repository (every 10 minutes, plus on a webhook from the record).
 
@@ -106,7 +106,7 @@ On a mirror node, it finds the forge of record by that record, creates a `mirror
 - **Access:** `DISABLE_REGISTRATION = true`, `REQUIRE_SIGNIN_VIEW = true`, `DEFAULT_PRIVATE = private`.
 - **Reverse-proxy sign-in:** off; `ling web` signs in with the form and keeps the cookies (§2.2).
 - **Updates and mail off:** `[cron.update_checker] ENABLED = false`; mail off; no telemetry (Forgejo has none).
-- **Mirrors:** `[mirror] DEFAULT_INTERVAL = 10m`. Push mirrors are allowed only for repositories that aren't private (§5.3).
+- **Mirrors:** `[mirror] ENABLED = false` on the forge of record (it needs no pull mirror, and Forgejo 15.0.11's API accepts a push mirror even with `DISABLE_NEW_PUSH = true`, so `[mirror]` is disabled there and every tick deletes any push mirror it finds; `ForgeAppIni`, `ForgeRepositories.remove_push_mirrors`); `[mirror] DEFAULT_INTERVAL = 10m` on mirror nodes. Push mirrors to GitHub run through the host job `ForgeGithubMirror` only for repositories that aren't private (§3.2, §5.3).
 - **Actions:** `[actions] ENABLED = true` on the forge of record.
 - **Secrets:** generated at install into the data folder (0600). They never enter a repository, a log or a memory note.
 
@@ -122,7 +122,7 @@ On a mirror node, it finds the forge of record by that record, creates a `mirror
 ### 2.5 The off switch
 
 - **`ling-admin forge off`** stops the unit, removes the mDNS record and keeps the data. **`on`** brings it back.
-- **The setting** is `[forge] enabled = false` in the node's config (`~/.config/dreamference/config.toml`, never the repository), with `DREAMFERENCE_FORGE=0` as an environment override. `node install --no-forge` installs without it.
+- **The setting** is `[forge] enabled = false` in the node's config (`~/.config/dreamference/config.toml`, never the repository), with `DREAMFERENCE_FORGE=0` as an environment override. `ling-admin node enable --no-forge` skips setting it up.
 - **Off on the main node** means the mirrors stop syncing and show "forge of record is off". Nothing is deleted.
 - **At `/airgapped on`:** the forge keeps running on the LAN, but its outbound mirrors to GitHub stop (§5.4).
 
@@ -163,7 +163,7 @@ Every mirror node pull-mirrors every non-private repository from the forge of re
 ### 3.2 Everything to GitHub (this project's fleet, O3)
 
 - **The forge is the origin; GitHub is its public copy.** Agents push only to the forge, and the forge's push mirror sends every branch and tag to GitHub within a minute (push-on-commit plus a 10-minute sweep). Abandoned branches go too, to maximise the public commit count.
-- **Nothing is deleted on GitHub.** The mirror pushes without pruning: forge-side branch deletions don't reach GitHub. That keeps abandoned branches and their commits public, and keeps GitHub-only refs alive. Forgejo's push mirror uses `--mirror`, which prunes, so this project's mirror is a small forge Actions job (`.forgejo/workflows/github-mirror.yml`) that runs `git push github 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'` without `--prune` on every push, triggered by the forge's push event.
+- **Nothing is deleted on GitHub.** The mirror pushes without pruning: forge-side branch deletions don't reach GitHub. That keeps abandoned branches and their commits public, and keeps GitHub-only refs alive. Forgejo's push mirror uses `--mirror`, which prunes, so as built (`dreamference/forge/forge_github_mirror.py`, `ForgeGithubMirror`) this project's mirror is a host job on the record (`ling-admin forge github-mirror --run`, triggered within seconds by `mightling-forge-mirror.path` when a push's `post-receive` hook touches `data/mightling/pushed`, plus the 10-minute `mightling-forge-tick.timer` sweep) that fetches both sides into `~/.local/share/dreamference/forge/github-work/`, re-runs the anonymity check on every commit GitHub lacks, and pushes new or ahead refs one at a time without `--force` or `--prune` (originally sketched as a forge Actions job `.forgejo/workflows/github-mirror.yml`). Credentials come from `gh auth token --user <account>` via a git credential helper at push time.
 - **Refs GitHub creates itself:** release tags made by `release.yml`, and the merge of a release branch back into `main`. Releases are tagged on the forge first, and `release.yml` takes an existing tag instead of creating one. A ref that still appears only on GitHub (for example a hand-made tag) is fetched back into the forge by a 10-minute pull of GitHub's tags, so the two never diverge silently.
 - **Every push is checked before it exists on the forge.** A server-side `pre-receive` hook on the forge of record runs the anonymity check (`tests/test_anonymity.py`'s checks against the denylist kept on the main node, never in a repository) on every ref of every push to a non-private repository. A failing push is refused, with the matching file and line, so a leak never enters the forge, and therefore never reaches GitHub.
 - **The mirror re-checks every ref before sending,** as a second layer, and stops the whole mirror run on any failure, with an issue on the forge. The existing client-side pre-push guard stays on the developer machines.
@@ -283,16 +283,19 @@ The move never deletes data on either node. It takes minutes for repositories th
 
 ## 7. Commands
 
-`ling-admin forge`, beside `node`; other nodes are reached over the existing SSH forced command:
-- `status`: role, mirror freshness, runner health, last backup, GitHub mirror state;
+`ling-admin forge` (`dreamference/forge/forge_command.py`), beside `node`; other nodes are reached over the existing SSH forced command (`dreamference/forge/forge_serve.py`):
+- `status`: role, repositories, mirror freshness, last backup, GitHub mirror state, storage;
 - `on` / `off` (§2.5);
-- `move <node>` / `move --back` (§6.1), and `promote <node>` (§6.2);
-- `backup`, and `restore --check`;
+- `move [<node>]` / `move here` / `move --back` (§6.1, `ForgeMove`), and `promote [<node>]` (§6.2);
+- `backup`, and `restore --check` (`ForgeBackup`);
 - `key add <file>`;
-- `github-mirror --all-branches | --off` (this project's fleet: §3.2);
-- `password --show`, which prints the owner's password again, on the node's own terminal only.
+- `github-mirror --all-branches | --off | --run [--account <account>]` (this project's fleet: §3.2, `ForgeGithubMirror`);
+- `password --show`, which prints the owner's password again, on the node's own terminal only;
+- `import <source> <name> [--anonymity full|denylist|off] [--exempt <path>…] [--mirror]` and `archive <name> <bundles…>` (`ForgeRepositories`);
+- `mirrors sync` (`ForgeMirrors`: hands the record's mirror plan to every paired node);
+- `run` and `tick` (used by `mightling-forge.service` and `mightling-forge-tick.timer`).
 
-`ling-admin node install|enable` sets the forge up; `node install --no-forge` skips it. Agents use plain git (`git push forge <team>/<topic>`) and the Forgejo API with a team token for statuses and pull requests. AGENTS.md gets at most two lines pointing to `docs/dev/forge.md`.
+`ling-admin node enable` sets the forge up; `ling-admin node enable --no-forge` skips it. Agents use plain git (`git push forge <team>/<topic>`) and the Forgejo API with a team token for statuses and pull requests. AGENTS.md gets at most two lines pointing to `docs/dev/forge.md`.
 
 ## 8. Phases (building waits for the owner's go)
 

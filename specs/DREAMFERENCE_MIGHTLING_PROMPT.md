@@ -1,10 +1,10 @@
 # Mightling Prompts — `/prompt`
 
 **Status:** Phase 1 implemented on 2026-10-03 (§13 records what was built and where it departs from the design); Phase 0 is built in part (§6.1 item 1, the writable `/testbed`, fixed in the runner on 2026-10-03), Phase 2 is not built, and the runs of §6.2 have not been made. §1 is read from the pinned Codex source and checked against the requests `ling` actually sends (a stub endpoint recorded them; no model was involved); §6.4 is a small pilot against the live model on 2026-10-02. §12 separates what was checked from what is assumed.
-**Goal:** `ling` can run under more than one system prompt, chosen by name. Two ship: `default`, today's prompt byte for byte, and `high-swe`, a prompt written to resolve as many SWE-bench tasks as the local model can. `/prompt` shows and switches them.
+**Goal:** `ling` can run under more than one system prompt, chosen by name. Six built-in prompts now ship (`default`, `offline`, `high-swe`, `ask`, `chat`, `chat-work`; §13–§14): `default` is today's prompt byte for byte, and `high-swe` is a prompt written to resolve as many SWE-bench tasks as the local model can. `/prompt` shows and switches them.
 **Builds on:**
 - the launcher, which already composes the system prompt and writes it to the model catalog (`ling-rs/src/lib.rs`, `base_instructions()` and `model_catalog()`);
-- the configuration chain `/cavemode` and `/airgapped` use (a `DREAMFERENCE_*` variable, then the TOML file, then the built-in default), and their slash-command pattern (MIGHTLING_CAVE_MODE (spec removed 2026-10-28), [MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md));
+- the configuration chain `/cavemode` *(removed 2026-10-28, `ef443182`)* and `/airgapped` use (a `DREAMFERENCE_*` variable, then the TOML file, then the built-in default), and their slash-command pattern (MIGHTLING_CAVE_MODE (spec removed 2026-10-28), [MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md));
 - `ling-admin swe-bench` ([MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md)), which is how a prompt is measured, and its first runs, which are where `high-swe` comes from.
 
 **Three things to know before reading further:**
@@ -94,12 +94,16 @@ A **prompt** has a name, a core text, and the list of launcher blocks appended t
 | Name | Core | Blocks | For |
 |---|---|---|---|
 | `default` | Codex's bundled template, renamed (today's `base_instructions()`) | web, email, code | everyday interactive work. **The default.** |
-| `high-swe` | Appendix A, 4,229 chars | code | resolving a defined task in a repository: unattended runs, Night Shift, the benchmark |
+| `offline` *(added 2026-10-10)* | Codex's bundled template, renamed (`Core::Codex`) | code | sessions with no network, where web and email blocks would name commands that cannot work |
+| `high-swe` | Appendix A, 4,229 chars (`ling-rs/prompts/high-swe.md`, v2: 4,381 chars) | code | resolving a defined task in a repository: unattended runs, Night Shift, the benchmark |
+| `ask` *(added 2026-10-07)* | `ling-rs/prompts/ask.md` | web, email, code | questions and research in a scratch folder with cited sources (`ling web` / desktop Ask threads; §14) |
+| `chat` *(added later)* | `ling-rs/prompts/ask.md` + `ling-rs/prompts/chat.md` (`Core::Text`) | web, email, code | phone messenger Ask chats (short plain-text replies, no Markdown tables) |
+| `chat-work` *(added later)* | Codex's bundled template + `ling-rs/prompts/chat-work.md` (`Core::CodexWith`) | web, email, code | repository coding tasks started from a phone messenger (`!work`) |
 
 - **`default` is byte-identical to what `ling` sends today**, and a test holds it there (§10). Choosing nothing changes nothing.
 - **`high-swe` leaves web and email out on purpose.** A benchmark container has no network, a block that says "do not say you cannot browse" is false there, and each block is text the model reads on every task for a capability a repository fix rarely needs. A session that needs both the method and the web runs `default`.
-- **Custom prompts.** A file `$CODEX_HOME/system-prompts/<name>.md` is a prompt of that name. Its text is the whole core. Its first line may be `<!-- ling: blocks=web,email,code -->` (any subset); without it no block is appended. Names are lowercase letters, digits and hyphens; `default` and `high-swe` cannot be shadowed. This is also how a candidate text is benchmarked without a rebuild (§6).
-- **Where prompts cannot come from.** Never from the repository, and never from text the model wrote: `$CODEX_HOME` is outside the workspace-write sandbox's writable folders (only `skills/` was opened, in `77b9471`), and a test keeps `system-prompts/` out of them. A repository's `dreamference.toml` may *name* an installed prompt (§4.1), as it may name a cave level; it cannot supply one.
+- **Custom prompts.** A file `$CODEX_HOME/system-prompts/<name>.md` is a prompt of that name. Its text is the whole core. Its first line may be `<!-- ling: blocks=web,email,code -->` (any subset); without it no block is appended. Names are lowercase letters, digits and hyphens; built-in names (`default`, `offline`, `high-swe`, `ask`, `chat`, `chat-work`) cannot be shadowed. This is also how a candidate text is benchmarked without a rebuild (§6).
+- **Where prompts cannot come from.** Never from the repository, and never from text the model wrote: `$CODEX_HOME` is outside the workspace-write sandbox's writable folders (only `skills/` was opened, in `77b9471`), and a test keeps `system-prompts/` out of them. A repository's `dreamference.toml` may *name* an installed prompt (§4.1), as it could name a cave level (before cave mode was removed on 2026-10-28, `ef443182`); it cannot supply one.
 
 ---
 
@@ -116,7 +120,7 @@ A **prompt** has a name, a core text, and the list of launcher blocks appended t
 
 The launcher intercepts `prompt` as it does `night` and `node`, before Codex parses the command line; it never reaches Codex, and it needs no model server. The price is the one those two already pay: a session cannot be started with the single word `prompt` as its message.
 
-### 3.2 In the TUI (Phase 2, patch `0020`)
+### 3.2 In the TUI (Phase 2, not built; number `0020` was later taken by `0020-flat-mcp-tools.patch`)
 
 | Form | Effect |
 |---|---|
@@ -163,7 +167,7 @@ The launcher already writes `$CODEX_HOME/model_catalog.json` at every launch and
 
 - **`ling-rs/src/prompt.rs`**: the built-in cores (`include_str!` of `ling-rs/prompts/high-swe.md`; `default` stays the bundled template), the custom-prompt loader, the tier resolution of §4.1, `compose(name)` (core plus its blocks), and the `ling prompt` subcommand.
 - **For `default`: nothing changes.** `model_catalog.json` is written as today, by the same code path.
-- **`DreamferenceConfig.mightling_prompt`** on the Python side, with the same tiers, as `mightling_cave_mode` has: `save_config()` writes the flat keys it knows, so a key it does not know would be dropped from the file by `ling-admin main-model set`.
+- **`DreamferenceConfig.mightling_prompt`** on the Python side, with the same tiers (as `mightling_cave_mode` had before cave mode was removed on 2026-10-28, `ef443182`): `save_config()` writes the flat keys it knows, so a key it does not know would be dropped from the file by `ling-admin main-model set`.
 - **For any other prompt:** the launcher writes `$CODEX_HOME/model_catalog.<name>.json`, identical except for `base_instructions`, and injects `-c model_catalog_json="<that file>"`. The setting is per process, so a `high-swe` Night Shift task and a `default` interactive session started in the same second cannot read each other's catalog, which a single shared file would allow.
 - **Not `model_instructions_file`.** It works (§1.2), but as an override it also replaces the prompt of every session *resumed* by that launch, which breaks the rule of §3.3. The catalog route gives a new session its prompt and leaves resumed ones alone, with no code of ours deciding it.
 
@@ -183,7 +187,7 @@ Three pieces, the first two with no dependency beyond the standard library, as `
 
 ### 4.4 Budget
 
-The patch series is 17 patches and 31,175 bytes under a 31,500-byte cap (at `fa9a7a9`). Phase 1 costs nothing. Phase 2's patch `0020-prompt-command` is estimated at 3.0 KB: the seven TUI hunks cost 2.1 KB for `/night`, and the core hook is two hunks (the manifest line and the call). The cap is raised to 34,500 in the same commit, with the test's comment saying why, as each earlier hook did. If another patch lands first, the numbers move and the rule does not.
+When written (at `fa9a7a9`), the patch series was 17 patches and 31,175 bytes under a 31,500-byte cap (today it is 32 patches and 57,571 bytes under a 64,000-byte cap, with `0020`–`0035` taken by later hooks). Phase 1 costs nothing. Phase 2's `/prompt` patch was estimated at 3.0 KB: the seven TUI hunks cost 2.1 KB for `/night`, and the core hook is two hunks (the manifest line and the call). The cap is raised in the same commit, with the test's comment saying why, as each earlier hook did. If another patch lands first, the numbers move and the rule does not.
 
 ---
 
@@ -221,7 +225,9 @@ A benchmark report under `high-swe` should be read class by class against this t
 - **Web and email blocks.** Risk: a `high-swe` session cannot look up documentation. §2 says why this is still the default for the prompt, and it is an open question (§11).
 - **Review mode, plan requests, "ask when ambiguous".** Risk: `high-swe` always acts. Published work on action bias (FixedBench) found agents change code in 35–65% of tasks that needed no change, and that telling them to reproduce first reduces it. Step 3 is that instruction; the text does not go further and tell the model it may decline, because on SWE-bench every task needs a change.
 
-### 5.4 Cave mode
+### 5.4 Cave mode *(removed 2026-10-28, `ef443182`)*
+
+*(Historical note: cave mode — `ling-rs/src/cave.rs`, `/cavemode`, patch `0017`, `DREAMFERENCE_MIGHTLING_CAVE_MODE` and `mightling_cave_mode` — was removed on 2026-10-28, commit `ef443182`. The section below records how it interacted with `high-swe` during the October 2026 pilots.)*
 
 Cave mode is a separate switch and stays one. But `ultra`, the default until 2026-10-20 (`lite` since, `full` in the TUI; CAVE_MODE §11), tells the model "Between tool calls, write nothing", and `high-swe` asks for a written diagnosis before the first edit. The cave text arrives later in the context than the system prompt.
 
@@ -524,7 +530,7 @@ Say what was wrong, which files you changed, and how you verified it (the comman
 | sympy-13877 | 0 / 1 | 0 | `matrices/matrices.py`, `utilities/randtest.py` | `core/exprtools.py` (timed out) |
 | sympy-17318 | 0 / 1 | 0 | `simplify/radsimp.py`, `simplify/sqrtdenest.py` | `radsimp.py`, a test file, `probe.txt` |
 
-## 14. A third built-in prompt, `ask` (2026-10-07)
+## 14. Additional built-in prompts: `ask`, `chat` and `chat-work`
 
-`ling prompt list` now shows three built-in prompts: `default`, `high-swe` and **`ask`** (`ling-rs/prompts/ask.md`, all three blocks: web, email, code), written for questions and research in a scratch folder with cited sources. It is what the web UI's Ask threads use: the UI asks for it by name and `ling web`'s bridge policy sets it from `ling prompt show ask --composed` ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §3.2). It is chosen like any other (`ling prompt use ask`, `DREAMFERENCE_MIGHTLING_PROMPT=ask`). Refine mode's two texts are in `ling-rs/prompts/refine.md` but are not a named prompt: `refine.rs` composes them around the task ([MIGHTLING_REFINE](./DREAMFERENCE_MIGHTLING_REFINE.md)).
+`ling prompt list` now shows six built-in prompts (`ling-rs/src/prompt.rs`): `default`, `offline` (§13), `high-swe`, **`ask`** (`ling-rs/prompts/ask.md`, all three blocks: web, email, code; added 2026-10-07), written for questions and research in a scratch folder with cited sources, **`chat`** (`ling-rs/prompts/ask.md` plus `ling-rs/prompts/chat.md`, `Core::Text`, all three blocks), for phone messenger Ask chats, and **`chat-work`** (`Core::CodexWith`, `default` plus `ling-rs/prompts/chat-work.md`, all three blocks), for repository coding tasks started from a phone messenger (`!work`). `ask` is what the web UI's and desktop app's Ask threads use: the UI asks for it by name and `ling web`'s bridge policy sets it from `ling prompt show ask --composed` ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §3.2). Each is chosen like any other (`ling prompt use <name>`, `DREAMFERENCE_MIGHTLING_PROMPT=<name>`). Refine mode's two texts are in `ling-rs/prompts/refine.md` but are not a named prompt: `refine.rs` composes them around the task ([MIGHTLING_REFINE](./DREAMFERENCE_MIGHTLING_REFINE.md)).
 

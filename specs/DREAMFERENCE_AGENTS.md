@@ -1,8 +1,8 @@
 # Mightling Agent Runtimes & Integration
 
-> **Version:** 1.5.1
+> **Version:** 1.7.2
 > **Subject:** the agent runners: Codex (`ling`, default), Cline, Continue, OpenHands.
-> **Checked against the code:** 2026-10-09 (`dreamference/runner/`, `dreamference/config/dreamference_config.py`)
+> **Checked against the code:** 2026-10-28 (`dreamference/runner/`, `dreamference/config/dreamference_config.py`)
 
 ---
 
@@ -41,7 +41,7 @@ The runner is chosen by `--agent`, then `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUN
 
 - **Package:** `dreamference/runner/codex_runner.py`, `codex_installer.py`, `codex_branded_builder.py`.
 - **Runtime:** the Mightling-branded Codex build (`~/.local/share/dreamference/mightling/bin/ling`, linked at `~/.local/bin/ling`), built from the `codex/` submodule plus `codex-patches/`. It never uses an upstream `codex` from PATH.
-- **Session:** `CodexRunner.run_session()` builds `ling` if needed and runs `ling [args…] ["PROMPT"]`, passing `DREAMFERENCE_VLLM_HOST` along. With `--debug` it sets `RUST_LOG`.
+- **Session:** `CodexRunner.run_session()` builds `ling` if needed and runs `ling [args…] ["PROMPT"]`, passing `DREAMFERENCE_VLLM_HOST`, `DREAMFERENCE_MIGHTLING_GMAIL` and, when `compat` (`--compat`) is given, `DREAMFERENCE_MIGHTLING_COMPAT` along. With `--debug` it sets `RUST_LOG`.
 - **Everything else happens in the launcher `ling-rs/`:**
   - waiting for vLLM;
   - the model catalog and `config.toml` in `$CODEX_HOME`, which `ling` sets to `~/.mightling` (never upstream's `~/.codex`);
@@ -159,11 +159,12 @@ The prompt is unused.
 
 `VLLMReadinessWaiter.wait_for_vllm(poll_interval=1.0, max_wait=600.0)` (`dreamference/runner/vllm_readiness_waiter.py`), used by Cline, Continue and OpenHands:
 
-1. It prints `⏳ Waiting for local vLLM server at {vllm_host} to become available...`.
-2. Every second it checks `GET /v1/models` (1 s timeout) and prints a dot.
-3. Once healthy, it sends a silent `max_tokens=1` chat completion naming the served model id. This proves that the engine can generate, not just list models; it returns success only when that request succeeds.
-4. After 600 s it prints `❌ Timed out …` and `💡 Start vLLM in another terminal via: ling-admin server start`, and fails.
-5. Ctrl+C cancels without starting the agent.
+1. Before polling, it probes `ModelGate.probe()` (`dreamference/vllm_server/model_gate.py`). If the benchmark model gate is `closed` (refusing requests while a SWE-bench or overnight benchmark run holds the server), it prints the refusal with `ling-admin night pause` / `ling-admin swe-bench stop` and returns `False` immediately without waiting.
+2. Otherwise it prints `⏳ Waiting for local vLLM server at {vllm_host} to become available...`.
+3. Every second it checks `GET /v1/models` (1 s timeout) and prints a dot.
+4. Once healthy, it sends a silent `max_tokens=1` chat completion naming the served model id. This proves that the engine can generate, not just list models; it returns success only when that request succeeds.
+5. After 600 s it prints `❌ Timed out …` and `💡 Start vLLM in another terminal via: ling-admin server start`, and fails.
+6. Ctrl+C cancels without starting the agent.
 
 **It does not launch vLLM.** Nothing downloads or starts a server from here. Start the server with `ling-admin server start`, which is documented in `DREAMFERENCE_INFERENCE.md`.
 
@@ -172,12 +173,12 @@ The prompt is unused.
 ## 7. vLLM-Side Function Calling
 
 
-`server start` passes `--enable-auto-tool-choice` plus the parser `VLLMServerManager.resolve_tool_call_parser()` resolves:
+`server start` passes `--enable-auto-tool-choice` plus the parser `VLLMServerManager.resolve_tool_call_parser(model, requested=None, engine=None)` resolves:
 1. an explicit `--tool-call-parser` (`auto` counts as unset);
-2. the model's `launch_overrides["tool_call_parser"]`;
+2. the model's `get_model_launch_overrides(model, engine)["tool_call_parser"]` (from the selected engine's recipe under `engine_recipes[engine]` when given, else `launch_overrides`);
 3. a guess from the name: `mistral` → `mistral`, otherwise `hermes`.
 
-The parser is not a per-family constant. Qwen 2.5 emits Hermes-style `<tool_call>` blocks, while Qwen 3.5/3.6 emit XML. The model `qwen3.8-27b-nvfp4-dflash2` (served by SGLang, the only one since 2026-10-07) resolves to `qwen3_coder` with reasoning parser `qwen3`; the removed 122B and 35B vLLM recipes used `qwen3_xml`, and a Qwen 2.5 Coder name outside the matrix resolves to `hermes`.
+The parser is not a per-family constant. Qwen 2.5 emits Hermes-style `<tool_call>` blocks, while Qwen 3.5/3.6 emit XML. The default model `qwen3.8-27b-nvfp4-dflash2` (served by SGLang by default, or `ling-serve` with `--engine ling` since 1.7.2; the matrix also holds two trial candidates, `qwen3.8-27b-minima-nvfp4-dflash2` and `qwen3.8-flash-next-nvfp4-mtp`) resolves to `qwen3_coder` with reasoning parser `qwen3`; the removed 122B and 35B vLLM recipes used `qwen3_xml`, and a Qwen 2.5 Coder name outside the matrix resolves to `hermes`.
 
 
 ## 8. Failure Modes

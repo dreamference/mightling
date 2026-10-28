@@ -2,7 +2,7 @@
 
 **Status:** proposed, **nothing built** (revised 2026-10-03 for the Qwen3.8 / SGLang stack, brought onto the renamed tree on 2026-10-12 with the draft depth the registry has run since 2026-10-09; the first version, written for the 122B on vLLM, is in git history). Published facts are cited in §11 with the date read; numbers measured on this machine say so; everything else is marked *(unverified)*.
 **Scheduled (the owner's decision, 2026-10-12):** part of the plan for faster decode. Phase 0 (§3, read-only: acceptance per class from `/metrics`) is built first; training (§4–§5) needs the overnight window with the model server stopped, so it follows the benchmark nights. A promoted drafter speeds up production SGLang directly, and ling-engine's M5 trial then serves it under the engine's exact verify (ling-engine `specs/DREAMFERENCE_LING_ENGINE_BACKLOG.md` §19.20).
-**Target:** the speculative drafter of the default model, `qwen3.8-27b-nvfp4-dflash2`: target `RadixArk/Qwen3.8-27B-NVFP4` on SGLang (`lmsysorg/sglang` v0.5.19, pinned by digest), drafter `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` (method `DFLASH`, **12** draft tokens, `quantization: modelopt_fp4`), all pinned by revision in the model matrix.
+**Target:** the speculative drafter of the default model, `qwen3.8-27b-nvfp4-dflash2`: target `RadixArk/Qwen3.8-27B-NVFP4` on SGLang (`lmsysorg/sglang` v0.5.21 since 2026-10-14, was v0.5.19 until 1.6.1, pinned by digest; `ling-serve` opt-in since 1.7.2), drafter `dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch` since 1.7.2 (searched-scale NVFP4 of `incoai/Qwen3.8-27B-DFlash2`, was `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` until 1.7.2; method `DFLASH`, **12** draft tokens, `quantization: modelopt_fp4`), all pinned by revision in the model matrix (`dreamference/hardware/model_matrix_registry.py`).
 **Builds on:**
 - the registry's `speculative_config` and `resolve_speculative_config()` ([INFERENCE](./DREAMFERENCE_INFERENCE.md));
 - SGLang's `/metrics` (`--enable-metrics` is in the recipe);
@@ -115,7 +115,7 @@ Compute is not the constraint *(estimate)*: ~6 × 2B FLOPs per trained token is 
 
 `~/.cache/dreamference/drafters/<id>/`: the exported BF16 weights (loadable by SGLang as the speculative draft model), and `meta.json` (target and revision, base drafter and revision, data size, class mix, exclusions, steps, time, peak memory).
 
-**Served as BF16 first.** The NVFP4 calibration of the current drafter (round-to-nearest plus activation calibration on 460 on-policy conversations, scales `amax / (6·448)`, ModelOpt layout) saved 2.2 GB of VRAM and recovered BF16's acceptance. A tuned BF16 drafter costs those 2.2 GB of KV pool (today's pool is ~157K tokens beside the sidecars; the size of the loss is *(unverified)*); re-quantizing a tuned drafter the same way is Phase 3, once a BF16 candidate has shown a gain.
+**Served as BF16 first.** The NVFP4 calibration of the original drafter (`maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`: round-to-nearest plus activation calibration on 460 on-policy conversations, scales `amax / (6·448)`, ModelOpt layout; replaced in 1.7.2 by `dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch`, a per-channel searched-scale NVFP4 quantization of `incoai/Qwen3.8-27B-DFlash2`) saved 2.2 GB of VRAM and recovered BF16's acceptance. A tuned BF16 drafter costs those 2.2 GB of KV pool (today's pool is ~157K tokens beside the sidecars; the size of the loss is *(unverified)*); re-quantizing a tuned drafter the same way is Phase 3, once a BF16 candidate has shown a gain.
 
 ---
 
@@ -125,7 +125,7 @@ Compute is not the constraint *(estimate)*: ~6 × 2B FLOPs per trained token is 
 
 `drafter evaluate <id>` starts the server with the candidate and measures, one request at a time at temperature 0: the fixed probes and up to 200 held-out session prompts (never SWE-bench ones). It repeats with the current drafter. Per run: accept length, accept rate, verify calls, output tok/s, per class.
 
-**Swapping the drafter.** A restart with the candidate named in the speculative config is the baseline route. SGLang merged disk/IPC weight updates for DFlash draft runners on 2026-09-24 (sgl-project/sglang#40777), with the note that DFlash weight updates have no end-to-end coverage; whether the pinned v0.5.19 image contains it is *(unverified)*. A hot swap is Phase 3, behind a live test.
+**Swapping the drafter.** A restart with the candidate named in the speculative config is the baseline route. SGLang merged disk/IPC weight updates for DFlash draft runners on 2026-09-24 (sgl-project/sglang#40777), with the note that DFlash weight updates have no end-to-end coverage; whether the pinned SGLang image (v0.5.21 since 2026-10-14; v0.5.19 when written) contains it is *(unverified)*. A hot swap is Phase 3, behind a live test.
 
 ### 6.2 Correctness check
 

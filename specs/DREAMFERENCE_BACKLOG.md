@@ -8,7 +8,7 @@
 - [together-ai-survey-2026-10-13](./research/together-ai-survey-2026-10-13.md) (items 1–6);
 - [compaction-survey-2026-10-13](./research/compaction-survey-2026-10-13.md) (items 7–13).
 
-The owner approved items 1–13 on 2026-10-13 and item 14 on 2026-10-14. The surveys' engine items are being added to ling-engine's backlog separately: the drafter's NVFP4 scales re-quantized, tool-wait-aware eviction, and state saved at tool-output boundaries.
+The owner approved items 1–13 on 2026-10-13 and item 14 on 2026-10-14. The surveys' engine items are being added to ling-engine's backlog separately: the drafter's NVFP4 scales re-quantized (shipped in 1.7.2 as `dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch`, `dreamference/hardware/model_matrix_registry.py`), tool-wait-aware eviction, and state saved at tool-output boundaries.
 
 | # | Item | Area | Status |
 |---|---|---|---|

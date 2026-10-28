@@ -1,6 +1,6 @@
 # Mightling Node — splitting Mightling into a client and `mightling-node`
 
-**Status:** implemented in part on 2026-10-02, on one GB10 (a second one was paired on 2026-10-08, §18.10), and Parts 2 and 3 completed on 2026-10-03 except for sending from a client (§18.8). Part 1: the node side (`ling-admin node enable|disable|status|id`), the launcher's resolution tiers and `ling node`, and `ling-search` on the node's SearXNG; `ling-app`'s forwarder was built too, and removed on 2026-10-08 (`3febddb`, §7). Part 2: the SSH pairing, `node list|add|remove|status|set|start|stop|sync-model`, and replicas as extra model servers for Night Shift and SWE-bench. Part 3: script jobs, `node run|jobs|logs|cancel|fetch` with `--setup`, `--out` and `--bind`, pruning, and night tasks worked by another node (`/night add --on`). Since: `/node` in the TUI (2026-10-07, §18.9), `node provision|prepare|askpass` ([MIGHTLING_FLEET](./DREAMFERENCE_MIGHTLING_FLEET.md), merged 2026-10-08, `249c262`), and the Onyx web chat retired on 2026-10-18 (`eb42c76`, `d43a926`): the advertised web UI is `ling web` on 3100. **§18 records what was built, what was measured and what was not;** where it differs from the sections above, §18 and §15.1 win. Checked against the code of 1.6.4 on 2026-10-19. Two machines have been paired since 2026-10-08 and the second was installed with `node enable --yes` (§18.10); jobs and `/night add --on` between them have still not been run, and a Night Shift lane on the second machine ran once, on the night of 2026-10-09, and was lost to a DHCP move (§13.2). Clients for x86-64 Linux and macOS have been built since 2026-10-07 (§8.4) and for Windows as a preview since 1.5.1.
+**Status:** implemented in part on 2026-10-02, on one GB10 (a second one was paired on 2026-10-08, §18.10), and Parts 2 and 3 completed on 2026-10-03 except for sending from a client (§18.8). Part 1: the node side (`ling-admin node enable|disable|status|id`), the launcher's resolution tiers and `ling node`, and `ling-search` on the node's SearXNG; `ling-app`'s forwarder was built too, and removed on 2026-10-08 (`3febddb`, §7). Part 2: the SSH pairing, `node list|add|remove|status|set|start|stop|sync-model`, and replicas as extra model servers for Night Shift and SWE-bench. Part 3: script jobs, `node run|jobs|logs|cancel|fetch` with `--setup`, `--out` and `--bind`, pruning, and night tasks worked by another node (`/night add --on`). Since: `/node` in the TUI (2026-10-07, §18.9), `node provision|prepare|askpass` ([MIGHTLING_FLEET](./DREAMFERENCE_MIGHTLING_FLEET.md), merged 2026-10-08, `249c262`), and the Onyx web chat retired on 2026-10-18 (`eb42c76`, `d43a926`): the advertised web UI is `ling web` on 3100. **§18 records what was built, what was measured and what was not;** where it differs from the sections above, §18 and §15.1 win. Checked against the code of 1.7.2 on 2026-10-28 (1.6.4 on 2026-10-19). Two machines have been paired since 2026-10-08 and the second was installed with `node enable --yes` (§18.10); jobs and `/night add --on` between them have still not been run, and a Night Shift lane on the second machine ran once, on the night of 2026-10-09, and was lost to a DHCP move (§13.2). Clients for x86-64 Linux and macOS have been built since 2026-10-07 (§8.4) and for Windows as a preview since 1.5.1.
 **Target:** the GB10 (DGX Spark) as the server, and Ubuntu, macOS and Windows machines on the same local network as clients.
 **Builds on:**
 - the launcher in `ling-rs/` and its `vllm_host()` tiers ([MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md));
@@ -140,7 +140,7 @@ Nothing that changes from minute to minute is advertised. Which model is loaded 
 
 ### 5.2 The node side: a static Avahi service file
 
-`ling-admin node enable [--no-web] [--yes]` writes `/etc/avahi/services/mightling-node.service` (Avahi watches that directory and publishes the file without a restart), sets `node_advertise`, and re-publishes the web UI and SearXNG on every interface. `node disable` removes the file and restores the loopback binds. `node status` prints the file's records, the binds, and what a browse of the local network returns.
+`ling-admin node enable [--no-web] [--no-forge] [--yes]` writes `/etc/avahi/services/mightling-node.service` (Avahi watches that directory and publishes the file without a restart), sets `node_advertise`, re-publishes the web UI and SearXNG on every interface, and sets up the node's Forgejo forge unless `--no-forge` ([MIGHTLING_FORGEJO](./DREAMFERENCE_MIGHTLING_FORGEJO.md)). `node disable` removes the file and restores the loopback binds. `node status` prints the file's records, the binds, and what a browse of the local network returns.
 
 - **Why a file and not a process.** A file needs no running publisher, so the node is advertised after a reboot with nobody logged in, like the model containers. A user unit holding the registration would need lingering, which is off here (§2).
 - **Why Avahi and not a responder of our own.** The node already runs one. A second responder on the same host competes for port 5353 and for the host name.
@@ -357,7 +357,7 @@ One entry point per system, and the machine decides the role:
 
 | Feature | Remote client | Why, when not |
 |---|---|---|
-| `ling`, `ling exec`, resume, `/cavemode`, `/usage` | yes | |
+| `ling`, `ling exec`, resume, `/cavemode` *(removed 2026-10-28, `ef443182`)*, `/usage` | yes | |
 | `ling-search` | yes, through the node's SearXNG | |
 | `ling-fetch` | yes, from the client | |
 | `ling-code` | yes, with the per-system limits of §8.3 | |
@@ -834,9 +834,9 @@ Not yet run between the two: jobs (`node run`), lanes for Night Shift or SWE-ben
 
 A node's address is exempt from any `HTTP_PROXY` the user's shell carries (EGRESS §11): `ling` adds the configured host and the remembered node's address to `NO_PROXY` before Codex starts, and Night Shift adds a lane's host to each task's environment. A node found by a browse for the first time is not in it for that first session, because the variable can only be set before any thread exists and the browse comes later; the launcher's own requests to it skip proxies regardless, and from the next start it is the remembered node and exempt.
 
-### 18.12 Added since 2026-10-08 (recorded 2026-10-19, against 1.6.4)
+### 18.12 Added since 2026-10-08 (recorded 2026-10-19 against 1.6.4; updated 2026-10-28 against 1.7.2)
 
-The `node` group as the code has it (`dreamference/cli/dreamference_cli_controller.py`): `enable [--no-web] [--yes]`, `disable`, `status [<name>]`, `id`, `list`, `add <name> [--user] [--ssh-port 22]`, `remove`, `set <name> --model <key>`, `start`, `stop`, `run <name> [--memory] [--time] [--test] [--gpu] [--setup] [--out] [--bind …] -- <command>`, `jobs [<name>]`, `logs`, `cancel`, `fetch`, `sync-model <name> <model> [--address]`, `provision`, `prepare`; and, typed by no person, `askpass`, `job-exec`, `authorize` and `serve-job [--key]`. `--gpu` is parsed and refused by the node (§18.7).
+The `node` group as the code has it (`dreamference/cli/dreamference_cli_controller.py`): `enable [--no-web] [--no-forge] [--yes]`, `disable`, `status [<name>]`, `id`, `list`, `add <name> [--user] [--ssh-port 22]`, `remove`, `set <name> --model <key>`, `start`, `stop`, `run <name> [--memory] [--time] [--test] [--gpu] [--setup] [--out] [--bind …] -- <command>`, `jobs [<name>]`, `logs`, `cancel`, `fetch`, `sync-model <name> <model> [--address]`, `provision [hosts…] [--all] [--web] [--role night|engine] [--dry-run] …`, `prepare`; and, typed by no person, `askpass`, `job-exec`, `authorize` and `serve-job [--key]`. `--gpu` is parsed and refused by the node (§18.7).
 
 | Piece | Where | Since |
 |---|---|---|
@@ -845,5 +845,9 @@ The `node` group as the code has it (`dreamference/cli/dreamference_cli_controll
 | `provision --web` shares `ling web` through `node enable`; it no longer installs Onyx (it had failed at that step since 1.5.1) | `node_provisioner.py` | 2026-10-18 (`d43a926`) |
 | Wi-Fi power saving: `node enable` warns, `node prepare` turns it off (its one NetworkManager change), a client's missed browse adds a hint (§6.4) | `dreamference/vllm_server/wifi_power_save.py`, `ling_node_locator::wifi_power_save_hint` (both copies) | 2026-10-12 (`9fb0b1e`, `1ae9387`, `80b2594`) |
 | Onyx retired: `node enable` no longer reads Onyx's `.env` or binds its nginx, and `node status` no longer reports port 3000 | `node_advertiser.py`, `node_settings.py` | 2026-10-18 (`eb42c76`) |
+| `node enable` sets up the node's Forgejo forge by default (`--no-forge` skips it) | `dreamference/forge/forge_service.py`, `dreamference/cli/dreamference_cli_controller.py`; spec [MIGHTLING_FORGEJO](./DREAMFERENCE_MIGHTLING_FORGEJO.md) | 2026-10-20 |
+| `node sync-model` also copies installed Dreamference-signed LoRA adapters (`adapter-receive` in `serve-job`) | `dreamference/node/node_adapter_sync.py` (`NodeAdapterSync.send`), `node_serve.py`; spec [MIGHTLING_ADAPTERS](./DREAMFERENCE_MIGHTLING_ADAPTERS.md) §6.4 | 2026-10-20 |
+| `node provision --role night\|engine [--dry-run]`: configures a paired node for its role (model server, night timer, paired lanes) | `dreamference/node/node_role_provisioner.py` (`NodeRoleProvisioner`) | 2026-10-22 |
+| `ling node join`: enrols a client with a node over the NetBird overlay | `ling-rs/src/remote_join.rs`, `dreamference/remote/` | 2026-10-21 |
 
 `node provision` has still not been run against a machine (FLEET's status line).
