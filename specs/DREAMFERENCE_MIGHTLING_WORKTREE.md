@@ -14,7 +14,7 @@ A draft paper said that "in Mightling's autonomous sessions (Work mode and Night
 | `ling exec` | In place. `ling exec --worktree` makes a managed worktree (`~/.mightling/worktrees/0564/wtrepo`, detached HEAD) and the source is untouched | Run against the GB10 in a scratch repository: in place, `auth.py` changed and `git status` showed ` M auth.py`; with `--worktree`, the source unchanged and the edit in the worktree |
 | Desktop app, Work | In place by default. **Local** is the default of the Local/Worktree toggle under the composer of a new thread in a git project (`App.tsx`, built 2026-10-16, DESKTOP_PARITY §2.6); **Worktree** makes a managed worktree on the vendor's contract, with Hand off back to the local checkout | Code read |
 | `ling web` | In place: the same page, without the main process's git, so it offers no Worktree toggle | Code read (`bridge.git.available()` is false there) |
-| Phone bridges (`chat` prompt) | The Ask folder (`~/.mightling/ask/…`), never a repository; there is no Work thread from the phone yet (SIGNAL §19, `/work` not built) | Code read (`thread/start` with `prompt: "chat"` and no `cwd`) |
+| Phone bridges (`chat` prompt) | The Ask folder (`~/.mightling/ask/…`), never a repository; there is no Work thread from the phone yet (SIGNAL §19, `/work` not built). *(Since 2026-10-28, `/repo` opens a forge repository in a per-thread worktree under `~/.mightling/chat-repos/<org>/<repo>/<thread>` on branch `phone/<thread>`, `ling-rs/web/src/chat_repos.rs`, [CHAT_REPOS](./DREAMFERENCE_MIGHTLING_CHAT_REPOS.md).)* | Code read (`thread/start` with `prompt: "chat"` and no `cwd`) |
 | Night Shift | A worktree per task and per attempt, `$CODEX_HOME/night/worktrees/<id>[-a<k>]` on branch `night/<id>[-a<k>]` (git's metadata in `<repo>/.git/worktrees/<id>`); the runner commits the chosen attempt on `night/<id>`, removes every worktree and merges nothing | Code read (`night_shift_task_run.py`), NIGHT_SHIFT §5.3, §11.9 |
 
 So the paper's sentence is true of Night Shift only. Work mode edits in place unless the user picks Worktree, and the worktree folder pattern `.git/worktrees/night-*` exists nowhere: Night Shift's are named by the task id.
@@ -42,7 +42,7 @@ The name follows Codex (`--worktree`, `/worktree`, the app's Local/Worktree) and
 | `ling worktree list` | The worktree sessions of this repository: running or finished, what each holds |
 | `/worktree` | Codex's picker, unchanged |
 
-**Built without a patch.** The patch series is at 57,523 of its 58,000 bytes, and a new slash command costs about 2 KB of patch (the variant, its description, its capability lists, its dispatch arms). Instead the composer's `Enter` hook, which patch `0029` already routes to `compat_keys::enter`, answers `/worktree <sub-command>` in every mode before Codex sees the line; outside the compatibility mode it answers nothing else. The answer is shown as an info line, as the compatibility mode's answers are.
+**Built without a patch.** The patch series was at 57,523 of its 58,000 bytes when built (now 57,571 of 64,000 bytes, `tests/test_codex_branded_builder.py`), and a new slash command costs about 2 KB of patch (the variant, its description, its capability lists, its dispatch arms). Instead the composer's `Enter` hook, which patch `0029` already routes to `compat_keys::enter`, answers `/worktree <sub-command>` in every mode before Codex sees the line; outside the compatibility mode it answers nothing else. The answer is shown as an info line, as the compatibility mode's answers are.
 
 ### 3.3 A session in worktree mode
 

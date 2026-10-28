@@ -1,6 +1,6 @@
 # Mightling Ask, the Mightling web server, and retiring Onyx
 
-**Status:** proposed (2026-10-07); Phase A partly built, see §16, §17 (2026-10-08) and §18 (2026-10-09); **Phase C built** (Onyx retired, image search and voice moved, branch `chat/onyx-phase-c`, 2026-10-09, merged after 1.6.0, ships in **1.7.0**, the user's decision of 2026-10-09), see §19; **rebased onto `main` after the 1.6.0 release on 2026-10-12** (§19.7) **and again on 2026-10-13** (§19.8); **not merged: it ships in 1.7.0 after its live checks** (§19.8). The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
+**Status:** proposed (2026-10-07); Phase A partly built, see §16, §17 (2026-10-08) and §18 (2026-10-09); **Phase C built** (Onyx retired, image search and voice moved, branch `chat/onyx-phase-c`, 2026-10-09, merged after 1.6.0, ships in **1.7.0**, the user's decision of 2026-10-09), see §19; **rebased onto `main` after the 1.6.0 release on 2026-10-12** (§19.7) **and again on 2026-10-13** (§19.8); **merged into `main` on 2026-10-18 (`dd2fb78`) after its live checks and shipped in 1.7.0** ([RELEASE_1.7.0](./DREAMFERENCE_RELEASE_1.7.0.md)). The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
 **Names:** written with the post-rename names ([RENAME_MIGHTLING](./DREAMFERENCE_RENAME_MIGHTLING.md), branch `rename/mightling`): `ling`, `ling-admin`, `ling-search`, `ling-fetch`, `ling-code`, `ling-app`, `~/.mightling`, `mightling_*` settings, `_mightling-node._tcp`. Where `main` still says Puffin, read `puffin` for `ling`.
 **Builds on:**
 - [MIGHTLING_DESKTOP](./DREAMFERENCE_MIGHTLING_DESKTOP.md): the Work window on `ling app-server`, the bridge's allow-list (§4.3), the air-gap rule in the server (§8.2, patch `0023`), Night Shift's busy marker (§8.3); and its Electron rebuild (branch `desktop/electron`), which copies the upstream vendor's desktop app;
@@ -16,7 +16,7 @@
 
 1. **One agent, no second chat backend.** Chat becomes an **Ask thread**: a conversation with the same `ling` agent, in a scratch folder instead of a repository. This is how the upstream vendor's desktop app does chat: it has no separate chat server either (MIGHTLING_DESKTOP §1).
 2. **One UI, two hosts.** The Work UI in `desktop/ui/` becomes the **Mightling UI** (Work and Ask threads, settings, apps). The Electron app shows it over `app://`; a new **web server, `ling web`**, serves the same build to a browser. The UI talks through one message interface, so the same code runs in both (the upstream vendor's app re-dispatches its IPC as window `MessageEvent`s for exactly this reason).
-3. **One bridge policy.** The allow-list, the dropped thread fields and the "answer only pending requests" rule (MIGHTLING_DESKTOP §4.3, `desktop/bridge/src/lib.rs`) move into one data file, `desktop/bridge/policy.json`, enforced by the Rust bridge crate (inside `ling web`) and by the Electron main process. Both run the same conformance vectors, so the two cannot drift.
+3. **One bridge policy.** The allow-list, the dropped thread fields and the "answer only pending requests" rule (MIGHTLING_DESKTOP §4.3, `desktop/bridge/src/lib.rs`) move into one data file, `desktop/bridge/policy.json` (built as `ling-rs/web/policy.json`, §16), enforced by `ling-rs/web/src/policy.rs` (inside `ling web`) and by the Electron main process (`desktop/electron/src/policy.ts`, §18.1). Both run the same conformance vectors, so the two cannot drift.
 4. **The web server requires a credential on every request, loopback included.** Sandboxed commands can reach loopback whenever the network is on (`/airgapped off`), and the Onyx stack showed what a published default credential costs (security review, 2026-10). Nothing is reachable from the LAN unless the node is advertised and a device has been paired.
 5. **Search over the user's files is new and local.** `ling-docs` indexes folders the user chooses, offline, inside the same memory budget and network-less sandbox as `ling-code`. Onyx Lite never did this here: the Lite stack leaves out Vespa, the workers and the embedding servers (ONYX §1).
 6. **Onyx goes in three releases, never in one.** Preview beside Onyx, then Onyx opt-in with a history export, then removal (§10). Until the last step, `ling-admin chat start` brings Onyx back.
@@ -88,14 +88,14 @@ Everything else (`rpc.ts`, `store.ts`, the views) is shared and tested once.
 
 ### 2.3 The bridge policy, once
 
-`desktop/bridge/policy.json` holds:
+`desktop/bridge/policy.json` (built as `ling-rs/web/policy.json`, §16) holds:
 - `allowedRequests`, `allowedNotifications` (today's `ALLOWED_REQUESTS`/`ALLOWED_NOTIFICATIONS`);
-- `threadOpeners` and `droppedThreadFields` (`baseInstructions`, `developerInstructions`, `modelProvider`, `config`, `personality`);
+- `threadOpeners` and `droppedThreadFields` (`baseInstructions`, `developerInstructions`, `modelProvider`, `config`, `personality`; plus `dynamicTools`, `environments`, `selectedCapabilityRoots`, `history`, `path`, §16);
 - the pending-request rule (answers only to server requests not yet answered);
 - **`airgappedRefusedRequests`** (2026-10-22): requests allowed only while `/airgapped` is off, judged by the level of the thread they name, else the configured one (the plugin installs, MIGHTLING_AIRGAPPED §14.12; the composer's `!` command, `thread/shellCommand`, §14.13), with a reason of their own in `airgappedRefusalReasons`. The host supplies the level from the launcher's resolver;
-- **`namedPrompts`:** the prompt names the UI may ask for (`default`, `ask`, `high-swe`), which the policy layer, not the UI, turns into `baseInstructions` (§3.2).
+- **`namedPrompts`:** the prompt names the UI may ask for (`default`, `ask`, `high-swe`, plus `chat` and `chat-work` for the phone bridges), which the policy layer, not the UI, turns into `baseInstructions` (§3.2).
 
-`desktop/bridge/vectors/*.json` are conformance cases (message in → accepted or refused, fields out). The Rust crate's tests and the Electron main process's tests both run every vector.
+`desktop/bridge/vectors/*.json` (built as `ling-rs/web/vectors/outgoing.json`, §16) are conformance cases (message in → accepted or refused, fields out). The Rust crate's tests and the Electron main process's tests both run every vector.
 
 ---
 
@@ -116,7 +116,7 @@ Everything else (`rpc.ts`, `store.ts`, the views) is shared and tested once.
 - for the user's files it uses `docs_search`/`docs_read`, citing `path` and page;
 - for mail, files in Drive and calendars it uses the `/apps` tools, treating their content as untrusted;
 - it writes anything long or reusable to the scratch folder and links it;
-- it keeps answers short unless asked (cave mode applies as usual).
+- it keeps answers short unless asked (cave mode applied as usual until it was removed on 2026-10-28).
 
 **The UI never sends prompt text.** It asks for `prompt: "ask"`; the policy layer reads the composed text from `ling prompt show ask --composed` (a new flag printing exactly what a session would receive) and sets `baseInstructions` itself. A name outside `namedPrompts` is refused. This is the one place the policy layer *adds* a dropped field, and the conformance vectors cover it.
 
@@ -129,8 +129,8 @@ Everything else (`rpc.ts`, `store.ts`, the views) is shared and tested once.
 | Attach images | written to the scratch folder, sent as `localImage`; only when the served model has vision (`ModelSpec.supports_vision`) |
 | Attach files (PDF, documents) | written to the scratch folder; the prompt tells the agent to read them with `ling-docs extract` (§5.3) |
 | Voice | the microphone button (§7) |
-| Images in answers | `image_search` results rendered as a gallery with a lightbox (§6) |
-| Apps | Settings → Apps: `app/list` with each app's state and its Connect link (the Google service's page) |
+| Images in answers | `image_search` results rendered as a gallery with a lightbox (§6; built as inline Markdown images, §19.2) |
+| Apps | Settings → Apps (built under Skills and tools → Apps, `desktop/ui/src/ExtensionsView.tsx`): `app/list` with each app's state and its Connect link (the Google service's page) |
 | Continue as Work | "Open in a project": forks the thread into a Work thread on a chosen folder (`thread/fork` with a new `cwd`); built as **Continue in a project** (DESKTOP §16 B33) |
 
 ---
@@ -139,9 +139,9 @@ Everything else (`rpc.ts`, `store.ts`, the views) is shared and tested once.
 
 ### 4.1 What it is
 
-A subcommand of the `ling` launcher (Rust, in `ling-rs`, using the bridge crate):
-- `ling web start [--lan]`, `stop`, `status`, `open`, `pair`, `devices`, `revoke <device>`;
-- run as a systemd user unit, `mightling-web.service`, installed by `ling-admin web enable` (on a node, by `node enable`).
+A subcommand of the `ling` launcher (Rust, in `ling-rs/web` (`ling-web-server`), routed by `ling-rs/src/web.rs`):
+- `ling web start [--lan] [--port N]`, `stop`, `status`, `open [--no-browser | --print-url]`, `pair`, `devices [--scope <device> watch|control]`, `revoke <device>`, `serve [--lan] [--port N]`, `ask [--port N] <question>`;
+- run as a systemd user unit, `mightling-web.service` (on macOS, the launchd agent `ai.dreamference.mightling-web`), written and started by `ling web start` itself (on a node, by `ling-admin node enable`; there is no `ling-admin web enable`, §16).
 
 It serves:
 - `/` and `/assets/*`: the Mightling UI build, embedded in the binary (no files to go stale, nothing loaded from elsewhere);
@@ -149,7 +149,7 @@ It serves:
 - `/api/upload`: attachments into the thread's scratch folder, size-capped (images 20 MB, files 100 MB);
 - `/api/transcribe`: audio to the speech sidecar (§7);
 - `/images/*`: the image sidecar's store, read-only (§6);
-- `/api/apps`: the Connect links for `/apps`, pointing at the Google service;
+- `/api/apps`: the Connect links for `/apps`, pointing at the Google service (remains 501; the UI reads `app/list` over the bridge instead, §19.2);
 - `/healthz`.
 
 **Port 3100**, chosen to avoid Onyx's 3000 and 80 while both exist, and kept afterwards so bookmarks never move.
@@ -187,34 +187,36 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 
 ## 5. Search over the user's files: `ling-docs`
 
+> **Specified in full and built in [MIGHTLING_LOCAL_INDEX](./DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md) (`ling-docs-rs/`):** the subsections below are the 2026-10-07 design sketch, with notes where the built crate differs.
+
 ### 5.1 Scope
 
-- **The user chooses folders:** `ling docs add ~/Documents`, `ling docs list`, `ling docs forget <folder>` (removes its entries and chunks); also in the UI's Settings → Files.
-- **Formats:** Markdown, plain text, HTML, PDF (its text layer), DOCX, ODT, EML and MBOX. Scanned PDFs (images without text) are listed as "no text"; OCR is a later phase.
+- **The user chooses folders:** `ling docs add ~/Documents`, `ling docs list`, `ling docs forget <folder>` (removes its entries and chunks; built as `ling docs remove <name>`, with `~/Documents` and `~/Downloads` indexed by default, `ling-docs-rs/src/main.rs`); also in the UI's Settings → Files (built as Settings › Your documents, `desktop/ui/src/SettingsDialog.tsx`).
+- **Formats:** Markdown, plain text, HTML, PDF (its text layer), DOCX, ODT, EML and MBOX. Scanned PDFs (images without text) are listed as "no text"; OCR is a later phase (built on 2026-10-20 with RapidOCR and Tesseract OSD in `ling-docs-rs/src/ocr/`, alongside reST, Org, LaTeX, CSV/TSV, spreadsheets and presentations in `ling-docs-rs/src/extract/`).
 - **Excluded by default:** `~/.mightling`, `~/.ssh`, `~/.gnupg`, keyrings and browser profiles, `.git` and dependency folders, and anything matching `.mightlingignore`. Code repositories are `ling-code`'s job.
 - **Limits:** 100 MB per file, and a per-folder file count reported before indexing starts.
 
 ### 5.2 How it searches
 
 - **Phase 1, keyword:** SQLite FTS5 with BM25 over chunks. A chunk is a heading section (Markdown, HTML, DOCX) or a page (PDF), split further at 2,000 characters. Each chunk keeps its path, page, heading and modification time.
-- **Phase 2, meaning:** dense vectors from `nomic-embed-text-v1.5` on the CPU (the context engine's model, already cached here, pinned to the CPU because the GPU belongs to the model server; CONTEXT), stored as float32 blobs beside the FTS table, combined with BM25 by reciprocal-rank fusion. Built only if Phase 1's measurements (§12) show keyword search misses what users ask.
+- **Phase 2, meaning:** dense vectors from `nomic-embed-text-v1.5` on the CPU (the context engine's model, already cached here, pinned to the CPU because the GPU belongs to the model server; CONTEXT), stored as float32 blobs beside the FTS table, combined with BM25 by reciprocal-rank fusion. Built only if Phase 1's measurements (§12) show keyword search misses what users ask. (As built in `ling-docs-rs/src/embed.rs` and `search.rs`, Phase 1 shipped with both FTS5—plus a CJK trigram table—and dense vectors from `snowflake-arctic-embed-m-v2.0` int8 on ONNX Runtime CPU, fused by weighted RRF; [MIGHTLING_LOCAL_INDEX](./DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md) §15–§16.)
 
 ### 5.3 How it runs
 
-- **Indexing** is done by `ling-admin docs index` on the node, admitted against the same host-wide memory budget as `ling-code` and run in a network-less bwrap sandbox inside `ling-index.slice` (MIGHTLING_CODE_INDEX's three rules). Extraction is Python (`pypdf` for PDFs, `python-docx`, the standard library's `email` and `html.parser`), decided in Phase 0 by quality on a sample of real files rather than by language preference.
+- **Indexing** is done by `ling-admin docs index` on the node, admitted against the same host-wide memory budget as `ling-code` and run in a network-less bwrap sandbox inside `ling-index.slice` (MIGHTLING_CODE_INDEX's three rules). Extraction is Python (`pypdf` for PDFs, `python-docx`, the standard library's `email` and `html.parser`), decided in Phase 0 by quality on a sample of real files rather than by language preference. (As built in `ling-docs-rs/`, indexing is run by `ling docs index` or automatically by `ling-docs session` inside `mightling-index.slice` (`ling-docs-rs/src/host.rs`), extraction is in Rust with `dlopen`'d PDFium, and `ling-admin docs setup` installs the pinned libraries and models.)
 - **Freshness:** files are re-read when their size or modification time changes. While `ling web` or the app is running, a watch (inotify) queues changes; otherwise `ling docs index` (and Night Shift, before its tasks) catches up.
 - **Queries only read:** a small read-only MCP server, `ling-docs mcp`, offers the agent three tools:
   - `docs_search(query, k)`: chunks with path, page and a snippet;
   - `docs_read(path, page|chunk)`: the text of one place;
-  - `docs_list(folder)`.
+  - `docs_list(folder)` (not built as an MCP tool; `ling-docs mcp` offers `docs_search`, `docs_read` and `pdf_search`, `ling-docs-rs/src/mcp.rs`).
   The launcher declares it like `ling-code`'s server, so every session, Ask or Work, has it.
 - **`ling-docs extract <file>`** prints a file's text, for attachments in an Ask thread.
 - **Air gap:** neither indexing nor querying touches the network, so the tools stay available at `/airgapped on`, unlike search and apps.
-- **Privacy:** the index holds the documents' text. It lives in `~/.mightling/docs/index.db` (0600), is never copied to another machine (not by `sync-model`, not by pairing), and `forget` deletes it for real (`VACUUM`).
+- **Privacy:** the index holds the documents' text. It lives in `~/.mightling/docs/index.db` (0600; built as one SQLite file per collection at `$CODEX_HOME/docs/<collection>.db`, mode 0600, `ling-docs-rs/src/store.rs`), is never copied to another machine (not by `sync-model`, not by pairing), and `forget` (built as `ling docs remove <name>`) deletes the collection's database file.
 
 ### 5.4 Relation to other specs
 
-[PDF_SEARCH](./DREAMFERENCE_PDF_SEARCH.md) (proposed, not built) is about PDFs on the web; `ling-docs` is about files on the disk. They share the extraction code once both exist. The old context engine (`dreamference/context_engine/`) indexes code and is superseded by `ling-code`; its embedding and storage code is reused for Phase 2.
+[PDF_SEARCH](./DREAMFERENCE_PDF_SEARCH.md) (proposed, not built; built 2026-10-12 in `ling-docs-rs/src/pdf_search.rs`) is about PDFs on the web; `ling-docs` is about files on the disk. They share the extraction code once both exist. The old context engine (`dreamference/context_engine/`) indexes code and is superseded by `ling-code`; its embedding and storage code is reused for Phase 2 (not reused: `ling-docs-rs/` has its own Rust ONNX Runtime embedding and SQLite storage).
 
 ---
 
@@ -260,9 +262,9 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 |---|---|---|---|
 | **A** | next minor (1.6) | Ask threads, `ling web` (loopback; LAN with pairing on advertised nodes), `ling-search --read`, `ling-docs` Phase 1, image search, voice and apps in the Mightling UI, `policy.json` with vectors | Unchanged, still the default. The app shows Ask beside Chat |
 | **B** | the one after (1.7); not shipped on its own: folded into 1.7.0 with Phase C (decided 2026-10-09) | `ling-admin chat export`; the app's Chat entry opens Ask; installers stop installing Onyx | **Opt-in:** `ling-admin chat start` installs and starts it; existing installs keep it running until the user runs `ling-admin chat retire` |
-| **C** | **1.7.0** (the user's decision of 2026-10-09; first planned for 1.8); built 2026-10-09 (§19), merged after 1.6.0 | Onyx code removed | **Gone:** on upgrade, `ling-admin` offers to stop and remove the containers; the volumes are kept until the user confirms |
+| **C** | **1.7.0** (the user's decision of 2026-10-09; first planned for 1.8); built 2026-10-09 (§19), merged into `main` on 2026-10-18 (`dd2fb78`) and shipped in 1.7.0 | Onyx code removed | **Gone:** on upgrade, `ling-admin` offers to stop and remove the containers; the volumes are kept until the user confirms |
 
-**For the 1.7.0 release notes** (Phase C ships in 1.7.0; no 1.7.0 notes file exists yet, so the line is kept here until one does):
+**For the 1.7.0 release notes** (Phase C shipped in 1.7.0, [RELEASE_1.7.0](./DREAMFERENCE_RELEASE_1.7.0.md)):
 - The Onyx web chat is retired: the web UI is `ling web` (port 3100) and the desktop app shows the same page; image search and voice are `ling-admin images start` and `ling-admin voice start`, and `server start` starts both on a node.
 - Saved Onyx chats aren't exported; `ling-admin chat remove` keeps them until you choose to delete them.
 - Pictures in saved Onyx chats no longer show: the `/puffin-images/` route went with Onyx's nginx. The pictures stay in the image search store, and `ling web` serves them at `/images/`.
@@ -470,7 +472,7 @@ Built: Ask in the desktop app's own window, and pairing a device by QR code. Two
 This part did not decide §2.1. What it changes, and what was read on the way (the app's own second server is gone since §18.6; the risk below remains for a `ling web` the user runs beside the app):
 - **Two app-servers can run on one `~/.mightling` today.** With the app open, both windows are in use: the app window on its own stdio app-server, and the Ask window on `ling web`'s app-server on the socket. Ask threads from either live under the one `~/.mightling/ask/` and are recognised by the same `ask/<thread-id>` links. Because the folder rules are the same, either host can resume the other's Ask thread in its folder.
 - **The thread database is built for several connections.** Codex's state databases open read-write pools in WAL mode with a five-second busy timeout (`state/src/sqlite.rs`), which SQLite supports across processes. Read in the submodule's source, not measured.
-- **The rollout files may not be.** Codex appends a thread's history to its JSONL rollout file. A search for lock calls (`flock`, `lock_exclusive`, `try_lock_exclusive`, `fs2`, `fd_lock`) in `rollout/` and `core/src` found none. This was read, not measured, in the submodule checkout, not confirmed at the pinned tag. So the risk is the same thread loaded in both servers at once: two writers on one rollout file, each with its own in-memory turn state. The app makes that possible, since one question can be open in the app window and in the Ask window. Neither server knows about the other's turn: the busy markers are per process, and Night Shift reads them all.
+- **The rollout files may not be.** Codex appends a thread's history to its JSONL rollout file. A search for lock calls (`flock`, `lock_exclusive`, `try_lock_exclusive`, `fs2`, `fd_lock`) in `rollout/` and `core/src` found none. This was read, not measured, in the submodule checkout, not confirmed at the pinned tag. (Verified at `rust-v0.158.0` on 2026-10-22, [MIGHTLING_SYNC](./DREAMFERENCE_MIGHTLING_SYNC.md) §2 and §16.6: `codex-rs/rollout/src/writer_lock.rs` holds a non-blocking exclusive `flock` on `~/.mightling/thread-writer-locks/<thread>.lock` per thread.) So the risk is the same thread loaded in both servers at once: two writers on one rollout file, each with its own in-memory turn state. The app makes that possible, since one question can be open in the app window and in the Ask window. Neither server knows about the other's turn: the busy markers are per process, and Night Shift reads them all.
 - **What Phase 0 question 1 still has to measure.** Run a turn on one thread in both servers, and check the rollout file and `thread/list` from each. Until then, the app window with its own server is what Work had already done since §17. If the answer is "one server", the app window moves to `ling web`'s socket, and this policy layer stays as the guard for the stdio fallback (§2.1).
 
 ### 18.4 Verified on this machine (2026-10-09)

@@ -95,13 +95,13 @@ Scores are the vendor's with thinking at its highest published setting, unless m
 | Model (release) | Total / active | Build for SM121, size | KV per 1K tokens | Fits one Spark? | Coding scores | Licence | Engine on SM121 |
 |---|---|---|---|---|---|---|---|
 | **Qwen3.8-27B** (Aug 2026), *today's coder* | 27B dense; 16 of 64 layers full attention, 4 KV heads × 256 | RadixArk NVFP4 (FFN NVFP4, attention FP8) | 64 MiB | yes; pool 157K tokens measured beside the sidecars | Pro 61.7, TB 2.1 73.0, DeepSWE 42.2, NL2Repo 42.3, LCB v6 90.3; AA 34 | Apache 2.0 | SGLang, in use |
-| **Qwen3.8-Flash-Next** (Aug 2026) | 125B main (512 experts, 10 + 1 active) + 51B n-gram table + 4B MTP; 6B active; 12 of 48 layers sparse full attention, 2 KV heads × 256 | NVIDIA NVFP4: routed experts NVFP4, attention and shared experts BF16, MTP and table FP8; 124 GiB on disk, of which the table is 47.7 GiB. RadixArk NVFP4 122 GiB. Intel int4 AutoRound (size not confirmed) | **24 MiB** | **yes, with the table memory-mapped from NVMe: about 73–75 GiB resident** | **Pro 62.5, Multilingual 81.0, DeepSWE 58.7, NL2Repo 48.1, LCB v6 91.9, Toolathlon 73.5; AA 40**. No Terminal-Bench published | Qwen Community 1.0; NVIDIA's build adds the NVIDIA Open Model License | vLLM 0.30 with 18 patches (measured on a GX10); SGLang `--ple-offload-backend file` (reported, not seen run on SM121) |
+| **Qwen3.8-Flash-Next** (Aug 2026) | 125B main (512 experts, 10 + 1 active) + 51B n-gram table + 4B MTP; 6B active; 12 of 48 layers sparse full attention, 2 KV heads × 256 | NVIDIA NVFP4: routed experts NVFP4, attention and shared experts BF16, MTP and table FP8; 124 GiB on disk, of which the table is 47.7 GiB. RadixArk NVFP4 122 GiB. `local-inference-lab/Qwen3.8-Flash-Next-NVFP4` puts the 51B table in NVFP4 as well (26.8 GiB instead of 47.7 GiB; ~97.5 GiB resident on upstream vLLM with MTP 3, added to the matrix as `qwen3.8-flash-next-nvfp4-mtp` on 2026-10-19). Intel int4 AutoRound (size not confirmed) | **24 MiB** | **yes, with the table memory-mapped from NVMe: about 73–75 GiB resident** (or ~97.5 GiB resident with the NVFP4 table) | **Pro 62.5, Multilingual 81.0, DeepSWE 58.7, NL2Repo 48.1, LCB v6 91.9, Toolathlon 73.5; AA 40**. No Terminal-Bench published | Qwen Community 1.0; NVIDIA's build adds the NVIDIA Open Model License | vLLM 0.30 with 18 patches (measured on a GX10), or upstream vLLM on `local-inference-lab/Qwen3.8-Flash-Next-NVFP4`; SGLang `--ple-offload-backend file` (reported, not seen run on SM121) |
 | DeepSeek V4-Flash (Apr 2026; 0731 refresh) | 284B / 13B; compressed sparse attention | official FP4 experts + FP8 = 167 GB; GGUF IQ2_XXS 90.9 GB, Q2_K_XL 96.8 GB, IQ3_XXS 104 GB, Q4_K_XL 155 GB | about 4–5 MiB (derived by others, not checked) | **only at 2–3 bits**: 2-bit experts at 81 GiB, peak 115 GiB | April: Verified 79.0, **Pro 52.6**, Multilingual 73.3, TB 2.0 56.9, LCB 91.6. 0731: DeepSWE 54.4, TB 2.1 82.7 | MIT | SGLang has an SM12x path for its attention; vLLM TP2 on two Sparks |
 | DeepSeek V4.1-Flash (Sep 2026) | 552B + 196B "Engram" tables; 8B active in prefill, 16B in decode | 763B parameters as published; Unsloth Q2_K 246 GiB | 0.87 MiB (FP4 KV) | no | DeepSWE 74.2, TB 2.1 90.6, TB 4.0 31.2; AA 39 | MIT | not seen on a Spark except low-bit, streaming from SSD |
 | DeepSeek V3.2 (2025) | 671B / 37B; MLA with sparse attention (DSA) | 4-bit ≈ 377 GB | 68.6 MiB (61 layers × 576 × 2 B) | no | superseded by V4 | MIT | sparse MLA has **no** SM121 backend (vLLM #45317; Triton fallback PR #54929 open) |
 | GLM-5.3-Flash (Aug 2026) | 320B / 18B; 34 linear + 11 sparse-attention layers | BF16, FP8; community NVFP4 ≈ 180 GB (estimate); UD-Q2_K_XL 108.7 GB | about 11 MiB (config looks wrong; unverified) | only at 2 bits: 108.7 GB leaves no room; an 85 GB 2.05-bit build crashes after ~10K tokens | DeepSWE 63.4, TB 2.1 84.3; AA 42 | MIT | two Sparks, NVFP4 TP2 (reported) |
 | MiniMax M2.7 (2026) | 230B / 10B | UD-IQ3_XXS 80 GB; REAP-pruned 172B NVFP4 98.9 GB (quality unvalidated) | not checked | only at 3 bits or pruned | Pro 56.2 (aggregator) | not checked | llama.cpp; vLLM TP2 on two Sparks |
-| Qwen3.5-122B-A10B (Feb 2026), *today's fallback* | 122B / 10B; 12 of 48 full attention, 2 KV heads × 256 | Intel INT4 AutoRound, RedHat NVFP4 ≈ 75 GB | 24 MiB | yes (in the matrix) | Verified 72.0, TB 2 49.4, LCB 78.9; AA 16 | Apache 2.0 | vLLM, in use |
+| Qwen3.5-122B-A10B (Feb 2026), *removed in 1.5.1 (2026-10-07)* | 122B / 10B; 12 of 48 full attention, 2 KV heads × 256 | Intel INT4 AutoRound, RedHat NVFP4 ≈ 75 GB | 24 MiB | yes (removed from the matrix in 1.5.1) | Verified 72.0, TB 2 49.4, LCB 78.9; AA 16 | Apache 2.0 | vLLM (removed in 1.5.1) |
 | Ling-3.0-flash (Aug 2026) | 124B / 5.1B; 35 linear + 7 MLA layers | official INT4 ≈ 77 GB | 7.9 MiB | yes | Pro 56.6 (OpenHands), Multilingual 72.4; AA 20 | MIT | vLLM fork with MTP |
 | Nemotron 3 Super (Mar 2026) | 120B / 12B; Mamba-2 + 8 attention layers | NVFP4 + FP8 | 8 MiB | yes | Verified 60.5 (OpenHands) | NVIDIA Open Model License | vLLM, Marlin path |
 | gpt-oss-120b (2025) | 117B / 5.1B; alternating full and 128-token sliding attention | MXFP4 ≈ 65 GB | 36 MiB (full layers) | yes | Verified 52.6 (medium effort); AA 12 | Apache 2.0 | vLLM, SGLang, llama.cpp |
@@ -187,7 +187,7 @@ Link facts: 189.85 Gb/s across both rails in NVIDIA's own `ib_write_bw` example,
 | Key | Value | Why |
 |---|---|---|
 | checkpoint | `nvidia/Qwen3.8-Flash-Next-NVFP4` at a pinned revision, served as its snapshot directory | the SGLang revision trap of INFERENCE §5.3 |
-| `engine` | `sglang`, image pinned by digest to a version with `--ple-offload-backend file` | the project's engine. The **fallback** is blazux's vLLM 0.30 build pinned by digest, as the 122B entries pin `aeon` images |
+| `engine` | `sglang`, image pinned by digest to a version with `--ple-offload-backend file` | the project's engine. The **fallback** is blazux's vLLM 0.30 build pinned by digest, as the 122B entries pinned `aeon` images before their removal in 1.5.1 |
 | n-gram table | memory-mapped from the snapshot on NVMe, not loaded into the arena | the only way it fits (§6) |
 | context | 262,144 tokens (native) | the packet budget is 96K (§4.4); the window must hold one with room |
 | memory | `--mem-fraction-static` chosen in Phase 0, starting at 0.72 (about 86 GiB: 73 of weights, 10 of KV, about 3 of linear-attention state) | §6.2 |
@@ -428,7 +428,7 @@ The advisor is resolved separately from the coder's model server, first match wi
 
 | Component | On an advisor node | Why |
 |---|---|---|
-| Diffusion sidecar | **not started** (`exclusive`) | up to 8 GiB cap plus GPU memory; it serves the coder's fast tools, which run on the coder's node |
+| Diffusion sidecar (switched off since 2026-10-03, `DIFFUSION_ENABLED = False`) | **not started** (`exclusive`) | up to 8 GiB cap plus GPU memory; when enabled, it serves the coder's fast tools, which run on the coder's node |
 | Speech-to-text, image search, Gmail service | **stopped** before the load | they serve the web UI and the agent on the coder's node |
 | Web UI stack (Onyx Lite, retired in 1.7.0; `ling web` since) | **stopped**; `node enable` defaults to `--no-web` on such a node | about 0.6 GiB of host memory plus Postgres, and nobody chats on the advisor node (question 5 offers it as a second model in node 1's web UI instead) |
 | SearXNG | **stopped** | the advisor does no web search |
@@ -456,7 +456,7 @@ The person has a working Spark (`spark-1`) and has bought a second (`spark-2`).
 2. **On `spark-1`:** `ling-admin node add spark-2`, the existing pairing (MIGHTLING_NODE §13.2, §18.6). The node's password is typed once.
 3. **On `spark-1`:** `ling-admin node set spark-2 --model qwen3.8-flash-next-advisor`. This is the existing command: the node runs its own `main-model set`, `server stop`, `server start`, with its own pre-flight and watchdog. Because the entry is `exclusive`, that `server start` stops the sidecars of §6.4 by itself; the user never names them.
    - **Shortcut on `spark-2` itself:** `ling-admin advisor enable` = `main-model set qwen3.8-flash-next-advisor`, `server start`, `node enable --no-web`. `advisor disable` restores the default model and the sidecars.
-4. **First load:** the download is about 133 GB (NVIDIA's NVFP4 build; 140 GB of free disk recommended). That is about 22 minutes at 100 MB/s, 45 minutes at 50 MB/s, and two hours on a 150 Mbit/s line. A Spark that already holds the checkpoint can copy it over the QSFP link with MIGHTLING_NODE §12.2's `node sync-model` once that exists. Then the load and compile, reported at over 5 minutes before blazux's loading patches (Phase 0 measures it). The advert says `loading` throughout.
+4. **First load:** the download is about 133 GB (NVIDIA's NVFP4 build; 140 GB of free disk recommended). That is about 22 minutes at 100 MB/s, 45 minutes at 50 MB/s, and two hours on a 150 Mbit/s line. A Spark that already holds the checkpoint can copy it over the QSFP link with MIGHTLING_NODE §12.2's `ling-admin node sync-model` (`NodeModelSync` in `dreamference/node/node_model_sync.py`). Then the load and compile, reported at over 5 minutes before blazux's loading patches (Phase 0 measures it). The advert says `loading` throughout.
 5. **On `spark-1`:** nothing. The next `ling` finds the advisor by browsing (§5.2).
 
 ### 7.2 What the first node shows
@@ -478,12 +478,12 @@ The person has a working Spark (`spark-1`) and has bought a second (`spark-2`).
 ### 8.1 First, the runner's defects
 
 MIGHTLING_PROMPT §6.1 lists the defects that would be measured in place of any change to the agent. They come first, because an advisor comparison made before them measures how well each arm copes with the defects:
-1. **`/testbed` sources are not writable by the agent** (`root:root 0644`): `chmod -R a+rwX /testbed` before the agent starts.
+1. **`/testbed` sources are not writable by the agent** (`root:root 0644`): `chmod -R a+rwX /testbed` before the agent starts (shipped in `SCRUB_SCRIPT`, `dreamference/swe_bench/swe_bench_instance_run.py`).
 2. **`rg` is missing from the images**, though the prompt names it.
-3. **Everything left behind is submitted**, test files and fixtures included. An advisor would flag these, which would credit it with fixing a runner defect.
+3. **Everything left behind is submitted**, test files and fixtures included. An advisor would flag these, which would credit it with fixing a runner defect (since fixed: `COLLECT_SCRIPT` diffs against `base-tree` and excludes binaries in `dreamference/swe_bench/swe_bench_instance_run.py`, `SweBenchPatchFilter` drops test hunks in `dreamference/swe_bench/swe_bench_patch_filter.py`, and `test_guard` in `ling-rs/src/guard.rs` blocks test edits).
 4. **A fresh baseline on one build**, three times.
 
-And the scale question MIGHTLING_PROMPT §6.3 already answers: validate about **100 instances** (28 are validated today, about 2.2 GB of images each), at which three repetitions can resolve a difference of about ten points.
+And the scale question MIGHTLING_PROMPT §6.3 already answers: validate about **100 instances** (28 were validated when written; 100 are validated now, about 2.2 GB of images each), at which three repetitions can resolve a difference of about ten points.
 
 ### 8.2 The cheap first signal: replaying recorded failures (before any node work)
 
@@ -535,7 +535,7 @@ A fixed set of about 20 tasks from this project's own backlog, each with a test 
 - **A summary in place of the transcript:** the transcript fits (§4.4). Summaries lose the tool history (MIGHTLING_COMPACTION §9), and summarising costs the coder's time.
 - **The diffusion slot as the advisor:** the 0.5B sidecar failed every reasoning role it was tried in (MIGHTLING_COMPACTION §9.3).
 - **A cloud model as the advisor:** stronger, but Mightling's model traffic does not leave the LAN.
-- **A `/advisor` slash command now:** the patch series has 325 bytes left of its cap. Phase 3, if the TUI needs a switch the configuration and `ling advise` do not give.
+- **A `/advisor` slash command now:** the patch series had 325 bytes left of its cap when written (since raised to 64,000 bytes in `tests/test_codex_branded_builder.py`). Phase 3, if the TUI needs a switch the configuration and `ling advise` do not give.
 
 ---
 

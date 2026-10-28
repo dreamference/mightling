@@ -1,8 +1,8 @@
 # Mightling System Requirements & Setup
 
-> **Version:** 1.5.1
+> **Version:** 1.7.2
 > **Subject:** Installation, Hardware Detection, Quickstart, Helper Scripts
-> **Checked against the code:** 2026-10-09 (`setup.py`, `install.sh`, `scripts/`, `dreamference/`, the `v1.5.1` release assets)
+> **Checked against the code:** 2026-10-28 (`setup.py`, `install.sh`, `scripts/`, `dreamference/`, the release assets)
 
 ---
 
@@ -22,7 +22,7 @@
 ### 1.1. Hardware
 
 - **NVIDIA GB10** (Blackwell SM121, 128 GB unified LPDDR5X, Arm `aarch64` CPU), in any of the eight machines built on it (§3.5): NVIDIA's DGX Spark and the Acer, ASUS, Dell, Gigabyte, HP, Lenovo and MSI boxes.
-- NVMe storage: the model (~20 GB of weights, the SGLang image) fits a 1 TB drive, the smallest any GB10 machine ships with. SWE-bench keeps 100 GB free (`RESERVE_GB`).
+- NVMe storage: the model (~20 GB of weights, the SGLang image) fits a 1 TB drive, the smallest any GB10 machine ships with. SWE-bench keeps 100 GB free (`DEFAULT_DISK_RESERVE = "100G"`, `disk_reserve` in `swe_bench_settings.py`).
 
 ### 1.2. Operating System and Drivers
 
@@ -33,7 +33,7 @@
 ### 1.3. Software
 
 - **Python:** 3.10 or newer; development and tests run on 3.12. `setup.py` declares no `python_requires`.
-- **Python dependencies** (`setup.py` `install_requires`): `pyyaml`, `toml`, `rich`, `requests`, `sentence-transformers`, `sqlite-vec`, `tensorizer`, `einops`, `fonttools[woff]`, `Pillow`, `beautifulsoup4`.
+- **Python dependencies** (`setup.py` `install_requires`): `pyyaml`, `toml`, `rich`, `requests`, `sentence-transformers`, `sqlite-vec`, `tensorizer`, `einops`, `Pillow`, `beautifulsoup4`.
 - **Docker**, which is required: the model server runs only in Docker.
 - **For `ling`:**
   - `git` with submodules (`codex/`), and a Rust toolchain via rustup (`ling-admin codex build` installs rustup if missing);
@@ -160,7 +160,8 @@ Tested against the stand-in release server with stand-ins for `sudo` (passwordle
 | no NVIDIA Container Toolkit (`nvidia-ctk`, its hook or `nvidia-container-cli`) | explained: install from NVIDIA's repository, `nvidia-ctk runtime configure --runtime=docker`, restart Docker |
 | the user cannot reach the Docker socket and is not in the `docker` group | `usermod -aG docker <user>` (effective at the next login) |
 | no `bwrap` | `apt-get install -y bubblewrap`, and the AppArmor profile below in the same step where the restriction is on |
-| `bwrap` refused a user namespace by AppArmor (from a transient user unit) | install `/etc/apparmor.d/puffin-bwrap`, `apparmor_parser -r` it |
+| `bwrap` refused a user namespace by AppArmor (from a transient user unit) | install `/etc/apparmor.d/puffin-bwrap`, `apparmor_parser -r` it (or load an existing `bwrap-userns-restrict` profile on Ubuntu 25.04+) |
+| connected Wi-Fi interface with power saving on (`WifiPowerSave`, `wifi_power_save.py`) | `nmcli connection modify <connection> 802-11-wireless.powersave 2` and `iw dev <interface> set power_save off` (keeps mDNS multicast from being dropped) |
 
 - Each command is printed, then run through `sudo`, which asks on the terminal. With no terminal they run with `sudo -n` when sudo needs no password; otherwise nothing runs and the commands are printed. `host setup --yes` (what `install.sh` runs) never waits for input: `sudo -n` or nothing, terminal or not. `node enable --yes` is the same for its one root command.
 - **An interrupted setup does not leave the machine worse** (2026-10-08). On the second GB10 `host setup | head` died of the closed pipe after `swapoff /swap.img` and `fallocate -l 64G`, before `mkswap`: the file was 64 GB under its old 16 GB header and the machine had no swap. Now output that cannot be written is dropped instead of raising, each command's own output is collected and printed by `ling-admin` (so a closed pipe never reaches `mkswap`), the hang-up is ignored while commands run, and a `/swap.img` that exists but is not in use is finished on the next run when it is this machine's swap file (listed as swap in `/etc/fstab`, or `blkid` says so): the same `fallocate`/`chmod`/`mkswap`/`swapon`, with no `swapoff`. Anything else at that path is still left to its owner. Building the new file under another name and swapping it in was rejected: an active swap file cannot be renamed, so `/proc/swaps` would show the other name until a reboot, and the next run would see "not the single /swap.img".
@@ -168,7 +169,7 @@ Tested against the stand-in release server with stand-ins for `sudo` (passwordle
 - A failed command stops its step; the host is read again at the end and what remains is listed.
 - On this machine the four model-load checks pass and no sudo runs.
 - **One more check, and its fix: bubblewrap's sandbox.** Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`, and with no AppArmor profile exempting `/usr/bin/bwrap`, `bwrap` is refused a user namespace. Measured here on 2026-10-02: it works from the PyCharm terminal, whose processes carry the snap's AppArmor label, and fails from a systemd user unit (so also a plain terminal, an SSH login and the Night Shift timer) with `setting up uid map: Permission denied`; `ling sandbox` fails there too. Every sandbox Mightling starts uses that `bwrap` (Codex prefers the system's bubblewrap on PATH; the code indexers and node jobs call it by name). `host check` tries `bwrap` from a transient user unit; `host setup` now fixes it by installing `/etc/apparmor.d/puffin-bwrap`, a profile for `/usr/bin/bwrap` alone in the shape of Ubuntu's own for sandboxing programs (`chrome`, `linux-sandbox`: `flags=(unconfined)` and `userns,`), and loading it with `apparmor_parser -r`. The sysctl set to 0 would also work, for every program on the machine, and is not offered. Where the restriction is not the cause (the sysctl is not 1), the step stays a manual one.
-- **The same check runs on every `ling-admin` run** (`SandboxPrerequisite`, `vllm_server/sandbox_prerequisite.py`; added 2026-10-03). The probe is one transient unit, about 25 ms. When `bwrap` is refused and someone is at a terminal, it asks: **1** install the profile now (each command printed, sudo asks for the password), **2** turn off what needs it, **3** not now (the default, asked again next run). "Turn off" removes the Night Shift timer, refuses `night enable` and `night run`, and is remembered in `~/.config/dreamference/sandbox.json`, so the question is not asked again; once `bwrap` works (after `host setup`) the file is removed and the user is told to `night enable` again. With nobody at a terminal (the Night Shift timer, a script) it prints one line on stderr and refuses only `night run`/`night enable`, whose tasks would otherwise each fail inside a sandbox that cannot start. It never asks for `mcp`, `host` or `node serve-job` (protocols on stdio, or the command that reports it anyway), nor in a command `ling` itself runs (`CODEX_THREAD_ID`/`CODEX_SANDBOX` set). **Verified on 2026-10-03:** the user ran `host setup` and the profile was loaded on this machine. From a throwaway systemd user unit, `bwrap --ro-bind / / --unshare-user --unshare-net true` and `ling sandbox -- true` (Codex's sandbox, which sets up its loopback interface) both succeed where both failed before, and `host check` reports nothing to do. (Run from a shell with no controlling terminal, `host setup` has no terminal for sudo and prints the two commands instead; it has to be typed in a real terminal.)
+- **The same check runs on every `ling-admin` run** (`SandboxPrerequisite`, `vllm_server/sandbox_prerequisite.py`; added 2026-10-03). The probe is one transient unit, about 25 ms. When `bwrap` is refused and someone is at a terminal, it asks: **1** install the profile now (each command printed, sudo asks for the password), **2** turn off what needs it, **3** not now (the default, asked again next run). "Turn off" removes the Night Shift timer, refuses `night enable` and `night run`, and is remembered in `~/.config/dreamference/sandbox.json`, so the question is not asked again; once `bwrap` works (after `host setup`) the file is removed and the user is told to `night enable` again. With nobody at a terminal (the Night Shift timer, a script) it prints one line on stderr and refuses only `night run`/`night enable`, whose tasks would otherwise each fail inside a sandbox that cannot start. It never asks for `mcp`, `host`, `node serve-job`, `node askpass` or `node prepare` (`QUIET_COMMANDS`: protocols on stdio, askpass, or commands that report/fix it anyway), nor in a command `ling` itself runs (`CODEX_THREAD_ID`/`CODEX_SANDBOX` set). **Verified on 2026-10-03:** the user ran `host setup` and the profile was loaded on this machine. From a throwaway systemd user unit, `bwrap --ro-bind / / --unshare-user --unshare-net true` and `ling sandbox -- true` (Codex's sandbox, which sets up its loopback interface) both succeed where both failed before, and `host check` reports nothing to do. (Run from a shell with no controlling terminal, `host setup` has no terminal for sudo and prints the two commands instead; it has to be typed in a real terminal.)
 
 ### 3.4. `scripts/install_gb10.sh`
 

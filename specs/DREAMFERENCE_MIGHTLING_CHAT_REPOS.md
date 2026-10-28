@@ -1,6 +1,6 @@
 # Mightling Chat Repos: Work mode on a forge repository from a phone
 
-**Status:** proposed and decided by the owner on 2026-10-27 (§0.1). The same day the owner ordered the Mini App's missing pieces built (§10), together with the `ling web` repository service they need (§4). A build agent starts on §10's order once this spec is merged. The rest builds by the phases of §13. Nothing is built yet.
+**Status:** proposed and decided by the owner on 2026-10-27 (§0.1). The same day the owner ordered the Mini App's missing pieces built (§10), together with the `ling web` repository service they need (§4). Phase 1 (G1–G10, G12–G14) and Phase 3's Full Access, worktree pruning and `allow_main` forge branch protection were built and merged on 2026-10-27–2026-10-28 (`ling-rs/web/src/chat_repos.rs`, `repo_limits.rs`, `telegram_app.rs`, `ling-rs/src/chat.rs`, `ling-rs/chat/src/repo_notice.rs`, `desktop/ui/`, `dreamference/forge/forge_phone.py`). Phase 0's live measurements, Phase 2 (Signal and Matrix text commands) and G11 (Discord's front) remain (§13).
 
 **Spec owner:** the owner. **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`). Machines use the repository's placeholders: `gx10-1a2b` is the main node, `node-b` another node, and `<front>` is `ling web`'s HTTPS front on the owner's tailnet. Real names and addresses are never written here.
 
@@ -158,7 +158,7 @@ Only names and counts appear in a status line: the repository, the branch, files
 ### 3.3 Working on `main`: an opt-in per repository
 
 - **The default is `phone/<thread>`, always.**
-- **Turning it on happens at the node's own terminal:** `ling chat repos allow-main <org>/<repo>`, which needs a typed `yes`. It adds the repository to `[chat_repos] allow_main` in the user's config file, never a repository's.
+- **Turning it on happens at the node's own terminal:** `ling chat repos allow-main <org>/<repo>`, which needs a typed `yes` (not built yet in `ling-rs/src/chat.rs`, which currently implements `ling chat repos full-access on|off`; `[chat_repos] allow_main` is read from `~/.config/dreamference/config.toml` by `ChatReposSettings` and `ForgePhone`). It adds the repository to `[chat_repos] allow_main` in the user's config file, never a repository's.
 - **The forge enforces it.** The phone account (§4.2) is left off `main`'s push allowlist on every repository, except those in `allow_main`.
 - **From the phone,** `/branch main` (or the page's branch menu) on an allowed repository asks for confirmation, then moves the thread's checkout to track `main`.
   - `/push` then pushes `main`, and refuses a non-fast-forward with "the forge's main moved; /update first".
@@ -190,7 +190,7 @@ The repository service is one more module, `ling-rs/web/src/chat_repos.rs`. Its 
 
 ### 4.2 Reaching the forge
 
-- **An account for the phone surface.** `ling-admin node install` creates a forge account, `mightling-phone`, alongside the forge's other generated accounts (FORGEJO §2.2). It has write access to every repository, private ones included (R2), and appears on no protected branch's push allowlist except where `allow_main` puts it.
+- **An account for the phone surface.** `ForgePhone.ensure()` (`dreamference/forge/forge_phone.py`, called by `ForgeService` during `ling-admin node enable`, `forge on` and `forge tick` in `dreamference/forge/forge_service.py`) creates a forge account, `mightling-phone`, alongside the forge's other generated accounts (FORGEJO §2.2). It has write access to every repository, private ones included (R2), and appears on no protected branch's push allowlist except where `allow_main` puts it.
 - **Its token** sits in `ling web`'s state folder (0600) and is handed to git only through `GIT_ASKPASS` for the one command. It's never in a remote URL, `.git/config`, a log or a message. A worktree's remote is the plain forge URL, so a `git push` the agent tries inside the sandbox has no credential, and `.git` is read-only there anyway.
 - **Connections:** `ling web` reaches the forge the way its `/forge/` proxy does (FORGEJO §2.2), on the LAN only. The egress audit already declares the forge as a node service. These calls add no destination outside the owner's nodes.
 - **Stated plainly, as CHAT §6 does:** Codex's sandbox limits writes, not reads, so a command the agent runs can read the token at `/airgapped off`, as it can read the forge's owner password file. Branch protection keeps `main` safe from a phone token. Nothing keeps a prompt-injected command from using the token on other branches, or from reading private repositories with it. `/airgapped on` (which masks the user's runtime folders and takes the network away) is the defence, as for every credential on the node. This is accepted for now; moving the token to a system account, as Signal's keys are, is left to a later phase (Q3, decided 2026-10-27).
@@ -242,7 +242,10 @@ The repository service is one more module, `ling-rs/web/src/chat_repos.rs`. Its 
 |---|---|---|
 | `GET /api/repos` | | §4.3 |
 | `POST /api/repos/open` | `{repo, bridge, chat, thread?}` | A new checkout and Work thread, or the chat's existing one; answers `{thread, cwd, branch}` |
-| `GET /api/repos/state?thread=` | | Branch, base, ahead and behind, uncommitted files with counts, access mode, budget |
+| `POST /api/repos/off` | `{bridge, chat, thread?}` | Clears the chat's current repository in `current.json` and answers `{repo, branch, uncommitted}` |
+| `GET /api/repos/notices?chat=&after=` | | Bridge-only: typed repository events (`RepoEventKind`) since `after` for `RepoNotice` delivery (§5.3) |
+| `GET /api/repos/current?chat=` | | Bridge-only: the chat's current repository and checkout (`current.json`) |
+| `GET /api/repos/state?thread=` | | Branch, base, ahead and behind, uncommitted files with counts, access mode, budget (and a confirmation nonce with `?intent=…`) |
 | `GET /api/repos/diff?thread=&path=&scope=` | | `scope`: `uncommitted`, `branch` (against the base) or `turn`; a stat, or one file's diff |
 | `GET /api/repos/log?thread=` | | The branch's commits since its base |
 | `POST /api/repos/commit` | `{thread, message}` | §4.4 |
@@ -251,6 +254,8 @@ The repository service is one more module, `ling-rs/web/src/chat_repos.rs`. Its 
 | `POST /api/repos/merge` | `{thread}` | §4.6 |
 | `POST /api/repos/pr` | `{thread}` | §4.6 |
 | `POST /api/repos/main` | `{thread}` | §3.3 |
+| `POST /api/repos/budget` | `{thread, add, confirm}` | Raises the chat's daily token budget until local midnight (§7.2) |
+| `POST /api/repos/access` | `{thread, level, typed?, confirm?}` | Grants (`level: "full"`) or ends (`level: "workspace"`) Full Access on the checkout (§6.3) |
 
 - **Thread checks:** every route that takes a thread checks that `index.json` maps it to a checkout under `chat-repos/`. No route takes a path.
 - **Confirmation:** the routes that change something take a `confirm` nonce, issued by a preceding `GET` with `?intent=…`. A bridge's confirmation (button, YES, ✅) carries that nonce, so a confirmation can't be replayed or aimed at another thread.
@@ -341,7 +346,7 @@ Approvals, on every bridge:
 - **What grants it:** `POST /api/repos/access {thread, level: "full", typed, confirm}` from the page, after the node's setting, a writable checkout, its air gap off, the exact phrase and a single-use `access` nonce all hold. The grant is in memory: a restart of `ling web` ends it.
 - **Only the page's turns run with it.** A messenger bridge (a `bridge=1` session or a Signal device) can neither grant nor end it (403), and a bridge's turn on a granted thread still gets the workspace sandbox. A read-only checkout never gets it.
 - **Ending it** (`level: "workspace"`, no nonce, so it works when the forge is down) takes the checkout's loaded threads back to the workspace sandbox at once (`thread/settings/update` over a connection of its own) and interrupts a turn still running.
-- **Known limit:** when the node's setting is turned off or the air gap turned on, the grant drops at the next check (the next turn, or the page's next `/api/repos/state`), and the thread's sandbox is narrowed by that turn; a turn already running with Full Access is not interrupted until then.
+- **Revocation when node settings change:** `sweep_full_access` (`ling-rs/web/src/chat_repos.rs`, run every `FULL_ACCESS_SWEEP_INTERVAL = 5s` by `ling-rs/web/src/server.rs`) re-evaluates every held grant against the node's `[chat_repos] full_access` and the air gap; when a grant no longer stands, the checkout's threads are taken back to their workspace sandbox within 5 s and any turn started before the grant dropped is interrupted (`96bc232a`, replacing the earlier limit where revocation waited until the next turn or `/api/repos/state`).
 
 ## 7. Bounds and budget
 
@@ -367,7 +372,7 @@ The Ask bounds of CHAT §16.3 (180 s, 25 tool calls) would cut an edit in half, 
   - a running turn is steered to summarise, as in §7.1;
   - new turns are refused with the time the budget resets;
   - git commands keep working.
-- **Raising it:** `ling chat repos budget <chat> <tokens>` at the node, or `/budget +<n>` from Signal or Matrix confirmed with YES, or the page's Budget control. A raise lasts until midnight.
+- **Raising it:** `POST /api/repos/budget` (the page's Budget control), or `ling chat repos budget <chat> <tokens>` at the node / `/budget +<n>` from Signal or Matrix confirmed with YES (the CLI subcommand and Signal/Matrix text commands are P2/unbuilt). A raise lasts until midnight.
 
 ### 7.3 Stop
 
@@ -424,24 +429,24 @@ The Ask bounds of CHAT §16.3 (180 s, 25 tool calls) would cut an edit in half, 
 - `prs`;
 - the folder chooser.
 
-The owner ordered every gap built (R6). Each row says what exists and what's needed:
+The owner ordered every gap built (R6). G1–G10 and G12–G14 are now built (2026-10-27–2026-10-28); G11 waits for the Discord adapter. Each row says what existed before the build and what was needed (and where it shipped):
 
-| # | Capability | Exists today | Needed |
+| # | Capability | Existed before | Needed / Shipped |
 |---|---|---|---|
-| G1 | **The repository service** | Nothing. `night_phone.rs` is the pattern | `chat_repos.rs` with the routes of §4.7, the policy rules of §5.1, `repo_limits.rs` (§7), and a forge client tested against a stand-in |
-| G2 | **Sign-in from the launch data** | The launch check (`POST /api/telegram/check`: signed `initData`, a paired Telegram user, a day's freshness) runs *on top of* the device credential. A new phone still needs `ling web pair` typed at the node | **Launch pairing:** a paired Telegram user's first launch from the configured front, with no device credential, gets a pending device and a 6-digit code shown on the page. The bot sends "A Mini App on a new device asks to pair (code 482 913)" with Approve and Decline. On Approve, `ling web` issues a `control` device credential, labelled `telegram-app`, revocable with `ling web revoke`. **The trust, stated plainly:** Telegram issued the bot token and carries both the launch data and the Approve press, so Telegram could forge both. The one thing it lacks is reach to `<front>` on the tailnet. Q6 asks whether that is enough |
-| G3 | **Deep links** | `#work` and `#popout=<thread>` in the address's fragment. Telegram owns the fragment (`tgWebAppData`), and `bridge.js` clears it | `?open=repos`, `?open=repo:<org>/<repo>` and `?open=thread:<id>` (with `&approval=1` for a waiting approval), read after the launch check. Used by every notice's button, and by Discord's link (G11) |
-| G4 | **Repository picker** | Work's project list (`project/list`) and the folders threads used. "Add folder…" and the chooser are Electron-only | A **Repos** view: `/api/repos` with 🔒, archived, mirror and open-checkout marks, a search box, and recent ones first. Opening one calls `/api/repos/open` and shows its thread |
-| G5 | **Work view on a phone** | The same Work UI, with one `@media (max-width: 720px)` rule in `styles.css`. Telegram's back button and safe-area insets are unused (MOONSHOT §15 "Not done") | A narrow layout: the thread list as a drawer, the review pane and file view as full-screen sheets, the composer pinned above the keyboard, and the approval card kept in view. Telegram's back button and safe area through `postEvent` (`web_app_setup_back_button`, `safe_area_changed`), since Telegram's script isn't loaded |
-| G6 | **Diffs** | The review pane in the web host shows the `turn` scope only (from the app-server). The unstaged, staged and branch scopes need the window's git | For a `chat-repos` thread, `git` in the web host is implemented over `/api/repos/diff` and `/state`: scopes `uncommitted`, `branch` and `turn`. `git.available()` becomes true for such a thread only. Stage, unstage and discard aren't offered, since commits take everything (§4.4) |
-| G7 | **Approvals** | Command and file-change approval cards answered through the policy's pending set, as in a browser | A "Waiting for you" strip at the top when `?approval=1` opens the page. The permissions-request card is checked in the web host, and built if it's missing there. The Full Access typed confirmation (§6.3) |
-| G8 | **Command output** | The agent's commands and their streamed output show in the thread. The user's own terminal panel and tasks are Electron-only | A full-screen, read-only output view for one command item (long logs, search, copy). **No interactive terminal from a phone:** it would be an unsandboxed shell |
-| G9 | **Branch, commit, push, update, merge, PR** | Electron-only (`git.commit`, `git.push`, `git.pullRequest`, `prs`) | A git bar for `chat-repos` threads: branch and ahead/behind, Commit (message), Push, Update, Merge, PR (forge link through `/forge/`), "Work on main" where allowed, each over §4.7 with its confirmation nonce |
-| G10 | **Live turns** | The page is an app-server client of the node, so node-owned phone threads stream directly. Threads owned by another device show through sync's live view (`sync.ts`, `/api/sync/live`) when sync is on | Resuming when the webview returns from the background: on `visibilitychange`, re-subscribe (`thread/resume`) and read back missed turns (`thread/turns/list`), as the bridges do (CHAT §2). Checked in Phase 0, built if it's missing |
-| G11 | **Discord's front** | Specified (DISCORD §3.11): `[chat] discord_web_url` served like the Mini App's address. Not built: `telegram_app::mini_app_url` reads only the Telegram setting | Read `discord_web_url`, add its host to `Config::public_names`, and use G3's deep links. Discord's launch carries nothing signed, so first pairing there is `ling web pair` or a code confirmed from Signal or Matrix |
-| G12 | **The file viewer** | File tabs read through `fs/readFile` (works in the web host). "Open in editor" is Electron-only | Nothing for reading. The narrow layout (G5) and the file tree in the drawer |
-| G13 | **The Work header** | `WorktreeHeader` shows a branch | The repository, `phone/<thread>`, 🔒, the "main" badge, the budget left, and the B9 warning of §8.1 |
-| G14 | **Bot notices and topics** | Topics as threads, `web_app` buttons and `/app` (MOONSHOT §14–§15) | `RepoNotice` (§5.3) in the hub; a topic per repository; Open buttons with G3's links; the counts-only confirmations of §2; the bot's refusal to forward typed text in a repository's topic |
+| G1 | **The repository service** | Nothing. `night_phone.rs` is the pattern | **Built** (`ling-rs/web/src/chat_repos.rs`, `repo_limits.rs`, `ling-rs/prompts/chat-work.md`, `ling-rs/web/policy.json`): `chat_repos.rs` with the routes of §4.7, the policy rules of §5.1, `repo_limits.rs` (§7), and a forge client tested against a stand-in |
+| G2 | **Sign-in from the launch data** | The launch check (`POST /api/telegram/check`: signed `initData`, a paired Telegram user, a day's freshness) runs *on top of* the device credential. A new phone still needs `ling web pair` typed at the node | **Built** (`ling-rs/web/src/telegram_app.rs`, `server.rs`, `ling-rs/chat/src/hub.rs`, `desktop/ui/src/init.ts`): **Launch pairing:** a paired Telegram user's first launch from the configured front, with no device credential, gets a pending device and a 6-digit code shown on the page. The bot sends "A Mini App on a new device asks to pair (code 482 913)" with Approve and Decline. On Approve, `ling web` issues a `control` device credential, labelled `telegram-app`, revocable with `ling web revoke`. **The trust, stated plainly:** Telegram issued the bot token and carries both the launch data and the Approve press, so Telegram could forge both. The one thing it lacks is reach to `<front>` on the tailnet. Q6 asks whether that is enough |
+| G3 | **Deep links** | `#work` and `#popout=<thread>` in the address's fragment. Telegram owns the fragment (`tgWebAppData`), and `bridge.js` clears it | **Built** (`desktop/ui/src/init.ts`, `deeplink.test.ts`): `?open=repos`, `?open=repo:<org>/<repo>` and `?open=thread:<id>` (with `&approval=1` for a waiting approval), read after the launch check. Used by every notice's button, and by Discord's link (G11) |
+| G4 | **Repository picker** | Work's project list (`project/list`) and the folders threads used. "Add folder…" and the chooser are Electron-only | **Built** (`desktop/ui/src/ReposView.tsx`, `repos.ts`): A **Repos** view: `/api/repos` with 🔒, archived, mirror and open-checkout marks, a search box, and recent ones first. Opening one calls `/api/repos/open` and shows its thread |
+| G5 | **Work view on a phone** | The same Work UI, with one `@media (max-width: 720px)` rule in `styles.css`. Telegram's back button and safe-area insets are unused (MOONSHOT §15 "Not done") | **Built** (`desktop/ui/src/phone.ts`, `App.tsx`, `styles.css`, `ling-rs/web/src/bridge.js`): A narrow layout: the thread list as a drawer, the review pane and file view as full-screen sheets, the composer pinned above the keyboard, and the approval card kept in view. Telegram's back button and safe area through `postEvent` (`web_app_setup_back_button`, `safe_area_changed`), since Telegram's script isn't loaded |
+| G6 | **Diffs** | The review pane in the web host shows the `turn` scope only (from the app-server). The unstaged, staged and branch scopes need the window's git | **Built** (`desktop/ui/src/bridge.ts`, `repos.ts`, `ReviewPane.tsx`): For a `chat-repos` thread, `git` in the web host is implemented over `/api/repos/diff` and `/state`: scopes `uncommitted`, `branch` and `turn`. `git.available()` becomes true for such a thread only. Stage, unstage and discard aren't offered, since commits take everything (§4.4) |
+| G7 | **Approvals** | Command and file-change approval cards answered through the policy's pending set, as in a browser | **Built** (`desktop/ui/src/ApprovalStrip.tsx`, `approvals.ts`, `ling-rs/src/chat.rs`, `ling-rs/web/src/chat_repos.rs`): A "Waiting for you" strip at the top when `?approval=1` opens the page. The permissions-request card is checked in the web host, and built if it's missing there. The Full Access typed confirmation (§6.3) |
+| G8 | **Command output** | The agent's commands and their streamed output show in the thread. The user's own terminal panel and tasks are Electron-only | **Built** (`desktop/ui/src/OutputView.tsx`, `output.test.ts`): A full-screen, read-only output view for one command item (long logs, search, copy). **No interactive terminal from a phone:** it would be an unsandboxed shell |
+| G9 | **Branch, commit, push, update, merge, PR** | Electron-only (`git.commit`, `git.push`, `git.pullRequest`, `prs`) | **Built** (`desktop/ui/src/GitBar.tsx`, `repos.ts`): A git bar for `chat-repos` threads: branch and ahead/behind, Commit (message), Push, Update, Merge, PR (forge link through `/forge/`), "Work on main" where allowed, each over §4.7 with its confirmation nonce |
+| G10 | **Live turns** | The page is an app-server client of the node, so node-owned phone threads stream directly. Threads owned by another device show through sync's live view (`sync.ts`, `/api/sync/live`) when sync is on | **Built** (`desktop/ui/src/resume.ts`, `resume.test.ts`): Resuming when the webview returns from the background: on `visibilitychange`, re-subscribe (`thread/resume`) and read back missed turns (`thread/turns/list`), as the bridges do (CHAT §2). Checked in Phase 0, built if it's missing |
+| G11 | **Discord's front** | Specified (DISCORD §3.11): `[chat] discord_web_url` served like the Mini App's address. Not built: `telegram_app::mini_app_url` reads only the Telegram setting | **Not built yet:** Read `discord_web_url`, add its host to `Config::public_names`, and use G3's deep links. Discord's launch carries nothing signed, so first pairing there is `ling web pair` or a code confirmed from Signal or Matrix |
+| G12 | **The file viewer** | File tabs read through `fs/readFile` (works in the web host). "Open in editor" is Electron-only | **Built** (`desktop/ui/src/FileTree.tsx`, `FileView.tsx`, `phone.ts`): Nothing for reading. The narrow layout (G5) and the file tree in the drawer |
+| G13 | **The Work header** | `WorktreeHeader` shows a branch | **Built** (`desktop/ui/src/WorktreeControls.tsx`, `repos.ts`): The repository, `phone/<thread>`, 🔒, the "main" badge, the budget left, and the B9 warning of §8.1 |
+| G14 | **Bot notices and topics** | Topics as threads, `web_app` buttons and `/app` (MOONSHOT §14–§15) | **Built** (`ling-rs/chat/src/repo_notice.rs`, `hub.rs`, `telegram.rs`, `ling-rs/chat/tests/telegram.rs`): `RepoNotice` (§5.3) in the hub; a topic per repository; Open buttons with G3's links; the counts-only confirmations of §2; the bot's refusal to forward typed text in a repository's topic |
 
 **Build order:**
 1. **G1** (everything else calls it).
@@ -536,16 +541,16 @@ All tests use a scratch `HOME`, a forge stand-in, local bare repositories, and s
 
 ### 12.5 Python
 
-`tests/test_anonymity.py` already covers this spec's text. If `ling-admin node install` gains the `mightling-phone` account, that's tested with the forge's other generated accounts (FORGEJO P0's tests), with Docker mocked.
+`tests/test_anonymity.py` already covers this spec's text. `ForgePhone` (`dreamference/forge/forge_phone.py`, called by `ForgeService` in `node enable`, `forge on` and `forge tick`) creates and maintains the `mightling-phone` account, its `0600` token file and default-branch protection, and is tested in `tests/test_forge_phone.py` with Docker mocked.
 
 ## 13. Phases
 
 | Phase | Delivers | Gate |
 |---|---|---|
-| **P0** (measure, on a throwaway bot and the owner's phone) | Whether Telegram's webview keeps `ling web`'s device cookie across launches; the back button and safe-area events through `postEvent`; what a backgrounded webview does to the WebSocket; Discord's in-app browser and the link; a worktree from a bare clone under workspace-write (the agent's edits pass, `.git` read-only); `mightling`'s clone time and disk | A short results section here |
-| **P1** (the Mini App build, R6) | §10 in its build order: G1–G10, G12–G14 | §12.1, §12.2, §12.4 pass; a whole loop on stand-ins: pick, turn, approval, diff, commit, push, merge |
-| **P2** | Signal and Matrix commands (§2, §5.2); the extended B9 (§8.1); Night Shift in the repository and `night_repos` retired (§11.2) | §12.3 passes; one live loop from Signal once the forge exists |
-| **P3** | Full Access by node policy (§6.3); pruning (§3.4); `allow_main` (§3.3); G11 with the Discord adapter | Their tests; a week of real use with no write to the owner's tree and nothing refused that should have passed |
+| **P0** (measure, on a throwaway bot and the owner's phone) | Whether Telegram's webview keeps `ling web`'s device cookie across launches; the back button and safe-area events through `postEvent`; what a backgrounded webview does to the WebSocket; Discord's in-app browser and the link; a worktree from a bare clone under workspace-write (the agent's edits pass, `.git` read-only); `mightling`'s clone time and disk | A short results section here (owed) |
+| **P1** (the Mini App build, R6; **built 2026-10-27–2026-10-28**) | §10 in its build order: G1–G10, G12–G14 | §12.1, §12.2, §12.4 pass; a whole loop on stand-ins: pick, turn, approval, diff, commit, push, merge |
+| **P2** | Signal and Matrix commands (§2, §5.2); the extended B9 (§8.1, built in `chat_repos.rs`); Night Shift in the repository and `night_repos` retired (§11.2) | §12.3 passes; one live loop from Signal once the forge exists |
+| **P3** (Full Access, pruning and `allow_main` built 2026-10-27–2026-10-28; G11 and `ling chat repos allow-main` CLI remaining) | Full Access by node policy (§6.3); pruning (§3.4); `allow_main` (§3.3); G11 with the Discord adapter | Their tests; a week of real use with no write to the owner's tree and nothing refused that should have passed |
 
 **Live use needs the forge:**
 - FORGEJO P0 for the forge of record;

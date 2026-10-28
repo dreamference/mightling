@@ -1,6 +1,6 @@
 # Mightling Terminal Agent — Gmail Access
 
-**Status:** implemented (re-checked against the code 2026-09-28) — `dreamference/chat/gmail_client.py`, `ling-admin gmail`, the launcher's prompt block in `ling-rs/src/lib.rs`, per-account `errors` in the service. Default-on when connected (§5's open decision), opt out with `mightling_gmail = false`.
+**Status:** implemented (re-checked against the code 2026-10-28) — `dreamference/chat/gmail_client.py`, `ling-admin gmail`, the launcher's prompt block `gmail_access_instructions` in `ling-rs/src/lib.rs`, per-account `errors` in the service (`tests/test_gmail_client.py`). Default-on when connected (§5's open decision), opt out with `mightling_gmail = false`.
 **Target:** the `ling` terminal agent (`ling`, the Mightling-branded Codex with the launcher in `ling-rs/` compiled in)
 **Since (noted 2026-10-09):** the service no longer needs the web UI: `ling-admin google start` runs it on its own (DOCKER §6, [MIGHTLING_APPS](./DREAMFERENCE_MIGHTLING_APPS.md) §5.1), and accounts are connected through its own connect page (Onyx's Settings → Gmail Accounts went with the web chat's retirement, [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §19, 1.7.0). When `/apps` declares Gmail as an MCP app (an account connected with the Gmail scope), the launcher offers the `gmail_search`/`gmail_read` tools and leaves out the shell section this spec describes; the shell section and `ling-admin gmail` remain for sessions where no app is declared.
 **Builds on:** the Gmail search service, first run for the Onyx web UI and now the Google service of its own (`dreamference/chat/gmail_search_service.py`, container `dreamference-gmail`), and the `ling-search` / `ling-fetch` pattern that gives the same agent web access.
@@ -17,7 +17,7 @@ Let the terminal agent answer mailbox questions — "what did Alice send about t
 
 The agent reaches web search through two shell commands described in its system prompt (`WEB_ACCESS_INSTRUCTIONS` in `ling-rs/src/lib.rs`). Gmail uses the same mechanism, for the reasons already recorded there:
 
-- **MCP is effectively unreachable for this model.** With `code_mode` on, Codex exposes MCP tools only inside its `exec` JavaScript runtime as `tools.mcp__<server>__<tool>(…)`. The served Qwen model calls the namespace directly, gets `unsupported call`, and gives up. This is the same failure that retired the SearXNG MCP wrapper. *(No longer true since 2026-10-02: patch `0020-flat-mcp-tools` sends MCP tools to the local model as plain functions, and the code index reaches it that way, MIGHTLING_CODE_INDEX §15. Gmail as read-only MCP tools is designed in [MIGHTLING_APPS](./DREAMFERENCE_MIGHTLING_APPS.md), which also narrows the path from an injected email to the shell; until it is built, the shell commands below are what runs. At a configured `/airgapped on` the Gmail section is left out of the prompt, MIGHTLING_AIRGAPPED §14.4.)*
+- **MCP is effectively unreachable for this model.** With `code_mode` on, Codex exposes MCP tools only inside its `exec` JavaScript runtime as `tools.mcp__<server>__<tool>(…)`. The served Qwen model calls the namespace directly, gets `unsupported call`, and gives up. This is the same failure that retired the SearXNG MCP wrapper. *(No longer true since 2026-10-02: patch `0020-flat-mcp-tools` sends MCP tools to the local model as plain functions, and the code index reaches it that way, MIGHTLING_CODE_INDEX §15. Gmail as read-only MCP tools is built in `ling-rs/apps/` and `ling-rs/src/apps.rs` (`ling apps serve gmail`, [MIGHTLING_APPS](./DREAMFERENCE_MIGHTLING_APPS.md)), which narrows the path from an injected email to the shell; when `/apps` declares Gmail, the launcher offers `gmail_search`/`gmail_read` and omits the shell prompt block below, keeping `ling-admin gmail` and `gmail_access_instructions` as the fallback when no app is declared. At a configured `/airgapped on` or against a remote node, Gmail is left out of the prompt, MIGHTLING_AIRGAPPED §14.4.)*
 - **Shell commands are used reliably.** The model already runs `ling-search` / `ling-fetch` correctly from any workspace, because the instruction travels in the session's prompt rather than a workspace `AGENTS.md`.
 - **No Codex patch is needed.** The branded build (`codex-patches/`) stays a branding-only diff series.
 
@@ -45,12 +45,12 @@ ling-admin gmail status [--json]
 
 The command is a thin HTTP client for the running service. It does **not** open IMAP itself.
 
-- **Endpoint:** `http://127.0.0.1:8767`, which is `GMAIL_HOST_PORT`, already published on loopback for the browser status check and the OAuth redirect.
+- **Endpoint:** `http://127.0.0.1:8767`, which is `GOOGLE_HOST_PORT`, already published on loopback for the browser status check and the OAuth redirect.
 - **Auth:** the `X-Mightling-Gmail-Token` header, carrying the shared secret read from `~/.config/dreamference/gmail/service-secret`. That is the file `GoogleService.secret()` creates (`ling-admin google start`; `OnyxRunner._gmail_secret()` until Onyx's retirement) and the container receives as `MIGHTLING_GMAIL_SECRET`. The CLI only reads it; it never creates one. A missing file means Gmail was never set up, and the error names `ling-admin google start`.
 - **Why not in-process IMAP:** the service is the one component that owns credential unsealing, the multi-account fan-out and access-token refresh (it refreshes from the sealed refresh token when less than 60 s remain; see `DREAMFERENCE_GOA.md` §0). A second host-side IMAP path would give two chances to disagree about the same sealed file, the exact problem `gmail_credentials.py` exists to avoid. It would also put the mailbox token inside the agent's own process.
 - **Sandbox:** the runner already sets `[sandbox_workspace_write] network_access = true`, so loopback is reachable from the agent's shell, and reading a file under `~` is permitted by the workspace-write sandbox. Nothing new is needed in `config.toml`.
 
-Constants (`GMAIL_HOST_PORT`, `GMAIL_AUTH_HEADER`, the secret path) are imported from `google_service.py` / `gmail_credentials.py`, never re-declared.
+Constants (`GOOGLE_HOST_PORT`, `GMAIL_AUTH_HEADER`, `SECRET_FILE_NAME`, `CREDENTIALS_DIR`, `IMAP_TIMEOUT_SECONDS`, `MAX_RESULT_LIMIT`) are imported from `google_service.py`, `gmail_credentials.py` and `gmail_search_service.py`, never re-declared.
 
 ### 3.2 Code layout
 
@@ -61,7 +61,7 @@ Following the one-class-per-file convention:
 
 ## 4. Prompt
 
-The launcher (`ling-rs`, which assembles the prompt since the Python runner was retired) appends a `GMAIL_ACCESS_INSTRUCTIONS` block after `WEB_ACCESS_INSTRUCTIONS`, **only when the Gmail service's status endpoint reports `connected`** at launch; it asks the service over HTTP, as the `ling-admin gmail` commands do, rather than importing `GmailClient`. An instruction naming a tool that answers "not connected" teaches the model to try, fail, and conclude it has no mail access; omitting it lets the model say plainly that Gmail isn't set up. Draft text:
+The launcher (`ling-rs`, which assembles the prompt since the Python runner was retired) appends a `gmail_access_instructions(&accounts)` block (`ling-rs/src/lib.rs`, `ling-rs/src/prompt.rs`) after `WEB_ACCESS_INSTRUCTIONS` when no `/apps` MCP app is declared, the host is local, `/airgapped` is `off`, `mightling_gmail` is enabled, **and the Gmail service's status endpoint reports `connected`** at launch; it asks the service over HTTP, as the `ling-admin gmail` commands do, rather than importing `GmailClient`. An instruction naming a tool that answers "not connected" teaches the model to try, fail, and conclude it has no mail access; omitting it lets the model say plainly that Gmail isn't set up. Draft text:
 
 ```
 # Email access
@@ -112,11 +112,11 @@ This is the part that differs from the web UI. There the model can only call the
 
 ## 8. Tests
 
-The service and the IMAP layer are covered in `tests/test_mightling_apps_service.py` and `tests/test_google_service_origin.py` (in `tests/test_onyx_runner.py` until Onyx's retirement). New tests stub HTTP:
+The service and the IMAP layer are covered in `tests/test_mightling_apps_service.py` and `tests/test_google_service_origin.py` (in `tests/test_onyx_runner.py` until Onyx's retirement). `tests/test_gmail_client.py` stubs HTTP and covers:
 
 - `GmailClient` sends the secret header, URL-encodes the query, clamps `limit`, and maps connection-refused and a missing secret to the two messages in §7.
 - CLI text output: numbered results with the `id:` line, the untrusted-content frame around `read`, an explicit "no messages matched", and a non-zero exit only on error.
-- The launcher includes `GMAIL_ACCESS_INSTRUCTIONS` with the account list when `status()` is connected, omits it when not connected or when `mightling_gmail = false`, and still includes `WEB_ACCESS_INSTRUCTIONS` in every case.
+- The launcher (`ling-rs/src/lib.rs`, `ling-rs/src/prompt.rs`) includes `gmail_access_instructions` with the account list when `status()` is connected and no app is declared, omits it when not connected or when `mightling_gmail = false`, and still includes `WEB_ACCESS_INSTRUCTIONS` in every case.
 - Service: `search()` reports a per-account failure in `errors` and still returns the other accounts' messages.
 
 ## 9. Acceptance

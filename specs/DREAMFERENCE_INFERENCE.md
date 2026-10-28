@@ -1,8 +1,8 @@
 # Mightling GB10 Inference Stack
 
-> **Version:** 1.5.1
-> **Subject:** vLLM and SGLang Launch Engines, Auto-Configuration, & Performance Optimization
-> **Checked against the code:** 2026-10-09 (`dreamference/vllm_server/vllm_server_manager.py`, `sglang_launch_builder.py`, `psi_watchdog.py`; constants compared value by value). Since 2026-10-07 the registry has one main model, served by SGLang; the vLLM path is kept and tested against test-only recipes (`vllm_recipes` in `tests/conftest.py`), so the vLLM sections below describe the launcher, not a model in use.
+> **Version:** 1.7.2
+> **Subject:** vLLM, SGLang and ling-serve Launch Engines, Auto-Configuration, & Performance Optimization
+> **Checked against the code:** 2026-10-28 (`dreamference/vllm_server/vllm_server_manager.py`, `sglang_launch_builder.py`, `ling_serve_launch_builder.py`, `model_gate.py`, `psi_watchdog.py`; constants compared value by value). Since 2026-10-07 the registry has one default main model (`qwen3.8-27b-nvfp4-dflash2`), served by SGLang by default with `ling-serve` (`engine: ling`) opt-in since 1.7.2, plus two trial candidates (`qwen3.8-27b-minima-nvfp4-dflash2` on SGLang and `qwen3.8-flash-next-nvfp4-mtp` on vLLM); the vLLM path is also tested against test-only recipes (`vllm_recipes` in `tests/conftest.py`).
 
 ---
 
@@ -24,27 +24,30 @@
 The server is started only by `ling-admin server start`. Agents never start it: they wait for it (`DREAMFERENCE_AGENTS.md` §6, or `ling`'s launcher).
 
 ```
-ling-admin server start [--model <alias>]
+ling-admin server start [--model <alias>] [--engine vllm|sglang|ling]
     ↓
-Resolve alias → HF repo, recipe (launch_overrides), Docker image
+Resolve alias → HF repo, recipe (launch_overrides / engine_recipes), Docker image
     ↓
 Host-safety pre-flight (check_host_safety): swap, sysctl, earlyoom / systemd-oomd, memory arena
     ↓
-Pre-download weights: main model, --draft-model, and the recipe's own drafter (DFlash2), at pinned revisions
+Pre-download weights: main model, --draft-model, the recipe's own drafter (DFlash2), and engine assets, at pinned revisions
     ↓
 Reset a stale vLLM torch.compile cache if the speculative signature changed (vLLM only)
     ↓
 Diffusion sidecar: switched off since 2026-10-03, so a leftover dreamference-diffusion-8001 is removed
 (with DIFFUSION_ENABLED on: started first, unless --no-diffusion)
     ↓
-Build the docker run command: python3 -m sglang.launch_server … for an `engine: sglang` recipe (the main model),
-vllm serve … otherwise (explicit args > recipe > module defaults)
+Start the model gate (`ModelGate`, container `dreamference-model-gate-<port>`) on 0.0.0.0:<port>;
+when the gate is up, the engine binds to loopback 127.0.0.1:<port + 10000> behind it
+    ↓
+Build the docker run command: python3 -m sglang.launch_server … for `engine: sglang` (the main model's default),
+ling-serve … for `engine: ling` (`--engine ling`), or vllm serve … otherwise (explicit args > recipe > module defaults)
     ↓
 Run the container under the PSI MemoryPressureWatchdog
     ↓
 Stream logs and Docker memory; poll /v1/models until healthy
     ↓
-NVFP4 canary (nvfp4 aliases only); tool-call check through /v1/responses (every model; MODELS §2.1); report diffusion sidecar state (when diffusion is on)
+NVFP4 canary (nvfp4 aliases only); tool-call check through /v1/responses (`ToolCallCanary`, every model; MODELS §2.1); warm-up request (`WARM_UP_PROMPT`); report diffusion sidecar state (when diffusion is on)
     ↓
 Exit; the containers keep running (--restart unless-stopped)
 ```
@@ -53,8 +56,8 @@ Exit; the containers keep running (--restart unless-stopped)
 
 ## 2. Weight Pre-Download & Management
 
-- `start_server()` calls `download_model()` for the main model, for `--draft-model` if given, and for the recipe's drafter (`get_speculative_draft_repo`) before the container starts. vLLM therefore never has to fetch weights during the load, which is the one phase this host cannot afford surprises in.
-- `ModelDownloader` tries `huggingface_hub.snapshot_download` first, then the `huggingface-cli` binary. If both fail, the fetch is left to vLLM.
+- `start_server()` calls `download_model()` for the main model, for `--draft-model` if given, for the recipe's drafter (`get_speculative_draft_repo`), and for any required engine assets before the container starts. vLLM therefore never has to fetch weights during the load, which is the one phase this host cannot afford surprises in.
+- `ModelDownloader` tries `huggingface_hub.snapshot_download` first, then the `huggingface-cli` binary; for Dreamference-hosted model assets (`dreamference/*`, such as `dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch` at `models-2026-10-27`), `ReleaseAssetDownloader` (`hardware/release_asset_downloader.py`) fetches pinned files from GitHub release assets into the Hugging Face hub cache layout. If both fail, the fetch is left to vLLM.
 - The cache is `~/.cache/huggingface/hub/` (`$HF_HOME/hub` if set, `$HF_HUB_CACHE` if that is set), resolved as huggingface_hub resolves it. `ModelDownloader.container_volume_args()` mounts the resolved home into every model container (server, diffusion sidecar, tensorizer) at `/root/.cache/huggingface`, and a hub moved by `HF_HUB_CACHE` at `/root/.cache/huggingface/hub`, so snapshot paths handed to the engine exist inside it. Until 2026-09-30 the mount was always `~/.cache/huggingface`, whatever `HF_HOME` said.
 
 ### 2.1. HF Token Handling
@@ -72,8 +75,8 @@ It is passed to the container as `-e HF_TOKEN=…`. When none is set, `huggingfa
 
 ### 3.1. Two ways to get a drafter
 
-- **Recipe (normal case):** the model's `launch_overrides["speculative_config"]`. On **SGLang** (the main model) it becomes `--speculative-algorithm DFLASH --speculative-draft-model-path <snapshot> --speculative-num-draft-tokens 12 --speculative-draft-model-quantization modelopt_fp4`, from `{"method": "DFLASH", "model": "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal", "revision": "bd7a934…", "num_speculative_tokens": 12, "quantization": "modelopt_fp4"}` (`SGLangLaunchBuilder.server_args`). On **vLLM** it is serialised to `--speculative-config`; the removed 122B recipes used `{"method": "dflash", "model": "z-lab/Qwen3.5-122B-A10B-DFlash", "num_speculative_tokens": 12, "attention_backend": "FLASH_ATTN"}`, and MTP recipes (heads inside the checkpoint) use the same key with `"method": "mtp"`. Either way the drafter is a separate checkpoint, pre-downloaded and counted in the memory budget.
-- **Explicit `--draft-model` (vLLM recipes only; the SGLang path takes its drafter from the recipe alone and ignores the flag):** emitted as `--speculative-config` JSON, built by `resolve_speculative_config()`; vLLM 0.2x has no `--speculative-model` or `--num-speculative-tokens` flag. `"model"` is the draft's resolved HF repo.
+- **Recipe (normal case):** the model's `launch_overrides["speculative_config"]`. On **SGLang** (the main model) it becomes `--speculative-algorithm DFLASH --speculative-draft-model-path <snapshot> --speculative-num-draft-tokens 12 --speculative-draft-model-quantization modelopt_fp4`, from `{"method": "DFLASH", "model": "dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch", "revision": "models-2026-10-27", "num_speculative_tokens": 12, "quantization": "modelopt_fp4"}` (`SGLangLaunchBuilder.server_args`; until 1.7.2 `"model"` was `"maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal"` at `"bd7a934…"`). On **ling-serve** (`engine: ling`) it becomes `--draft-model <snapshot> --draft-block 12` (`LingServeLaunchBuilder.server_args`). On **vLLM** it is serialised to `--speculative-config`; the removed 122B recipes used `{"method": "dflash", "model": "z-lab/Qwen3.5-122B-A10B-DFlash", "num_speculative_tokens": 12, "attention_backend": "FLASH_ATTN"}`, and MTP recipes (heads inside the checkpoint, such as `qwen3.8-flash-next-nvfp4-mtp`) use the same key with `"method": "mtp"`. Either way an external drafter is a separate checkpoint, pre-downloaded and counted in the memory budget.
+- **Explicit `--draft-model` (vLLM recipes only; the SGLang and ling-serve paths take their drafter from the recipe alone and ignore the flag):** emitted as `--speculative-config` JSON, built by `resolve_speculative_config()`; vLLM 0.2x has no `--speculative-model` or `--num-speculative-tokens` flag. `"model"` is the draft's resolved HF repo.
 
 **Precedence:** with both present, the explicit draft is **layered onto** the recipe when the recipe also uses an external drafter (it has a `"model"`): `"model"` is replaced, and the recipe's method and drafter attention backend are kept. A self-speculation recipe (MTP, no `"model"`) is replaced outright, since its method means nothing for a separate checkpoint. There is no fail-fast validation of the combination. Until 2026-09-29 the explicit path emitted the removed `--speculative-model` flags and failed at argument parsing.
 
@@ -81,7 +84,7 @@ It is passed to the container as `-e HF_TOKEN=…`. When none is set, `huggingfa
 
 ### 3.2. Speculative token count
 
-- **With a recipe:** its `speculative_config` carries the count. The main model uses 16 (12 was measured +7% at one stream and neutral at two on the second GB10, 2026-10-08; the change waits for the benchmark to finish).
+- **With a recipe:** its `speculative_config` carries the count. The main model uses 12 since 2026-10-09 (16 until then; 12 was measured +7% at one stream and neutral at two on the second GB10, 2026-10-08).
 - **With an explicit draft:** `ling-admin server start` passes the config's resolved `num_speculative_tokens` — `--num-speculative-tokens` > `DREAMFERENCE_SPECULATIVE_TOKENS` > file > `DEFAULT_SPECULATIVE_TOKENS = 8` — so a draft without the flag gets 8, not the recipe's 12. `start_server()` / `build_launch_command()` default to 5 only when called directly from Python.
 - **Without a draft**, the depth argument is ignored and the recipe's config is passed exactly.
 
@@ -137,10 +140,13 @@ The keys mirror `build_launch_command`'s parameters: `max_model_len`, `gpu_memor
 | `enable_prefix_caching` | `false` forces prefix caching off, whatever the config says (hybrid-GDN checkpoints cannot honour it) |
 | `generation_overrides` | Replaces, or with `None` disables, the default `--override-generation-config` |
 | `extra_args` | Verbatim flags appended to the command |
-| `engine` | `sglang` serves the model with SGLang instead of vLLM (§5.3) |
+| `engine` | `sglang` serves the model with SGLang (§5.3), `ling` with `ling-serve` (`LingServeLaunchBuilder`), instead of vLLM; `ModelSpec.engine_recipes` holds alternate engine recipes for a model (`server start --engine <engine>` or `server_engine` in config) |
 | `revision` | Pinned checkpoint commit: downloaded at that commit and served from its snapshot directory |
 | `chat_template_patches` | (anchor, replacement) pairs applied to a copy of the checkpoint's chat template at launch (§5.3) |
+| `runtime_patches` | Container Python files patched on a host copy (verified by SHA-256) and bind-mounted read-only at launch (`SGLangRuntimePatcher`, `sglang_runtime_patcher.py`) |
+| `lora` | LoRA adapter serving configuration (`QWEN38_LORA_RECIPE`, `adapter_serving.py`) |
 | `container_headroom_gb` | Memory added to the engine's fraction when sizing the container's cgroup cap |
+| `load_transient_gb` | Per-model override of the start gate's transient load overhead estimate (§7) |
 
 ### 5.2. Removed vLLM Recipes
 
@@ -154,14 +160,15 @@ One entry is served by SGLang, because its speed is in a drafter only SGLang run
 | :------ | :---- |
 | `engine` | `sglang` |
 | `docker_image` | `lmsysorg/sglang@sha256:b1259f3ea327…` (v0.5.21, pinned by digest; v0.5.19 `d6e7288627be…` through 1.6.3; v0.5.21 ships from 1.6.4, the 1.6.2 that first carried it never having been published) |
-| checkpoint | `RadixArk/Qwen3.8-27B-NVFP4` @ `52d1adc`, served as its snapshot directory |
-| drafter | `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` @ `bd7a934`, 12 draft tokens (the recipe's 16 until 2026-10-09: 12 measured +7% on the replay set, 48.3 against 45.1 tok/s single stream, two runs each in one session, acceptance 5.23 against 4.99 per step, speculation still exact; 8, 10 and 14 gained nothing), `modelopt_fp4` |
-| memory | `--mem-fraction-static 0.50`, cgroup cap = fraction + 24 GB headroom |
-| context | 262,144 tokens |
-| parsers | `qwen3_coder` tools, `qwen3` reasoning |
-| `extra_args` | flashinfer attention, chunked prefill 8192, mamba radix cache `extra_buffer`, bf16 SSM state, 96 mamba slots, 8 running requests, torch.compile to batch 4, 2 continuous decode steps, `--sleep-on-idle`, `--enable-metrics` |
+| `checkpoint` | `RadixArk/Qwen3.8-27B-NVFP4` @ `52d1adc`, served as its snapshot directory |
+| `drafter` | `dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch` @ `models-2026-10-27` since 1.7.2 (`maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` @ `bd7a934` until then), 12 draft tokens (the recipe's 16 until 2026-10-09: 12 measured +7% on the replay set, 48.3 against 45.1 tok/s single stream, two runs each in one session, acceptance 5.23 against 4.99 per step, speculation still exact; 8, 10 and 14 gained nothing), `modelopt_fp4` |
+| `memory` | `--mem-fraction-static 0.50`, cgroup cap = fraction + 24 GB headroom |
+| `context` | 262,144 tokens |
+| `parsers` | `qwen3_coder` tools, `qwen3` reasoning |
+| `extra_args` | flashinfer attention, `--sampling-backend pytorch`, chunked prefill 8192, `--disable-prefill-cuda-graph`, `--cuda-graph-max-bs-decode 8`, `--disable-flashinfer-autotune`, mamba radix cache `extra_buffer`, bf16 SSM state, 96 mamba slots, 8 running requests, torch.compile to batch 4, 2 continuous decode steps, `--sleep-on-idle`, `--enable-metrics` |
+| `engine_recipes["ling"]` | `ling-serve` (`LingServeLaunchBuilder`, `ling_serve_launch_builder.py`), opt-in since 1.7.2 (`server start --engine ling` or `server_engine = "ling"`), image `ghcr.io/dreamference/ling-serve@sha256:7bff4e37e731…` (`8d112d0d2539…`), 262,144 context, 12 draft tokens, `--graphs --pdl` |
 
-**How it is wired.** `SGLangLaunchBuilder` builds only the arguments after the image: `python3 -m sglang.launch_server --model-path <snapshot> --trust-remote-code --served-model-name <repo> --host 0.0.0.0 --port <port> --tp-size 1 --mem-fraction-static <f> --context-length <n>`, the parsers, the drafter flags (§3.1) and the recipe's `extra_args`; the container comes from the same `docker run` prefix as vLLM's, so the memory cap, CPU limit, OOM score, mounts and PSI watchdog are engine-independent. Both engines get `VLLM_NO_USAGE_STATS=1` and `DO_NOT_TRACK=1`. The served model name is the repository ID, as with vLLM, so clients see no difference.
+**How it is wired.** `SGLangLaunchBuilder` builds only the arguments after the image: `python3 -m sglang.launch_server --model-path <snapshot> --trust-remote-code --served-model-name <repo> --host <host> --port <port> --tp-size 1 --mem-fraction-static <f> --context-length <n>`, the parsers, the drafter flags (§3.1), the recipe's `extra_args` and any installed LoRA adapter flags (`AdapterServing.server_args`); behind the model gate (`ModelGate`, `model_gate.py`), `<host>` is `127.0.0.1` and `<port>` is `port + 10000` (`18000`) while `dreamference-model-gate-<port>` listens on `0.0.0.0:<port>` (`8000`). `SGLangRuntimePatcher` (`sglang_runtime_patcher.py`) patches `/sgl-workspace/sglang/python/sglang/srt/entrypoints/openai/serving_responses.py` on a host copy verified by SHA-256 (phase-merge fix, streaming text before message close, and LoRA adapter routing on `/v1/responses`) and mounts it read-only into the container. The container comes from the same `docker run` prefix as vLLM's, so the memory cap, CPU limit, OOM score, mounts and PSI watchdog are engine-independent. All engines get `VLLM_NO_USAGE_STATS=1` and `DO_NOT_TRACK=1`. The served model name is the repository ID, as with vLLM, so clients see no difference.
 
 **Four things found on the first launches, each now handled in code:**
 - **Revisions.** SGLang drops `--revision` on some offline config lookups, which then resolve through `refs/main`; a download by commit writes none, and the first launch failed in a restart loop. Pinned checkpoints are passed as their snapshot directories.

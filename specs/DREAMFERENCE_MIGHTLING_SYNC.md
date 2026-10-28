@@ -141,9 +141,9 @@ The default scope is therefore: interactive threads, live and controllable from 
 ### 5.2 Rollouts: append-only by offset
 
 - **The hub's copy** of a rollout is its uncompressed bytes, kept in 1 MiB chunks, each with a SHA-256 and a chain hash over the chunks before it, so an offset plus its chain hash names a prefix exactly.
-- **Upload** from the owner: `PUT /api/sync/rollouts/<thread>?offset=<n>&prefix=<chain hash>` with the new bytes. The hub accepts only if `offset` equals its length and the prefix hash matches; otherwise it answers with its length and hash, and the agent resumes from there.
-- **Compression.** When Codex replaces a finished `.jsonl` by `.jsonl.zst`, the agent reads through the decompressed stream; the logical bytes, and so the offsets, are unchanged. A downloaded rollout is written as plain `.jsonl`, and the receiving Codex compresses it on its own schedule. (**Unverified:** that Codex's compression never changes content; Phase 0 checks it on real files.)
-- **Reading** from other devices: `GET /api/sync/rollouts/<thread>?offset=<n>`. By default a device reads a thread it does not own from the hub on open, renders it, and writes nothing to its own `~/.mightling`, as Codex's phone reads the live state of the machine (§1.1). With `[sync] replicate = true` it also downloads: a new thread is written to `sessions/YYYY/MM/DD/<the owner's file name>` through a temporary file and a rename; growth is appended. The agent never writes a thread for which the local Codex holds a writer lock (`thread-writer-locks/`), and never a thread its own device owns.
+- **Upload** from the owner: `PUT /api/sync/rollouts/<thread>?offset=<n>&prefix=<chain hash>` with the new bytes (built keyed by rollout id as `PUT /api/sync/rollouts/<rollout>?offset=<n>&prefix=<chain hash>`, `ling-rs/web/src/sync_hub.rs`, §17.3). The hub accepts only if `offset` equals its length and the prefix hash matches; otherwise it answers with its length and hash, and the agent resumes from there.
+- **Compression.** When Codex replaces a finished `.jsonl` by `.jsonl.zst`, the agent reads through the decompressed stream; the logical bytes, and so the offsets, are unchanged. A downloaded rollout is written as plain `.jsonl`, and the receiving Codex compresses it on its own schedule. (**Verified in Phase 0, §16.2:** Codex's compression is byte-for-byte zstd level 3 and never changes content.)
+- **Reading** from other devices: `GET /api/sync/rollouts/<thread>?offset=<n>` (`GET /api/sync/rollouts/<rollout>?offset=<n>`, `ling-rs/web/src/sync_hub.rs`). By default a device reads a thread it does not own from the hub on open, renders it, and writes nothing to its own `~/.mightling`, as Codex's phone reads the live state of the machine (§1.1). With `[sync] replicate = true` it also downloads: a new thread is written to `sessions/YYYY/MM/DD/<the owner's file name>` through a temporary file and a rename; growth is appended. The agent never writes a thread for which the local Codex holds a writer lock (`thread-writer-locks/`), and never a thread its own device owns.
 - **The manifest.** `GET /api/sync/manifest?since=<cursor>` lists every change after a cursor: rollout lengths, names, archive state, metadata, tombstones. The cursor is the hub's own sequence number, never a device clock.
 
 ### 5.3 Making Codex see a downloaded thread
@@ -163,8 +163,8 @@ Deleting a thread on any device with `control` writes a tombstone. Every device 
 
 ### 6.1 Publishing
 
-- **The desktop app and `ling web`** are app-server clients already. Their sync agent republishes the notifications of the threads they own (item started and completed, deltas, approval requests, turn completed) to the hub's `/api/sync/live` WebSocket, already filtered by the same `policy.json` rules that govern the app's own IPC.
-- **The TUI** has no app-server client to tap. Its live view on other devices follows the rollout as it grows: the agent uploads appended bytes within a second, and the hub fans them out. Deltas inside one message are not in the rollout, so a TUI turn is seen item by item, not token by token. **Unverified:** whether 0.158's TUI runs on an in-process app-server whose events could be reached without a patch; Phase 0 checks, and nothing is patched for it.
+- **The desktop app and `ling web`** are app-server clients already. Their sync agent republishes the notifications of the threads they own (item started and completed, deltas, approval requests, turn completed) to the hub's `/api/sync/live` WebSocket (built in Phase 2 as HTTP long-polling: hosts post to `POST /api/sync/host?wait=<s>` and followers read `GET /api/sync/live/<thread>?after=<seq>&wait=<s>`, §18.2–§18.3), already filtered by the same `policy.json` rules that govern the app's own IPC.
+- **The TUI** has no app-server client to tap. Its live view on other devices follows the rollout as it grows: the agent uploads appended bytes within a second, and the hub fans them out. Deltas inside one message are not in the rollout, so a TUI turn is seen item by item, not token by token. (**Measured in Phase 0, §16.3, and built in Phase 2, §18.1:** 0.158's TUI runs an in-process app-server by default, or uses a server already listening at `$CODEX_HOME/app-server-control/app-server-control.sock`, which `ling-rs/sync/src/live.rs` attaches to without a patch.)
 
 ### 6.2 Following
 
@@ -251,12 +251,13 @@ A phone chat's thread is a node thread. With sync on, it is listed on the laptop
 ## 11. Commands
 
 ```
-ling sync enable                 # on the node: turns the hub on in ling web; on a device: pairs (code or QR) and starts the agent
-ling sync status                 # hub or agent, devices, last cycle, pending uploads, queued messages
+ling sync enable [--code N] [--name NAME] [--port N]  # on the node: turns the hub on in ling web; on a device: pairs (code or QR) and starts the agent
+ling sync status [--json]        # hub or agent, devices, last cycle, pending uploads, queued messages
 ling sync disable                # stops; keeps local files; on the node, keeps the hub store until `ling sync forget`
 ling sync forget                 # node: deletes the hub store for real; device: forgets its secret
 ling sync exclude <path>         # this project never leaves this device
-ling sync handover <thread>      # continue a thread here (§6.4); --with-code for the bundle (O5)
+ling sync agent [--once]         # the agent in the foreground; what the user unit runs
+ling sync handover <thread>      # continue a thread here (§6.4, Phase 3, not built yet); --with-code for the bundle (O5)
 ```
 
 The desktop app gets the same in Settings › Sync, and a "Running on the laptop" banner and "Continue here" button on threads owned elsewhere.
@@ -383,7 +384,7 @@ Off until `ling sync enable`, per device; with it never run there is no unit, no
 ### 17.1 What runs where
 
 - **The hub** is `ling web`'s `sync_store.rs` (the store, plain files and functions) and `sync_hub.rs` (the routes), in `ling-rs/web`. `ling sync enable` on the node writes `~/.mightling/sync/hub/hub.json`; the server asks for it on every request, so turning the hub on or off needs no restart, and nothing is opened or written while it is off.
-- **The agent** is the `ling-sync` crate (`ling-rs/sync`), routed by the launcher as `ling sync …` (`ling-rs/src/sync.rs`). It runs as the user unit `mightling-sync.service` (`ling sync agent`, `MemoryMax=256M`, `Nice=10`) on Linux; on macOS it runs by hand for now, and Windows has neither `ling web` nor `ling sync` yet. The desktop app does not run an agent of its own (§3's "inside the app's main process" is not built).
+- **The agent** is the `ling-sync` crate (`ling-rs/sync`), routed by the launcher as `ling sync …` (`ling-rs/src/sync.rs`). It runs as the user unit `mightling-sync.service` (`ling sync agent`, `MemoryMax=256M`, `Nice=10`) on Linux; on macOS it runs by hand for now, and Windows has neither `ling web` nor `ling sync` yet. The desktop app does not run an agent of its own (§3's "inside the app's main process" is not built for rollout sync; in Phase 2, §18.1, the desktop app's main process runs the live host in `desktop/electron/src/sync-host.ts` for its own app-server).
 - **The node** is a device too: `ling sync enable` there pairs its own agent with the hub on loopback.
 
 ### 17.2 Pairing and scopes
@@ -408,7 +409,7 @@ Off until `ling sync enable`, per device; with it never run there is no unit, no
 
 - **`ling web`** (the node's own browser, the phone's, the Telegram Mini App) shows **Other devices** in the sidebar once the hub is on: every thread another device published, by device, newest first, with how many there are. A thread opens as a transcript the hub renders from the rollout (the user's and the agent's messages, commands with their exit and last lines, changed files, tool calls, turn ends), read only, under "Running on <device>". With `control` it can be archived or deleted everywhere. The page follows the hub with a long-poll of the manifest, so a thread a laptop's app starts appears within a second or two of its agent's upload. The node's own threads are the page's own (the app-server lists them) and are left out.
 - **The desktop app** shows none of this yet: it has no hub of its own, and reading the node's would be a main-process call outside the bridge policy. Its user reads other devices' threads in the node's `ling web`.
-- **`policy.json` is unchanged:** nothing here is an app-server method. The forwarded commands of Phase 2 will add its conformance cases.
+- **`policy.json` is unchanged:** nothing here is an app-server method. The forwarded commands of Phase 2 will add its conformance cases (in Phase 2, §18.2, hosts carry out remote commands using requests `policy.json` already allows, so `policy.json` needed no new methods).
 
 ### 17.5 The audit (§9)
 
