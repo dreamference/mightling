@@ -197,7 +197,7 @@ describe("RpcClient and window/IPC bridge routes", () => {
 
     expect(terminals.available()).toBe(true);
     await terminals.list();
-    await terminals.publish({ processId: "term-1", title: "shell", cwd: "/repo", threadId: "t1" });
+    await terminals.publish({ processId: "term-1", title: "shell", cwd: "/repo", threadId: "t1", exitCode: null, error: null });
     await terminals.forget("term-1");
     await terminals.backlog("term-1");
 
