@@ -1109,9 +1109,22 @@ Get it and serve it from the control plane; renewed daily by a user timer.
 |---|---|
 | `--staging` | Test against Let's Encrypt's staging CA; its certificate is never served. |
 
+#### `ling-admin remote certificate relay`
+
+Give the relay its own public certificate under its own name (relay.<domain>).
+
+| Option | Description |
+|---|---|
+| `--staging` | Test against Let's Encrypt's staging CA; nothing changes on the box. |
+| `--name` | The relay's name (default: relay. and the box's parent domain) |
+
+#### `ling-admin remote certificate relay-off`
+
+Put the node CA's certificate and the box's name back on the relay.
+
 #### `ling-admin remote certificate renew`
 
-Renew it when due (the timer's command).
+Renew them when due (the timer's command).
 
 #### `ling-admin remote certificate off`
 

@@ -735,10 +735,15 @@ class DreamferenceCLIController:
             "issue": lambda: RemoteAccess.certificate_issue(staging=args.staging),
             "renew": RemoteAccess.certificate_renew,
             "off": RemoteAccess.certificate_off,
+            "relay": lambda: RemoteAccess.certificate_relay(staging=args.staging, name=args.name),
+            "relay-off": RemoteAccess.certificate_relay_off,
         }
         action = actions.get(getattr(args, "certificate_command", None) or "")
         if action is None:
-            print("usage: ling-admin remote certificate {issue [--staging],renew,off}")
+            print(
+                "usage: ling-admin remote certificate "
+                "{issue [--staging],renew,off,relay [--staging] [--name N],relay-off}"
+            )
             return 2
         return action()
 
@@ -1807,7 +1812,17 @@ class DreamferenceCLIController:
         remote_certificate_issue_parser.add_argument(
             "--staging", action="store_true",
             help="Test against Let's Encrypt's staging CA; its certificate is never served")
-        remote_certificate_subparsers.add_parser("renew", help="Renew it when due (the timer's command)")
+        remote_certificate_relay_parser = remote_certificate_subparsers.add_parser(
+            "relay", help="Give the relay its own public certificate under its own name (relay.<domain>)"
+        )
+        remote_certificate_relay_parser.add_argument(
+            "--staging", action="store_true",
+            help="Test against Let's Encrypt's staging CA; nothing changes on the box")
+        remote_certificate_relay_parser.add_argument(
+            "--name", default=None, help="The relay's name (default: relay. and the box's parent domain)")
+        remote_certificate_subparsers.add_parser(
+            "relay-off", help="Put the node CA's certificate and the box's name back on the relay")
+        remote_certificate_subparsers.add_parser("renew", help="Renew them when due (the timer's command)")
         remote_certificate_subparsers.add_parser(
             "off", help="Serve the node CA's certificate again and stop renewing")
 

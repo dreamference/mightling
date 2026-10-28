@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from dreamference.remote.remote_box import RemoteBox
+from dreamference.remote.remote_box import VERIFIED, RemoteBox
 from dreamference.remote.remote_bundle_options import BundleOptions
 from dreamference.remote.remote_certificate_authority import RemoteCertificateAuthority
 from dreamference.remote.remote_control_plane import RemoteControlPlane
@@ -34,6 +34,7 @@ from dreamference.remote.remote_enrolment import RemoteEnrolment
 from dreamference.remote.remote_join_script import RemoteJoinScript
 from dreamference.remote.remote_node_peer import RemoteNodePeer
 from dreamference.remote.remote_public_certificate import RemotePublicCertificate
+from dreamference.remote.remote_relay_certificate import RECORD_KEYS, RemoteRelayCertificate
 from dreamference.remote.remote_settings import (
     BOX_PUBLIC_PORT,
     CODE_MINUTES,
@@ -376,7 +377,7 @@ class RemoteAccess:
         if tunnel_key is None:
             print("❌ ssh-keygen could not make the tunnel's key.")
             return False
-        relay = run["relay"]
+        relay = RemoteRelayCertificate.box_files(dns_name, run["relay"])
         if not RemoteBox.deploy(
             dns_name, facts["arch"], facts["packages"], run["secret"], relay[0], relay[1], tunnel_key,
             ssh_to=run["ssh_to"],
@@ -419,6 +420,10 @@ class RemoteAccess:
         }  # fmt: skip
         if run["ssh_to"]:
             record["ssh"] = run["ssh_to"]
+        # What `remote certificate` recorded survives a setup rerun (spec §15).
+        for kept in ("public_certificate", *RECORD_KEYS):
+            if (run["existing"] or {}).get(kept):
+                record[kept] = run["existing"][kept]
         if not (run["existing"] or {}).get("node_peer") and not cls._join_node(run):
             RemoteSettings.write(record)
             print(
@@ -515,7 +520,8 @@ class RemoteAccess:
             int: The exit status.
         """
         dns_name, ssh_to, facts = run["dns_name"], run["ssh_to"], run["facts"]
-        secret, relay, existing = run["secret"], run["relay"], run["existing"]
+        secret, existing = run["secret"], run["existing"]
+        relay = RemoteRelayCertificate.box_files(dns_name, run["relay"])
         overlay_name = run["overlay_name"]
         print(f"📦 The box ({dns_name}, {facts['arch']})…")
         tunnel_key = RemoteTunnel.public_key()
@@ -633,6 +639,8 @@ class RemoteAccess:
             )
         if public:
             healthy &= cls._public_certificate_lines()
+        if record.get("relay_name"):
+            healthy &= cls._relay_certificate_lines(record["relay_name"])
         if record.get("box_only"):
             print("This node:  not set up yet (--box-only): no control plane, no tunnel, no peer.")
             print(
@@ -679,6 +687,35 @@ class RemoteAccess:
         print(f"Public cert: {facts['issuer']}, valid {facts['days']} more days{warning}")
         print(f"Renewal:    {timer} (mightling-remote-certificate.timer, daily)")
         return facts["days"] >= 0 and timer == ACTIVE
+
+    @classmethod
+    def _relay_certificate_lines(cls, relay_name: str) -> bool:
+        """Prints the relay's own certificate: issuer, days left, and whether the box presents it.
+
+        Args:
+            relay_name: The relay's own public name.
+
+        Returns:
+            bool: False when the box does not present lego's current relay certificate, or it expires.
+        """
+        certificate = RemotePublicCertificate.files(relay_name)[0]
+        facts = RemotePublicCertificate.describe(certificate)
+        outcome = RemoteBox._handshake(
+            relay_name, RELAY_PORT, relay_name, None,
+            expected=RemotePublicCertificate.fingerprint(certificate),
+        )  # fmt: skip
+        if facts is None:
+            print(f"Relay cert: ❌ the relay's certificate for {relay_name} cannot be read")
+            return False
+        presented = (
+            "presented by the box"
+            if outcome == VERIFIED
+            else f"❌ the box does not present it ({outcome})"
+        )
+        print(
+            f"Relay cert: {facts['issuer']}, valid {facts['days']} more days, {presented} ({relay_name})"
+        )
+        return outcome == VERIFIED and facts["days"] >= 0
 
     # -- the public certificate (spec §15) ---------------------------------------------------------
 
@@ -729,30 +766,137 @@ class RemoteAccess:
 
     @classmethod
     def certificate_renew(cls) -> int:
-        """Renews the public certificate when due and restarts the control plane with a new one.
+        """Renews the public certificates when due; each restarts only what it must.
 
-        The renewal timer's command; a run that finds nothing due changes nothing.
+        The renewal timer's command; a run that finds nothing due changes nothing. A new control-plane
+        certificate restarts the control plane; a new relay certificate goes to the box and restarts
+        the relay alone. One failing does not stop the other, and any failure is a non-zero exit (the
+        timer's unit then alerts the owner).
 
         Returns:
             int: The exit status.
         """
         record = RemoteSettings.read()
-        if record is None or not record.get("public_certificate"):
+        if record is None or not (record.get("public_certificate") or record.get("relay_name")):
             print(
                 "The control plane has no public certificate (ling-admin remote certificate issue)."
             )
             return 0
-        dns_name = record["dns_name"]
+        failed = False
+        if record.get("public_certificate"):
+            failed |= not cls._renew_control_plane(record["dns_name"])
+        if record.get("relay_name"):
+            if RemoteRelayCertificate.renew(record):
+                print("✅ The relay's certificate is current on the box.")
+            else:
+                failed = True
+        return 1 if failed else 0
+
+    @classmethod
+    def _renew_control_plane(cls, dns_name: str) -> bool:
+        """The control plane's half of `certificate_renew`.
+
+        Args:
+            dns_name: The box's public DNS name.
+
+        Returns:
+            bool: Whether the control plane serves the current certificate afterwards.
+        """
         if not RemotePublicCertificate.obtain(dns_name):
-            return 1
+            return False
         if not RemotePublicCertificate.due(dns_name):
             facts = RemotePublicCertificate.describe(RemotePublicCertificate.files(dns_name)[0])
             print(f"✅ Not due: valid {facts['days'] if facts else '?'} more days.")
-            return 0
+            return True
         print("🔁 A new certificate: the control plane restarts with it (peers' tunnels carry on)…")
         if not RemotePublicCertificate.install(dns_name):
-            return 1
+            return False
         print("✅ Renewed and served.")
+        return True
+
+    @classmethod
+    def certificate_relay(cls, staging: bool = False, name: str | None = None) -> int:
+        """Gives the relay a public certificate under a name of its own (spec §15.5).
+
+        Args:
+            staging: Let's Encrypt's staging CA: proves the flow, changes nothing on the box.
+            name: The relay's name; by default `relay.` and the box's parent domain.
+
+        Returns:
+            int: The exit status.
+        """
+        record = RemoteSettings.read()
+        if record is None or record.get("box_only"):
+            print("❌ Remote access is not set up on this node (ling-admin remote setup).")
+            return 3
+        dns_name = record["dns_name"]
+        relay_name = (
+            (name or record.get("relay_name") or RemoteSettings.default_relay_name(dns_name))
+            .strip()
+            .lower()
+            .rstrip(".")
+        )
+        if not RemoteRelayCertificate.valid_name(relay_name, dns_name):
+            print(f"❌ {relay_name!r} cannot be the relay's name: it must differ from {dns_name}.")
+            return 2
+        return cls._relay_issue(record, relay_name, staging)
+
+    @classmethod
+    def _relay_issue(cls, record: dict[str, Any], relay_name: str, staging: bool) -> int:
+        """`certificate_relay` once the name is fixed: DNS, certificate, box, management, timer.
+
+        Args:
+            record: `remote.json`.
+            relay_name: The relay's name.
+            staging: Let's Encrypt's staging CA.
+
+        Returns:
+            int: The exit status.
+        """
+        dns_name = record["dns_name"]
+        where = "Let's Encrypt's staging CA (a test)" if staging else "Let's Encrypt"
+        print(f"🔐 A public certificate for the relay, {relay_name}, from {where}…")
+        # Before the challenge even in a test: a name that does not exist yet makes the resolvers answer
+        # NXDOMAIN for `_acme-challenge.<name>` from their cache, and lego's propagation check times out.
+        if not RemoteRelayCertificate.ensure_addresses(relay_name, dns_name):
+            return 1
+        if not RemoteRelayCertificate.obtain(relay_name, staging=staging):
+            return 1
+        certificate = RemotePublicCertificate.files(relay_name, staging)[0]
+        facts = RemotePublicCertificate.describe(certificate) or {"issuer": "?", "days": "?"}
+        print(f"✅ {facts['issuer']}, valid {facts['days']} more days")
+        if staging:
+            return 0
+        print("🔁 The box's relay restarts with it; then management names the relay's new address…")
+        if not RemoteRelayCertificate.switch(record, relay_name):
+            print("❌ The relay was put back on the node CA's certificate.")
+            return 1
+        if not RemotePublicCertificate.install_timer():
+            print(
+                "⚠️  The renewal timer did not start (systemctl --user status mightling-remote-certificate.timer)."
+            )
+            return 1
+        print(
+            f"✅ The relay presents its own certificate at {relay_name}; peers learn the address from "
+            "management and need no re-enrolment. The daily timer renews it."
+        )
+        return 0
+
+    @classmethod
+    def certificate_relay_off(cls) -> int:
+        """Puts the node CA's certificate and the box's name back on the relay.
+
+        Returns:
+            int: The exit status.
+        """
+        record = RemoteSettings.read()
+        if record is None or not record.get("relay_name"):
+            print("The relay has no certificate of its own.")
+            return 0
+        if not RemoteRelayCertificate.off(record):
+            print("❌ Could not put the relay back (ling-admin remote status).")
+            return 1
+        print("✅ The relay presents the node CA's certificate at the box's name again.")
         return 0
 
     @classmethod
@@ -773,7 +917,9 @@ class RemoteAccess:
                 "❌ The node CA's control-plane certificate is missing (ling-admin remote setup)."
             )
             return 1
-        RemotePublicCertificate.remove_timer()
+        if not record.get("relay_name"):
+            # The relay's own certificate (spec §15.5) is still renewed by the same timer.
+            RemotePublicCertificate.remove_timer()
         record["public_certificate"] = False
         RemoteSettings.write(record)
         print("🔁 The control plane restarts with the node CA's certificate…")
