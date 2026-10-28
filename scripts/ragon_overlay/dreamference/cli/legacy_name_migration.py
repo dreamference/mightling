@@ -37,6 +37,9 @@ LEGACY_FORGE_TYPES: Final[tuple] = ("_mightling-forge._tcp", "_puffin-forge._tcp
 # The forge's container and network, its user units and the state folder inside its data folder.
 LEGACY_FORGE_NAME: Final[str] = "mightling-forge"
 LEGACY_FORGE_STATE: Final[str] = "mightling"
+FORGE_STATE: Final[str] = "ragon"
+# Where an old state folder goes when the new one already exists: kept, never merged or deleted.
+FORGE_STATE_ASIDE: Final[str] = "mightling.pre-ragon"
 LEGACY_PHONE_ACCOUNT: Final[str] = "mightling-phone"
 # The engine's containers: `ling-serve` and, while it scans, `ling-serve-scan-*`.
 LEGACY_ENGINE_CONTAINER: Final[str] = "ling-serve"
@@ -68,6 +71,9 @@ LEGACY_PRODUCT_WORDS: Final[tuple] = ("Mightling", "Puffin")
 PRODUCT_WORD: Final[str] = "Ragon"
 # The `main` record of an advertised node that serves a model a coding client can use.
 MAIN_RECORD_ON: Final[str] = "1"
+# How long the forge may take to answer after its first start under the new names, then how often
+# the phone account is asked for while the answer is neither found nor not found.
+FORGE_ANSWER_WAIT_S: Final[float] = 180.0
 FORGE_RENAME_TRIES: Final[int] = 6
 FORGE_RENAME_WAIT_S: Final[int] = 5
 # (key comment, admin command) of the pairing lines each generation wrote.
@@ -874,7 +880,9 @@ class LegacyNameMigration:
 
         The forge's data (repositories, database) is host data and stays where it is. The old
         container and network are removed and the new ones are made when the units start again,
-        if the forge was enabled.
+        if the forge was enabled. A new state folder that already exists is kept and the old one is
+        moved aside, so the next command finds nothing to do. The forge starts before its timers:
+        the ten-minute tick would otherwise make a new phone account before the old one is renamed.
 
         Returns:
             str | None: A line when anything of the old forge was found.
@@ -894,23 +902,51 @@ class LegacyNameMigration:
                 path.unlink()
         ForgeContainer.docker(["rm", "-f", LEGACY_FORGE_NAME], timeout=60)
         ForgeContainer.docker(["network", "rm", LEGACY_FORGE_NAME], timeout=30)
-        new_state = ForgeSettings.data_dir() / "ragon"
-        if old_state.is_dir() and not new_state.exists():
-            shutil.move(str(old_state), str(new_state))
+        new_state = ForgeSettings.data_dir() / FORGE_STATE
+        aside = ""
+        if old_state.is_dir():
+            if not new_state.exists():
+                shutil.move(str(old_state), str(new_state))
+            else:
+                spare = cls.free_name(old_state.with_name(FORGE_STATE_ASIDE))
+                shutil.move(str(old_state), str(spare))
+                aside = f"; {new_state} was there already, so {old_state} is kept as {spare}"
         if not enabled:
             ForgeService.systemctl("daemon-reload")
-            return "moved the forge to its new names (it was off)"
+            return f"moved the forge to its new names (it was off){aside}"
         ForgeService.install_units()
-        ForgeService.systemctl("enable", "--now", UNIT, *TIMERS)
+        ForgeService.systemctl("enable", "--now", UNIT)
         renamed = cls.rename_phone_account()
-        return "moved the forge to its new names" + (f"; {renamed}" if renamed else "")
+        ForgeService.systemctl("enable", "--now", *TIMERS)
+        return "moved the forge to its new names" + aside + (f"; {renamed}" if renamed else "")
+
+    @staticmethod
+    def free_name(path: Path) -> Path:
+        """Returns `path`, or `path.2`, `path.3`… when it is taken.
+
+        Args:
+            path: The name wanted.
+
+        Returns:
+            Path: The first of them that does not exist.
+        """
+        candidate, number = path, 1
+        while candidate.exists() or candidate.is_symlink():
+            number += 1
+            candidate = path.with_name(f"{path.name}.{number}")
+        return candidate
 
     @classmethod
     def rename_phone_account(cls) -> str | None:
         """Renames the forge's phone account through Forgejo's admin API (its token survives).
 
+        Waits for the forge to answer after its start, then asks for the old account until the
+        answer is that it exists or that it does not: an error while Forgejo starts is not taken
+        for either.
+
         Returns:
-            str | None: A line when the account was renamed, or why it was not.
+            str | None: A line when the account was renamed, or why it was not; None when there is
+            no old account (or no admin token to ask with).
         """
         from dreamference.forge.forge_accounts import ForgeAccounts
         from dreamference.forge.forge_container import ForgeContainer
@@ -919,16 +955,25 @@ class LegacyNameMigration:
         admin = ForgeAccounts.admin_token()
         if not admin:
             return None
+        ForgeContainer.wait_until_answering(FORGE_ANSWER_WAIT_S)
         status = 0
-        for _ in range(FORGE_RENAME_TRIES):
+        for attempt in range(FORGE_RENAME_TRIES):
+            if attempt:
+                time.sleep(FORGE_RENAME_WAIT_S)
             status, _body = ForgeContainer.api(
                 "GET", f"/users/{LEGACY_PHONE_ACCOUNT}", admin, timeout=10
             )
-            if status:
+            if status in (HTTPStatus.OK, HTTPStatus.NOT_FOUND):
                 break
-            time.sleep(FORGE_RENAME_WAIT_S)
-        if status != HTTPStatus.OK:
+        if status == HTTPStatus.NOT_FOUND:
             return None
+        if status != HTTPStatus.OK:
+            return (
+                f"could not rename the forge account {LEGACY_PHONE_ACCOUNT} to {PHONE_ACCOUNT}: "
+                f"the forge did not answer (last answer {status}); its ten-minute timer makes a new "
+                f"{PHONE_ACCOUNT}, and {LEGACY_PHONE_ACCOUNT} can then be removed in the forge's "
+                "site administration"
+            )
         status, _body = ForgeContainer.api(
             "POST",
             f"/admin/users/{LEGACY_PHONE_ACCOUNT}/rename",

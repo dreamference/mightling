@@ -159,7 +159,12 @@ const WINDOWS_PROGRAMS: &[(&str, &str)] = &[
     ("AppData/Local/Programs/Puffin", "AppData/Local/Programs/Ragon"),
 ];
 /// Folders of the moved home that hold git worktrees, repaired after the move.
-const WORKTREE_FOLDERS: &[&str] = &["worktrees", "chat-repos", "night"];
+const WORKTREE_FOLDERS: &[&str] = &["worktrees", "chat-repos", "night", "session-worktrees"];
+/// Records of the moved home that name worktrees by their absolute paths: the phone checkouts'
+/// index and each `/worktree` session's record (`<id>/session.json`).
+const CHAT_REPOS_INDEX: &str = "chat-repos/index.json";
+const SESSION_WORKTREES: &str = "session-worktrees";
+const SESSION_RECORD: &str = "session.json";
 /// User units of a SWE-bench run, a Night Shift run or a node job: nothing moves under them
 /// (specs/DREAMFERENCE_RENAME_RAGON.md §7). `ragon-admin` waits for the same units.
 #[cfg(target_os = "linux")]
@@ -807,16 +812,103 @@ fn move_home(home: &Path, report: &mut Report) {
     report
         .lines
         .push(format!("moved {} to {}", old.display(), new.display()));
-    fix_home(&new, report);
+    fix_home(home, &new, report);
 }
 
 /// Rewrites the inside of a home that came from `~/.mightling`.
-fn fix_home(new: &Path, report: &mut Report) {
+fn fix_home(home: &Path, new: &Path, report: &mut Report) {
     rename_files(new);
     rename_origin_files(&new.join("skills"));
     rewrite_config(&new.join("config.toml"));
+    let moves = home_moves(home);
+    rewrite_recorded_paths(&new.join(CHAT_REPOS_INDEX), &moves);
+    if let Ok(entries) = std::fs::read_dir(new.join(SESSION_WORKTREES)) {
+        for entry in entries.flatten() {
+            rewrite_recorded_paths(&entry.path().join(SESSION_RECORD), &moves);
+        }
+    }
     for folder in WORKTREE_FOLDERS {
-        repair_worktrees(&new.join(folder), 0, report);
+        repair_worktrees(&new.join(folder), &moves, 0, report);
+    }
+}
+
+/// The old home's path and the new one's, as given and as the file system resolves them (git
+/// records the resolved path), the longer first.
+fn home_moves(home: &Path) -> Vec<(String, String)> {
+    let mut bases = vec![home.to_path_buf()];
+    if let Ok(real) = std::fs::canonicalize(home)
+        && real != home
+    {
+        bases.push(real);
+    }
+    let mut moves: Vec<(String, String)> = bases
+        .iter()
+        .map(|base| {
+            (
+                path_text(&base.join(MIGHTLING_HOME_DIR)),
+                path_text(&base.join(crate::home::RAGON_HOME_DIR)),
+            )
+        })
+        .collect();
+    moves.sort_by_key(|(old, _)| std::cmp::Reverse(old.len()));
+    moves
+}
+
+/// A path as git and the records write it: with `/` separators on Windows too.
+fn path_text(path: &Path) -> String {
+    let text = path.to_string_lossy().into_owned();
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text
+    }
+}
+
+/// The same place in the new home when `target` is an absolute path inside the old one; `None`
+/// for a relative path (it moved with the home) or a path elsewhere.
+fn moved_path(target: &str, moves: &[(String, String)]) -> Option<String> {
+    let unified = if cfg!(windows) { target.replace('\\', "/") } else { target.to_string() };
+    moves.iter().find_map(|(old, new)| {
+        let rest = unified.strip_prefix(old.as_str())?;
+        (rest.is_empty() || rest.starts_with('/')).then(|| format!("{new}{rest}"))
+    })
+}
+
+/// Rewrites the old home's path to the new one's in a JSON record of absolute paths. Best effort.
+fn rewrite_recorded_paths(record: &Path, moves: &[(String, String)]) {
+    let Ok(text) = std::fs::read_to_string(record) else {
+        return;
+    };
+    let mut rewritten = text.clone();
+    for (old, new) in moves {
+        rewritten = rewritten.replace(&format!("{old}/"), &format!("{new}/"));
+        rewritten = rewritten.replace(&format!("{old}\""), &format!("{new}\""));
+    }
+    if rewritten != text {
+        let _ = std::fs::write(record, rewritten);
+    }
+}
+
+/// Points one link between a worktree and its repository at the new home: a worktree's `.git`
+/// file (`gitdir: <path>`) or the repository's `worktrees/<name>/gitdir` (`<path>`). Only a path
+/// into the old home whose new place exists is rewritten. Returns the file's target afterwards.
+fn repoint_link(file: &Path, moves: &[(String, String)]) -> Option<(PathBuf, bool)> {
+    let text = std::fs::read_to_string(file).ok()?;
+    let (lead, target) = match text.strip_prefix("gitdir:") {
+        Some(rest) => ("gitdir: ", rest.trim()),
+        None => ("", text.trim()),
+    };
+    let target_path = Path::new(target);
+    if !target_path.is_absolute() {
+        let parent = file.parent()?;
+        return Some((parent.join(target_path), false));
+    }
+    match moved_path(target, moves) {
+        Some(moved) if !target_path.exists() && Path::new(&moved).exists() => {
+            let changed = std::fs::write(file, format!("{lead}{moved}\n")).is_ok();
+            Some((PathBuf::from(moved), changed))
+        }
+        _ => Some((target_path.to_path_buf(), false)),
     }
 }
 
@@ -844,9 +936,13 @@ fn rewrite_config(config: &Path) {
     }
 }
 
-/// Runs `git worktree repair` in every worktree under `dir` (a folder with a `.git` file), at most
-/// three levels down. Best effort: a missing git or a broken repository is skipped.
-fn repair_worktrees(dir: &Path, depth: usize, report: &mut Report) {
+/// Repairs every worktree under `dir` (a folder with a `.git` file), at most three levels down.
+///
+/// The links between the worktree and its repository that point into the old home are rewritten
+/// first: when the repository moved with the home too (a phone checkout's `base.git`), git cannot
+/// find it to repair anything. Then `git worktree repair` fixes what is left. Best effort: a
+/// missing git or a broken repository is skipped.
+fn repair_worktrees(dir: &Path, moves: &[(String, String)], depth: usize, report: &mut Report) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -859,6 +955,13 @@ fn repair_worktrees(dir: &Path, depth: usize, report: &mut Report) {
             continue;
         }
         if path.join(".git").is_file() {
+            let mut relinked = false;
+            if let Some((gitdir, changed)) = repoint_link(&path.join(".git"), moves) {
+                relinked = changed;
+                if let Some((_, changed)) = repoint_link(&gitdir.join("gitdir"), moves) {
+                    relinked |= changed;
+                }
+            }
             let repaired = std::process::Command::new("git")
                 .arg("-C")
                 .arg(&path)
@@ -868,11 +971,11 @@ fn repair_worktrees(dir: &Path, depth: usize, report: &mut Report) {
                 .stderr(std::process::Stdio::null())
                 .status()
                 .is_ok_and(|status| status.success());
-            if repaired {
+            if relinked || repaired {
                 report.lines.push(format!("repaired the worktree {}", path.display()));
             }
         } else if depth < 3 {
-            repair_worktrees(&path, depth + 1, report);
+            repair_worktrees(&path, moves, depth + 1, report);
         }
     }
 }
@@ -1508,6 +1611,50 @@ mod tests {
         let mut again = Report::default();
         copy_windows_install(&home, &mut again);
         assert!(again.is_empty(), "a second run finds the new folder and does nothing");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn worktrees_and_their_records_follow_the_home_even_when_the_repository_moved_too() {
+        let home = scratch("worktree-links");
+        let old = home.join(MIGHTLING_HOME_DIR);
+        let new = home.join(crate::home::RAGON_HOME_DIR);
+        let (o, n, h) = (old.display().to_string(), new.display().to_string(), home.display().to_string());
+        // A phone checkout: the worktree and its bare repository both inside the home.
+        write(&old.join("chat-repos/o/r/base.git/worktrees/tg-1/gitdir"), &format!("{o}/chat-repos/o/r/tg-1/.git\n"));
+        write(&old.join("chat-repos/o/r/tg-1/.git"), &format!("gitdir: {o}/chat-repos/o/r/base.git/worktrees/tg-1\n"));
+        write(&old.join("chat-repos/index.json"), &format!("[{{\"dir\":\"{o}/chat-repos/o/r/tg-1\"}}]"));
+        // A Night Shift worktree and a `/worktree` session of a repository outside the home.
+        write(&home.join("proj/.git/worktrees/wt1/gitdir"), &format!("{o}/night/worktrees/wt1/.git\n"));
+        write(&old.join("night/worktrees/wt1/.git"), &format!("gitdir: {h}/proj/.git/worktrees/wt1\n"));
+        write(&home.join("proj/.git/worktrees/proj/gitdir"), &format!("{o}/session-worktrees/abc/proj/.git\n"));
+        write(&old.join("session-worktrees/abc/proj/.git"), &format!("gitdir: {h}/proj/.git/worktrees/proj\n"));
+        write(
+            &old.join("session-worktrees/abc/session.json"),
+            &format!("{{\"checkout\":\"{o}/session-worktrees/abc/proj\",\"source\":\"{h}/proj\"}}"),
+        );
+        // A relative link moved with the home and stays as it is.
+        write(&old.join("worktrees/rel/.git"), "gitdir: ../../rel.git/worktrees/rel\n");
+
+        let mut report = Report::default();
+        move_home(&home, &mut report);
+
+        let read = |path: PathBuf| std::fs::read_to_string(path).unwrap();
+        assert_eq!(read(new.join("chat-repos/o/r/tg-1/.git")), format!("gitdir: {n}/chat-repos/o/r/base.git/worktrees/tg-1\n"));
+        assert_eq!(read(new.join("chat-repos/o/r/base.git/worktrees/tg-1/gitdir")), format!("{n}/chat-repos/o/r/tg-1/.git\n"));
+        assert_eq!(read(new.join("chat-repos/index.json")), format!("[{{\"dir\":\"{n}/chat-repos/o/r/tg-1\"}}]"));
+        assert_eq!(read(new.join("night/worktrees/wt1/.git")), format!("gitdir: {h}/proj/.git/worktrees/wt1\n"));
+        assert_eq!(read(home.join("proj/.git/worktrees/wt1/gitdir")), format!("{n}/night/worktrees/wt1/.git\n"));
+        assert_eq!(read(home.join("proj/.git/worktrees/proj/gitdir")), format!("{n}/session-worktrees/abc/proj/.git\n"));
+        assert_eq!(
+            read(new.join("session-worktrees/abc/session.json")),
+            format!("{{\"checkout\":\"{n}/session-worktrees/abc/proj\",\"source\":\"{h}/proj\"}}")
+        );
+        assert_eq!(read(new.join("worktrees/rel/.git")), "gitdir: ../../rel.git/worktrees/rel\n");
+        for worktree in ["chat-repos/o/r/tg-1", "night/worktrees/wt1", "session-worktrees/abc/proj"] {
+            let line = format!("repaired the worktree {}", new.join(worktree).display());
+            assert!(report.lines.contains(&line), "{line} in {:?}", report.lines);
+        }
         let _ = std::fs::remove_dir_all(&home);
     }
 

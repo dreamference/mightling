@@ -471,6 +471,101 @@ def test_an_old_forge_is_moved_to_its_new_names(monkeypatch, tmp_home):
     assert LegacyNameMigration.migrate_forge() is None, "a second run finds nothing to do"
 
 
+def _fake_forge(monkeypatch, answers):
+    """Stubs the forge's systemctl, docker and API; `answers` are the GET statuses in turn."""
+    from dreamference.forge.forge_accounts import ForgeAccounts
+    from dreamference.forge.forge_container import ForgeContainer
+    from dreamference.forge.forge_service import ForgeService
+
+    events = []
+    monkeypatch.setattr(
+        ForgeService,
+        "systemctl",
+        classmethod(lambda cls, *args: events.append(("systemctl", *args)) or _Result()),
+    )
+    monkeypatch.setattr(ForgeService, "install_units", classmethod(lambda cls: None))
+    monkeypatch.setattr(
+        ForgeContainer,
+        "docker",
+        staticmethod(lambda argv, **kw: events.append(("docker", *argv)) or _Result()),
+    )
+    monkeypatch.setattr(ForgeContainer, "wait_until_answering", classmethod(lambda cls, s=0: True))
+    pending = list(answers)
+
+    def fake_api(method, path, token, body=None, timeout=0):
+        events.append((method, path))
+        if method == "GET":
+            return (pending.pop(0) if len(pending) > 1 else pending[0]), {}
+        return 204, None
+
+    monkeypatch.setattr(ForgeContainer, "api", staticmethod(fake_api))
+    monkeypatch.setattr(ForgeAccounts, "admin_token", classmethod(lambda cls: "token"))
+    monkeypatch.setattr(legacy_name_migration.time, "sleep", lambda seconds: None)
+    return events
+
+
+def test_an_existing_new_forge_state_is_kept_and_the_old_one_set_aside_once(monkeypatch, tmp_home):
+    from dreamference.forge.forge_settings import ForgeSettings
+
+    events = _fake_forge(monkeypatch, [200])
+    data = ForgeSettings.data_dir()
+    (data / "mightling").mkdir(parents=True)
+    (data / "mightling/frozen").write_text("old")
+    (data / "ragon").mkdir()
+    (data / "ragon/frozen").write_text("new")
+    (data / "mightling.pre-ragon").mkdir()
+
+    line = LegacyNameMigration.migrate_forge()
+
+    assert line and "kept as" in line
+    assert (data / "ragon/frozen").read_text() == "new"
+    assert (data / "mightling.pre-ragon.2/frozen").read_text() == "old"
+    assert not (data / "mightling").exists()
+    events.clear()
+    assert LegacyNameMigration.migrate_forge() is None, "a second run finds nothing to do"
+    assert events == [], "and touches neither docker nor systemd"
+
+
+def test_the_phone_account_is_renamed_after_the_forge_answers_and_before_the_timers_start(
+    monkeypatch, tmp_home
+):
+    from dreamference.forge.forge_service import ForgeService
+
+    units = ForgeService.unit_dir()
+    units.mkdir(parents=True)
+    (units / "mightling-forge.service").write_text("[Unit]\n")
+    events = _fake_forge(monkeypatch, [0, 502, 503, 200])
+
+    line = LegacyNameMigration.migrate_forge()
+
+    assert line and "renamed the forge account mightling-phone to ragon-phone" in line
+    gets = [event for event in events if event[0] == "GET"]
+    assert len(gets) == 4, "errors while Forgejo starts are asked again"
+    rename = events.index(("POST", "/admin/users/mightling-phone/rename"))
+    timers = next(
+        i
+        for i, event in enumerate(events)
+        if event[:2] == ("systemctl", "enable") and "timer" in str(event)
+    )
+    assert rename < timers, "the tick would make a new phone account before the rename"
+
+
+def test_no_old_phone_account_means_no_rename(monkeypatch, tmp_home):
+    events = _fake_forge(monkeypatch, [503, 404])
+
+    assert LegacyNameMigration.rename_phone_account() is None
+    assert not [event for event in events if event[0] == "POST"]
+
+
+def test_a_forge_that_never_answers_is_reported_not_skipped(monkeypatch, tmp_home):
+    events = _fake_forge(monkeypatch, [503])
+
+    line = LegacyNameMigration.rename_phone_account()
+
+    assert line and "could not rename" in line and "503" in line
+    assert not [event for event in events if event[0] == "POST"]
+
+
 def test_an_old_service_file_is_rendered_again_with_both_types():
     text = (
         "<service-group><name>%h</name>"
