@@ -63,6 +63,7 @@
 /.gitmodules                                    @dreamference/release
 /scripts/package_mightling.sh                   @dreamference/release
 /scripts/macos/                                 @dreamference/release @dreamference/security
+/scripts/release_benchmark.py                   @dreamference/release
 /scripts/release_notes.py                       @dreamference/release
 /scripts/release_benchmark.py                   @dreamference/release
 /scripts/release_on_green.py                    @dreamference/release
