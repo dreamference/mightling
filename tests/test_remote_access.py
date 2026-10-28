@@ -34,6 +34,7 @@ from dreamference.remote import (
     RemoteControlPlane,
     RemoteEnrolment,
     RemoteNodePeer,
+    RemotePublicCertificate,
     RemoteSettings,
     RemoteTunnel,
     remote_settings,
@@ -1007,7 +1008,7 @@ def test_the_public_port_is_checked_with_the_boxs_name_and_another(monkeypatch, 
         RemoteBox,
         "_handshake",
         classmethod(
-            lambda cls, d, port, name, ca, timeout=10: (
+            lambda cls, d, port, name, ca, timeout=10, expected=None: (
                 seen.append((d, port, name, ca)) or ("verified" if ca else "closed")
             )
         ),
@@ -1222,6 +1223,9 @@ def test_remove_keeps_the_ca_and_purge_deletes_everything(monkeypatch):
     monkeypatch.setattr(
         RemoteControlPlane, "remove_proxy", classmethod(lambda cls: calls.append(("proxy",)))
     )
+    monkeypatch.setattr(
+        RemotePublicCertificate, "remove_timer", classmethod(lambda cls: calls.append(("timer",)))
+    )
     assert RemoteAccess.remove(yes=True) == 0
     assert calls == [("box", BOX), ("tunnel",)] and RemoteSettings.read() is not None
     calls.clear()
@@ -1231,6 +1235,7 @@ def test_remove_keeps_the_ca_and_purge_deletes_everything(monkeypatch):
         ("tunnel",),
         ("stop",),
         ("proxy",),
+        ("timer",),
         ("leave",),
         ("advertise", None),
     ]
@@ -1431,3 +1436,373 @@ def test_an_unchanged_ca_keeps_the_client_running_but_resets_a_stale_profile(tmp
     assert "netbird service stop" not in calls
     down = calls.index("netbird down")
     assert any(call.startswith("netbird up") for call in calls[down:])
+
+
+# -- the public certificate (spec §15) --------------------------------------------------------------
+
+ACCOUNT = "https://acme-v02.api.letsencrypt.org/acme/acct/123"
+
+
+def _lego_archive(binary=b"#!/bin/sh\n"):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        info = tarfile.TarInfo("lego")
+        info.size = len(binary)
+        archive.addfile(info, io.BytesIO(binary))
+    return buffer.getvalue()
+
+
+def _token():
+    path = pathlib.Path(remote_settings.CLOUDFLARE_TOKEN_FILE).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("cf-secret-token\n")
+    return path
+
+
+def _account(staging=False, url=ACCOUNT):
+    host = "acme-staging-v02.api.letsencrypt.org" if staging else "acme-v02.api.letsencrypt.org"
+    path = RemotePublicCertificate.folder(staging) / "accounts" / host / "mightling-node"
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "account.json").write_text(json.dumps({"registration": {"accountURL": url}}))
+
+
+def test_lego_is_pinned_and_a_wrong_digest_installs_nothing(monkeypatch):
+    archive = _lego_archive()
+    monkeypatch.setattr("platform.machine", lambda: "aarch64")
+    monkeypatch.setattr(RemotePublicCertificate, "_download", classmethod(lambda cls, url: archive))
+    assert RemotePublicCertificate.lego() is None, "the digest is not the pinned one"
+    monkeypatch.setitem(remote_settings.LEGO_ARCHIVES, "arm64", hashlib.sha256(archive).hexdigest())
+    binary = RemotePublicCertificate.lego()
+    assert binary is not None and binary.name == f"lego-{remote_settings.LEGO_VERSION}"
+    assert oct(binary.stat().st_mode & 0o777) == "0o700"
+    assert oct(RemotePublicCertificate.folder().stat().st_mode & 0o777) == "0o700"
+    assert "v5.5.2" in remote_settings.LEGO_URL.format(version="5.5.2", arch="arm64")
+
+
+def test_lego_gets_the_token_by_file_never_in_its_environment(monkeypatch):
+    monkeypatch.setenv("CF_DNS_API_TOKEN", "leaked")
+    env = RemotePublicCertificate.lego_env()
+    assert "CF_DNS_API_TOKEN" not in env
+    assert env["CF_DNS_API_TOKEN_FILE"].endswith(".config/dreamference/cloudflare-token")
+    argv = RemotePublicCertificate.lego_argv(pathlib.Path("/x/lego"), ["run"], staging=True)
+    assert argv[:2] == ["/x/lego", "run"]
+    assert argv[argv.index("--server") + 1] == remote_settings.ACME_STAGING
+    assert argv[argv.index("--path") + 1].endswith("remote/acme-staging")
+    assert "--accept-tos" in argv and "--email" not in argv
+
+
+def test_caa_allows_only_this_account_by_dns01_and_no_wildcard():
+    records = RemotePublicCertificate.caa_records([ACCOUNT])
+    assert records == [
+        {
+            "flags": 0,
+            "tag": "issue",
+            "value": f"letsencrypt.org; validationmethods=dns-01; accounturi={ACCOUNT}",
+        },
+        {"flags": 0, "tag": "issuewild", "value": ";"},
+    ]
+
+
+def _fake_cloudflare(monkeypatch, existing):
+    calls = []
+
+    def call(cls, method, path, body=None):
+        calls.append((method, path, body))
+        if path.startswith("/zones?name=remote."):
+            return 200, {"result": []}
+        if path.startswith("/zones?name="):
+            return 200, {"result": [{"id": "z1"}]}
+        if method == "GET":
+            return 200, {"result": existing}
+        return 200, {"result": {}}
+
+    monkeypatch.setattr(RemotePublicCertificate, "_cloudflare", classmethod(call))
+    return calls
+
+
+def test_caa_is_written_once_and_left_alone_when_right(monkeypatch):
+    calls = _fake_cloudflare(
+        monkeypatch, [{"id": "old", "data": {"flags": 0, "tag": "issue", "value": "x"}}]
+    )
+    assert RemotePublicCertificate.ensure_caa("remote.example.org", [ACCOUNT])
+    writes = [(m, p) for m, p, _ in calls if m != "GET"]
+    assert writes == [
+        ("DELETE", "/zones/z1/dns_records/old"),
+        ("POST", "/zones/z1/dns_records"),
+        ("POST", "/zones/z1/dns_records"),
+    ]
+    assert all(
+        b["name"] == "remote.example.org" and b["type"] == "CAA" for m, _, b in calls if m == "POST"
+    )
+    right = [
+        {"id": f"r{i}", "data": d}
+        for i, d in enumerate(RemotePublicCertificate.caa_records([ACCOUNT]))
+    ]
+    calls = _fake_cloudflare(monkeypatch, right)
+    assert RemotePublicCertificate.ensure_caa("remote.example.org", [ACCOUNT])
+    assert all(m == "GET" for m, _, _ in calls)
+
+
+def test_obtain_without_a_token_runs_nothing(monkeypatch):
+    monkeypatch.setattr(
+        RemotePublicCertificate, "_run", classmethod(lambda cls, *a, **k: pytest.fail("ran lego"))
+    )
+    assert not RemotePublicCertificate.obtain(BOX)
+
+
+def test_obtain_registers_sets_caa_then_runs_lego_with_the_renewal_window(monkeypatch):
+    _token()
+    binary = RemotePublicCertificate.folder() / "bin" / "lego"
+    monkeypatch.setattr(RemotePublicCertificate, "lego", classmethod(lambda cls: binary))
+    order = []
+
+    def run(cls, argv, env=None, timeout=600):
+        order.append(argv[1])
+        assert env["CF_DNS_API_TOKEN_FILE"] and "cf-secret-token" not in json.dumps(env)
+        if argv[1] == "accounts":
+            _account()
+        else:
+            assert argv[argv.index("--domains") + 1] == BOX
+            assert argv[argv.index("--renew-days") + 1] == "30"
+            certificate, key = RemotePublicCertificate.files(BOX)
+            certificate.parent.mkdir(parents=True, exist_ok=True)
+            certificate.write_text("crt")
+            key.write_text("key")
+        return _done(argv)
+
+    monkeypatch.setattr(RemotePublicCertificate, "_run", classmethod(run))
+    caa = []
+    monkeypatch.setattr(
+        RemotePublicCertificate,
+        "ensure_caa",
+        classmethod(lambda cls, d, urls: caa.append((d, urls)) or True),
+    )
+    assert RemotePublicCertificate.obtain(BOX)
+    assert order == ["accounts", "run"] and caa == [(BOX, [ACCOUNT])]
+    assert RemotePublicCertificate.obtain(BOX) and order[2:] == ["run"], "registered once"
+
+
+@needs_openssl
+def test_serving_restarts_the_control_plane_and_waits_for_the_new_leaf(monkeypatch):
+    RemoteCertificateAuthority.ensure(BOX)
+    certificate, key = RemoteCertificateAuthority.issue("control-plane", [BOX])
+    der = ssl.PEM_cert_to_DER_cert(certificate.read_text())
+    monkeypatch.setattr(RemoteControlPlane, "running", classmethod(lambda cls: True))
+    restarts = []
+    monkeypatch.setattr(
+        RemoteControlPlane, "restart", classmethod(lambda cls: restarts.append(1) or True)
+    )
+    served = iter([None, b"old", der])
+    monkeypatch.setattr(
+        RemotePublicCertificate, "_served_der", classmethod(lambda cls, h, p, n: next(served))
+    )
+    monkeypatch.setattr("dreamference.remote.remote_public_certificate.RELOAD_POLL_S", 0)
+    assert RemotePublicCertificate.serve(BOX, certificate.read_text(), key.read_text())
+    assert restarts == [1]
+    crt, tls_key = RemotePublicCertificate.served_files()
+    assert (
+        oct(tls_key.stat().st_mode & 0o777) == "0o600"
+        and crt.read_text() == certificate.read_text()
+    )
+    monkeypatch.setattr(
+        RemotePublicCertificate, "_served_der", classmethod(lambda cls, h, p, n: b"old")
+    )
+    monkeypatch.setattr("dreamference.remote.remote_public_certificate.RELOAD_WAIT_S", 0.05)
+    assert not RemotePublicCertificate.serve(BOX, certificate.read_text(), key.read_text())
+
+
+def test_the_restart_keeps_the_container_as_it_is(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        RemoteControlPlane,
+        "_run",
+        classmethod(lambda cls, argv, timeout=300: seen.append(argv) or _done(argv)),
+    )
+    assert RemoteControlPlane.restart()
+    assert seen == [["docker", "restart", "-t", "10", "dreamference-remote"]]
+
+
+@needs_openssl
+def test_fingerprint_and_description_read_the_leaf(monkeypatch):
+    RemoteCertificateAuthority.ensure(BOX)
+    certificate, _ = RemoteCertificateAuthority.issue("control-plane", [BOX])
+    chain = certificate.read_text() + RemoteCertificateAuthority.ca_certificate().read_text()
+    leaf = hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate.read_text())).hexdigest()
+    assert RemotePublicCertificate.fingerprint(chain) == leaf
+    assert RemotePublicCertificate.fingerprint(certificate) == leaf
+    assert RemotePublicCertificate.fingerprint("nothing") is None
+    facts = RemotePublicCertificate.describe(certificate)
+    assert facts["issuer"] == "Mightling Mightling node CA" and 800 < facts["days"] <= 825
+
+
+@needs_openssl
+def test_with_the_public_certificate_443_must_serve_exactly_the_installed_leaf(monkeypatch):
+    RemoteCertificateAuthority.ensure(BOX)
+    ca = RemoteCertificateAuthority.ca_certificate()
+    certificate, key = RemoteCertificateAuthority.issue("control-plane", [BOX])
+    # The node's CA stands in for the system store here.
+    monkeypatch.setenv("SSL_CERT_FILE", str(ca))
+    leaf = RemotePublicCertificate.fingerprint(certificate)
+    port = _one_connection_server(certificate, key)
+    assert RemoteBox._handshake("127.0.0.1", port, BOX, None, expected=leaf) == "verified"
+    port = _one_connection_server(certificate, key)
+    assert RemoteBox._handshake("127.0.0.1", port, BOX, None, expected="0" * 64) == "foreign"
+
+
+def _public_set_up():
+    _set_up()
+    record = RemoteSettings.read()
+    record["public_certificate"] = True
+    RemoteSettings.write(record)
+
+
+def test_a_staging_certificate_is_never_served(monkeypatch, capsys):
+    _set_up()
+    monkeypatch.setattr(
+        RemotePublicCertificate, "obtain", classmethod(lambda cls, d, staging=False: staging)
+    )
+    monkeypatch.setattr(
+        RemotePublicCertificate,
+        "describe",
+        classmethod(lambda cls, c: {"issuer": "(STAGING)", "days": 63}),
+    )
+    monkeypatch.setattr(
+        RemotePublicCertificate, "serve", classmethod(lambda cls, *a: pytest.fail("served"))
+    )
+    monkeypatch.setattr(
+        RemotePublicCertificate, "install_timer", classmethod(lambda cls: pytest.fail("timer"))
+    )
+    assert RemoteAccess.certificate_issue(staging=True) == 0
+    assert not RemoteSettings.public_certificate()
+
+
+def test_issuing_serves_records_and_arms_the_timer(monkeypatch):
+    _set_up()
+    steps = []
+    monkeypatch.setattr(
+        RemotePublicCertificate, "obtain", classmethod(lambda cls, d, staging=False: True)
+    )
+    monkeypatch.setattr(
+        RemotePublicCertificate,
+        "describe",
+        classmethod(lambda cls, c: {"issuer": "Let's Encrypt E8", "days": 63}),
+    )
+    monkeypatch.setattr(RemotePublicCertificate, "due", classmethod(lambda cls, d: True))
+    monkeypatch.setattr(
+        RemotePublicCertificate,
+        "install",
+        classmethod(lambda cls, d: steps.append("install") or True),
+    )
+    monkeypatch.setattr(
+        RemotePublicCertificate,
+        "install_timer",
+        classmethod(lambda cls: steps.append("timer") or True),
+    )
+    assert RemoteAccess.certificate_issue() == 0
+    assert steps == ["install", "timer"] and RemoteSettings.public_certificate()
+
+
+def test_renewal_restarts_only_for_a_new_certificate(monkeypatch):
+    monkeypatch.setattr(
+        RemotePublicCertificate,
+        "obtain",
+        classmethod(lambda cls, d, staging=False: pytest.fail("lego")),
+    )
+    _set_up()
+    assert RemoteAccess.certificate_renew() == 0, "no public certificate: nothing to renew"
+    _public_set_up()
+    installs = []
+    due = [False]
+    monkeypatch.setattr(
+        RemotePublicCertificate, "obtain", classmethod(lambda cls, d, staging=False: True)
+    )
+    monkeypatch.setattr(RemotePublicCertificate, "due", classmethod(lambda cls, d: due[0]))
+    monkeypatch.setattr(
+        RemotePublicCertificate, "describe", classmethod(lambda cls, c: {"issuer": "x", "days": 50})
+    )
+    monkeypatch.setattr(
+        RemotePublicCertificate, "install", classmethod(lambda cls, d: installs.append(d) or True)
+    )
+    assert RemoteAccess.certificate_renew() == 0 and installs == []
+    due[0] = True
+    assert RemoteAccess.certificate_renew() == 0 and installs == [BOX]
+
+
+def test_off_serves_the_node_ca_again_and_stops_renewing(monkeypatch):
+    _public_set_up()
+    RemoteSettings.write_private("certs/control-plane.crt", "node-crt")
+    RemoteSettings.write_private("certs/control-plane.key", "node-key")
+    seen = []
+    monkeypatch.setattr(
+        RemotePublicCertificate, "remove_timer", classmethod(lambda cls: seen.append("timer"))
+    )
+    monkeypatch.setattr(
+        RemotePublicCertificate,
+        "serve",
+        classmethod(lambda cls, d, c, k: seen.append((d, c, k)) or True),
+    )
+    assert RemoteAccess.certificate_off() == 0
+    assert (
+        seen == ["timer", (BOX, "node-crt", "node-key")] and not RemoteSettings.public_certificate()
+    )
+
+
+def test_a_setup_rerun_keeps_the_public_certificate_in_front(monkeypatch):
+    _public_set_up()
+    certificate, key = RemotePublicCertificate.files(BOX)
+    certificate.parent.mkdir(parents=True, exist_ok=True)
+    certificate.write_text("public-crt")
+    key.write_text("public-key")
+    node = (
+        RemoteSettings.write_private("certs/c.crt", "node-crt"),
+        RemoteSettings.write_private("certs/c.key", "node-key"),
+    )
+    written = {}
+    monkeypatch.setattr(
+        RemoteControlPlane,
+        "write_files",
+        classmethod(lambda cls, d, s, k, c, key: written.update(c=c, key=key)),
+    )
+    monkeypatch.setattr(RemoteAccess, "_control_plane_token", classmethod(lambda cls, d, n: "tok"))
+    run = {"dns_name": BOX, "secret": "s", "node_id": NODE_ID, "control": node}
+    assert RemoteAccess._stage_control_plane(run)
+    assert written == {"c": "public-crt", "key": "public-key"}
+
+
+def test_the_renewal_timer_is_daily_in_the_batch_slice():
+    units = RemotePublicCertificate.timer_units()
+    service = units["mightling-remote-certificate.service"]
+    assert "ExecStart=%h/.local/bin/ling-admin remote certificate renew" in service
+    assert "Slice=mightling-batch.slice" in service and "Type=oneshot" in service
+    assert "OnCalendar=" in units["mightling-remote-certificate.timer"]
+
+
+def test_status_names_the_public_certificate_and_its_timer(monkeypatch, capsys):
+    _public_set_up()
+    monkeypatch.setattr(
+        RemoteBox,
+        "unit_states",
+        classmethod(lambda cls, d, ssh_to=None: {"haproxy": "active", "relay": "active"}),
+    )
+    monkeypatch.setattr(RemoteTunnel, "state", classmethod(lambda cls: "active"))
+    monkeypatch.setattr(RemoteControlPlane, "running", classmethod(lambda cls: True))
+    monkeypatch.setattr(RemoteControlPlane, "peers", classmethod(lambda cls, d, t: PEERS))
+    monkeypatch.setattr(
+        RemoteBox,
+        "check_public_port",
+        classmethod(lambda cls, d, ca: {"own": "verified", "other": "closed"}),
+    )
+    monkeypatch.setattr(
+        RemotePublicCertificate,
+        "describe",
+        classmethod(lambda cls, c: {"issuer": "Let's Encrypt E8", "days": 63}),
+    )
+    timer = ["active"]
+    monkeypatch.setattr(RemotePublicCertificate, "timer_state", classmethod(lambda cls: timer[0]))
+    assert RemoteAccess.status() == 0
+    out = capsys.readouterr().out
+    assert (
+        "Public cert: Let's Encrypt E8, valid 63 more days" in out and "Renewal:    active" in out
+    )
+    timer[0] = "inactive"
+    assert RemoteAccess.status() == 1, "nothing renews it"

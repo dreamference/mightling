@@ -30,6 +30,7 @@ from dreamference.remote.remote_certificate_authority import RemoteCertificateAu
 from dreamference.remote.remote_control_plane import RemoteControlPlane
 from dreamference.remote.remote_enrolment import RemoteEnrolment
 from dreamference.remote.remote_node_peer import RemoteNodePeer
+from dreamference.remote.remote_public_certificate import RemotePublicCertificate
 from dreamference.remote.remote_settings import (
     BOX_PUBLIC_PORT,
     CODE_MINUTES,
@@ -333,6 +334,10 @@ class RemoteAccess:
         )
         RemoteSettings.write_private("store-key", store_key + "\n")
         control = run["control"]
+        public = RemotePublicCertificate.files(run["dns_name"])
+        if RemoteSettings.public_certificate() and all(path.is_file() for path in public):
+            # The public certificate stays the control plane's across a rerun (spec §15).
+            control = public
         RemoteControlPlane.write_files(
             run["dns_name"],
             run["secret"],
@@ -614,12 +619,16 @@ class RemoteAccess:
         expiry = RemoteCertificateAuthority.expiry(
             RemoteSettings.path("certs", "control-plane.crt")
         )
+        public = RemoteSettings.public_certificate()
         if expiry is not None:
             days = int((expiry.timestamp() - time.time()) // 86400)
             print(
-                f"Certificates: valid {days} more days"
+                ("Node CA certificates (the relay's)" if public else "Certificates")
+                + f": valid {days} more days"
                 + ("  ⚠️ run `ling-admin remote setup` to reissue" if days < RENEW_DAYS else "")
             )
+        if public:
+            healthy &= cls._public_certificate_lines()
         if record.get("box_only"):
             print("This node:  not set up yet (--box-only): no control plane, no tunnel, no peer.")
             print(
@@ -647,6 +656,132 @@ class RemoteAccess:
                 f"Peers:      {len(peers)} enrolled, {connected} connected (ling-admin remote peers)"
             )
         return 0 if healthy else 1
+
+    @classmethod
+    def _public_certificate_lines(cls) -> bool:
+        """Prints the public certificate's issuer, days left and renewal timer.
+
+        Returns:
+            bool: False when it is missing, nearly expired, or nothing renews it.
+        """
+        facts = RemotePublicCertificate.describe(RemotePublicCertificate.served_files()[0])
+        timer = RemotePublicCertificate.timer_state()
+        if facts is None:
+            print("Public cert: ❌ the control plane's certificate cannot be read")
+            return False
+        warning = (
+            "  ⚠️ due: ling-admin remote certificate renew" if facts["days"] < RENEW_DAYS else ""
+        )
+        print(f"Public cert: {facts['issuer']}, valid {facts['days']} more days{warning}")
+        print(f"Renewal:    {timer} (mightling-remote-certificate.timer, daily)")
+        return facts["days"] >= 0 and timer == ACTIVE
+
+    # -- the public certificate (spec §15) ---------------------------------------------------------
+
+    @classmethod
+    def certificate_issue(cls, staging: bool = False) -> int:
+        """Gets the public certificate for the box's name and puts it in front of the control plane.
+
+        With `staging`, only proves the DNS-01 flow against Let's Encrypt's staging CA: its
+        certificate is kept in `acme-staging/` and never served (no peer trusts it).
+
+        Args:
+            staging: Let's Encrypt's staging CA, for a test.
+
+        Returns:
+            int: The exit status.
+        """
+        record = RemoteSettings.read()
+        if record is None or record.get("box_only"):
+            print("❌ Remote access is not set up on this node (ling-admin remote setup).")
+            return 3
+        dns_name = record["dns_name"]
+        where = (
+            "Let's Encrypt's staging CA (a test; nothing is served)" if staging else "Let's Encrypt"
+        )
+        print(f"🔐 A public certificate for {dns_name} from {where}, by DNS-01 in Cloudflare…")
+        if not RemotePublicCertificate.obtain(dns_name, staging=staging):
+            return 1
+        certificate = RemotePublicCertificate.files(dns_name, staging)[0]
+        facts = RemotePublicCertificate.describe(certificate) or {"issuer": "?", "days": "?"}
+        print(f"✅ {facts['issuer']}, valid {facts['days']} more days ({certificate})")
+        if staging:
+            return 0
+        if RemotePublicCertificate.due(dns_name):
+            print("🔁 The control plane restarts with it (peers' tunnels carry on)…")
+            if not RemotePublicCertificate.install(dns_name):
+                return 1
+        record["public_certificate"] = True
+        RemoteSettings.write(record)
+        if not RemotePublicCertificate.install_timer():
+            print(
+                "⚠️  The renewal timer did not start (systemctl --user status mightling-remote-certificate.timer)."
+            )
+            return 1
+        print(
+            "✅ The control plane presents it; mightling-remote-certificate.timer renews it daily when due."
+        )
+        return 0
+
+    @classmethod
+    def certificate_renew(cls) -> int:
+        """Renews the public certificate when due and restarts the control plane with a new one.
+
+        The renewal timer's command; a run that finds nothing due changes nothing.
+
+        Returns:
+            int: The exit status.
+        """
+        record = RemoteSettings.read()
+        if record is None or not record.get("public_certificate"):
+            print(
+                "The control plane has no public certificate (ling-admin remote certificate issue)."
+            )
+            return 0
+        dns_name = record["dns_name"]
+        if not RemotePublicCertificate.obtain(dns_name):
+            return 1
+        if not RemotePublicCertificate.due(dns_name):
+            facts = RemotePublicCertificate.describe(RemotePublicCertificate.files(dns_name)[0])
+            print(f"✅ Not due: valid {facts['days'] if facts else '?'} more days.")
+            return 0
+        print("🔁 A new certificate: the control plane restarts with it (peers' tunnels carry on)…")
+        if not RemotePublicCertificate.install(dns_name):
+            return 1
+        print("✅ Renewed and served.")
+        return 0
+
+    @classmethod
+    def certificate_off(cls) -> int:
+        """Puts the node CA's certificate back in front of the control plane, and stops renewing.
+
+        Returns:
+            int: The exit status.
+        """
+        record = RemoteSettings.read()
+        if record is None:
+            print("Remote access is not set up.")
+            return 3
+        certificate = RemoteSettings.path("certs", "control-plane.crt")
+        key = RemoteSettings.path("certs", "control-plane.key")
+        if not (certificate.is_file() and key.is_file()):
+            print(
+                "❌ The node CA's control-plane certificate is missing (ling-admin remote setup)."
+            )
+            return 1
+        RemotePublicCertificate.remove_timer()
+        record["public_certificate"] = False
+        RemoteSettings.write(record)
+        print("🔁 The control plane restarts with the node CA's certificate…")
+        if not RemotePublicCertificate.serve(
+            record["dns_name"], certificate.read_text(), key.read_text()
+        ):
+            return 1
+        print(
+            "✅ The node CA's certificate is served again; clients that trust only the system store "
+            "(Android) cannot reach management."
+        )
+        return 0
 
     @classmethod
     def peer_lines(cls, peers: list[dict[str, Any]]) -> list[str]:
@@ -897,6 +1032,7 @@ class RemoteAccess:
         if purge:
             RemoteControlPlane.stop()
             RemoteControlPlane.remove_proxy()
+            RemotePublicCertificate.remove_timer()
             if (record or {}).get("node_peer"):
                 RemoteNodePeer.leave(yes)
             import shutil

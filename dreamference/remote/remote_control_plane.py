@@ -100,9 +100,11 @@ class RemoteControlPlane:
         token: str | None = None,
     ) -> tuple[int, Any]:
         """One JSON request to management on loopback, the certificate checked against the CA."""
-        context = ssl.create_default_context(
-            cafile=str(RemoteCertificateAuthority.ca_certificate())
-        )
+        # The system store for the public certificate (spec §15), the node's CA for its own.
+        context = ssl.create_default_context()
+        ca = RemoteCertificateAuthority.ca_certificate()
+        if ca.is_file():
+            context.load_verify_locations(cafile=str(ca))
         connection = cls._Connection(CONTROL_PLANE_PORT, dns_name, context, timeout=20)
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if token:
@@ -272,6 +274,22 @@ class RemoteControlPlane:
             LOG.error(f"❌ Could not start the loopback proxy ({PROXY_SOCKET_UNIT}).")
             return False
         return True
+
+    @classmethod
+    def restart(cls) -> bool:
+        """Restarts the running container as it is, so that it reads its certificate again.
+
+        NetBird's combined server loads its certificate once, at start. The container keeps its
+        configuration (no setup token, the internal network); the peers' WireGuard sessions are
+        peer to peer and carry on, and their management and signal streams reconnect.
+
+        Returns:
+            bool: True when Docker restarted it.
+        """
+        result = cls._run(["docker", "restart", "-t", "10", SERVER_CONTAINER], timeout=120)
+        if result.returncode != 0:
+            LOG.error(f"❌ Could not restart {SERVER_CONTAINER}: {result.stderr.strip()[:300]}")
+        return result.returncode == 0
 
     @classmethod
     def geolocation_ready(cls) -> bool:

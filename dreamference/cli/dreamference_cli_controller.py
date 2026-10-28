@@ -720,6 +720,29 @@ class DreamferenceCLIController:
         sys.exit(action())
 
     @classmethod
+    def _remote_certificate(cls, args: argparse.Namespace) -> int:
+        """`ling-admin remote certificate issue|renew|off` (REMOTE_ACCESS §15).
+
+        Args:
+            args (argparse.Namespace): The parsed arguments.
+
+        Returns:
+            int: The exit code; 2 without a subcommand.
+        """
+        from dreamference.remote.remote_access import RemoteAccess
+
+        actions = {
+            "issue": lambda: RemoteAccess.certificate_issue(staging=args.staging),
+            "renew": RemoteAccess.certificate_renew,
+            "off": RemoteAccess.certificate_off,
+        }
+        action = actions.get(getattr(args, "certificate_command", None) or "")
+        if action is None:
+            print("usage: ling-admin remote certificate {issue [--staging],renew,off}")
+            return 2
+        return action()
+
+    @classmethod
     def _run_retired_chat(cls, args: argparse.Namespace) -> int:
         """`ling-admin chat …` after the Onyx web chat's retirement (ASK §10, Phase C).
 
@@ -1729,6 +1752,20 @@ class DreamferenceCLIController:
             "revoke", help="Delete a peer: its key is forgotten; it can rejoin only on the LAN"
         )
         remote_revoke_parser.add_argument("peer", help="The peer's name or overlay name (or a prefix)")
+        remote_certificate_parser = remote_subparsers.add_parser(
+            "certificate",
+            help="The control plane's public certificate for the box's name (Let's Encrypt, DNS-01 here)"
+        )
+        remote_certificate_subparsers = remote_certificate_parser.add_subparsers(dest="certificate_command")
+        remote_certificate_issue_parser = remote_certificate_subparsers.add_parser(
+            "issue", help="Get it and serve it from the control plane; renewed daily by a user timer"
+        )
+        remote_certificate_issue_parser.add_argument(
+            "--staging", action="store_true",
+            help="Test against Let's Encrypt's staging CA; its certificate is never served")
+        remote_certificate_subparsers.add_parser("renew", help="Renew it when due (the timer's command)")
+        remote_certificate_subparsers.add_parser(
+            "off", help="Serve the node CA's certificate again and stop renewing")
 
         # Command: ling-admin web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
@@ -3173,10 +3210,11 @@ class DreamferenceCLIController:
                                  else RemoteAccess.code()),
                 "peers": RemoteAccess.peers,
                 "revoke": lambda: RemoteAccess.revoke(args.peer),
+                "certificate": lambda: cls._remote_certificate(args),
             }
             action = actions.get(args.remote_command or "")
             if action is None:
-                print("usage: ling-admin remote {setup,status,remove,code,peers,revoke}")
+                print("usage: ling-admin remote {setup,status,remove,code,peers,revoke,certificate}")
                 sys.exit(2)
             sys.exit(action())
 

@@ -1052,6 +1052,26 @@ Delete a peer: its key is forgotten; it can rejoin only on the LAN.
 |---|---|
 | `peer` | The peer's name or overlay name (or a prefix) |
 
+#### `ling-admin remote certificate`
+
+The control plane's public certificate for the box's name (Let's Encrypt, DNS-01 here).
+
+#### `ling-admin remote certificate issue`
+
+Get it and serve it from the control plane; renewed daily by a user timer.
+
+| Option | Description |
+|---|---|
+| `--staging` | Test against Let's Encrypt's staging CA; its certificate is never served. |
+
+#### `ling-admin remote certificate renew`
+
+Renew it when due (the timer's command).
+
+#### `ling-admin remote certificate off`
+
+Serve the node CA's certificate again and stop renewing.
+
 ### `ling-admin web`
 
 Launch Web Canvas UI interactive pair-programming pane.

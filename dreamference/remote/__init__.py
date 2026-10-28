@@ -11,6 +11,7 @@ from dreamference.remote.remote_certificate_authority import RemoteCertificateAu
 from dreamference.remote.remote_control_plane import RemoteControlPlane
 from dreamference.remote.remote_enrolment import RemoteEnrolment
 from dreamference.remote.remote_node_peer import RemoteNodePeer
+from dreamference.remote.remote_public_certificate import RemotePublicCertificate
 from dreamference.remote.remote_settings import RemoteSettings
 from dreamference.remote.remote_tunnel import RemoteTunnel
 
@@ -21,6 +22,7 @@ __all__ = [
     "RemoteControlPlane",
     "RemoteEnrolment",
     "RemoteNodePeer",
+    "RemotePublicCertificate",
     "RemoteSettings",
     "RemoteTunnel",
 ]

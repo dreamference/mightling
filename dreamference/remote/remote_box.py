@@ -541,7 +541,13 @@ class RemoteBox:
 
     @classmethod
     def _handshake(
-        cls, host: str, port: int, server_name: str, ca_file: Path | None, timeout: int = 10
+        cls,
+        host: str,
+        port: int,
+        server_name: str,
+        ca_file: Path | None,
+        timeout: int = 10,
+        expected: str | None = None,
     ) -> str:
         """One TLS handshake with the box's public port.
 
@@ -551,6 +557,10 @@ class RemoteBox:
             timeout: Seconds for the connection and the handshake.
             server_name: The server name to send.
             ca_file: The node's CA certificate to verify against; None to verify nothing.
+            expected: With the public certificate (spec §15): the SHA-256 of the leaf the control
+                plane serves. The handshake is then verified against the system store, and a
+                different leaf, however well signed, is `foreign`: the box could get a public
+                certificate of its own for its name.
 
         Returns:
             str: `verified` (the handshake completed under `ca_file`), `answered` (it completed and
@@ -558,7 +568,9 @@ class RemoteBox:
             sign), `closed` (the box took the connection and closed it without a handshake) or
             `unreachable` (no TCP connection).
         """
-        if ca_file is None:
+        if expected is not None:
+            context = ssl.create_default_context()
+        elif ca_file is None:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
@@ -570,19 +582,23 @@ class RemoteBox:
             return UNREACHABLE
         with connection:
             try:
-                with context.wrap_socket(connection, server_hostname=server_name):
-                    return "answered" if ca_file is None else VERIFIED
+                with context.wrap_socket(connection, server_hostname=server_name) as tls:
+                    leaf = tls.getpeercert(binary_form=True) or b""
             except ssl.SSLCertVerificationError:
                 return FOREIGN
             except (ssl.SSLError, OSError):
                 return CLOSED
+        if expected is not None:
+            return VERIFIED if hashlib.sha256(leaf).hexdigest() == expected else FOREIGN
+        return "answered" if ca_file is None else VERIFIED
 
     @classmethod
     def check_public_port(cls, dns_name: str, ca_file: Path) -> dict[str, str]:
         """Checks port 443 the way a peer meets it.
 
-        The box's own name must reach the node's control plane, TLS and all, under the node's CA;
-        any other name must be refused by the box.
+        The box's own name must reach the node's control plane, TLS and all, under the node's CA
+        (or, with the public certificate, under the system store and with exactly the leaf the
+        control plane serves); any other name must be refused by the box.
 
         Args:
             dns_name: The box's public DNS name.
@@ -593,8 +609,15 @@ class RemoteBox:
             (`closed` when refused, `answered` when something behind the box spoke TLS for it,
             or `unreachable`).
         """
+        expected = None
+        if RemoteSettings.public_certificate():
+            from dreamference.remote.remote_public_certificate import RemotePublicCertificate
+
+            expected = RemotePublicCertificate.fingerprint(
+                RemotePublicCertificate.served_files()[0]
+            )
         return {
-            "own": cls._handshake(dns_name, BOX_PUBLIC_PORT, dns_name, ca_file),
+            "own": cls._handshake(dns_name, BOX_PUBLIC_PORT, dns_name, ca_file, expected=expected),
             "other": cls._handshake(dns_name, BOX_PUBLIC_PORT, OTHER_NAME, None),
         }
 
@@ -620,10 +643,16 @@ class RemoteBox:
             else "⚠️ ANOTHER NAME GOT A TLS ANSWER: the box passes more than its own name"
         )
         if own == VERIFIED:
-            return f"the box's name reaches this node's control plane (TLS under the node's CA); {refused}"
+            trust = (
+                "its public certificate"
+                if RemoteSettings.public_certificate()
+                else "TLS under the node's CA"
+            )
+            return f"the box's name reaches this node's control plane ({trust}); {refused}"
         if own == FOREIGN:
-            return (
-                "❌ something other than this node answers for the box's name "
-                "(a certificate the node's CA did not sign)"
+            return "❌ something other than this node answers for the box's name " + (
+                "(not the public certificate this node's control plane serves)"
+                if RemoteSettings.public_certificate()
+                else "(a certificate the node's CA did not sign)"
             )
         return f"the box takes the connection and nothing answers behind it (the tunnel is not up); {refused}"
