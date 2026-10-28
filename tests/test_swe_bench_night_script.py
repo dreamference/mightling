@@ -641,7 +641,10 @@ def test_without_best_of_the_night_is_the_two_arm_night(tmp_path):
     assert not any("--seed 20261013" in line for line in recorded)
 
 
-def test_the_engine_ab_serves_each_arm_on_the_remote_machine_and_restores_production(tmp_path):
+@pytest.mark.parametrize("overlay", [False, True])
+def test_the_engine_ab_serves_each_arm_on_the_remote_machine_and_restores_production(
+    tmp_path, overlay
+):
     # A stand-in `ssh` on PATH records what the remote helper was asked and answers as it does; the stand-in
     # Python records each ling-admin call with the model server the round was pointed at.
     calls, remote = tmp_path / "calls.txt", tmp_path / "remote.txt"
@@ -657,7 +660,10 @@ def test_the_engine_ab_serves_each_arm_on_the_remote_machine_and_restores_produc
         'case "$args" in *"serve sglang"*) echo "ready sglang" ;; *"serve engine"*) echo "ready ling-engine" ;;'
         " *restore*) echo restored ;; esac\n"
     )
-    for path in (fake, ssh):
+    getent = bindir / "getent"
+    # The overlay's DNS knows the machine (a machine at another site) or it does not (this LAN, mDNS).
+    getent.write_text(f'#!/bin/bash\n{"exit 0" if overlay else "exit 2"}\n')
+    for path in (fake, ssh, getent):
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
     task_list = tmp_path / "list.txt"
     task_list.write_text("acme__widget-1\n")
@@ -685,9 +691,10 @@ def test_the_engine_ab_serves_each_arm_on_the_remote_machine_and_restores_produc
     assert result.returncode == 0, result.stdout + result.stderr
     recorded = calls.read_text().splitlines()
     rounds = [line for line in recorded if " swe-bench run " in line]
-    assert rounds[0].startswith("http://node-b.local:30000 swe-bench run ")
+    host = "node-b.netbird.selfhosted" if overlay else "node-b.local"
+    assert rounds[0].startswith(f"http://{host}:30000 swe-bench run ")
     assert "--name n12-exec-tool-function-apply-patch-off-on-sglang " in rounds[0]
-    assert rounds[1].startswith("http://node-b.local:8300 swe-bench run ")
+    assert rounds[1].startswith(f"http://{host}:8300 swe-bench run ")
     assert all(
         "--exec-tool function" in r
         and "--apply-patch off" in r
@@ -701,7 +708,8 @@ def test_the_engine_ab_serves_each_arm_on_the_remote_machine_and_restores_produc
         "engine",
         "restore",
     ]
-    assert all(line.startswith("-o BatchMode=yes node-b bash -s -- ") for line in asked)
+    ssh_name = "node-b.netbird.selfhosted" if overlay else "node-b"
+    assert all(line.startswith(f"-o BatchMode=yes {ssh_name} bash -s -- ") for line in asked)
     # The regrades need no model server and run after production is back.
     assert all(line.startswith("local ") for line in recorded if " swe-bench eval " in line)
 

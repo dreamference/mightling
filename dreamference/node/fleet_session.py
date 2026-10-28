@@ -312,7 +312,12 @@ class FleetSession:
     RSYNC_DROPPED: tuple[int, ...] = (10, 12, 30, 35, 255)
 
     def rsync(
-        self, source: Path, destination: str, attempts: int = 1, wait_s: float = 20.0
+        self,
+        source: Path,
+        destination: str,
+        attempts: int = 1,
+        wait_s: float = 20.0,
+        files: list[str] | None = None,
     ) -> subprocess.CompletedProcess:
         """Copies a folder there over the session: `rsync -aH --partial --append-verify`, so the
         hub cache's links survive and an interrupted copy resumes where it stopped.
@@ -329,10 +334,29 @@ class FleetSession:
             destination: The remote folder (may start with `~/`).
             attempts: How many times to try while the connection keeps dropping.
             wait_s: Seconds to wait between attempts.
+            files: Only these paths of the source folder (relative to it), with links kept as
+                links, instead of the whole folder.
 
         Returns:
             subprocess.CompletedProcess: rsync's result (the last attempt's).
         """
+        listing: Path | None = None
+        if files is not None:
+            self.run_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                "w", dir=self.run_dir, prefix="files-", delete=False
+            ) as handle:
+                handle.write("\n".join(files) + "\n")
+                listing = Path(handle.name)
+        try:
+            return self._rsync(source, destination, attempts, wait_s, listing)
+        finally:
+            if listing is not None:
+                listing.unlink(missing_ok=True)
+
+    def _rsync(
+        self, source: Path, destination: str, attempts: int, wait_s: float, listing: Path | None
+    ) -> subprocess.CompletedProcess:
         transport = " ".join(
             [
                 "ssh",
@@ -350,6 +374,7 @@ class FleetSession:
             "--append-verify",
             "--timeout=120",
             "--mkpath",
+            *([f"--files-from={listing}"] if listing is not None else []),
             "-e",
             transport,
             f"{source}/",

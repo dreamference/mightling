@@ -66,6 +66,17 @@ class FleetModelPlan:
         return "/" in reference.split("@", 1)[0].split(":", 1)[0] or "@sha256:" in reference
 
     @classmethod
+    def hub(cls) -> Path:
+        """Names this machine's hub cache.
+
+        Returns:
+            Path: This machine's hub cache.
+        """
+        from dreamference.node.node_model_sync import NodeModelSync
+
+        return NodeModelSync.hub()
+
+    @classmethod
     def local_folders(cls, folders: List[str]) -> List[Path]:
         """
         Args:
