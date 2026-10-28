@@ -13,7 +13,9 @@ import {
   beginGitAction,
   chatRepos,
   executeGitAction,
+  fullAccessConfirmationPhrase,
   isChatRepoCwd,
+  matchesFullAccessConfirmation,
   safePrUrl,
   type ChatRepoState,
   type ChatReposApi,
@@ -34,13 +36,14 @@ export interface GitBarProps {
   initialMergeInProgress?: boolean;
 }
 
-const CONFIRM_LABELS: Record<Exclude<GitBarAction, "commit">, string> = {
+const CONFIRM_LABELS: Record<Exclude<GitBarAction, "commit" | "full-access">, string> = {
   push: "Push commits to the forge?",
   update: "Merge base branch into this checkout?",
   abort: "Abort the merge in progress?",
   merge: "Squash-merge this branch into main?",
   pr: "Open a pull request on the forge?",
   main: "Switch this checkout to work on main?",
+  "workspace-access": "Return this checkout to the workspace sandbox?",
 };
 
 export function GitBar(props: GitBarProps) {
@@ -75,9 +78,18 @@ export function GitBar(props: GitBarProps) {
   const readOnly = state.read_only;
   const onMain = state.branch !== null && (state.branch === "main" || state.branch === state.base);
   const showWorkOnMain = !onMain && state.allow_main !== false && !mainRefused;
+  const fullAccessGranted = Boolean(state.full_access);
+  const fullAccessAllowed = Boolean(state.full_access_allowed);
+  const requiredPhrase = fullAccessConfirmationPhrase(state.repo);
 
   const startAction = async (action: GitBarAction) => {
-    if (readOnly || busy) return;
+    if ((readOnly && action !== "workspace-access") || busy) return;
+    // Ending Full Access asks only for a click: no nonce and no forge, so it works when they are down.
+    if (action === "workspace-access") {
+      setOutcome(null);
+      setPending({ action, intent: "access", confirm: "", message: "" });
+      return;
+    }
     setBusy(true);
     setOutcome(null);
     try {
@@ -122,6 +134,12 @@ export function GitBar(props: GitBarProps) {
         <span className="git-bar-ahead-behind" title={`Ahead ${state.ahead}, behind ${state.behind} (${state.base})`}>
           ↑{state.ahead} ↓{state.behind}
         </span>
+        <span
+          className={fullAccessGranted ? "git-bar-sandbox full-access" : "git-bar-sandbox"}
+          title={!fullAccessAllowed && !fullAccessGranted ? "Full Access is off for phone threads" : undefined}
+        >
+          {fullAccessGranted ? "Full Access" : "Workspace"}
+        </span>
       </span>
 
       <span className="git-bar-actions">
@@ -135,6 +153,11 @@ export function GitBar(props: GitBarProps) {
         <button disabled={readOnly || busy} onClick={() => void startAction("pr")}>PR</button>
         {showWorkOnMain ? (
           <button disabled={readOnly || busy} onClick={() => void startAction("main")}>Work on main</button>
+        ) : null}
+        {fullAccessGranted ? (
+          <button disabled={busy} onClick={() => void startAction("workspace-access")}>Back to Workspace</button>
+        ) : fullAccessAllowed ? (
+          <button disabled={readOnly || busy} onClick={() => void startAction("full-access")}>Full Access…</button>
         ) : null}
       </span>
 
@@ -159,6 +182,32 @@ export function GitBar(props: GitBarProps) {
             />
             <button className="primary" disabled={busy || !pending.message.trim()} onClick={() => void confirmAction()}>
               Confirm commit
+            </button>
+            <button disabled={busy} onClick={() => setPending(null)}>Cancel</button>
+          </div>
+        ) : pending.action === "full-access" ? (
+          <div className="git-confirm full-access-confirm" role="group" aria-label="Confirm Full Access">
+            <span className="git-confirm-prompt">Type {requiredPhrase} to allow Full Access:</span>
+            <input
+              type="text"
+              className="git-full-access-input"
+              value={pending.message}
+              placeholder={requiredPhrase}
+              aria-label={`Type ${requiredPhrase}`}
+              onChange={(event) => setPending({ ...pending, message: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && matchesFullAccessConfirmation(pending.message, state.repo)) {
+                  void confirmAction();
+                }
+                if (event.key === "Escape") setPending(null);
+              }}
+            />
+            <button
+              className="primary"
+              disabled={busy || !matchesFullAccessConfirmation(pending.message, state.repo)}
+              onClick={() => void confirmAction()}
+            >
+              Confirm
             </button>
             <button disabled={busy} onClick={() => setPending(null)}>Cancel</button>
           </div>

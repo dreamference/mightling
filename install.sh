@@ -494,8 +494,9 @@ for name in $INSTALLED; do
     install -m 0755 "$WORK/$name" "$INSTALL_DIR/bin/.$name.new"
     mv -f "$INSTALL_DIR/bin/.$name.new" "$INSTALL_DIR/bin/$name"
     # Codex looks for its Code Mode host beside its own executable, so that one needs no link,
-    # and `ling signal` finds its bridge there too: its commands are `ling signal …`.
-    case "$name" in codex-code-mode-host|ling-signal|ling-delegate) ;; *) link "$INSTALL_DIR/bin/$name" "$name" ;; esac
+    # and `ling signal` finds its bridge there too: its commands are `ling signal …`. `ling-delegate` is linked:
+    # the delegation plugin runs it, and must not depend on which `ling` is installed.
+    case "$name" in codex-code-mode-host|ling-signal) ;; *) link "$INSTALL_DIR/bin/$name" "$name" ;; esac
 done
 # What was installed, for `node provision`'s state probe and drift report.
 printf '%s\n' "$TAG" > "$INSTALL_DIR/VERSION"

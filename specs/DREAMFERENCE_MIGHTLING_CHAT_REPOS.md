@@ -313,6 +313,8 @@ The bot receives only `RepoNotice` values (§12.2), each built from a fixed temp
 
 Phone Work threads start in **workspace-write** with **on-request** approvals, the desktop Work defaults.
 
+Every turn on a repository thread carries an explicit sandbox, written by the policy in both enforcers whatever the page sent: the user's own `[sandbox_workspace_write]` from `$CODEX_HOME/config.toml` (its writable roots, and the network on, as the launcher writes it, unless the thread's air gap is `on`), `readOnly` with the same network in a read-only checkout, and `dangerFullAccess` only under §6.3. A turn's sandbox holds for the turns after it, so writing it on every turn is what keeps a thread from keeping a wider one.
+
 Approvals, on every bridge:
 - **Commands and file changes:** relayed as today, Approve means once, with nonces. `acceptForSession` and policy amendments are never offered from a phone.
 - **`item/permissions/requestApproval`** (more network or file access) is relayed with `scope: "turn"`, on every bridge for Work threads. This changes SIGNAL §8, which declines it, and the change applies to `chat-work` threads only.
@@ -336,6 +338,10 @@ Approvals, on every bridge:
 - **When allowed,** `/access full` (or the page's sandbox menu) asks the owner to type `FULL ACCESS <repo>` exactly. It lasts for the thread until `/access workspace`.
 - **The Telegram and Discord bots never offer it;** the page does.
 - **At `on` it's refused regardless,** by the app-server (patch `0023`, AIRGAPPED §14.7), with the same message.
+- **What grants it:** `POST /api/repos/access {thread, level: "full", typed, confirm}` from the page, after the node's setting, a writable checkout, its air gap off, the exact phrase and a single-use `access` nonce all hold. The grant is in memory: a restart of `ling web` ends it.
+- **Only the page's turns run with it.** A messenger bridge (a `bridge=1` session or a Signal device) can neither grant nor end it (403), and a bridge's turn on a granted thread still gets the workspace sandbox. A read-only checkout never gets it.
+- **Ending it** (`level: "workspace"`, no nonce, so it works when the forge is down) takes the checkout's loaded threads back to the workspace sandbox at once (`thread/settings/update` over a connection of its own) and interrupts a turn still running.
+- **Known limit:** when the node's setting is turned off or the air gap turned on, the grant drops at the next check (the next turn, or the page's next `/api/repos/state`), and the thread's sandbox is narrowed by that turn; a turn already running with Full Access is not interrupted until then.
 
 ## 7. Bounds and budget
 

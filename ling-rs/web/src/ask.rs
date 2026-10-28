@@ -108,6 +108,38 @@ pub fn is_bridge_device(name: &str) -> bool {
         && instance.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+/// The user's `[sandbox_workspace_write]` in `$CODEX_HOME/config.toml`, as the app-server reads it
+/// for `sandbox: "workspace-write"`. The launcher writes `network_access = true` when it is absent
+/// (the owner's decision of 2026-10-22), so absent counts as true; a writable root that is not an
+/// absolute path is left out, since the app-server refuses a turn naming one. The air gap is not
+/// read here: the caller turns the network off for a thread at `on`.
+pub fn configured_workspace_sandbox(codex_home: &Path) -> crate::policy::WorkspaceSandbox {
+    let text = std::fs::read_to_string(codex_home.join("config.toml")).unwrap_or_default();
+    let table = text
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|root| root.get("sandbox_workspace_write").and_then(toml::Value::as_table).cloned())
+        .unwrap_or_default();
+    let flag = |key: &str, absent: bool| table.get(key).and_then(toml::Value::as_bool).unwrap_or(absent);
+    crate::policy::WorkspaceSandbox {
+        network_access: flag("network_access", true),
+        writable_roots: table
+            .get("writable_roots")
+            .and_then(toml::Value::as_array)
+            .map(|roots| {
+                roots
+                    .iter()
+                    .filter_map(toml::Value::as_str)
+                    .filter(|root| Path::new(root).is_absolute())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        exclude_tmpdir_env_var: flag("exclude_tmpdir_env_var", false),
+        exclude_slash_tmp: flag("exclude_slash_tmp", false),
+    }
+}
+
 /// What the policy layer asks while vetting one message: the named prompt's text, fetched before
 /// the message is vetted, and the Ask folders.
 pub struct MessagePrompts<'a> {
@@ -128,9 +160,34 @@ impl<'a> MessagePrompts<'a> {
         self.root.parent().unwrap_or(self.root)
     }
 
+    /// Whether the repository thread `thread_id` runs with Full Access now: its checkout holds a
+    /// grant that still stands (`ChatRepos::effective_full_access`: the node's setting on, the
+    /// checkout writable, its air gap off) and the thread's own air gap is off. A grant that no
+    /// longer stands is dropped, so it never comes back without the phrase typed again.
+    fn repo_thread_full_access_with(&self, server: &crate::server::Server, thread_id: &str) -> bool {
+        let Some(record) = server.chat_repos.find_by_app_thread(self.codex_home(), thread_id) else {
+            return false;
+        };
+        let settings = crate::chat_repos::ChatReposSettings::load_from(server.config.user_config.as_deref());
+        if !server.chat_repos.effective_full_access(&settings, &record) {
+            return false;
+        }
+        if self.airgapped_on(Some(thread_id))
+            || crate::server::thread_airgapped_on(Some(thread_id), Some(Path::new(&record.dir)))
+        {
+            server.chat_repos.revoke_full_access(&record.thread);
+            return false;
+        }
+        true
+    }
+
     /// Marks whether this message came from a paired phone bridge tab.
     pub fn with_bridge(self, bridge: bool) -> TabPrompts<'a> {
-        TabPrompts { inner: self, bridge }
+        TabPrompts {
+            inner: self,
+            bridge,
+            server: None,
+        }
     }
 }
 
@@ -138,6 +195,16 @@ impl<'a> MessagePrompts<'a> {
 pub struct TabPrompts<'a> {
     pub inner: MessagePrompts<'a>,
     pub bridge: bool,
+    pub server: Option<&'a crate::server::Server>,
+}
+
+impl<'a> TabPrompts<'a> {
+    /// Attaches the running [`crate::server::Server`] so repository Full Access grants are checked
+    /// directly against its [`crate::chat_repos::ChatRepos`] and configuration.
+    pub fn with_server(mut self, server: &'a crate::server::Server) -> Self {
+        self.server = Some(server);
+        self
+    }
 }
 
 impl PromptSource for MessagePrompts<'_> {
@@ -180,6 +247,17 @@ impl PromptSource for MessagePrompts<'_> {
     fn is_bridge(&self) -> bool {
         false
     }
+
+    fn workspace_sandbox(&self, thread_id: &str) -> crate::policy::WorkspaceSandbox {
+        let mut sandbox = configured_workspace_sandbox(self.codex_home());
+        let checkout = self.repo_thread_cwd(thread_id).map(PathBuf::from);
+        if self.airgapped_on(Some(thread_id))
+            || checkout.is_some_and(|cwd| crate::server::thread_airgapped_on(Some(thread_id), Some(&cwd)))
+        {
+            sandbox.network_access = false;
+        }
+        sandbox
+    }
 }
 
 impl PromptSource for TabPrompts<'_> {
@@ -207,12 +285,23 @@ impl PromptSource for TabPrompts<'_> {
         self.inner.repo_thread_cwd(thread_id)
     }
 
+    /// Only a tab that carries the running server can say a thread has Full Access; without one
+    /// the answer is no.
+    fn repo_thread_full_access(&self, thread_id: &str) -> bool {
+        self.server
+            .is_some_and(|server| self.inner.repo_thread_full_access_with(server, thread_id))
+    }
+
     fn is_bridge(&self) -> bool {
         self.bridge
     }
 
     fn work_folder(&self, cwd: &str) -> bool {
         self.inner.work_folder(cwd)
+    }
+
+    fn workspace_sandbox(&self, thread_id: &str) -> crate::policy::WorkspaceSandbox {
+        self.inner.workspace_sandbox(thread_id)
     }
 }
 
@@ -292,6 +381,71 @@ mod tests {
     }
 
     #[test]
+    fn a_repository_turns_workspace_sandbox_is_the_users_with_no_network_at_on() {
+        let home = scratch("workspace-sandbox");
+        // The launcher writes `network_access = true` when absent: absent is true.
+        assert_eq!(
+            configured_workspace_sandbox(&home),
+            crate::policy::WorkspaceSandbox { network_access: true, ..Default::default() }
+        );
+        std::fs::write(
+            home.join("config.toml"),
+            "[sandbox_workspace_write]\nnetwork_access = false\nwritable_roots = [\"/codex/skills\", \"relative\", 3]\nexclude_slash_tmp = true\n",
+        )
+        .unwrap();
+        assert_eq!(
+            configured_workspace_sandbox(&home),
+            crate::policy::WorkspaceSandbox {
+                network_access: false,
+                writable_roots: vec!["/codex/skills".to_string()],
+                exclude_tmpdir_env_var: false,
+                exclude_slash_tmp: true,
+            }
+        );
+
+        // The file says network on, the checkout's air gap says on: the turn gets no network.
+        std::fs::write(
+            home.join("config.toml"),
+            "[sandbox_workspace_write]\nnetwork_access = true\nwritable_roots = [\"/codex/skills\"]\n",
+        )
+        .unwrap();
+        let root = root(&home);
+        std::fs::create_dir_all(&root).unwrap();
+        let checkout = crate::chat_repos::root_dir(&home).join("org_widget").join("cafef00d");
+        std::fs::create_dir_all(&checkout).unwrap();
+        let record = crate::chat_repos::CheckoutRecord {
+            thread: "cafef00d".to_string(),
+            repo: "org/widget".to_string(),
+            bridge: "telegram".to_string(),
+            chat: "c".to_string(),
+            device: "telegram-app".to_string(),
+            dir: checkout.to_string_lossy().into_owned(),
+            branch: Some("phone/cafef00d".to_string()),
+            base: "main".to_string(),
+            app_threads: vec!["app-net".to_string()],
+            read_only: false,
+            created: 1,
+            last_used: 1,
+        };
+        crate::chat_repos::save_index(&home, &[record]).unwrap();
+        let prompts = MessagePrompts {
+            root: &root,
+            composed: None,
+            created: Mutex::new(None),
+            airgapped_on: false,
+            thread_folder: None,
+        }
+        .with_bridge(false);
+        let open = prompts.workspace_sandbox("app-net");
+        assert!(open.network_access && open.writable_roots == vec!["/codex/skills".to_string()]);
+        std::fs::write(checkout.join("dreamference.toml"), "mightling_airgapped = \"on\"\n").unwrap();
+        let closed = prompts.workspace_sandbox("app-net");
+        assert!(!closed.network_access, "the air gap at on takes the network away");
+        assert_eq!(closed.writable_roots, vec!["/codex/skills".to_string()]);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn bridge_device_names_and_message_prompts_repo_checks() {
         assert!(is_bridge_device("signal-bridge"));
         assert!(is_bridge_device("signal-work"));
@@ -343,6 +497,65 @@ mod tests {
         assert!(crate::chat_repos::record_app_thread(&home, &checkout, "app-t2").unwrap());
         assert_eq!(prompts.repo_thread_cwd("app-t1"), Some(canonical_checkout.clone()));
         assert_eq!(prompts.repo_thread_cwd("app-t2"), Some(canonical_checkout));
+        assert!(!prompts.repo_thread_full_access("app-t1"));
+
+        let state_dir = crate::auth::state_dir(&home);
+        let user_config = home.join("config.toml");
+        std::fs::write(&user_config, "[chat_repos]\nfull_access = true\n").unwrap();
+        let server = crate::server::Server::new(crate::server::Config {
+            codex_home: home.clone(),
+            state_dir: state_dir.clone(),
+            port: 3100,
+            lan_names: Vec::new(),
+            public_names: Vec::new(),
+            socket: home.join("s.sock"),
+            launch: crate::app_server::Launch {
+                ling: home.join("ling"),
+                env: Vec::new(),
+                log: state_dir.join("app-server.log"),
+            },
+            images_dir: home.join("images"),
+            speech_addr: "127.0.0.1:9".to_string(),
+            user_config: Some(user_config.clone()),
+            forge_url: None,
+        })
+        .unwrap();
+
+        // A tab without the running server never says Full Access.
+        server.chat_repos.grant_full_access("deadbeef");
+        assert!(!prompts.repo_thread_full_access("app-t1"));
+        let tab = MessagePrompts {
+            root: &root,
+            composed: None,
+            created: Mutex::new(None),
+            airgapped_on: false,
+            thread_folder: None,
+        }
+        .with_bridge(false)
+        .with_server(&server);
+        assert!(tab.repo_thread_full_access("app-t1") && tab.repo_thread_full_access("app-t2"));
+        assert!(!tab.repo_thread_full_access("app-t3"), "a thread of no checkout");
+
+        // The node's setting turned off drops the grant: turned on again, it does not come back.
+        std::fs::write(&user_config, "[chat_repos]\nfull_access = false\n").unwrap();
+        assert!(!tab.repo_thread_full_access("app-t1"));
+        std::fs::write(&user_config, "[chat_repos]\nfull_access = true\n").unwrap();
+        assert!(!tab.repo_thread_full_access("app-t1"));
+        assert!(!server.chat_repos.is_full_access_granted("deadbeef"));
+
+        // The air gap turned on in the checkout drops it too.
+        server.chat_repos.grant_full_access("deadbeef");
+        assert!(tab.repo_thread_full_access("app-t1"));
+        let wt_cfg = checkout.join("dreamference.toml");
+        std::fs::write(&wt_cfg, "mightling_airgapped = \"on\"\n").unwrap();
+        assert!(!tab.repo_thread_full_access("app-t1"));
+        std::fs::remove_file(&wt_cfg).unwrap();
+        assert!(!tab.repo_thread_full_access("app-t1"));
+
+        server.chat_repos.grant_full_access("deadbeef");
+        assert!(tab.repo_thread_full_access("app-t1"));
+        server.chat_repos.revoke_full_access("deadbeef");
+        assert!(!tab.repo_thread_full_access("app-t1"));
 
         let _ = std::fs::remove_dir_all(&home);
     }

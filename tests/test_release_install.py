@@ -754,7 +754,7 @@ def release_install(tmp_path, monkeypatch):
         monkeypatch.setattr(codex_branded_builder, name, str(tmp_path / "site-packages" / name.lower()))
     install_dir = tmp_path / "install"
     monkeypatch.setattr(codex_branded_builder, "INSTALL_DIR", str(install_dir))
-    for name in ("PATH_LINK", "ADMIN_PATH_LINK", "SEARCH_PATH_LINK", "FETCH_PATH_LINK", "CODE_PATH_LINK", "DOCS_PATH_LINK"):
+    for name in ("PATH_LINK", "ADMIN_PATH_LINK", "SEARCH_PATH_LINK", "FETCH_PATH_LINK", "CODE_PATH_LINK", "DOCS_PATH_LINK", "DELEGATE_PATH_LINK"):
         monkeypatch.setattr(codex_branded_builder, name, str(tmp_path / "bin" / name.lower()))
 
     def place(*names):

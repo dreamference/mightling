@@ -110,7 +110,13 @@ export interface ChatRepoBudget {
   resets_at: number;
 }
 
-export type ChatRepoIntent = "commit" | "push" | "update" | "merge" | "pr" | "main" | "budget";
+export type ChatRepoIntent = "commit" | "push" | "update" | "merge" | "pr" | "main" | "budget" | "access";
+
+export type ChatRepoAccessLevel = "workspace" | "full";
+
+export interface ChatRepoAccessResult {
+  level: ChatRepoAccessLevel;
+}
 
 export interface ChatRepoState {
   repo: string;
@@ -125,6 +131,8 @@ export interface ChatRepoState {
   warnings: string[];
   confirm?: string;
   allow_main?: boolean;
+  full_access_allowed?: boolean;
+  full_access?: boolean;
   merge_in_progress?: boolean;
   cwd?: string;
 }
@@ -380,6 +388,7 @@ export interface ChatReposApi {
   pr(thread: string, confirm: string): Promise<ChatRepoPrResult>;
   main(thread: string, confirm: string): Promise<ChatRepoMainResult>;
   budget(thread: string, confirm: string, add: number): Promise<ChatRepoBudget>;
+  access(thread: string, level: ChatRepoAccessLevel, confirm: string, typed?: string): Promise<ChatRepoAccessResult>;
 }
 
 /** Client for `/api/repos*` on `ling web`. */
@@ -497,6 +506,14 @@ export function chatRepos(fetcher: Fetcher = activeFetcher): ChatReposApi {
     budget(thread, confirm, add) {
       return post<ChatRepoBudget>("/api/repos/budget", { thread, add, confirm }, "Budget extension refused");
     },
+
+    access(thread, level, confirm, typed) {
+      // Ending Full Access needs no nonce; a grant needs one and the typed phrase.
+      const payload: Record<string, unknown> = { thread, level };
+      if (confirm) payload.confirm = confirm;
+      if (typed !== undefined) payload.typed = typed;
+      return post<ChatRepoAccessResult>("/api/repos/access", payload, "Access change refused");
+    },
   };
 }
 
@@ -511,7 +528,16 @@ export function safePrUrl(url: string): boolean {
   }
 }
 
-export type GitBarAction = "commit" | "push" | "update" | "abort" | "merge" | "pr" | "main";
+export type GitBarAction =
+  | "commit"
+  | "push"
+  | "update"
+  | "abort"
+  | "merge"
+  | "pr"
+  | "main"
+  | "full-access"
+  | "workspace-access";
 
 export interface PendingGitAction {
   action: GitBarAction;
@@ -520,8 +546,20 @@ export interface PendingGitAction {
   message: string;
 }
 
+/** Exact phrase the owner must type to confirm Full Access for `<org>/<repo>` (§6.2). */
+export function fullAccessConfirmationPhrase(repo: string): string {
+  return `FULL ACCESS ${repo}`;
+}
+
+/** Checks whether `typed` matches `FULL ACCESS <org>/<repo>` character-for-character. */
+export function matchesFullAccessConfirmation(typed: string, repo: string): boolean {
+  return typed === fullAccessConfirmationPhrase(repo);
+}
+
 export function intentForAction(action: GitBarAction): ChatRepoIntent {
-  return action === "abort" ? "update" : action;
+  if (action === "abort") return "update";
+  if (action === "full-access" || action === "workspace-access") return "access";
+  return action;
 }
 
 /** Step 1 of every Git bar action: fetches a single-use `confirm` nonce from `/api/repos/state` with `intent=`. */
@@ -608,6 +646,14 @@ export async function executeGitAction(
       case "main": {
         const res = await api.main(thread, pending.confirm);
         return { text: `Working on ${res.branch}`, branch: res.branch };
+      }
+      case "full-access": {
+        await api.access(thread, "full", pending.confirm, pending.message);
+        return { text: "Full Access" };
+      }
+      case "workspace-access": {
+        await api.access(thread, "workspace", pending.confirm);
+        return { text: "Workspace" };
       }
     }
   } catch (error) {

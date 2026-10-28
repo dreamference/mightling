@@ -31,15 +31,15 @@ def test_manifest_and_marketplace_name_mightling_at_the_package_version() -> Non
         ("mightling", "./claude-plugin", __version__)
     ]
     assert set(manifest["userConfig"]) == {"node", "max_parallel", "allow_classes"}
-    assert manifest["userConfig"]["allow_classes"]["default"] == "W1"
+    assert manifest["userConfig"]["allow_classes"]["default"] == "W1,L1"
 
 
 def test_the_mcp_server_is_ling_delegate_mcp() -> None:
-    """`.mcp.json` declares one stdio server, `mightling`, running `ling delegate mcp`."""
+    """`.mcp.json` declares one stdio server, `mightling`, running `ling-delegate mcp`, not the `ling` on PATH."""
     servers = _json(PLUGIN / ".mcp.json")["mcpServers"]
     assert list(servers) == ["mightling"]
-    assert servers["mightling"]["command"] == "ling"
-    assert servers["mightling"]["args"] == ["delegate", "mcp"]
+    assert servers["mightling"]["command"] == "ling-delegate"
+    assert servers["mightling"]["args"] == ["mcp"]
 
 
 def test_the_subagent_reaches_only_watch_and_read() -> None:
@@ -54,6 +54,15 @@ def test_the_skill_sends_every_long_wait_to_watch() -> None:
     """The skill tells Claude to use `watch` for every wait longer than a minute."""
     text = (PLUGIN / "skills" / "delegate" / "SKILL.md").read_text(encoding="utf-8")
     assert "every wait longer than a minute" in text
+
+
+def test_the_skill_sends_single_symbol_questions_to_lookup_first() -> None:
+    """The skill names `lookup`, its closed op list and the model-free default classes."""
+    text = (PLUGIN / "skills" / "delegate" / "SKILL.md").read_text(encoding="utf-8")
+    assert "mcp__plugin_mightling_mightling__lookup" in text
+    assert "before you read files" in text
+    for op in ("def", "refs", "callers", "impl", "outline"):
+        assert f"| `{op}` |" in text
 
 
 def test_nothing_in_the_repository_enables_the_plugin() -> None:

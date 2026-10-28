@@ -56,6 +56,10 @@ pub trait PromptSource: Send + Sync {
     fn repo_thread_cwd(&self, _thread_id: &str) -> Option<String> {
         None
     }
+    /// Whether `thread_id` is a repository thread whose checkout is currently granted Full Access.
+    fn repo_thread_full_access(&self, _thread_id: &str) -> bool {
+        false
+    }
     /// Whether the caller is a paired phone bridge device or bridge session rather than the owner's browser session or desktop app.
     fn is_bridge(&self) -> bool {
         false
@@ -65,6 +69,40 @@ pub trait PromptSource: Send + Sync {
     /// project's primary folder, DESKTOP §16 B33). An implementation that cannot tell answers false.
     fn work_folder(&self, _cwd: &str) -> bool {
         false
+    }
+    /// The workspace sandbox the policy writes on a repository thread's `turn/start` without Full
+    /// Access, as the thread `thread_id` would get it from `sandbox: "workspace-write"`: the user's
+    /// `[sandbox_workspace_write]` in `$CODEX_HOME/config.toml`, with no network while the thread's
+    /// air gap is on. A source that cannot tell answers no network and no extra roots.
+    fn workspace_sandbox(&self, _thread_id: &str) -> WorkspaceSandbox {
+        WorkspaceSandbox::default()
+    }
+}
+
+/// What a `workspaceWrite` sandbox policy holds beside its type (the app-server's `SandboxPolicy`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkspaceSandbox {
+    pub network_access: bool,
+    pub writable_roots: Vec<String>,
+    pub exclude_tmpdir_env_var: bool,
+    pub exclude_slash_tmp: bool,
+}
+
+impl WorkspaceSandbox {
+    /// The `sandboxPolicy` for a turn: `readOnly` in a read-only checkout, else `workspaceWrite`.
+    /// The read-only sandbox takes the same network setting, as the launcher gives it (patch 0031).
+    pub fn policy(&self, read_only: bool) -> Value {
+        if read_only {
+            serde_json::json!({"type": "readOnly", "networkAccess": self.network_access})
+        } else {
+            serde_json::json!({
+                "type": "workspaceWrite",
+                "writableRoots": self.writable_roots,
+                "networkAccess": self.network_access,
+                "excludeTmpdirEnvVar": self.exclude_tmpdir_env_var,
+                "excludeSlashTmp": self.exclude_slash_tmp
+            })
+        }
     }
 }
 
@@ -280,14 +318,30 @@ impl Policy {
                 if method == "turn/start"
                     && let Some(Value::Object(params)) = object.get_mut("params")
                 {
-                    let is_repo = params
+                    let repo_thread = params
                         .get("threadId")
                         .and_then(Value::as_str)
-                        .is_some_and(|id| prompts.repo_thread_cwd(id).is_some());
+                        .and_then(|id| prompts.repo_thread_cwd(id).map(|cwd| (id.to_string(), cwd)));
+                    let is_repo = repo_thread.is_some();
                     if prompts.is_bridge() || is_repo {
                         for field in &self.pinned_turn_fields {
                             params.remove(field);
                         }
+                    }
+                    // A repository turn's sandbox is written on every turn, never left to the
+                    // thread: a turn's `sandboxPolicy` holds for the turns after it. Full Access only
+                    // for a turn from the page (never a messenger bridge's) on a writable checkout
+                    // whose grant still stands; otherwise the sandbox `workspace-write` gives the thread, from the
+                    // user's own configuration (network on unless the air gap is), read-only in a
+                    // read-only checkout.
+                    if let Some((thread_id, repo_cwd)) = repo_thread {
+                        let read_only = prompts.repo_checkout(&repo_cwd) == Some(true);
+                        let sandbox_policy = if !read_only && !prompts.is_bridge() && prompts.repo_thread_full_access(&thread_id) {
+                            serde_json::json!({"type": "dangerFullAccess"})
+                        } else {
+                            prompts.workspace_sandbox(&thread_id).policy(read_only)
+                        };
+                        params.insert("sandboxPolicy".to_string(), sandbox_policy);
                     }
                 }
                 if method == self.import_request {
@@ -574,7 +628,9 @@ mod tests {
         airgapped: std::sync::atomic::AtomicBool,
         repo_checkouts: Mutex<BTreeMap<String, bool>>,
         repo_threads: Mutex<BTreeMap<String, String>>,
+        repo_full_access: Mutex<BTreeSet<String>>,
         bridge: std::sync::atomic::AtomicBool,
+        workspace: Mutex<WorkspaceSandbox>,
     }
 
     impl PromptSource for Stub {
@@ -598,11 +654,17 @@ mod tests {
         fn repo_thread_cwd(&self, thread_id: &str) -> Option<String> {
             self.repo_threads.lock().unwrap().get(thread_id).cloned()
         }
+        fn repo_thread_full_access(&self, thread_id: &str) -> bool {
+            self.repo_full_access.lock().unwrap().contains(thread_id)
+        }
         fn is_bridge(&self) -> bool {
             self.bridge.load(std::sync::atomic::Ordering::Relaxed)
         }
         fn work_folder(&self, cwd: &str) -> bool {
             cwd.starts_with("WORK/")
+        }
+        fn workspace_sandbox(&self, _thread_id: &str) -> WorkspaceSandbox {
+            self.workspace.lock().unwrap().clone()
         }
     }
 
@@ -654,7 +716,9 @@ mod tests {
             airgapped: Default::default(),
             repo_checkouts: Mutex::new(BTreeMap::new()),
             repo_threads: Mutex::new(BTreeMap::new()),
+            repo_full_access: Mutex::new(BTreeSet::new()),
             bridge: Default::default(),
+            workspace: Mutex::new(WorkspaceSandbox::default()),
         };
         let cases = vectors["cases"].as_array().unwrap();
         assert!(cases.len() >= 25);
@@ -678,7 +742,25 @@ mod tests {
                 .and_then(Value::as_object)
                 .map(|items| items.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string())).collect())
                 .unwrap_or_default();
+            *stub.repo_full_access.lock().unwrap() = case
+                .get("repoFullAccess")
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().map(|id| id.as_str().unwrap().to_string()).collect())
+                .unwrap_or_default();
             stub.bridge.store(case.get("bridge").and_then(Value::as_bool).unwrap_or(false), std::sync::atomic::Ordering::Relaxed);
+            // The user's workspace sandbox (`workspaceSandbox`), no network and no extra roots when absent.
+            let workspace = case.get("workspaceSandbox");
+            let flag = |key: &str| workspace.and_then(|w| w.get(key)).and_then(Value::as_bool).unwrap_or(false);
+            *stub.workspace.lock().unwrap() = WorkspaceSandbox {
+                network_access: flag("networkAccess"),
+                writable_roots: workspace
+                    .and_then(|w| w.get("writableRoots"))
+                    .and_then(Value::as_array)
+                    .map(|roots| roots.iter().map(|root| root.as_str().unwrap().to_string()).collect())
+                    .unwrap_or_default(),
+                exclude_tmpdir_env_var: flag("excludeTmpdirEnvVar"),
+                exclude_slash_tmp: flag("excludeSlashTmp"),
+            };
             let result = policy.vet_outgoing(&case["message"], &mut pending, &stub);
             if case["accept"].as_bool().unwrap() {
                 let out = result.unwrap_or_else(|err| panic!("{name}: refused: {err}"));
@@ -747,7 +829,9 @@ mod tests {
             airgapped: Default::default(),
             repo_checkouts: Mutex::new(BTreeMap::new()),
             repo_threads: Mutex::new(BTreeMap::new()),
+            repo_full_access: Mutex::new(BTreeSet::new()),
             bridge: Default::default(),
+            workspace: Mutex::new(WorkspaceSandbox::default()),
         };
         let vet = |method: &str, thread: &str, cwd: &str| {
             let message = serde_json::json!({"id": 1, "method": method, "params": {"threadId": thread, "cwd": cwd, "sandbox": "danger-full-access", "permissions": ":danger-full-access", "runtimeWorkspaceRoots": ["/"]}});

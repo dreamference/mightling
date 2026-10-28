@@ -1,14 +1,18 @@
 //! MCP stdio server (`ling delegate mcp`, `specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md` §4.1, §4.2).
 //!
 //! Speaks JSON-RPC 2.0 over stdin/stdout (one JSON object per line, matching Claude Code's stdio
-//! MCP transport and `ling-rs/apps/src/mcp.rs`). In Phase P1, only class W1 (`watch`) is exposed;
-//! calls to `ask`, `lookup`, `task`, or `night` are refused with a clear message.
+//! MCP transport and `ling-rs/apps/src/mcp.rs`). In Phase P1, only the model-free classes are exposed,
+//! W1 (`watch`) and L1 (`lookup`); calls to `ask`, `task`, or `night` are refused with a clear message.
 
 use std::io::{self, BufRead, Write};
 
 use serde_json::{Value, json};
 
-use crate::classes::{ALLOW_CLASSES_ENV, is_w1_enabled};
+use crate::classes::{ALLOW_CLASSES_ENV, is_l1_enabled, is_w1_enabled};
+use crate::lookup::{
+    DEFAULT_LIMIT, IndexBackend, LOOKUP_OPS, LookupRequest, MAX_LIMIT, SystemIndex,
+    execute as lookup_execute,
+};
 use crate::watch::{
     CLOSED_KINDS, DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S, MIN_COMMAND_POLL_S, Probe, SystemProbe,
     WatchRequest, execute,
@@ -27,7 +31,9 @@ pub fn serve_stdio() -> i32 {
     let mut writer = stdout.lock();
     let mut probe = SystemProbe::new();
 
-    if serve_stream(&mut reader, &mut writer, allow_classes.as_deref(), &mut probe).is_err() {
+    if serve_stream(&mut reader, &mut writer, allow_classes.as_deref(), &mut probe, &SystemIndex)
+        .is_err()
+    {
         return 1;
     }
     0
@@ -39,6 +45,7 @@ pub fn serve_stream<R: BufRead, W: Write>(
     writer: &mut W,
     allow_classes: Option<&str>,
     probe: &mut dyn Probe,
+    index: &dyn IndexBackend,
 ) -> io::Result<()> {
     let mut line = String::new();
     loop {
@@ -51,7 +58,7 @@ pub fn serve_stream<R: BufRead, W: Write>(
         if trimmed.is_empty() {
             continue;
         }
-        if let Some(resp) = handle_line(trimmed, allow_classes, probe) {
+        if let Some(resp) = handle_line(trimmed, allow_classes, probe, index) {
             writeln!(writer, "{resp}")?;
             writer.flush()?;
         }
@@ -64,6 +71,7 @@ pub fn handle_line(
     line: &str,
     allow_classes: Option<&str>,
     probe: &mut dyn Probe,
+    index: &dyn IndexBackend,
 ) -> Option<String> {
     let msg: Value = match serde_json::from_str(line) {
         Ok(v) => v,
@@ -101,14 +109,16 @@ pub fn handle_line(
         m if m.starts_with("notifications/") => return None,
         "ping" => Ok(json!({})),
         "tools/list" => {
-            let tools = if is_w1_enabled(allow_classes) {
-                vec![watch_tool_definition()]
-            } else {
-                Vec::new()
-            };
+            let mut tools = Vec::new();
+            if is_l1_enabled(allow_classes) {
+                tools.push(lookup_tool_definition());
+            }
+            if is_w1_enabled(allow_classes) {
+                tools.push(watch_tool_definition());
+            }
             Ok(json!({ "tools": tools }))
         }
-        "tools/call" => Ok(call_tool(&params, allow_classes, probe)),
+        "tools/call" => Ok(call_tool(&params, allow_classes, probe, index)),
         _ => {
             id.as_ref()?;
             Err(json!({
@@ -229,7 +239,34 @@ pub fn watch_tool_definition() -> Value {
     })
 }
 
-fn call_tool(params: &Value, allow_classes: Option<&str>, probe: &mut dyn Probe) -> Value {
+/// JSON Schema definition of the `lookup` tool advertised in `tools/list`.
+pub fn lookup_tool_definition() -> Value {
+    json!({
+        "name": "lookup",
+        "description": format!(
+            "Exact answers from the code index with NO model: where a name is defined (def), every reference (refs), what calls it (callers), implementations (impl), or the definitions of a file (outline). Returns hits as {{path, start, end, quote}} with each quote read back from the file, at most {MAX_LIMIT} rows and about 1,500 tokens. Use it before reading files for a single symbol. Zero hits is a fact about the index only; for a literal string use rg."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "op": { "type": "string", "enum": LOOKUP_OPS, "description": "def, refs, callers, impl, or outline." },
+                "name": { "type": "string", "description": "The name to look up (qualify it as Type.name or by path:line when ambiguous); for outline, the file path relative to the repository." },
+                "scope": { "type": "string", "description": "Keep only rows under this relative path prefix or glob." },
+                "repo": { "type": "string", "description": "Repository folder (default: the current directory)." },
+                "limit": { "type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": format!("Rows to return (default {DEFAULT_LIMIT}).") }
+            },
+            "required": ["op", "name"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn call_tool(
+    params: &Value,
+    allow_classes: Option<&str>,
+    probe: &mut dyn Probe,
+    index: &dyn IndexBackend,
+) -> Value {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
 
@@ -257,8 +294,31 @@ fn call_tool(params: &Value, allow_classes: Option<&str>, probe: &mut dyn Probe)
                 Err(err) => tool_error(&err.to_string()),
             }
         }
-        "ask" | "lookup" | "task" | "night" => tool_error(&format!(
-            "tool {name:?} is disabled in Phase P1: only class W1 (`watch`, no model) is enabled"
+        "lookup" => {
+            if !is_l1_enabled(allow_classes) {
+                return tool_error(
+                    "class L1 (`lookup`) is disabled by DREAMFERENCE_DELEGATE_ALLOW_CLASSES",
+                );
+            }
+            let req: LookupRequest = match serde_json::from_value(args) {
+                Ok(r) => r,
+                Err(e) => return tool_error(&format!("invalid lookup arguments: {e}")),
+            };
+            match lookup_execute(&req, index) {
+                Ok(result) => {
+                    let text = serde_json::to_string(&result).unwrap_or_default();
+                    let structured = serde_json::to_value(&result).unwrap_or(Value::Null);
+                    json!({
+                        "content": [{ "type": "text", "text": text }],
+                        "structuredContent": structured,
+                        "isError": false
+                    })
+                }
+                Err(err) => tool_error(&err),
+            }
+        }
+        "ask" | "task" | "night" => tool_error(&format!(
+            "tool {name:?} is disabled in Phase P1: only the model-free classes W1 (`watch`) and L1 (`lookup`) are enabled"
         )),
         other => tool_error(&format!("unknown tool: {other}")),
     }
@@ -278,6 +338,17 @@ mod tests {
     use std::path::Path;
 
     struct DummyProbe;
+
+    struct NoIndex;
+
+    impl IndexBackend for NoIndex {
+        fn run_index(&self, _repo: &Path, _args: &[String]) -> Result<String, String> {
+            Ok(r#"{"rows":[{"path":"Cargo.toml","line":1,"detail":"x (to 2)"}],"notes":[]}"#.into())
+        }
+        fn read_lines(&self, _path: &Path) -> Result<Vec<String>, String> {
+            Ok(vec!["[package]".into(), "name = \"x\"".into()])
+        }
+    }
 
     impl Probe for DummyProbe {
         fn now_s(&mut self) -> u64 {
@@ -336,13 +407,14 @@ mod tests {
     }
 
     #[test]
-    fn mcp_initialize_and_tools_list_expose_only_watch() {
+    fn mcp_initialize_and_tools_list_expose_only_the_model_free_tools() {
         let mut probe = DummyProbe;
         let init_resp: Value = serde_json::from_str(
             &handle_line(
                 r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
                 None,
                 &mut probe,
+                &NoIndex,
             )
             .unwrap(),
         )
@@ -355,6 +427,7 @@ mod tests {
                 r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
                 None,
                 &mut probe,
+                &NoIndex,
             )
             .is_none()
         );
@@ -364,6 +437,7 @@ mod tests {
                 r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
                 Some("W1"),
                 &mut probe,
+                &NoIndex,
             )
             .unwrap(),
         )
@@ -371,6 +445,40 @@ mod tests {
         let tools = list_resp["result"]["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], "watch");
+
+        let both: Value = serde_json::from_str(
+            &handle_line(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#, None, &mut probe, &NoIndex)
+                .unwrap(),
+        )
+        .unwrap();
+        let names: Vec<&str> = both["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["lookup", "watch"]);
+    }
+
+    #[test]
+    fn mcp_lookup_answers_with_quotes_and_refuses_bad_arguments() {
+        let mut probe = DummyProbe;
+        let dir = std::env::current_dir().unwrap();
+        let call = |args: Value, allow: Option<&str>, probe: &mut DummyProbe| -> Value {
+            let line = json!({"jsonrpc":"2.0","id":9,"method":"tools/call",
+                "params":{"name":"lookup","arguments":args}})
+            .to_string();
+            serde_json::from_str(&handle_line(&line, allow, probe, &NoIndex).unwrap()).unwrap()
+        };
+        let ok = call(json!({"op":"def","name":"x","repo":dir}), None, &mut probe);
+        assert_eq!(ok["result"]["isError"], false);
+        assert_eq!(ok["result"]["structuredContent"]["hits"][0]["quote"], "[package]\nname = \"x\"");
+        let bad = call(json!({"op":"rm","name":"x"}), None, &mut probe);
+        assert_eq!(bad["result"]["isError"], true);
+        let extra = call(json!({"op":"def","name":"x","shell":"ls"}), None, &mut probe);
+        assert_eq!(extra["result"]["isError"], true);
+        let off = call(json!({"op":"def","name":"x"}), Some("W1"), &mut probe);
+        assert_eq!(off["result"]["isError"], true);
     }
 
     #[test]
@@ -381,6 +489,7 @@ mod tests {
                 r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"watch","arguments":{"kind":"file_line","target":"/tmp/out.log","pattern":"READY"}}}"#,
                 Some("W1"),
                 &mut probe,
+                &NoIndex,
             )
             .unwrap(),
         )
@@ -393,7 +502,7 @@ mod tests {
         assert_eq!(parsed.at, "2026-10-27T12:00:00Z");
 
         // Disabled model-backed classes are refused.
-        for disabled_tool in ["ask", "lookup", "task", "night"] {
+        for disabled_tool in ["ask", "task", "night"] {
             let req_line = json!({
                 "jsonrpc": "2.0",
                 "id": 4,
@@ -402,7 +511,7 @@ mod tests {
             })
             .to_string();
             let resp: Value =
-                serde_json::from_str(&handle_line(&req_line, Some("W1"), &mut probe).unwrap())
+                serde_json::from_str(&handle_line(&req_line, Some("W1"), &mut probe, &NoIndex).unwrap())
                     .unwrap();
             assert_eq!(resp["result"]["isError"], true);
             assert!(
