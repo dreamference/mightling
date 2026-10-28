@@ -13,6 +13,7 @@ from dreamference.remote.remote_enrolment import RemoteEnrolment
 from dreamference.remote.remote_join_script import RemoteJoinScript
 from dreamference.remote.remote_node_peer import RemoteNodePeer
 from dreamference.remote.remote_public_certificate import RemotePublicCertificate
+from dreamference.remote.remote_relay_certificate import RemoteRelayCertificate
 from dreamference.remote.remote_settings import RemoteSettings
 from dreamference.remote.remote_tunnel import RemoteTunnel
 
@@ -25,6 +26,7 @@ __all__ = [
     "RemoteJoinScript",
     "RemoteNodePeer",
     "RemotePublicCertificate",
+    "RemoteRelayCertificate",
     "RemoteSettings",
     "RemoteTunnel",
 ]

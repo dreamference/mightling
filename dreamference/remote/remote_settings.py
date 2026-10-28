@@ -66,6 +66,11 @@ CLOUDFLARE_API: Final[str] = "https://api.cloudflare.com/client/v4"
 PUBLIC_RENEW_DAYS: Final[int] = 30
 CERTIFICATE_SERVICE_UNIT: Final[str] = "mightling-remote-certificate.service"
 CERTIFICATE_TIMER_UNIT: Final[str] = "mightling-remote-certificate.timer"
+CERTIFICATE_ALERT_UNIT: Final[str] = "mightling-remote-certificate-alert.service"
+# The relay's own certificate (spec §15.5): its own name, its own ACME account in lego's folder, and
+# the keys of remote.json that record it. Only the certificate and key go to the box.
+RELAY_LABEL: Final[str] = "relay"
+RELAY_ACCOUNT_ID: Final[str] = "mightling-relay"
 
 # The overlay's DNS domain: NetBird's default (the user's decision, 2026-10-10).
 OVERLAY_DOMAIN: Final[str] = "netbird.selfhosted"
@@ -268,6 +273,34 @@ class RemoteSettings:
         return f"https://{dns_name}:{BOX_PUBLIC_PORT}"
 
     @classmethod
+    def relay_name(cls, dns_name: str) -> str:
+        """The name the relay is reached by.
+
+        Args:
+            dns_name: The box's public DNS name.
+
+        Returns:
+            str: The relay's own public name once it has a certificate of its own (`remote
+            certificate relay`, spec §15.5), else the box's name.
+        """
+        record = cls.read()
+        name = record.get("relay_name") if record else None
+        return name if isinstance(name, str) and name else dns_name
+
+    @classmethod
+    def default_relay_name(cls, dns_name: str) -> str:
+        """The name `remote certificate relay` gives the relay by default.
+
+        Args:
+            dns_name: The box's public DNS name.
+
+        Returns:
+            str: `relay.` and the box's parent domain (`remote.dreamference.ai` →
+            `relay.dreamference.ai`), a name whose key can never vouch for the control plane's.
+        """
+        return f"{RELAY_LABEL}.{cls.default_ca_scope(dns_name)}"
+
+    @classmethod
     def relay_address(cls, dns_name: str) -> str:
         """The relay's address, as NetBird writes it.
 
@@ -277,4 +310,4 @@ class RemoteSettings:
         Returns:
             str: The relay's address as NetBird writes it.
         """
-        return f"rels://{dns_name}:{RELAY_PORT}"
+        return f"rels://{cls.relay_name(dns_name)}:{RELAY_PORT}"
