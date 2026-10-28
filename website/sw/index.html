@@ -77,12 +77,12 @@
 <p class="note">Inafanya kazi kwenye NVIDIA DGX Spark na kila mashine ya GB10. Hati hii inakagua kila upakuaji kwa checksum za toleo na inaonyesha kila amri ya <code>sudo</code> kabla ya kuiendesha. <a href="https://github.com/dreamference/mightling/blob/main/install.sh">Isome kwanza</a> ukipenda.</p>
 <div class="clients">
 <div class="client">
-<h3>Wateja wa Mac na Linux</h3>
-<p>Kompyuta zako nyingine zinatumia modeli ya GB10 kupitia mtandao wa ndani. Kwenye Mac au mashine nyingine ya Linux, amri ile ile hapo juu inasakinisha mteja wa <code>ling</code>; anaipata GB10 mwenyewe.</p>
+<h3>Clients za Mac na Linux</h3>
+<p>Kompyuta zako nyingine zinatumia modeli ya GB10 kupitia mtandao wa ndani. Kwenye Mac au mashine nyingine ya Linux, amri ile ile hapo juu inasakinisha client ya <code>ling</code>; inaipata GB10 yenyewe.</p>
 <p>Kuanzia 1.7.2 pia inaweka programu ya desktop kwenye Applications kwenye Mac, tayari kufunguliwa (<code>--no-app</code> inaiacha).</p>
 </div>
 <div class="client">
-<h3>Mteja wa Windows <span class="tag">onyesho</span></h3>
+<h3>Client ya Windows <span class="tag">onyesho</span></h3>
 <div class="cmd has-copy"><button class="copy" data-done="Imenakiliwa" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">Nakili</button>
 <pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
 <p>Kwenye PowerShell. Inasakinisha bila haki za msimamizi (kuanzia 1.7.2 hata programu ya desktop), kisha Windows inauliza mara moja kuandaa sandbox ya wakala. Bado haijatiwa saini, kwa hivyo Smart App Control lazima izimwe. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">Soma hati</a>.</p>
@@ -100,7 +100,7 @@
 <section id="new">
 <div class="wrap">
 <h2>Mpya katika 1.7: programu ya desktop kwenye Mac, Linux na Windows</h2>
-<p class="sub">Programu ya desktop ya Mightling 1.7.0 inaweka Ask na Work katika dirisha moja. Work ni meza kamili ya kazi kwa vikao vya wakala: composer yenye faili, skill na amri, kidirisha cha review cha kuweka stage, kurudisha nyuma na kufanya commit, worktree, tabo za terminal, na mti wa faili na tabo za faili kando ya thread. Kwenye kompyuta zako nyingine ni mteja wa GB10 yako, ambayo inaipata kwenye mtandao wa ndani.</p>
+<p class="sub">Programu ya desktop ya Mightling 1.7.0 inaweka Ask na Work katika dirisha moja. Work ni meza kamili ya kazi kwa vikao vya wakala: composer yenye faili, skill na amri, kidirisha cha review cha kuweka stage, kurudisha nyuma na kufanya commit, worktree, tabo za terminal, na mti wa faili na tabo za faili kando ya thread. Kwenye kompyuta zako nyingine ni client ya GB10 yako, ambayo inaipata kwenye mtandao wa ndani.</p>
 <div class="pillars">
 <div class="pillar">
 <h3>macOS <span class="tag">onyesho</span></h3>
@@ -124,7 +124,7 @@
 <li>Windows: SmartScreen › <b>More info</b> › <b>Run anyway</b>. Smart App Control lazima izimwe.</li>
 </ul>
 </details>
-<p class="sub after">Pia katika 1.7.0: Night Shift inaweza kujaribu kazi mara kadhaa na kuhifadhi jaribio bora (<code>/night add --best-of N</code>), mashine moja inaweza kuendesha madaraja kadhaa ya Signal, na mteja anachagua kati ya node mbili kwenye mtandao mmoja bila kupoteza ile anayoijua. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">Maelezo ya toleo na vipakuliwa</a>.</p>
+<p class="sub after">Pia katika 1.7.0: Night Shift inaweza kujaribu kazi mara kadhaa na kuhifadhi jaribio bora (<code>/night add --best-of N</code>), mashine moja inaweza kuendesha madaraja kadhaa ya Signal, na client inachagua kati ya node mbili kwenye mtandao mmoja bila kupoteza ile inayoijua. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">Maelezo ya toleo na vipakuliwa</a>.</p>
 </div>
 </section>
 <section id="benchmark">
@@ -187,7 +187,7 @@
 <section id="proof">
 <div class="wrap">
 <h2>Msimbo wako haondoki mezani kwako — na unaweza kuthibitisha</h2>
-<p class="sub">Mawakala wa uandishi wa msimbo wa cloud hutuma msimbo wako wa chanzo kwenye seva za mtu mwingine. Mightling haupeleki popote: modeli inaendeshwa kwenye GB10 yako, na hakuna kitu ndani ya Mightling kinachopiga simu nyumbani. Hakuna uchanganuzi wa matumizi, hakuna metriki, hakuna kuingia, hakuna ripoti za hitilafu za "bila jina". Hivyo inaweza kutumika kwa msimbo usioruhusiwa kuupakia: kazi za wateja, data iliyodhibitiwa, bidhaa ambazo hazijatolewa.</p>
+<p class="sub">Mawakala wa uandishi wa msimbo wa cloud hutuma msimbo wako wa chanzo kwenye seva za mtu mwingine. Mightling haupeleki popote: modeli inaendeshwa kwenye GB10 yako, na hakuna kitu ndani ya Mightling kinachowasiliana na seva za nje. Hakuna uchanganuzi wa matumizi, hakuna metriki, hakuna kuingia, hakuna ripoti za hitilafu za "bila jina". Hivyo inaweza kutumika kwa msimbo usioruhusiwa kuupakia: kazi za wateja, data iliyodhibitiwa, bidhaa ambazo hazijatolewa.</p>
 <div class="proof">
 <div>
 <p>Amri moja inaendesha kikao halisi cha Mightling chini ya <code>strace</code> na kuorodhesha kila muunganisho wa mtandao uliofanywa:</p>
@@ -238,7 +238,7 @@ Networked git commands: none</pre></div>
 <h3>✨ Hakuna cha kusanidi</h3>
 <ul>
 <li><b>Bila tuning:</b> modeli, muktadha, kernel na speculative decoding vimechaguliwa kwa ajili ya GB10.</li>
-<li><b>Haitagandisha mashine yako:</b> mwenyeji unakaguliwa na shinikizo la kumbukumbu linatazamwa wakati wa kupakia.</li>
+<li><b>Haitagandisha mashine yako:</b> mashine mwenyeji (host) inakaguliwa na shinikizo la kumbukumbu linatazamwa wakati wa kupakia.</li>
 <li><b>Mashine zako nyingine zinaipata</b> kwenye mtandao wa ndani.</li>
 <li><b>Masasisho ni amri moja:</b> <code>ling update</code>.</li>
 </ul>
@@ -293,7 +293,7 @@ Networked git commands: none</pre></div>
 <div class="pillar">
 <h3><a href="paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
 <p class="note-small">dgxcoder · Oktoba 2026</p>
-<p>Tunawasilisha muundo wa usanifu, modeli rasmi ya uwezo, na tathmini ya kimajaribio ya Mightling Desktop, mazingira ya desktop ya chanzo huria yanayotumia itifaki ileile ya app-server kama mteja wa desktop wa muuzaji wa awali, yanayodumisha chaguo-msingi zinazoendana na Codex, yanayoendesha uelekezaji kwenye maunzi ya mtumiaji mwenyewe, na yanayofungia kila amri iliyo kwenye sandbox ndani ya kituo cha kazi mtumiaji anapowasha <code>/airgapped on</code>.</p>
+<p>Tunawasilisha muundo wa usanifu, modeli rasmi ya uwezo, na tathmini ya kimajaribio ya Mightling Desktop, mazingira ya desktop ya chanzo huria yanayotumia itifaki ileile ya app-server kama desktop client ya muuzaji wa awali, yanayodumisha chaguo-msingi zinazoendana na Codex, yanayoendesha inference kwenye maunzi ya mtumiaji mwenyewe, na yanayofungia kila amri iliyo kwenye sandbox ndani ya kituo cha kazi mtumiaji anapowasha <code>/airgapped on</code>.</p>
 <p><a href="paper/desktop-architecture.pdf">Soma makala (PDF)</a></p>
 </div>
 </div>
@@ -302,23 +302,23 @@ Networked git commands: none</pre></div>
 <div class="wrap">
 <h2>Maswali yanayoulizwa mara kwa mara</h2>
 <details><summary>Je, ninahitaji GB10?</summary>
-<p>Ndiyo, ili kuendesha modeli. Kompyuta zako nyingine zinaitumia kama wateja: Linux (Arm au x86) na macOS kwa amri ileile ya usakinishaji, Windows (Arm au x86, onyesho) kwa <a href="#install">mstari wa PowerShell</a>.</p></details>
+<p>Ndiyo, ili kuendesha modeli. Kompyuta zako nyingine zinaitumia kama clients: Linux (Arm au x86) na macOS kwa amri ileile ya usakinishaji, Windows (Arm au x86, onyesho) kwa <a href="#install">mstari wa PowerShell</a>.</p></details>
 <details><summary>Nilisakinisha Puffin. Je, hii ndiyo?</summary>
 <p>Ndiyo: Puffin ilibadilishwa jina kuwa Mightling katika 1.5. Endesha <code>puffin update</code> mara moja, kisha <code>puffin</code> mara ya mwisho. Inahamisha vikao, mipangilio na viungo vyako, na kuanzia hapo amri ni <code>ling</code>.</p></details>
 <details><summary>Je, ni bure kweli?</summary>
-<p>Ndiyo. Mightling ni chanzo huria chini ya AGPL, na uzito wa modeli ni bure. Gharama yako pekee ya kuendelea ni umeme.</p></details>
+<p>Ndiyo. Mightling ni chanzo huria chini ya AGPL, na weights za modeli ni bure. Gharama yako pekee ya kuendelea ni umeme.</p></details>
 <details><summary>Ninahitaji nini mbali na mashine?</summary>
 <p>Mfumo wa uendeshaji unaokuja nao (DGX OS 7, au Ubuntu 24.04 pale muuzaji anapoutoa), Docker na NVIDIA Container Toolkit, Python 3 na Git. Kwenye Ubuntu ya kawaida, <code>ling-admin host check</code> inakuambia kinachokosekana.</p></details>
 <details><summary>Je, kuna kitu kinafika mtandaoni?</summary>
 <p>Ni kile tu unachoomba wewe au wakala, kama utafutaji wa wavuti kupitia SearXNG kwenye mashine yako mwenyewe, na upakuaji wa mara ya kwanza. <code>/airgapped on</code> inazima yote.</p></details>
 <details><summary>Inaendesha modeli gani?</summary>
-<p>Qwen3.8-27B katika umbizo la NVFP4 la biti 4 la NVIDIA, inayohudumiwa na SGLang pamoja na drafter ya DFlash2, iliyochaguliwa na kuboreshwa kwa GB10. Uzito wa takriban 20 GB; karibu 38 GB za kumbukumbu ya mashine zinabaki huru inapohudumia.</p></details>
+<p>Qwen3.8-27B katika umbizo la NVFP4 la biti 4 la NVIDIA, inayohudumiwa na SGLang pamoja na drafter ya DFlash2, iliyochaguliwa na kuboreshwa kwa GB10. Weights za takriban 20 GB; karibu 38 GB za kumbukumbu ya mashine zinabaki huru inapohudumia.</p></details>
 </div>
 </section>
 <section class="cta">
 <div class="wrap">
 <h2>Weka msimbo wako mezani kwako</h2>
-<p class="sub centered">Ukiamini msimbo unapaswa kubaki kwenye meza ulikoandikwa, weka nyota kwenye repositori: ndivyo wamiliki wengine wa GB10 wanavyomgundua Mightling.</p>
+<p class="sub centered">Ukiamini msimbo unapaswa kubaki kwenye meza ulikoandikwa, weka nyota kwenye repositori: ndivyo wamiliki wengine wa GB10 wanavyoigundua Mightling.</p>
 <div class="buttons">
 <a class="btn primary" href="https://github.com/dreamference/mightling">Weka nyota kwenye GitHub</a>
 <a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">Toleo la hivi karibuni</a>

@@ -92,7 +92,7 @@
 <div class="numbers">
 <div><b>68/100</b><span>SWE-bench Verified görevi, tek bir DGX Spark üzerinde çevrimdışı</span></div>
 <div><b>~48 tok/s</b><span>ajan işinde üretim, tek akış</span></div>
-<div><b>0</b><span>eve bağlanan bağlantı, çıkış denetimiyle doğrulandı</span></div>
+<div><b>0</b><span>dış sunucuya bağlantı (phone-home), çıkış denetimiyle doğrulandı</span></div>
 <div><b>$0</b><span>token başına, sonsuza dek</span></div>
 </div>
 </div>
@@ -153,10 +153,10 @@
 <tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">yayımlanmadı</td><td class="ns"><a href="https://cursor.com/blog/composer">yayımlanmadı</a></td></tr>
 </table>
 </div>
-<p class="sub after">Bunu bir sıralama olarak değil, bir yan yana koyma olarak oku. Aynı 100 görevde Mightling, kendisinden kat kat büyük modeller olan Qwen3-Coder-480B ve GLM-4.6 kadar görev çözdü; ama her satırda farklı bir ajan, farklı donanım ve lider tablosu satırlarında resmî x86 test imajları var, bizimkiler ise topluluğun arm64 imajlarında çalıştı. Refine modunda ilk oturum görevi hiçbir şeyi değiştirmeden inceler, yeni bir oturum da onu yapar: varsayılan moddan bir görev fazla çözdü (69'a karşı 68; her kol diğerinin kaybettiği görevleri kazandı), görev başına yaklaşık 2,2 kat süreyle, bu yüzden isteğe bağlı kalıyor (<code>ling --refine</code>).</p>
+<p class="sub after">Bunu bir sıralama olarak değil, denk modellerle bir karşılaştırma olarak oku. Aynı 100 görevde Mightling, kendisinden kat kat büyük modeller olan Qwen3-Coder-480B ve GLM-4.6 kadar görev çözdü; ama her satırda farklı bir ajan, farklı donanım ve lider tablosu satırlarında resmî x86 test imajları var, bizimkiler ise topluluğun arm64 imajlarında çalıştı. Refine modunda ilk oturum görevi hiçbir şeyi değiştirmeden inceler, yeni bir oturum da onu yapar: varsayılan moddan bir görev fazla çözdü (69'a karşı 68; her kol diğerinin kaybettiği görevleri kazandı), görev başına yaklaşık 2,2 kat süreyle, bu yüzden isteğe bağlı kalıyor (<code>ling --refine</code>).</p>
 <details class="method"><summary>≈%69 nasıl tahmin ediliyor</summary>
 <p>100 görev Verified'ın beşte biridir, dolayısıyla tüm sette rakam bir tahmindir. Tek parametreli bir madde-tepki (Rasch) modeli, 175 herkese açık Verified gönderiminin tamamının görev başına sonuçlarına oturtulur: her göreve bir zorluk, her sisteme bir yetenek düşer. Mightling'in yeteneği, bu 100 görevde 68 çözümü açıklayan yetenektir; ≈%69 bu yeteneğin 500 görevin tamamındaki beklenen puanıdır (yayımlanan puanlar üzerinde sade bir regresyon bir puan içinde aynı sonucu verir). Bunu sınamak için her herkese açık gönderim yalnızca bu 100 görevde puanlandı ve genel puanı aynı yolla tahmin edildi: hata 2,4 puan (RMSE) çıktı, yukarıdaki aralık bunun ±1,96 katıdır. Tablodaki her sayı, <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> deposundaki herkese açık görev başına verilerden <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> ile yeniden üretilir.</p>
-<p>100 görev, test ortamı arm64'te çalışan ve doğrulanan görevler arasından (altın yama geçer, boş değişiklik kalır) Verified'ın depolarına tam kümeyle orantılı dağıtılmıştır. Yayımlanmış sistemler bu 100 görevde tüm 500'e göre 1,0 ile 1,5 puan daha düşük alır, yani örneklem kolay bir örneklem değildir. Bir lider tablosu girişi de değildir: onları SWE-bench ekibi kendi altyapısında puanlar.</p>
+<p>100 görev, test ortamı arm64'te çalışan ve doğrulanan görevler arasından (altın yama geçer, boş değişiklik başarısız olur) Verified'ın depolarına tam kümeyle orantılı dağıtılmıştır. Yayımlanmış sistemler bu 100 görevde tüm 500'e göre 1,0 ile 1,5 puan daha düşük alır, yani örneklem kolay bir örneklem değildir. Bir lider tablosu girişi de değildir: onları SWE-bench ekibi kendi altyapısında puanlar.</p>
 </details>
 <ol class="footnotes">
 <li id="fn1">Mightling: 100 görev, her biri için tek deneme; tek DGX Spark (GB10, 128 GB), model yerelde sunuldu, bulut yok; varsayılan mod 2026-10-08'de, refine modu 2026-10-09'da ölçüldü. Tahmin, <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> görev başına verilerinden.</li>
@@ -187,7 +187,7 @@
 <section id="proof">
 <div class="wrap">
 <h2>Kodun masandan asla çıkmaz — ve bunu kanıtlayabilirsin</h2>
-<p class="sub">Bulut kodlama ajanları kaynak kodunu başkasının sunucularına gönderir. Mightling onu hiçbir yere göndermez: model GB10'unda çalışır ve Mightling'deki hiçbir şey eve bağlanmaz. Kullanım analizi yok, metrik yok, oturum açma yok, “anonim” çökme raporu yok. Bu da onu yükleme iznin olmayan kodlar için kullanılabilir kılar: müşteri işleri, düzenlemeye tabi veriler, yayımlanmamış ürünler.</p>
+<p class="sub">Bulut kodlama ajanları kaynak kodunu başkasının sunucularına gönderir. Mightling onu hiçbir yere göndermez: model GB10'unda çalışır ve Mightling'deki hiçbir şey dışarıya veri göndermez. Kullanım analizi yok, metrik yok, oturum açma yok, “anonim” çökme raporu yok. Bu da onu yükleme iznin olmayan kodlar için kullanılabilir kılar: müşteri işleri, düzenlemeye tabi veriler, yayımlanmamış ürünler.</p>
 <div class="proof">
 <div>
 <p>Tek bir komut gerçek bir Mightling oturumunu <code>strace</code> altında çalıştırır ve kurduğu her ağ bağlantısını listeler:</p>
@@ -232,7 +232,7 @@ Networked git commands: none</pre></div>
 <tr><td>Kod okuma</td><td class="num">~1,800 tok/s</td></tr>
 <tr><td>Bağlam</td><td class="num">262K</td></tr>
 </table>
-<p class="note-small">Spekülatif kod çözmeli bir GB10'da tek akış. Ajan işi gerçek ajan oturumları üzerinden ölçülür; kod, JSON ve düz yazı çıktı türüne göre, açgözlü kod çözmeyle. Aynı anda dört ajan çalıştır: kota yok, “lütfen bekleyin” yok.</p>
+<p class="note-small">Spekülatif kod çözmeli bir GB10'da tek akış. Ajan işi gerçek ajan oturumları üzerinden ölçülür; kod, JSON ve düz yazı çıktı türüne göre, greedy (açgözlü) kod çözmeyle. Aynı anda dört ajan çalıştır: kota yok, “lütfen bekleyin” yok.</p>
 </div>
 <div class="pillar">
 <h3>✨ Yapılandıracak bir şey yok</h3>

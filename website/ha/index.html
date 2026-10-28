@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mightling — saurin rubuta lambar AI a kan teburinka</title>
+<title>Mightling — rubuta lambar AI cikin sauri a kan teburinka</title>
 <meta name="description" content="Wakilin rubuta lambar da ya warware ayyuka 68 cikin 100 na SWE-bench Verified ba tare da intanet ba a kan NVIDIA DGX Spark guda (kimanin 69% na dukan jerin), da kusan token 47 a daƙiƙa. Babu cloud, babu asusu, babu kuɗin API, babu telemetry.">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="referrer" content="no-referrer">
@@ -67,25 +67,25 @@
 <div class="hero" id="install">
 <img alt="Mightling" class="logo logo-light" height="181" src="/assets/mightling-logo-light.svg" width="300"/>
 <img alt="Mightling" class="logo logo-dark" height="181" src="/assets/mightling-logo-dark.svg" width="300"/>
-<h1>Saurin rubuta lambar AI a kan teburinka.<br/>Kimanin 69% a SWE‑bench Verified.</h1>
-<p class="lede"><strong>Ayyuka 68 cikin 100 na SWE-bench Verified, an warware su ba tare da intanet ba a kan DGX Spark guda</strong>, da kusan token 47 a daƙiƙa. Wakilin rubuta lambar, mataimakin tattaunawa da manhajar desktop, duk suna aiki gaba ɗaya a kan GB10 ɗinka. Babu cloud. Babu asusu. Babu kuɗin API. Babu telemetry. <a href="#benchmark">Yadda aka auna shi</a></p>
+<h1>Rubuta lambar AI cikin sauri a kan teburinka.<br/>Kimanin 69% a SWE‑bench Verified.</h1>
+<p class="lede"><strong>Ayyuka 68 cikin 100 na SWE-bench Verified, an warware su ba tare da intanet ba a kan DGX Spark guda</strong>, a kusan token 47 a kowace daƙiƙa. Wakilin rubuta lamba, mataimakin tattaunawa da manhajar desktop, duk suna aiki gaba ɗaya a kan GB10 ɗinka. Babu cloud. Babu asusu. Babu kuɗin API. Babu telemetry. <a href="#benchmark">Yadda aka auna shi</a></p>
 <div class="install">
 <div class="cmd has-copy"><button class="copy" data-done="An kwafa" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">Kwafa</button>
 <pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
 <div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># yana sauke samfurin sau ɗaya (~20 GB), sannan ya fara bayar da shi</span>
 <span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># shi ke nan</span></pre></div>
-<p class="note">Yana aiki a kan NVIDIA DGX Spark da kowace na'urar GB10. Rubutun yana tabbatar da kowane saukewa da checksums na fitowar, kuma yana nuna kowane umarnin <code>sudo</code> kafin ya gudanar da shi. <a href="https://github.com/dreamference/mightling/blob/main/install.sh">Karanta shi tukuna</a> idan kana so.</p>
+<p class="note">Yana aiki a kan NVIDIA DGX Spark da kowace na'urar GB10. Script ɗin yana tabbatar da kowane saukewa da checksums na fitowar, kuma yana nuna kowane umarnin <code>sudo</code> kafin ya gudanar da shi. <a href="https://github.com/dreamference/mightling/blob/main/install.sh">Karanta shi tukuna</a> idan kana so.</p>
 <div class="clients">
 <div class="client">
-<h3>Abokan hulɗa na Mac da Linux</h3>
-<p>Sauran kwamfutocinka suna amfani da samfurin GB10 ta hanyar cibiyar sadarwa ta gida. A kan Mac ko wata na'urar Linux, umarnin da ke sama iri ɗaya yana shigar da abokin hulɗa <code>ling</code>; yana samun GB10 da kansa.</p>
-<p>Daga 1.7.2 yana kuma sanya manhajar desktop a cikin Applications a kan Mac, a shirye don buɗewa (<code>--no-app</code> yana barinta).</p>
+<h3>Clients na Mac da Linux</h3>
+<p>Sauran kwamfutocinka suna amfani da samfurin GB10 ta hanyar cibiyar sadarwa ta gida. A kan Mac ko wata na'urar Linux, umarnin da ke sama iri ɗaya yana shigar da client ɗin <code>ling</code>; yana gano GB10 da kansa.</p>
+<p>Daga 1.7.2 yana kuma sanya manhajar desktop a cikin Applications a kan Mac, a shirye don buɗewa (<code>--no-app</code> yana ketare ta).</p>
 </div>
 <div class="client">
-<h3>Abokin hulɗa na Windows <span class="tag">samfoti</span></h3>
+<h3>Client na Windows <span class="tag">samfoti</span></h3>
 <div class="cmd has-copy"><button class="copy" data-done="An kwafa" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">Kwafa</button>
 <pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
-<p>A cikin PowerShell. Yana shigarwa ba tare da haƙƙin mai gudanarwa ba (daga 1.7.2 har da manhajar desktop), sannan Windows ta tambaya sau ɗaya don kafa sandbox ɗin wakilin. Ba a sa hannu a kai ba tukuna, don haka dole a kashe Smart App Control. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">Karanta rubutun</a>.</p>
+<p>A cikin PowerShell. Yana shigarwa ba tare da haƙƙin mai gudanarwa ba (daga 1.7.2 har da manhajar desktop), sannan Windows ta tambaya sau ɗaya don kafa sandbox ɗin wakilin. Ba a sa hannu a kai ba tukuna, don haka dole a kashe Smart App Control. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">Karanta script ɗin</a>.</p>
 </div>
 </div>
 </div>
@@ -100,7 +100,7 @@
 <section id="new">
 <div class="wrap">
 <h2>Sabo a 1.7: manhajar desktop a kan Mac, Linux da Windows</h2>
-<p class="sub">Manhajar desktop ta Mightling 1.7.0 tana haɗa Ask da Work a taga ɗaya. Work cikakken wurin aiki ne na zaman wakili: composer mai fayiloli, skills da umarni, allon review don stage, mayarwa da commit, worktrees, shafukan terminal, da itacen fayiloli da shafukan fayiloli kusa da thread. A sauran kwamfutocinka abokin hulɗa ne na GB10 ɗinka, wanda yake samu a cibiyar sadarwa ta gida.</p>
+<p class="sub">Manhajar desktop ta Mightling 1.7.0 tana haɗa Ask da Work a taga ɗaya. Work cikakken wurin aiki ne na zaman wakili: composer mai fayiloli, skills da umarni, allon review don stage, mayarwa da commit, worktrees, shafukan terminal, da itacen fayiloli da shafukan fayiloli kusa da thread. A sauran kwamfutocinka client ne na GB10 ɗinka, wanda yake ganowa a cibiyar sadarwa ta gida.</p>
 <div class="pillars">
 <div class="pillar">
 <h3>macOS <span class="tag">samfoti</span></h3>
@@ -108,7 +108,7 @@
 </div>
 <div class="pillar">
 <h3>Linux</h3>
-<p>A kan GB10, <code>mightling_1.7.0_arm64.deb</code> yana shigar da manhajar, shigarta ta farawa da umarnin <code>ling-app</code>, tare da bayanin sandbox da take buƙata:</p>
+<p>A kan GB10, <code>mightling_1.7.0_arm64.deb</code> yana shigar da manhajar, mazauninta a menu na farawa da umarnin <code>ling-app</code>, tare da tsarin sandbox profile da take buƙata:</p>
 <div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
 <p>Sannan ka buɗe ta daga menu na manhajoji, ko da <code>ling app</code>. <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">Ƙari</a>.</p>
 </div>
@@ -124,7 +124,7 @@
 <li>Windows: SmartScreen › <b>More info</b> › <b>Run anyway</b>. Dole a kashe Smart App Control.</li>
 </ul>
 </details>
-<p class="sub after">Haka kuma a 1.7.0: Night Shift na iya gwada aiki sau da yawa ya riƙe mafi kyawun ƙoƙari (<code>/night add --best-of N</code>), na'ura ɗaya na iya gudanar da gadoji da yawa na Signal, kuma abokin hulɗa yana zaɓa tsakanin nodes biyu a cibiyar sadarwa ɗaya ba tare da rasa wanda ya sani ba. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">Bayanin fitowa da saukewa</a>.</p>
+<p class="sub after">Haka kuma a 1.7.0: Night Shift na iya gwada aiki sau da yawa ya riƙe mafi kyawun ƙoƙari (<code>/night add --best-of N</code>), na'ura ɗaya na iya gudanar da gadoji da yawa na Signal, kuma client yana zaɓa tsakanin nodes biyu a cibiyar sadarwa ɗaya ba tare da rasa wanda ya sani ba. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">Bayanin fitowa da saukewa</a>.</p>
 </div>
 </section>
 <section id="benchmark">
@@ -143,11 +143,11 @@
 <tr><td>DeepSeek V3.2, high (mini-SWE-agent)<a class="fn" href="#fn5">5</a></td><td class="num">70/100</td><td class="num">70.0%</td></tr>
 <tr><td>Claude Opus 4.5, wakilai huɗu<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
 <tr><td>Gemini 3 Pro (live-SWE-agent)<a class="fn" href="#fn7">7</a></td><td class="num">79/100</td><td class="num">77.4%</td></tr>
-<tr class="group"><td colspan="3">Ƙananan samfuran buɗaɗɗen tushe (sigogi biliyan 20–40)</td></tr>
+<tr class="group"><td colspan="3">Ƙananan samfuran buɗaɗɗen tushe (parameters biliyan 20–40)</td></tr>
 <tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), test-time scaling<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
 <tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), ƙoƙari ɗaya<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
 <tr><td>Devstral Small 2512 (mini-SWE-agent)<a class="fn" href="#fn9">9</a></td><td class="num">57/100</td><td class="num">56.4%</td></tr>
-<tr class="group"><td colspan="3">Kayayyakin wakilan rubuta lambar, kamar yadda masu kera su ke wallafa su</td></tr>
+<tr class="group"><td colspan="3">Kayayyakin wakilan rubuta lamba, kamar yadda masu samar da su ke wallafa su</td></tr>
 <tr><td>GitHub Copilot agent mode (VS Code), tare da Claude 3.7 Sonnet<a class="fn" href="#fn10">10</a></td><td class="ns">ba a wallafa ba</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
 <tr><td>Claude Code<a class="fn" href="#fn11">11</a></td><td class="ns">ba a wallafa ba</td><td class="ns"><a href="https://www.anthropic.com/engineering/swe-bench-sonnet">ba a wallafa ba</a></td></tr>
 <tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">ba a wallafa ba</td><td class="ns"><a href="https://cursor.com/blog/composer">ba a wallafa ba</a></td></tr>
@@ -155,7 +155,7 @@
 </div>
 <p class="sub after">Ka karanta shi a matsayin kwatancen abokan tafiya, ba jerin matsayi ba. A kan ayyuka 100 iri ɗaya Mightling ya warware adadin da Qwen3-Coder-480B da GLM-4.6 suka warware, samfuran da suka fi shi girma sau da yawa, amma kowane layi yana amfani da wakili daban, kayan aiki daban kuma, ga layukan leaderboard, hotunan gwaji na x86 na hukuma, yayin da namu ya yi aiki a kan hotunan arm64 na al'umma. A yanayin refine zaman farko yana nazarin aikin ba tare da canza komai ba, sabon zama kuma ya yi shi: ya warware aiki ɗaya fiye da yanayin da aka saba (69 da 68, kowane ɓangare yana cin ayyukan da ɗayan ya rasa), da kusan sau 2.2 na lokaci a kowane aiki, don haka ya kasance na zaɓi (<code>ling --refine</code>).</p>
 <details class="method"><summary>Yadda ake kimanta ≈69%</summary>
-<p>Ayyuka 100 kashi ɗaya cikin biyar ne na Verified, don haka adadin dukan jerin kimantawa ne. Ana dacewar samfurin item-response (Rasch) mai sigogi ɗaya a kan sakamakon kowane aiki na dukan gabatarwar Verified 175 na jama'a: kowane aiki yana da wahalarsa kuma kowane tsari yana da iyawarsa. Iyawar Mightling ita ce wadda ke bayyana ayyuka 68 da aka warware a kan waɗannan 100; ≈69% shi ne makin da ake tsammani na wannan iyawa a kan dukan 500 (regression na yau da kullum a kan makin da aka wallafa ya yarda cikin maki ɗaya). Don gwada shi, an ba kowace gabatarwar jama'a maki a kan waɗannan ayyuka 100 kaɗai, aka hasashen makinta na gaba ɗaya haka nan: kuskuren ya kasance maki 2.4 (RMSE), kuma kewayon da ke sama ±1.96 ne na wannan. Kowane lamba a teburin <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> yana sake samar da ita daga bayanan kowane aiki na jama'a na <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
+<p>Ayyuka 100 kashi ɗaya cikin biyar ne na Verified, don haka adadin dukan jerin kimantawa ne. An ɗora samfurin item-response (Rasch) mai parameter ɗaya a kan sakamakon kowane aiki na dukan gabatarwar Verified 175 na jama'a: kowane aiki yana da wahalarsa kuma kowane tsari yana da iyawarsa. Iyawar Mightling ita ce wadda ke bayyana ayyuka 68 da aka warware a kan waɗannan 100; ≈69% shi ne makin da ake tsammani na wannan iyawa a kan dukan 500 (regression na yau da kullum a kan makin da aka wallafa ya yarda cikin maki ɗaya). Don gwada shi, an ba kowace gabatarwar jama'a maki a kan waɗannan ayyuka 100 kaɗai, aka hasashen makinta na gaba ɗaya haka nan: kuskuren ya kasance maki 2.4 (RMSE), kuma kewayon da ke sama ±1.96 ne na wannan. Kowane lamba a teburin <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> yana sake samar da ita daga bayanan kowane aiki na jama'a na <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
 <p>An rarraba ayyuka 100 a repositories na Verified daidai gwargwado da dukan jerin, a cikin ayyukan da muhallin gwajinsu ke aiki kuma ya tabbata a arm64 (gold patch yana wucewa, canji maras komai yana faɗuwa). Tsarukan da aka wallafa suna samun maki 1.0 zuwa 1.5 ƙasa a kan waɗannan 100 fiye da a kan dukan 500, don haka samfurin ba mai sauƙi ba ne. Ba shigarwa a leaderboard ba ne: tawagar SWE-bench ce ke ba su maki a kan nasu kayan aiki.</p>
 </details>
 <ol class="footnotes">
@@ -187,7 +187,7 @@
 <section id="proof">
 <div class="wrap">
 <h2>Lambarka ba ta barin teburinka — kuma za ka iya tabbatarwa</h2>
-<p class="sub">Wakilan rubuta lambar cloud suna aika lambar tushenka zuwa sabar wasu. Mightling ba ya aika ta ko'ina: samfurin yana aiki a GB10 ɗinka, kuma babu abin da ke cikin Mightling da ke tuntuɓar waje. Babu nazarin amfani, babu metrics, babu shiga da asusu, babu rahotannin lalacewa na "ɓoyayyen suna". Wannan yana sa a iya amfani da shi ga lambar da ba a yarda ka ɗora ba: aikin abokin ciniki, bayanan da doka ke sarrafawa, kayayyakin da ba a fitar ba.</p>
+<p class="sub">Wakilan rubuta lamba na cloud suna aika lambar tushenka zuwa sabar wasu. Mightling ba ya aika ta ko'ina: samfurin yana aiki a GB10 ɗinka, kuma babu abin da ke cikin Mightling da ke tuntuɓar waje. Babu nazarin amfani, babu metrics, babu shiga da asusu, babu rahotannin tsayawar manhaja (crash reports) na "ɓoyayyen suna". Wannan yana sa a iya amfani da shi ga lambar da ba a yarda ka ɗora ba: aikin abokin ciniki, bayanan da doka ke sarrafawa, kayayyakin da ba a fitar ba.</p>
 <div class="proof">
 <div>
 <p>Umarni ɗaya yana gudanar da zaman Mightling na gaske a ƙarƙashin <code>strace</code> yana jera kowane haɗin cibiyar sadarwa da ya yi:</p>
@@ -228,17 +228,17 @@ Networked git commands: none</pre></div>
 <tr><td>Aikin wakili</td><td class="num">~48 tok/s</td></tr>
 <tr><td>Lamba</td><td class="num">69 tok/s</td></tr>
 <tr><td>JSON</td><td class="num">84 tok/s</td></tr>
-<tr><td>Rubutu</td><td class="num">32 tok/s</td></tr>
+<tr><td>Rubutun zube</td><td class="num">32 tok/s</td></tr>
 <tr><td>Karanta lamba</td><td class="num">~1,800 tok/s</td></tr>
 <tr><td>Mahallin rubutu</td><td class="num">262K</td></tr>
 </table>
-<p class="note-small">Kwarara ɗaya a GB10 tare da speculative decoding. An auna aikin wakili a zaman wakili na gaske; lamba, JSON da rubutu bisa nau'in fitarwa, da greedy decoding. Gudanar da wakilai huɗu a lokaci guda: babu kaso, babu "don Allah a jira".</p>
+<p class="note-small">Kwarara ɗaya a GB10 tare da speculative decoding. An auna aikin wakili a zaman wakili na gaske; lamba, JSON da rubutun zube bisa nau'in fitarwa, da greedy decoding. Gudanar da wakilai huɗu a lokaci guda: babu kaso, babu "don Allah a jira".</p>
 </div>
 <div class="pillar">
 <h3>✨ Babu abin saitawa</h3>
 <ul>
 <li><b>Babu tuning:</b> an zaɓi samfuri, mahallin rubutu, kernels da speculative decoding don GB10.</li>
-<li><b>Ba zai daskarar da na'urarka ba:</b> ana duba mai masaukin kuma ana sa ido kan matsin ƙwaƙwalwa yayin lodawa.</li>
+<li><b>Ba zai tsayar da na'urarka cak ba:</b> ana duba na'urar (host) kuma ana sa ido kan matsin memory yayin lodawa.</li>
 <li><b>Sauran na'urorinka suna samunsa</b> a cibiyar sadarwa ta gida.</li>
 <li><b>Sabuntawa umarni ɗaya ne:</b> <code>ling update</code>.</li>
 </ul>
@@ -263,13 +263,13 @@ Networked git commands: none</pre></div>
 </section>
 <section id="compare">
 <div class="wrap">
-<h2>Mightling da wakilan rubuta lambar cloud</h2>
+<h2>Mightling da wakilan rubuta lamba na cloud</h2>
 <div class="tablewrap">
 <table>
 <tr><th></th><th>Wakilan cloud</th><th>Mightling</th></tr>
-<tr><td>Inda lambarka ke zuwa</td><td>Sabarsu</td><td class="yes">Ba ya zuwa ko'ina</td></tr>
+<tr><td>Inda lambarka ke zuwa</td><td>Sabarsu</td><td class="yes">Ba ta zuwa ko'ina</td></tr>
 <tr><td>Ana buƙatar asusu</td><td>Eh</td><td class="yes">A'a</td></tr>
-<tr><td>Kuɗi a kowane token</td><td>Ana auna a caji</td><td class="yes">Sifili</td></tr>
+<tr><td>Kuɗi a kowane token</td><td>Ana ƙididdige caji</td><td class="yes">Sifili</td></tr>
 <tr><td>Iyakokin amfani</td><td>Eh</td><td class="yes">A'a</td></tr>
 <tr><td>Yana aiki idan an cire cibiyar sadarwa</td><td>A'a</td><td class="yes">Eh</td></tr>
 <tr><td>Za ka iya tabbatar da abin da ke fita</td><td>A'a</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
@@ -284,7 +284,7 @@ Networked git commands: none</pre></div>
 <li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
 <li>Gigabyte AI TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
 </ul>
-<p class="sub flush">Suna raba guntu, ƙwaƙwalwar haɗin gwiwa ta 128 GB da DGX OS 7, don haka na'urar shigarwa ɗaya tana rufe su duka. Ana haɓaka Mightling kuma a gwada shi kullum a ASUS Ascent GX10; gwaje-gwaje suna rufe sauran.</p>
+<p class="sub flush">Suna raba chip ɗaya, unified memory na 128 GB da DGX OS 7, don haka na'urar shigarwa ɗaya tana rufe su duka. Ana haɓaka Mightling kuma a gwada shi kullum a ASUS Ascent GX10; gwaje-gwaje suna rufe sauran.</p>
 </div>
 </section>
 <section id="paper">
@@ -293,7 +293,7 @@ Networked git commands: none</pre></div>
 <div class="pillar">
 <h3><a href="paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
 <p class="note-small">dgxcoder · Oktoba 2026</p>
-<p>Muna gabatar da tsarin gini, ƙirar iyawa ta yau da kullum, da kimantawa ta gwaji na Mightling Desktop, muhallin desktop na buɗaɗɗen tushe wanda yake magana da irin protocol ɗin app-server na abokin hulɗar desktop na mai kera na asali, yana kiyaye tsoffin saitunan da suka dace da Codex, yana gudanar da inference a kan kayan aikin mai amfani, kuma yana kulle kowane umarni da ke cikin sandbox a cikin wurin aiki idan mai amfani ya kunna <code>/airgapped on</code>.</p>
+<p>Muna gabatar da tsarin gini, ƙirar iyawa ta yau da kullum, da kimantawa ta gwaji na Mightling Desktop, muhallin desktop na buɗaɗɗen tushe wanda yake magana da irin protocol ɗin app-server na desktop client na mai samarwa na asali, yana kiyaye tsoffin saitunan da suka dace da Codex, yana gudanar da inference a kan kayan aikin mai amfani, kuma yana kulle kowane umarni da ke cikin sandbox a cikin wurin aiki idan mai amfani ya kunna <code>/airgapped on</code>.</p>
 <p><a href="paper/desktop-architecture.pdf">Karanta takardar (PDF)</a></p>
 </div>
 </div>
@@ -302,17 +302,17 @@ Networked git commands: none</pre></div>
 <div class="wrap">
 <h2>Tambayoyi</h2>
 <details><summary>Shin ina buƙatar GB10?</summary>
-<p>Eh, don gudanar da samfurin. Sauran kwamfutocinka suna amfani da shi a matsayin abokan hulɗa: Linux (Arm ko x86) da macOS da umarnin shigarwa iri ɗaya, Windows (Arm ko x86, samfoti) da <a href="#install">layin PowerShell</a>.</p></details>
+<p>Eh, don gudanar da samfurin. Sauran kwamfutocinka suna amfani da shi a matsayin clients: Linux (Arm ko x86) da macOS da umarnin shigarwa iri ɗaya, Windows (Arm ko x86, samfoti) da <a href="#install">layin PowerShell</a>.</p></details>
 <details><summary>Na shigar da Puffin. Wannan shi ne?</summary>
 <p>Eh: an canza sunan Puffin zuwa Mightling a 1.5. Gudanar da <code>puffin update</code> sau ɗaya, sannan <code>puffin</code> na ƙarshe. Yana mayar da zamanka, saitunanka da hanyoyin haɗinka, kuma daga nan umarnin shi ne <code>ling</code>.</p></details>
 <details><summary>Da gaske kyauta ne?</summary>
-<p>Eh. Mightling buɗaɗɗen tushe ne a ƙarƙashin AGPL, kuma nauyin samfurin kyauta ne. Abin da kake kashewa kawai shi ne wutar lantarki.</p></details>
+<p>Eh. Mightling buɗaɗɗen tushe ne a ƙarƙashin AGPL, kuma weights ɗin samfurin kyauta ne. Abin da kake kashewa kawai shi ne wutar lantarki.</p></details>
 <details><summary>Me nake buƙata baya ga na'urar?</summary>
-<p>Tsarin aiki da take zuwa da shi (DGX OS 7, ko Ubuntu 24.04 inda mai kera ke bayarwa), Docker tare da NVIDIA Container Toolkit, Python 3 da Git. A Ubuntu na yau da kullum, <code>ling-admin host check</code> yana gaya maka abin da ya rasa.</p></details>
+<p>Tsarin aiki da take zuwa da shi (DGX OS 7, ko Ubuntu 24.04 inda mai samarwa ke bayarwa), Docker tare da NVIDIA Container Toolkit, Python 3 da Git. A Ubuntu na yau da kullum, <code>ling-admin host check</code> yana gaya maka abin da babu.</p></details>
 <details><summary>Shin wani abu yana kai intanet?</summary>
 <p>Abin da kai ko wakili kuka nema kawai, kamar binciken yanar gizo ta SearXNG a na'urarka, da saukewa na farko. <code>/airgapped on</code> yana kashe duka.</p></details>
 <details><summary>Wane samfuri yake gudanarwa?</summary>
-<p>Qwen3.8-27B a tsarin NVFP4 na 4-bit na NVIDIA, SGLang ke bayarwa tare da drafter na DFlash2, an zaɓa kuma an daidaita shi don GB10. Nauyi kusan 20 GB; kusan 38 GB na ƙwaƙwalwar na'urar suna zama babu amfani yayin da yake aiki.</p></details>
+<p>Qwen3.8-27B a tsarin NVFP4 na 4-bit na NVIDIA, SGLang ke bayarwa tare da drafter na DFlash2, an zaɓa kuma an daidaita shi don GB10. Weights kusan 20 GB; kusan 38 GB na memory ɗin na'urar yana ragewa a fili yayin da yake aiki.</p></details>
 </div>
 </section>
 <section class="cta">
