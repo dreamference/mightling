@@ -1596,6 +1596,10 @@ class DreamferenceCLIController:
         node_provision_parser.add_argument("--match", default=None, help="With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-")
         node_provision_parser.add_argument("--start-timeout", type=int, default=None, help="Seconds to wait for a started model server (default 1200)")
         node_provision_parser.add_argument(
+            "--model-source", choices=["copy", "hf"], default="copy",
+            help="copy (default): rsync the weights from here; hf: the node downloads the public weights from "
+                 "Hugging Face, each file is checked by SHA-256, only what the Hub lacks is sent from here")
+        node_provision_parser.add_argument(
             "--role", choices=["night", "engine"], default=None,
             help="Also leave it as a night or engine node: main key, docker, agents' sudoers, key-only SSH, "
                  "the role's setup and a readiness report (docs/dev/node.md)")
@@ -3056,7 +3060,7 @@ class DreamferenceCLIController:
                 from dreamference.node.node_provisioner import NodeProvisioner
                 options = {name: getattr(args, name) for name in (
                     "all", "user", "model", "source", "per_host_password", "mesh", "web", "no_start", "no_forge",
-                    "restart", "os_update", "dry_run", "via", "match", "start_timeout", "role")}
+                    "restart", "os_update", "dry_run", "via", "match", "start_timeout", "role", "model_source")}
                 sys.exit(NodeProvisioner(args.hosts, options).run())
             if args.node_command == "prepare":
                 from dreamference.node.node_prepare import NodePrepare
