@@ -1,9 +1,21 @@
 # Mightling 1.7.2 — release notes
 
-**Status:** draft, started 2026-10-26 on the branch `models/ling-engine-server` with the model
-server's section; the rest of the release is still to be written into it ({{TBD}} below). The text
-between the two rules is the GitHub release's description: the release workflow publishes it as it
-stands (`scripts/release_notes.py`), and refuses it while a `{{TBD` marker is left.
+**Status:** prepared 2026-10-28 on the branch `release/1.7.2`: origin/main at `989e3e98`, plus the
+version set to 1.7.2 and the rest of these notes, cut through the release workflow from that branch
+(nothing merged into main after `989e3e98` is in it). Started 2026-10-26 on the branch
+`models/ling-engine-server` with the model server's section. Built from the merges in
+`v1.7.1..release/1.7.2`. The text between the two rules is the GitHub release's description: the
+release workflow publishes it as it stands (`scripts/release_notes.py`).
+
+**Version.** Set to 1.7.2 in `setup.py`, `dreamference/__init__.py`, the MCP server's `serverInfo`,
+`desktop/electron/package.json` and its `package-lock.json`, and, new since 1.7.1, the delegation
+plugin's manifest and marketplace entry and `ling delegate mcp`'s `serverInfo`
+(`ling-rs/delegate/src/mcp.rs`).
+
+**Checked before the cut (2026-10-28):** the release dry run 40651273143 passed on `989e3e98`
+(every build and test the release runs, the clients and the Mac dmgs included); `windows.yml` green
+on that tree; no messenger blocking marker; the two ling-serve images that carried a home path
+answer 404 on the registry, and the pinned `7bff4e37` answers 200.
 
 **The engine.** ling-engine 8d112d0d25393bca95e3e5c9227d0135eba6f2eb (branch
 `release/1.7.2-engine`, 2026-10-27): bdda3a2 plus, alone, main's tokenizer fix (15e82b6: the BPE
@@ -31,13 +43,26 @@ phase-merge fix.
   204,857-token prompt answered exactly, prefill ~850-900 tokens/s at that length, decode 39.6
   tokens/s there (74.9 at short context), `ling-run --spec-check` on the long prompt passed (tokens
   and state identical).
-- **The drafter:** ScaleSearch if its upload is on the Hub in time, else RTN ({{TBD which}}).
+- **The drafter:** ScaleSearch (merge ccff3b6), `dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch`,
+  hosted as assets of the `models-2026-10-27` pre-release and pinned by SHA-256, on SGLang and
+  ling-serve alike.
 - **The live test on the node:** switch to ling-serve (`server stop`, `server start --engine ling`),
   `/v1/models`, a `ling exec` task, a phone bridge, the desktop app and the egress audit, then back
-  to SGLang ({{TBD date and result}}).
+  to SGLang (not recorded here before the cut).
 - **The suite**, the desktop gate, the Rust tests and `ling-admin codex build` as for 1.7.1.
 
 ---
+
+**Answers stream again with SGLang.** Since SGLang 0.5.21, an answer to a request that offered
+tools (every `ling` turn, the desktop app, `ling web` and the phone bridges) arrived whole at the end
+instead of word by word. A second patch applied at every SGLang launch lets the text stream as it is
+written; the model's output does not change. A node applies it at its next `ling-admin server start`.
+
+**A new drafter for the default model.** Qwen3.8-27B's DFlash2 drafter is now Dreamference's NVFP4
+quantization with searched block scales (ScaleSearch), on SGLang and on ling-serve alike. It is
+downloaded from Mightling's own GitHub release assets and checked by SHA-256; a node fetches it at
+its next `ling-admin server start`. Every model download now takes the revision the model registry
+pins, for the model and its drafter.
 
 **A second engine for the model, opt-in: ling-serve.** The default model, Qwen3.8-27B with the
 DFlash2 drafter, can now also be served by `ling-serve`, the server of
@@ -71,7 +96,73 @@ Its limits, which are why it is not the default yet:
 It becomes the default once it reads images, serves adapters and runs more than two requests at
 once.
 
-ling-engine (opt-in): fixed a crash under concurrent requests (tokenizer cache).
+ling-engine (opt-in): fixed a crash under concurrent requests (tokenizer cache). Its image is
+`ghcr.io/dreamference/ling-serve@sha256:7bff4e37e731893a6248b0632897a2740e1842e0b19b28a68f0eee22d670caf8`;
+the two earlier images, whose binaries carried a path of the machine that built them, are deleted
+from the registry.
+
+**Telegram's Mini App works on your repositories.** A phone thread can switch to a repository on
+the node's forge and work in it as Work mode does: a repository picker, a checkout of its own for
+each thread, the diff, a git bar where every write takes a fresh one-time confirmation, a Waiting
+for you strip with once-only approval choices, and a read-only view of a command's output with
+search and copy. A new phone is paired from the bot's own button when it first opens the Mini App,
+and a link into a thread opens only after that check. It ships with no hidden switch: it is there
+whenever the Telegram bridge is set up and `[chat] telegram_mini_app_url` is configured.
+
+**Phones.** On Telegram with topics on, a message outside any topic continues the topic used last,
+and `/new` opens a new one. Signal answers stream in by edits, with a status line at once in Note to
+Self. The phone takes the most likely reading of a question and says it in one line instead of
+asking back, asking first only before something destructive or costly; phone threads ask for no
+approvals, and dated facts go to `ling-search` first.
+
+**A forge on every node.** `ling-admin node enable` sets up Forgejo on the node (`--no-forge` skips
+it): sign-in required, new repositories private, the first node set up holding the forge of record
+and the others mirroring it, daily backups, and `ling-admin forge move` to hand the record to another node. In
+`ling web`, Code beside Ask and Work opens it, already signed in, for paired control devices.
+
+**The desktop app** gains a side chat (Ctrl+Alt+S), `/init` writing a short `AGENTS.md`, edited
+messages that keep every version sent, two-line summaries of idle chats, an Ask question continued
+in a project as a Work thread, threads deleted for good (after a confirmation naming them) and
+several chosen at once for Archive, Move and Delete, terminals as tabs, CSV and HTML tabs, office
+files previewed as PDFs through an installed LibreOffice, Mermaid diagrams drawn in answers, tool
+calls shown in full, the agent's plan as a checklist while it works, its questions answered in full,
+`/review`'s findings on their lines, pull requests with their comments and reviews, a command's
+prefix or a host always allowed from its approval, a warning when another thread works in the same
+checkout, Settings › Memories, dictation (Ctrl+Shift+V) with a word list, a first-run page, a
+readable interface font (Atkinson Hyperlegible), and File and Help menus with a tray that counts
+the threads that wait. MCP servers: added with their environment, folder and headers (a token only
+by its variable's name), recommended open-source servers (none offered at `/airgapped on`), `.mcpb`
+bundles installed from a file, and each tool allowed, asked or off. MCP servers' own instructions
+now reach the model.
+
+**On Windows** the desktop app is sharp at every display scaling, its notifications show labelled
+Mightling and its window groups with its taskbar pin, and the title bar leaves the window controls
+their room. The installer and uninstaller close a running app and replace its folder whole, never
+leaving a mix of two versions. The app's data moves once to
+`%LOCALAPPDATA%\dev.dreamference.mightling`. `ling`'s sandbox works over SSH and on a PC with
+several users, worktree sessions work, `ling doctor` runs, and `install.ps1` keeps one mDNS firewall
+rule per program.
+
+**Night Shift** repeats a task on chosen weekdays, every N nights or on a day of the month
+(`ling-admin night every --days`, `--every`, `--monthly`). Each finished run stays unread in the
+desktop app's Scheduled inbox until opened, `ling-admin night archive` moves old runs away, and a
+task queued from a Work thread shows its morning result in that thread, with Apply.
+
+**Install, update, uninstall.** The one-line installers install the desktop app too (`--no-app`,
+`-NoApp` to skip it), and `ling update` updates the app they installed under the same signed checks.
+`ling uninstall` removes a release install of the client on Linux, macOS and Windows, keeping the
+desktop app while it is there.
+
+**Sync, phase 2:** live turns followed and answered from any paired device, off until
+`ling sync enable`.
+
+**Also:** a repository thread's or a phone bridge's turn can no longer choose a permissions profile
+or add folders past its sandbox; the desktop app's `!` command runs in your shell at `/airgapped off`
+and is refused at `on`; the local file index no longer embeds everything again after an upgrade;
+`ling-admin node add` takes the user from your SSH config and names the user it tried when a login
+is refused.
+
+## Known issues
 
 **Windows: https from inside the sandbox (a known limit).** On Windows, `curl.exe` and PowerShell's
 `Invoke-WebRequest` cannot reach an https address from inside `ling`'s sandbox: Windows' own TLS
@@ -86,11 +177,14 @@ sandbox and are not affected.
 without its permission rules, and says what turned it on and how to turn it off (`ling compat use off`
 for the setting in your config file).
 
-{{TBD the rest of 1.7.2}}
-
 ---
 
 ## Upgrading from 1.7.1
 
-Nothing changes until you choose ling-serve: the node pulls its image (under 1 GB) at the first
-`ling-admin server start --engine ling`, and SGLang's image stays in use by default.
+`ling update` on a client or a node (it updates the desktop app too when the one-line installer put
+it there). On a node, `ling-admin server stop && ling-admin server start` then restarts SGLang with
+the streaming fix and fetches the new drafter; then `ling web start` (it restarts the server) and,
+if a phone bridge is on, `ling chat start` (or `ling signal setup --refresh` for Signal). The
+desktop app otherwise: on Linux the release's `.deb`, on a Mac the new dmg, on Windows the new
+installer. ling-serve stays opt-in: the node pulls its image (under 1 GB) at the first
+`ling-admin server start --engine ling`.
