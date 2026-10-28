@@ -12,6 +12,11 @@ The desktop runs scripts/qa/desktop_linux_qa.sh, fed on standard input, inside a
 scope capped in memory and CPU, at the lowest CPU and I/O priority: it is someone's desktop. The
 report is `<date>.json` and `<date>.md` (and the full log, `<date>.log`) in the report directory;
 the owner is alerted (owner-notify) only when a check fails or the desktop cannot be reached.
+
+`--platform macos` runs scripts/qa/macos_qa.sh instead (the light run on the old 8 GB Mac mini): no
+systemd scope (macOS has none), `nice` and `taskpolicy -b` for the lowest priority, reports in
+~/.local/state/dreamference/qa/macos, and a failure goes to the coordinator's inbox (coord-inbox
+--action) instead of the owner.
 """
 
 import argparse
@@ -26,8 +31,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-SCRIPT = Path(__file__).with_name("desktop_linux_qa.sh")
-DEFAULT_REPORTS = Path.home() / ".local/state/dreamference/qa/desktop"
+MACOS = "macos"
+SCRIPTS = {
+    "linux": Path(__file__).with_name("desktop_linux_qa.sh"),
+    MACOS: Path(__file__).with_name("macos_qa.sh"),
+}
+TITLES = {"linux": "Desktop QA", MACOS: "macOS QA"}
+REPORTS = Path.home() / ".local/state/dreamference/qa"
+INBOX = Path.home() / ".local/bin/coord-inbox"
 NOTIFY = Path.home() / ".local/bin/owner-notify"
 MARK = "QA-RESULT "
 PASS = "pass"
@@ -53,15 +64,20 @@ def overlay_name() -> str:
     return str(status.get("fqdn") or "")
 
 
-def run_remote(host: str, memory: str, cpu: str, env: dict[str, str]) -> tuple[int | None, str]:
+def run_remote(
+    host: str, platform: str, memory: str, cpu: str, env: dict[str, str]
+) -> tuple[int | None, str]:
     """Run the QA script on the desktop; returns ssh's exit code (None: it timed out) and the output."""
     assignments = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
     # The remote login shell may be fish: one plain command line, nothing shell-specific.
-    remote = (
-        f"env {assignments} systemd-run --user --scope --quiet --collect"
-        f" -p MemoryMax={memory} -p MemoryHigh={memory} -p MemorySwapMax=1G -p CPUQuota={cpu}"
-        " -p IOWeight=10 nice -n 19 ionice -c 3 bash -s"
-    )
+    if platform == MACOS:
+        remote = f"env {assignments} nice -n 19 taskpolicy -b bash -s"
+    else:
+        remote = (
+            f"env {assignments} systemd-run --user --scope --quiet --collect"
+            f" -p MemoryMax={memory} -p MemoryHigh={memory} -p MemorySwapMax=1G -p CPUQuota={cpu}"
+            " -p IOWeight=10 nice -n 19 ionice -c 3 bash -s"
+        )
     command = [
         "ssh",
         "-o",
@@ -71,13 +87,13 @@ def run_remote(host: str, memory: str, cpu: str, env: dict[str, str]) -> tuple[i
         "-o",
         "ServerAliveInterval=60",
     ]
-    with SCRIPT.open("rb") as script:
+    with SCRIPTS[platform].open("rb") as script:
         try:
             done = subprocess.run(
                 [*command, host, remote],
                 stdin=script,
                 capture_output=True,
-                timeout=3 * 3600,
+                timeout=(1 if platform == MACOS else 3) * 3600,
                 check=False,
             )
         except subprocess.TimeoutExpired as expired:
@@ -91,7 +107,7 @@ def run_remote(host: str, memory: str, cpu: str, env: dict[str, str]) -> tuple[i
 def markdown(report: dict[str, Any]) -> str:
     """The report as a short Markdown table."""
     lines = [
-        f"# Desktop QA, {report['date']}",
+        f"# {TITLES[report['platform']]}, {report['date']}",
         "",
         f"Result: **{report['result']}** (ssh exit {report['ssh_exit']}, {report['minutes']} min)",
         "",
@@ -104,9 +120,17 @@ def markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def notify(text: str) -> None:
-    """A short alert to the owner; never fails the run."""
-    if NOTIFY.exists():
+def notify(text: str, platform: str) -> None:
+    """A short alert (the coordinator's inbox for macOS, the owner otherwise); never fails the run."""
+    if platform == MACOS:
+        if INBOX.exists():
+            subprocess.run(
+                [str(INBOX), "add", f"macos-qa: {text}", "--action"],
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+    elif NOTIFY.exists():
         subprocess.run([str(NOTIFY), text], capture_output=True, timeout=60, check=False)
 
 
@@ -114,20 +138,23 @@ def main() -> int:
     """Run, write the report, alert on failure; exit 1 when the run failed."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--host", required=True, help="the desktop's SSH alias")
-    parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORTS)
+    parser.add_argument("--platform", choices=sorted(SCRIPTS), default="linux")
+    parser.add_argument("--report-dir", type=Path, default=None)
     parser.add_argument("--memory", default="6G", help="the desktop scope's memory cap")
     parser.add_argument("--cpu", default="400%", help="the desktop scope's CPU quota")
     parser.add_argument("--no-notify", action="store_true", help="never alert the owner")
     args = parser.parse_args()
+    if args.report_dir is None:
+        args.report_dir = REPORTS / (MACOS if args.platform == MACOS else "desktop")
 
     started = datetime.datetime.now(datetime.UTC)
     env = {
         "QA_LAN_HOST": socket.gethostname().split(".")[0] + ".local",
-        "QA_OVERLAY_HOST": overlay_name(),
+        "QA_OVERLAY_HOST": "" if args.platform == MACOS else overlay_name(),
         "QA_MODEL_PORT": "8000",
         "QA_WEB_PORT": "3100",
     }
-    code, output = run_remote(args.host, args.memory, args.cpu, env)
+    code, output = run_remote(args.host, args.platform, args.memory, args.cpu, env)
     checks = []
     for line in output.splitlines():
         if line.startswith(MARK):
@@ -145,6 +172,7 @@ def main() -> int:
     report = {
         "date": started.isoformat(timespec="seconds"),
         "result": result,
+        "platform": args.platform,
         "ssh_exit": code,
         "minutes": round((datetime.datetime.now(datetime.UTC) - started).total_seconds() / 60, 1),
         "checks": checks,
@@ -165,8 +193,11 @@ def main() -> int:
         elif result == FAIL:
             what = f"ended with exit {code}"
         else:
-            what = "could not reach the desktop" if result == UNREACHABLE else "printed no results"
-        notify(f"Desktop QA {what}. Report: {args.report_dir / (stamp + '.md')}")
+            what = "could not reach the machine" if result == UNREACHABLE else "printed no results"
+        notify(
+            f"{TITLES[args.platform]} {what}. Report: {args.report_dir / (stamp + '.md')}",
+            args.platform,
+        )
     return 0 if result == PASS else 1
 
 
