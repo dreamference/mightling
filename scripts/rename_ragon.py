@@ -36,11 +36,8 @@ EXCLUDE_FILES = {
     "scripts/rename_ragon.py",
     "tests/test_rename_ragon.py",
     "dreamference/chat/retired_web_chat.py",
-    "install.sh",
-    "install.ps1",
     "desktop/electron/predecessor.json",  # names Mightling on purpose (the desktop identity)
     "desktop/electron/windows/predecessor.nsh",
-    ".github/workflows/release.yml",
     # the migration modules: the overlay brings them in their final names
     "ling-rs/src/rename.rs",
     "ragon-rs/src/rename.rs",
@@ -58,6 +55,9 @@ EXCLUDE_PREFIXES = (
     "paper/puffin.",
     "scripts/ragon_overlay/",
 )
+# The transition assets are renamed like everything else, then given the older names by COMPAT_EDITS;
+# the leftover check lets those through because the files must know every old name (spec §3).
+LEFTOVER_EXEMPT = {"install.sh", "install.ps1", ".github/workflows/release.yml"}
 # Paths that keep their name (their content is excluded too).
 PATH_KEEP = {
     "specs/DREAMFERENCE_RENAME_MIGHTLING.md",
@@ -218,7 +218,11 @@ def leftovers(root, files=None):
     """Lists `path:line: text` for every old name outside the allowlist."""
     hits = []
     for path in files if files is not None else tracked(root):
-        if content_excluded(path) or pathlib.Path(os.path.join(root, path)).is_symlink():
+        if (
+            content_excluded(path)
+            or path in LEFTOVER_EXEMPT
+            or pathlib.Path(os.path.join(root, path)).is_symlink()
+        ):
             continue
         text = read_text(root, path)
         if text is None:
@@ -242,8 +246,88 @@ COMPAT_KEEP = [
 
 # Compatibility edits applied to the renamed tree (spec §4 and §5): the older name stays readable for
 # one release. Each is (path, old text, new text, expected occurrences); a missing anchor aborts.
+OLD_INSTALL_SH_ANCHOR = 'for old in puffin puffin-search puffin-fetch puffin-code puffin-app puffin-admin; do\n'
+OLD_INSTALL_SH = (
+    "# Mightling (1.5 to 1.8) became Ragon in 1.9.0 (specs/DREAMFERENCE_RENAME_RAGON.md §4.2, L1): the\n"
+    "# same move, for the same reasons. `ragon` moves the agent's home and the rest the first time it runs.\n"
+    'MIGHTLING_DIR="$(dirname "$INSTALL_DIR")/mightling"\n'
+    'if [ -d "$MIGHTLING_DIR" ] && [ ! -e "$INSTALL_DIR" ]; then\n'
+    '    mv "$MIGHTLING_DIR" "$INSTALL_DIR"\n'
+    "    for pair in ling:ragon ling-search:ragon-search ling-fetch:ragon-fetch ling-code:ragon-code ling-docs:ragon-docs ling-app:ragon-app; do\n"
+    '        old="${pair%%:*}"; new="${pair#*:}"\n'
+    '        [ -e "$INSTALL_DIR/bin/$old" ] && [ ! -e "$INSTALL_DIR/bin/$new" ] && mv "$INSTALL_DIR/bin/$old" "$INSTALL_DIR/bin/$new"\n'
+    "    done\n"
+    '    say "Mightling is now Ragon: moved $MIGHTLING_DIR to $INSTALL_DIR"\n'
+    "fi\n"
+    "for old in ling ling-search ling-fetch ling-code ling-docs ling-app ling-admin; do\n"
+    '    [ -L "$LINK_DIR/$old" ] && rm -f "$LINK_DIR/$old"\n'
+    "done\n"
+)
+SIGN_STEP = "      - name: Write and sign SHA256SUMS\n"
+OLD_ASSETS_STEP = r"""      # 1.9.0 publishes the binaries three times, under ragon-*, ling-* (for a 1.8.x `ling update`) and
+      # puffin-* (for 1.4.x), one SHA256SUMS over all of them (spec §4.1). The bytes are the same, so
+      # the older sums files are the Ragon ones with the names changed. From 1.9.1 on only ragon-*.
+      - name: Add the older asset names
+        if: ${{ inputs.version == '1.9.0' }}
+        run: |
+          while IFS= read -r file; do
+            dir="$(dirname "$file")"; base="$(basename "$file")"
+            case "$base" in
+              ragon-*.gz) cp "$file" "$dir/ling${base#ragon}" ;;
+              ragon-*.sha256sums) sed 's/ragon/ling/' "$file" > "$dir/ling${base#ragon}" ;;
+            esac
+            case "$base" in
+              ragon-aarch64-*.gz|ragon-x86_64-*.gz|ragon-search-*.gz|ragon-fetch-*.gz|ragon-code-*.gz)
+                cp "$file" "$dir/puffin${base#ragon}" ;;
+              ragon-aarch64-*.sha256sums|ragon-x86_64-*.sha256sums)
+                grep -v -E 'ragon-(docs|app)' "$file" | sed 's/ragon/puffin/' > "$dir/puffin${base#ragon}" ;;
+            esac
+          done < <(find artifacts -type f -name 'ragon-*' | sort)
+"""
+
 SWE_UNIT_OLD = '                    "ragon-swe-*",\n'
 COMPAT_EDITS = [
+    (
+        "install.sh",
+        OLD_INSTALL_SH_ANCHOR,
+        OLD_INSTALL_SH + OLD_INSTALL_SH_ANCHOR,
+        1,
+    ),
+    (".github/workflows/release.yml", SIGN_STEP, OLD_ASSETS_STEP + SIGN_STEP, 1),
+    (
+        "install.ps1",
+        '$_.Name -like "Ragon-mDNS-*" }',
+        '$_.Name -like "Ragon-mDNS-*" -or $_.Name -like "Mightling-mDNS-*" }',
+        1,
+    ),
+    (
+        "install.ps1",
+        '    Get-NetFirewallRule | Where-Object { $_.Name -like "Ragon-mDNS-*" -or',
+        '    # Rules of the Mightling install (1.5 to 1.8) go too: their programs are in its folder.\n'
+        '    $Mine = @($Mine) + ((Join-Path $env:LOCALAPPDATA "Programs\\Mightling").TrimEnd("\\") + "\\")\n'
+        '    Get-NetFirewallRule | Where-Object { $_.Name -like "Ragon-mDNS-*" -or',
+        1,
+    ),
+    (
+        "tests/test_install_ps1.py",
+        '"Ragon-mDNS-ed821dee"',
+        '"Ragon-mDNS-e3dfdf36"',
+        1,
+    ),
+    (
+        "tests/test_install_ps1.py",
+        '"Ragon-mDNS-557757bc"',
+        '"Ragon-mDNS-f3f04289"',
+        1,
+    ),
+    (  # the 1.6.0 notes are history and keep the old name; the test that renders them says so
+        "tests/test_release_notes.py",
+        "**Search your own documents.** Ragon now keeps",
+        "**Search your own documents.** Mightling now keeps",
+        1,
+    ),
+    ("ragon-rs/src/uninstall.rs", '"Ragon-mDNS-ed821dee"', '"Ragon-mDNS-e3dfdf36"', 1),
+    ("ragon-rs/src/uninstall.rs", '"Ragon-mDNS-557757bc"', '"Ragon-mDNS-f3f04289"', 2),
     (
         "dreamference/forge/forge_storage.py",
         SWE_UNIT_OLD,
