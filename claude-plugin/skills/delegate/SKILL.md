@@ -1,9 +1,29 @@
 ---
 name: delegate
-description: Use Mightling's `watch` tool (`mcp__plugin_mightling_mightling__watch` or `ling delegate watch`) for every wait longer than a minute instead of `sleep` loops or repeated polling turns.
+description: Use Mightling's `lookup` tool (`mcp__plugin_mightling_mightling__lookup`) before reading files to find a symbol, and its `watch` tool (`mcp__plugin_mightling_mightling__watch` or `ling delegate watch`) for every wait longer than a minute instead of `sleep` loops or repeated polling turns.
 ---
 
-# Mightling `watch` (Class W1 — Waiting and Monitoring)
+# Mightling `lookup` (Class L1) and `watch` (Class W1)
+
+## `lookup`: ask the index before you read files
+
+Before opening or grepping files to find one symbol, call `mcp__plugin_mightling_mightling__lookup` (or `ling delegate lookup <op> <name>` from a shell). It uses **no model** and answers from `ling-code`'s index in about a second, with every quote read back from the file:
+
+| `op` | Answers | `name` |
+| --- | --- | --- |
+| `def` | where the name is defined | the name (`Type.name`, or `path:line`, when it is ambiguous) |
+| `refs` | every reference to it | the name |
+| `callers` | the definitions that call it | the name |
+| `impl` | implementations of a trait, interface or method | the name |
+| `outline` | the definitions of one file, with their first lines | the file, relative to the repository |
+
+Optional `scope` (a relative path prefix or glob), `repo` (default: the current directory) and `limit` (default 20, at most 50). The result is `{hits: [{path, start, end, quote, detail}], dropped, truncated, notes}`, about 1,500 tokens at most. Use the `path:start` it returns to `Read` only the lines you need.
+
+- Use `lookup` for **one symbol or file**; a question that needs three or more searches is not a `lookup`.
+- Zero hits is a fact about the index, not about the concept: the index can be stale or heuristic (read `notes`). For a literal string, use `rg`.
+- A global instruction that names another code-navigation tool wins over this one.
+
+## `watch` (Class W1, Waiting and Monitoring)
 
 Use `mcp__plugin_mightling_mightling__watch` (or `ling delegate watch` from a shell) for **every wait longer than a minute** instead of `sleep` loops, `while` polling loops, or repeated status-check turns.
 
@@ -45,4 +65,4 @@ Any condition kind outside this closed list is refused.
 - **Duration bounds**: default `timeout_s = 1800` (30 minutes), hard maximum `MAX_TIMEOUT_S = 14400` (4 hours). When `timeout_s` expires before the condition is met, `watch` returns `met: false` with the last observation.
 - **Polling bounds**: files, PIDs, Night Shift task files, and loopback HTTP poll at `>= 1s`; `gh_run`, `systemd_unit`, `command`, and `git_ref` poll at `>= 15s`.
 - **Resource bounds**: file reads are capped at 64 MiB per check and `observed` is capped at 6,000 characters (~1,500 tokens).
-- **Phase P1 scope**: only class `W1` (`watch`) is active. Model-backed tools (`ask`, `lookup`, `task`, `night`) remain disabled.
+- **Phase P1 scope**: only the model-free classes `W1` (`watch`) and `L1` (`lookup`) are active. Model-backed tools (`ask`, `task`, `night`) remain disabled.

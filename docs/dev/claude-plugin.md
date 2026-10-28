@@ -4,7 +4,7 @@ Specification: `specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md`.
 
 Two leaf crates under `ling-rs/` back the two halves of the design:
 
-- **Part A (`ling-rs/delegate/`, `ling delegate …`)**: the Claude Code delegation plugin. Phase P1 builds class `W1` (`watch`) only, the class the owner turned on on 2026-10-27. Model-backed classes (`ask`, `lookup`, `task`, `night`) remain disabled.
+- **Part A (`ling-rs/delegate/`, `ling delegate …`)**: the Claude Code delegation plugin. Phase P1 builds the two model-free classes: `W1` (`watch`, turned on by the owner on 2026-10-27) and `L1` (`lookup`). Model-backed classes (`ask`, `task`, `night`) remain disabled.
 - **Part B (`ling-rs/monitor/`, `ling monitor …`)**: the deterministic session monitor over local transcripts (Phase M0).
 
 Both crates depend only on `chrono`, `serde`, `serde_json`, `toml` (and `regex-lite` in `ling-delegate`), so their unit tests run standalone in a copy of the crate folder (`cargo test`) without compiling the Codex workspace.
@@ -35,7 +35,7 @@ claude plugin marketplace add /path/to/checkout     # or, inside Claude Code: /p
 claude plugin install mightling@mightling           # or: /plugin install mightling@mightling
 ```
 
-Claude Code asks for the plugin's settings (`node`, `max_parallel`, `allow_classes`) at enable time; the defaults are fine (`allow_classes` is `W1`). Restart Claude Code or run `/reload-plugins`, then check `/plugin` and `/mcp` (server `mightling`, tool `watch`). To update after a pull: `claude plugin marketplace update mightling`, then `claude plugin update mightling@mightling`. To remove: `claude plugin uninstall mightling@mightling` and `claude plugin marketplace remove mightling`.
+Claude Code asks for the plugin's settings (`node`, `max_parallel`, `allow_classes`) at enable time; the defaults are fine (`allow_classes` is `W1,L1`). Restart Claude Code or run `/reload-plugins`, then check `/plugin` and `/mcp` (server `mightling`, tools `lookup` and `watch`). To update after a pull: `claude plugin marketplace update mightling`, then `claude plugin update mightling@mightling`. To remove: `claude plugin uninstall mightling@mightling` and `claude plugin marketplace remove mightling`.
 
 One session only, nothing persisted: `claude --plugin-dir /path/to/checkout/claude-plugin`.
 
@@ -56,3 +56,15 @@ ling delegate classes
 ```
 
 Closed condition kinds: `file_line`, `pid_exit`, `http_status`, `gh_run`, `systemd_unit`, `command`, `night_task`, `git_ref`, `timeout`. Default timeout is 1,800 s (30 min), hard maximum is 14,400 s (4 h), and subprocess polls (`gh_run`, `systemd_unit`, `command`, `git_ref`) enforce a 15 s minimum interval.
+
+## Using `lookup` (Class L1)
+
+`lookup` answers one symbol question from `ling-code`'s index with **no model** (`ling-rs/delegate/src/lookup.rs`):
+
+```bash
+ling-delegate lookup def format_table
+ling-delegate lookup refs SystemProbe --scope ling-rs/delegate
+ling-delegate lookup outline ling-rs/delegate/src/classes.rs --limit 10
+```
+
+The closed list of operations is `def`, `refs`, `callers`, `impl`, `outline` (`name` is a file for `outline`); `scope` is a relative path prefix or glob, `repo` the repository (default: the current directory), `limit` 20 by default and 50 at most. The server runs `ling-code <op> --json` (a read of its own stores, 20 s limit, no socket), then reads every row back from the file inside the repository: a row whose file or line cannot be read, or that leaves the repository, is dropped and counted in `dropped`. The result `{op, query, scope, hits: [{path, start, end, quote, detail}], dropped, truncated, notes}` is bounded to about 6,000 characters; a quote is the definition's first three lines at most. A name or scope that starts with `-`, is absolute or climbs with `..` is refused before the index is asked. Zero hits is stated as a fact about the index only. The unit tests inject the index and files (`IndexBackend`), so they need no network and no `ling-code`.
