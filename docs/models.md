@@ -11,7 +11,7 @@ How well the default model solves real coding tasks, release by release, is on t
 
 | Alias | Model | Parameters | Precision | Memory needed | Images |
 |---|---|---|---|---|---|
-| **`qwen3.8-27b-nvfp4-dflash2`** (default) | Qwen3.8-27B, NVFP4, with DFlash2 speculative decoding, served by SGLang | 27B | NVFP4 | 20 – 70 GB | yes |
+| **`qwen3.8-27b-nvfp4-dflash2`** (default) | Qwen3.8-27B, NVFP4, with DFlash2 speculative decoding, served by ling-serve (SGLang with `--engine sglang`) | 27B | NVFP4 | 20 – 70 GB | yes |
 | `qwen3.8-27b-dflash2-draft` | DFlash2 drafter for Qwen3.8-27B (not served on its own) | ~1B | NVFP4 | 1 – 2 GB | no |
 | `qwen3.8-27b-minima-nvfp4-dflash2` (candidate, under evaluation) | Qwen3.8-27B with every layer in NVFP4 ("Minima"), same server settings and drafter as the default | 27B | NVFP4 | 19 – 70 GB | no |
 
@@ -23,10 +23,122 @@ ling-admin model list
 
 ## The default model
 
-`qwen3.8-27b-nvfp4-dflash2` is RadixArk's NVFP4 quantisation of Qwen3.8-27B, served by **SGLang**
-rather than vLLM, because its speed comes from a drafter only SGLang runs: DFlash2, which proposes
-12 tokens at a time for the model to check in one pass. The recipe follows
+`qwen3.8-27b-nvfp4-dflash2` is RadixArk's NVFP4 quantisation of Qwen3.8-27B, with DFlash2
+speculative decoding: a small drafter proposes 12 tokens at a time and the model checks them in one
+pass. Its output is exactly what the model alone would write; the drafter changes the speed, never
+the answer. The recipe follows
 [hasso5703/dgx-spark-qwen38](https://github.com/hasso5703/dgx-spark-qwen38), measured on a GB10.
+
+### ling-serve, the default engine (1.8.0)
+
+From 1.8.0 the default model is served by **ling-serve**, the server of
+[ling-engine](https://github.com/dreamference/ling-engine), written for this one model on the GB10.
+SGLang, the engine of 1.0 to 1.7, is one flag away (see [Going back to SGLang](#going-back-to-sglang)).
+ling-serve was opt-in from 1.7.2 (`--engine ling`); nothing about that command changes.
+
+What changes for you:
+
+- **Four conversations at once**, each with the model's full 262,144-token context. Until 1.7 the
+  engine ran two at a time and a third waited. A fourth task, a phone thread or the desktop app's
+  second window no longer queues behind the others.
+- **A shared, paged memory for conversations.** Each conversation's context lives in pages taken from
+  one pool instead of a full-size block reserved up front, which is what lets four conversations at
+  262,144 tokens fit in the memory of one GB10.
+- **Memory sized at start** from what the machine has free (see [Memory](#memory)).
+- **Conversations take fair turns**: a long prompt being read does not stall the answers of the
+  others.
+- **A small image**: ling-serve's Docker image is under 1 GB, against SGLang's 34 GB, so the first
+  start after an upgrade pulls much less.
+- Everything else stays: the same checkpoint, the same drafter, the same `/v1` API on the same
+  port, the same container limits and the same memory-safety checks before a load. `ling`, `ling web`,
+  the desktop app and the phone bridges need no change.
+
+<!-- TODO(1.8.0): measured figures (combined rate of four conversations, start time, memory in use),
+     from the bar night on the pinned engine commit; none are stated here until then. -->
+
+`server start` checks the NVFP4 output and a tool call before it reports ready. If ling-serve fails
+one of them, or stops before it answers, it says so and prints the command to go back to SGLang; it
+never switches engine by itself.
+
+#### Memory
+
+ling-serve plans its whole footprint before it allocates anything: the weights, scratch space, a
+fixed part for each of the four conversations, the drafter, and the pool of pages that holds their
+contexts. The pool takes what is free at that moment, so the same release sizes itself differently on
+a machine with the desktop session closed and on one with a browser and other services resident.
+`ling-admin server start` runs the same plan first and refuses to start, naming the shortfall, when the
+host would be left without room (the check described in [Troubleshooting](#troubleshooting)).
+
+What this means in practice:
+
+- Free memory before you start the server for the best result; closing the desktop session on the
+  machine recovers the most.
+- The context a conversation can reach is not reduced; what shrinks on a loaded machine is the number
+  of long conversations that fit at once. An idle conversation's pages are reclaimed first.
+- While serving, a request that arrives when the host is nearly out of memory is answered with HTTP
+  503 and the reason, instead of risking the whole machine.
+
+`ling-admin status` shows the running engine, its commit, the number of conversations
+(sessions) and the batch, and whether the KV cache is paged.
+
+<!-- TODO(1.8.0): host memory in use while serving at four sessions (measured), and the free-memory
+     figure below which the start is refused. -->
+
+#### Prefix sharing and its privacy scope
+
+Agents begin every conversation with much of the same text: the system prompt, the tool list, the
+repository's instructions. ling-serve keeps the computed form of such beginnings and reuses it, so a
+new conversation that starts with text the server has already read does not read it again.
+
+Sharing is limited on purpose. `ling` marks every request with a **scope**, an opaque hash of the
+owner and the repository the conversation is working in, in the `X-Ling-Share-Scope` header, and the
+server reuses a beginning only for requests with the same scope. Two repositories, or two owners on a
+shared machine, never share, even when their texts are identical; a repository's own conversations
+share with each other. The scope is a hash: the server never sees the repository's name or path, and
+the header carries nothing readable.
+
+- It saves reading time only. Whether a beginning was reused never changes the answer.
+- A request that carries no scope shares only within its own conversation.
+- Nothing leaves the machine: the shared store is memory of the model server on this node.
+
+<!-- TODO(1.8.0): confirm against the pinned engine that a request
+     without it shares nothing across conversations; confirm what `ling` sends from which release. -->
+
+#### Going back to SGLang
+
+For one start:
+
+```bash
+ling-admin server stop && ling-admin server start --engine sglang
+```
+
+or to keep it, in `~/.config/dreamference/config.toml` (or `DREAMFERENCE_SERVER_ENGINE=sglang`):
+
+```toml
+server_engine = "sglang"
+```
+
+Remove the line (or set `server_engine = "ling"`) to follow the default again. Stay on SGLang if you
+serve LoRA adapters: ling-serve's recipe has none, so [`ling-admin adapter`](admin.md#ling-admin-adapter) serving needs SGLang.
+SGLang keeps its own limits and settings, below.
+
+#### Troubleshooting
+
+| What you see | What it means | What to do |
+|---|---|---|
+| `server start` says "Not enough memory to start ling-serve" and prints a plan, the load peak and the missing amount | The plan for four conversations at 262,144 tokens, plus the load peak, does not fit in the memory free now | Free memory (close the desktop session, stop other large services), or `ling-admin server start --engine sglang` |
+| `server start` reports a failed NVFP4 or tool-call check and prints the way back | The engine started but its output failed a check | Run the printed `--engine sglang` command, and report it with `ling-admin server logs` |
+| A request is answered with HTTP 503 and a `host_memory_low` reason | The machine is nearly out of memory; the server refuses new work to protect the host | Free memory and retry; the work already running continues |
+| A new conversation waits | Four are already running (or kept warm) | It starts when one finishes; recently used conversations are protected for 30 seconds |
+| Which engine is running? | | `ling-admin status` |
+| Logs | | `ling-admin server logs` |
+
+<!-- TODO(1.8.0): check each row against the pinned engine's messages; confirm the 503 body shape. -->
+
+### SGLang, the fallback (`--engine sglang`)
+
+SGLang served the default model through 1.7. It reads images and serves LoRA
+adapters, and its speed comes from the same DFlash2 drafter.
 
 Measured on a GB10, single-stream, 2026-10-09, with 12 draft tokens (`scripts/decode_speed.py`):
 
@@ -41,7 +153,7 @@ It reads images, holds a 262K-token context (a fact planted in the middle of a 1
 found), and while serving leaves about 38 GB of memory free, so several agents can work at once:
 four `ling` tasks in parallel finished in 23 seconds.
 
-Server settings it runs with (from the registry):
+Server settings it runs with when you choose it (from the registry):
 
 | Setting | Value |
 |---|---|
@@ -53,46 +165,6 @@ Server settings it runs with (from the registry):
 | Speculative decoding | DFlash2, `dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch` (NVFP4 with searched scales, downloaded from Mightling's GitHub release assets and checked by SHA-256; the RTN-calibrated `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` until 1.7.2), 12 tokens |
 | Tool calls / reasoning parsers | `qwen3_coder` / `qwen3` |
 | Thinking | `ling` asks for none; chat thinks at medium effort unless told otherwise |
-
-### ling-serve, opt-in
-
-Since 1.7.2 the default model can also be served by **ling-serve**, the server of
-[ling-engine](https://github.com/dreamference/ling-engine), written for this one model on the GB10.
-SGLang stays the default; ling-serve becomes the default once it reads images, serves adapters and
-runs more than two requests at once. Switch for one start:
-
-```bash
-ling-admin server stop && ling-admin server start --engine ling
-```
-
-or keep it, in `~/.config/dreamference/config.toml` (or `DREAMFERENCE_SERVER_ENGINE=ling`):
-
-```toml
-server_engine = "ling"
-```
-
-Back to SGLang: remove that line, or `ling-admin server start --engine sglang`. If ling-serve fails
-one of `server start`'s checks (it does not answer, the NVFP4 canary or the tool-call check fails),
-`server start` says so and prints the command to go back; it never switches engine by itself.
-
-It serves the same checkpoint with the same drafter and the same 262,144-token context, from its
-own small image (`ghcr.io/dreamference/ling-serve`, pinned by digest, the ling-engine commit in its
-labels), inside the same container limits and host-safety checks. Its speculation is exact (the
-drafter changes the speed, never the output) and it verifies the drafter's guesses as a tree. Its
-limits:
-
-- **No images.** An image arrives as the text `[image]`; `ling` and the phone bridges learn this
-  from the server and send text.
-- **No LoRA adapters**, and no API key (`--api-key` is refused).
-- **Two requests at once**; a third waits until one finishes.
-- **Changing the end of a long prompt reads it again**: a new prompt that shares a long beginning
-  with an earlier one but differs inside the same message is read in full (at ~850-900 tokens per
-  second near 200K tokens, nearly four minutes).
-
-Measured on a GB10 on 2026-10-26 (ling-engine bdda3a2, 262,144-token context): ready in 40 s, about
-60 GB of memory in use while serving; a 600-token code answer at 74.9 tokens per second; a
-204,857-token prompt with two facts hidden at 45% and 85% of its length answered both exactly, with
-decode at 39.6 tokens per second at that length.
 
 ## Changing models
 
