@@ -5,7 +5,7 @@
   },
   "ragon-rs/src/rename.rs": {
     "replaces": "ling-rs/src/rename.rs",
-    "sha256": "21f2c5468a8645a440e801db9b99774cbc14689f930fb9501d99e938ba03d603"
+    "sha256": "7a5f475554b33b8f87af6208476dfeaeea74e003d04222d760f629640e662222"
   },
   "tests/test_legacy_name_migration.py": {
     "replaces": "tests/test_legacy_name_migration.py",

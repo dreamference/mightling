@@ -109,7 +109,6 @@ const LEGACY_LINKS: &[&str] = &[
 const CARRY_OVER: &[&str] = &[
     "session_index.jsonl",
     "airgapped",
-    "cave_mode",
     "audit",
     "night",
     "system-prompts",
@@ -669,7 +668,7 @@ mod tests {
         let home = scratch("full");
         mightling_layout(&home);
         let cwd = home.join("project");
-        write(&cwd.join("dreamference.toml"), "mightling_cave_mode = \"off\"\n");
+        write(&cwd.join("dreamference.toml"), "mightling_night_hour = \"3\"\n");
 
         let report = migrate(&home, &cwd, None);
         assert!(!report.is_empty());
@@ -693,7 +692,7 @@ mod tests {
         assert!(config.contains("# mightling_prompt") && config.contains("server_engine = \"ragon\""));
         assert_eq!(
             std::fs::read_to_string(cwd.join("dreamference.toml")).unwrap(),
-            "ragon_cave_mode = \"off\"\n"
+            "ragon_night_hour = \"3\"\n"
         );
         assert!(home.join(".ssh/ragon-node_ed25519").is_file() && home.join(".ssh/ragon-node_ed25519.pub").is_file());
         assert!(home.join(".local/share/dev.dreamference.ragon/Cookies").is_file());
