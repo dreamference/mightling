@@ -114,11 +114,11 @@ def test_accuracy_reads_prompt_and_instruction_level(tmp_path):
     assert IFEVAL.accuracy(path) == {"prompts": 2, "prompt_level": 0.5, "instruction_level": 0.75}
 
 
-def test_a_shipped_level_sets_no_cave_and_a_named_one_does():
+def test_a_scenario_carries_the_prompt_and_the_row_key():
     row = {"key": 7, "prompt": "Write two words."}
-    assert "cave" not in IFEVAL.scenario_for("ifeval", row, "shipped", "ask")
-    named = IFEVAL.scenario_for("ifeval", row, "ultra", "default")
-    assert named["cave"] == "ultra" and named["prompt"] == "default" and named["id"] == "ifeval-7"
+    scenario = IFEVAL.scenario_for("ifeval", row, "default")
+    assert scenario["prompt"] == "default" and scenario["id"] == "ifeval-7"
+    assert "cave" not in scenario
 
 
 FAKE_SCORER = r'''#!/usr/bin/env python3
@@ -158,8 +158,6 @@ def test_the_ifeval_runner_answers_each_prompt_scores_it_and_writes_the_summary(
         [
             "--sets",
             "ifeval",
-            "--cave",
-            "shipped,ultra",
             "--cache",
             str(cache),
             "--runs",
@@ -176,23 +174,18 @@ def test_the_ifeval_runner_answers_each_prompt_scores_it_and_writes_the_summary(
     )
     assert status == 0
     summary = json.loads((tmp_path / "runs" / "summary.json").read_text())
-    for level in ("shipped", "ultra"):
-        result = summary["results"]["ifeval"][level]
-        assert result["strict"] == {"prompts": 3, "prompt_level": 1.0, "instruction_level": 1.0}
-        assert result["empty_answers"] == 0
+    result = summary["results"]["ifeval"]
+    assert result["strict"] == {"prompts": 3, "prompt_level": 1.0, "instruction_level": 1.0}
+    assert result["empty_answers"] == 0
     assert summary["manifest"]["ifeval"]["licence"] == "Apache-2.0"
-    responses = (
-        (tmp_path / "runs" / "ifeval" / "ultra" / "responses.jsonl").read_text().splitlines()
-    )
+    responses = (tmp_path / "runs" / "ifeval" / "responses.jsonl").read_text().splitlines()
     assert [json.loads(r)["prompt"] for r in responses] == [
         "Say hello 1.",
         "Say hello 2.",
         "Say hello 3.",
     ]
-    scenario = json.loads(
-        (tmp_path / "runs" / "ifeval" / "ultra" / "ifeval-1" / "scenario.json").read_text()
-    )
-    assert scenario["cave"] == "ultra"
+    scenario = json.loads((tmp_path / "runs" / "ifeval" / "ifeval-1" / "scenario.json").read_text())
+    assert "cave" not in scenario
 
 
 def test_the_ifeval_runner_refuses_an_empty_cache(tmp_path, capsys):

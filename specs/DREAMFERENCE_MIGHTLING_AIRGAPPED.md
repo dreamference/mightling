@@ -6,7 +6,7 @@
 **Builds on:**
 - the web commands `ling-search` and `ling-fetch` ([MIGHTLING_CODEX §4.1](./DREAMFERENCE_MIGHTLING_CODEX.md)), and the SearXNG instance on `127.0.0.1:8888` they search through;
 - Codex's command sandbox, which already runs a command with no network when its policy says so (`bwrap --unshare-net`);
-- the pattern `/cavemode` set for a per-session level: a file keyed by the session, configuration tiers, a World State section ([CAVE_MODE §3, §5](./DREAMFERENCE_MIGHTLING_CAVE_MODE.md));
+- the pattern `/cavemode` set for a per-session level: a file keyed by the session, configuration tiers, a World State section (CAVE_MODE §3, §5 (spec removed 2026-10-28));
 - the airlock of [MIGHTLING_EGRESS §4](./DREAMFERENCE_MIGHTLING_EGRESS.md), which becomes the second layer of this spec's strictest level (§5.4).
 
 **One hook patch**, `0019-airgapped` (§6.4, as built in §14), which raised the patch-size cap explicitly.
@@ -70,7 +70,7 @@ At `on` it adds one line saying whether the level is enforced, for example `Enfo
 
 ## 3. What the model is told
 
-The system prompt stays one text for every level, so the prefix cache survives a switch ([CAVE_MODE §5.1](./DREAMFERENCE_MIGHTLING_CAVE_MODE.md)). The level reaches the model as a World State section, `airgapped`, whose value is the level name. A fragment is added to the conversation only when the value changes:
+The system prompt stays one text for every level, so the prefix cache survives a switch (CAVE_MODE §5.1 (spec removed 2026-10-28)). The level reaches the model as a World State section, `airgapped`, whose value is the level name. A fragment is added to the conversation only when the value changes:
 
 | Change | Fragment |
 |---|---|
@@ -294,7 +294,7 @@ Stated in the command's own output (§2), so nobody takes `on` for more than it 
 - **Rewrite SearXNG's settings for `duckduckgo`,** so that no other engine exists. That would be a barrier, not a preference, but SearXNG is shared with the web chat and with every other session, so one session's level would change search for all of them. It is the right mechanism for a machine-wide level (§13), not for a session's.
 - **A second SearXNG with only DuckDuckGo enabled.** A real barrier per session only if the sandbox could allow one port and not another, which it cannot; without that it is the same preference with one more container.
 - **Codex's managed network proxy** (the sandbox's proxy-only mode with a domain allowlist) could let `duckduckgo` allow only chosen hosts. It would also break `pip`, `git` and `cargo` at that level, which the level is not meant to touch, and it is a large upstream feature this fork has never run.
-- **Per-level system prompts.** Changing the catalog's prompt mid-session re-reads the whole conversation ([CAVE_MODE §5.2](./DREAMFERENCE_MIGHTLING_CAVE_MODE.md)), and the catalog file is shared by sessions at different levels.
+- **Per-level system prompts.** Changing the catalog's prompt mid-session re-reads the whole conversation (CAVE_MODE §5.2 (spec removed 2026-10-28)), and the catalog file is shared by sessions at different levels.
 - **`ling --airlock` as its own switch,** as EGRESS proposed. Two switches for one question ("may this session reach the internet?") would need a rule for every combination. The airlock is the mechanism; the level is the knob.
 - **Only tool-level refusal at `on`,** with no kernel enforcement. Then `curl` works and the level's name is false.
 

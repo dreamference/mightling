@@ -1850,11 +1850,6 @@
    "RUF059": 2,
    "ruff-format": 1
   },
-  "tests/test_cave_mode.py": {
-   "D205": 1,
-   "D209": 1,
-   "ruff-format": 1
-  },
   "tests/test_cli_entry_points.py": {
    "D205": 1,
    "E501": 1,

@@ -64,7 +64,7 @@ See `DREAMFERENCE_MIGHTLING_CODEX.md` for the full description.
 1. Wait for vLLM (§6).
 2. Require `code` or `codium` on `PATH`; exit 1 with a hint otherwise.
 3. Install the extension if missing (`code --install-extension saoudrizwan.claude-dev`).
-4. Rewrite `.clinerules` in the workspace on every launch, with local/offline guidance plus Cave Mode text when `--cave` is set.
+4. Rewrite `.clinerules` in the workspace on every launch, with local/offline guidance.
 5. Print the connection details (Standard /v1 provider, base URL, API key `gb10-local-token`, model).
 6. Open VS Code on the workspace.
 

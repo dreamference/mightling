@@ -1,26 +1,28 @@
 {
-  "id": "s13-dict-iteration-off",
+  "id": "s13-tcp-udp",
   "family": "S13",
   "failure": [
     6
   ],
   "turns": [
     {
-      "text": "Why does my Python loop raise 'RuntimeError: dictionary changed size during iteration', and how do I fix it?"
+      "text": "What's the difference between TCP and UDP? Give one typical use for each."
     }
   ],
   "expect": {
     "mention": [
       [
-        "iterat"
+        "connection",
+        "handshake",
+        "reliab"
       ],
       [
-        "list(",
-        "copy",
-        ".keys()",
-        "dict(",
-        "comprehension",
-        "items())"
+        "stream",
+        "video",
+        "dns",
+        "gam",
+        "voip",
+        "voice"
       ]
     ],
     "max_tool_calls": 2
@@ -35,6 +37,5 @@
     "connect": {
       "fault": "forbidden"
     }
-  },
-  "cave": "off"
+  }
 }

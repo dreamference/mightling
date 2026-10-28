@@ -3,7 +3,7 @@ port joined to the socket outside, then each turn through `ling exec` (the first
 `ling exec … resume --last` (the rest), with the harness's own bound on every turn.
 
     python3 -I session.py SCENARIO.json OUT_DIR --home CODEX_HOME --workspace DIR
-                          [--model-socket PATH] [--ling ling] [--cave LEVEL]
+                          [--model-socket PATH] [--ling ling]
 
 Writes into OUT_DIR: `turns.jsonl` (one record per turn: exit status, seconds, why it was cut),
 `events-<n>.jsonl` (each turn's `--json` stream), `web.jsonl` (the stand-ins' log). Standard
@@ -125,7 +125,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--model-socket")
     parser.add_argument("--ling", default="ling")
-    parser.add_argument("--cave", help="the cave level for every turn (unset: the shipped default)")
     parser.add_argument("--silence-s", type=float, default=SILENCE_S)
     args = parser.parse_args(argv)
 
@@ -147,9 +146,6 @@ def main(argv: list[str] | None = None) -> int:
             "DREAMFERENCE_MIGHTLING_PROMPT": scenario.get("prompt", "ask"),
             "DREAMFERENCE_VLLM_HOST": f"http://127.0.0.1:{MODEL_PORT}",
         }
-        cave = scenario.get("cave", args.cave)
-        if cave:
-            env["DREAMFERENCE_MIGHTLING_CAVE_MODE"] = cave
         assets = Path(args.scenario).parent
         with (out / "turns.jsonl").open("w") as log:
             for index, turn in enumerate(scenario["turns"]):

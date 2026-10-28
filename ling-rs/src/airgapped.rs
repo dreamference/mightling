@@ -935,10 +935,12 @@ impl ContextContributor for Airgapped {
     }
 }
 
-/// Registers the section. Called beside `cave::install` in the app server's registry and in the
-/// one `ling debug prompt-input` builds.
+/// Registers the section. Called in the app server's registry and in the one `ling debug
+/// prompt-input` builds. The loop guard rides on the same call (loop_guard.rs), which keeps it out of
+/// the patches.
 pub fn install<C: Sync>(registry: &mut ExtensionRegistryBuilder<C>) {
     registry.prompt_contributor(Arc::new(Airgapped));
+    crate::loop_guard::install(registry);
 }
 
 #[cfg(test)]

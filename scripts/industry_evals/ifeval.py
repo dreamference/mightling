@@ -1,12 +1,12 @@
 """T1: IFEval and IFBench through `ling` (specs/DREAMFERENCE_MIGHTLING_ASSISTANT_EVALS.md §10.3).
 
-    python ifeval.py --sets ifeval,ifbench --cave shipped,off,ultra [--limit 20] [--parallel 3]
+    python ifeval.py --sets ifeval,ifbench [--limit 20] [--parallel 3]
 
 Each prompt is one turn of `ling exec` in the ask-evals jail (scripts/ask_evals: no network but
 the stand-ins, which answer nothing useful here, and the model through its socket), with the prompt
-(`--prompt`, `ask` by default) and the cave level as the variables. The answers go to each set's own
+(`--prompt`, `ask` by default) as the variable. The answers go to each set's own
 reference scorer, fetched at a pinned commit into the cache by `setup_cache.py ifeval`, run in its
-own virtualenv with no network. The result is the four standard numbers per set and level:
+own virtualenv with no network. The result is the four standard numbers per set:
 strict and loose, prompt-level and instruction-level. `summary.json` holds them with the manifest's
 sources, revisions and licences.
 """
@@ -45,7 +45,6 @@ SETS: Final[dict] = {
         "scorer": ["run_eval.py"],
     },
 }
-SHIPPED: Final[str] = "shipped"
 
 
 def _load_runner():
@@ -66,9 +65,9 @@ def prompts(cache: Path, name: str, limit: int | None) -> list[dict]:
     return rows[:limit] if limit else rows
 
 
-def scenario_for(name: str, row: dict, level: str, prompt: str) -> dict:
+def scenario_for(name: str, row: dict, prompt: str) -> dict:
     """One prompt as an ask-evals scenario: one turn, no web, no checks (the scorer judges)."""
-    scenario = {
+    return {
         "id": f"{name}-{row.get('key', abs(hash(row['prompt'])))}",
         "family": name,
         "failure": [],
@@ -77,9 +76,6 @@ def scenario_for(name: str, row: dict, level: str, prompt: str) -> dict:
         "expect": {},
         "prompt": prompt,
     }
-    if level != SHIPPED:
-        scenario["cave"] = level
-    return scenario
 
 
 def answer_of(run_dir: Path) -> str:
@@ -148,9 +144,6 @@ def score(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--sets", default="ifeval,ifbench")
-    parser.add_argument(
-        "--cave", default=SHIPPED, help=f"comma-separated levels; {SHIPPED!r} sets none"
-    )
     parser.add_argument("--prompt", default="ask")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--parallel", type=int, default=3)
@@ -186,15 +179,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"❌ No model server answers on 127.0.0.1:{args.model_port}.", file=sys.stderr)
             return 2
         forwarder, socket_path = runner.start_forwarder(args.model_port)
-    session_args = argparse.Namespace(no_jail=args.no_jail, ling=args.ling, cave=None)
+    session_args = argparse.Namespace(no_jail=args.no_jail, ling=args.ling)
     # A stop still opens the gate and removes the forwarder's socket (the `finally` below).
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     hold = None
     if args.hold_gate:
         from askevals.gate import GateHold  # noqa: PLC0415 - needs the dreamference package
 
-        sets, levels = args.sets.split(","), args.cave.split(",")
-        total = sum(len(prompts(cache, n, args.limit)) for n in sets) * len(levels)
+        total = sum(len(prompts(cache, n, args.limit)) for n in args.sets.split(","))
         hold = GateHold(args.hold_gate, total=total).__enter__()
     summary: dict = {
         "manifest": json.loads((cache / "manifest.json").read_text()),
@@ -204,32 +196,31 @@ def main(argv: list[str] | None = None) -> int:
     try:
         for name in args.sets.split(","):
             rows = prompts(cache, name, args.limit)
-            for level in args.cave.split(","):
-                base = runs / name / level
+            base = runs / name
 
-                def one(row: dict, base: Path = base, level: str = level, name: str = name) -> dict:
-                    scenario = scenario_for(name, row, level, args.prompt)
-                    run_dir = base / scenario["id"]
-                    path = runner.prepare(scenario, run_dir, seed=0)
-                    subprocess.run(
-                        runner.session_command(path, run_dir, session_args, socket_path),
-                        check=False,
-                    )
-                    if hold:
-                        hold.advance()
-                    return {"prompt": row["prompt"], "response": answer_of(run_dir)}
-
-                with ThreadPoolExecutor(max(1, args.parallel)) as pool:
-                    answered = list(pool.map(one, rows))
-                responses = base / "responses.jsonl"
-                responses.write_text(
-                    "".join(json.dumps(a, ensure_ascii=False) + "\n" for a in answered)
+            def one(row: dict, base: Path = base, name: str = name) -> dict:
+                scenario = scenario_for(name, row, args.prompt)
+                run_dir = base / scenario["id"]
+                path = runner.prepare(scenario, run_dir, seed=0)
+                subprocess.run(
+                    runner.session_command(path, run_dir, session_args, socket_path),
+                    check=False,
                 )
-                python = Path(args.scorer_python) if args.scorer_python else venv_python(cache)
-                result = score(cache, name, responses, base / "scored", python, rows=rows)
-                result["empty_answers"] = sum(1 for a in answered if not a["response"].strip())
-                summary["results"].setdefault(name, {})[level] = result
-                print(json.dumps({"set": name, "cave": level, **result}), flush=True)
+                if hold:
+                    hold.advance()
+                return {"prompt": row["prompt"], "response": answer_of(run_dir)}
+
+            with ThreadPoolExecutor(max(1, args.parallel)) as pool:
+                answered = list(pool.map(one, rows))
+            responses = base / "responses.jsonl"
+            responses.write_text(
+                "".join(json.dumps(a, ensure_ascii=False) + "\n" for a in answered)
+            )
+            python = Path(args.scorer_python) if args.scorer_python else venv_python(cache)
+            result = score(cache, name, responses, base / "scored", python, rows=rows)
+            result["empty_answers"] = sum(1 for a in answered if not a["response"].strip())
+            summary["results"][name] = result
+            print(json.dumps({"set": name, **result}), flush=True)
     finally:
         if hold:
             hold.__exit__()

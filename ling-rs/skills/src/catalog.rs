@@ -572,7 +572,7 @@ mod tests {
     fn skills_are_found_in_every_place_and_foreign_ones_through_their_categories() {
         let fixture = Fixture::new("catalog-found");
         fixture.skill(".mightling/skills/pdf", "pdf", "");
-        fixture.skill(".agents/skills/caveman", "caveman", "");
+        fixture.skill(".agents/skills/terse", "terse", "");
         fixture.skill(".claude/skills/synced/internal-comms", "internal-comms", "");
         fixture.skill(".claude/skills/direct", "direct", "");
         fixture.skill(".gemini/skills/gem", "gem", "");
@@ -594,7 +594,7 @@ mod tests {
             found,
             vec![
                 expect("pdf", "ling"),
-                expect("caveman", "~/.agents/skills"),
+                expect("terse", "~/.agents/skills"),
                 expect("direct", "Claude Code"),
                 expect("internal-comms", "Claude Code"),
                 expect("gem", "Gemini CLI"),

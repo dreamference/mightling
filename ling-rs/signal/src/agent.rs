@@ -418,24 +418,6 @@ pub async fn chat_settings(port: u16, cookie: &str) -> Result<ChatSettings, Stri
     Ok(ChatSettings::from_json(&value))
 }
 
-/// `/cavemode <text>` for `thread` (None before the first question), as `ling web` passes it to
-/// `ling cavemode` (`/api/cavemode`, cave-mode spec §11.5): what it printed, or why it was refused.
-pub async fn cavemode(port: u16, cookie: &str, thread: Option<&str>, text: &str) -> Result<String, String> {
-    let body = serde_json::to_vec(&serde_json::json!({ "command": text, "thread": thread })).map_err(|err| err.to_string())?;
-    let mut request = format!(
-        "POST /api/cavemode HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    )
-    .into_bytes();
-    request.extend_from_slice(&body);
-    let (_, _, body) = http(port, &request).await?;
-    let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-    match value.get("said").and_then(Value::as_str) {
-        Some(said) => Ok(said.to_string()),
-        None => Err(value.get("error").and_then(Value::as_str).unwrap_or("ling web did not answer").to_string()),
-    }
-}
-
 /// The user-level air-gap level, as `ling web` resolves it (`/api/airgapped`): true for `on`.
 pub async fn airgap_level(port: u16, cookie: &str) -> Result<bool, String> {
     let request = format!("GET /api/airgapped HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n");

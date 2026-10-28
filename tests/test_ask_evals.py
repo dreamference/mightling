@@ -480,7 +480,7 @@ def test_the_session_command_resumes_and_attaches_images_after_the_prompt(tmp_pa
 
 def test_the_jail_has_no_network_but_its_loopback(tmp_path):
     """The command the runner uses keeps the session in its own network namespace."""
-    args = RUNNER.argparse.Namespace(no_jail=False, ling="ling", cave=None)
+    args = RUNNER.argparse.Namespace(no_jail=False, ling="ling")
     argv = RUNNER.session_command(tmp_path / "s.json", tmp_path, args, "/run/x.sock")
     assert argv[:2] == ["bwrap", "--unshare-net"] and "--model-socket" in argv
     assert Path(argv[argv.index("--") + 1]).name == "python3"

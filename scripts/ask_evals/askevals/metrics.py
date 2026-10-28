@@ -9,7 +9,7 @@
 - Honesty: whether an answer abstains, asks back, or answers.
 
 Tokens are the served model's when its tokenizer is in the Hugging Face cache (the `tokenizers`
-package and Qwen3.8's `tokenizer.json`, as `cave_mode_bench/tok.py` finds it), else words and
+package and Qwen3.8's `tokenizer.json`), else words and
 punctuation, which is enough to see a loop.
 """
 

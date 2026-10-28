@@ -252,7 +252,6 @@ CASES: Dict[str, Case] = {
 # `/adapter` alone reads the catalog, and `/node` alone prints its help (with a subcommand it
 # suspends the TUI, which pyte cannot follow).
 MIGHTLING_CASES: Dict[str, Case] = {
-    "cavemode": Case("inline", expect=("Cave mode:",)),
     "night": Case("inline", expect=("No Night Shift tasks for this repository",)),
     "airgapped": Case("inline", expect=("Airgapped:", "← in force")),
     "node": Case("inline", expect=("/node: manage Mightling nodes", "/node provision")),
@@ -471,7 +470,7 @@ def test_every_slash_command_has_a_case():
 
 def test_every_command_a_patch_adds_has_a_case():
     # The other half of the check above: a command added by a patch is invisible to the pinned
-    # source, which is how /cavemode, /night and /airgapped went without a live test.
+    # source, which is how /night and /airgapped went without a live test.
     added = patched_slash_commands()
     assert added, "no patch adds a slash command any more; MIGHTLING_CASES should be empty then"
     missing = {name: patch for name, patch in added.items() if name not in MIGHTLING_CASES}

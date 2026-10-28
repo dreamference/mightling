@@ -122,7 +122,6 @@ function General({ prefs, onChange }: SettingsProps) {
         <label><input type="checkbox" checked={prefs.openArtifacts} onChange={(event) => onChange({ openArtifacts: event.target.checked })} /> Open a document, PDF or image the agent creates in a tab beside the thread</label>
         <label><input type="checkbox" checked={prefs.pasteAsFile} onChange={(event) => onChange({ pasteAsFile: event.target.checked })} /> Make a long paste (2,000 characters or 40 lines) an attachment: a file in Ask, a block after your words in Work</label>
       </fieldset>
-      <AnswerLength />
       {bridge.git.available() ? <QuickEntry prefs={prefs} onChange={onChange} /> : null}
       <fieldset>
         <legend>Text size</legend>
@@ -131,39 +130,6 @@ function General({ prefs, onChange }: SettingsProps) {
         </label>
       </fieldset>
     </>
-  );
-}
-
-/**
- * Settings › General › How long answers are (CAVE_MODE §11.5): the level new sessions start at, in every
- * surface (the terminal, Ask, the app, the phone), written to the configuration by `ling cavemode`.
- * "Built-in" leaves it unset, so Ask threads start at `lite` and the terminal at `full`.
- */
-function AnswerLength() {
-  const [status, setStatus] = useState<bridge.CaveMode | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const load = () => bridge.cavemode.status(null).then((answer) => { setStatus(answer); setFailed(null); }).catch((error: unknown) => setFailed(error instanceof Error ? error.message : String(error)));
-  useEffect(() => { void load(); }, []);
-  const choose = (level: string) => {
-    setBusy(true);
-    bridge.cavemode.set(level, null).then(load).catch((error: unknown) => setFailed(error instanceof Error ? error.message : String(error))).finally(() => setBusy(false));
-  };
-  const chosen = status?.configured ?? "built-in";
-  return (
-    <fieldset>
-      <legend>How long answers are</legend>
-      {failed ? <p className="dialog-note">{failed}</p> : null}
-      {status ? (
-        <>
-          <label><input type="radio" name="cave" disabled={busy} checked={chosen === "built-in"} onChange={() => choose("built-in")} /> Built-in: {status.default} here and in Ask, {status.tuiDefault} in the terminal</label>
-          {status.levels.map((level) => (
-            <label key={level.name}><input type="radio" name="cave" disabled={busy} checked={chosen === level.name} onChange={() => choose(level.name)} /> {level.name}: {level.summary}</label>
-          ))}
-          <p className="dialog-note">For new threads everywhere, the terminal and the phone included. One thread: <code>/cavemode &lt;level&gt;</code> in it.</p>
-        </>
-      ) : failed ? null : <p className="empty small">…</p>}
-    </fieldset>
   );
 }
 

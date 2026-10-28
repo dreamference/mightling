@@ -1,1 +1,0 @@
-The tests in test_stats.py fail. Find the bug and fix it.

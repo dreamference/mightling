@@ -66,7 +66,7 @@ export interface SlashCommand {
 
 /**
  * The commands of the TUI the app runs (DESKTOP_PARITY §2.3 row "Slash commands"), each through a
- * method the policy allows or a window action, plus Mightling's `/airgapped` and `/cavemode`. `/review`, `/goal`,
+ * method the policy allows or a window action, plus Mightling's `/airgapped`. `/review`, `/goal`,
  * `/plan`, `/memories`, `/agents` and the other launcher commands come with the items that add
  * their methods or views.
  */
@@ -105,7 +105,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "plugins", description: "The plugins: install, remove, add a marketplace", needs: "none" },
   { name: "hooks", description: "The hooks: what runs when, and whether you trust each", needs: "none" },
   { name: "airgapped", description: "Show the air-gap level, or set the default for new threads", needs: "none", args: "[default off|on]" },
-  { name: "cavemode", description: "How terse answers are: show the level, set it for this thread, or the default", needs: "none", args: "[off|lite|full|ultra | default <level|built-in>]" },
   // DESKTOP §16 B38: Mightling's own prompt (init.ts).
   { name: "init", description: "Write a short AGENTS.md for this repository, or propose changes to the one it has", needs: "work", args: "[note]" },
 ];

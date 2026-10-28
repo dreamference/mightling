@@ -20,7 +20,7 @@ One command runs `ling` over SWE-bench instances on this machine and says how ma
 - the upstream harness applies the patch and runs the instance's tests;
 - a report gives the resolved rate, with everything needed to reproduce it.
 
-**What the number is for.** Comparisons *on this machine*: one model against another, a prompt change, cave mode on and off ([MIGHTLING_CAVE_MODE](./DREAMFERENCE_MIGHTLING_CAVE_MODE.md)), a retrained drafter ([SELF_SPEEDING](./DREAMFERENCE_SELF_SPEEDING.md)), a Codex bump. `benchmark_server` measures tokens per second; nothing today measures whether the agent's work is right.
+**What the number is for.** Comparisons *on this machine*: one model against another, a prompt change, cave mode on and off (MIGHTLING_CAVE_MODE (spec removed 2026-10-28)), a retrained drafter ([SELF_SPEEDING](./DREAMFERENCE_SELF_SPEEDING.md)), a Codex bump. `benchmark_server` measures tokens per second; nothing today measures whether the agent's work is right.
 
 **What the number is not.** A leaderboard score. §8 lists why, and the report prints those reasons beside every figure.
 

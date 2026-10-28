@@ -67,10 +67,10 @@ On the GB10, under `flock ~/.ling-build.lock nice -n 10` and `-j 12`, keep the d
 
 ### The patches are one-line hooks and nothing else
 
-32 patches, ~59.5 KB in all (59,496 bytes); `test_the_patches_stay_small` caps them at 64 KB. The cap's history:
+32 patches, ~57.6 KB in all (57,571 bytes); `test_the_patches_stay_small` caps them at 64 KB. The cap's history:
 
 - raised from 20 KB on 2026-09-30 for the last on-screen Codex names;
-- to 25 KB on 2026-10-01 for `0017-cave-mode`;
+- to 25 KB on 2026-10-01 for `0017-cave-mode` (removed 2026-10-28; its bytes stay in the cap's history);
 - to 27.5 KB the same day for `0018-night-slash-command`;
 - to 31.5 KB for `0019-airgapped`;
 - to 32.5 KB on 2026-10-02 for `0020-flat-mcp-tools` (MCP tools reach the local model only as plain functions: SGLang and vLLM drop Codex's `namespace` tool type, so before it no MCP server, the code index's included, was ever visible to the model);

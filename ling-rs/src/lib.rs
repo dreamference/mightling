@@ -38,7 +38,6 @@ pub mod airgapped;
 pub mod app;
 pub mod apps;
 pub mod audit;
-pub mod cave;
 #[cfg(unix)]
 pub mod chat;
 pub mod code_index;
@@ -133,7 +132,7 @@ const COMMANDS_WITHOUT_MODEL: &[&str] = &[
 /// The launcher's own subcommands, handled before Codex parses the command line.
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
-    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync", "monitor", "delegate",
+    "signal", "refine", "compat", "loop-guard", "guard", "worktree", "sync", "monitor", "delegate",
     "uninstall",
 ];
 
@@ -369,13 +368,6 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "airgapped"
     {
         std::process::exit(airgapped::run_cli(&user_args[index + 1..]));
-    }
-    // `cavemode` shows or sets how terse answers are (cave.rs), as `/cavemode` does inside a
-    // session; `ling web`, the desktop app and the phone bridges set it through this.
-    if let Some(index) = subcommand
-        && user_args[index] == "cavemode"
-    {
-        std::process::exit(cave::run_cli(&user_args[index + 1..]));
     }
     // `node` lists, chooses or forgets the Mightling node this machine uses (node.rs).
     if let Some(index) = subcommand
@@ -693,7 +685,6 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         rg_installed: code_index::rg_installed(),
         masking: mask::instruction(masking).to_string(),
     };
-    cave::prune_session_files();
     airgapped::prune_session_files();
     adapter::prune_session_files();
     let catalog = configure_codex_home(&codex_home, &host, &model, &adapters, &parts, &chosen.prompt)?;
@@ -708,8 +699,6 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // After the ledger's registration, so the notice group follows it in `config.toml`.
     // `resume` and `fork` open the TUI too.
     let tui = interactive || subcommand.is_some_and(|index| matches!(user_args[index].as_str(), "resume" | "fork"));
-    // The TUI starts at its own cave level when nothing is configured (cave.rs; spec §11.5).
-    cave::set_tui(tui);
     // The footer names the folder and the branch edits land in, unless the user chose a status line.
     let args = worktree::with_status_line(args, &user_args, &codex_home, tui);
     // The compatibility mode's renderer and key map, for this session only (compat_tui.rs).
