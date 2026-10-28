@@ -496,7 +496,7 @@ impl Renderer {
                 let _ = self.api.send(&room, json!({ "msgtype": "m.notice", "body": outcome })).await;
             }
             // Matrix rooms here are not split into threads (MOONSHOT §6): nothing to rename.
-            Outbound::ThreadNamed { .. } => {}
+            Outbound::ThreadNamed { .. } | Outbound::RepoNotice { .. } | Outbound::RepoTypedRefusal { .. } => {}
             Outbound::File { name, bytes, .. } => {
                 let size = bytes.len();
                 let sent = match self.api.upload(&name, bytes).await {

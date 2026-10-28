@@ -306,6 +306,65 @@ pub fn set_last_topic(dir: &Path, chat_id: i64, topic: Option<i64>) {
     let _ = Threads::update(dir, |threads| threads.set_last_topic(chat_id, topic));
 }
 
+/// One lock for `repo-topics.json` in this process.
+static REPO_TOPICS_FILE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn repo_topics_file() -> std::sync::MutexGuard<'static, ()> {
+    REPO_TOPICS_FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Path to `repo-topics.json`, which maps `(chat_id, repo_name) → topic_id`.
+pub fn repo_topics_path(dir: &Path) -> PathBuf {
+    dir.join("repo-topics.json")
+}
+
+/// Loads `repo-topics.json` as a map `"<chat_id>:<repo>" → topic_id`.
+pub fn load_repo_topics(dir: &Path) -> BTreeMap<String, i64> {
+    let value = read_json(&repo_topics_path(dir));
+    let obj = value
+        .get("topics")
+        .and_then(Value::as_object)
+        .or_else(|| value.as_object());
+    let Some(obj) = obj else {
+        return BTreeMap::new();
+    };
+    obj.iter()
+        .filter_map(|(k, v)| Some((k.clone(), v.as_i64()?)))
+        .collect()
+}
+
+/// Looks up the forum topic id for `(chat_id, repo)` in `repo-topics.json`.
+pub fn repo_topic(dir: &Path, chat_id: i64, repo: &str) -> Option<i64> {
+    let _guard = repo_topics_file();
+    let key = format!("{chat_id}:{repo}");
+    load_repo_topics(dir).get(&key).copied()
+}
+
+/// Records the forum topic id for `(chat_id, repo)` in `repo-topics.json`.
+pub fn set_repo_topic(dir: &Path, chat_id: i64, repo: &str, topic_id: i64) {
+    let _guard = repo_topics_file();
+    let mut map = load_repo_topics(dir);
+    let prefix = format!("{chat_id}:");
+    map.retain(|k, &mut v| !(k.starts_with(&prefix) && v == topic_id));
+    map.insert(format!("{chat_id}:{repo}"), topic_id);
+    let text = serde_json::to_string_pretty(&json!({ "topics": map })).unwrap_or_default();
+    let _ = write_private(&repo_topics_path(dir), &text);
+}
+
+/// Looks up the repository name for `(chat_id, topic_id)` in `repo-topics.json`.
+pub fn repo_for_topic(dir: &Path, chat_id: i64, topic_id: i64) -> Option<String> {
+    let _guard = repo_topics_file();
+    let prefix = format!("{chat_id}:");
+    load_repo_topics(dir)
+        .into_iter()
+        .find_map(|(k, v)| (v == topic_id).then(|| k.strip_prefix(&prefix).map(str::to_string)).flatten())
+}
+
+/// Whether `topic_id` in `chat_id` is a repository topic in `repo-topics.json`.
+pub fn is_repo_topic(dir: &Path, chat_id: i64, topic_id: i64) -> bool {
+    repo_for_topic(dir, chat_id, topic_id).is_some()
+}
+
 /// Pending Telegram pairing codes live in `<chat dir>/pairing/`, under their hash, ten minutes, one
 /// use: the web crate's own functions, pointed at this folder.
 pub fn issue_pairing_code(dir: &Path) -> std::io::Result<String> {

@@ -27,6 +27,9 @@ use crate::limits::Verdict;
 use crate::limits::Watch;
 use ling_web_server::chat_settings::ChatSettings;
 
+use crate::repo_notice::RepoName;
+use crate::repo_notice::RepoNotice;
+use crate::repo_notice::RepoNoticeKind;
 use crate::store::ThreadRef;
 use crate::store::Threads;
 
@@ -54,6 +57,12 @@ pub enum Outbound {
     Message { chat: String, markdown: String },
     /// One line from the bridge itself, plain text.
     Notice { chat: String, text: String },
+    /// A fixed-template repository notice for Telegram or Discord (CHAT_REPOS §5.3, §12.2): never
+    /// free text.
+    RepoNotice { chat: String, notice: RepoNotice },
+    /// Fixed refusal when typed text arrives in a repository's topic or while a repository is
+    /// current for the chat (`Repo work happens in the app.` with the Open button, CHAT_REPOS §2).
+    RepoTypedRefusal { chat: String, repo: RepoName },
     /// A request from the agent, with its options; the last option always declines.
     Approval { chat: String, id: String, text: String, options: Vec<String> },
     /// An approval was answered, declined for lack of an answer, or resolved elsewhere.
@@ -72,6 +81,8 @@ impl Outbound {
             Outbound::Draft { chat, .. }
             | Outbound::Message { chat, .. }
             | Outbound::Notice { chat, .. }
+            | Outbound::RepoNotice { chat, .. }
+            | Outbound::RepoTypedRefusal { chat, .. }
             | Outbound::Approval { chat, .. }
             | Outbound::ApprovalClosed { chat, .. }
             | Outbound::ThreadNamed { chat, .. }
@@ -131,6 +142,8 @@ pub struct HubConfig {
     pub report_interval: Duration,
     /// How often pending Mini App launch-pair requests are looked for.
     pub pair_interval: Duration,
+    /// How often repository notices (`GET /api/repos/notices`) are looked for (default 2 s).
+    pub repo_notice_interval: Duration,
     /// After "answer now", how long before the interrupt; the final turn's time (limits.rs).
     pub grace: Duration,
     pub final_budget: Duration,
@@ -149,6 +162,7 @@ impl HubConfig {
             settings_file: None,
             report_interval: Duration::from_secs(300),
             pair_interval: Duration::from_secs(300),
+            repo_notice_interval: Duration::from_secs(2),
             grace: Duration::from_millis(limits::GRACE_MS),
             final_budget: Duration::from_millis(limits::FINAL_BUDGET_MS),
         }
@@ -351,6 +365,8 @@ pub struct Hub {
     closed: std::collections::VecDeque<String>,
     /// Pending Mini App launch-pair request ids already prompted to Telegram.
     seen_pairs: HashSet<String>,
+    /// 2-second cache of `/api/repos/current` per chat key, refreshed on Switched / RepoOff notices.
+    current_repo_cache: HashMap<String, (Instant, Option<RepoName>)>,
     /// Threads this connection is subscribed to (started or resumed since it was made).
     subscribed: HashSet<String>,
     airgap: Box<dyn Fn() -> bool + Send>,
@@ -428,6 +444,7 @@ impl Hub {
             uploaded: HashMap::new(),
             closed: std::collections::VecDeque::new(),
             seen_pairs: HashSet::new(),
+            current_repo_cache: HashMap::new(),
             subscribed: HashSet::new(),
             airgap,
             airgapped,
@@ -467,6 +484,11 @@ impl Hub {
         reports.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut pairs = tokio::time::interval_at(tokio::time::Instant::now() + self.config.pair_interval, self.config.pair_interval);
         pairs.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut repo_notices = tokio::time::interval_at(
+            tokio::time::Instant::now() + self.config.repo_notice_interval,
+            self.config.repo_notice_interval,
+        );
+        repo_notices.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 message = inbound.recv() => match message {
@@ -479,6 +501,7 @@ impl Hub {
                 },
                 _ = tick.tick() => self.on_tick(),
                 _ = pairs.tick() => self.push_pending_pairs().await,
+                _ = repo_notices.tick() => self.push_repo_notices().await,
                 _ = reports.tick() => {
                     self.push_reports().await;
                     self.push_sync_notices().await;
@@ -511,10 +534,18 @@ impl Hub {
                     );
                     return;
                 }
+                let trimmed = text.trim();
+                if adapter_of(&chat) == "telegram"
+                    && !trimmed.is_empty()
+                    && !trimmed.starts_with('/')
+                    && let Some(repo) = self.active_repo_for_telegram_chat(&chat).await
+                {
+                    self.send(Outbound::RepoTypedRefusal { chat, repo });
+                    return;
+                }
                 if self.answer_by_text(&chat, &text) {
                     return;
                 }
-                let trimmed = text.trim();
                 if trimmed.starts_with('/') {
                     self.command(&chat, trimmed).await;
                 } else if !trimmed.is_empty() {
@@ -527,6 +558,12 @@ impl Hub {
                         &chat,
                         "The air gap is on, so Telegram is paused: it would carry this conversation off your machine. Use Matrix, or turn the air gap off on the machine.",
                     );
+                    return;
+                }
+                if adapter_of(&chat) == "telegram"
+                    && let Some(repo) = self.active_repo_for_telegram_chat(&chat).await
+                {
+                    self.send(Outbound::RepoTypedRefusal { chat, repo });
                     return;
                 }
                 if let Some(line) = attachments::dropped_notice(&dropped) {
@@ -1167,6 +1204,97 @@ impl Hub {
             }
             let _ = crate::store::write_private(&seen_file, &seq.to_string());
         }
+    }
+
+    /// Repository notices (`GET /api/repos/notices?after=<seq>`, CHAT_REPOS §5.3, §12.2 G14):
+    /// last seq kept in `repo-notice-seen`, unparsable notices dropped, each parsed notice sent as
+    /// `Outbound::RepoNotice` (never `Outbound::Notice`). Refreshes the 2 s current-repo cache on
+    /// `Switched` and `RepoOff`.
+    pub async fn push_repo_notices(&mut self) {
+        let seen_file = self.config.dir.join("repo-notice-seen");
+        let seen = std::fs::read_to_string(&seen_file)
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0);
+        let Ok(value) = self.agent.web(&format!("/api/repos/notices?after={seen}"), None).await else { return };
+        let server_seq = value.get("seq").and_then(Value::as_u64);
+        let (list, mut highest) = if let Some(s) = server_seq
+            && seen > 0
+            && s < seen
+        {
+            // `ling web` restarted and its in-memory sequence reset: drain from 0.
+            let Ok(reset_val) = self.agent.web("/api/repos/notices?after=0", None).await else { return };
+            let s2 = reset_val.get("seq").and_then(Value::as_u64).unwrap_or(0);
+            let items = reset_val.get("notices").and_then(Value::as_array).cloned().unwrap_or_default();
+            (items, s2)
+        } else {
+            let items = value.get("notices").and_then(Value::as_array).cloned().unwrap_or_default();
+            (items, server_seq.unwrap_or(seen))
+        };
+
+        for raw in &list {
+            if let Some(item_seq) = raw.get("seq").and_then(Value::as_u64) {
+                highest = highest.max(item_seq);
+            }
+            let Some(notice) = RepoNotice::parse(raw) else { continue };
+            highest = highest.max(notice.seq);
+            match &notice.kind {
+                RepoNoticeKind::Switched { .. } => {
+                    self.current_repo_cache
+                        .insert(notice.chat_key.clone(), (Instant::now(), Some(notice.repo.clone())));
+                }
+                RepoNoticeKind::RepoOff { .. } => {
+                    self.current_repo_cache
+                        .insert(notice.chat_key.clone(), (Instant::now(), None));
+                }
+                _ => {}
+            }
+            if adapter_of(&notice.chat_key) == "telegram" && self.airgapped {
+                continue;
+            }
+            let chat = notice.chat_key.clone();
+            self.send(Outbound::RepoNotice { chat, notice });
+        }
+
+        if highest != seen || !list.is_empty() {
+            let _ = crate::store::write_private(&seen_file, &highest.to_string());
+        }
+    }
+
+    /// Returns the active `RepoName` for `chat` when typed text in Telegram must be refused
+    /// (`Repo work happens in the app.`):
+    /// - when the message is in a repository's topic (`repo-topics.json`), or
+    /// - when `/api/repos/current` names a repository for `chat` (cached for 2 s and refreshed on
+    ///   `Switched` / `RepoOff`). Ask in a non-repository topic works as before.
+    async fn active_repo_for_telegram_chat(&mut self, chat: &str) -> Option<RepoName> {
+        let (chat_id, topic) = crate::telegram::target(chat)?;
+        if let Some(topic_id) = topic {
+            if let Some(repo_str) = crate::store::repo_for_topic(&self.config.dir, chat_id, topic_id)
+                && let Some(repo) = RepoName::parse(&repo_str)
+            {
+                return Some(repo);
+            }
+            return self.cached_current_repo(chat).await;
+        }
+        self.cached_current_repo(chat).await
+    }
+
+    async fn cached_current_repo(&mut self, chat_key: &str) -> Option<RepoName> {
+        if let Some((at, cached)) = self.current_repo_cache.get(chat_key)
+            && at.elapsed() < Duration::from_secs(2)
+        {
+            return cached.clone();
+        }
+        let chat_param = chat_key.strip_prefix("telegram:")?;
+        let path = format!("/api/repos/current?bridge=telegram&chat={chat_param}");
+        let repo = self
+            .agent
+            .web(&path, None)
+            .await
+            .ok()
+            .and_then(|v| v.get("repo").and_then(Value::as_str).and_then(RepoName::parse));
+        self.current_repo_cache.insert(chat_key.to_string(), (Instant::now(), repo.clone()));
+        repo
     }
 
     /// Pending Telegram Mini App first-launch device pairing requests (`GET /api/telegram/pending-pairs`,

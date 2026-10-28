@@ -25,7 +25,7 @@ struct Log {
 
 impl Log {
     fn methods(&self) -> Vec<String> {
-        self.requests.lock().unwrap().iter().map(|(m, _)| m.clone()).collect()
+        self.requests.lock().unwrap().iter().filter(|(m, _)| m != "web").map(|(m, _)| m.clone()).collect()
     }
     fn params(&self, method: &str) -> Vec<Value> {
         self.requests.lock().unwrap().iter().filter(|(m, _)| m == method).map(|(_, p)| p.clone()).collect()
