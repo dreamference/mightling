@@ -15,6 +15,7 @@ from dreamference.swe_bench import (
     SweBenchInstanceRun,
     SweBenchRunner,
     SweBenchSettings,
+    swe_bench_image_builder,
     swe_bench_settings,
 )
 from dreamference.swe_bench.swe_bench_instance_run import CONTAINER_PATH
@@ -141,6 +142,8 @@ def machine(monkeypatch):
         SweBenchDocker, "run", classmethod(lambda cls, *a, **k: docker.run(*a, **k))
     )
     monkeypatch.setattr(SweBenchImages, "fetch_tags", classmethod(lambda cls: ["django-django-1"]))
+    # The disk check reads the real disk (a CI runner has 8 GiB free); these tests are about the builds.
+    monkeypatch.setattr(swe_bench_image_builder, "BUILD_HEADROOM_BYTES", 0)
     git_calls = []
 
     def fake_git(command, **kwargs):
