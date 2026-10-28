@@ -22,9 +22,9 @@ Bar (all four, then the owner's OK): combined rate of 4 conversations at or abov
 
 | Item | Owner | Blocker | Date |
 |---|---|---|---|
-| Paged KV: P4b merge (static map is P4a, merged) | P4b merge agent (second-puffin) | GPU lock on the dev host | 10-29 night soak |
+| Paged KV: P4b merge (static map is P4a, merged) | P4b merge agent (node-b) | GPU lock on the dev host | 10-29 night soak |
 | P4c, then P4d (shared KV and recurrent state pool, cross-request prefix reuse) | P4c agent | P4b merged; the usage-limit stop | P4c ~11-02 to 11-05, P4d ~11-06 to 11-09 (estimate; no agent has dated them) |
-| 4-conversation rate and identical-output measurement | nobody | P4c/P4d; second-puffin night of 10-30 (baselines) is armed, do not re-arm | after P4d |
+| 4-conversation rate and identical-output measurement | nobody | P4c/P4d; node-b night of 10-30 (baselines) is armed, do not re-arm | after P4d |
 | No-loss night on the final pin | nobody | final engine commit | one night after the pin, ~11-10 |
 | Engine pin moves in the Mightling repository (from `72c2a6a` / the 1.7.2 image) | nobody | the final engine commit; a new image on GHCR | with the bar |
 | `ling-serve --plan-only` (engine `d4adbd5`) missing from the pinned image: the pre-load check falls back to the 0.50 arena | nobody (comes with the new pin) | the pin; confirm `check_host_safety()` reads the plan, and test it | with the pin |
@@ -52,8 +52,8 @@ Bar (all four, then the owner's OK): combined rate of 4 conversations at or abov
 | Onyx backup folder and `onyx_*` volumes deleted | coordinator | date | 11-26 |
 | GitHub Support purge request (old commits; engine `403d083`) | coordinator drafts, owner sends | owner | owner's daily batch |
 | Ragon: name check, kept-on-purpose list, three asset sets, migration, mixed-version mDNS | rename-script agent | 1.9.0 rule: nothing else in that release | 11-18 and after |
-| Night 18 (engine `72c2a6a` against SGLang) and night 15b (third-puffin) | armed, 10-28 21:00 | none | results 10-29 morning |
-| Second-puffin nights 10-29 (P4 soak) and 10-30 (baselines) | armed, do not re-arm | none | 10-29, 10-30 |
+| Night 18 (engine `72c2a6a` against SGLang) and night 15b (node-c) | armed, 10-28 21:00 | none | results 10-29 morning |
+| Node-b nights 10-29 (P4 soak) and 10-30 (baselines) | armed, do not re-arm | none | 10-29, 10-30 |
 | Nights 19 to 21, days 2 to 4, `flash-next`, `night16` held in the queue | coordinator | held; decide which are needed for the 1.8.0 bar and release the rest after 1.9.0 | decide 10-30 |
 
 ## Not 1.x (paused; do not start)
