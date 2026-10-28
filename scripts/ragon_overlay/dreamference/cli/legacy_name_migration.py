@@ -23,6 +23,8 @@ import re
 import shutil
 import subprocess
 import sys
+import time
+from http import HTTPStatus
 from pathlib import Path
 from typing import Final
 
@@ -31,6 +33,20 @@ KEY_PREFIX: Final[str] = "ragon_"
 LEGACY_NIGHT_UNITS: Final[tuple] = ("mightling-night", "puffin-night")
 LEGACY_SERVICE_FILES: Final[tuple] = ("mightling-node.service", "puffin-node.service")
 LEGACY_SERVICE_TYPES: Final[tuple] = ("_mightling-node._tcp", "_puffin-node._tcp")
+LEGACY_FORGE_TYPES: Final[tuple] = ("_mightling-forge._tcp", "_puffin-forge._tcp")
+# The forge's container and network, its user units and the state folder inside its data folder.
+LEGACY_FORGE_NAME: Final[str] = "mightling-forge"
+LEGACY_FORGE_STATE: Final[str] = "mightling"
+LEGACY_PHONE_ACCOUNT: Final[str] = "mightling-phone"
+# The engine's containers: `ling-serve` and, while it scans, `ling-serve-scan-*`.
+LEGACY_ENGINE_CONTAINER: Final[str] = "ling-serve"
+# A Signal bridge's system account and unit (the sudo line renames the account; its uid stays).
+LEGACY_SIGNAL_UNIT: Final[Path] = Path("/etc/systemd/system/mightling-signal.service")
+LEGACY_SIGNAL_ACCOUNT: Final[str] = "mightling-signal"
+# The `main` record of an advertised node that serves a model a coding client can use.
+MAIN_RECORD_ON: Final[str] = "1"
+FORGE_RENAME_TRIES: Final[int] = 6
+FORGE_RENAME_WAIT_S: Final[int] = 5
 # (key comment, admin command) of the pairing lines each generation wrote.
 LEGACY_PAIRING: Final[tuple] = (("mightling-node", "ling-admin"), ("puffin-node", "puffin-admin"))
 LEGACY_DESKTOP_DATA: Final[tuple] = (
@@ -186,6 +202,8 @@ class LegacyNameMigration:
             cls.remove_old_links,
             cls.rewrite_user_config,
             cls.replace_night_units,
+            cls.remove_old_engine_containers,
+            cls.migrate_forge,
             cls.replace_service_file,
             cls.rewrite_authorized_keys,
             cls.rekey_paired_nodes,
@@ -226,9 +244,16 @@ class LegacyNameMigration:
             str | None: The command (AppArmor profiles, the Avahi file), or None when there are none.
         """
         old = [Path("/etc/apparmor.d") / name for name in ("puffin-bwrap", "mightling-bwrap")]
-        if any(path.exists() for path in old):
-            return "sudo ragon-admin host setup"
-        return None
+        lines = ["sudo ragon-admin host setup"] if any(path.exists() for path in old) else []
+        if LEGACY_SIGNAL_UNIT.exists():
+            # The account keeps its uid, so the bridge's state and the device link survive; `ragon signal
+            # start` installs the unit under its new name.
+            lines.append(
+                f"sudo sh -c 'systemctl disable --now {LEGACY_SIGNAL_UNIT.name}; "
+                f"usermod -l ragon-signal {LEGACY_SIGNAL_ACCOUNT}; "
+                f"groupmod -n ragon-signal {LEGACY_SIGNAL_ACCOUNT}; rm -f {LEGACY_SIGNAL_UNIT}'"
+            )
+        return "; ".join(lines) if lines else None
 
     @classmethod
     def move_install_dir(cls) -> str | None:
@@ -389,6 +414,144 @@ class LegacyNameMigration:
         return "; ".join(lines) if lines else None
 
     @classmethod
+    def with_both_types(cls, text: str) -> str:
+        """Renders an old service file's records again, so the new file carries both service types.
+
+        Args:
+            text: The old file's text, its types already renamed.
+
+        Returns:
+            str: The text of a file that advertises the node (and the forge) under both types; the
+            given text when its records cannot be read.
+        """
+        from dreamference.node.node_service_file import NodeServiceFile
+
+        records = NodeServiceFile.parse(text)
+        if not records or not records.get("node"):
+            return text
+
+        def number(key: str) -> int | None:
+            return int(records[key]) if records.get(key, "").isdigit() else None
+
+        try:
+            return NodeServiceFile.render(
+                port=int(records["port"]),
+                node_id=records["node"],
+                version=records.get("version", ""),
+                state=records.get("state") or "stopped",
+                web_port=number("web"),
+                search_port=number("search"),
+                main=records.get("main") == MAIN_RECORD_ON,
+                remote=records.get("remote") or None,
+                forge=NodeServiceFile.parse_forge(text),
+            )
+        except ValueError:
+            return text
+
+    @classmethod
+    def remove_old_engine_containers(cls) -> str | None:
+        """Removes the model server's containers that still carry the old name.
+
+        The engine starts again under its new name at the next `ragon-admin server start`. This
+        runs by day only: the migration waits while a Night Shift or SWE-bench run is active.
+
+        Returns:
+            str | None: A line when a container was removed.
+        """
+        from dreamference.forge.forge_container import ForgeContainer
+
+        listed = ForgeContainer.docker(["ps", "-a", "--format", "{{.Names}}"], timeout=30)
+        names = [
+            name
+            for name in listed.stdout.split()
+            if name == LEGACY_ENGINE_CONTAINER or name.startswith(f"{LEGACY_ENGINE_CONTAINER}-scan-")
+        ]
+        removed = [name for name in names if ForgeContainer.docker(["rm", "-f", name]).returncode == 0]
+        if not removed:
+            return None
+        return f"removed the container {', '.join(removed)}; `ragon-admin server start` starts the engine again"
+
+    @classmethod
+    def forge_leftovers(cls) -> tuple[list[Path], Path]:
+        """Finds what an older forge left behind.
+
+        Returns:
+            tuple[list[Path], Path]: The old user unit files, and the old state folder inside the
+            forge's data folder (which may not exist).
+        """
+        from dreamference.forge.forge_service import ForgeService
+        from dreamference.forge.forge_settings import ForgeSettings
+
+        units = sorted(path for path in ForgeService.unit_dir().glob(f"{LEGACY_FORGE_NAME}*") if path.is_file())
+        return units, ForgeSettings.data_dir() / LEGACY_FORGE_STATE
+
+    @classmethod
+    def migrate_forge(cls) -> str | None:
+        """Moves the forge to its new names: units, container, network, state folder and phone account.
+
+        The forge's data (repositories, database) is host data and stays where it is. The old
+        container and network are removed and the new ones are made when the units start again,
+        if the forge was enabled.
+
+        Returns:
+            str | None: A line when anything of the old forge was found.
+        """
+        from dreamference.forge.forge_container import ForgeContainer
+        from dreamference.forge.forge_service import TIMERS, ForgeService
+        from dreamference.forge.forge_settings import UNIT, ForgeSettings
+
+        units, old_state = cls.forge_leftovers()
+        if not units and not old_state.is_dir():
+            return None
+        old_service = f"{LEGACY_FORGE_NAME}.service"
+        enabled = ForgeService.systemctl("is-enabled", old_service).returncode == 0
+        if units:
+            ForgeService.systemctl("disable", "--now", *[path.name for path in units])
+            for path in units:
+                path.unlink()
+        ForgeContainer.docker(["rm", "-f", LEGACY_FORGE_NAME], timeout=60)
+        ForgeContainer.docker(["network", "rm", LEGACY_FORGE_NAME], timeout=30)
+        new_state = ForgeSettings.data_dir() / "ragon"
+        if old_state.is_dir() and not new_state.exists():
+            shutil.move(str(old_state), str(new_state))
+        if not enabled:
+            ForgeService.systemctl("daemon-reload")
+            return "moved the forge to its new names (it was off)"
+        ForgeService.install_units()
+        ForgeService.systemctl("enable", "--now", UNIT, *TIMERS)
+        renamed = cls.rename_phone_account()
+        return "moved the forge to its new names" + (f"; {renamed}" if renamed else "")
+
+    @classmethod
+    def rename_phone_account(cls) -> str | None:
+        """Renames the forge's phone account through Forgejo's admin API (its token survives).
+
+        Returns:
+            str | None: A line when the account was renamed, or why it was not.
+        """
+        from dreamference.forge.forge_accounts import ForgeAccounts
+        from dreamference.forge.forge_container import ForgeContainer
+        from dreamference.forge.forge_phone import PHONE_ACCOUNT
+
+        admin = ForgeAccounts.admin_token()
+        if not admin:
+            return None
+        status = 0
+        for _ in range(FORGE_RENAME_TRIES):
+            status, _body = ForgeContainer.api("GET", f"/users/{LEGACY_PHONE_ACCOUNT}", admin, timeout=10)
+            if status:
+                break
+            time.sleep(FORGE_RENAME_WAIT_S)
+        if status != HTTPStatus.OK:
+            return None
+        status, _body = ForgeContainer.api(
+            "POST", f"/admin/users/{LEGACY_PHONE_ACCOUNT}/rename", admin, {"new_username": PHONE_ACCOUNT}
+        )
+        if status in (HTTPStatus.OK, HTTPStatus.NO_CONTENT):
+            return f"renamed the forge account {LEGACY_PHONE_ACCOUNT} to {PHONE_ACCOUNT}"
+        return f"could not rename the forge account {LEGACY_PHONE_ACCOUNT} (answer {status})"
+
+    @classmethod
     def replace_service_file(cls) -> str | None:
         """Points the old Avahi file at the new service type, then moves it to its new name.
 
@@ -399,7 +562,11 @@ class LegacyNameMigration:
             Optional[str]: A line when the old file was found.
         """
         from dreamference.node.node_advertiser import NodeAdvertiser
-        from dreamference.node.node_service_file import SERVICE_TYPE, NodeServiceFile
+        from dreamference.node.node_service_file import (
+            FORGE_SERVICE_TYPE,
+            SERVICE_TYPE,
+            NodeServiceFile,
+        )
 
         new = NodeServiceFile.service_path
         line = None
@@ -410,6 +577,9 @@ class LegacyNameMigration:
             text = legacy.read_text()
             for old_type in LEGACY_SERVICE_TYPES:
                 text = text.replace(old_type, SERVICE_TYPE)
+            for old_type in LEGACY_FORGE_TYPES:
+                text = text.replace(old_type, FORGE_SERVICE_TYPE)
+            text = cls.with_both_types(text)
             try:
                 legacy.write_text(text)
             except OSError:

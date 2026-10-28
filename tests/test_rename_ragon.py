@@ -202,3 +202,53 @@ def test_predecessor_files_and_the_webview_id():
     ):
         assert rr.content_excluded(path)
     assert rr.transform('"dev.dreamference.mightling"') == '"dev.dreamference.ragon"'
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("ling-code def foo", "ragon-code def foo"),
+        ("run `ling-docs search`", "run `ragon-docs search`"),
+        ("a\\nling-search", "a\\nragon-search"),
+    ],
+)
+def test_the_tool_names_after_an_escape_or_a_backtick_are_renamed(old, new):
+    assert rr.transform(old) == new
+
+
+@pytest.mark.parametrize(
+    "peer",
+    [
+        "mightling-1a2b3c4d-1111-2222-3333-444455556666",
+        "mightling-ab.netbird.selfhosted",
+    ],
+)
+def test_enrolled_peer_names_keep_the_old_prefix(peer):
+    assert rr.transform(f"peer {peer} joined") == f"peer {peer} joined"
+    assert rr.LEFTOVER.search(rr.masked(peer)) is None
+
+
+def test_the_protected_words_do_not_count_as_leftovers():
+    for word in ("mightling-release-key", "mightling-adapter", "still runs Mightling: `ling update` there"):
+        assert rr.LEFTOVER.search(rr.masked(word)) is None
+
+
+def test_a_compat_edit_with_a_missing_anchor_aborts(tmp_path, monkeypatch):
+    (tmp_path / "a.txt").write_text("nothing to anchor on\n")
+    monkeypatch.setattr(rr, "COMPAT_EDITS", [("a.txt", "absent text", "x", 1)])
+    with pytest.raises(SystemExit):
+        rr.apply_compat(tmp_path, False)
+
+
+def test_every_compat_edit_names_an_anchor_that_occurs_a_fixed_number_of_times():
+    for entry in rr.COMPAT_EDITS:
+        path, old, new, count = entry
+        assert path and old and new != old and count >= 1
+
+
+def test_a_compat_edit_is_applied_once_and_a_second_run_does_nothing(tmp_path, monkeypatch):
+    (tmp_path / "a.txt").write_text("keep\nanchor\n")
+    monkeypatch.setattr(rr, "COMPAT_EDITS", [("a.txt", "anchor\n", "anchor\nextra\n", 1)])
+    assert rr.apply_compat(tmp_path, False) == 1
+    assert (tmp_path / "a.txt").read_text() == "keep\nanchor\nextra\n"
+    assert rr.apply_compat(tmp_path, False) == 0

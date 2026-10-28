@@ -258,6 +258,10 @@ def leftovers(root, files=None):
 COMPAT_KEEP = [
     "MIGHTLING_LEGACY_MIGRATION",
     "_mightling-node._tcp",
+    "ai.dreamference.ling-engine.commit",
+    "_mightling-forge._tcp",
+    "/scripts/rename_mightling.py",
+    "**Search your own documents.** Mightling now keeps",
     "mightling.slice/mightling-index.slice",
     "ling-swe-*",
     "still runs Mightling: `ling update` there",
@@ -437,6 +441,112 @@ COMPAT_EDITS = [
         NODE_STRIP + "        .or_else(|| fullname.strip_suffix(locator::LEGACY_SERVICE_TYPE))\n",
         1,
     ),
+    (
+        "ragon-rs/src/node.rs",
+        "    pub main: bool,\n}\n",
+        "    pub main: bool,\n    /// Found only through the type the older releases announce: the node has not updated.\n    pub legacy: bool,\n}\n",
+        1,
+    ),
+    (
+        "ragon-rs/src/node.rs",
+        '        main: record("main").is_some_and(|value| value != "0"),\n    })\n',
+        '        main: record("main").is_some_and(|value| value != "0"),\n'
+        "        legacy: fullname.ends_with(locator::LEGACY_SERVICE_TYPE),\n    })\n",
+        1,
+    ),
+    (
+        "ragon-rs/src/node.rs",
+        "                node: Node { address, ..advert.node },\n                ..advert\n",
+        "                node: Node { address, ..advert.node },\n                legacy: existing.legacy && advert.legacy,\n                ..advert\n",
+        1,
+    ),
+    (
+        "ragon-rs/src/node.rs",
+        '            state: "ready".to_string(),\n            main: true,\n        }\n',
+        '            state: "ready".to_string(),\n            main: true,\n            legacy: false,\n        }\n',
+        1,
+    ),
+    (
+        "ragon-rs/src/remote_join.rs",
+        '            state: "ready".into(),\n            main,\n        }\n',
+        '            state: "ready".into(),\n            main,\n            legacy: false,\n        }\n',
+        1,
+    ),
+    (
+        "ragon-rs/src/node.rs",
+        '            lines.push(format!("      off the LAN: {} (remote access)", node.remote));\n        }\n',
+        '            lines.push(format!("      off the LAN: {} (remote access)", node.remote));\n        }\n'
+        "        if advert.legacy {\n"
+        '            lines.push("      still runs Mightling: `ling update` there".to_string());\n'
+        "        }\n",
+        1,
+    ),
+    (
+        "dreamference/forge/forge_settings.py",
+        'SERVICE_TYPE: Final[str] = "_ragon-forge._tcp"\n',
+        'SERVICE_TYPE: Final[str] = "_ragon-forge._tcp"\n'
+        "# The type 1.5 to 1.8 nodes announce the forge under: published and browsed for one release.\n"
+        'LEGACY_SERVICE_TYPE: Final[str] = "_mightling-forge._tcp"\n',
+        1,
+    ),
+    (
+        "dreamference/forge/forge_service.py",
+        "    MEMORY_CAP_GIB,\n    ROLE_MIRROR,\n",
+        "    LEGACY_SERVICE_TYPE,\n    MEMORY_CAP_GIB,\n    ROLE_MIRROR,\n",
+        1,
+    ),
+    (
+        "dreamference/forge/forge_service.py",
+        "        for entry in NodeBrowser.browse_service(SERVICE_TYPE):\n",
+        "        for entry in NodeBrowser.browse_service(SERVICE_TYPE) + NodeBrowser.browse_service(LEGACY_SERVICE_TYPE):\n",
+        1,
+    ),
+    (
+        "dreamference/forge/forge_service.py",
+        "        for entry in NodeBrowser.browse_service(SERVICE_TYPE) + NodeBrowser.browse():\n",
+        "        legacy = NodeBrowser.browse_service(LEGACY_SERVICE_TYPE)\n"
+        "        for entry in NodeBrowser.browse_service(SERVICE_TYPE) + legacy + NodeBrowser.browse():\n",
+        1,
+    ),
+    (
+        "dreamference/node/node_service_file.py",
+        'FORGE_SERVICE_TYPE: Final[str] = "_ragon-forge._tcp"\n',
+        'FORGE_SERVICE_TYPE: Final[str] = "_ragon-forge._tcp"\n'
+        'LEGACY_FORGE_SERVICE_TYPE: Final[str] = "_mightling-forge._tcp"\n',
+        1,
+    ),
+    (
+        "dreamference/node/node_service_file.py",
+        '            lines += ["  <service>", f"    <type>{FORGE_SERVICE_TYPE}</type>", f"    <port>{int(forge_port)}</port>",\n'
+        "                      f\"    <txt-record>{escape(f'node={node_id}')}</txt-record>\",\n"
+        "                      f\"    <txt-record>{escape(f'role={role}')}</txt-record>\", \"  </service>\"]\n",
+        "            for forge_type in (FORGE_SERVICE_TYPE, LEGACY_FORGE_SERVICE_TYPE):\n"
+        "                lines += [\n"
+        '                    "  <service>",\n'
+        '                    f"    <type>{forge_type}</type>",\n'
+        '                    f"    <port>{int(forge_port)}</port>",\n'
+        "                    f\"    <txt-record>{escape(f'node={node_id}')}</txt-record>\",\n"
+        "                    f\"    <txt-record>{escape(f'role={role}')}</txt-record>\",\n"
+        '                    "  </service>",\n'
+        "                ]\n",
+        1,
+    ),
+    (
+        "dreamference/vllm_server/ragon_serve_launch_builder.py",
+        'RAGON_ENGINE_COMMIT_LABEL: Final[str] = "ai.dreamference.ragon-engine.commit"\n',
+        'RAGON_ENGINE_COMMIT_LABEL: Final[str] = "ai.dreamference.ragon-engine.commit"\n'
+        "# The label of an image built before the rename (a 1.8 pin): still read for one release.\n"
+        'LEGACY_ENGINE_COMMIT_LABEL: Final[str] = "ai.dreamference.ling-engine.commit"\n',
+        1,
+    ),
+    (
+        "dreamference/vllm_server/ragon_serve_launch_builder.py",
+        '        commit = str(labels.get(RAGON_ENGINE_COMMIT_LABEL) or "unknown")\n',
+        "        commit = str(\n"
+        "            labels.get(RAGON_ENGINE_COMMIT_LABEL) or labels.get(LEGACY_ENGINE_COMMIT_LABEL) or \"unknown\"\n"
+        "        )\n",
+        1,
+    ),
     ("ragon-code-rs/src/scip_store.rs", SCIP_FILTER_OLD, SCIP_FILTER_NEW, 1),
     ("ragon-code-rs/src/scip_store.rs", SCIP_HAS_OLD, SCIP_HAS_NEW, 1),
     ("ragon-code-rs/src/scip_store.rs", SCIP_OPEN_ANCHOR, SCIP_OPEN_NEW, 1),
@@ -490,7 +600,7 @@ COMPAT_EDITS = [
     (
         "tests/test_forge.py",
         'assert text.count("<service>") == 2 and',
-        'assert text.count("<service>") == 3 and',
+        'assert text.count("<service>") == 4 and',
         1,
     ),
     (
@@ -584,8 +694,8 @@ def apply_compat(root, dry):
         if not full.exists():
             continue  # a partial tree (a rehearsal fixture); the real tree has every file
         text = full.read_text(encoding="utf-8")
-        if new in text and old != new and text.count(new) >= 1 and text.count(old) == 0:
-            continue
+        if old != new and new in text:
+            continue  # applied already: a second run, or an edit whose new text holds the old
         if text.count(old) != count:
             sys.exit(
                 f"compat edit anchor not found {count}x in {path}: {old.strip()[:70]!r} ({text.count(old)}x)"

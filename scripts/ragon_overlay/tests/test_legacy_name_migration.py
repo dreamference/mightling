@@ -387,3 +387,110 @@ def test_the_old_switch_set_to_0_still_blocks_it(monkeypatch):
         LegacyNameMigration, "release_install", classmethod(lambda cls, package_dir=None: True)
     )
     assert not LegacyNameMigration.allowed()
+
+
+class _Result:
+    def __init__(self, stdout="", returncode=0):
+        self.stdout = stdout
+        self.returncode = returncode
+
+
+def test_the_old_engine_containers_are_removed_and_the_sidecars_are_left(monkeypatch):
+    from dreamference.forge.forge_container import ForgeContainer
+
+    calls = []
+
+    def docker(argv, timeout=120, input_text=None):
+        calls.append(list(argv))
+        listing = "ling-serve\nling-serve-scan-3\ndreamference-gate\nragon-serve\n"
+        return _Result(listing if argv[0] == "ps" else "")
+
+    monkeypatch.setattr(ForgeContainer, "docker", staticmethod(docker))
+
+    line = LegacyNameMigration.remove_old_engine_containers()
+
+    removed = [call[-1] for call in calls if call[0] == "rm"]
+    assert removed == ["ling-serve", "ling-serve-scan-3"]
+    assert "ling-serve" in line and "server start" in line
+
+
+def test_no_old_engine_container_means_no_line(monkeypatch):
+    from dreamference.forge.forge_container import ForgeContainer
+
+    monkeypatch.setattr(
+        ForgeContainer, "docker", staticmethod(lambda argv, **kw: _Result("ragon-serve\n"))
+    )
+    assert LegacyNameMigration.remove_old_engine_containers() is None
+
+
+def test_an_old_forge_is_moved_to_its_new_names(monkeypatch, tmp_home):
+    from dreamference.forge.forge_accounts import ForgeAccounts
+    from dreamference.forge.forge_container import ForgeContainer
+    from dreamference.forge.forge_service import ForgeService
+    from dreamference.forge.forge_settings import ForgeSettings
+
+    units = tmp_home / ".config/systemd/user"
+    units.mkdir(parents=True)
+    for name in ("mightling-forge.service", "mightling-forge-tick.timer", "other.service"):
+        (units / name).write_text("[Unit]\n")
+    state = ForgeSettings.data_dir() / "mightling"
+    state.mkdir(parents=True)
+    (state / "frozen").write_text("1")
+    systemctl, docker, api = [], [], []
+    monkeypatch.setattr(
+        ForgeService,
+        "systemctl",
+        classmethod(lambda cls, *args: systemctl.append(args) or _Result()),
+    )
+    monkeypatch.setattr(ForgeService, "install_units", classmethod(lambda cls: None))
+    monkeypatch.setattr(
+        ForgeContainer,
+        "docker",
+        staticmethod(lambda argv, **kw: docker.append(list(argv)) or _Result()),
+    )
+
+    def fake_api(method, path, token, body=None, timeout=0):
+        api.append((method, path, body))
+        return 200, {}
+
+    monkeypatch.setattr(ForgeContainer, "api", staticmethod(fake_api))
+    monkeypatch.setattr(ForgeAccounts, "admin_token", classmethod(lambda cls: "token"))
+
+    line = LegacyNameMigration.migrate_forge()
+
+    assert line and "renamed the forge account" in line
+    assert sorted(path.name for path in units.iterdir()) == ["other.service"]
+    assert (ForgeSettings.data_dir() / "ragon/frozen").read_text() == "1" and not state.exists()
+    assert ["rm", "-f", "mightling-forge"] in docker and ["network", "rm", "mightling-forge"] in docker
+    assert any(call[0] == "enable" for call in systemctl)
+    assert ("POST", "/admin/users/mightling-phone/rename", {"new_username": "ragon-phone"}) in api
+    assert LegacyNameMigration.migrate_forge() is None, "a second run finds nothing to do"
+
+
+def test_an_old_service_file_is_rendered_again_with_both_types():
+    text = (
+        "<service-group><name>%h</name>"
+        "<service><type>_ragon-node._tcp</type><port>8000</port>"
+        "<txt-record>node=n-1</txt-record><txt-record>version=1.8</txt-record>"
+        "<txt-record>state=ready</txt-record></service>"
+        "<service><type>_ragon-forge._tcp</type><port>3200</port>"
+        "<txt-record>role=record</txt-record></service></service-group>"
+    )
+
+    out = LegacyNameMigration.with_both_types(text)
+
+    assert out.count("<service>") == 4
+    assert "_mightling-node._tcp" in out and "_mightling-forge._tcp" in out
+    assert LegacyNameMigration.with_both_types("not a service file") == "not a service file"
+
+
+def test_the_sudo_line_names_the_signal_account_only_when_the_old_unit_is_there(
+    monkeypatch, tmp_path
+):
+    unit = tmp_path / "mightling-signal.service"
+    monkeypatch.setattr(legacy_name_migration, "LEGACY_SIGNAL_UNIT", unit)
+    monkeypatch.setattr(Path, "exists", lambda self: self == unit and unit.is_file())
+    assert LegacyNameMigration.privileged_line() is None
+    unit.write_text("[Unit]\n")
+    line = LegacyNameMigration.privileged_line()
+    assert "usermod -l ragon-signal mightling-signal" in line and "groupmod -n" in line

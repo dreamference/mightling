@@ -148,6 +148,13 @@ const APP_DATA: &[(&str, &str)] = &[
     ),
     ("AppData/Local/dev.dreamference.mightling", "AppData/Local/dev.dreamference.ragon"),
 ];
+/// On Windows the install folders of the earlier names and the new one, relative to the profile folder.
+/// A running program cannot be moved there, so the folder is copied and the old one left (the
+/// installer, run again, removes it).
+const WINDOWS_PROGRAMS: &[(&str, &str)] = &[
+    ("AppData/Local/Programs/Mightling", "AppData/Local/Programs/Ragon"),
+    ("AppData/Local/Programs/Puffin", "AppData/Local/Programs/Ragon"),
+];
 /// Folders of the moved home that hold git worktrees, repaired after the move.
 const WORKTREE_FOLDERS: &[&str] = &["worktrees", "chat-repos", "night"];
 
@@ -190,6 +197,7 @@ impl Report {
 pub fn migrate(home: &Path, cwd: &Path, config_path: Option<&Path>) -> Report {
     let mut report = Report::default();
     move_install_dir(home, &mut report);
+    copy_windows_install(home, &mut report);
     relink(home, &mut report);
     move_home(home, &mut report);
     let mut configs = vec![
@@ -260,6 +268,34 @@ fn move_install_dir(home: &Path, report: &mut Report) {
         if from.is_file() && std::fs::symlink_metadata(&to).is_err() && std::fs::rename(&from, &to).is_ok() {
             report.lines.push(format!("renamed {old} to {new}"));
         }
+    }
+}
+
+/// The Windows install folder (`Programs\Mightling`) copied to `Programs\Ragon`, its programs under
+/// their new names (`ling.exe` becomes `ragon.exe`). Nothing happens where the old folder does not exist,
+/// which is everywhere but a Windows machine that had Mightling or Puffin.
+fn copy_windows_install(home: &Path, report: &mut Report) {
+    for (old, new) in WINDOWS_PROGRAMS {
+        let (legacy, current) = (home.join(old), home.join(new));
+        if !legacy.is_dir() || std::fs::symlink_metadata(&current).is_ok() {
+            continue;
+        }
+        if copy_tree(&legacy, &current).is_err() {
+            let _ = std::fs::remove_dir_all(&current);
+            continue;
+        }
+        let bin = current.join("bin");
+        for (from_name, to_name) in BINARIES {
+            let (from, to) = (bin.join(format!("{from_name}.exe")), bin.join(format!("{to_name}.exe")));
+            if from.is_file() && std::fs::symlink_metadata(&to).is_err() {
+                let _ = std::fs::rename(&from, &to);
+            }
+        }
+        report.lines.push(format!(
+            "copied {} to {}; run the installer again to put the new folder on PATH and remove the old one",
+            legacy.display(),
+            current.display()
+        ));
     }
 }
 
@@ -781,6 +817,26 @@ mod tests {
         assert!(is_installed_binary(&link, &exe));
         let _ = std::fs::remove_file(&link);
         let _ = std::fs::remove_dir_all(&real);
+    }
+
+    #[test]
+    fn a_windows_install_folder_is_copied_under_the_new_names() {
+        let home = scratch("windows-programs");
+        let bin = home.join("AppData/Local/Programs/Mightling/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("ling.exe"), "binary").unwrap();
+        std::fs::write(bin.join("ling-docs.exe"), "docs").unwrap();
+        let mut report = Report::default();
+        copy_windows_install(&home, &mut report);
+        let new_bin = home.join("AppData/Local/Programs/Ragon/bin");
+        assert_eq!(std::fs::read_to_string(new_bin.join("ragon.exe")).unwrap(), "binary");
+        assert!(new_bin.join("ragon-docs.exe").is_file() && !new_bin.join("ling.exe").exists());
+        assert!(bin.join("ling.exe").is_file(), "the old folder is left as it was");
+        assert_eq!(report.lines.len(), 1);
+        let mut again = Report::default();
+        copy_windows_install(&home, &mut again);
+        assert!(again.is_empty(), "a second run finds the new folder and does nothing");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
