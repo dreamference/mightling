@@ -85,10 +85,13 @@ def test_the_shared_build_holds_every_build_and_publishes_nothing() -> None:
     assert build_inputs["sign"]["default"] is False
 
 
-def test_the_dry_run_runs_nightly_and_by_hand_and_calls_the_same_build() -> None:
+def test_the_dry_run_runs_by_hand_and_the_timer_and_calls_the_same_build_and_calls_the_same_build() -> (
+    None
+):
     dry = workflow("release-dry-run.yml")
     on = trigger(dry)
-    assert on["schedule"] == [{"cron": "7 2 * * *"}]
+    # gx10's mightling-release-dry-run.timer is the only scheduler (a second one ran it twice a day).
+    assert "schedule" not in on
     assert "workflow_dispatch" in on
     jobs = dry["jobs"]
     build = jobs["build"]

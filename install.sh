@@ -318,9 +318,15 @@ else
     else
         release_url="$API/repos/$REPO/releases/latest"
     fi
-    if ! curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$release_url" -o "$WORK/release.json"; then
-        say "❌ Could not read $release_url" >&2
-        if [ -z "$TOKEN" ]; then
+    HTTP_CODE="$(curl -sSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$release_url" -o "$WORK/release.json" -w '%{http_code}' 2>"$WORK/release.err")" || HTTP_CODE="000"
+    if [ "$HTTP_CODE" != "200" ]; then
+        say "❌ Could not read $release_url (HTTP $HTTP_CODE)" >&2
+        [ "$HTTP_CODE" != "000" ] || say "   $(tr '\n' ' ' < "$WORK/release.err")" >&2
+        if { [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "429" ]; } && grep -qi 'rate limit' "$WORK/release.json" 2>/dev/null; then
+            say "   GitHub's API rate limit is used up for this network. Wait a while, or set GH_TOKEN" >&2
+            say "   (or GITHUB_TOKEN) to any GitHub token (a limit per account instead of per address)," >&2
+            say "   and run this again." >&2
+        elif [ -z "$TOKEN" ]; then
             say "   Check the network and that $REPO has a published release. If the repository is" >&2
             say "   private, set GH_TOKEN (or GITHUB_TOKEN) to a token that can read it, or log in with" >&2
             say "   \`gh auth login\`, and run this again." >&2
@@ -330,15 +336,20 @@ else
         exit 1
     fi
 
-    TAG="$(awk -F'"' '/^  "tag_name":/ {print $4; exit}' "$WORK/release.json")"
+    # GitHub prints the answer indented or, behind some networks' proxies, compact on one line, so
+    # it is first cut into one member per line (after every comma, brace and bracket) and then
+    # matched with any whitespace around the colon. No jq or python is needed.
+    awk '{ gsub(/[,{}[]/, "&\n"); print }' "$WORK/release.json" | tr -d '\r' > "$WORK/release.lines"
+
+    TAG="$(awk -F'"' '/^[[:space:]]*"tag_name"[[:space:]]*:/ {print $4; exit}' "$WORK/release.lines")"
     [ -n "$TAG" ] || fail "the release at $release_url has no tag."
 
     # "name<TAB>API url" for every asset. GitHub prints an asset's own "url" before its "name"; the
     # uploader's "url" in between is a user URL and is not taken.
     awk -F'"' '
-        /"url": "[^"]*\/releases\/assets\/[0-9]+"/ { url = $4 }
-        /^      "name":/ && url != "" { print $4 "\t" url; url = "" }
-    ' "$WORK/release.json" > "$WORK/assets.tsv"
+        /^[[:space:]]*"url"[[:space:]]*:[[:space:]]*"[^"]*\/releases\/assets\/[0-9]+"/ { url = $4 }
+        /^[[:space:]]*"name"[[:space:]]*:/ && url != "" { print $4 "\t" url; url = "" }
+    ' "$WORK/release.lines" > "$WORK/assets.tsv"
 
     asset_url() { awk -F'\t' -v name="$1" '$1 == name {print $2; exit}' "$WORK/assets.tsv"; }
 
