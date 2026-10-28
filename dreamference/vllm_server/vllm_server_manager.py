@@ -21,7 +21,7 @@ from dreamference.hardware.model_matrix_registry import ENGINE_VLLM, ModelMatrix
 from dreamference.vllm_server.vllm_server_status import VLLMServerStatus
 from dreamference.vllm_server.vllm_log_streamer import VLLMLogStreamer
 from dreamference.vllm_server.psi_watchdog import MemoryPressureWatchdog
-from dreamference.vllm_server.ling_serve_launch_builder import LingServeLaunchBuilder
+from dreamference.vllm_server.ling_serve_launch_builder import LING_SERVE_PROGRAM, LingServeLaunchBuilder
 from dreamference.vllm_server.sglang_launch_builder import SGLangLaunchBuilder
 from dreamference.config.dreamference_config import (
     DreamferenceConfig,
@@ -1547,7 +1547,7 @@ class VLLMServerManager:
                 subprocess.run(
                     [
                         "docker", "run", "--rm",
-                        "-v", f"{os.path.expanduser('~/.cache/dreamference')}:/root/.cache/dreamference",
+                        "-v", f"{Path.home() / '.cache' / 'dreamference'}:/root/.cache/dreamference",
                         "--entrypoint", "rm", docker_image,
                         "-rf", f"{CONTAINER_VLLM_CACHE_ROOT}/torch_compile_cache",
                     ],
@@ -1570,6 +1570,55 @@ class VLLMServerManager:
             pass
 
         return cleared
+
+    @classmethod
+    def ling_serve_plan(cls, docker_image: str, model: str, recipe: dict[str, Any]) -> dict[str, int] | None:
+        """Asks ling-serve for the memory it plans to take, before anything is loaded.
+
+        ling-serve sizes its sessions and context from MemAvailable at start (ling-engine
+        specs/DREAMFERENCE_LING_ENGINE_BATCHING.md §5.6), so the host-safety check has to follow
+        that plan and not the recipe's arena. `--plan-only` prints it as one JSON line and exits.
+
+        Args:
+            docker_image: The pinned ling-serve image.
+            model: The registry model.
+            recipe: The model's `engine: ling` recipe.
+
+        Returns:
+            dict[str, int] | None: `sessions`, `batch`, `max_context` and `planned_bytes`, or None
+                when the engine gave no plan (an image older than the flag, a refusal, a timeout).
+        """
+        import json
+
+        from dreamference.hardware import resolve_model_hf_repo
+        from dreamference.hardware.model_downloader import ModelDownloader
+
+        cmd = [
+            "docker", "run", "--rm", "--entrypoint", LING_SERVE_PROGRAM,
+            *ModelDownloader.container_volume_args(),
+            "-v", f"{Path.home() / '.cache' / 'dreamference'}:/root/.cache/dreamference",
+            docker_image,
+            *LingServeLaunchBuilder.server_args(
+                resolve_model_hf_repo(model), recipe, 8000, recipe.get("max_model_len"),
+            )[1:],
+            "--plan-only",
+        ]
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if out.returncode != 0:
+            return None
+        for line in reversed(out.stdout.splitlines()):
+            try:
+                plan = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(plan, dict) and all(
+                isinstance(plan.get(k), int) for k in ("sessions", "batch", "max_context", "planned_bytes")
+            ):
+                return plan
+        return None
 
     def start_server(
         self,
@@ -1785,7 +1834,11 @@ class VLLMServerManager:
         side_services = self.side_service_allowance()
         side_gb = sum(gb for _, gb in side_services)
         required_gb = arena_gb + transient_gb + side_gb
-        if actual_free_gb < required_gb:
+        # ling-serve sizes its own sessions and context from MemAvailable at start (BATCHING §5.6), so
+        # its recipe's 0.50 arena is not what it takes: for it this check is made below, against the
+        # engine's own plan, once the checkpoint is on disk for the engine to read.
+        engine_plans = LingServeLaunchBuilder.is_ling(overrides)
+        if not engine_plans and actual_free_gb < required_gb:
             # The arena is a fraction of total memory, so the fix is expressed as the fraction
             # that would fit — otherwise the operator is left to work backwards from four numbers.
             max_utilization = max(0.0, (actual_free_gb - transient_gb) / actual_total_gb)
@@ -1822,6 +1875,33 @@ class VLLMServerManager:
             # named by HF repo ID rather than by the registry alias the tensorizer cache keys on.
             from dreamference.hardware import download_recipe_companions
             download_recipe_companions(model, hf_token=hf_token, engine=engine)
+
+        if engine_plans:
+            plan = self.ling_serve_plan(docker_image, model, overrides)
+            actual_free_gb = HardwareManager.detect_gb10_hardware().available_memory_gb
+            if plan is None:
+                basis_gb = arena_gb
+                basis = f"the recipe's arena, {gpu_memory_utilization:.2f} x {actual_total_gb:.2f} GB"
+                sys.stdout.write("⚠️  ling-serve gave no plan (--plan-only); the pre-load check falls back to the "
+                                 "recipe's arena.\n")
+            else:
+                basis_gb = plan["planned_bytes"] / 1e9
+                basis = (f"ling-serve's plan: {plan['sessions']} sessions x {plan['max_context']:,} tokens, "
+                         f"batch {plan['batch']}")
+            required_gb = basis_gb + transient_gb + side_gb
+            if actual_free_gb < required_gb:
+                _abort(
+                    "Not enough memory to start ling-serve.",
+                    f"   Plan:        {basis_gb:.2f} GB ({basis})\n"
+                    f"   Load peak:   {transient_gb:.2f} GB (page cache and staging for "
+                    f"{weights_gb:.2f} GB of weights; {transient_source})\n"
+                    + "".join(f"   Side service: {gb:.2f} GB ({name}, its cap)\n" for name, gb in side_services)
+                    + f"   Required:    {required_gb:.2f} GB\n"
+                    f"   Available:   {actual_free_gb:.2f} GB\n"
+                    f"   Missing:     {required_gb - actual_free_gb:.2f} GB\n\n"
+                    f"Free memory on the host (closing the desktop session recovers the most), or give\n"
+                    f"ling-serve fewer sessions or a shorter --max-context.",
+                )
 
         # The compile cache persists across container lifetimes now, which means it also outlives
         # the recipe that produced it. Reconcile the two before the graph is loaded rather than

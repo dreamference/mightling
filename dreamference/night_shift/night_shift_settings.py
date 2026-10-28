@@ -106,6 +106,14 @@ class NightShiftSettings:
         # Other nodes' model servers a run may also use (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3):
         # "paired" (every paired node serving the same model), "none", or a list of names.
         self.nodes: Any = table.get("nodes", "paired")
+        # Night Shift fills its own queue before a non-benchmark night (night_shift_autofill.py): off
+        # unless switched on, on the one box that runs Night Shift. At most 5 tasks a night.
+        self.autofill: bool = bool(table.get("autofill", False))
+        self.autofill_max: int = min(5, max(1, int(table.get("autofill_max", 5))))
+        repo = table.get("autofill_repo")
+        self.autofill_repo: str | None = (
+            repo.strip() if isinstance(repo, str) and repo.strip() else None
+        )
 
     def refine_enabled(self) -> bool:
         """Whether night tasks are refined first: `[night] refine`, then `mightling_refine` through its

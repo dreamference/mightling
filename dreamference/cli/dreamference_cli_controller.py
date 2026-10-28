@@ -934,6 +934,34 @@ class DreamferenceCLIController:
         return 2
 
     @classmethod
+    def handle_night_autofill(cls, dry_run: bool, maximum: int | None) -> int:
+        """`ling-admin night autofill [--dry-run] [--max N]`: queue the night's self-made tasks now.
+
+        Args:
+            dry_run: Say what would be queued and queue nothing.
+            maximum: The most tasks (1 to 5), or None for `[night] autofill_max`.
+
+        Returns:
+            The exit code: 0 when it ran, 1 when ling is not built.
+        """
+        from datetime import date
+
+        from dreamference.night_shift import NightShiftAutofill, NightShiftQueue, NightShiftSettings
+        from dreamference.runner.codex_installer import CodexInstaller
+
+        settings = NightShiftSettings()
+        mightling_bin = os.environ.get("MIGHTLING_NIGHT_MIGHTLING_BIN") or CodexInstaller.get_codex_executable()
+        if not mightling_bin:
+            print("❌ ling is not built: run `ling-admin codex build` first.")
+            return 1
+        lines = NightShiftAutofill.fill(
+            NightShiftQueue.night_dir(), NightShiftAutofill.repo_for(settings.autofill_repo), mightling_bin,
+            date.today(), maximum or settings.autofill_max, dry_run=dry_run)
+        for line in lines:
+            print(f"🌙 {line}")
+        return 0
+
+    @classmethod
     def handle_night_archive(cls, weeks: int) -> int:
         """`ling-admin night archive [--weeks N]`: old runs moved to `night/archive/` (night_shift_archive.py).
 
@@ -1461,6 +1489,14 @@ class DreamferenceCLIController:
         night_archive_parser.add_argument(
             "--weeks", type=int, default=DEFAULT_ARCHIVE_WEEKS,
             help=f"How old a run must be, in weeks (default {DEFAULT_ARCHIVE_WEEKS})")
+        night_autofill_parser = night_subparsers.add_parser(
+            "autofill",
+            help="Queue up to 5 bounded tasks from QA findings, failing CI tests and open "
+                 "spec items (also runs at the start of `night run` when [night] autofill = true)")
+        night_autofill_parser.add_argument(
+            "--dry-run", action="store_true", help="Say what would be queued; queue nothing")
+        night_autofill_parser.add_argument(
+            "--max", type=int, default=None, help="Tasks at most (1 to 5; default [night] autofill_max)")
         night_pause_parser = night_subparsers.add_parser("pause", help="Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate)")
         night_pause_parser.add_argument("--for", dest="duration", default="1h", help="How long: 90m, 2h, 45s, or minutes (default 1h)")
         night_subparsers.add_parser("resume", help="End a pause: the model gate refuses everyone but the benchmark run again")
@@ -3100,11 +3136,13 @@ class DreamferenceCLIController:
                                               ignore_sessions=args.ignore_open_sessions))
             if args.night_command in ("pause", "resume"):
                 sys.exit(cls.handle_gate_pause(config.vllm_host, args.duration if args.night_command == "pause" else None))
+            if args.night_command in ("autofill",):
+                sys.exit(cls.handle_night_autofill(args.dry_run, args.max))
             if args.night_command in ("every",):
                 sys.exit(cls.handle_night_every(args))
             if args.night_command in ("archive",):
                 sys.exit(cls.handle_night_archive(args.weeks))
-            print("usage: ling-admin night {enable,disable,status,run,every,archive,pause,resume}")
+            print("usage: ling-admin night {enable,disable,status,run,autofill,every,archive,pause,resume}")
             sys.exit(2)
 
         elif args.command == "code":
