@@ -417,8 +417,9 @@ fn call_tool(
                 ));
             }
             let runner = backends.runner.as_ref();
+            let ling_bin = backends.env.ling_bin.as_str();
             match name {
-                "run_test" => run_tool::<RunTestRequest, _, _>(args, name, |r| run_test(r, runner)),
+                "run_test" => run_tool::<RunTestRequest, _, _>(args, name, |r| run_test(r, runner, ling_bin)),
                 "git_log" => run_tool::<GitLogRequest, _, _>(args, name, |r| git_log(r, runner)),
                 _ => run_tool::<DiffStatRequest, _, _>(args, name, |r| diff_stat(r, runner)),
             }

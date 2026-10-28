@@ -232,13 +232,10 @@ pub fn main_checkout(worktree: &Path) -> Option<PathBuf> {
     Some(p)
 }
 
-/// The tool `name` for a worktree: its own `.venv/bin`, else the main checkout's, else the bare
-/// name on `PATH`.
+/// The tool `name` for a worktree: the main checkout's `.venv/bin`, else the absolute path on
+/// `PATH`. Never the worktree's own `.venv`: the model writes the worktree, so an interpreter
+/// there is the model's program.
 pub fn venv_tool(worktree: &Path, name: &str) -> String {
-    let own = worktree.join(".venv/bin").join(name);
-    if own.is_file() {
-        return own.display().to_string();
-    }
     if let Some(main) = main_checkout(worktree) {
         let path = main.join(".venv/bin").join(name);
         if path.is_file() {
@@ -246,7 +243,106 @@ pub fn venv_tool(worktree: &Path, name: &str) -> String {
         }
     }
     // The venv folder names its interpreter `python`; on PATH it is `python3`.
-    if name == "python" { "python3".to_string() } else { name.to_string() }
+    absolute_program(if name == "python" { "python3" } else { name })
+}
+
+/// `program` as an absolute path found on `PATH` (the sandbox's `PATH` is not the caller's), or
+/// unchanged when it already has a `/` or is not found.
+pub fn absolute_program(program: &str) -> String {
+    if program.contains('/') {
+        return program.to_string();
+    }
+    std::env::var_os("PATH")
+        .and_then(|paths| std::env::split_paths(&paths).map(|d| d.join(program)).find(|p| p.is_file()))
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| program.to_string())
+}
+
+/// The `ling` that provides `ling sandbox` (`DREAMFERENCE_DELEGATE_LING`, default `ling`).
+pub fn delegate_ling_bin() -> String {
+    std::env::var("DREAMFERENCE_DELEGATE_LING")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "ling".to_string())
+}
+
+/// The sandbox every command that runs worktree code goes through: Mightling's `:workspace`
+/// profile with the network off, so the worktree and the temp folder are writable, the rest of
+/// the disk is read-only and no connection leaves. The worktree is the model's to write (a
+/// `conftest.py`, a `build.rs`, a test), so its tests and gates never run on the host.
+fn sandbox_prefix(ling_bin: &str, worktree: &Path) -> Vec<String> {
+    vec![
+        ling_bin.to_string(),
+        "sandbox".into(),
+        "-P".into(),
+        ":workspace".into(),
+        "--sandbox-state-disable-network".into(),
+        "-C".into(),
+        worktree.display().to_string(),
+        "--".into(),
+    ]
+}
+
+/// `argv` wrapped to run in [`sandbox_prefix`]'s sandbox, starting in `dir` (the worktree or a
+/// folder inside it). There is no host fallback: when the sandbox cannot start, the run fails.
+pub fn sandboxed(ling_bin: &str, worktree: &Path, dir: &Path, argv: &[String]) -> Vec<String> {
+    let mut out = sandbox_prefix(ling_bin, worktree);
+    out.extend(["sh", "-c", "cd \"$1\" && shift && exec \"$@\"", "sh"].map(String::from));
+    out.push(dir.display().to_string());
+    if let Some((program, rest)) = argv.split_first() {
+        out.push(absolute_program(program));
+        out.extend(rest.iter().cloned());
+    }
+    out
+}
+
+/// The environment of a sandboxed run: offline cargo (its home is read-only and the network is
+/// off) and npm's cache in the temp folder.
+pub fn sandbox_env() -> Vec<(String, String)> {
+    vec![
+        ("CI".into(), "1".into()),
+        ("CARGO_NET_OFFLINE".into(), "true".into()),
+        ("npm_config_cache".into(), std::env::temp_dir().join("ling-delegate-npm").display().to_string()),
+        ("npm_config_update_notifier".into(), "false".into()),
+    ]
+}
+
+/// Checks that the sandbox starts here (`true` inside it). `Err` means nothing may run: a test
+/// that cannot be sandboxed is refused, never run on the host. `bwrap` needs the AppArmor
+/// profile `ling-admin host setup` installs.
+pub fn sandbox_check(runner: &dyn Runner, ling_bin: &str, worktree: &Path) -> Result<(), String> {
+    let mut argv = sandbox_prefix(ling_bin, worktree);
+    argv.push("true".into());
+    let mut spec = RunSpec::new(&[], worktree, 60);
+    spec.argv = argv;
+    let refused = |why: String| {
+        Err(format!(
+            "the sandbox does not start here ({why}); tests and gates never run outside it (`ling-admin host setup` installs the AppArmor profile bwrap needs)"
+        ))
+    };
+    match runner.run(&spec) {
+        Ok(out) if out.exit == Some(0) && !out.timed_out => Ok(()),
+        Ok(out) => refused(tail_of(&out.output, 3, 300).0),
+        Err(e) => refused(e),
+    }
+}
+
+/// Build output a test run leaves in the worktree; a new ignored path elsewhere is the model's.
+pub fn is_build_artifact(path: &str) -> bool {
+    let path = path.trim_end_matches('/');
+    path.ends_with(".pyc")
+        || path.split('/').any(|c| {
+            matches!(
+                c,
+                "__pycache__" | ".pytest_cache" | ".ruff_cache" | ".mypy_cache" | ".hypothesis" | "target" | "node_modules"
+            ) || c.ends_with(".egg-info")
+        })
+}
+
+/// The worktree's ignored paths (`git status --ignored=matching`; an ignored folder is one entry).
+pub fn ignored_paths(runner: &dyn Runner, repo: &Path) -> Result<Vec<String>, String> {
+    let raw = git(runner, repo, &["status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=all"])?;
+    Ok(parse_status(&raw).into_iter().filter(|e| e.code == '!').map(|e| e.path).collect())
 }
 
 /// The submodule `rel` lies inside, if any (`.gitmodules` of the worktree). A task never edits
@@ -391,6 +487,29 @@ mod tests {
         assert!(slow.timed_out);
         assert_eq!(slow.exit, None);
         assert!(SystemRunner.run(&RunSpec::new(&["/no/such/program"], &dir, 1)).is_err());
+    }
+
+    #[test]
+    fn sandboxed_commands_start_in_their_folder_inside_the_workspace_sandbox() {
+        let argv = sandboxed("ling", Path::new("/w"), Path::new("/w/crate"), &["/bin/cargo".into(), "test".into(), "x".into()]);
+        assert_eq!(
+            argv,
+            [
+                "ling", "sandbox", "-P", ":workspace", "--sandbox-state-disable-network", "-C", "/w", "--",
+                "sh", "-c", "cd \"$1\" && shift && exec \"$@\"", "sh", "/w/crate", "/bin/cargo", "test", "x",
+            ]
+        );
+        assert!(sandbox_env().iter().any(|(k, v)| k == "CARGO_NET_OFFLINE" && v == "true"));
+    }
+
+    #[test]
+    fn build_output_is_told_apart_from_the_models_files() {
+        for p in ["src/__pycache__/", "a/b.pyc", "target/", "ui/node_modules/", ".pytest_cache/", "x.egg-info/"] {
+            assert!(is_build_artifact(p), "{p}");
+        }
+        for p in ["tests/conftest.py", ".venv/", "src/pytest.py", "tests/.gitignore"] {
+            assert!(!is_build_artifact(p), "{p}");
+        }
     }
 
     #[test]

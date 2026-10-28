@@ -2,7 +2,7 @@
 //! (`specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md` §4.2).
 
 use crate::classes::{CLASSES, format_table};
-use crate::exec::SystemRunner;
+use crate::exec::{SystemRunner, delegate_ling_bin};
 use crate::lookup::{LookupRequest, SystemIndex, execute as lookup_execute};
 use crate::mcp::serve_stdio;
 use crate::task::{Ledger, TaskEnv, TaskRequest, execute as task_execute, format_stats, record_verdict};
@@ -82,7 +82,7 @@ pub fn run(args: &[String]) -> i32 {
         }
         "classes" => run_classes(rest),
         "lookup" => run_lookup(rest),
-        "run_test" | "run-test" => run_exact(rest, parse_run_test_args, |r| run_test(r, &SystemRunner)),
+        "run_test" | "run-test" => run_exact(rest, parse_run_test_args, |r| run_test(r, &SystemRunner, &delegate_ling_bin())),
         "git_log" | "git-log" => run_exact(rest, parse_git_log_args, |r| git_log(r, &SystemRunner)),
         "diff_stat" | "diff-stat" => run_exact(rest, parse_diff_stat_args, |r| diff_stat(r, &SystemRunner)),
         "task" => run_task(rest),

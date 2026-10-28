@@ -16,8 +16,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::exec::{
-    RunSpec, Runner, StatusEntry, check_relative, git, linked_worktree, main_checkout,
-    parse_numstat, status_entries, tail_of, under_submodule, venv_tool,
+    RunSpec, Runner, StatusEntry, check_relative, delegate_ling_bin, git, ignored_paths,
+    is_build_artifact, linked_worktree, main_checkout, parse_numstat, sandbox_check, sandbox_env,
+    sandboxed, status_entries, tail_of, under_submodule, venv_tool,
 };
 use crate::tools::{RunTestRequest, RunTestResult, run_test, test_command};
 
@@ -63,10 +64,7 @@ impl TaskEnv {
             .filter(|v| *v >= 1)
             .unwrap_or(2);
         let node = std::env::var("DREAMFERENCE_DELEGATE_NODE").ok().filter(|v| !v.trim().is_empty());
-        let ling_bin = std::env::var("DREAMFERENCE_DELEGATE_LING")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or_else(|| "ling".to_string());
+        let ling_bin = delegate_ling_bin();
         Self { codex_home, max_parallel, node, ling_bin }
     }
 
@@ -541,6 +539,16 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
         Ok(h) => h.trim().to_string(),
         Err(e) => return refuse(e),
     };
+    // The acceptance test and the gates run the model's code: only inside the sandbox. Checked
+    // before the model spends its time.
+    if let Err(e) = sandbox_check(runner, &env.ling_bin, &wt) {
+        return refuse(e);
+    }
+    // Ignored paths now, so a file the model hides behind a `.gitignore` rule is still seen.
+    let ignored_before = match ignored_paths(runner, &wt) {
+        Ok(v) => v,
+        Err(e) => return refuse(e),
+    };
 
     let mut r = TaskResult {
         id: id.clone(),
@@ -644,6 +652,17 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
             touched.push(e.path.clone());
         }
     }
+    // New ignored files (a `conftest.py` behind a `.gitignore` rule) are invisible to the status
+    // above and to the diff; anything but build output is the model's and goes.
+    for path in tri!(ignored_paths(runner, &wt)) {
+        if ignored_before.contains(&path) || is_build_artifact(&path) {
+            continue;
+        }
+        tri!(revert(runner, &wt, &StatusEntry { path: path.trim_end_matches('/').to_string(), code: '?' }));
+        r.notes.push(format!("{path} is new and ignored by a .gitignore rule, so not in the diff; removed"));
+        r.reverted.push(path);
+        violations.push("scope".to_string());
+    }
     r.files = touched.clone();
 
     // 3. The diff of what stays (new files made visible without staging their content).
@@ -706,7 +725,7 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
     }
 
     // 5. The acceptance test, then the cheap gates.
-    let acc = tri!(run_test(&accept, runner));
+    let acc = tri!(run_test(&accept, runner, &env.ling_bin));
     let acc_ok = acc.passed;
     r.acceptance = Some(acc);
     if !acc_ok {
@@ -720,12 +739,20 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
     if !py.is_empty() {
         let ruff = venv_tool(&wt, "ruff");
         for (name, sub) in [("ruff format --check", "format"), ("ruff check", "check")] {
-            let mut argv = vec![ruff.as_str(), sub];
+            let mut argv = vec![ruff.clone(), sub.to_string()];
             if sub == "format" {
-                argv.push("--check");
+                argv.push("--check".to_string());
             }
-            argv.extend(py.iter().copied());
-            let out = tri!(runner.run(&RunSpec::new(&argv, &wt, 120)));
+            argv.extend(py.iter().map(|p| p.to_string()));
+            // ruff reads the worktree's own config: the sandbox too.
+            let spec = RunSpec {
+                argv: sandboxed(&env.ling_bin, &wt, &wt, &argv),
+                cwd: wt.clone(),
+                env: sandbox_env(),
+                timeout_s: 120,
+                batch: false,
+            };
+            let out = tri!(runner.run(&spec));
             let ok = out.exit == Some(0) && !out.timed_out;
             r.gates.push(Gate { name: name.to_string(), ok, tail: tail_of(&out.output, 15, 1500).0 });
         }
@@ -787,6 +814,11 @@ mod tests {
         status_after: String,
         numstat: String,
         diff: String,
+        /// `ling sandbox -- true` succeeds.
+        sandbox_ok: bool,
+        /// `git status --ignored` output, before and after the model.
+        ignored: RefCell<String>,
+        ignored_after: String,
     }
 
     impl Runner for World {
@@ -801,7 +833,23 @@ mod tests {
                     ok("")
                 };
             }
-            if j.contains(" exec ") {
+            if j.starts_with("ling sandbox") {
+                if j.ends_with(" -- true") {
+                    let exit = if self.sandbox_ok { 0 } else { 1 };
+                    return Ok(RunOutput { exit: Some(exit), output: "bwrap: no".into(), timed_out: false, elapsed_s: 0 });
+                }
+                let (inner, start) = crate::tools::tests::unwrap_sandbox(&spec.argv).expect("a well-formed sandbox argv");
+                assert!(Path::new(&start).starts_with(&self.wt), "{start}");
+                let inner = inner.join(" ");
+                if inner.contains("pytest") || inner.contains("cargo test") {
+                    return Ok(RunOutput { exit: Some(self.accept_exit), output: "1 passed".into(), timed_out: false, elapsed_s: 3 });
+                }
+                if inner.contains("ruff") {
+                    return Ok(RunOutput { exit: Some(self.ruff_exit), output: "ruff said".into(), timed_out: false, elapsed_s: 1 });
+                }
+                return Err(format!("unexpected in the sandbox: {inner}"));
+            }
+            if j.starts_with("ling exec ") {
                 assert!(spec.batch, "the model runs in the batch slice");
                 assert!(j.contains("-s workspace-write"));
                 assert!(spec.env.iter().any(|(k, _)| k == "DREAMFERENCE_VLLM_HOST"));
@@ -811,7 +859,11 @@ mod tests {
                     std::fs::write(full, c).unwrap();
                 }
                 *self.status.borrow_mut() = self.status_after.clone();
+                *self.ignored.borrow_mut() = self.ignored_after.clone();
                 return Ok(RunOutput { exit: Some(self.ling_exit), output: "done".into(), timed_out: false, elapsed_s: 30 });
+            }
+            if j.starts_with("git status") && j.contains("--ignored") {
+                return ok(&self.ignored.borrow());
             }
             if j.starts_with("git status") {
                 return ok(&self.status.borrow());
@@ -830,12 +882,7 @@ mod tests {
             if j.starts_with("git ") {
                 return ok("");
             }
-            if j.contains("pytest") || j.contains("cargo test") {
-                return Ok(RunOutput { exit: Some(self.accept_exit), output: "1 passed".into(), timed_out: false, elapsed_s: 3 });
-            }
-            if j.contains("ruff") {
-                return Ok(RunOutput { exit: Some(self.ruff_exit), output: "ruff said".into(), timed_out: false, elapsed_s: 1 });
-            }
+            assert!(!(j.contains("pytest") || j.contains("cargo") || j.contains("ruff")), "ran on the host: {j}");
             Err(format!("unexpected: {j}"))
         }
     }
@@ -869,6 +916,9 @@ mod tests {
             status_after: " M src/a.py\0".into(),
             numstat: "1\t1\tsrc/a.py\n".into(),
             diff: "diff --git a/src/a.py b/src/a.py\n-x = 0\n+x = 1\n".into(),
+            sandbox_ok: true,
+            ignored: RefCell::new("!! .mypy_cache/\0".into()),
+            ignored_after: "!! .mypy_cache/\0".into(),
         }
     }
 
@@ -904,6 +954,43 @@ mod tests {
         let text = std::fs::read_to_string(env.state_dir().join("ledger.jsonl")).unwrap();
         assert!(!text.contains("Set x to 1") && !text.contains("x = 1"));
         assert!(!env.state_dir().join("running").join(format!("{}.pid", r.id)).exists(), "slot released");
+    }
+
+    #[test]
+    fn the_acceptance_test_and_the_gates_run_only_in_the_sandbox() {
+        let (wt, env) = setup("sbx");
+        let w = world(&wt);
+        assert!(execute(&request(&wt, "T3"), &w, &env).unwrap().pass);
+        let log = w.log.borrow();
+        let tests: Vec<&String> =
+            log.iter().filter(|c| !c.starts_with("ling exec") && (c.contains("pytest") || c.contains("ruff"))).collect();
+        assert_eq!(tests.len(), 3, "{log:?}");
+        assert!(tests.iter().all(|c| c.starts_with("ling sandbox -P :workspace --sandbox-state-disable-network -C ")), "{tests:?}");
+    }
+
+    #[test]
+    fn a_sandbox_that_does_not_start_refuses_the_task_before_the_model_runs() {
+        let (wt, env) = setup("nosbx");
+        let mut w = world(&wt);
+        w.sandbox_ok = false;
+        let err = execute(&request(&wt, "T3"), &w, &env).unwrap_err();
+        assert!(err.contains("sandbox does not start"), "{err}");
+        let log = w.log.borrow();
+        assert!(!log.iter().any(|c| c.starts_with("ling exec") || c.contains("pytest") || c.contains("ruff")), "{log:?}");
+    }
+
+    #[test]
+    fn a_new_file_hidden_by_a_gitignore_rule_is_removed_and_fails_the_task() {
+        let (wt, env) = setup("ignored");
+        let mut w = world(&wt);
+        w.writes = vec![("src/a.py", "x = 1\n"), ("src/conftest.py", "import os\n"), ("src/__pycache__/a.pyc", "x")];
+        w.ignored_after = "!! .mypy_cache/\0!! src/__pycache__/\0!! src/conftest.py\0".into();
+        let r = execute(&request(&wt, "T3"), &w, &env).unwrap();
+        assert_eq!(r.reason, "scope");
+        assert_eq!(r.reverted, vec!["src/conftest.py"]);
+        assert!(!wt.join("src/conftest.py").exists());
+        assert!(wt.join("src/__pycache__/a.pyc").exists(), "build output stays");
+        assert!(r.acceptance.is_none(), "no test runs");
     }
 
     #[test]
