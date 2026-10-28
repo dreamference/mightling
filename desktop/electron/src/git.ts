@@ -15,11 +15,20 @@ import * as userFs from "./userfs";
 /** The most a diff or log may weigh: the pane is for reading, and this machine's memory is shared with a model. */
 export const MAX_OUTPUT = 16 * 1024 * 1024;
 
+/** The variables that add config or move the system or global config file: never inherited. */
+export const REMOVED_CONFIG_ENV = ["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_COUNT"];
+
 /** git's environment: never a prompt for credentials (a click must not hang), never a pager or an editor. */
 export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...base, GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat", GIT_EDITOR: "true", LC_ALL: "C", GIT_CONFIG_NOSYSTEM: "1", GIT_OPTIONAL_LOCKS: "0" };
+  // No GIT_CONFIG_NOSYSTEM: the system config is trusted like the global one, since only an
+  // administrator can write it (a per-user Git for Windows install keeps it in the user's own install
+  // folder, the user's, not the checkout's); it carries Git for Windows' core.autocrlf=true and its
+  // git-lfs filter, and a program it names loses to SAFE_CONFIG. No variable may move it or add config.
+  const env: NodeJS.ProcessEnv = { ...base, GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat", GIT_EDITOR: "true", LC_ALL: "C", GIT_OPTIONAL_LOCKS: "0" };
   delete env.GIT_EXTERNAL_DIFF;
-  delete env.GIT_CONFIG_PARAMETERS;
+  for (const name of Object.keys(env)) {
+    if (REMOVED_CONFIG_ENV.includes(name) || name.startsWith("GIT_CONFIG_KEY_") || name.startsWith("GIT_CONFIG_VALUE_")) delete env[name];
+  }
   // Empty, not deleted: core.gitProxy is first-value-wins, so only the variable outranks the checkout's own value.
   env.GIT_PROXY_COMMAND = "";
   return env;

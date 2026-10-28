@@ -12,7 +12,8 @@
 //! The command-line `-c` scope outranks every file, so this crate pins the fixed keys there and, for
 //! the three driver families whose names are the agent's to choose, reads the names from the
 //! effective config and blanks each program. `--no-ext-diff` and `--no-textconv` go after
-//! `diff`, `show` and `log`. The environment drops `GIT_EXTERNAL_DIFF` and sets `GIT_PAGER=cat`.
+//! `diff`, `show` and `log`. The environment drops `GIT_EXTERNAL_DIFF` and the variables that add
+//! config or move a config file, and sets `GIT_PAGER=cat`; the system config is read (see `FIXED_ENV`).
 //! One window stays: a name added between the read and the run. Callers that have a sandbox use it
 //! too; this is the layer for the ones that do not.
 
@@ -52,14 +53,25 @@ pub const FIXED_CONFIG: &[&str] = &[
 /// The longest a host-side git command may run unless the caller says otherwise.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Environment variables the command must not inherit (they name a program for diff).
-pub const REMOVED_ENV: &[&str] = &["GIT_EXTERNAL_DIFF", "GIT_CONFIG_PARAMETERS"];
+/// Environment variables the command must not inherit: `GIT_EXTERNAL_DIFF` names a program for
+/// diff, and the others add config or move the system or global file to another path.
+pub const REMOVED_ENV: &[&str] =
+    &["GIT_EXTERNAL_DIFF", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_COUNT"];
+
+/// Prefixes of the numbered config variables (`GIT_CONFIG_KEY_0`, `GIT_CONFIG_VALUE_0`…), also removed.
+pub const REMOVED_ENV_PREFIXES: &[&str] = &["GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
 
 /// Environment variables the command sets. `GIT_PROXY_COMMAND` is set empty rather than removed:
 /// `core.gitProxy` is first-value-wins, so a `-c` pair cannot replace the checkout's own value,
 /// but git reads no `core.gitProxy` at all once the variable is set, and an empty one means none.
+///
+/// `GIT_CONFIG_NOSYSTEM` is not set: the system config is trusted like the global one, since only
+/// an administrator can write it (a per-user Git for Windows install keeps it in the user's own
+/// install folder: the user's, not the checkout's), and `REMOVED_ENV` keeps a variable from moving
+/// it elsewhere. It holds settings the host's git must keep: Git for Windows sets
+/// `core.autocrlf=true` there (without it a file `git stash pop` wrote with CRLF diffs whole
+/// against `HEAD`), and its git-lfs filter. A program it names loses to the `-c` pairs as well.
 pub const FIXED_ENV: &[(&str, &str)] = &[
-    ("GIT_CONFIG_NOSYSTEM", "1"),
     ("GIT_PAGER", "cat"),
     ("GIT_TERMINAL_PROMPT", "0"),
     ("GIT_OPTIONAL_LOCKS", "0"),
@@ -198,6 +210,14 @@ pub fn apply_env(cmd: &mut Command) {
     for name in REMOVED_ENV {
         cmd.env_remove(name);
     }
+    let numbered: Vec<OsString> = std::env::vars_os()
+        .map(|(name, _)| name)
+        .chain(cmd.get_envs().map(|(name, _)| name.to_os_string()))
+        .filter(|name| name.to_str().is_some_and(|n| REMOVED_ENV_PREFIXES.iter().any(|p| n.starts_with(p))))
+        .collect();
+    for name in numbered {
+        cmd.env_remove(name);
+    }
     for (name, value) in FIXED_ENV {
         cmd.env(name, value);
     }
@@ -324,6 +344,109 @@ mod tests {
         let _ = Command::new("git").arg("-C").arg(&repo).args(["status", "--porcelain"]).env("GIT_CONFIG_NOSYSTEM", "1").output();
         let _ = Command::new("git").arg("-C").arg(&repo).args(["diff"]).env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_PAGER", "").output();
         assert!(marker.exists(), "the control run should have executed a configured program");
+    }
+
+    #[test]
+    fn the_system_config_is_read_so_line_endings_follow_it() {
+        // Git for Windows keeps core.autocrlf=true in its system config; a hardened diff that
+        // skipped it saw every CRLF file `git stash pop` wrote as changed in full.
+        let root = scratch("system");
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        plain(&repo, &["init", "-q"]);
+        let system = root.join("gitconfig");
+        fs::write(&system, "[core]\n\tautocrlf = true\n").unwrap();
+        let mut cmd = command(&repo, &["config", "--get", "core.autocrlf"]);
+        cmd.env("GIT_CONFIG_SYSTEM", &system).env_remove("GIT_CONFIG_NOSYSTEM");
+        let out = run(cmd, DEFAULT_TIMEOUT).unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "true");
+        assert!(FIXED_ENV.iter().all(|(name, _)| *name != "GIT_CONFIG_NOSYSTEM"));
+    }
+
+    /// A repository with a changed file, and a system-config file naming a program for fsmonitor,
+    /// sshCommand, the credential helper, the pager and diff.external.
+    fn hostile_system(name: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let root = scratch(name);
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let marker = root.join("marker");
+        plain(&repo, &["init", "-q"]);
+        fs::write(repo.join("a.txt"), "one\n").unwrap();
+        plain(&repo, &["add", "-A"]);
+        plain(&repo, &["commit", "-q", "-m", "init"]);
+        fs::write(repo.join("a.txt"), "one\ntwo changed\n").unwrap();
+        let fsmon = script(&root, "fsmonitor", &marker);
+        let ssh = script(&root, "ssh", &marker);
+        let cred = script(&root, "cred", &marker);
+        let pager = script(&root, "pager", &marker);
+        let ext = script(&root, "external", &marker);
+        let system = root.join("system-gitconfig");
+        fs::write(
+            &system,
+            format!(
+                "[core]\n\tfsmonitor = {fsmon}\n\tsshCommand = {ssh}\n\tpager = {pager}\n[credential]\n\thelper = {cred}\n[diff]\n\texternal = {ext}\n"
+            ),
+        )
+        .unwrap();
+        (repo, system, marker)
+    }
+
+    const SYSTEM_PINS: &[(&str, &str)] = &[
+        ("core.fsmonitor", "false"),
+        ("core.sshCommand", "ssh"),
+        ("core.pager", "cat"),
+        ("credential.helper", ""),
+        ("diff.external", ""),
+    ];
+
+    #[test]
+    fn a_system_config_that_names_programs_loses_to_the_pins() {
+        // Control: plain git runs the system file's fsmonitor.
+        let (repo, system, marker) = hostile_system("system-control");
+        let _ = Command::new("git").arg("-C").arg(&repo).args(["status", "--porcelain"]).env("GIT_CONFIG_SYSTEM", &system).env_remove("GIT_CONFIG_NOSYSTEM").output();
+        assert!(marker.exists(), "the control run should have executed the system config's fsmonitor");
+
+        // The file read as the system config (the caller sets the variable after `command`).
+        let (repo, system, marker) = hostile_system("system-proof");
+        for args in [vec!["status", "--porcelain"], vec!["diff"], vec!["log", "-p", "-1"]] {
+            let mut cmd = command(&repo, &args);
+            cmd.env("GIT_CONFIG_SYSTEM", &system).env_remove("GIT_CONFIG_NOSYSTEM");
+            let out = run(cmd, DEFAULT_TIMEOUT).unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        }
+        for (key, pin) in SYSTEM_PINS {
+            let mut cmd = command(&repo, &["config", "--get", key]);
+            cmd.env("GIT_CONFIG_SYSTEM", &system).env_remove("GIT_CONFIG_NOSYSTEM");
+            let out = run(cmd, DEFAULT_TIMEOUT).unwrap();
+            assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end_matches('\n'), *pin, "{key}");
+        }
+        let ran = fs::read_to_string(&marker).unwrap_or_default();
+        assert!(ran.is_empty(), "a program the system config names ran: {ran}");
+    }
+
+    #[test]
+    fn an_inherited_variable_cannot_move_or_add_config() {
+        let (repo, system, marker) = hostile_system("system-env");
+        let fsmon = script(repo.parent().unwrap(), "numbered", &marker);
+        // Set on the command before the hardening, as an inherited environment would be.
+        let mut cmd = Command::new("git");
+        cmd.env("GIT_CONFIG_SYSTEM", &system)
+            .env("GIT_CONFIG_GLOBAL", &system)
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "core.fsmonitor")
+            .env("GIT_CONFIG_VALUE_0", &fsmon)
+            .env("GIT_CONFIG_PARAMETERS", format!("'core.fsmonitor'='{fsmon}'"))
+            .env_remove("GIT_CONFIG_NOSYSTEM");
+        cmd.arg("-C").arg(&repo).args(hardened_args(Some(&repo), &["status", "--porcelain"]));
+        apply_env(&mut cmd);
+        for (name, value) in cmd.get_envs() {
+            let name = name.to_string_lossy();
+            assert!(!name.starts_with("GIT_CONFIG_") || value.is_none(), "{name} reaches git");
+        }
+        let out = run(cmd, DEFAULT_TIMEOUT).unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let ran = fs::read_to_string(&marker).unwrap_or_default();
+        assert!(ran.is_empty(), "a program an inherited variable named ran: {ran}");
     }
 
     #[test]

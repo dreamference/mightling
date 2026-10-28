@@ -17,7 +17,7 @@ const saved = { HOME: process.env.HOME, GIT_CONFIG_GLOBAL: process.env.GIT_CONFI
 
 beforeAll(() => {
   process.env.HOME = scratchHome;
-  process.env.GIT_CONFIG_GLOBAL = path.join(scratchHome, "gitconfig");
+  process.env.GIT_CONFIG_GLOBAL = path.join(scratchHome, ".gitconfig");
   process.env.GIT_CONFIG_NOSYSTEM = "1";
   fs.writeFileSync(process.env.GIT_CONFIG_GLOBAL, "[user]\n\tname = Test\n\temail = test@example.invalid\n[init]\n\tdefaultBranch = main\n");
 });
@@ -180,6 +180,50 @@ describe("git on a checkout the agent wrote the config of", () => {
     await git.git(root, ["log", "-p", "-1"]);
     await git.diff(root, "unstaged");
     expect(fs.existsSync(marker), "a configured program ran").toBe(false);
+  });
+
+  it("reads the system config (Git for Windows' autocrlf), but a program it names loses to the pins", async () => {
+    const root = repo();
+    const marker = path.join(root, "..", `ran-system-${path.basename(root)}`);
+    const tool = path.join(root, "..", `tool-system-${path.basename(root)}.sh`);
+    fs.writeFileSync(tool, `#!/bin/sh\necho ran >> '${marker}'\ncat\n`, { mode: 0o755 });
+    const system = path.join(root, "..", `system-${path.basename(root)}.gitconfig`);
+    fs.writeFileSync(
+      system,
+      ["[core]", "\tautocrlf = true", `\tfsmonitor = ${tool}`, `\tpager = ${tool}`, `\tsshCommand = ${tool}`, "[diff]", `\texternal = ${tool}`, "[credential]", `\thelper = ${tool}`, ""].join("\n"),
+    );
+    const asSystem = { GIT_CONFIG_SYSTEM: system, GIT_CONFIG_NOSYSTEM: "0" };
+    // The control: plain git runs the system file's fsmonitor.
+    try {
+      execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8", env: { ...process.env, ...asSystem } });
+    } catch {
+      /* a failing hook does not matter for the control */
+    }
+    expect(fs.existsSync(marker)).toBe(true);
+    fs.rmSync(marker);
+
+    expect("GIT_CONFIG_NOSYSTEM" in git.gitEnv({})).toBe(false);
+    await git.git(root, ["status", "--porcelain"], undefined, 60_000, asSystem);
+    await git.git(root, ["diff"], undefined, 60_000, asSystem);
+    expect((await git.git(root, ["config", "--get", "core.autocrlf"], undefined, 60_000, asSystem)).trim()).toBe("true");
+    for (const [key, pin] of [["core.fsmonitor", "false"], ["core.sshCommand", "ssh"], ["core.pager", "cat"], ["credential.helper", ""], ["diff.external", ""]]) {
+      expect((await git.git(root, ["config", "--get", key], undefined, 60_000, asSystem)).replace(/\n$/, ""), key).toBe(pin);
+    }
+    expect(fs.existsSync(marker), "a program the system config names ran").toBe(false);
+  });
+
+  it("lets no inherited variable move a config file or add config", () => {
+    const env = git.gitEnv({
+      PATH: "/usr/bin",
+      GIT_CONFIG_SYSTEM: "/x",
+      GIT_CONFIG_GLOBAL: "/x",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.fsmonitor",
+      GIT_CONFIG_VALUE_0: "/x",
+      GIT_CONFIG_PARAMETERS: "'core.fsmonitor'='/x'",
+    });
+    expect(Object.keys(env).filter((name) => name.startsWith("GIT_CONFIG_"))).toEqual([]);
+    expect(env.PATH).toBe("/usr/bin");
   });
 
   it("puts the diff flags after the subcommand and blanks only the checkout's own drivers", () => {
