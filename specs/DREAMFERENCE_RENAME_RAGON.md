@@ -191,7 +191,7 @@ These names are internal, persisted or cryptographic, and never shown to a user 
 - The `puffin-*` release assets: 1.9.0 publishes them one last time (§4.1), and then never again.
 - The build caches `~/.cache/dreamference/puffin-codex`, `puffin-web` and `puffin-code-build` move to `ragon-codex`, `ragon-web` and `ragon-code-build`. A move on one filesystem is instant. The first build after it may rebuild some crates, because Cargo's dep-info holds absolute paths: one long build at worst, once.
 - `puffin-bwrap` is replaced by `ragon-bwrap` (§2.3).
-- The SCIP stores' tables (`puffin_names`, `puffin_relationships`, `puffin_meta`) are renamed `ragon_*` with SQLite's `ALTER TABLE … RENAME` the first time a store is opened. That is cheap, and it keeps every index readable without a rebuild. The schema filter skips both names.
+- The SCIP stores' tables (`puffin_names`, `puffin_relationships`, `puffin_meta`) are renamed `ragon_*` with SQLite's `ALTER TABLE … RENAME` by the next indexing run. That is cheap, and it keeps every index readable without a rebuild. Queries open a store read-only, so until that run they read either name. The schema hash's filter skips both names.
 - `_puffin-node._tcp`, `dev.dreamference.puffin` and `puffin-node_ed25519` stay only in the migration's list of old layouts.
 
 ## 4. The transition
@@ -429,7 +429,7 @@ The last rename is the yardstick. It was decided on 2026-10-07, built and merged
 | 6. Desktop identity on real hardware | day 3–4 | a Windows test machine and a Mac: the automatic app switch, data moved, old app and shortcuts gone, pins, notifications, TCC prompts; the Linux `.deb` | 1 day |
 | 7. Aftercare | days 4–6 | fixes found in use (the last rename needed two), 1.9.1 if needed | 2 days (reserve) |
 
-**Total: about 12 days of work, of which about 6 fall after the freeze.** 1.9.0 is published on day 2 after the freeze (about 2026-11-20). All machines are on Ragon by day 3, and the rename is settled by about day 6 (around 2026-11-24), all assuming 1.x completes on 2026-11-18. The first benchmark night after the rename runs with a system prompt that says Ragon. The pinned-series rule treats that as a new configuration, so a night that compares against an earlier one says so.
+**Total: about 12 days of work.** 5 of them fall before the freeze (building the script). 7 fall after it, and they take about 6 calendar days, because phases 4 and 6 run beside phase 5. 1.9.0 is published on day 2 after the freeze (about 2026-11-20). All machines are on Ragon by day 3, and the rename is settled by about day 6 (around 2026-11-24), all assuming 1.x completes on 2026-11-18. The first benchmark night after the rename runs with a system prompt that says Ragon. The pinned-series rule treats that as a new configuration, so a night that compares against an earlier one says so.
 
 ## 12. Open questions
 
