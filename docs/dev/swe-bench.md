@@ -93,3 +93,7 @@ The owner's decision of 2026-10-28: a subset of SWE-bench Multilingual (C, C++, 
 Every `docker` call goes through `SweBenchDocker`, and the cache and results directories are module-level constants, so the tests (`tests/test_swe_bench.py`, where a container is a scratch git repository) never start a container or touch the real cache.
 
 SWE-bench's stored `puffin_version` / `puffin_code_calls` keys keep their old names on purpose.
+
+## Published release results
+
+Only numbers tied to a release are published; nightly results stay internal. A release's entry is `docs/releases/<version>.json`, recorded by `scripts/release_benchmark.py record` from the report of the night that qualified the release, the night given by id and never guessed, with the previous default's result beside it. `render` rewrites the Benchmarks page (`docs/benchmarks.md`); the release workflow's `validate` job runs `check`. A release with no entry shows no number. No hostname, address, user name or home path goes in an entry (the script refuses them). 1.7.2 has no entry: its qualifying night's numbers (night 17) are not recorded in the repository.

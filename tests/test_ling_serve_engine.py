@@ -308,6 +308,14 @@ def _stub_start(monkeypatch, mgr, calls):
     monkeypatch.setattr(mgr, "check_host_safety", lambda: None)
     monkeypatch.setattr(mgr, "_evict_model_page_cache", lambda model: 0.0)
     monkeypatch.setattr(
+        mgr,
+        "ling_serve_plan",
+        lambda *a, **k: calls.get(
+            "plan",
+            {"sessions": 3, "batch": 3, "max_context": 262144, "planned_bytes": 82_400_000_000},
+        ),
+    )
+    monkeypatch.setattr(
         mgr, "_reset_stale_compile_cache", lambda *a, **k: calls.setdefault("reset", True)
     )
     monkeypatch.setattr("dreamference.hardware.download_model", lambda *a, **k: True)
@@ -352,6 +360,83 @@ def test_start_server_on_ling_serve_pulls_its_image_and_prepares_nothing_of_sgla
         mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
     assert calls["image"] == QWEN38_LING_IMAGE
     assert "template" not in calls and "runtime_patch" not in calls and "reset" not in calls
+
+
+def test_the_pre_load_check_follows_the_engines_plan_not_the_recipes_arena(monkeypatch, capsys):
+    # 110 GB available: the recipe's 0.50 arena (~60 GB) plus the load peak would pass, the engine's
+    # 100 GB plan plus the peak does not.
+    mgr = VLLMServerManager()
+    calls: dict = {
+        "plan": {"sessions": 4, "batch": 4, "max_context": 262144, "planned_bytes": 109_000_000_000}
+    }
+    _stub_start(monkeypatch, mgr, calls)
+    with pytest.raises(SystemExit):
+        mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
+    out = capsys.readouterr().out
+    assert "Not enough memory to start ling-serve." in out
+    assert "4 sessions x 262,144 tokens" in out
+
+
+def test_the_pre_load_check_admits_a_plan_that_fits(monkeypatch):
+    mgr = VLLMServerManager()
+    calls: dict = {}  # the stub's 3 x 262,144 plan, 82.4 GB
+    _stub_start(monkeypatch, mgr, calls)
+    with pytest.raises(TypeError):  # the launch itself is stubbed out
+        mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
+    assert calls["engine"] == ENGINE_LING
+
+
+def test_without_a_plan_the_check_falls_back_to_the_recipes_arena(monkeypatch, capsys):
+    mgr = VLLMServerManager()
+    calls: dict = {}
+    _stub_start(monkeypatch, mgr, calls)
+    monkeypatch.setattr(mgr, "ling_serve_plan", lambda *a, **k: None)
+    with pytest.raises(TypeError):
+        mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
+    assert "gave no plan" in capsys.readouterr().out
+
+
+def test_ling_serve_plan_runs_plan_only_in_the_image_and_reads_its_json_line(monkeypatch):
+    import subprocess
+
+    seen: list = []
+
+    def run(cmd, **kw):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout='noise\n{"sessions":3,"batch":3,"max_context":262144,"planned_bytes":82400000000}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr("dreamference.vllm_server.vllm_server_manager.subprocess.run", run)
+    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    plan = VLLMServerManager.ling_serve_plan(QWEN38_LING_IMAGE, DEFAULT_MODEL_ALIAS, recipe)
+    assert plan == {
+        "sessions": 3,
+        "batch": 3,
+        "max_context": 262144,
+        "planned_bytes": 82_400_000_000,
+    }
+    cmd = seen[0]
+    assert (
+        cmd[-1] == "--plan-only"
+        and "--rm" in cmd
+        and cmd[cmd.index(QWEN38_LING_IMAGE) + 1] == "--model"
+    )
+    assert "--sessions" not in cmd and "--max-context" in cmd
+
+
+def test_ling_serve_plan_is_none_when_the_engine_refuses_or_the_image_lacks_the_flag(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(
+        "dreamference.vllm_server.vllm_server_manager.subprocess.run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 3, stdout="", stderr="refused to start"),
+    )
+    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    assert VLLMServerManager.ling_serve_plan(QWEN38_LING_IMAGE, DEFAULT_MODEL_ALIAS, recipe) is None
 
 
 def test_start_server_on_sglang_prepares_its_patches(monkeypatch):

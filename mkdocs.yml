@@ -54,6 +54,7 @@ nav:
   - Reference:
       - ling-admin: admin.md
       - Models: models.md
+      - Benchmarks: benchmarks.md
   - How it works:
       - Architecture: architecture.md
       - Privacy & security: privacy.md

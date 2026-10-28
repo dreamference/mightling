@@ -133,6 +133,15 @@ jobs:
             fi
           fi
 
+      # A release's published benchmark result is docs/releases/<version>.json, recorded by
+      # `scripts/release_benchmark.py record` from the qualifying night's report (the night given by
+      # id). A release without one is allowed and shows no number; one that exists must be valid and
+      # the Benchmarks page must match the entries.
+      - name: Check the benchmark entry
+        run: |
+          python3 scripts/release_benchmark.py check
+          if [[ -f "docs/releases/$VERSION.json" ]]; then python3 scripts/release_benchmark.py check --version "$VERSION"; else echo "::notice::No benchmark entry for $VERSION; the Benchmarks page shows no number for it."; fi
+
   # Every build and test, for every platform: release-build.yml, which release-dry-run.yml runs
   # nightly on main as well, so what a release builds has been built and tested the night before.
   build:
