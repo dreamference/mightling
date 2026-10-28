@@ -1010,11 +1010,15 @@ impl ChatRepos {
         self.record_event(chat, repo, None, None, typed);
     }
 
-    /// Drains and returns all recorded events in the ring (used by unit tests).
+    /// Drains and returns the budget, unbounded and busy events of the ring (used by unit tests).
     pub fn take_notices(&self) -> Vec<RepoEvent> {
         self.check_pending_approvals();
         let mut ring = self.events.lock().unwrap_or_else(|p| p.into_inner());
-        std::mem::take(&mut ring.events).into_iter().collect()
+        let (taken, kept): (Vec<RepoEvent>, Vec<RepoEvent>) = std::mem::take(&mut ring.events)
+            .into_iter()
+            .partition(|ev| matches!(ev.kind.kind_name(), "budget80" | "unbounded" | "busy"));
+        ring.events = kept.into_iter().collect();
+        taken
     }
 
     /// Returns `(notices, seq)` for `GET /api/repos/notices?after=<seq>`: only events with
@@ -1585,25 +1589,42 @@ pub fn count_porcelain_lines_sync(server: &Server, checkout_dir: &Path) -> u32 {
     cmd.env("LC_ALL", "C");
     cmd.env("GIT_TERMINAL_PROMPT", "0");
     cmd.env("GIT_CONFIG_NOSYSTEM", "1");
+    // The agent can write the checkout's own git config, so the helpers a config can name are
+    // switched off for this status, and a hung git is killed after a few seconds.
     cmd.arg("-c")
         .arg(&hooks_arg)
+        .arg("-c")
+        .arg("core.fsmonitor=false")
         .arg("status")
         .arg("--porcelain")
         .current_dir(checkout_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());
-    let Ok(output) = cmd.output() else {
+    let Ok(mut child) = cmd.spawn() else {
         return 0;
     };
-    if !output.status.success() {
+    let Some(mut stdout) = child.stdout.take() else {
+        let _ = child.kill();
         return 0;
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+    let Ok(buf) = rx.recv_timeout(Duration::from_secs(10)) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return 0;
+    };
+    match child.wait() {
+        Ok(status) if status.success() => {}
+        _ => return 0,
     }
-    output
-        .stdout
-        .split(|&b| b == b'\n')
-        .filter(|line| !line.is_empty())
-        .count() as u32
+    buf.split(|&b| b == b'\n').filter(|line| !line.is_empty()).count() as u32
 }
 
 /// Reads `$CODEX_HOME/chat-repos/index.json` (empty list when missing).
@@ -8872,7 +8893,7 @@ mod tests {
             {
                 "full_name": "org/widget",
                 "default_branch": "main",
-                "private": true,
+                "private": false,
                 "archived": false,
                 "mirror": false,
                 "updated_at": "2026-10-20T12:00:00Z",
