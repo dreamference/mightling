@@ -138,7 +138,12 @@ if [ "$status" != "completed" ]; then
   sleep 60
 fi
 conclusion=$(gh run view "$run_id" -R "$REPO" --json conclusion --jq .conclusion 2>/dev/null)
-gh run view "$run_id" -R "$REPO" --log 2>/dev/null | grep -oE 'Z ACCEPT (PASS|FAIL|WARN|INFO|RESULT) .*' | cut -c3- > "$work/lines.txt" || true
+# The log is archived a little after the run completes: retry until its lines are there.
+for _ in $(seq 1 12); do
+  gh run view "$run_id" -R "$REPO" --log 2>/dev/null | grep -oE 'Z ACCEPT (PASS|FAIL|WARN|INFO|RESULT) .*' | cut -c3- > "$work/lines.txt" || true
+  [ -s "$work/lines.txt" ] && break
+  sleep 10
+done
 cat "$work/lines.txt"
 
 # Revoke the runner's peer and check that it is gone (an ephemeral peer may already be).
