@@ -17,8 +17,6 @@ use std::collections::HashSet;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
-use std::process::Stdio;
 
 use serde_json::Value;
 use serde_json::json;
@@ -311,14 +309,7 @@ fn first_line(command: &str) -> String {
 
 /// `git status --porcelain` in `cwd`, or `None` when it is not a repository or git is missing.
 pub fn git_status(cwd: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(["--no-optional-locks", "status", "--porcelain", "--untracked-files=all"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
+    let output = ling_safegit::output(cwd, &["--no-optional-locks", "status", "--porcelain", "--untracked-files=all"]).ok()?;
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 

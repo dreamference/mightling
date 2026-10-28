@@ -4,7 +4,6 @@
 //! read-only, and a plain `git status` would try to refresh the index there (spec §2).
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 
@@ -95,13 +94,11 @@ fn main_worktree(root: &Path) -> Option<PathBuf> {
 /// Args: `dir`, the directory to run in; `args`, git's arguments.
 /// Returns: stdout as text, or an error carrying stderr when git fails.
 pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
-        .arg("--no-optional-locks")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .stdin(Stdio::null())
-        .output()
+    // The checkout's config is the agent's to write and indexing runs outside the sandbox:
+    // `ling_safegit` pins every key that makes git run a program.
+    let mut all = vec!["--no-optional-locks"];
+    all.extend_from_slice(args);
+    let output = ling_safegit::run(ling_safegit::command(dir, &all), std::time::Duration::from_secs(600))
         .with_context(|| format!("running git {}", args.join(" ")))?;
     if !output.status.success() {
         bail!("git {}: {}", args.join(" "), String::from_utf8_lossy(&output.stderr).trim());

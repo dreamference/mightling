@@ -392,8 +392,9 @@ pub(crate) mod tests {
 
     impl Runner for Script {
         fn run(&self, spec: &RunSpec) -> Result<RunOutput, String> {
-            self.seen.borrow_mut().push((spec.argv.clone(), spec.cwd.clone(), spec.batch));
-            let joined = spec.argv.join(" ");
+            let argv = ling_safegit::plain_argv(&spec.argv);
+            self.seen.borrow_mut().push((argv.clone(), spec.cwd.clone(), spec.batch));
+            let joined = argv.join(" ");
             for (frag, code, out) in &self.rules {
                 if joined.contains(frag) {
                     return Ok(RunOutput { exit: Some(*code), output: out.clone(), timed_out: false, elapsed_s: 1 });

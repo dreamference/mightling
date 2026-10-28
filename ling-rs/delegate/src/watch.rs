@@ -783,12 +783,12 @@ impl Probe for SystemProbe {
     }
 
     fn git_rev_parse(&mut self, git_ref: &str, repo: Option<&Path>) -> Result<String, String> {
-        let mut cmd = Command::new("git");
-        if let Some(dir) = repo {
-            cmd.arg("-C").arg(dir);
+        let args = ["rev-parse", "--verify", git_ref];
+        let output = match repo {
+            Some(dir) => ling_safegit::output(dir, &args),
+            None => ling_safegit::output(Path::new("."), &args),
         }
-        cmd.args(["rev-parse", "--verify", git_ref]);
-        let output = cmd.output().map_err(|e| format!("spawn git: {e}"))?;
+        .map_err(|e| format!("spawn git: {e}"))?;
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
             return Err(if err.is_empty() {

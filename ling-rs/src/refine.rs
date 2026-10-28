@@ -477,13 +477,7 @@ pub fn run_study(args: &[OsString], task: &str, out: &Path, stdout: Stdio, stder
 /// outside a repository. Compared before and after the study step, which is told to change nothing.
 pub fn tree_fingerprint(dir: &Path) -> Option<String> {
     let git = |args: &[&str]| {
-        std::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
+        ling_safegit::output(dir, args)
             .ok()
             .filter(|output| output.status.success())
             .map(|output| output.stdout)

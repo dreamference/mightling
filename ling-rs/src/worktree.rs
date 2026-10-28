@@ -32,7 +32,6 @@
 use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 use std::process::Output;
 use std::process::Stdio;
 
@@ -728,10 +727,8 @@ fn snapshot(session: &Session) -> Result<Option<String>, String> {
     if base_tree.as_deref() == Some(tree.as_str()) {
         return Ok(None);
     }
-    let commit = Command::new("git")
-        .arg("-C")
-        .arg(&session.checkout)
-        .args(["commit-tree", &tree, "-p", &session.base, "-m", &format!("ling worktree session {} (discarded)", session.id)])
+    let message = format!("ling worktree session {} (discarded)", session.id);
+    let commit = ling_safegit::command(&session.checkout, &["commit-tree", &tree, "-p", &session.base, "-m", &message])
         .env("GIT_AUTHOR_NAME", "Mightling")
         .env("GIT_AUTHOR_EMAIL", "mightling@localhost")
         .env("GIT_COMMITTER_NAME", "Mightling")
@@ -757,12 +754,11 @@ fn short(sha: &str) -> &str {
 // -- git --------------------------------------------------------------------------------------
 
 fn git(dir: &Path, args: &[&str], index: Option<&Path>) -> Option<Output> {
-    let mut command = Command::new("git");
-    command.arg("-C").arg(dir).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut command = ling_safegit::command(dir, args);
     if let Some(index) = index {
         command.env("GIT_INDEX_FILE", index);
     }
-    command.output().ok()
+    ling_safegit::run(command, std::time::Duration::from_secs(60)).ok()
 }
 
 fn git_text(dir: &Path, args: &[&str]) -> Option<String> {
@@ -775,10 +771,7 @@ fn git_text(dir: &Path, args: &[&str]) -> Option<String> {
 
 fn git_with_input(dir: &Path, args: &[&str], input: &[u8]) -> Option<Output> {
     use std::io::Write;
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
+    let mut child = ling_safegit::command(dir, args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
