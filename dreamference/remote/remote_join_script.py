@@ -10,8 +10,10 @@ release archive (SHA-256 checked), makes sure `sshd` is there, joins the overlay
 from a 0600 file, and adds an `ssh` alias for the node.
 
 The key is never in a URL (the script downloads only NetBird's release archive) and never in a log:
-the script does not trace itself and `netbird up` gets `--setup-key-file`. It does appear on the
-line itself, as part of the script, so the line is secret until its key is spent or expires.
+the script does not trace itself, `netbird up` gets `--setup-key-file`, and the script reaches
+`sudo bash -s` on its standard input, never as an argument (sudo logs a command's arguments, and any
+local user reads a running one's in `/proc/<pid>/cmdline`). It does appear on the line itself, as
+part of the script, so the line is secret until its key is spent or expires.
 """
 
 import base64
@@ -148,7 +150,11 @@ class RemoteJoinScript:
 
         Returns:
             str: A line starting with a space (so a shell that skips such lines keeps it out of its
-            history) that decodes the script and runs it under sudo with the terminal as its input.
+            history) that decodes the script and pipes it into `sudo bash -s`: `printf` is the
+            shell's builtin and the script travels on a pipe, so the key is in no process's
+            arguments and not in sudo's log. The script is one function called on its last line,
+            so bash has read all of it before any command runs and none can read the rest as input.
         """
-        encoded = base64.b64encode(script.encode()).decode()
-        return f" sudo bash -c \"$(printf %s '{encoded}' | base64 -d)\""
+        wrapped = f"join_main() {{\n{script.rstrip()}\n}}\njoin_main\n"
+        encoded = base64.b64encode(wrapped.encode()).decode()
+        return f" printf %s '{encoded}' | base64 -d | sudo bash -s"

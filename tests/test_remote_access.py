@@ -1329,7 +1329,9 @@ def test_a_join_file_is_one_private_line_that_decodes_to_a_valid_script(
     assert minted == [("client house-1", False, 120)]  # two hours, one use, not ephemeral
     assert target.stat().st_mode & 0o777 == 0o600
     text = target.read_text()
-    assert text.count("\n") == 1 and text.startswith(" sudo bash -c")
+    assert text.count("\n") == 1 and text.startswith(" printf %s '")
+    # The script reaches sudo on a pipe: never an argument sudo logs or /proc/<pid>/cmdline shows.
+    assert text.rstrip("\n").endswith("| base64 -d | sudo bash -s") and "bash -c" not in text
     assert "SECRET-KEY-1" not in text  # only inside the base64
     assert "SECRET-KEY-1" not in capsys.readouterr().out
     encoded = text.split("'")[1]
@@ -1342,6 +1344,8 @@ def test_a_join_file_is_one_private_line_that_decodes_to_a_valid_script(
     assert subprocess.run(["bash", "-n", str(path)], check=False).returncode == 0
     assert "mightling-" in script
     assert "gx10-remote" in script and "User" in script
+    # One function called last, so nothing in the script can read the rest of it as its input.
+    assert script.startswith("join_main() {\nset -eu\n") and script.endswith("\n}\njoin_main\n")
 
 
 def test_the_join_script_leaves_out_the_ca_when_the_certificate_is_public():
