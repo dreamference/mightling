@@ -342,7 +342,8 @@ impl Tab {
             airgapped_on,
             thread_folder,
         }
-        .with_bridge(self.bridge);
+        .with_bridge(self.bridge)
+        .with_server(&self.server);
         let vetted = {
             let mut pending = self.shared.pending.lock().unwrap_or_else(|p| p.into_inner());
             policy.vet_outgoing(&message, &mut pending, &prompts)?

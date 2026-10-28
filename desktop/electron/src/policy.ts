@@ -39,6 +39,8 @@ export interface PromptSource {
   repoCheckout(cwd: string): boolean | null;
   /** The recorded checkout `cwd` when `threadId` is in `app_threads` of a checkout in `$CODEX_HOME/chat-repos/index.json`, or `null` otherwise. */
   repoThreadCwd(threadId: string): string | null;
+  /** Whether `threadId` is a repository thread whose checkout is currently granted Full Access. */
+  repoThreadFullAccess(threadId: string): boolean;
   /** Whether the caller is a paired phone bridge device or bridge session rather than the owner's browser session or desktop app. */
   isBridge(): boolean;
   /**
@@ -47,6 +49,38 @@ export interface PromptSource {
    * folder, DESKTOP §16 B33). Without it, or when it cannot tell, the answer is no.
    */
   workFolder?(cwd: string): boolean;
+  /**
+   * The workspace sandbox the policy writes on a repository thread's `turn/start` without Full
+   * Access, as the thread would get it from `sandbox: "workspace-write"`: the user's
+   * `[sandbox_workspace_write]`, with no network while the thread's air gap is on. Without it, or
+   * when it cannot tell, no network and no extra roots.
+   */
+  workspaceSandbox?(threadId: string): WorkspaceSandbox;
+}
+
+/** What a `workspaceWrite` sandbox policy holds beside its type (the app-server's `SandboxPolicy`). */
+export interface WorkspaceSandbox {
+  networkAccess: boolean;
+  writableRoots: string[];
+  excludeTmpdirEnvVar: boolean;
+  excludeSlashTmp: boolean;
+}
+
+const NO_WORKSPACE_EXTRAS: WorkspaceSandbox = { networkAccess: false, writableRoots: [], excludeTmpdirEnvVar: false, excludeSlashTmp: false };
+
+/**
+ * The `sandboxPolicy` for a turn: `readOnly` in a read-only checkout, else `workspaceWrite`. The
+ * read-only sandbox takes the same network setting, as the launcher gives it (patch 0031).
+ */
+function turnSandboxPolicy(workspace: WorkspaceSandbox, readOnly: boolean): JsonObject {
+  if (readOnly) return { type: "readOnly", networkAccess: workspace.networkAccess };
+  return {
+    type: "workspaceWrite",
+    writableRoots: [...workspace.writableRoots],
+    networkAccess: workspace.networkAccess,
+    excludeTmpdirEnvVar: workspace.excludeTmpdirEnvVar,
+    excludeSlashTmp: workspace.excludeSlashTmp,
+  };
 }
 
 /** The rules of `policy.json`. */
@@ -365,9 +399,23 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
     }
     if (method === "turn/start" && isObject(object.params)) {
       const params: JsonObject = { ...object.params };
-      const isRepo = typeof params.threadId === "string" && prompts.repoThreadCwd(params.threadId) !== null;
+      const threadId = typeof params.threadId === "string" ? params.threadId : null;
+      const repoCwd = threadId !== null ? prompts.repoThreadCwd(threadId) : null;
+      const isRepo = repoCwd !== null;
       if (prompts.isBridge() || isRepo) {
         for (const field of policy.pinnedTurnFields) delete params[field];
+      }
+      // A repository turn's sandbox is written on every turn, never left to the thread: a turn's
+      // `sandboxPolicy` holds for the turns after it. Full Access only for a turn from the page
+      // (never a messenger bridge's) on a writable checkout whose grant still stands; otherwise the sandbox
+      // `workspace-write` gives the thread, from the user's own configuration (network on unless the
+      // air gap is), read-only in a read-only checkout.
+      if (threadId !== null && repoCwd !== null) {
+        const readOnly = prompts.repoCheckout(repoCwd) === true;
+        params.sandboxPolicy =
+          !readOnly && !prompts.isBridge() && prompts.repoThreadFullAccess(threadId)
+            ? { type: "dangerFullAccess" }
+            : turnSandboxPolicy(prompts.workspaceSandbox?.(threadId) ?? NO_WORKSPACE_EXTRAS, readOnly);
       }
       object.params = params;
     }

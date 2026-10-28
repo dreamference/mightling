@@ -20,6 +20,8 @@ import {
   executeGitAction,
   filesIn,
   formatAnonymityRefusal,
+  fullAccessConfirmationPhrase,
+  matchesFullAccessConfirmation,
   openRepoForWork,
   recordCheckout,
   repoName,
@@ -762,5 +764,188 @@ describe("G13: WorktreeHeader on a chat-repos thread", () => {
     expect(desktopHtml).toContain("local · main");
     expect(desktopHtml).toContain("Hand off");
     expect(desktopHtml).not.toContain("tokens left");
+  });
+});
+
+describe("G7: Full Access typed confirmation and sandbox chip", () => {
+  it("renders Workspace or Full Access chip, hides button with disabled title when off, and enables Confirm only on exact FULL ACCESS <org>/<repo>", () => {
+    const checkoutCwd = "/home/u/.mightling/chat-repos/org/alpha-service/web-01234567";
+    recordCheckout({
+      thread: "01234567",
+      cwd: checkoutCwd,
+      repo: "org/alpha-service",
+      branch: "phone/01234567",
+      read_only: false,
+    });
+    setHost("web");
+
+    expect(fullAccessConfirmationPhrase("org/alpha-service")).toBe("FULL ACCESS org/alpha-service");
+    expect(matchesFullAccessConfirmation("FULL ACCESS org/alpha-service", "org/alpha-service")).toBe(true);
+    expect(matchesFullAccessConfirmation("full access org/alpha-service", "org/alpha-service")).toBe(false);
+    expect(matchesFullAccessConfirmation("FULL ACCESS org/alpha-service ", "org/alpha-service")).toBe(false);
+    expect(matchesFullAccessConfirmation("FULL ACCESS org/other", "org/alpha-service")).toBe(false);
+
+    // 1. Not allowed: Workspace chip with title "Full Access is off for phone threads" and no Full Access button.
+    const disallowedHtml = renderToStaticMarkup(
+      createElement(GitBar, {
+        thread: "01234567",
+        cwd: checkoutCwd,
+        state: sampleState({ full_access_allowed: false, full_access: false }),
+      }),
+    );
+    expect(disallowedHtml).toContain(">Workspace<");
+    expect(disallowedHtml).toContain('title="Full Access is off for phone threads"');
+    expect(disallowedHtml).not.toContain("Full Access…");
+    expect(disallowedHtml).not.toContain("Back to Workspace");
+
+    // 2. Allowed and not granted: Workspace chip and "Full Access…" button.
+    const allowedHtml = renderToStaticMarkup(
+      createElement(GitBar, {
+        thread: "01234567",
+        cwd: checkoutCwd,
+        state: sampleState({ full_access_allowed: true, full_access: false }),
+      }),
+    );
+    expect(allowedHtml).toContain(">Workspace<");
+    expect(allowedHtml).toContain(">Full Access…<");
+    expect(allowedHtml).not.toContain("Back to Workspace");
+
+    // 3. Pending full-access confirmation with partial/wrong text: Confirm button is disabled.
+    const mismatchPendingHtml = renderToStaticMarkup(
+      createElement(GitBar, {
+        thread: "01234567",
+        cwd: checkoutCwd,
+        state: sampleState({ full_access_allowed: true, full_access: false }),
+        initialPending: {
+          action: "full-access",
+          intent: "access",
+          confirm: "nonce-access-1",
+          message: "FULL ACCESS org/alpha",
+        },
+      }),
+    );
+    expect(mismatchPendingHtml).toContain("Type FULL ACCESS org/alpha-service to allow Full Access:");
+    expect(mismatchPendingHtml).toContain('class="primary" disabled=""');
+
+    // 4. Pending full-access confirmation with exact text: Confirm button is enabled.
+    const matchedPendingHtml = renderToStaticMarkup(
+      createElement(GitBar, {
+        thread: "01234567",
+        cwd: checkoutCwd,
+        state: sampleState({ full_access_allowed: true, full_access: false }),
+        initialPending: {
+          action: "full-access",
+          intent: "access",
+          confirm: "nonce-access-1",
+          message: "FULL ACCESS org/alpha-service",
+        },
+      }),
+    );
+    expect(matchedPendingHtml).toContain('<button class="primary">Confirm</button>');
+
+    // 5. Granted: Full Access chip and "Back to Workspace" button.
+    const grantedHtml = renderToStaticMarkup(
+      createElement(GitBar, {
+        thread: "01234567",
+        cwd: checkoutCwd,
+        state: sampleState({ full_access_allowed: true, full_access: true }),
+      }),
+    );
+    expect(grantedHtml).toContain(">Full Access<");
+    expect(grantedHtml).toContain(">Back to Workspace<");
+    expect(grantedHtml).not.toContain("Full Access…");
+  });
+
+  it("performs the two-step nonce and POST /api/repos/access flow for full access, workspace reset, and server refusals", async () => {
+    const log: { method: string; url: string; body: unknown }[] = [];
+    let counter = 0;
+    let shouldRefuseAirgap = false;
+    const api = chatRepos(async (url, init) => {
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      log.push({ method, url, body });
+
+      if (url.startsWith("/api/repos/state?")) {
+        const parsed = new URL(url, "http://127.0.0.1");
+        const intent = parsed.searchParams.get("intent");
+        counter += 1;
+        return jsonResponse(
+          sampleState({
+            full_access_allowed: true,
+            full_access: false,
+            confirm: intent ? `nonce-${intent}-${counter}` : undefined,
+          }),
+        );
+      }
+      if (url === "/api/repos/access") {
+        if (shouldRefuseAirgap) {
+          return jsonResponse(
+            {
+              error:
+                "Full Access runs commands with no sandbox, and the sandbox is what takes their network away, so the two are incompatible",
+            },
+            403,
+          );
+        }
+        const req = body as { level?: string; typed?: string };
+        if (req.level === "full" && req.typed !== "FULL ACCESS org/alpha-service") {
+          return jsonResponse({ error: "type FULL ACCESS org/alpha-service exactly" }, 400);
+        }
+        return jsonResponse({ level: req.level });
+      }
+      return jsonResponse({}, 404);
+    });
+
+    // 1. Grant Full Access (GET state?intent=access -> POST /api/repos/access with level="full" and typed).
+    const fullStep = await beginGitAction(api, "01234567", "full-access", "FULL ACCESS org/alpha-service");
+    expect(fullStep.pending.intent).toBe("access");
+    expect(fullStep.pending.confirm).toBe("nonce-access-1");
+    const fullOut = await executeGitAction(api, "01234567", fullStep.pending);
+    expect(fullOut.text).toBe("Full Access");
+
+    // 2. Back to Workspace needs no nonce (it must work with the forge down): POST level="workspace" only.
+    const wsOut = await executeGitAction(api, "01234567", { action: "workspace-access", intent: "access", confirm: "", message: "" });
+    expect(wsOut.text).toBe("Workspace");
+
+    // 3. Server refusal surfaces only the server's error sentence inline.
+    shouldRefuseAirgap = true;
+    const refusedStep = await beginGitAction(api, "01234567", "full-access", "FULL ACCESS org/alpha-service");
+    const refusedOut = await executeGitAction(api, "01234567", refusedStep.pending);
+    expect(refusedOut.text).toBe(
+      "Full Access runs commands with no sandbox, and the sandbox is what takes their network away, so the two are incompatible",
+    );
+
+    expect(log).toEqual([
+      { method: "GET", url: "/api/repos/state?thread=01234567&intent=access", body: null },
+      {
+        method: "POST",
+        url: "/api/repos/access",
+        body: {
+          thread: "01234567",
+          level: "full",
+          typed: "FULL ACCESS org/alpha-service",
+          confirm: "nonce-access-1",
+        },
+      },
+      {
+        method: "POST",
+        url: "/api/repos/access",
+        body: {
+          thread: "01234567",
+          level: "workspace",
+        },
+      },
+      { method: "GET", url: "/api/repos/state?thread=01234567&intent=access", body: null },
+      {
+        method: "POST",
+        url: "/api/repos/access",
+        body: {
+          thread: "01234567",
+          level: "full",
+          typed: "FULL ACCESS org/alpha-service",
+          confirm: "nonce-access-2",
+        },
+      },
+    ]);
   });
 });

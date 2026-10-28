@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { POLICY, airgapThread, namedPrompt, parsePolicy, threadPlace, vetOutgoing, type PromptSource } from "./policy";
+import { POLICY, airgapThread, namedPrompt, parsePolicy, threadPlace, vetOutgoing, type PromptSource, type WorkspaceSandbox } from "./policy";
 
 const WEB = path.join(__dirname, "..", "..", "..", "ling-rs", "web");
 
@@ -21,7 +21,9 @@ interface Case {
   airgapped?: "off" | "on";
   repoCheckouts?: Record<string, boolean>;
   repoThreads?: Record<string, string>;
+  repoFullAccess?: string[];
   bridge?: boolean;
+  workspaceSandbox?: Partial<WorkspaceSandbox>;
 }
 
 describe("the policy", () => {
@@ -51,7 +53,9 @@ describe("the policy", () => {
     let on = false;
     let repoCheckouts = new Map<string, boolean>();
     let repoThreads = new Map<string, string>();
+    let repoFullAccess = new Set<string>();
     let bridge = false;
+    let workspace: WorkspaceSandbox = { networkAccess: false, writableRoots: [], excludeTmpdirEnvVar: false, excludeSlashTmp: false };
     const stub: PromptSource = {
       composed: (name) => `PROMPT:${name}`,
       newScratchFolder: () => `SCRATCH/${++made}`,
@@ -59,7 +63,9 @@ describe("the policy", () => {
       airgappedOn: () => on,
       repoCheckout: (cwd) => repoCheckouts.get(cwd) ?? null,
       repoThreadCwd: (threadId) => repoThreads.get(threadId) ?? null,
+      repoThreadFullAccess: (threadId) => repoFullAccess.has(threadId),
       isBridge: () => bridge,
+      workspaceSandbox: () => workspace,
       workFolder: (cwd) => cwd.startsWith("WORK/"),
     };
     for (const testCase of vectors.cases) {
@@ -67,7 +73,10 @@ describe("the policy", () => {
       on = testCase.airgapped === "on";
       repoCheckouts = new Map(Object.entries(testCase.repoCheckouts ?? {}));
       repoThreads = new Map(Object.entries(testCase.repoThreads ?? {}));
+      repoFullAccess = new Set(testCase.repoFullAccess ?? []);
       bridge = Boolean(testCase.bridge);
+      // The user's workspace sandbox (`workspaceSandbox`), no network and no extra roots when absent.
+      workspace = { networkAccess: false, writableRoots: [], excludeTmpdirEnvVar: false, excludeSlashTmp: false, ...testCase.workspaceSandbox };
       const pending = new Set(testCase.pending ?? []);
       if (testCase.accept) {
         let out: unknown;
@@ -89,6 +98,7 @@ describe("the policy", () => {
       airgappedOn: () => false,
       repoCheckout: () => null,
       repoThreadCwd: () => null,
+      repoThreadFullAccess: () => false,
       isBridge: () => false,
       ...(workFolder ? { workFolder } : {}),
     });
@@ -127,6 +137,7 @@ describe("the policy", () => {
       airgappedOn: (thread) => (asked.push(thread), thread === "sealed"),
       repoCheckout: () => null,
       repoThreadCwd: () => null,
+      repoThreadFullAccess: () => false,
       isBridge: () => false,
     };
     const shell = (thread: string) => ({ id: 1, method: "thread/shellCommand", params: { threadId: thread, command: "ls" } });
