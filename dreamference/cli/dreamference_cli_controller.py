@@ -358,6 +358,47 @@ class DreamferenceCLIController:
         return requested
 
     @classmethod
+    def _engine_for_adapters(cls, model: str, engine: str | None, from_flag: bool) -> str | None:
+        """Keeps installed LoRA adapters from being lost to an engine that cannot serve them.
+
+        ling-serve has no adapter code (that is ling-engine 2.0 work). When the engine this start
+        resolved is ling and an adapter is installed for the model, a start without `--engine`
+        moves to SGLang and says so; an explicit `--engine ling` is refused.
+
+        Args:
+            model (str): The model to serve.
+            engine (str | None): `_server_engine`'s answer (None: the model's own default).
+            from_flag (bool): Whether the engine came from `--engine`.
+
+        Returns:
+            str | None: The engine to pass on.
+
+        Raises:
+            SystemExit: With 2, on `--engine ling` while adapters are installed.
+        """
+        from dreamference.hardware import ModelMatrixRegistry
+        from dreamference.hardware.model_matrix_registry import ENGINE_LING, ENGINE_SGLANG
+        from dreamference.vllm_server.adapter_serving import AdapterServing
+
+        engines = ModelMatrixRegistry.engines(model)
+        if (engine or (engines[0] if engines else None)) != ENGINE_LING:
+            return engine
+        adapters = AdapterServing.launch_adapters(model)
+        if not adapters:
+            return engine
+        names = ", ".join(str(entry["name"]) for entry in adapters)
+        if from_flag:
+            print(f"❌ --engine ling cannot serve the installed adapters ({names}): ling-serve has no "
+                  "adapter support yet. Use --engine sglang, or remove them with "
+                  "`ling-admin adapter remove`.")
+            raise SystemExit(2)
+        if ENGINE_SGLANG not in engines:
+            return engine
+        print(f"⚠️  Adapters need SGLang until ling-engine supports them: serving with SGLang "
+              f"for {names}.")
+        return ENGINE_SGLANG
+
+    @classmethod
     def _suggest_engine_fallback(cls, model: str, engine: str | None, what: str) -> None:
         """After a failed start check on ling-serve, names SGLang, the default engine, to go back to.
 
@@ -2781,6 +2822,7 @@ class DreamferenceCLIController:
                 # The engine: --engine for this start, else the configured one, else the model's own.
                 engine = cls._server_engine(args.model, args.engine or config.server_engine,
                                             from_flag=bool(args.engine))
+                engine = cls._engine_for_adapters(args.model, engine, from_flag=bool(args.engine))
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 # A machine that loads a model is a node; an advertised one says `loading`.
                 from dreamference.node import NodeAdvertiser

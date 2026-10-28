@@ -201,7 +201,25 @@ class AdapterCommand:
             f"✅ Installed {entry['display_name']} {entry['version']} as `{entry['name']}`{flag}."
         )
         print(RESTART_HINT.format(name=entry["name"]))
+        cls._warn_if_ling(base)
         return 0
+
+    @classmethod
+    def _warn_if_ling(cls, base: dict[str, str] | None) -> None:
+        """Warns when the engine the next `server start` resolves is ling-serve, which serves no adapters."""
+        from dreamference.hardware import ModelMatrixRegistry
+        from dreamference.hardware.model_matrix_registry import ENGINE_LING
+
+        if base is None:
+            return
+        engines = ModelMatrixRegistry.engines(base["key"])
+        engine = DreamferenceConfig().server_engine or (engines[0] if engines else None)
+        if engine == ENGINE_LING:
+            print(
+                "⚠️  The engine configured for this model is ling-serve, which cannot serve adapters yet: "
+                "`ling-admin server start` will use SGLang while an adapter is installed "
+                "(`--engine ling` is refused)."
+            )
 
     @classmethod
     def _confirm(cls, manifest: AdapterManifest) -> bool:
