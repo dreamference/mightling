@@ -83,8 +83,18 @@ t=$(started)
 mkdir -p "$SCRATCH_HOME"
 ling=""
 if curl -fsSL -m 120 -o "$WORK/install.sh" "$REPO_URL/releases/latest/download/install.sh"; then
-    out="$(HOME="$SCRATCH_HOME" timeout 900 bash "$WORK/install.sh" --role client 2>&1)"
-    code=$?
+    # Standard input is the script bash is reading: the installer gets none. One retry: on 2026-10-28
+    # the API answered once in compact JSON (install.sh reads the tag from a pretty-printed line:
+    # "has no tag") and in pretty JSON a minute later.
+    for attempt in 1 2; do
+        out="$(HOME="$SCRATCH_HOME" timeout 900 bash "$WORK/install.sh" --role client 2>&1 < /dev/null)"
+        code=$?
+        [[ $code -eq 0 ]] && break
+        echo "$out"
+        echo "== install.sh attempt $attempt failed (exit $code)"
+        rate_limited "$out" && break
+        sleep 30
+    done
     echo "$out"
     if [[ $code -eq 0 && -x "$SCRATCH_HOME/.local/bin/ling" ]]; then
         ling="$SCRATCH_HOME/.local/bin/ling"
