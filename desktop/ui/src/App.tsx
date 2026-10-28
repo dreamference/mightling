@@ -97,6 +97,7 @@ import { AgentMark } from "./agentmarks";
 import { ExportDialog } from "./ExportDialog";
 import { LINKED_SETTINGS, sameRemote } from "./links2";
 import { GitBar } from "./GitBar";
+import { backTarget, DrawerFiles, NARROW_MEDIA_QUERY } from "./phone";
 import { ReposView } from "./ReposView";
 import {
   CHAT_WORK_PROMPT,
@@ -226,6 +227,19 @@ export function App() {
   const [pending, setPending] = useState<PendingFile[]>([]);
   const [sending, setSending] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const [narrow, setNarrow] = useState<boolean>(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia(NARROW_MEDIA_QUERY).matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(NARROW_MEDIA_QUERY);
+    setNarrow(query.matches);
+    const onChange = (event: MediaQueryListEvent) => setNarrow(event.matches);
+    query.addEventListener?.("change", onChange);
+    return () => query.removeEventListener?.("change", onChange);
+  }, []);
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [models, setModels] = useState<Model[]>([]);
   const [modelChoice, setModelChoice] = useState<string | null>(null);
@@ -2580,6 +2594,100 @@ export function App() {
     }
   };
 
+  const escapeLayerOpen =
+    picker !== "closed" ||
+    settingsOpen ||
+    info !== null ||
+    menuOpen !== false ||
+    findOpen ||
+    rowMenu !== null ||
+    extensions !== null ||
+    scheduledOpen ||
+    fileSearch !== null ||
+    activityOpen ||
+    boardOpen;
+  const dialogOpen =
+    escapeLayerOpen ||
+    continuing !== null ||
+    linkAsked !== null ||
+    syncedOpen ||
+    askFilesOpen ||
+    pathMenu !== null ||
+    exporting !== null ||
+    projectDialog !== null ||
+    editingEnv;
+  const closeEscapeLayers = () => {
+    setFileSearch(null);
+    setBoardOpen(false);
+    setActivityOpen(false);
+    setScheduledOpen(false);
+    setExtensions(null);
+    setPicker("closed");
+    setSettingsOpen(false);
+    setMenuOpen(false);
+    setFindOpen(false);
+    setRowMenu(null);
+    setInfo(null);
+  };
+  const closeDialogLayers = () => {
+    closeEscapeLayers();
+    setScheduledRun(null);
+    setPluginFocus(null);
+    setContinuing(null);
+    setLinkAsked(null);
+    setSyncedOpen(false);
+    setAskFilesOpen(false);
+    setPathMenu(null);
+    setExporting(null);
+    setProjectDialog(null);
+    setEditingEnv(false);
+  };
+  const activeBackTarget = backTarget({
+    outputTarget: outputTarget !== null,
+    reposOpen,
+    dialogOpen,
+    sheetOpen: tabsShown,
+    drawer,
+    threadSelected: selected !== null,
+    narrow,
+  });
+  const onTelegramBackRef = useRef<() => void>(() => {});
+  onTelegramBackRef.current = () => {
+    switch (activeBackTarget) {
+      case "output":
+        setOutputTarget(null);
+        return;
+      case "repos":
+        setReposOpen(false);
+        return;
+      case "dialog":
+        closeDialogLayers();
+        return;
+      case "sheet":
+        if (paneActive) {
+          closeSurface();
+        } else if (paneTree) {
+          setTreeShown(false);
+          setAskTree(false);
+        } else {
+          updatePrefs({ layout: "chat" });
+        }
+        return;
+      case "drawer":
+        setDrawer(false);
+        return;
+      case "thread":
+        dispatch({ type: "select", threadId: null });
+        return;
+    }
+  };
+  useEffect(() => {
+    bridge.telegram.setBackButton(activeBackTarget !== null);
+  }, [activeBackTarget]);
+  useEffect(() => {
+    return bridge.telegram.onBack(() => onTelegramBackRef.current());
+  }, []);
+
   // Shortcuts that work anywhere in the window: the model picker, recent models, settings, and Enter
   // and Esc on an open approval when no text field has focus.
   const keys = useRef<(event: KeyboardEvent) => void>(() => {});
@@ -2712,18 +2820,8 @@ export function App() {
       event.preventDefault();
       setSettingsPage("general");
       setSettingsOpen((open) => !open);
-    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu || extensions || scheduledOpen || fileSearch !== null || activityOpen || boardOpen)) {
-      setFileSearch(null);
-      setBoardOpen(false);
-      setActivityOpen(false);
-      setScheduledOpen(false);
-      setExtensions(null);
-      setPicker("closed");
-      setSettingsOpen(false);
-      setMenuOpen(false);
-      setFindOpen(false);
-      setRowMenu(null);
-      setInfo(null);
+    } else if (event.key === "Escape" && escapeLayerOpen) {
+      closeEscapeLayers();
     } else if (event.key === "Escape" && choice.ids.length) {
       setChoice(NO_CHOICE);
     } else if (!editableFocus() && threadRequests.length > 0) {
@@ -3047,6 +3145,17 @@ export function App() {
                 title={prefs.threadOrder === "chronological" ? "List threads by project" : "List every thread by date, across projects"} aria-label="Chronological"
                 onClick={(event) => { event.preventDefault(); updatePrefs({ threadOrder: prefs.threadOrder === "chronological" ? "projects" : "chronological" }); }}><Icon name="clock" size={14} /></button>
             </label>
+            <DrawerFiles
+              host={HOST}
+              open={drawer && narrow}
+              view={view}
+              cwd={selected ? workFolder : null}
+              client={client}
+              listen={listen}
+              selected={paneActive?.kind === "file" ? paneActive.key.slice(5) : null}
+              onOpen={(path) => openFile(path)}
+              onClose={() => setDrawer(false)}
+            />
             {found ? (
               <section className="project">
                 <h2>Found</h2>

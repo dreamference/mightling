@@ -893,26 +893,45 @@ html.pet-page body { margin: 0; }
 
 /* Narrow windows and phones: the thread list becomes a drawer behind the menu button, and inputs
    are 16px so mobile browsers do not zoom into them. `ling web` is text-only from other devices
-   (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.4). */
+   (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.4; specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §10 G5, G12). */
+.drawer-files { display: none; }
 @media (max-width: 720px) {
-  .work, .work.review-open { grid-template-columns: 1fr; }
-  .review-pane { position: fixed; inset: 0; z-index: 25; }
-  .sidebar { position: fixed; z-index: 20; top: 0; bottom: 0; left: 0; width: min(85vw, 320px); transform: translateX(-100%); box-shadow: var(--shadow-focus); }
+  .work, .work.review-open, .work.tabs-full { grid-template-columns: 1fr; height: 100dvh; }
+  .work.tabs-full .thread-pane { visibility: visible; }
+  .thread-pane { height: 100dvh; min-height: 0; }
+  .review-pane, .tab-area { position: fixed; inset: 0; width: 100vw; height: 100dvh; z-index: 25; border-left: none; display: flex; flex-direction: column; background: var(--canvas); }
+  .review-bar { padding-top: calc(6px + max(env(safe-area-inset-top), var(--tg-content-safe-top, 0px))); flex-wrap: wrap; }
+  .review-bar .layout-switch button:not(:last-child) { display: none; }
+  .review-bar .tab button.icon, .review-bar .layout-switch button { min-height: 32px; }
+  .file-view { flex: 1; min-height: 0; width: 100%; height: 100%; }
+  .file-tools { padding-top: calc(4px + max(env(safe-area-inset-top), var(--tg-content-safe-top, 0px))); flex-wrap: wrap; }
+  .sidebar { position: fixed; z-index: 20; top: 0; bottom: 0; left: 0; width: min(85vw, 320px); transform: translateX(-100%); box-shadow: var(--shadow-focus); padding-top: calc(10px + max(env(safe-area-inset-top), var(--tg-content-safe-top, 0px))); padding-bottom: calc(12px + max(env(safe-area-inset-bottom), var(--tg-content-safe-bottom, 0px))); }
   .drawer-open .sidebar { transform: none; }
   .drawer-open .backdrop { display: block; position: fixed; inset: 0; z-index: 10; background: var(--scrim); }
+  .drawer-files { display: block; }
+  .drawer-files .file-tree { width: 100%; max-height: 40dvh; border-right: none; background: transparent; }
   .bar .menu-toggle { display: inline-flex; }
   .bar .sidebar-toggle, .bar .nav-button { display: none; }
   .settings-body { grid-template-columns: 1fr; }
-  .bar { padding: 6px 8px; gap: 6px; }
+  .bar { padding: calc(6px + max(env(safe-area-inset-top), var(--tg-content-safe-top, 0px))) 8px 6px; gap: 6px; }
   .bar .title { max-width: none; flex: 1; min-width: 0; }
   .bar .cwd, .bar .spacer, .chip.optional { display: none; }
+  .git-bar { flex-wrap: wrap; padding: 6px 10px; gap: 6px; }
+  .git-bar-actions { flex-wrap: wrap; width: 100%; gap: 6px; }
+  .git-bar button, .git-bar-actions button, .git-confirm button { min-height: 40px; }
+  .git-commit-input { flex: 1 1 100%; min-width: 0; min-height: 40px; }
+  .approval-strip { position: sticky; top: 0; z-index: 5; }
   .turns { padding: 12px 12px 4px; }
-  .composer { padding: 4px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .approval-host { position: sticky; bottom: 0; z-index: 4; background: var(--canvas); padding-bottom: 4px; }
+  .composer { position: sticky; bottom: 0; z-index: 6; background: var(--canvas); padding: 4px 10px calc(10px + max(env(safe-area-inset-bottom), var(--tg-content-safe-bottom, 0px))); }
+  .output-view { position: fixed; inset: 0; width: 100vw; height: 100dvh; z-index: 60; padding-bottom: max(env(safe-area-inset-bottom), var(--tg-content-safe-bottom, 0px)); }
+  .output-view-bar { padding-top: calc(8px + max(env(safe-area-inset-top), var(--tg-content-safe-top, 0px))); }
+  .output-view-bar button { min-height: 40px; }
   .item.user { max-width: 92%; }
   .row-actions { display: flex; }
   .age { display: none; }
   input, textarea, select, .composer textarea, .search input, .new-thread input { font-size: 16px; }
-  .approval .buttons button { flex: 1 1 auto; }
+  .approval .buttons button { flex: 1 1 auto; min-height: 40px; }
   .startup { margin: 24px auto; }
   .dialog-backdrop:has(.dialog.synced) { padding-top: 8px; }
   .dialog.synced { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); padding: 12px 12px 16px; box-sizing: border-box; }
@@ -1255,3 +1274,41 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .output-view-log { flex: 1; min-height: 0; margin: 0; padding: 14px 16px; overflow-y: auto; font-family: var(--font-code); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .output-match { background: var(--accent-soft); color: var(--text); border-radius: 2px; }
 .output-match.current { outline: 1px solid var(--accent-text); font-weight: 600; }
+
+/* Inside Telegram's webview (`bridge.js` sets `html[data-host="telegram"]`, CHAT_REPOS §10 G5; TELEGRAM_MOONSHOT §15):
+   safe-area insets from `safe_area_changed` and `content_safe_area_changed` keep top bars, full-screen sheets, and the
+   bottom composer clear of the phone's notch, status bar, Telegram header, and home indicator. */
+:root[data-host="telegram"] {
+  --tg-safe-top: 0px;
+  --tg-safe-right: 0px;
+  --tg-safe-bottom: 0px;
+  --tg-safe-left: 0px;
+  --tg-content-safe-top: 0px;
+  --tg-content-safe-right: 0px;
+  --tg-content-safe-bottom: 0px;
+  --tg-content-safe-left: 0px;
+}
+:root[data-host="telegram"] .work {
+  height: 100dvh;
+  padding-left: max(env(safe-area-inset-left, 0px), var(--tg-safe-left, 0px), var(--tg-content-safe-left, 0px));
+  padding-right: max(env(safe-area-inset-right, 0px), var(--tg-safe-right, 0px), var(--tg-content-safe-right, 0px));
+}
+:root[data-host="telegram"] .thread-pane > .bar {
+  padding-top: calc(6px + max(env(safe-area-inset-top, 0px), var(--tg-safe-top, 0px) + var(--tg-content-safe-top, 0px)));
+}
+:root[data-host="telegram"] .sidebar {
+  padding-top: calc(10px + max(env(safe-area-inset-top, 0px), var(--tg-safe-top, 0px) + var(--tg-content-safe-top, 0px)));
+  padding-bottom: calc(12px + max(env(safe-area-inset-bottom, 0px), var(--tg-safe-bottom, 0px), var(--tg-content-safe-bottom, 0px)));
+}
+:root[data-host="telegram"] .review-pane > .review-bar,
+:root[data-host="telegram"] .output-view-bar {
+  padding-top: calc(8px + max(env(safe-area-inset-top, 0px), var(--tg-safe-top, 0px) + var(--tg-content-safe-top, 0px)));
+}
+:root[data-host="telegram"] .composer {
+  padding-bottom: calc(10px + max(env(safe-area-inset-bottom, 0px), var(--tg-content-safe-bottom, 0px), var(--tg-safe-bottom, 0px)));
+}
+:root[data-host="telegram"] .output-view {
+  height: 100dvh;
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-content-safe-bottom, 0px), var(--tg-safe-bottom, 0px));
+}
+

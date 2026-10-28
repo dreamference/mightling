@@ -1007,3 +1007,35 @@ export async function readBoards(sqliteHome: string | null): Promise<Board[]> {
   if (host() !== "electron") return [];
   return send<Board[]>({ type: "board/read", sqliteHome });
 }
+
+/** The Telegram Mini App host (`ling-rs/web/static/bridge.js`, CHAT_REPOS §10 G5): a no-op in the desktop app and in an ordinary browser tab. */
+export const telegram = {
+  available(): boolean {
+    if (host() === "electron") return false;
+    return typeof document !== "undefined" && document.documentElement?.dataset?.host === "telegram";
+  },
+  setBackButton(visible: boolean): void {
+    if (!telegram.available()) return;
+    if (typeof window === "undefined" || !window.electronBridge) return;
+    void window.electronBridge.sendMessageFromView({
+      type: "telegram/back-button",
+      visible: Boolean(visible),
+    });
+  },
+  onBack(listener: () => void): () => void {
+    if (!telegram.available() || typeof window === "undefined" || typeof window.addEventListener !== "function") {
+      return () => {};
+    }
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { channel?: string } | null;
+      if (data && data.channel === "telegramBack") listener();
+    };
+    window.addEventListener("message", onMessage);
+    return () => {
+      if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+        window.removeEventListener("message", onMessage);
+      }
+    };
+  },
+};
+

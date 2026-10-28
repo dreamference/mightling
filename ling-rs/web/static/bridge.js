@@ -288,18 +288,51 @@
     return ok;
   });
 
+  function applySafeArea(prefix, data) {
+    if (!data || typeof data !== "object") return;
+    const box =
+      data.safe_area && typeof data.safe_area === "object"
+        ? data.safe_area
+        : data.content_safe_area && typeof data.content_safe_area === "object"
+          ? data.content_safe_area
+          : data;
+    const style = document.documentElement && document.documentElement.style;
+    if (!style || typeof style.setProperty !== "function") return;
+    for (const side of ["top", "right", "bottom", "left"]) {
+      const value = box[side];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        style.setProperty(`${prefix}-${side}`, `${value}px`);
+      }
+    }
+  }
+
   if (launch) {
     document.documentElement.dataset.host = "telegram";
     window.Telegram = window.Telegram || {};
     window.Telegram.WebView = window.Telegram.WebView || {
       receiveEvent(type, data) {
-        if (type !== "theme_changed") return;
-        const theme = telegramTheme(data && data.theme_params);
-        if (theme) dispatch({ channel: "theme", payload: theme });
+        if (type === "theme_changed") {
+          const theme = telegramTheme(data && data.theme_params);
+          if (theme) dispatch({ channel: "theme", payload: theme });
+          return;
+        }
+        if (type === "safe_area_changed") {
+          applySafeArea("--tg-safe", data);
+          return;
+        }
+        if (type === "content_safe_area_changed") {
+          applySafeArea("--tg-content-safe", data);
+          return;
+        }
+        if (type === "back_button_pressed") {
+          dispatch({ channel: "telegramBack", payload: null });
+        }
       },
     };
     telegramEvent("web_app_ready");
     telegramEvent("web_app_expand");
+    telegramEvent("web_app_request_safe_area");
+    telegramEvent("web_app_request_content_safe_area");
   }
 
   function send(frame) {
@@ -313,6 +346,12 @@
 
   window.electronBridge = {
     sendMessageFromView(message) {
+      if (message && typeof message === "object" && message.type === "telegram/back-button") {
+        if (launch) {
+          telegramEvent("web_app_setup_back_button", { is_visible: Boolean(message.visible) });
+        }
+        return Promise.resolve(null);
+      }
       const call = next++;
       return new Promise((resolve, reject) => {
         pending.set(call, { resolve, reject });
