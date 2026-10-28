@@ -63,7 +63,7 @@ def test_the_release_keeps_only_its_own_jobs_and_calls_the_shared_build() -> Non
     # Every input the release dispatch takes for its builds reaches the shared workflow.
     inputs = trigger(workflow("release.yml"))["workflow_dispatch"]["inputs"]
     passed = jobs["build"]["with"]
-    for name in set(inputs) - {"prerelease", "draft"}:
+    for name in set(inputs) - {"prerelease", "draft", "generated_notes"}:
         assert passed[name] == f"${{{{ inputs.{name} }}}}", name
 
 

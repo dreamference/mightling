@@ -64,6 +64,8 @@
 /scripts/package_mightling.sh                   @dreamference/release
 /scripts/macos/                                 @dreamference/release @dreamference/security
 /scripts/release_notes.py                       @dreamference/release
+/scripts/release_benchmark.py                   @dreamference/release
+/scripts/release_on_green.py                    @dreamference/release
 /scripts/rename_mightling.py                    @dreamference/release
 /scripts/gen_admin_reference.py                 @dreamference/release
 /specs/DREAMFERENCE_RELEASE_*.md                @dreamference/release
