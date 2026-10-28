@@ -43,7 +43,7 @@ python3 -m venv .venv
 This installs `ling-admin`. Put the environment on your `PATH`, for example in `~/.bashrc`:
 
 ```bash
-export PATH="$HOME/ling/.venv/bin:$PATH"
+export PATH="$HOME/mightling/.venv/bin:$PATH"
 ```
 
 !!! warning "`ling-admin`, `ling-search` and `ling-fetch` have to be on your PATH"
@@ -132,9 +132,9 @@ curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/in
 cd ~/my-project && ling
 ```
 
-The script installs the client: `ling`, `ling-search`, `ling-fetch` and `ling-code`, and on a
-Mac, from 1.7.2, the [desktop app](desktop.md) as well (`--no-app` leaves it out). On Windows 11,
-the same in PowerShell (a preview; Smart App Control must be off):
+The script installs the client: `ling`, `ling-search`, `ling-fetch`, `ling-code` (and on Linux
+`ling-docs`), and on a Mac, from 1.7.2, the [desktop app](desktop.md) as well (`--no-app` leaves it
+out). On Windows 11, the same in PowerShell (a preview; Smart App Control must be off):
 
 ```powershell
 irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex
@@ -157,9 +157,3 @@ To remove the client, on any of them: `ling uninstall` (it asks first; `--purge`
     macOS's own sandbox enforces `/airgapped on`, but it is set once, when `ling` starts: use
     `ling airgapped default on` (or `DREAMFERENCE_MIGHTLING_AIRGAPPED=on ling`) and restart. Typed
     inside a running session, `/airgapped on` and `off` say so and change nothing.
-
-## Known issues
-
-- **`ling update` finds nothing yet.** It installs the latest published Mightling release, and none
-  has been published. Until then, update by pulling the repository and running
-  `ling-admin codex build`.

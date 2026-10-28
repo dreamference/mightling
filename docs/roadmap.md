@@ -3,15 +3,17 @@
 Work that is planned or designed but **not built yet**. Nothing here is a commitment to a date.
 
 Already shipped and so no longer listed here: the code index (`ling-code`, offered to the agent
-as tools), Gmail, Google Drive and Calendar in `/apps`, the desktop app's Work window, and
-observation masking with a per-output cap (built, off by default).
+as tools), the local document index (`ling-docs`, [Your documents](documents.md)), Gmail, Google
+Drive and Calendar in `/apps`, the desktop app's Work window (including review, git worktrees and
+settings pages), setting up more GB10s (`ling-admin node provision`), and observation masking with
+a per-output cap (built, off by default).
 
 ## The Work window, continued
 
-*Status: Phase 1 built.*
+*Status: Phases 1–3 built.*
 
-The desktop app's **Work** window drives `ling` sessions: threads, approvals, diffs, Stop, steer
-and undo. Still to come: review, git worktrees, settings pages and choosing a model from the window.
+The desktop app's **Work** window drives `ling` sessions: threads, approvals, diffs, review, git
+worktrees, settings pages, Stop, steer and undo. Still to come: choosing a model from the window.
 
 ## Keeping long tasks inside the context window
 
@@ -22,20 +24,10 @@ outputs older than the last few, and capping any single output, roughly halves h
 has to summarise itself on recorded runs. It becomes the default once a benchmark shows it does not
 cost results.
 
-## Setting up more GB10s
-
-*Status: designed.*
-
-After NVIDIA's first-boot wizard, one command on an existing node installs Mightling on new units,
-applies the host settings, copies the model over the network and pairs them.
-
 ## Documents
 
-*Status: idea.*
+*Status: indexing and search shipped ([Your documents](documents.md)); editing is an idea.*
 
-Search across PDFs, Word, PowerPoint and spreadsheet files as well as code:
-
-- documents converted to Markdown locally, then indexed by section;
 - editing spreadsheets and documents safely, with a backup and a diff each time.
 
 ## Returning features, locally

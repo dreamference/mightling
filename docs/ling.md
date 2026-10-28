@@ -150,10 +150,11 @@ ling-admin node enable        # asks for your password once; `--no-web` keeps th
 ```
 
 That announces the node on the local network and lets other computers reach its web search and
-its web UI. **Anyone on your network can then use the model, search through the node and open the
-web UI**, which has one shared account and can search the mail connected on the node. Nothing is
-encrypted or password-protected, so do this only on a network you trust. `ling-admin node
-disable` undoes it, and `ling-admin node status` shows what is announced.
+its web UI. **Anyone on your network can then use the model and search through the node**, and
+nothing is encrypted on the local network, so do this only on a network you trust; the web UI
+(`ling web`, port 3100) serves another computer or phone only once paired on the node
+(`ling web pair`). `ling-admin node disable` undoes it, and `ling-admin node status` shows what is
+announced.
 
 On the other computer, type `ling`. It finds the node and remembers it:
 
@@ -168,8 +169,8 @@ If there are several nodes, `ling` asks once which to use and never switches by 
 node's model server is stopped or still loading, it says so instead of waiting.
 
 What does not work from a client yet: Gmail in `ling`, Night Shift (`/night add` is refused: tasks
-run on the node), and anything `ling-admin` does. The desktop window, `ling-app`, shows the
-node's web UI on a client. This is new and has been tested on one machine only; see
+run on the node), and anything `ling-admin` does. The desktop app, `ling-app`, runs its own
+bundled `ling` against the node's model. See
 `specs/DREAMFERENCE_MIGHTLING_NODE.md` §18 for what was measured.
 
 ### A second GB10

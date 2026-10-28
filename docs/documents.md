@@ -44,7 +44,7 @@ you add. A `.lingignore` file (gitignore syntax) in a folder can leave out more.
 Headings give each passage its section (`Delivery > Rates`), a message its subject, a table or a
 sheet its columns, a slide its title. A spreadsheet is read by its stored values (a formula's last
 result). An e-mail's readable attachments (PDF, Word, OpenDocument, HTML, text, CSV) are indexed with
-their message. Other files, such as installers, archives, pictures and videos, are left out without
+their message. Other files, such as installers, archives and videos, are left out without
 being opened.
 
 Scanned pages and pictures are read by OCR on this machine, after the rest of a folder is
@@ -57,7 +57,8 @@ read fewer pages of a long scan.
 
 ## Searching
 
-The agent has `docs_search` and `docs_read` when a collection exists. You can search too:
+The agent has `docs_search` and `docs_read` when a collection exists, and `pdf_search` (read back
+with `docs_read`) to search inside a long PDF from a URL or the workspace. You can search too:
 
 ```bash
 ling docs search "notice period acme" [--collection contracts] [--type docx] [--after 2025-01-01]

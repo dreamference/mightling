@@ -29,7 +29,7 @@ is not a preview.
   Mightling as `[Screenshot text: …]`, and the image itself too when the model being served takes
   images. If nothing can be read from it, the bridge says so ("I can't read this image; describe it
   or paste the text.") instead of asking Mightling about nothing. A file is saved in the thread's
-  folder. What a bridge cannot take (a voice message, a sticker) is named in one line, never
+  folder. What a bridge cannot take (a video, a sticker) is named in one line, never
   dropped silently.
 - **A new thread after a pause.** A message after four hours of silence starts a new thread, and
   the bridge says so: "New thread (the last message was 16h00m ago); /use 2 to go back." Change

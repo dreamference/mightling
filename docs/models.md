@@ -14,6 +14,7 @@ How well the default model solves real coding tasks, release by release, is on t
 | **`qwen3.8-27b-nvfp4-dflash2`** (default) | Qwen3.8-27B, NVFP4, with DFlash2 speculative decoding, served by SGLang | 27B | NVFP4 | 20 – 70 GB | yes |
 | `qwen3.8-27b-dflash2-draft` | DFlash2 drafter for Qwen3.8-27B (not served on its own) | ~1B | NVFP4 | 1 – 2 GB | no |
 | `qwen3.8-27b-minima-nvfp4-dflash2` (candidate, under evaluation) | Qwen3.8-27B with every layer in NVFP4 ("Minima"), same server settings and drafter as the default | 27B | NVFP4 | 19 – 70 GB | no |
+| `qwen3.8-flash-next-nvfp4-mtp` (trial candidate) | Qwen3.8-Flash-Next (125B with 6B active, 51B n-gram table, 4B MTP head), QAD NVFP4 with MTP speculative decoding, served by vLLM | 180B | NVFP4 | 100 – 115 GB | yes |
 
 List them, with their Hugging Face repositories, on your machine:
 
@@ -45,7 +46,7 @@ Server settings it runs with (from the registry):
 
 | Setting | Value |
 |---|---|
-| Server | SGLang v0.5.19, pinned by digest |
+| Server | SGLang v0.5.21, pinned by digest |
 | Checkpoint | `RadixArk/Qwen3.8-27B-NVFP4`, pinned commit |
 | Context length | 262,144 tokens |
 | Concurrent requests | 8 |
@@ -83,7 +84,7 @@ limits:
 
 - **No images.** An image arrives as the text `[image]`; `ling` and the phone bridges learn this
   from the server and send text.
-- **No LoRA adapters**, and no API key (`--api-key` is refused).
+- **No LoRA adapters** (while an adapter is installed, `server start` stays on SGLang and refuses `--engine ling`), and no API key (`--api-key` is refused).
 - **Two requests at once**; a third waits until one finishes.
 - **Changing the end of a long prompt reads it again**: a new prompt that shares a long beginning
   with an earlier one but differs inside the same message is read in full (at ~850-900 tokens per

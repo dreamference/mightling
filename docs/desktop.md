@@ -368,7 +368,7 @@ accent, background and text colours of the theme in front; each theme keeps its 
   included, are kept in `~/.mightling/config.toml` with the server.
 - **Ask one click away**, in the same window's sidebar.
 
-Not there yet: review, settings pages and choosing a model (it is shown, not chosen).
+Not there yet: choosing a model from the window (the model the node serves is shown).
 Night Shift holds back while a Work turn is running, and the machine stays awake until it ends.
 
 ## Notes
