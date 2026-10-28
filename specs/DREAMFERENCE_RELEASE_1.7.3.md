@@ -51,7 +51,13 @@ the shared hub, so a repository's content does not reach Telegram or Discord.
 **Safer git on your machine.** Where Mightling runs git in a checkout the agent can write (the web
 server, the launcher, the delegation plugin, the monitor, `ling-code` and the desktop app), git no
 longer runs a program that the checkout's own configuration names (an external diff, a filter, a
-hook or a pager). Your checkouts behave as before.
+hook or a pager). The same holds for the git that Night Shift, node jobs, the context engine and the
+SWE-bench harness run. Repository hooks run again, as you choose. Your checkouts behave as before.
+
+Full Access given to a phone Work thread now ends within five seconds of the node turning it off (or
+of `/airgapped on`), not at the thread's next turn.
+
+**Cave mode is removed for now** (`/cavemode` and the terse-answer levels); it can come back later.
 
 **Night Shift fills its own queue,** off until you turn it on: `[night] autofill = true` (or
 `ling-admin night autofill` by hand) queues up to five bounded tasks a night from failing CI tests,
@@ -66,7 +72,9 @@ bounded edit with one test, handed to the local model, with a ledger of how it d
 **Benchmarks.** The website has a Benchmarks page: only numbers tied to a release, with how each was
 measured. 1.7.3 carries no entry.
 
-**Also:** the desktop app's icons show the Mightling mark at every size, including the tray's;
+**Also:** on a Mac, the code-mode helper is found beside the `ling` binary and `ling web start` and
+`stop` use a per-user launchd agent; the delegation plugin's test and lint gates run inside the
+sandbox; the Mini App refuses a replayed launch; the desktop app's icons show the Mightling mark at every size, including the tray's;
 the Apple silicon client can build on a self-hosted Mac; SWE-bench Multilingual runs on arm64.
 
 ling-engine (opt-in): unchanged from 1.7.2 (image
