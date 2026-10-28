@@ -143,7 +143,7 @@ exec_leg() {
         return
     fi
     local dir="$WORK/exec-$leg"
-    mkdir -p "$dir"
+    mkdir -p "$dir" "$SCRATCH_HOME/.mightling-$leg"
     out="$(cd "$dir" && HOME="$SCRATCH_HOME" CODEX_HOME="$SCRATCH_HOME/.mightling-$leg" \
         DREAMFERENCE_MIGHTLING_DOCS=0 DREAMFERENCE_VLLM_HOST="http://$host:$MODEL_PORT" \
         timeout 300 "$ling" exec --skip-git-repo-check --output-last-message "$dir/answer.txt" \
