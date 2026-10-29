@@ -223,6 +223,44 @@ pub fn walk(collection: &Collection, user_home: &Path, images: bool) -> Discover
     walk_in(collection, user_home, &crate::config::home(), images)
 }
 
+/// Whether the innermost `.lingignore` with a say on `path` ignores it.
+fn lingignored(ignores: &[Gitignore], path: &Path, is_dir: bool) -> bool {
+    for gi in ignores.iter().rev() {
+        let m = gi.matched(path, is_dir);
+        if m.is_ignore() {
+            return true;
+        }
+        if m.is_whitelist() {
+            return false;
+        }
+    }
+    false
+}
+
+/// The `.lingignore` files of the folders from `root` down to the one holding `path`, outermost
+/// first, as [`walk_in`] gathers them on its way down.
+fn lingignores_above(root: &Path, path: &Path) -> Vec<Gitignore> {
+    let Some(parent) = path.parent() else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<&Path> = parent
+        .ancestors()
+        .take_while(|d| d.starts_with(root))
+        .collect();
+    dirs.reverse();
+    dirs.into_iter()
+        .filter_map(|dir| {
+            let file = dir.join(".lingignore");
+            if !file.is_file() {
+                return None;
+            }
+            let mut builder = GitignoreBuilder::new(dir);
+            builder.add(&file);
+            builder.build().ok()
+        })
+        .collect()
+}
+
 /// [`walk`] with the agent's home named (where a project's knowledge folder may be a collection).
 pub fn walk_in(
     collection: &Collection,
@@ -319,17 +357,12 @@ pub fn walk_in(
                 *out.skipped.entry("excluded folder").or_default() += 1;
                 continue;
             }
+            // A followed link is kept out by a `.lingignore` naming it where it was found, or
+            // naming what it points to where that is.
             let ignored = |is_dir: bool| -> bool {
-                for gi in ignores.iter().rev() {
-                    let m = gi.matched(&path, is_dir);
-                    if m.is_ignore() {
-                        return true;
-                    }
-                    if m.is_whitelist() {
-                        return false;
-                    }
-                }
-                false
+                lingignored(&ignores, &walked, is_dir)
+                    || (path != walked
+                        && lingignored(&lingignores_above(&root, &path), &path, is_dir))
             };
             if meta.is_dir() {
                 if SKIP_DIRS.contains(&name.as_str()) || build_tree(&path) {
@@ -646,6 +679,28 @@ mod tests {
             .map(|c| c.rel.clone())
             .collect();
         assert_eq!(rels, ["in.md"]);
+    }
+
+    #[test]
+    fn a_followed_link_is_kept_out_by_a_lingignore_naming_it_or_its_target() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("private/kept.md"), b"x");
+        write(&root.join("quiet/hidden.md"), b"x");
+        write(&root.join("quiet/.lingignore"), b"hidden.md\n");
+        write(&root.join("pub/.lingignore"), b"/report.md\n");
+        let link = |target: &str, name: &str| {
+            std::os::unix::fs::symlink(root.join(target), root.join(name)).unwrap()
+        };
+        link("private/kept.md", "pub/report.md");
+        link("quiet/hidden.md", "pub/shown.md");
+        let mut collection = Collection::new("docs", root.clone());
+        collection.follow_symlinks = true;
+        let found = walk(&collection, &home, true);
+        let rels: Vec<_> = found.candidates.iter().map(|c| c.rel.clone()).collect();
+        assert_eq!(rels, ["private/kept.md"]);
+        assert_eq!(found.skipped.get(".lingignore"), Some(&3));
     }
 
     #[test]
