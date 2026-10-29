@@ -224,15 +224,27 @@ class WebTools:
             # The page's server names the charset: an unknown one used to raise out of this tool.
             encoding = "utf-8"
 
-        if "html" in content_type.lower():
+        is_html = "html" in content_type.lower()
+        if "charset=" in content_type.lower():
             decoded = raw.decode(encoding, errors="replace")
+        else:
+            # requests names ISO-8859-1 for any text/* reply without a charset, which turned every
+            # such UTF-8 page into mojibake. Bytes that are UTF-8 (a sequence cut by the download
+            # ceiling included) are read as UTF-8; others by their <meta> charset or their look.
+            try:
+                decoded = codecs.getincrementaldecoder("utf-8")().decode(raw, final=False)
+            except UnicodeDecodeError:
+                from bs4.dammit import UnicodeDammit
+
+                decoded = UnicodeDammit(raw, is_html=is_html).unicode_markup or ""
+        if is_html:
             extracted = cls._html_to_text(decoded)
             title, text = extracted["title"], extracted["text"]
         else:
             # Plain text, JSON, source files: hand them back as-is rather than running a markup
             # parser over something that is not markup.
             title = ""
-            text = raw.decode(encoding, errors="replace")
+            text = decoded
 
         return {
             "url": url,
