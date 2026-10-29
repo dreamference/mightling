@@ -10,6 +10,8 @@ import json
 import subprocess
 import os
 import stat
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -153,13 +155,14 @@ def test_the_audit_runs_the_session_in_a_throwaway_repository_and_home(tmp_path,
     calls = tmp_path / "calls.json"
     strace = tmp_path / "bin" / "strace"
     strace.parent.mkdir()
-    strace.write_text(f"""#!{os.sys.executable}
+    strace.write_text(f"""#!{sys.executable}
 import json, os, shutil, sys
 args = sys.argv[1:]
 json.dump({{"args": args, "cwd": os.getcwd(), "CODEX_HOME": os.environ.get("CODEX_HOME"),
            "config": open(os.environ["DREAMFERENCE_CONFIG_PATH"]).read(),
            "host": os.environ.get("DREAMFERENCE_VLLM_HOST"),
            "adapter": os.environ.get("DREAMFERENCE_MIGHTLING_ADAPTER"),
+           "worktree": os.environ.get("DREAMFERENCE_MIGHTLING_WORKTREE"),
            "docs": os.environ.get("DREAMFERENCE_MIGHTLING_DOCS")}}, open({str(calls)!r}, "w"))
 shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
 open(args[len(args) - 2], "w").write("pong")
@@ -182,14 +185,22 @@ open(args[len(args) - 2], "w").write("pong")
     assert call["CODEX_HOME"] != str(home) and not os.path.exists(call["CODEX_HOME"])
     assert os.path.basename(call["cwd"]) == "repo" and not os.path.exists(call["cwd"])
     assert 'vllm_host = "http://localhost:8000"' in call["config"] and "code_index_enabled = false" in call["config"]
-    assert call["docs"] == "0"
-    # The audited session is on the base, whatever adapter the user starts sessions with (adapters §10.4).
-    assert call["adapter"] == ""
-    # The JSON result is written to the real CODEX_HOME, and says which build it was.
+    assert "mightling_docs = false" in call["config"] and call["docs"] == "0"
+    # Named, so the session never browses for a node (a multicast lookup the audit would fail).
+    assert call["host"] == "http://localhost:8000"
+    # The audited session is on the base, whatever adapter the user starts sessions with (adapters §10.4),
+    # and in place: it never moves into a worktree of the throwaway repository (§10.2).
+    assert call["adapter"] == "" and call["worktree"] == "off"
+    # The JSON result is written to the real CODEX_HOME, named by the kind of session, and says which build it was.
     (result_file,) = list((home / "audit").glob("*.json"))
+    assert result_file.name.endswith("-exec.json")
     result = json.loads(result_file.read_text())
     assert result["verdict"] == "pass" and result["destinations"] == {"127.0.0.1:8000": 2, "127.0.0.1:8767": 1}
     assert result["codex_tag"].startswith("rust-v")
+    # Everything §3.2 asks the record to hold, so two audits can be compared across builds.
+    assert {"dns_names", "dns_servers", "unix_sockets", "processes", "networked_git", "problems",
+            "mightling_version", "patches"} <= set(result)
+    assert result["processes"]["ling"] == 1
     # /opt/ling is not the installed build: no build key and no patch list are credited to it.
     assert result["mightling_bin"] == "/opt/ling" and result["build_key"] == ""
     assert result["build_matches_checkout"] is False and result["patches"] is None
@@ -210,6 +221,7 @@ def test_the_identity_names_the_traced_binary_and_credits_patches_only_to_a_matc
 
     ours = EgressAudit.build_identity(str(installed))
     assert ours["build_key"] == "key-1" and ours["build_matches_checkout"] is True
+    assert ours["mightling_version"] == "ling 0.158.0"
     assert "0001-brand-mightling-name.patch" in ours["patches"]
     assert ours["mightling_sha256"] == hashlib.sha256(b"installed").hexdigest()
 
@@ -241,7 +253,7 @@ def test_the_web_audit_traces_the_server_while_an_untraced_client_asks_it(tmp_pa
     calls = tmp_path / "calls.json"
     strace = tmp_path / "bin" / "strace"
     strace.parent.mkdir()
-    strace.write_text(f"""#!{os.sys.executable}
+    strace.write_text(f"""#!{sys.executable}
 import json, os, shutil, signal, sys, time
 args = sys.argv[1:]
 json.dump({{"args": args, "HOME": os.environ["HOME"], "XDG_RUNTIME_DIR": os.environ["XDG_RUNTIME_DIR"],
@@ -258,7 +270,7 @@ time.sleep(60)
     # The client, `ling web ask`, is the stand-in `ling` itself.
     asked = tmp_path / "asked.json"
     ling = tmp_path / "ling"
-    ling.write_text(f"""#!{os.sys.executable}
+    ling.write_text(f"""#!{sys.executable}
 import json, sys
 json.dump(sys.argv[1:], open({str(asked)!r}, "w"))
 print("pong")
@@ -334,7 +346,7 @@ def interface_stand_in(tmp_path, monkeypatch, answers: bool):
     calls = tmp_path / "calls.json"
     strace = tmp_path / "bin" / "strace"
     strace.parent.mkdir()
-    strace.write_text(f"""#!{os.sys.executable}
+    strace.write_text(f"""#!{sys.executable}
 import json, os, shutil, sys, time
 args = sys.argv[1:]
 home = os.environ["CODEX_HOME"]
@@ -493,7 +505,7 @@ def test_the_desktop_app_is_traced_hidden_as_ling_app_opens_it(tmp_path, monkeyp
     calls = tmp_path / "calls.json"
     strace = tmp_path / "bin" / "strace"
     strace.parent.mkdir()
-    strace.write_text(f"""#!{os.sys.executable}
+    strace.write_text(f"""#!{sys.executable}
 import json, os, shutil, sys
 args = sys.argv[1:]
 json.dump({{"args": args, "HOME": os.environ.get("HOME"), "audit": os.environ.get("MIGHTLING_APP_AUDIT"),
@@ -761,7 +773,7 @@ def _web_stand_ins(tmp_path, monkeypatch, answer: str):
     question and what the scratch home held, and answers `answer` to the image question."""
     strace = tmp_path / "bin" / "strace"
     strace.parent.mkdir()
-    strace.write_text(f"""#!{os.sys.executable}
+    strace.write_text(f"""#!{sys.executable}
 import os, shutil, signal, sys, time
 args = sys.argv[1:]
 shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
@@ -774,7 +786,7 @@ time.sleep(60)
     strace.chmod(strace.stat().st_mode | stat.S_IEXEC)
     asked = tmp_path / "asked.jsonl"
     ling = tmp_path / "ling"
-    ling.write_text(f"""#!{os.sys.executable}
+    ling.write_text(f"""#!{sys.executable}
 import json, os, sys
 home = os.environ["HOME"]
 config = os.path.join(home, ".config", "dreamference")
@@ -921,7 +933,7 @@ def test_the_compatibility_audit_runs_print_mode_in_a_repository_with_claude_cod
     strace = tmp_path / "bin" / "strace"
     strace.parent.mkdir()
     recorded = Path(FIXTURES) / "exec_pass.strace"
-    strace.write_text(f"""#!{os.sys.executable}
+    strace.write_text(f"""#!{sys.executable}
 import json, os, pathlib, shutil, sys
 args = sys.argv[1:]
 files = sorted(str(p) for p in pathlib.Path(".").rglob("*") if p.is_file() and ".git" not in p.parts)
@@ -989,3 +1001,99 @@ def test_every_address_a_sendmmsg_names_is_counted():
             f'{message("140.82.112.3", 443)}], 2, 0) = 2\n')
     trace = StraceParser.parse(line)
     assert trace.destinations == {"127.0.0.1:9000": 1, "140.82.112.3:443": 1}
+
+
+# -- requirements of the spec checked one by one (2026-10-29)
+
+def test_git_push_and_remote_http_reach_a_network():
+    # §10.2: `push` and `remote-http` are counted beside §3.1's list.
+    trace = StraceParser.parse(
+        '1 execve("/usr/bin/git", ["git", "push", "origin", "main"], 0x0 /* 1 var */) = 0\n'
+        '1 execve("/usr/lib/git-core/git-remote-http", ["git-remote-http", "origin", "http://example.com/r.git"], '
+        '0x0 /* 1 var */) = 0\n')
+    assert trace.networked_git == ["git push origin main", "git-remote-http origin http://example.com/r.git"]
+    verdict = EgressAudit.judge(trace, ALLOWED, replied=True)
+    assert verdict.status == FAIL
+    assert "ran a git command that reaches a network: git push origin main" in verdict.problems
+
+
+def test_an_interrupted_execve_counts_only_when_its_resumed_line_reports_success():
+    # §10.2: an `<unfinished ...>` execve is a process once its `resumed` line says it ran.
+    trace = StraceParser.parse(
+        '7 execve("/usr/bin/git", ["git", "fetch"], 0x0 /* 1 var */ <unfinished ...>\n'
+        '8 execve("/usr/bin/curl", ["curl", "https://example.com"], 0x0 /* 1 var */ <unfinished ...>\n'
+        '7 <... execve resumed>) = -1 ENOENT (No such file or directory)\n'
+        '8 <... execve resumed>) = 0\n')
+    assert trace.processes == {"curl": 1}
+    assert trace.networked_git == [], "a git that never started fetched nothing"
+
+
+def test_a_tcp_connect_that_failed_was_still_an_attempt():
+    # §10.2: a connect counts whatever it returned.
+    trace = StraceParser.parse(
+        '3 connect(5<TCP:[77]>, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("140.82.112.3")}, 16) '
+        '= -1 ENETUNREACH (Network is unreachable)\n'
+        '3 execve("/bin/true", ["true"], 0x0 /* 1 var */) = 0\n')
+    assert trace.destinations == {"140.82.112.3:443": 1} and trace.route_lookups == {}
+    assert EgressAudit.judge(trace, ALLOWED, replied=True).status == FAIL
+
+
+def test_an_exec_session_that_never_answers_is_stopped_with_everything_it_started(tmp_path, monkeypatch, capsys):
+    # §10.2: after the timeout the whole process group is stopped, and the result is "trace failed".
+    child_pid = tmp_path / "child.pid"
+    strace = tmp_path / "bin" / "strace"
+    strace.parent.mkdir()
+    strace.write_text(f"""#!{sys.executable}
+import subprocess, time
+child = subprocess.Popen(["sleep", "120"])
+open({str(child_pid)!r}, "w").write(str(child.pid))
+time.sleep(120)
+""")
+    strace.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr("dreamference.audit.egress_audit.SESSION_TIMEOUT_S", 1)
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000") == 2
+    assert "Egress audit: trace failed" in capsys.readouterr().out
+    pid = int(child_pid.read_text())
+    for _ in range(50):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        if " Z " in Path(f"/proc/{pid}/stat").read_text():   # stopped, not yet reaped
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail("the session's child was left running")
+
+
+def test_after_a_build_without_the_terminal_modules_only_exec_is_traced_and_a_line_says_so(
+    after_build, monkeypatch, capsys
+):
+    # §10.5: without pexpect and pyte the interface is not traced, and the build's output says so.
+    _, runs = after_build
+    monkeypatch.setattr(TuiSession, "missing_modules", classmethod(lambda cls: ["pexpect", "pyte"]))
+    assert EgressAudit.after_build(vllm_host="http://localhost:8000") == 0
+    assert runs == [{"tui": False, "write_json": True, "vllm_host": "http://localhost:8000"}]
+    assert "The full-screen interface was not traced (pexpect and pyte are not installed)" in capsys.readouterr().out
+
+
+def test_declared_exceptions_are_printed_and_never_change_the_verdict(tmp_path, monkeypatch, capsys):
+    # §10.9: every report ends with one line per bridge that is on; the verdict stays the trace's.
+    trace = fixture("exec_pass.strace")
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(EgressAudit, "trace_session", classmethod(lambda cls, *a, **k: (trace, True, "")))
+    monkeypatch.setattr(EgressAudit, "declared_exceptions", classmethod(lambda cls: ["Signal bridge enabled (x)"]))
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000") == 0
+    out = capsys.readouterr().out
+    assert "✅ Egress audit: pass" in out
+    assert out.rstrip().splitlines()[-1].endswith("  Declared exception: Signal bridge enabled (x)")
+
+
+@pytest.mark.parametrize("flags", [["--tui", "--app"], ["--web", "--docs"], ["--sync", "--compat", "claude"]])
+def test_the_scenarios_are_mutually_exclusive(flags, capsys):
+    # §2: one session kind per audit.
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+    with pytest.raises(SystemExit) as stopped:
+        DreamferenceCLIController.run_cli(["audit", "egress", *flags])
+    assert stopped.value.code == 2 and "not allowed with argument" in capsys.readouterr().err
