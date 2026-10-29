@@ -2,6 +2,7 @@
 
 import glob
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -14,14 +15,16 @@ from dreamference.runner import codex_test_runner as runner_module
 from dreamference.runner.codex_branded_builder import CODEX_SUBMODULE_DIR
 from dreamference.runner.codex_test_runner import CodexTestRunner
 
-SUBMODULE_PRESENT = os.path.isdir(os.path.join(CODEX_SUBMODULE_DIR, "codex-rs"))
+SUBMODULE_PRESENT = pathlib.Path(os.path.join(CODEX_SUBMODULE_DIR, "codex-rs")).is_dir()
 
 
 def _workspace_packages() -> dict:
     """Maps each Codex workspace package name to its directory, read from the submodule's manifests."""
     packages = {}
-    for manifest in glob.glob(os.path.join(CODEX_SUBMODULE_DIR, "codex-rs", "**", "Cargo.toml"), recursive=True):
-        with open(manifest) as handle:
+    for manifest in glob.glob(
+        os.path.join(CODEX_SUBMODULE_DIR, "codex-rs", "**", "Cargo.toml"), recursive=True
+    ):
+        with pathlib.Path(manifest).open() as handle:
             match = re.search(r'^\[package\]\s*\nname = "([^"]+)"', handle.read(), re.M)
         if match:
             packages[match.group(1)] = os.path.dirname(manifest)
@@ -43,7 +46,7 @@ def test_every_skipped_package_and_target_exists_in_the_pinned_codex():
     for entry in skips["package"]:
         assert entry["name"] in packages
     for entry in skips["target"]:
-        assert os.path.isfile(os.path.join(packages[entry["package"]], "tests", f"{entry['test']}.rs"))
+        assert pathlib.Path(os.path.join(packages[entry["package"]], "tests", f"{entry['test']}.rs")).is_file()
 
 
 def test_a_skip_without_a_reason_is_refused(tmp_path):
@@ -54,9 +57,14 @@ def test_a_skip_without_a_reason_is_refused(tmp_path):
 
 
 def test_the_filterset_narrows_to_the_callers_filter_and_leaves_the_skips_out():
-    skips = {"test": [{"filter": "test(=a)", "reason": "r"}, {"filter": "package(b)", "reason": "r"}]}
+    skips = {
+        "test": [{"filter": "test(=a)", "reason": "r"}, {"filter": "package(b)", "reason": "r"}]
+    }
     assert CodexTestRunner.filterset(skips) == "not ((test(=a)) | (package(b)))"
-    assert CodexTestRunner.filterset(skips, "package(c)") == "(package(c)) & not ((test(=a)) | (package(b)))"
+    assert (
+        CodexTestRunner.filterset(skips, "package(c)")
+        == "(package(c)) & not ((test(=a)) | (package(b)))"
+    )
     assert CodexTestRunner.filterset({"test": []}) is None
 
 
@@ -70,19 +78,29 @@ def test_binaries_are_built_first_and_a_package_with_a_skipped_target_runs_on_it
         commands = CodexTestRunner.commands(skips, "/x/codex-rs", {}, None, 8)
     build, workspace, package = commands
     assert build[:2] == ["cargo", "build"] and "--bins" in build
-    assert ["--exclude", "codex-voice-host"] == build[build.index("--exclude"):build.index("--exclude") + 2]
+    assert build[
+        build.index("--exclude") : build.index("--exclude") + 2
+    ] == ["--exclude", "codex-voice-host"]
     assert "codex-code-mode-host" in workspace and "codex-voice-host" in workspace
     assert package[package.index("-p") + 1] == "codex-code-mode-host"
-    assert "stdio" not in package and ["--test", "grpc"] == package[-4:-2]
+    assert "stdio" not in package and package[-4:-2] == ["--test", "grpc"]
     # The launcher is built beside it (its vendored OpenSSL), but only that package's tests run.
-    assert ["-p", "ling-launcher"] == package[package.index("-p") + 2:package.index("-p") + 4]
+    assert package[package.index("-p") + 2 : package.index("-p") + 4] == ["-p", "ling-launcher"]
     assert package[package.index("-E") + 1] == "(package(codex-code-mode-host))"
 
 
 def test_the_tests_see_an_empty_home_and_no_model_server(tmp_path):
-    with patch.dict(os.environ, {"RUST_BACKTRACE": "1", "CODEX_HOME": "/home/x/.mightling",
-                                 "DREAMFERENCE_CONFIG_PATH": "/home/x/dreamference.toml"}):
-        environment = CodexTestRunner.environment({"RUSTY_V8_ARCHIVE": "a"}, "/tools", 6, str(tmp_path))
+    with patch.dict(
+        os.environ,
+        {
+            "RUST_BACKTRACE": "1",
+            "CODEX_HOME": "/home/x/.mightling",
+            "DREAMFERENCE_CONFIG_PATH": "/home/x/dreamference.toml",
+        },
+    ):
+        environment = CodexTestRunner.environment(
+            {"RUSTY_V8_ARCHIVE": "a"}, "/tools", 6, str(tmp_path)
+        )
     assert environment["HOME"] == runner_module.TEST_HOME_DIR
     assert environment["TMPDIR"] == str(tmp_path)
     # The launcher steps aside, and a test that looked for a model server anyway finds a closed port.
@@ -105,7 +123,9 @@ def test_the_tests_start_on_the_base_whatever_the_users_default_adapter(tmp_path
 def test_the_export_is_put_back_at_the_version_upstreams_tests_expect(tmp_path):
     manifest = tmp_path / "codex-rs" / "Cargo.toml"
     manifest.parent.mkdir()
-    manifest.write_text('[workspace.package]\nversion = "0.158.0"\n\n[dependencies]\nx = { version = "1.2.3" }\n')
+    manifest.write_text(
+        '[workspace.package]\nversion = "0.158.0"\n\n[dependencies]\nx = { version = "1.2.3" }\n'
+    )
     CodexTestRunner.reset_workspace_version(str(tmp_path))
     text = manifest.read_text()
     assert '[workspace.package]\nversion = "0.0.0"' in text and 'version = "1.2.3"' in text
@@ -116,21 +136,27 @@ def test_the_run_tests_the_export_and_never_the_submodule(tmp_path, monkeypatch)
     monkeypatch.setattr(runner_module, "TEST_HOME_DIR", str(tmp_path / "test-home"))
     monkeypatch.setattr(runner_module, "BUILD_CACHE_DIR", str(tmp_path))
     (tmp_path / "test-src" / "codex-rs").mkdir(parents=True)
-    (tmp_path / "test-src" / "codex-rs" / "Cargo.toml").write_text('[workspace.package]\nversion = "1"\n')
+    (tmp_path / "test-src" / "codex-rs" / "Cargo.toml").write_text(
+        '[workspace.package]\nversion = "1"\n'
+    )
     calls = []
 
     def fake_call(command, cwd=None, env=None):
         calls.append((command, cwd, env))
         return 100 if "nextest" in command else 0
 
-    with patch("dreamference.runner.codex_test_runner.DesktopInstaller.install_rust", return_value=True), \
-            patch.object(runner_module.CodexBrandedBuilder, "prepare_source", return_value=True), \
-            patch.object(runner_module.CodexBrandedBuilder, "fetch_rusty_v8", return_value={}), \
-            patch.object(CodexTestRunner, "ensure_nextest", return_value="/tools"), \
-            patch.object(CodexTestRunner, "test_targets", return_value=["grpc"]), \
-            patch.object(CodexTestRunner, "has_disk_space", return_value=True), \
-            patch.object(CodexTestRunner, "apply_test_overlay", return_value=True) as overlay, \
-            patch("subprocess.call", side_effect=fake_call):
+    with (
+        patch(
+            "dreamference.runner.codex_test_runner.DesktopInstaller.install_rust", return_value=True
+        ),
+        patch.object(runner_module.CodexBrandedBuilder, "prepare_source", return_value=True),
+        patch.object(runner_module.CodexBrandedBuilder, "fetch_rusty_v8", return_value={}),
+        patch.object(CodexTestRunner, "ensure_nextest", return_value="/tools"),
+        patch.object(CodexTestRunner, "test_targets", return_value=["grpc"]),
+        patch.object(CodexTestRunner, "has_disk_space", return_value=True),
+        patch.object(CodexTestRunner, "apply_test_overlay", return_value=True) as overlay,
+        patch("subprocess.call", side_effect=fake_call),
+    ):
         assert CodexTestRunner.run() == 100
     overlay.assert_called_once_with(str(tmp_path / "test-src"))
     assert len(calls) == 3
@@ -139,7 +165,7 @@ def test_the_run_tests_the_export_and_never_the_submodule(tmp_path, monkeypatch)
         assert not cwd.startswith(CODEX_SUBMODULE_DIR)
         assert env["MIGHTLING_UPSTREAM_TESTS"] == "1"
     # The private temporary directory is removed afterwards.
-    assert not os.path.exists(calls[0][2]["TMPDIR"])
+    assert not pathlib.Path(calls[0][2]["TMPDIR"]).exists()
 
 
 def test_a_run_without_room_for_the_build_does_not_start(tmp_path, monkeypatch):
@@ -149,18 +175,24 @@ def test_a_run_without_room_for_the_build_does_not_start(tmp_path, monkeypatch):
         assert not CodexTestRunner.has_disk_space()
     # An earlier build counts toward what is needed: Cargo reuses or replaces it.
     (tmp_path / "test-target").mkdir()
-    with open(tmp_path / "test-target" / "big", "wb") as handle:
+    with pathlib.Path(tmp_path / "test-target" / "big").open("wb") as handle:
         handle.truncate(38 * 2**30)
     with patch("shutil.disk_usage", return_value=shutil._ntuple_diskusage(0, 0, 5 * 2**30)):
         assert CodexTestRunner.has_disk_space()
-    with patch("dreamference.runner.codex_test_runner.DesktopInstaller.install_rust", return_value=True), \
-            patch.object(CodexTestRunner, "has_disk_space", return_value=False), \
-            patch("subprocess.call") as call:
+    with (
+        patch(
+            "dreamference.runner.codex_test_runner.DesktopInstaller.install_rust", return_value=True
+        ),
+        patch.object(CodexTestRunner, "has_disk_space", return_value=False),
+        patch("subprocess.call") as call,
+    ):
         assert CodexTestRunner.run() == 1
     call.assert_not_called()
 
 
-def test_the_temporary_directory_name_has_no_path_separators_the_tests_decode(tmp_path, monkeypatch):
+def test_the_temporary_directory_name_has_no_path_separators_the_tests_decode(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
     path = CodexTestRunner.make_temp_dir()
     assert os.path.dirname(path) == str(tmp_path)
@@ -172,11 +204,17 @@ def test_a_nextest_download_that_fails_its_checksum_is_not_used(tmp_path, monkey
     monkeypatch.setattr(runner_module, "TOOLS_DIR", str(tmp_path))
 
     def fake_retrieve(url, path):
-        with open(path, "wb") as handle:
+        with pathlib.Path(path).open("wb") as handle:
             handle.write(b"not the release")
 
-    with patch.object(runner_module.CodexBrandedBuilder, "host_target", return_value="aarch64-unknown-linux-gnu"), \
-            patch.object(runner_module.CodexBrandedBuilder, "download", side_effect=fake_retrieve):
+    with (
+        patch.object(
+            runner_module.CodexBrandedBuilder,
+            "host_target",
+            return_value="aarch64-unknown-linux-gnu",
+        ),
+        patch.object(runner_module.CodexBrandedBuilder, "download", side_effect=fake_retrieve),
+    ):
         assert CodexTestRunner.ensure_nextest() is None
     assert not (tmp_path / "cargo-nextest").exists()
 
@@ -194,21 +232,29 @@ expression: rendered
 
 
 def test_a_snapshot_that_only_renames_codex_is_accepted():
-    ling = (BOXED_UPSTREAM.replace("OpenAI Codex (v0.0.0)      ", "Mightling (v0.0.0)            ")
-              .replace("Ask Codex", "Ask Mightling"))
+    ling = BOXED_UPSTREAM.replace(
+        "OpenAI Codex (v0.0.0)      ", "Mightling (v0.0.0)            "
+    ).replace("Ask Codex", "Ask Mightling")
     assert CodexTestRunner.differs_only_by_name(BOXED_UPSTREAM, ling)
 
 
 def test_a_snapshot_with_any_other_change_is_refused():
-    renamed = BOXED_UPSTREAM.replace("OpenAI Codex", "Mightling").replace("Ask Codex", "Ask Mightling")
+    renamed = BOXED_UPSTREAM.replace("OpenAI Codex", "Mightling").replace(
+        "Ask Codex", "Ask Mightling"
+    )
     # A layout regression: a row of content gone, a word changed, a symbol changed.
-    assert not CodexTestRunner.differs_only_by_name(BOXED_UPSTREAM, renamed.replace(
-        "│ model:     gpt-5   /model to change   │\n", ""))
-    assert not CodexTestRunner.differs_only_by_name(BOXED_UPSTREAM, renamed.replace("gpt-5", "gpt-6"))
+    assert not CodexTestRunner.differs_only_by_name(
+        BOXED_UPSTREAM, renamed.replace("│ model:     gpt-5   /model to change   │\n", "")
+    )
+    assert not CodexTestRunner.differs_only_by_name(
+        BOXED_UPSTREAM, renamed.replace("gpt-5", "gpt-6")
+    )
     assert not CodexTestRunner.differs_only_by_name(BOXED_UPSTREAM, renamed.replace("›", ">"))
 
 
-def test_the_overlay_replaces_upstream_snapshots_and_applies_the_test_patches(tmp_path, monkeypatch):
+def test_the_overlay_replaces_upstream_snapshots_and_applies_the_test_patches(
+    tmp_path, monkeypatch
+):
     export = tmp_path / "export"
     snap = export / "codex-rs" / "tui" / "src" / "snapshots" / "header.snap"
     snap.parent.mkdir(parents=True)
@@ -237,6 +283,7 @@ def test_the_overlay_replaces_upstream_snapshots_and_applies_the_test_patches(tm
 def _cells(text: str) -> int:
     """How many terminal cells a line takes: two for a wide character, one for any other."""
     import unicodedata
+
     return sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in text)
 
 
@@ -252,7 +299,7 @@ def _box_widths(lines: list[str]) -> list[list[int]]:
                 break
             segment = row[start:]
             end = max(segment.rfind("╮"), segment.rfind("│"), segment.rfind("╯"))
-            widths.append(_cells(segment[:end + 1]))
+            widths.append(_cells(segment[: end + 1]))
             if row[start] == "╰":
                 break
         boxes.append(widths)
@@ -265,17 +312,25 @@ def test_the_overlay_snapshots_keep_upstreams_widths():
     # snapshots had a row three cells wider than the terminal or a box with one row sticking out,
     # and `slash_side_requests_forked_side_question_while_task_running` failed on it (1.7.0 tests).
     wrong = []
-    for path in glob.glob(os.path.join(runner_module.SNAPSHOT_OVERLAY_DIR, "**", "*.snap"), recursive=True):
+    for path in glob.glob(
+        os.path.join(runner_module.SNAPSHOT_OVERLAY_DIR, "**", "*.snap"), recursive=True
+    ):
         relative = os.path.relpath(path, runner_module.SNAPSHOT_OVERLAY_DIR)
-        with open(path, encoding="utf-8") as handle:
+        with pathlib.Path(path).open(encoding="utf-8") as handle:
             lines = handle.read().split("\n")
-        with open(os.path.join(CODEX_SUBMODULE_DIR, "codex-rs", relative), encoding="utf-8") as handle:
+        with pathlib.Path(os.path.join(CODEX_SUBMODULE_DIR, "codex-rs", relative)).open(encoding="utf-8") as handle:
             upstream = handle.read().split("\n")
         rows = {_cells(line) for line in lines if len(line) > 1 and line[0] == line[-1] == '"'}
-        upstream_rows = {_cells(line) for line in upstream if len(line) > 1 and line[0] == line[-1] == '"'}
+        upstream_rows = {
+            _cells(line) for line in upstream if len(line) > 1 and line[0] == line[-1] == '"'
+        }
         if rows != upstream_rows:
             wrong.append(f"{relative}: rows {sorted(rows)}, upstream {sorted(upstream_rows)}")
-        wrong += [f"{relative}: box rows {widths}" for widths in _box_widths(lines) if len(set(widths)) > 1]
+        wrong += [
+            f"{relative}: box rows {widths}"
+            for widths in _box_widths(lines)
+            if len(set(widths)) > 1
+        ]
     assert wrong == []
 
 
@@ -301,7 +356,7 @@ def test_insta_never_rewrites_snapshots_in_an_ordinary_run(monkeypatch):
 
 def test_the_shipped_test_patches_touch_only_test_files():
     for name in os.listdir(runner_module.TEST_PATCHES_DIR):
-        with open(os.path.join(runner_module.TEST_PATCHES_DIR, name)) as handle:
+        with pathlib.Path(os.path.join(runner_module.TEST_PATCHES_DIR, name)).open() as handle:
             paths = re.findall(r"^\+\+\+ b/(\S+)", handle.read(), flags=re.M)
         assert paths, name
         for path in paths:
@@ -317,6 +372,7 @@ def test_project_markers_in_the_temporary_root_are_reported(tmp_path, monkeypatc
 
 def test_the_temporary_directory_keeps_png_off_a_base64_boundary():
     import base64
+
     # The pet-image test's path: <TMPDIR>/.tmpXXXXXX/frame.png, encoded whole.
     path = CodexTestRunner.make_temp_dir()
     try:
@@ -325,12 +381,15 @@ def test_the_temporary_directory_keeps_png_off_a_base64_boundary():
         encoded = base64.b64encode(f"{root}/.tmpABCDEF/frame.png".encode()).decode()
         assert "cG5n" not in encoded
     finally:
-        os.rmdir(path)
+        pathlib.Path(path).rmdir()
 
 
 def test_a_command_the_filter_leaves_empty_does_not_fail_the_run():
-    skips = {"package": [], "target": [{"package": "codex-code-mode-host", "test": "stdio", "reason": "r"}],
-             "test": []}
+    skips = {
+        "package": [],
+        "target": [{"package": "codex-code-mode-host", "test": "stdio", "reason": "r"}],
+        "test": [],
+    }
     with patch.object(CodexTestRunner, "test_targets", return_value=["stdio", "other"]):
         commands = CodexTestRunner.commands(skips, "/ws", {}, "package(codex-tui)", 8)
     for command in commands[1:]:
@@ -348,8 +407,11 @@ def test_the_nextest_download_gives_up_on_a_server_that_stops_sending(tmp_path, 
         raise TimeoutError("timed out")
 
     monkeypatch.setattr(runner_module, "TOOLS_DIR", str(tmp_path / "tools"))
-    monkeypatch.setattr(runner_module.CodexBrandedBuilder, "host_target",
-                        classmethod(lambda cls: "aarch64-unknown-linux-gnu"))
+    monkeypatch.setattr(
+        runner_module.CodexBrandedBuilder,
+        "host_target",
+        classmethod(lambda cls: "aarch64-unknown-linux-gnu"),
+    )
     monkeypatch.setattr(urllib.request, "urlopen", stalled)
     assert CodexTestRunner.ensure_nextest() is None
     assert timeouts and timeouts[0] is not None
@@ -587,9 +649,7 @@ def test_run_guard_failures_and_build_abort(tmp_path, monkeypatch):
         runner_module.os, "lstat", lambda path, **kw: (_ for _ in ()).throw(OSError("gone"))
     )
     Usage = namedtuple("Usage", ["total", "used", "free"])
-    monkeypatch.setattr(
-        runner_module.shutil, "disk_usage", lambda path: Usage(100, 99, 1 * 2**30)
-    )
+    monkeypatch.setattr(runner_module.shutil, "disk_usage", lambda path: Usage(100, 99, 1 * 2**30))
     assert CodexTestRunner.run() == 1
     # shutil.rmtree calls os.lstat too; give it the real one back before anything else runs.
     monkeypatch.setattr(runner_module.os, "lstat", real_lstat)
@@ -628,23 +688,17 @@ def test_run_guard_failures_and_build_abort(tmp_path, monkeypatch):
         "prepare_source",
         classmethod(lambda cls, d: True),
     )
-    monkeypatch.setattr(
-        CodexTestRunner, "apply_test_overlay", classmethod(lambda cls, d: False)
-    )
+    monkeypatch.setattr(CodexTestRunner, "apply_test_overlay", classmethod(lambda cls, d: False))
     assert CodexTestRunner.run() == 1
 
     # 6. Missing rusty_v8 or nextest returns 1.
-    monkeypatch.setattr(
-        CodexTestRunner, "apply_test_overlay", classmethod(lambda cls, d: True)
-    )
+    monkeypatch.setattr(CodexTestRunner, "apply_test_overlay", classmethod(lambda cls, d: True))
     monkeypatch.setattr(
         runner_module.CodexBrandedBuilder,
         "fetch_rusty_v8",
         classmethod(lambda cls, d: None),
     )
-    monkeypatch.setattr(
-        CodexTestRunner, "ensure_nextest", classmethod(lambda cls: None)
-    )
+    monkeypatch.setattr(CodexTestRunner, "ensure_nextest", classmethod(lambda cls: None))
     assert CodexTestRunner.run() == 1
 
     # 7. _run_commands stops immediately when `cargo build` fails, and run() reports new stray markers.
@@ -653,9 +707,7 @@ def test_run_guard_failures_and_build_abort(tmp_path, monkeypatch):
         "fetch_rusty_v8",
         classmethod(lambda cls, d: {"RUSTY_V8_ARCHIVE": "/v8.a"}),
     )
-    monkeypatch.setattr(
-        CodexTestRunner, "ensure_nextest", classmethod(lambda cls: "/tools")
-    )
+    monkeypatch.setattr(CodexTestRunner, "ensure_nextest", classmethod(lambda cls: "/tools"))
     markers = [["/tmp/.git"], ["/tmp/.git", "/tmp/AGENTS.md"]]
     monkeypatch.setattr(
         CodexTestRunner, "stray_project_markers", classmethod(lambda cls: markers.pop(0))
@@ -671,9 +723,42 @@ def test_run_guard_failures_and_build_abort(tmp_path, monkeypatch):
         "call",
         lambda cmd, **kw: called.append(cmd) or 2,
     )
-    monkeypatch.setattr(
-        CodexTestRunner, "accept_snapshots", classmethod(lambda cls, before: 0)
-    )
+    monkeypatch.setattr(CodexTestRunner, "accept_snapshots", classmethod(lambda cls, before: 0))
     assert CodexTestRunner.run(accept_snapshots=True) == 2
     assert len(called) == 1
 
+
+def test_the_run_is_capped_in_memory_without_swap_and_is_the_first_the_kernel_kills(monkeypatch):
+    # specs/DREAMFERENCE_MIGHTLING_CODEX.md §7: a 24 GiB cap, and choom -n 1000 so an
+    # out-of-memory kill takes the tests and not the desktop session.
+    monkeypatch.setattr(runner_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    command = CodexTestRunner.scoped(["cargo", "nextest", "run"], runner_module.DEFAULT_MEMORY_MAX)
+    assert command[:4] == ["systemd-run", "--user", "--scope", "--quiet"]
+    assert "MemoryMax=24G" in command and "MemorySwapMax=0" in command
+    assert command[command.index("choom") :] == [
+        "choom",
+        "-n",
+        "1000",
+        "--",
+        "cargo",
+        "nextest",
+        "run",
+    ]
+    # Without choom the cap still holds.
+    monkeypatch.setattr(
+        runner_module.shutil, "which", lambda name: None if name == "choom" else name
+    )
+    assert "choom" not in CodexTestRunner.scoped(["cargo"], "24G")
+
+
+def test_the_run_defaults_to_eight_tests_at_a_time_under_24g():
+    assert runner_module.DEFAULT_TEST_THREADS == 8
+    assert runner_module.DEFAULT_MEMORY_MAX == "24G"
+    assert runner_module.TEST_BUILD_DISK_GIB == 40
+
+
+def test_the_test_build_keeps_no_debug_info_in_its_own_target_directory(tmp_path):
+    environment = CodexTestRunner.environment({}, "/tools", 6, str(tmp_path))
+    assert environment["CARGO_TARGET_DIR"] == runner_module.TEST_TARGET_DIR
+    assert environment["CARGO_PROFILE_CI_TEST_DEBUG"] == "false"
+    assert environment["CARGO_PROFILE_CI_TEST_STRIP"] == "debuginfo"
