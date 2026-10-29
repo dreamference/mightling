@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
 from dreamference.swe_bench import swe_bench_settings
+from dreamference.swe_bench.swe_bench_scratch import SweBenchScratch
 
 # Statuses after which an instance's agent phase is over and its prediction is written.
 FINISHED_STATUSES: Final[tuple] = ("done", "empty", "stalled", "timeout", "error")
@@ -222,14 +223,16 @@ class SweBenchRunStore:
         """
         from datetime import datetime
 
-        paths = sorted((self.directory / "scratch" / instance_id / "codex-home" / "sessions").rglob("rollout*.jsonl"))
+        # The container wrote the scratch: nothing below its root is followed.
+        scratch = self.directory / "scratch" / instance_id
+        paths = SweBenchScratch.files(scratch, "codex-home/sessions", "rollout*.jsonl", recursive=True)
         if not paths:
             return None
         seconds: List[Optional[float]] = []
         for path in paths:
             earlier: List[float] = []
             try:
-                lines = path.read_text(errors="replace").splitlines()
+                lines = SweBenchScratch.read_text(scratch, path).splitlines()
             except OSError:
                 continue
             for line in lines:

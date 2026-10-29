@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
 from dreamference.swe_bench import swe_bench_issue_gate
+from dreamference.swe_bench.swe_bench_scratch import SweBenchScratch
 
 # The hook sets `--hooks` takes, with what each enforces.
 HOOK_SETS: Final[Dict[str, str]] = {
@@ -127,12 +128,13 @@ class SweBenchHooks:
         return hashlib.sha256(cls.gate_source().read_bytes()).hexdigest()
 
     @classmethod
-    def outcome(cls, directory: Path) -> Dict[str, Any]:
+    def outcome(cls, scratch: Path) -> Dict[str, Any]:
         """
         What the gate did in one task, from its conditions and state, for the instance's state.
 
         Args:
-            directory: The gate's directory on the host.
+            scratch: The instance's scratch on the host, whose `GATE_DIRECTORY` the container
+                wrote (read without following a link, `SweBenchScratch`).
 
         Returns:
             Dict[str, Any]: `ran` (any hook ran once the conditions were written),
@@ -143,9 +145,10 @@ class SweBenchHooks:
         """
         def load(name: str) -> Dict[str, Any]:
             try:
-                return json.loads((directory / name).read_text())
-            except (OSError, ValueError):
+                record = json.loads(SweBenchScratch.read_text(scratch, f"{GATE_DIRECTORY}/{name}"))
+            except ValueError:
                 return {}
+            return record if isinstance(record, dict) else {}
 
         conditions, state = load(swe_bench_issue_gate.CONDITIONS_FILE), load(swe_bench_issue_gate.STATE_FILE)
         invocations = state.get("invocations", {})

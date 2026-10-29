@@ -42,6 +42,7 @@ from dreamference.swe_bench.swe_bench_issue_gate import CONDITIONS_FILE
 from dreamference.swe_bench.swe_bench_issue_targets import SweBenchIssueTargets
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_runtime import CONTAINER_MOUNT
+from dreamference.swe_bench.swe_bench_scratch import SweBenchScratch
 
 # The whole prompt: the issue and nothing else from the dataset row (§5.4).
 PROMPT: Final[
@@ -677,9 +678,7 @@ class SweBenchInstanceRun:
         finally:
             SweBenchDocker.run(["rm", "-f", self.container], timeout=120)
         if self.hooks:
-            state["hooks"] = dict(
-                state.get("hooks") or {}, **SweBenchHooks.outcome(self.scratch / GATE_DIRECTORY)
-            )
+            state["hooks"] = dict(state.get("hooks") or {}, **SweBenchHooks.outcome(self.scratch))
         if self.stop_event.is_set():
             status = "interrupted"
         state["apply_patch"] = {"form": self.apply_patch, "calls": self.apply_patch_calls()}
@@ -778,8 +777,8 @@ class SweBenchInstanceRun:
             # The container was stopped to end the agent; its filesystem is still there.
             SweBenchDocker.run(["start", self.container], timeout=120)
         collected = self._script(COLLECT_SCRIPT, timeout=600)
-        patch = self._read(self.scratch / "patch.diff")
-        state["binary_files"] = self._read(self.scratch / "binary-files").split("\n")[:-1]
+        patch = self._read("patch.diff")
+        state["binary_files"] = self._read("binary-files").split("\n")[:-1]
         if collected.returncode != 0:
             self.notes.append(f"collecting the patch failed: {collected.stderr.strip()[-300:]}")
         if outcome == "timeout":
@@ -826,7 +825,7 @@ class SweBenchInstanceRun:
         if outcome == "timeout":
             # The container was stopped to end the step; the second step needs it running.
             SweBenchDocker.run(["start", self.container], timeout=120)
-        refined = self._read(self.scratch / REFINED_FILE)
+        refined = self._read(REFINED_FILE)
         record["refined_bytes"] = len(refined.encode())
         record["refined"] = refined[:REFINED_STATE_LIMIT]
         # Measured, not assumed: the first step was told not to edit, and may have.
@@ -852,6 +851,16 @@ class SweBenchInstanceRun:
         outcome = self._exec(turn_prompt, resume=resume)
         return self._restart(state, task_prompt) if outcome == "restart" else outcome
 
+    def rollouts(self) -> list[str]:
+        """Lists the session rollouts Codex left in the scratch.
+
+        Returns:
+            list[str]: This instance's session rollouts, relative to its scratch (`SweBenchScratch`).
+        """
+        return SweBenchScratch.files(
+            self.scratch, "codex-home/sessions", "rollout*.jsonl", recursive=True
+        )
+
     def compactions_recorded(self) -> int:
         """Counts the compactions in this instance's sessions: the `compacted` records of every
         rollout under its scratch `codex-home` (what `scripts/context_budget_replay.py` counts).
@@ -860,9 +869,9 @@ class SweBenchInstanceRun:
             int: The count; a line still being written is skipped.
         """
         count = 0
-        for path in sorted((self.scratch / "codex-home" / "sessions").rglob("rollout*.jsonl")):
+        for path in self.rollouts():
             try:
-                with Path(path).open("rb") as handle:
+                with SweBenchScratch.open(self.scratch, path) as handle:
                     for line in handle:
                         if b'"compacted"' not in line:
                             continue
@@ -889,10 +898,10 @@ class SweBenchInstanceRun:
             Dict[str, Any]: `compactions`, `seconds`, `drops`, `declined`, `dropped_outputs`.
         """
         compactions, seconds = 0, 0.0
-        for path in sorted((self.scratch / "codex-home" / "sessions").rglob("rollout*.jsonl")):
+        for path in self.rollouts():
             times: list[float] = []
             try:
-                with Path(path).open("rb") as handle:
+                with SweBenchScratch.open(self.scratch, path) as handle:
                     for line in handle:
                         try:
                             record = json.loads(line)
@@ -922,10 +931,7 @@ class SweBenchInstanceRun:
             except OSError:
                 continue
         drops = declined = dropped = 0
-        try:
-            lines = (self.scratch / "codex-home" / DROP_LOG).read_text().splitlines()
-        except OSError:
-            lines = []
+        lines = SweBenchScratch.read_text(self.scratch, f"codex-home/{DROP_LOG}").splitlines()
         for line in lines:
             try:
                 entry = json.loads(line)
@@ -957,10 +963,7 @@ class SweBenchInstanceRun:
             Dict[str, int]: `nudged`, `ended`, `capped`.
         """
         counts = {"nudged": 0, "ended": 0, "capped": 0}
-        try:
-            lines = (self.scratch / "codex-home" / LOOP_GUARD_LOG).read_text().splitlines()
-        except OSError:
-            return counts
+        lines = SweBenchScratch.read_text(self.scratch, f"codex-home/{LOOP_GUARD_LOG}").splitlines()
         for line in lines:
             try:
                 entry = json.loads(line)
@@ -996,9 +999,9 @@ class SweBenchInstanceRun:
             "last_stop": None,
         }
         latest = -1
-        for path in sorted((self.scratch / "codex-home" / GUARD_DIR).glob("*.json")):
+        for path in SweBenchScratch.files(self.scratch, f"codex-home/{GUARD_DIR}", "*.json"):
             try:
-                session = json.loads(path.read_text())
+                session = json.loads(SweBenchScratch.read_text(self.scratch, path))
             except (OSError, ValueError):
                 continue
             if not isinstance(session, dict):
@@ -1061,9 +1064,9 @@ class SweBenchInstanceRun:
         """
         needle = json.dumps(name).encode()
         count = 0
-        for path in sorted((self.scratch / "codex-home" / "sessions").rglob("rollout*.jsonl")):
+        for path in self.rollouts():
             try:
-                with Path(path).open("rb") as handle:
+                with SweBenchScratch.open(self.scratch, path) as handle:
                     for line in handle:
                         if needle not in line:
                             continue
@@ -1117,9 +1120,9 @@ class SweBenchInstanceRun:
         # The container was stopped to end the session; the diff and the reset need it running.
         SweBenchDocker.run(["start", self.container], timeout=120)
         collected = self._script(COLLECT_SCRIPT, timeout=600)
-        diff = self._read(self.scratch / "patch.diff") if collected.returncode == 0 else ""
+        diff = self._read("patch.diff") if collected.returncode == 0 else ""
         try:
-            (self.scratch / RESTART_DIFF).write_text(diff)
+            SweBenchScratch.write_text(self.scratch, RESTART_DIFF, diff)
         except OSError:
             pass
         record["diff_bytes"] = len(diff.encode())
@@ -1169,9 +1172,9 @@ class SweBenchInstanceRun:
             return None
         snapshot = self._script(REVIEW_SNAPSHOT_SCRIPT, timeout=300)
         self._script(COLLECT_SCRIPT, timeout=600)
-        before = self._read(self.scratch / "patch.diff")
+        before = self._read("patch.diff")
         try:
-            (self.scratch / PATCH_BEFORE_REVIEW).write_text(before)
+            SweBenchScratch.write_text(self.scratch, PATCH_BEFORE_REVIEW, before)
         except OSError:
             pass
         resumed = self.session is not None
@@ -1234,9 +1237,9 @@ class SweBenchInstanceRun:
             listing if listed.returncode == 0 else "",
             root.strip() or "/testbed",
         )
-        directory = self.scratch / GATE_DIRECTORY
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / CONDITIONS_FILE).write_text(json.dumps(conditions, indent=1))
+        SweBenchScratch.write_text(
+            self.scratch, f"{GATE_DIRECTORY}/{CONDITIONS_FILE}", json.dumps(conditions, indent=1)
+        )
         state["hooks"] = {
             "sets": self.hooks,
             "conditions": {
@@ -1430,11 +1433,7 @@ class SweBenchInstanceRun:
         )
 
     def _last_message(self) -> str:
-        return self._read(self.scratch / "last.txt").strip()
+        return self._read("last.txt").strip()
 
-    @classmethod
-    def _read(cls, path: Path) -> str:
-        try:
-            return path.read_text(errors="replace")
-        except OSError:
-            return ""
+    def _read(self, name: str) -> str:
+        return SweBenchScratch.read_text(self.scratch, name)
