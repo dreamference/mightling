@@ -758,6 +758,11 @@ mod tests {
         let both = resolve_from(Some("x"), Some((path, "mightling_prompt = \"y\"\n")), &installed);
         assert_eq!((both.prompt.name.as_str(), both.skipped.len()), ("default", 2));
         assert_eq!(startup_lines(&both, false).len(), 2);
+        // The launch line, word for word (§13), and the same note in the list.
+        let names = "default, offline, high-swe, ask, chat, chat-work";
+        let skipped = format!("prompt \"high-sw\" from {ENV_VAR} is not installed (installed: {names}); skipped.");
+        assert_eq!(startup_lines(&typo, false), vec![format!("⚠️  {skipped}")]);
+        assert!(list_lines(&typo, &installed).contains(&format!("Note: {skipped}")));
         assert_eq!(startup_lines(&file, true), vec![format!("Prompt: high-swe ({TOML_KEY} in /tmp/dreamference.toml).")]);
         assert!(startup_lines(&env, true).is_empty(), "default says nothing");
     }
@@ -789,15 +794,22 @@ mod tests {
         assert!(installed.notes.iter().any(|note| note.contains("high-swe is built in")));
         assert!(installed.notes.iter().any(|note| note.contains("Bad_Name.md")));
         assert!(installed.notes.iter().any(|note| note.contains("no text")));
+        // `ling prompt list` names every file it passed over.
+        let lines = list_lines(&resolve_from(None, None, &installed), &installed);
+        for note in &installed.notes {
+            assert!(lines.contains(&format!("Note: {note}.")), "{note}");
+        }
         let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
     fn names_are_lowercase_letters_digits_and_hyphens() {
-        for good in ["default", "high-swe", "v2", "a-b-c"] {
+        let longest = "a".repeat(64);
+        for good in ["default", "high-swe", "v2", "a-b-c", longest.as_str()] {
             assert!(valid_name(good), "{good}");
         }
-        for bad in ["", "High", "a_b", "a.b", "../x", "-x", "a b"] {
+        let too_long = "a".repeat(65);
+        for bad in ["", "High", "a_b", "a.b", "../x", "-x", "a b", too_long.as_str()] {
             assert!(!valid_name(bad), "{bad}");
         }
     }
