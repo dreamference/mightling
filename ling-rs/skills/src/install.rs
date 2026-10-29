@@ -867,6 +867,47 @@ mod tests {
     }
 
     #[test]
+    fn a_chain_of_links_cannot_reach_outside_the_skill() {
+        // Each link alone stays inside by its text; together, through one another, they would not.
+        let ordered = |entries: &[(&str, Option<&str>)]| {
+            let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+            for (path, link) in entries {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(0);
+                header.set_mode(0o644);
+                if let Some(link) = link {
+                    header.set_entry_type(tar::EntryType::Symlink);
+                    header.set_link_name(link).unwrap_or_default();
+                }
+                header.set_path(path).unwrap_or_default();
+                header.set_cksum();
+                builder.append(&header, std::io::empty()).unwrap_or_default();
+            }
+            builder.into_inner().and_then(|encoder| encoder.finish()).unwrap_or_default()
+        };
+        let root = scratch("unpack-chain");
+        let write_out = ordered(&[
+            ("r-1/skill/SKILL.md", None),
+            ("r-1/skill/x/y", Some("..")),
+            ("r-1/skill/z", Some("x/y/..")),
+            ("r-1/skill/z/evil", None),
+        ]);
+        assert!(unpack(write_out.as_slice(), &["skill".into()], &root.join("a/skill")).is_err());
+        assert!(!root.join("a/evil").exists());
+        let link_out = ordered(&[("r-1/skill/z", Some("x/y/..")), ("r-1/skill/x/y", Some(".."))]);
+        assert!(unpack(link_out.as_slice(), &["skill".into()], &root.join("b/skill")).is_err());
+        let behind_a_link = ordered(&[("r-1/skill/x/y", Some("..")), ("r-1/skill/x/y/w", Some("../.."))]);
+        assert!(unpack(behind_a_link.as_slice(), &["skill".into()], &root.join("c/skill")).is_err());
+
+        let source = root.join("local");
+        std::fs::create_dir_all(source.join("x")).unwrap_or_default();
+        std::fs::write(source.join("SKILL.md"), SKILL).unwrap_or_default();
+        symlink(Path::new(".."), &source.join("x/y")).unwrap_or_default();
+        symlink(Path::new("x/y/.."), &source.join("z")).unwrap_or_default();
+        assert!(copy_local(&source, &root.join("d/skill")).is_err());
+    }
+
+    #[test]
     fn a_folder_that_is_not_a_legal_skill_is_refused() {
         let root = scratch("validate");
         std::fs::create_dir_all(root.join("none")).unwrap_or_default();
