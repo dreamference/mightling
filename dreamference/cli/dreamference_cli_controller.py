@@ -361,8 +361,8 @@ class DreamferenceCLIController:
     def _engine_for_adapters(cls, model: str, engine: str | None, from_flag: bool) -> str | None:
         """Keeps installed LoRA adapters from being lost to an engine that cannot serve them.
 
-        ling-serve has no adapter code (that is ling-engine 2.0 work). When the engine this start
-        resolved is ling and an adapter is installed for the model, a start without `--engine`
+        ling-serve, the default engine since 1.8.0, has no adapter code until 1.8.1. When the engine this
+        start resolved is ling and an adapter is installed for the model, a start without `--engine`
         moves to SGLang and says so; an explicit `--engine ling` is refused.
 
         Args:
@@ -389,12 +389,12 @@ class DreamferenceCLIController:
         names = ", ".join(str(entry["name"]) for entry in adapters)
         if from_flag:
             print(f"❌ --engine ling cannot serve the installed adapters ({names}): ling-serve has no "
-                  "adapter support yet. Use --engine sglang, or remove them with "
+                  "adapter support until 1.8.1. Use --engine sglang, or remove them with "
                   "`ling-admin adapter remove`.")
             raise SystemExit(2)
         if ENGINE_SGLANG not in engines:
             return engine
-        print(f"⚠️  Adapters need SGLang until ling-engine supports them: serving with SGLang "
+        print(f"⚠️  Adapters need SGLang until 1.8.1, when ling-serve serves them: serving with SGLang "
               f"for {names}.")
         return ENGINE_SGLANG
 

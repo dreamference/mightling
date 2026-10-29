@@ -216,7 +216,7 @@ class AdapterCommand:
         engine = DreamferenceConfig().server_engine or (engines[0] if engines else None)
         if engine == ENGINE_LING:
             print(
-                "⚠️  The engine configured for this model is ling-serve, which cannot serve adapters yet: "
+                "⚠️  The engine configured for this model is ling-serve, which serves adapters from 1.8.1: "
                 "`ling-admin server start` will use SGLang while an adapter is installed "
                 "(`--engine ling` is refused)."
             )

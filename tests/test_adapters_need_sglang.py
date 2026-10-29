@@ -43,7 +43,7 @@ def test_ling_default_with_an_adapter_falls_back_to_sglang_and_says_so(
 ):
     assert Cli._engine_for_adapters(MODEL, None, from_flag=False) == ENGINE_SGLANG
     out = capsys.readouterr().out
-    assert "Adapters need SGLang until ling-engine supports them" in out
+    assert "Adapters need SGLang until 1.8.1" in out
     assert "mine" in out
 
 
@@ -84,12 +84,12 @@ def test_sglang_default_with_an_adapter_is_untouched(sglang_default, adapters, c
 
 def test_adapter_install_warns_when_the_engine_is_ling(ling_default, capsys):
     AdapterCommand._warn_if_ling({"key": MODEL})
-    assert "cannot serve adapters yet" in capsys.readouterr().out
+    assert "serves adapters from 1.8.1" in capsys.readouterr().out
 
 
 def test_adapter_install_warns_on_the_shipped_default(capsys):
     AdapterCommand._warn_if_ling({"key": MODEL})
-    assert "cannot serve adapters yet" in capsys.readouterr().out
+    assert "serves adapters from 1.8.1" in capsys.readouterr().out
 
 
 def test_adapter_install_does_not_warn_when_the_config_names_sglang(monkeypatch, capsys):
