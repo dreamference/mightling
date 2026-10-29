@@ -288,7 +288,8 @@ pub fn call(app: App, backend: &dyn Backend, name: &str, arguments: &Value) -> V
 pub fn render(app: App, status: u16, answer: &Value) -> Value {
     let source = app.key();
     if let Some(error) = answer.get("error").and_then(Value::as_str) {
-        let mut text = format!("{}: {error}", app.name());
+        // Error text can carry a server's or a message's own words: it is defused like the items.
+        let mut text = format!("{}: {}", app.name(), neutralize(error));
         if let Some(hint) = answer.get("hint").and_then(Value::as_str) {
             text.push_str(&format!("\n{hint}"));
         }
@@ -307,7 +308,7 @@ pub fn render(app: App, status: u16, answer: &Value) -> Value {
     for failure in answer.get("errors").and_then(Value::as_array).into_iter().flatten() {
         let account = failure.get("account").and_then(Value::as_str).unwrap_or("an account");
         let error = failure.get("error").and_then(Value::as_str).unwrap_or("failed");
-        out.push(format!("{account} could not be read: {error}"));
+        out.push(neutralize(&format!("{account} could not be read: {error}")));
     }
     text_result(out.join("\n\n"), false)
 }
