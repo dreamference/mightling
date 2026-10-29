@@ -295,3 +295,20 @@ def test_the_canary_reads_utf8_events_whatever_charset_the_stream_names():
     response.raw = io.BytesIO(body.encode("utf-8"))
     ok, detail = check(response)
     assert ok, detail
+
+
+def test_a_rejected_recipe_variable_stops_the_loading_monitor_and_says_why():
+    from dreamference.vllm_server.model_loading_monitor import ModelLoadingMonitor
+
+    # vLLM's own wording: "Unknown vLLM environment variable detected: %s".
+    lines = ["WARNING envs.py:120] Unknown vLLM environment variable detected: VLLM_KERNEL_PIN\n"]
+    monitor = ModelLoadingMonitor(
+        get_logs_fn=lambda: [lines.pop()] if lines else [],
+        check_health_fn=lambda: False,
+        recipe_env_keys={"VLLM_KERNEL_PIN"},
+    )
+    monitor.start()
+    monitor.monitor_thread.join(timeout=5)
+    # sys.exit in the monitor's thread ended only that thread, and the launch went on waiting.
+    assert not monitor.monitor_thread.is_alive()
+    assert monitor.fatal and "VLLM_KERNEL_PIN" in monitor.fatal
