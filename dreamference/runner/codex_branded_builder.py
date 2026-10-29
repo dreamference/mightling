@@ -183,6 +183,10 @@ WEB_UI_IGNORED: Final[frozenset] = frozenset({"node_modules", "dist"})
 RUSTY_V8_RELEASE_URL: Final[str] = "https://github.com/openai/codex/releases/download/rusty-v8-v{version}"
 RUSTY_V8_PROFILE: Final[str] = "ptrcomp_sandbox_release"
 
+# How long a download may wait for the next bytes before it gives up. A slow link still finishes;
+# a server that stops sending no longer hangs the build.
+DOWNLOAD_TIMEOUT_SECONDS: Final[float] = 60.0
+
 
 class CodexBrandedBuilder:
     """
@@ -542,6 +546,24 @@ class CodexBrandedBuilder:
         return True
 
     @classmethod
+    def download(cls, url: str, path: str) -> None:
+        """Downloads `url` to `path`, giving up on a server that stops sending.
+
+        `urlretrieve` takes no timeout, and no default is set, so a stalled connection hung the
+        build for good. The timeout bounds each read, not the whole download; a TimeoutError is an
+        OSError, which the callers already report.
+
+        Args:
+            url (str): The file to fetch.
+            path (str): Where to write it.
+        """
+        import urllib.request
+
+        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response, \
+                Path(path).open("wb") as handle:
+            shutil.copyfileobj(response, handle)
+
+    @classmethod
     def host_target(cls) -> str:
         """
         Returns the Rust target triple of this machine, which is the one Codex is built for.
@@ -606,7 +628,6 @@ class CodexBrandedBuilder:
                 Cargo, or None if the files could not be fetched or failed verification.
         """
         import re
-        import urllib.request
 
         with open(os.path.join(source_dir, "codex-rs", "Cargo.toml")) as handle:
             pinned = re.search(r'^v8 = "=([\d.]+)"', handle.read(), re.M)
@@ -647,7 +668,7 @@ class CodexBrandedBuilder:
                 return path
             print(f"📥 Fetching {name}...")
             try:
-                urllib.request.urlretrieve(f"{base_url}/{name}", path)
+                cls.download(f"{base_url}/{name}", path)
             except OSError as error:
                 print(f"❌ Could not download {name}: {error}")
                 return None

@@ -176,7 +176,7 @@ def test_a_nextest_download_that_fails_its_checksum_is_not_used(tmp_path, monkey
             handle.write(b"not the release")
 
     with patch.object(runner_module.CodexBrandedBuilder, "host_target", return_value="aarch64-unknown-linux-gnu"), \
-            patch("urllib.request.urlretrieve", side_effect=fake_retrieve):
+            patch.object(runner_module.CodexBrandedBuilder, "download", side_effect=fake_retrieve):
         assert CodexTestRunner.ensure_nextest() is None
     assert not (tmp_path / "cargo-nextest").exists()
 
@@ -337,13 +337,30 @@ def test_a_command_the_filter_leaves_empty_does_not_fail_the_run():
         assert command[command.index("--no-tests") + 1] == "pass"
 
 
+def test_the_nextest_download_gives_up_on_a_server_that_stops_sending(tmp_path, monkeypatch):
+    # urlretrieve sets no timeout, so a stalled download hung `ling-admin codex test` for good.
+    import urllib.request
+
+    timeouts = []
+
+    def stalled(url, *args, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(runner_module, "TOOLS_DIR", str(tmp_path / "tools"))
+    monkeypatch.setattr(runner_module.CodexBrandedBuilder, "host_target",
+                        classmethod(lambda cls: "aarch64-unknown-linux-gnu"))
+    monkeypatch.setattr(urllib.request, "urlopen", stalled)
+    assert CodexTestRunner.ensure_nextest() is None
+    assert timeouts and timeouts[0] is not None
+
+
 def test_ensure_nextest_handles_stamp_unsupported_target_network_error_and_valid_archive(
     tmp_path, monkeypatch
 ):
     import hashlib
     import io
     import tarfile
-    import urllib.request
     from pathlib import Path
 
     tools = tmp_path / "tools"
@@ -366,7 +383,7 @@ def test_ensure_nextest_handles_stamp_unsupported_target_network_error_and_valid
     def fail_download(url, dest):
         raise OSError("network unreachable")
 
-    monkeypatch.setattr(urllib.request, "urlretrieve", fail_download)
+    monkeypatch.setattr(runner_module.CodexBrandedBuilder, "download", staticmethod(fail_download))
     assert CodexTestRunner.ensure_nextest() is None
 
     # Valid archive extracts binary, writes stamp, and subsequent call returns from stamp.
@@ -380,9 +397,9 @@ def test_ensure_nextest_handles_stamp_unsupported_target_network_error_and_valid
     digest = hashlib.sha256(raw_archive).hexdigest()
     monkeypatch.setitem(runner_module.NEXTEST_SHA256, target, digest)
     monkeypatch.setattr(
-        urllib.request,
-        "urlretrieve",
-        lambda url, dest: Path(dest).write_bytes(raw_archive),
+        runner_module.CodexBrandedBuilder,
+        "download",
+        staticmethod(lambda url, dest: Path(dest).write_bytes(raw_archive)),
     )
     assert CodexTestRunner.ensure_nextest() == str(tools)
     assert (tools / "cargo-nextest").read_bytes() == b"#!/bin/sh\necho nextest\n"
@@ -390,9 +407,9 @@ def test_ensure_nextest_handles_stamp_unsupported_target_network_error_and_valid
 
     # Stamp hit skips download.
     monkeypatch.setattr(
-        urllib.request,
-        "urlretrieve",
-        lambda url, dest: pytest.fail("should use cached cargo-nextest"),
+        runner_module.CodexBrandedBuilder,
+        "download",
+        staticmethod(lambda url, dest: pytest.fail("should use cached cargo-nextest")),
     )
     assert CodexTestRunner.ensure_nextest() == str(tools)
 

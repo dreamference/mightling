@@ -157,7 +157,6 @@ class CodexTestRunner:
             Optional[str]: The directory holding `cargo-nextest`, or None if it could not be installed.
         """
         import tarfile
-        import urllib.request
 
         binary = os.path.join(TOOLS_DIR, "cargo-nextest")
         stamp = os.path.join(TOOLS_DIR, "cargo-nextest.version")
@@ -175,7 +174,8 @@ class CodexTestRunner:
         archive = os.path.join(TOOLS_DIR, f"cargo-nextest-{NEXTEST_VERSION}.tar.gz")
         print(f"📥 Fetching cargo-nextest {NEXTEST_VERSION}...")
         try:
-            urllib.request.urlretrieve(NEXTEST_URL.format(version=NEXTEST_VERSION, target=target), archive)
+            CodexBrandedBuilder.download(
+                NEXTEST_URL.format(version=NEXTEST_VERSION, target=target), archive)
         except OSError as exc:
             print(f"❌ Could not download cargo-nextest: {exc}")
             return None
