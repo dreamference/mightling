@@ -290,18 +290,20 @@ class ContextEngine:
             for rel_path, sim in vec_scores.items():
                 file_scores[rel_path] = file_scores.get(rel_path, 0.0) + sim * 3.0  # weight semantic higher
 
-        sorted_files = sorted(file_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
-        
+        # Paths no longer indexed are dropped before the cut: cut first, a stale path among the
+        # best scores left fewer than `top_k` results.
+        indexed = [(p, s) for p, s in file_scores.items() if p in self.indexed_files]
+        sorted_files = sorted(indexed, key=lambda x: x[1], reverse=True)[:top_k]
+
         results: List[Dict[str, Any]] = []
         for rel_path, score in sorted_files:
-            idx_file = self.indexed_files.get(rel_path)
-            if idx_file:
-                results.append({
-                    "rel_path": rel_path,
-                    "score": round(score, 4),
-                    "symbols": [asdict(s) for s in idx_file.symbols],
-                    "size_bytes": idx_file.size_bytes
-                })
+            idx_file = self.indexed_files[rel_path]
+            results.append({
+                "rel_path": rel_path,
+                "score": round(score, 4),
+                "symbols": [asdict(s) for s in idx_file.symbols],
+                "size_bytes": idx_file.size_bytes
+            })
         return results
 
     def save_index(self) -> None:

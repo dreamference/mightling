@@ -268,3 +268,15 @@ def test_a_failed_full_text_search_closes_its_connection(tmp_path, monkeypatch):
     monkeypatch.setattr(sqlite_context_storage.sqlite3, "connect", lambda *a, **k: conn)
     assert SQLiteContextStorage(tmp_path / "context.db").search_fts(["alpha"], top_k=5) == {}
     conn.close.assert_called_once()
+
+
+def test_a_search_returns_top_k_files_even_when_a_scored_path_is_no_longer_indexed(tmp_path):
+    # The ranking was cut to `top_k` before paths missing from `indexed_files` were dropped, so a
+    # stale path among the best scores left the caller with fewer results than it asked for.
+    from dreamference.context_engine.indexed_file import IndexedFile
+
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.indexed_files = {"a.py": IndexedFile(rel_path="a.py", abs_path=str(tmp_path / "a.py"),
+                                                size_bytes=1, symbols=[], tokens=[])}
+    engine.tf_idf_index = {"alpha": {"gone.py": 5.0, "a.py": 1.0}}
+    assert [r["rel_path"] for r in engine.search_code("alpha", top_k=1)] == ["a.py"]
