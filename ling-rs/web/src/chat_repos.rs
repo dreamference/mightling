@@ -2538,6 +2538,9 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
         return json_response(StatusCode::BAD_GATEWAY, json!({ "error": err }));
     }
 
+    // Submodules are set up only in a worktree this request made: on a re-open `submodule update`
+    // would move the agent's submodule HEAD and `deinit -f` would clear a folder left empty.
+    let mut fresh_worktree = true;
     let (created_new_worktree, candidate_thread, candidate_worktree_dir, candidate_branch) =
         if let Some(existing) = &existing_snapshot {
             // A checkout opened while the repository was read-only has no branch: it gets its
@@ -2556,7 +2559,8 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
                     return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }));
                 }
             }
-            if !wt_dir.join(".git").exists() {
+            fresh_worktree = !wt_dir.join(".git").exists();
+            if fresh_worktree {
                 if let Err(err) = ensure_worktree(
                     &server,
                     &base_git,
@@ -2691,6 +2695,7 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
             remove_branch,
         } => {
             cleanup_losing_worktree(&server, &base_git, &remove_dir, remove_branch.as_deref()).await;
+            fresh_worktree = false;
             winner
         }
         OpenIndexOutcome::MaxCheckouts {
@@ -2714,7 +2719,11 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
     };
 
     let worktree_path = PathBuf::from(&record.dir);
-    let notes = inspect_and_init_submodules_and_lfs(&server, &worktree_path, &base_url, &forge_repo).await;
+    let notes = if fresh_worktree {
+        inspect_and_init_submodules_and_lfs(&server, &worktree_path, &base_url, &forge_repo).await
+    } else {
+        Vec::new()
+    };
 
     let chat_key = record.chat_key();
     server
@@ -8758,6 +8767,56 @@ mod tests {
         );
         let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
         assert!(!wt.join("vendor/sneaky/.git").exists());
+    }
+
+    #[tokio::test]
+    async fn a_reopened_checkout_keeps_what_was_put_in_a_submodule_folder() {
+        let s = scratch("submodule-reopen");
+        let bare = make_bare_repo(&s.dir, "org/subkeep");
+        let seed_work = s.dir.join("seed-work").join("org_subkeep");
+        std::fs::write(
+            seed_work.join(".gitmodules"),
+            "[submodule \"ext\"]\n\tpath = vendor/ext\n\turl = https://127.0.0.1:9443/outside/ext.git\n",
+        )
+        .unwrap();
+        let head = git_stdout(&seed_work, &["rev-parse", "HEAD"]).trim().to_string();
+        git_sync(&seed_work, &["update-index", "--add", "--cacheinfo", &format!("160000,{head},vendor/ext")]);
+        git_sync(&seed_work, &["add", ".gitmodules"]);
+        git_sync(&seed_work, &["commit", "-m", "add an off-forge submodule"]);
+        git_sync(&seed_work, &["push", "origin", "main"]);
+
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/subkeep",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+        let open = json!({ "repo": "org/subkeep", "bridge": "signal", "chat": "c1" });
+
+        let (st, opened, body) = post_json(&server, &cookie, "/api/repos/open", open.clone()).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
+        // The agent fills the folder left empty (say, with its own copy of the dependency).
+        std::fs::create_dir_all(wt.join("vendor/ext")).unwrap();
+        std::fs::write(wt.join("vendor/ext/notes.txt"), "the agent's work\n").unwrap();
+
+        let (st, again, body) = post_json(&server, &cookie, "/api/repos/open", open).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(again["cwd"], opened["cwd"]);
+        assert_eq!(
+            std::fs::read_to_string(wt.join("vendor/ext/notes.txt")).ok().as_deref(),
+            Some("the agent's work\n"),
+            "re-opening the checkout must not clear a submodule folder"
+        );
     }
 
     #[tokio::test]
