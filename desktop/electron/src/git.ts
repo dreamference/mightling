@@ -185,6 +185,8 @@ export function git(cwd: string, args: string[], input?: string, timeoutMs = 60_
         reject(new GitError(tooBig ? "the output is too large to show here" : String(stderr || error.message).trim()));
       } else resolve(stdout);
     });
+    // git may exit before it reads it all (a refused patch): its answer comes above; EPIPE here would crash the app.
+    child.stdin?.on("error", () => undefined);
     if (input !== undefined) child.stdin?.end(input);
   }));
 }
@@ -408,17 +410,20 @@ export async function log(root: string, count = 30): Promise<Commit[]> {
   });
 }
 
-export const stage = async (root: string, files: unknown) => void (await git(root, ["add", "--", ...paths(root, files)]));
-export const unstage = async (root: string, files: unknown) => void (await git(root, ["restore", "--staged", "--", ...paths(root, files)]));
+/** A file the page names is that file: `[ab].txt` or `c*.txt` is not a pattern that also takes `b.txt` or `cd.txt`. */
+const LITERAL = { GIT_LITERAL_PATHSPECS: "1" };
+
+export const stage = async (root: string, files: unknown) => void (await git(root, ["add", "--", ...paths(root, files)], undefined, undefined, LITERAL));
+export const unstage = async (root: string, files: unknown) => void (await git(root, ["restore", "--staged", "--", ...paths(root, files)], undefined, undefined, LITERAL));
 
 /** Throws away a file's unstaged changes; an untracked file is deleted (the page asks first). */
 export async function discard(root: string, files: unknown): Promise<void> {
   const list = paths(root, files);
   const untracked = new Set((await status(root)).files.filter((file) => file.unstaged === "?").map((file) => file.path));
   const tracked = list.filter((file) => !untracked.has(file));
-  if (tracked.length) await git(root, ["restore", "--worktree", "--", ...tracked]);
+  if (tracked.length) await git(root, ["restore", "--worktree", "--", ...tracked], undefined, undefined, LITERAL);
   const gone = list.filter((file) => untracked.has(file));
-  if (gone.length) await git(root, ["clean", "-f", "-q", "--", ...gone]);
+  if (gone.length) await git(root, ["clean", "-f", "-q", "--", ...gone], undefined, undefined, LITERAL);
 }
 
 /** The files a patch touches, from its headers; every one must stay inside the repository. */

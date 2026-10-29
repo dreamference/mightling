@@ -86,5 +86,7 @@ describe("notifications", () => {
   it("fold a message onto one line", () => {
     expect(oneLine("  a\n\tb  ", 10)).toBe("a b");
     expect(oneLine("abcdefghij", 5)).toBe("abcd…");
+    // An emoji at the cut is dropped whole, not left half.
+    expect(oneLine(`${"a".repeat(58)}😀x`, 60)).toBe(`${"a".repeat(58)}…`);
   });
 });

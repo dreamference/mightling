@@ -5,7 +5,7 @@
 // gives each answer back to the window that asked, untagged; notifications and the server's own
 // requests go to every window (an approval answered in one is resolved in all by
 // `serverRequest/resolved`). The protocol takes one `initialize` per connection: the first window's
-// is sent, later windows get its answer from here.
+// is sent, later windows get its answer from here, held until it comes when they ask before it has.
 //
 // A thread shown in two windows has one composer (`WindowHub`): the window that showed it first, or
 // took it over, owns it; the others mirror the thread read-only. This process refuses a turn, a
@@ -21,6 +21,13 @@ const SEPARATOR = "␟";
 
 export type Routed = { to: "all" } | { to: string };
 
+/** A message from the server for one window or all, and the same answer for other windows (`RequestRouter.incoming`). */
+export interface Delivery {
+  to: string | "all";
+  payload: unknown;
+  also?: { to: string; payload: unknown }[];
+}
+
 export class RequestRouter {
   private initialized: unknown = null;
 
@@ -33,6 +40,11 @@ export class RequestRouter {
     const method = typeof message.method === "string" ? message.method : null;
     if (method === "initialize" && "id" in message && this.initialized !== null) {
       return { send: null, reply: { id: message.id, result: this.initialized } };
+    }
+    // The first window's initialize is not answered yet (windows restored at launch): a second would be refused.
+    if (method === "initialize" && "id" in message && this.initializeId !== null) {
+      this.held.push({ window, id: message.id });
+      return { send: null, reply: null };
     }
     if (method === "initialized" && !("id" in message) && this.initialized !== null && window !== this.first) {
       return { send: null, reply: null };
@@ -50,9 +62,11 @@ export class RequestRouter {
 
   private first: string | null = null;
   private initializeId: string | null = null;
+  /** Later windows' initialize requests, held until the first one's answer: each window and its own id. */
+  private held: { window: string; id: unknown }[] = [];
 
-  /** Where a message from the server goes, and as what. */
-  incoming(message: unknown): { to: string | "all"; payload: unknown } {
+  /** Where a message from the server goes, and as what; `also`: the same answer for the windows held with it. */
+  incoming(message: unknown): Delivery {
     if (!isObject(message) || typeof message.method === "string" || !("id" in message) || typeof message.id !== "string") {
       return { to: "all", payload: message };
     }
@@ -65,8 +79,16 @@ export class RequestRouter {
     } catch {
       return { to: "all", payload: message };
     }
-    if (message.id === this.initializeId && "result" in message) this.initialized = message.result;
-    return { to: window, payload: { ...message, id } };
+    if (message.id !== this.initializeId) return { to: window, payload: { ...message, id } };
+    // The answer to the initialize that was sent: kept for later windows, and given to those held.
+    if ("result" in message) this.initialized = message.result;
+    else {
+      this.first = null;
+      this.initializeId = null;
+    }
+    const also = this.held.map((entry) => ({ to: entry.window, payload: { ...message, id: entry.id } }));
+    this.held = [];
+    return also.length > 0 ? { to: window, payload: { ...message, id }, also } : { to: window, payload: { ...message, id } };
   }
 
   /** The server went away: the next window to initialize sends its own `initialize` again. */
@@ -74,6 +96,7 @@ export class RequestRouter {
     this.initialized = null;
     this.first = null;
     this.initializeId = null;
+    this.held = [];
   }
 }
 
@@ -237,7 +260,7 @@ export class WindowHub {
   }
 
   /** Where a message from the server goes, and as what; remembers which thread each server request is about. */
-  incoming(message: unknown): { to: string | "all"; payload: unknown } {
+  incoming(message: unknown): Delivery {
     if (isObject(message) && typeof message.method === "string") {
       if ("id" in message) {
         const thread = threadOf(message);

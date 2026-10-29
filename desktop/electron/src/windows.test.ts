@@ -156,6 +156,26 @@ describe("the request router", () => {
     expect(router.incoming({ id: a.id, error: { code: 1, message: "no" } })).toEqual({ to: "1", payload: { id: 7, error: { code: 1, message: "no" } } });
   });
 
+  it("holds a window's initialize while the first is unanswered, and answers both with the server's one answer", () => {
+    const router = new RequestRouter();
+    // Two windows restored at launch both initialize before the server, still starting, answers.
+    const first = router.outgoing("1", { id: 1, method: "initialize", params: {} }).send as { id: string };
+    expect(router.outgoing("2", { id: 3, method: "initialize", params: {} })).toEqual({ send: null, reply: null });
+    expect(router.incoming({ id: first.id, result: { userAgent: "ling" } })).toEqual({
+      to: "1",
+      payload: { id: 1, result: { userAgent: "ling" } },
+      also: [{ to: "2", payload: { id: 3, result: { userAgent: "ling" } } }],
+    });
+    expect(router.outgoing("2", { method: "initialized" })).toEqual({ send: null, reply: null });
+
+    // An initialize the server refused is refused to the windows held with it; the next one is sent again.
+    const again = new RequestRouter();
+    const sent = again.outgoing("1", { id: 1, method: "initialize", params: {} }).send as { id: string };
+    again.outgoing("2", { id: 1, method: "initialize", params: {} });
+    expect(again.incoming({ id: sent.id, error: { code: 1, message: "no" } }).also).toEqual([{ to: "2", payload: { id: 1, error: { code: 1, message: "no" } } }]);
+    expect(again.outgoing("2", { id: 2, method: "initialize", params: {} }).send).toEqual({ id: "2␟2", method: "initialize", params: {} });
+  });
+
   it("sends notifications and the server's own requests to every window, and answers to them unchanged", () => {
     const router = new RequestRouter();
     expect(router.incoming({ method: "turn/started", params: {} }).to).toBe("all");

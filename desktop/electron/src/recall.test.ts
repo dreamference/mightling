@@ -38,9 +38,10 @@ describe("earlier questions", () => {
     if (process.platform !== "win32") expect(fs.statSync(path.join(h, HISTORY_DIR, "t1.md")).mode & 0o777).toBe(0o600);
     expect(() => writeRecall(h, "../evil", 1, "x")).toThrow(/thread id/);
     expect(() => writeRecall(h, "t3", 1, 42)).toThrow(/text/);
-    // A long one keeps its start.
-    writeRecall(h, "t4", 1, "x".repeat(MAX_BYTES + 100));
+    // A long one keeps its start, and no character cut in half.
+    writeRecall(h, "t4", 1, `x${"é".repeat(MAX_BYTES)}`);
     expect(fs.readFileSync(path.join(h, HISTORY_DIR, "t4.md"), "utf8")).toContain("is not kept");
+    expect(fs.readFileSync(path.join(h, HISTORY_DIR, "t4.md"), "utf8")).not.toContain("\uFFFD");
     expect(pruneRecall(h, ["t2"])).toBe(2);
     expect(fs.readdirSync(path.join(h, HISTORY_DIR)).sort()).toEqual(["index.json", "t2.md"]);
     expect(recallIndex(h)).toEqual({ t2: 200 });

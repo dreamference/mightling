@@ -19,7 +19,7 @@ import * as userFs from "./userfs";
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, FAILED, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
-import { airgapped, setDefault } from "./airgapped";
+import { airgapped, countsAsOn, setDefault } from "./airgapped";
 import { serve } from "./app-protocol";
 import { auditPreview, type WorkTarget } from "./args";
 import { webUrl } from "./links";
@@ -149,8 +149,10 @@ export async function main(options: MainOptions): Promise<void> {
       recentQuestions.observe(message.payload);
       terminals.observe(message.payload);
       const routed = hub.incoming(message.payload);
-      for (const target of windows()) {
-        if (routed.to === "all" || String(target.webContents.id) === routed.to) send(target, { channel: "work://message", payload: routed.payload });
+      for (const delivery of [routed, ...(routed.also ?? [])]) {
+        for (const target of windows()) {
+          if (delivery.to === "all" || String(target.webContents.id) === delivery.to) send(target, { channel: "work://message", payload: delivery.payload });
+        }
       }
       return;
     }
@@ -551,11 +553,11 @@ export async function main(options: MainOptions): Promise<void> {
   });
   ipcMain.on(CHANNEL_CHUNK_ACK, () => {});
 
-  /** Refuses what would reach the network for a thread at `/airgapped on` (push, the forge's page). */
+  /** Refuses what would reach the network for a thread at `/airgapped on` (push, the forge's page), or when `ling airgapped` did not answer. */
   const offline = async (thread: string | null, what: string) => {
     const ling = findLing(resourcesPath());
-    const level = ling ? await airgapped(ling, thread) : { level: "off", source: "" };
-    if (level.level === "on") throw new Error(`airgapped is on (${level.source}): ${what} would reach the network`);
+    const level = ling ? await airgapped(ling, thread) : { level: "off" as const, source: "" };
+    if (countsAsOn(level)) throw new Error(`airgapped is on (${level.source}): ${what} would reach the network`);
   };
   /** Preview tabs (preview.ts): their rules read Settings › Browser and the thread's air-gap level. */
   const previews = new Previews(
@@ -567,7 +569,7 @@ export async function main(options: MainOptions): Promise<void> {
     },
     async (thread) => {
       const ling = findLing(resourcesPath());
-      return ling ? (await airgapped(ling, thread)).level === "on" : false;
+      return ling ? countsAsOn(await airgapped(ling, thread)) : false;
     },
   );
   let editors: Editor[] | null = null;
@@ -971,10 +973,10 @@ export async function main(options: MainOptions): Promise<void> {
         }
         const picked = pickedBundles.get(String(message.token));
         if (!picked) throw new Error("choose the bundle's file again");
-        const { summary } = await mcpb.readBundle(picked.file, home, places);
-        if (summary.fetches) await offline(null, `this bundle's command, ${summary.fetches},`);
         const values = typeof message.values === "object" && message.values !== null && !Array.isArray(message.values) ? message.values : {};
-        const installed = await mcpb.installBundle(picked.file, home, places, { expected: picked.name, values, replace: message.replace === true });
+        // Checked on the command installBundle fills in from the file as it reads it then, not on an earlier read.
+        const fetching = (command: string) => offline(null, `this bundle's command, ${command},`);
+        const installed = await mcpb.installBundle(picked.file, home, places, { expected: picked.name, values, replace: message.replace === true, fetching });
         pickedBundles.delete(String(message.token));
         return installed;
       }

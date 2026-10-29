@@ -203,9 +203,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): HostConfig | n
 }
 
 /** Whether `folder` is `root` or inside it. */
-function within(folder: string, root: string): boolean {
+export function within(folder: string, root: string): boolean {
   const relative = path.relative(root, folder);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  // `..notes` is a folder inside; only `..` itself, or a path through it, leaves.
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 export class SyncHost {
@@ -381,7 +382,8 @@ export class SyncHost {
       let count = 0;
       while (count < this.events.length && (count === 0 || bytes + this.events[count].bytes <= BATCH_CAP)) bytes += this.events[count++].bytes;
       const events = this.events.splice(0, count);
-      if (!(await this.post(config, events, acks, 0))) {
+      // A post that stop() cut off is not kept: what it carried was the stopped server's.
+      if (!(await this.post(config, events, acks, 0)) && this.running) {
         // Kept for the next post, in order; the oldest events give way first.
         this.acks = [...acks, ...this.acks];
         this.events = [...events, ...this.events].slice(-QUEUE_CAP);

@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ForView } from "./api";
 import { AppServer } from "./server";
-import { EVENT_CAP, HOST_ID_PREFIX, SyncHost, hubBase, privateIp, readConfig, type HostOptions } from "./sync-host";
+import { EVENT_CAP, HOST_ID_PREFIX, SyncHost, hubBase, privateIp, readConfig, within, type HostOptions } from "./sync-host";
 import { nodeScript } from "./test-ling";
 
 type Json = Record<string, any>;
@@ -55,6 +55,8 @@ class Hub {
   private commands: unknown[] = [];
   private held: http.ServerResponse[] = [];
   failures = 0;
+  /** Posts that carry events go unanswered (a hub gone quiet). */
+  stall = false;
   base = "";
   private readonly server = http.createServer((request, response) => {
     let body = "";
@@ -69,6 +71,7 @@ class Hub {
         return;
       }
       const wait = Number(url.searchParams.get("wait") ?? "0");
+      if (this.stall && (this.posts[this.posts.length - 1].body.events ?? []).length > 0) return void this.held.push(response);
       if (this.commands.length > 0 || wait === 0) return this.answer(response);
       this.held.push(response);
       setTimeout(() => {
@@ -305,6 +308,15 @@ describe("what the host reads", () => {
     for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.9", "192.168.50.105", "169.254.1.1", "100.64.0.1", "::1", "fd12::1", "fe80::1", "::ffff:192.168.50.2"]) expect(privateIp(ip), ip).toBe(true);
     for (const ip of ["203.0.113.1", "172.32.0.1", "100.128.0.1", "2001:db8::1", "::ffff:203.0.113.1"]) expect(privateIp(ip), ip).toBe(false);
   });
+
+  it("keeps a folder whose name starts with two dots inside the excluded folder it is in", () => {
+    const secret = path.resolve("/home/user/secret");
+    expect(within(path.join(secret, "..notes"), secret)).toBe(true);
+    expect(within(path.join(secret, "a"), secret)).toBe(true);
+    expect(within(secret, secret)).toBe(true);
+    expect(within(path.resolve("/home/user/other"), secret)).toBe(false);
+    expect(within(path.resolve("/home/user"), secret)).toBe(false);
+  });
 });
 
 describe("the sync host", () => {
@@ -533,6 +545,23 @@ describe("the sync host", () => {
     expect(gaps[3]).toBeGreaterThanOrEqual(145);
     expect(gaps[3]).toBeLessThan(400);
     expect(r.host.currentBackoff).toBe(0);
+  });
+
+  it("forgets with the server what a post in flight carried: a new server's host does not send it", async () => {
+    const r = await rig("stop-in-flight");
+    r.host.start();
+    await until(() => offered(r.hub));
+    r.hub.stall = true;
+    r.emit({ method: "turn/started", params: { threadId: "t-1", turn: { id: "turn-old" } } });
+    const sent = () => r.hub.events.filter((event) => JSON.stringify(event).includes("turn-old")).length;
+    await until(() => sent() === 1);
+    r.host.stop();
+    r.hub.stall = false;
+    await pause(100);
+    r.host.start();
+    await until(() => r.hub.posts.filter((post) => (post.body.models ?? []).length > 0).length >= 2);
+    await pause(300);
+    expect(sent()).toBe(1);
   });
 
   it("stops with the server: nothing more is posted", async () => {

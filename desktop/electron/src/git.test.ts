@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { findEditors, execProgram, openCommand, runsWhenOpened, systemDataDirs } from "./editors";
 import * as git from "./git";
+import { nodeScript } from "./test-ling";
 
 const scratchHome = fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-home-"));
 const saved = { HOME: process.env.HOME, GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM };
@@ -111,6 +112,14 @@ describe("window-side git", () => {
     expect(fs.existsSync(path.join(root, "new.txt"))).toBe(false);
     await expect(git.stage(root, ["../escape"])).rejects.toThrow("outside the repository");
     await expect(git.apply(root, "--- a/../x\n+++ b/../x\n@@ -1 +1 @@\n-a\n+b\n", { cached: true })).rejects.toThrow("outside the repository");
+  });
+
+  it.skipIf(process.platform === "win32")("takes a file's name as written, not as a pattern for others", async () => {
+    const root = repo();
+    for (const name of ["[ab].txt", "b.txt"]) fs.writeFileSync(path.join(root, name), "x\n");
+    await git.discard(root, ["[ab].txt"]);
+    expect(fs.existsSync(path.join(root, "[ab].txt"))).toBe(false);
+    expect(fs.existsSync(path.join(root, "b.txt"))).toBe(true);
   });
 
   it("commits what is staged, or everything, and shows the Commit and Branch scopes", async () => {
@@ -417,5 +426,26 @@ describe("git on a Mac without the Command Line Tools", () => {
     expect(git.gitMissing({ ...darwin, pathEnv: [brew.dir, stub.dir].join(path.delimiter), xcodeSelect: asked.file })).toBeNull();
     expect(asked.runs()).toBe(0);
     expect(stub.runs()).toBe(0);
+  });
+});
+
+describe("git given input it does not read", () => {
+  it.skipIf(process.platform === "win32")("answers with git's refusal, and the pipe it closed throws nothing", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-closed-"));
+    nodeScript(dir, "git", 'if (process.argv[2] !== "config") process.stderr.write("refused"); process.exit(process.argv[2] === "config" ? 0 : 1);\n');
+    const savedPath = process.env.PATH;
+    process.env.PATH = [dir, savedPath].join(path.delimiter);
+    const uncaught: unknown[] = [];
+    const record = (error: unknown) => uncaught.push(error);
+    process.on("uncaughtException", record);
+    try {
+      await expect(git.git(dir, ["apply", "--check", "-"], "x".repeat(16 * 1024 * 1024))).rejects.toThrow("refused");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(uncaught).toEqual([]);
+    } finally {
+      process.off("uncaughtException", record);
+      process.env.PATH = savedPath;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
