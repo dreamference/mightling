@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -326,3 +327,213 @@ def test_real_compat_anchors_match_their_own_exact_layout():
             assert len(rr.anchor_pattern(old).findall(old)) == 1, path
             checked += 1
     assert checked > 0
+
+
+# F9: the renamed sandbox check and host step replace the profile an older release installed.
+REPO = SCRIPT.parent.parent
+SANDBOX = "dreamference/vllm_server/sandbox_prerequisite.py"
+HOST_SETUP = "dreamference/vllm_server/host_safety_setup.py"
+ALL_COMPAT_EDITS = list(rr.COMPAT_EDITS)
+
+
+def renamed_module(tmp_path, monkeypatch, relative, name):
+    """The renamed copy of a real source file, compat edits applied, imported from tmp_path."""
+    source = (REPO / relative).read_text(encoding="utf-8")
+    if "LEGACY_PROFILE_NAMES" in (REPO / SANDBOX).read_text(encoding="utf-8"):
+        pytest.skip("this tree is the renamed copy already; the script's input is the old tree")
+    target = tmp_path / "tree" / rr.new_path(relative)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(rr.transform_text(relative, source), encoding="utf-8")
+    monkeypatch.setattr(
+        rr, "COMPAT_EDITS", [edit for edit in ALL_COMPAT_EDITS if edit[0] == relative]
+    )
+    rr.apply_compat(tmp_path / "tree", False)
+    module_spec = importlib.util.spec_from_file_location(name, target)
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def renamed_sandbox(tmp_path, monkeypatch):
+    """The renamed SandboxPrerequisite whose AppArmor folder is tmp_path/apparmor and whose bwrap is fixed."""
+    module = renamed_module(tmp_path, monkeypatch, SANDBOX, "ragon_sandbox_prerequisite")
+    apparmor = tmp_path / "apparmor"
+    apparmor.mkdir()
+    bwrap = tmp_path / "bin" / "bwrap"
+    bwrap.parent.mkdir()
+    bwrap.write_text("")
+    monkeypatch.setattr(module, "APPARMOR_DIR", str(apparmor))
+    monkeypatch.setattr(module.shutil, "which", lambda name: str(bwrap))
+    monkeypatch.setattr(
+        module.SandboxPrerequisite, "_userns_restricted", classmethod(lambda cls: True)
+    )
+    monkeypatch.setattr(
+        module.SandboxPrerequisite,
+        "staged_profile",
+        classmethod(lambda cls, binary: tmp_path / "staged"),
+    )
+    module.bwrap = str(bwrap.resolve())
+    module.apparmor = apparmor
+    return module
+
+
+def write_profile(module, name):
+    path = module.apparmor / name
+    path.write_text(f"profile {name} {module.bwrap} flags=(unconfined) {{}}\n")
+    return str(path)
+
+
+def test_the_renamed_sandbox_check_replaces_the_old_profile(renamed_sandbox):
+    old = write_profile(renamed_sandbox, "puffin-bwrap")
+    assert renamed_sandbox.PROFILE_NAME == "ragon-bwrap"
+    assert renamed_sandbox.SandboxPrerequisite.fix_commands() == [
+        ["apparmor_parser", "-R", old],
+        ["rm", "-f", old],
+        [
+            "install",
+            "-m",
+            "644",
+            "-o",
+            "root",
+            "-g",
+            "root",
+            str(renamed_sandbox.apparmor.parent / "staged"),
+            "/etc/apparmor.d/ragon-bwrap",
+        ],
+        ["apparmor_parser", "-r", "/etc/apparmor.d/ragon-bwrap"],
+    ]
+
+
+def test_the_old_profile_is_not_a_third_party_profile_and_a_real_one_is_reloaded(renamed_sandbox):
+    old = write_profile(renamed_sandbox, "puffin-bwrap")
+    other = write_profile(renamed_sandbox, "other-bwrap")
+    assert renamed_sandbox.SandboxPrerequisite.fix_commands() == [
+        ["apparmor_parser", "-R", old],
+        ["rm", "-f", old],
+        ["apparmor_parser", "-r", other],
+    ]
+
+
+def test_without_an_old_profile_only_the_two_install_lines_remain(renamed_sandbox):
+    commands = renamed_sandbox.SandboxPrerequisite.fix_commands()
+    assert [command[0] for command in commands] == ["install", "apparmor_parser"]
+    assert commands[1] == ["apparmor_parser", "-r", "/etc/apparmor.d/ragon-bwrap"]
+
+
+@pytest.fixture
+def renamed_host_setup(tmp_path, monkeypatch, renamed_sandbox):
+    monkeypatch.setitem(
+        __import__("sys").modules, "dreamference.vllm_server.sandbox_prerequisite", renamed_sandbox
+    )
+    module = renamed_module(tmp_path, monkeypatch, HOST_SETUP, "ragon_host_safety_setup")
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/bin/bwrap")
+    monkeypatch.setattr(module.HostSafetySetup, "sandbox_works", classmethod(lambda cls: True))
+    return module
+
+
+def test_the_host_step_replaces_a_profile_that_still_works(renamed_host_setup, renamed_sandbox):
+    old = write_profile(renamed_sandbox, "puffin-bwrap")
+    step = renamed_host_setup.HostSafetySetup._sandbox_step()
+    assert step["commands"][:2] == [["apparmor_parser", "-R", old], ["rm", "-f", old]]
+    assert step["commands"][2][0] == "install"
+    assert step["commands"][-1] == ["apparmor_parser", "-r", "/etc/apparmor.d/ragon-bwrap"]
+
+
+def test_the_host_step_has_nothing_to_do_without_an_old_profile(renamed_host_setup):
+    assert renamed_host_setup.HostSafetySetup._sandbox_step() is None
+
+
+def test_the_host_step_only_removes_when_userns_is_not_restricted(
+    renamed_host_setup, renamed_sandbox, monkeypatch
+):
+    old = write_profile(renamed_sandbox, "puffin-bwrap")
+    monkeypatch.setattr(
+        renamed_sandbox.SandboxPrerequisite, "_userns_restricted", classmethod(lambda cls: False)
+    )
+    step = renamed_host_setup.HostSafetySetup._sandbox_step()
+    assert step["commands"] == [["apparmor_parser", "-R", old], ["rm", "-f", old]]
+
+
+# F11: the older asset names a 1.9.0 release adds, and a build that no longer adds them.
+LINUX_TARGETS = ("aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu")
+OTHER_TARGETS = ("aarch64-apple-darwin", "x86_64-pc-windows-msvc")
+SUMS_PROGRAMS = (
+    "ragon",
+    "ragon-search",
+    "ragon-fetch",
+    "ragon-code",
+    "ragon-docs",
+    "ragon-app",
+    "ragon-signal",
+)
+
+
+def old_assets_script():
+    """The shell body of release.yml's "Add the older asset names" step, dedented."""
+    body = rr.OLD_ASSETS_STEP.split("        run: |\n", 1)[1]
+    return textwrap.dedent(body)
+
+
+def fake_artifacts(root):
+    artifacts = root / "artifacts"
+    artifacts.mkdir()
+    for target in (*LINUX_TARGETS, *OTHER_TARGETS):
+        (artifacts / f"ragon-{target}.gz").write_text(f"bytes {target}\n")
+        lines = [f"{'a' * 64}  {program}-{target}.gz\n" for program in SUMS_PROGRAMS]
+        lines.append(f"{'b' * 64}  codex-code-mode-host-{target}.gz\n")
+        lines.append(f"{'c' * 64}  ragon-delegate-{target}.gz\n")
+        (artifacts / f"ragon-{target}.sha256sums").write_text("".join(lines))
+    for program in ("search", "fetch", "code", "docs"):
+        (artifacts / f"ragon-{program}-{LINUX_TARGETS[0]}.gz").write_text(f"bytes {program}\n")
+    return artifacts
+
+
+def test_the_older_asset_step_lists_only_what_1_4_asks_for(tmp_path):
+    artifacts = fake_artifacts(tmp_path)
+    result = subprocess.run(
+        ["bash", "-c", old_assets_script()], cwd=tmp_path, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    five = {"puffin", "puffin-search", "puffin-fetch", "puffin-code", "codex-code-mode-host"}
+    for target in LINUX_TARGETS:
+        listed = (artifacts / f"puffin-{target}.sha256sums").read_text().splitlines()
+        assert {line.split("  ")[1].removesuffix(f"-{target}.gz") for line in listed} == five
+    assert not list(artifacts.glob("puffin-*windows*")) and not list(
+        artifacts.glob("puffin-*apple*")
+    )
+    assert (
+        artifacts / f"puffin-{LINUX_TARGETS[0]}.gz"
+    ).read_text() == f"bytes {LINUX_TARGETS[0]}\n"
+    assert not (artifacts / f"puffin-docs-{LINUX_TARGETS[0]}.gz").exists()
+
+
+def test_the_older_asset_step_leaves_the_ling_copies_whole(tmp_path):
+    artifacts = fake_artifacts(tmp_path)
+    subprocess.run(
+        ["bash", "-c", old_assets_script()], cwd=tmp_path, check=True, capture_output=True
+    )
+    for target in (*LINUX_TARGETS, *OTHER_TARGETS):
+        ragon = (artifacts / f"ragon-{target}.sha256sums").read_text()
+        assert (artifacts / f"ling-{target}.sha256sums").read_text() == ragon.replace(
+            "ragon", "ling"
+        )
+        assert (artifacts / f"ling-{target}.gz").read_bytes() == (
+            artifacts / f"ragon-{target}.gz"
+        ).read_bytes()
+
+
+def test_the_renamed_build_workflow_no_longer_adds_puffin_assets(tmp_path, monkeypatch):
+    relative = ".github/workflows/release-build.yml"
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        rr.transform_text(relative, (REPO / relative).read_text(encoding="utf-8")), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        rr, "COMPAT_EDITS", [edit for edit in ALL_COMPAT_EDITS if edit[0] == relative]
+    )
+    rr.apply_compat(tmp_path, False)
+    text = target.read_text(encoding="utf-8")
+    assert "dist/puffin" not in text and "puffin-$target" not in text
+    assert "release.yml adds the older asset names" in text
