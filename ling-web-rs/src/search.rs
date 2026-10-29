@@ -806,6 +806,36 @@ mod tests {
     }
 
     #[test]
+    fn a_page_only_a_second_infobox_named_is_still_a_web_result() {
+        // Only the first infobox is shown, so the second one's page must not be held back.
+        let mut payload = searxng(
+            json!([
+                {"title": "Lisbon - Wikipedia", "url": "https://en.wikipedia.org/wiki/Lisbon", "engine": "mwmbl"},
+                {"title": "Lisbon - Wikidata", "url": "https://www.wikidata.org/wiki/Q597", "content": "city", "engine": "yep"}
+            ]),
+            json!([]),
+            json!([]),
+        );
+        payload["infoboxes"] = json!([
+            {"infobox": "Lisbon", "id": "https://en.wikipedia.org/wiki/Lisbon", "content": "Capital.", "engine": "wikipedia"},
+            {"infobox": "Lisbon", "id": "https://www.wikidata.org/wiki/Q597", "content": "City.", "engine": "wikidata"}
+        ]);
+        let found = from_searxng("lisbon", &payload, 5, Level::Off).unwrap();
+        let urls: Vec<&str> = found
+            .results
+            .iter()
+            .map(|result| result.url.as_str())
+            .collect();
+        assert_eq!(
+            urls,
+            [
+                "https://en.wikipedia.org/wiki/Lisbon",
+                "https://www.wikidata.org/wiki/Q597"
+            ]
+        );
+    }
+
+    #[test]
     fn the_same_page_under_two_addresses_is_one_result_with_both_engines() {
         let payload = searxng(
             json!([
