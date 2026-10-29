@@ -842,6 +842,8 @@ mod tests {
         std::fs::create_dir_all(main.join(".git/worktrees/tree")).unwrap_or_default();
         std::fs::create_dir_all(&tree).unwrap_or_default();
         std::fs::write(tree.join(".git"), format!("gitdir: {}\n", main.join(".git/worktrees/tree").display())).unwrap_or_default();
+        std::fs::write(main.join(".git/worktrees/tree/gitdir"), format!("{}\n", tree.join(".git").display()))
+            .unwrap_or_default();
         write_skill(&tree.join(".claude/skills/fmt"), "fmt", "");
         let mut machine = fixture.machine();
         machine.cwd = tree.clone();
@@ -861,6 +863,17 @@ mod tests {
         }
         machine.cwd = other;
         assert!(plan(&machine, &Settings::default()).find("planted").is_none());
+
+        // Nor can a `.git` file naming a trusted repository's worktree: the worktree must name it back.
+        for (name, gitdir) in [("forged", "tree"), ("invented", "nothing")] {
+            let forged = fixture.cwd.join(name);
+            std::fs::create_dir_all(&forged).unwrap_or_default();
+            let line = format!("gitdir: {}\n", main.join(".git/worktrees").join(gitdir).display());
+            std::fs::write(forged.join(".git"), line).unwrap_or_default();
+            write_skill(&forged.join(".claude/skills/planted"), "planted", "");
+            machine.cwd = forged;
+            assert!(plan(&machine, &Settings::default()).find("planted").is_none(), "{name}");
+        }
     }
 
     #[test]
