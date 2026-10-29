@@ -230,3 +230,12 @@ def test_an_onyx_image_that_lost_its_tag_is_removed_by_its_id(deployment):
     assert RetiredWebChat.remove(ask=lambda question: True) == 0
     assert fake.images == ["postgres:15.2-alpine"]
     assert RetiredWebChat.remove_data()
+
+
+def test_removing_without_docker_says_so_instead_of_failing_with_a_traceback(monkeypatch, capsys):
+    def no_docker(argv, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "docker")
+
+    monkeypatch.setattr(subprocess, "run", no_docker)
+    assert RetiredWebChat.remove(yes=True) == 1
+    assert "Docker could not be run" in capsys.readouterr().out
