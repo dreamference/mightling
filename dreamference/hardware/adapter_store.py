@@ -10,10 +10,13 @@ so it lives under the home, never in a repository.
 
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Final
 
 INSTALLED_FILE: Final[str] = "installed.json"
+LOCK_FILE: Final[str] = ".installed.json.lock"
 FILE_MODE: Final[int] = 0o600
 TRUST_DREAMFERENCE: Final[str] = "dreamference"
 TRUST_THIRD_PARTY: Final[str] = "third-party"
@@ -76,9 +79,10 @@ class AdapterStore:
         Args:
             entry: The entry; its `name` is the key.
         """
-        entries = cls._entries_to_change()
-        entries[str(entry["name"])] = entry
-        cls._write(entries)
+        with cls._locked():
+            entries = cls._entries_to_change()
+            entries[str(entry["name"])] = entry
+            cls._write(entries)
 
     @classmethod
     def drop(cls, name: str) -> bool:
@@ -90,11 +94,35 @@ class AdapterStore:
         Returns:
             bool: Whether there was one.
         """
-        entries = cls._entries_to_change()
-        if entries.pop(name, None) is None:
-            return False
-        cls._write(entries)
+        with cls._locked():
+            entries = cls._entries_to_change()
+            if entries.pop(name, None) is None:
+                return False
+            cls._write(entries)
         return True
+
+    @classmethod
+    @contextmanager
+    def _locked(cls) -> Iterator[None]:
+        """Holds the installed set's lock while a change reads, edits and rewrites the file.
+
+        An install and a node's adapter sync may run at once; unlocked, the later write dropped
+        the other's entry.
+
+        Yields:
+            None: While the lock is held.
+        """
+        import fcntl
+
+        folder = cls.folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(folder / LOCK_FILE, os.O_WRONLY | os.O_CREAT, FILE_MODE)
+        with os.fdopen(descriptor, "w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     @classmethod
     def _entries_to_change(cls) -> dict[str, dict[str, object]]:

@@ -657,4 +657,34 @@ def test_an_entry_that_cannot_be_written_leaves_the_installed_set_and_no_staging
     with pytest.raises(TypeError):
         AdapterStore.put({"name": "go", "repo": object()})
     assert AdapterStore.path().read_text(encoding="utf-8") == before
-    assert sorted(p.name for p in AdapterStore.folder().iterdir()) == ["installed.json"]
+    assert sorted(
+        p.name for p in AdapterStore.folder().iterdir() if not p.name.endswith(".lock")
+    ) == ["installed.json"]
+
+
+def test_two_concurrent_changes_to_the_installed_set_both_land(monkeypatch):
+    # `ling-admin adapter install` and a node's adapter sync both read, change and rewrite the
+    # file; unlocked, the one that wrote last dropped the other's entry.
+    import threading
+    import time
+
+    write = AdapterStore._write.__func__
+    first_reached, go = threading.Event(), threading.Event()
+
+    def held_write(cls, entries):
+        if not first_reached.is_set():
+            first_reached.set()
+            go.wait(5)
+        write(cls, entries)
+
+    monkeypatch.setattr(AdapterStore, "_write", classmethod(held_write))
+    first = threading.Thread(target=AdapterStore.put, args=({"name": "rust", "commit": COMMIT},))
+    first.start()
+    assert first_reached.wait(5)
+    second = threading.Thread(target=AdapterStore.put, args=({"name": "go", "commit": COMMIT},))
+    second.start()
+    time.sleep(0.3)
+    go.set()
+    first.join(5)
+    second.join(5)
+    assert sorted(AdapterStore.entries()) == ["go", "rust"]
