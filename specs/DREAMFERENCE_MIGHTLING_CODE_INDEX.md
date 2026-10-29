@@ -592,7 +592,7 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **scip-python's environment:** a fixture repository whose `.venv/bin/python3` and `sitecustomize.py` write marker files is indexed without either marker appearing.
 - **Prompt:** the `# Code navigation` block is full when the index is ready, reduced while building, absent without a repository, and under 250 tokens.
 - **Submodules (§4.3)**, on fixture repositories built in the test's temporary directory with local bare remotes and fixed author addresses:
-  - same namespace and our authors: indexed (`yours`); same namespace and a foreign author: not indexed (`third-party`); another owner: not indexed (`other organisation`), even with our authors; a relative URL with our authors: indexed;
+  - same namespace and our authors: indexed (`yours`); same namespace and a foreign author: not indexed (`third-party`); another owner: not indexed (`other organisation`), even with our authors; a relative URL with our authors: indexed while it stays under the owner, not indexed (`other organisation`) when `../../` leaves it;
   - a shallow single-commit submodule is decided by that commit; a fork with 3 of our commits on 50 upstream ones is `third-party`;
   - no remote on either side: authorship decides, and an executing indexer never inherits trust from it;
   - URL forms: `https://`, `ssh://` with a port, scp-like, upper-case owner, an `insteadOf` rewrite, and `https://user:token@host/…`, whose token appears nowhere in the output, the logs or the manifest;
