@@ -131,3 +131,17 @@ def test_an_unreadable_stamp_reads_as_no_runtime(host):
     SweBenchRuntime.directory().mkdir()
     (SweBenchRuntime.directory() / STAMP_NAME).write_text("\n")
     assert SweBenchRuntime.current_hash() is None
+
+
+def test_the_web_commands_and_the_admin_tools_beside_ling_are_not_carried(host):
+    """§5.1: the web binaries and `ling-admin` are not mounted into the container."""
+    for name in (
+        "ling-search",
+        "ling-fetch",
+        "ling-admin",
+        "ling-signal",
+        "ling-delegate",
+        "ling-code",
+    ):
+        (host["root"] / "bin" / name).write_bytes(b"\x7fELF " + name.encode())
+    assert SweBenchRuntime._binaries(host["ling"]) == [host["ling"]]
