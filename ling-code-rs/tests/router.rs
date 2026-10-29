@@ -842,6 +842,31 @@ fn impact_of_a_diff_starts_from_every_definition_it_touches() {
 }
 
 #[test]
+fn impact_of_a_diff_ignores_the_repository_diff_prefix_settings() {
+    // `diff.noprefix` and `diff.mnemonicPrefix` change the `+++` line git prints; the changed
+    // definition is found either way.
+    let f = fixture();
+    let text = std::fs::read_to_string(f.repo.root.join("shapes/geometry.py")).unwrap();
+    f.write(
+        "shapes/geometry.py",
+        &text.replace(
+            "    return Circle(radius)",
+            "    return Circle(float(radius))",
+        ),
+    );
+    for (key, value) in [("diff.noprefix", "true"), ("diff.mnemonicPrefix", "true")] {
+        git(&f.repo.root, &["config", key, value]);
+        let (code, out) = f.run(&["impact", "--diff"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            out.contains("1 changed definitions: shapes.geometry.make_circle"),
+            "{key}: {out}"
+        );
+        git(&f.repo.root, &["config", "--unset", key]);
+    }
+}
+
+#[test]
 fn layers_exact_answers_from_scip_alone() {
     // `MIGHTLING_CODE_LAYERS=exact`: the graph is never read, so nothing is tagged heuristic unless
     // it came from the text search, and `search` and `outline` answer from the SCIP stores.

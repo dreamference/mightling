@@ -1068,7 +1068,17 @@ impl Context {
         }
         let diff = crate::paths::git(
             &self.repo.root,
-            &["diff", "-U0", "--no-renames", "--no-ext-diff", rev, "--"],
+            &[
+                "diff",
+                "-U0",
+                "--no-renames",
+                "--no-ext-diff",
+                // Fixed prefixes: `diff.noprefix` or `diff.mnemonicPrefix` would change them.
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                rev,
+                "--",
+            ],
         )?;
         let mut touched: Vec<Candidate> = Vec::new();
         for (path, start, end) in diff_ranges(&diff) {
@@ -2118,7 +2128,7 @@ fn diff_ranges(diff: &str) -> Vec<(String, u32, u32)> {
     let mut path: Option<String> = None;
     for line in diff.lines() {
         if let Some(rest) = line.strip_prefix("+++ ") {
-            path = rest.strip_prefix("b/").map(str::to_string);
+            path = diff_path(rest).and_then(|p| p.strip_prefix("b/").map(str::to_string));
         } else if line.starts_with("@@") {
             let Some(path) = &path else { continue };
             let Some(new_side) = line.split_whitespace().find(|part| part.starts_with('+')) else {
@@ -2137,6 +2147,42 @@ fn diff_ranges(diff: &str) -> Vec<(String, u32, u32)> {
         }
     }
     out
+}
+
+/// The path of a `---`/`+++` line: git ends one that has a space with a tab, and writes one
+/// with a quote, a backslash, a control or a non-ASCII byte in C quotes, octal escapes included.
+fn diff_path(raw: &str) -> Option<String> {
+    let Some(quoted) = raw.strip_prefix('"').and_then(|r| r.strip_suffix('"')) else {
+        return Some(raw.strip_suffix('\t').unwrap_or(raw).to_string());
+    };
+    let mut bytes = Vec::new();
+    let mut chars = quoted.bytes().peekable();
+    while let Some(b) = chars.next() {
+        if b != b'\\' {
+            bytes.push(b);
+            continue;
+        }
+        let escaped = chars.next()?;
+        bytes.push(match escaped {
+            b'0'..=b'7' => {
+                let mut value = u32::from(escaped - b'0');
+                for _ in 0..2 {
+                    let digit = chars.next_if(|d| (b'0'..=b'7').contains(d))?;
+                    value = value * 8 + u32::from(digit - b'0');
+                }
+                u8::try_from(value).ok()?
+            }
+            b'a' => 0x07,
+            b'b' => 0x08,
+            b'f' => 0x0c,
+            b'n' => b'\n',
+            b'r' => b'\r',
+            b't' => b'\t',
+            b'v' => 0x0b,
+            other => other,
+        });
+    }
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Keeps one row per `(path, line)`, the most trusted, ordered exact → heuristic → text.
@@ -2285,6 +2331,20 @@ mod tests {
         assert_eq!(
             diff_ranges(diff),
             vec![("a.py".to_string(), 3, 4), ("a.py".to_string(), 11, 11)]
+        );
+    }
+
+    #[test]
+    fn diff_paths_with_spaces_or_quotes_keep_their_hunks() {
+        // git ends a `+++` path that has a space with a tab, and quotes one with a byte it escapes.
+        let diff = "--- a/a b.py\t\n+++ b/a b.py\t\n@@ -1 +1 @@\n-x\n+y\n\
+                    --- \"a/\\303\\251 \\\"q\\\".py\"\n+++ \"b/\\303\\251 \\\"q\\\".py\"\n@@ -2 +2 @@\n-x\n+y\n";
+        assert_eq!(
+            diff_ranges(diff),
+            vec![
+                ("a b.py".to_string(), 1, 1),
+                ("\u{e9} \"q\".py".to_string(), 2, 2)
+            ]
         );
     }
 
