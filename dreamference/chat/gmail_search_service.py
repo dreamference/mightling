@@ -82,7 +82,6 @@ GOOGLE_OAUTH_CLIENT_ID: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_ID", "444
 GOOGLE_OAUTH_CLIENT_SECRET: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_SECRET", "-gMLuQyDiI0XrQS_vx_mhuYF")
 GMAIL_SCOPE: Final[str] = "https://mail.google.com/"
 EMAIL_SCOPE: Final[str] = "https://www.googleapis.com/auth/userinfo.email"
-GOOGLE_OAUTH_SCOPES: Final[str] = EMAIL_SCOPE + " " + GMAIL_SCOPE
 
 # What each of Mightling's apps asks Google for (specs/DREAMFERENCE_MIGHTLING_APPS.md §5.2). The full Drive
 # and Calendar scopes: GNOME's client is refused the read-only ones ("This app is blocked", measured
@@ -161,10 +160,6 @@ CONNECT_PATH: Final[str] = "/connect"
 
 # What the connect button pointed at under earlier designs; kept as a redirect for an old link.
 LEGACY_START_PATH: Final[str] = "/oauth/start"
-
-# Where the user signs into Google. GNOME's Settings panel, opened by URI so the page can link
-# straight at it rather than describing a path through a menu.
-GNOME_SETTINGS_URI: Final[str] = "gnome-control-center://online-accounts"
 
 # What an unconnected search answers with. It names the place the user can act rather than a
 # command they would have to leave the app to run -- the model reads this and relays it.

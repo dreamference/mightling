@@ -127,7 +127,7 @@ dreamference/
 │   ├── gmail_search_service.py                  # GmailSearchService (the Google service inside its container)
 │   ├── google_workspace_reader.py               # GoogleWorkspaceReader (read-only Drive and Calendar, staged beside it)
 │   ├── google_service.py                        # GoogleService (ling-admin google start|stop|status, without the web UI)
-│   ├── gmail_credentials.py                     # GmailCredentials
+│   ├── gmail_credentials.py                     # CREDENTIALS_DIR
 │   ├── gmail_client.py                          # GmailClient (ling-admin gmail)
 │   ├── matrix_homeserver.py                     # MatrixHomeserver (ling-admin matrix: tuwunel on an internal network)
 │   ├── image_search_service.py                  # ImageSearchService, HardenedFetcher, ImageStore, SearxngClient, SiglipClient, VisionRanker, FetchRejected

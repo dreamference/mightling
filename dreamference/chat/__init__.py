@@ -17,7 +17,6 @@ from dreamference.chat.desktop_installer import DesktopInstaller
 from dreamference.chat.desktop_runner import DesktopRunner
 from dreamference.chat.docker_bridge import DockerBridge
 from dreamference.chat.gmail_client import GmailClient
-from dreamference.chat.gmail_credentials import GmailCredentials
 from dreamference.chat.gmail_search_service import GmailSearchService
 from dreamference.chat.google_service import GoogleService
 from dreamference.chat.google_workspace_reader import GoogleWorkspaceReader
@@ -37,7 +36,6 @@ __all__ = [
     "DesktopRunner",
     "DockerBridge",
     "GmailClient",
-    "GmailCredentials",
     "GmailSearchService",
     "GoogleService",
     "GoogleWorkspaceReader",
