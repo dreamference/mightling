@@ -35,14 +35,21 @@ pub fn markdown(text: &str) -> Vec<Unit> {
     let mut start = 1;
     let mut buf: Vec<&str> = Vec::new();
     let all = lines(text);
-    let mut in_fence = false;
+    // The open fence's character and length: only a run of the same character, at least as long,
+    // closes it.
+    let mut fence: Option<(char, usize)> = None;
     for (i, line) in all.iter().enumerate() {
         let n = i + 1;
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            in_fence = !in_fence;
+        if let Some(c) = trimmed.chars().next().filter(|c| matches!(c, '`' | '~')) {
+            let run = trimmed.chars().take_while(|&x| x == c).count();
+            match fence {
+                None if run >= 3 => fence = Some((c, run)),
+                Some((open, len)) if open == c && run >= len => fence = None,
+                _ => {}
+            }
         }
-        if !in_fence {
+        if fence.is_none() {
             if let Some((level, title)) = atx_heading(line) {
                 if has_text(&buf) {
                     units.push(unit(start, n - 1, heading.join(" > "), &buf));
@@ -227,6 +234,15 @@ mod tests {
             ]
         );
         assert!(units[2].text.contains("# not a heading"));
+    }
+
+    #[test]
+    fn a_fence_is_closed_only_by_a_fence_of_its_own_kind() {
+        let text = "# Title\n```\n~~~\n# still code\n```\n## Part\nbody\n";
+        let units = markdown(text);
+        let headings: Vec<&str> = units.iter().map(|u| u.heading.as_str()).collect();
+        assert_eq!(headings, ["Title", "Title > Part"]);
+        assert!(units[0].text.contains("# still code"));
     }
 
     #[test]
