@@ -170,6 +170,16 @@ pub fn running(repo: &Repo) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether a supervisor is running or holds the lock: `index --wait` supervises in-process and
+/// writes no running marker. It takes the lock for a moment, so a supervisor starting just then
+/// would stand down: ask only before starting one. Creates the state directory.
+pub fn supervisor_busy(repo: &Repo) -> bool {
+    running(repo)
+        || claim_supervisor(&repo.state_dir())
+            .map(|lock| lock.is_none())
+            .unwrap_or(false)
+}
+
 const CBMIGNORE_BEGIN: &str =
     "# BEGIN ling-code managed: submodules that are not indexed (see `ling-code submodules`)";
 const CBMIGNORE_BEGIN_PREFIX: &str = "# BEGIN ling-code managed";
@@ -423,5 +433,22 @@ mod tests {
         };
         exclude_from_git(&repo, ".cbmignore").unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep\n");
+    }
+
+    /// `index --wait` supervises in-process and writes no running marker; the session must still
+    /// see it, or the child it spawns stands down and the request it took is lost.
+    #[test]
+    fn a_supervisor_holding_the_lock_counts_as_busy() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo {
+            root: dir.path().to_path_buf(),
+            main_root: dir.path().to_path_buf(),
+            is_git: false,
+        };
+        assert!(!supervisor_busy(&repo));
+        let held = claim_supervisor(&repo.state_dir()).unwrap().unwrap();
+        assert!(supervisor_busy(&repo));
+        drop(held);
+        assert!(!supervisor_busy(&repo));
     }
 }

@@ -75,7 +75,12 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
                 .map(|t| t.elapsed() >= Duration::from_secs(settings.min_interval_s))
                 .unwrap_or(true);
             if let Some(request) = pending {
-                if interval_passed || request == Request::IndexExact {
+                // A child spawned while `index --wait` holds the lock (it writes no running
+                // marker) would stand down at once, and the request it took would be lost. Asked
+                // only here: the check takes the lock for a moment.
+                if (interval_passed || request == Request::IndexExact)
+                    && !index::supervisor_busy(&repo)
+                {
                     pending = None;
                     last_start = Some(Instant::now());
                     let exact = request == Request::IndexExact || wants_exact(&repo, &settings);
