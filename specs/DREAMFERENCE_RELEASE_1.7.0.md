@@ -1,6 +1,6 @@
 # Mightling 1.7.0 — release notes
 
-**Status:** prepared 2026-10-19 on the branch `release/1.7.0` (rebased onto origin/main at `b4c353e`,
+**Status:** published 2026-10-20 as `v1.7.0` (tag on `799bbee`; this line updated 2026-10-29). Prepared 2026-10-19 on the branch `release/1.7.0` (rebased onto origin/main at `b4c353e`,
 plus the version set to 1.7.0 and these notes; rebased again right before the cut if `main` moves); not merged and not tagged. The owner cuts 1.7.0 after their
 try-out. Built from `git log --first-parent v1.6.4..release/1.7.0`. The text between the two rules
 is the GitHub release's description: the release workflow publishes it as it stands

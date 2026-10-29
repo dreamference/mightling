@@ -1,6 +1,6 @@
 # Mightling 1.7.1 — release notes
 
-**Status:** prepared 2026-10-22 on the branch `release/1.7.1` (origin/main at `f93b53b`, plus the
+**Status:** published 2026-10-26 as `v1.7.1` (tag on `ea4eb73`; this line updated 2026-10-29). Prepared 2026-10-22 on the branch `release/1.7.1` (origin/main at `f93b53b`, plus the
 version set to 1.7.1 and these notes), cut through the release workflow once the gate, the build on
 the node and the device checks passed (the owner approved cutting without asking). Built from the
 merges in `v1.7.0..release/1.7.1`. The text between the two rules is the GitHub release's

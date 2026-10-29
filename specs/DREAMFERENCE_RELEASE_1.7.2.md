@@ -1,6 +1,6 @@
 # Mightling 1.7.2 — release notes
 
-**Status:** prepared 2026-10-28 on the branch `release/1.7.2`: origin/main at `989e3e98`, plus the
+**Status:** published 2026-10-28 as `v1.7.2`, the current release (tag on `f94f712`; this line updated 2026-10-29). Prepared 2026-10-28 on the branch `release/1.7.2`: origin/main at `989e3e98`, plus the
 version set to 1.7.2 and the rest of these notes, cut through the release workflow from that branch
 (nothing merged into main after `989e3e98` is in it). Started 2026-10-26 on the branch
 `models/ling-engine-server` with the model server's section. Built from the merges in
