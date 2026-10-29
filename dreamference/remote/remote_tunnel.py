@@ -217,6 +217,15 @@ class RemoteTunnel:
         return enabled.returncode == 0 and started.returncode == 0
 
     @classmethod
+    def stop(cls) -> bool:
+        """Stops the unit and leaves it enabled; `install` starts it again.
+
+        Returns:
+            bool: True when systemd stopped it.
+        """
+        return cls._run(["systemctl", "--user", "stop", TUNNEL_UNIT]).returncode == 0
+
+    @classmethod
     def remove(cls) -> None:
         """Stops, disables and deletes the unit; the key stays unless the folder is purged."""
         cls._run(["systemctl", "--user", "disable", "--now", TUNNEL_UNIT])
