@@ -170,7 +170,7 @@ class NodeAdapterSync:
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir()
         try:
-            problem = NodeModelSync._unpack(sys.stdin.buffer, staging, {folder_name})
+            problem = NodeModelSync._unpack(sys.stdin.buffer, staging, {folder_name}, size)
             problem = problem or NodeModelSync._verify(staging)
             problem = problem or cls._check(staging / folder_name / "snapshots" / commit, name)
             if problem:

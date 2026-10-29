@@ -2270,7 +2270,7 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
         sys.executable,
         "-c",
         "import sys; from dreamference.node.node_model_sync import NodeModelSync; "
-        f"sys.exit(NodeModelSync.receive({SYNC_KEY!r}, 0))",
+        f"sys.exit(NodeModelSync.receive({SYNC_KEY!r}, 10**9))",
     ]
     # The receiver checks the real disk; a CI runner has less free than the copy's margin.
     receiver[2] = PLENTY_OF_DISK + receiver[2]
@@ -2317,7 +2317,7 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
 PLENTY_OF_DISK = "import shutil, types; shutil.disk_usage = lambda path: types.SimpleNamespace(total=4 << 40, used=2 << 40, free=2 << 40); "
 
 
-def receive(monkeypatch, hub, members, size=0):
+def receive(monkeypatch, hub, members, size=None):
     import io
     import shutil
     import sys
@@ -2341,6 +2341,8 @@ def receive(monkeypatch, hub, members, size=0):
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(buffer.getvalue())))
+    if size is None:  # what the sender declares: the bytes of its plain files
+        size = sum(len(data) for _, data in members if isinstance(data, bytes))
     return NodeModelSync.receive(SYNC_KEY, size)
 
 
@@ -2408,6 +2410,23 @@ def test_a_copy_cannot_reach_outside_its_model_folder_through_a_link(tmp_path, m
     assert receive(monkeypatch, hub, members) == 0
     assert (hub / snapshot / "model.bin").read_bytes() == good
     assert (hub / snapshot / "sub" / "tokenizer.bin").read_bytes() == good
+
+
+def test_a_copy_cannot_carry_more_than_it_declared(tmp_path, monkeypatch, capsys):
+    import hashlib
+
+    from dreamference.node import NodeModelSync
+
+    # The free-space check is made for the declared size; `model-receive <key> 0` followed by an
+    # endless stream once filled the node's disk.
+    folder = "models--" + NodeModelSync.repos(SYNC_KEY)[0].replace("/", "--")
+    hub = tmp_path / "hub"
+    good = b"weights"
+    members = [(f"{folder}/blobs/{hashlib.sha256(good).hexdigest()}", good)]
+    assert receive(monkeypatch, hub, members, size=len(good) - 1) == 1
+    assert "more than the 6 bytes it declared" in capsys.readouterr().err
+    assert list(hub.iterdir()) == []
+    assert receive(monkeypatch, hub, members, size=len(good)) == 0
 
 
 def test_enable_without_avahi_installs_it_or_publishes_nothing(machine, monkeypatch, capsys):

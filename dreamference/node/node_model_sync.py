@@ -221,7 +221,7 @@ class NodeModelSync:
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir()
         try:
-            problem = cls._unpack(sys.stdin.buffer, staging, allowed)
+            problem = cls._unpack(sys.stdin.buffer, staging, allowed, size)
             problem = problem or cls._verify(staging)
             if problem:
                 print(f"❌ {problem}; nothing was added to the cache.", file=sys.stderr)
@@ -233,14 +233,23 @@ class NodeModelSync:
         return 0
 
     @classmethod
-    def _unpack(cls, stream: Any, staging: Path, allowed: set) -> Optional[str]:
-        """Extracts the stream into `staging`; returns what was wrong with it, if anything."""
+    def _unpack(cls, stream: Any, staging: Path, allowed: set, size: int) -> Optional[str]:
+        """
+        Extracts the stream into `staging`; returns what was wrong with it, if anything.
+
+        `size` is what the sender declared, counted as `size()` counts it: the free-space check was
+        made for that much, so a copy that carries more is refused before it can fill the disk.
+        """
         root = os.path.realpath(staging)
+        carried = 0
         try:
             with tarfile.open(fileobj=stream, mode="r|") as archive:
                 for member in archive:
                     if not cls._stays_in_folder(member, root, allowed):
                         return f"the copy carried {member.name}, which is not a folder of this model"
+                    carried += member.size if member.isreg() else 0
+                    if carried > size:
+                        return f"the copy carried more than the {size} bytes it declared"
                     # `data` also refuses devices and odd modes.
                     archive.extract(member, staging, filter="data")
         except (tarfile.TarError, OSError) as error:
