@@ -203,6 +203,45 @@ fn another_organisation_is_not_indexed_whoever_wrote_it() {
     );
 }
 
+/// git resolves a relative URL against the superproject's remote: `../x` stays with its owner,
+/// `../../other-org/x` leaves it.
+#[test]
+fn a_relative_url_that_climbs_out_of_the_owner_is_another_organisation() {
+    let f = fixture();
+    let root = f.repo.root.clone();
+    git(
+        &root,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://example.com/acme/super.git",
+        ],
+    );
+    for name in ["sibling", "outside"] {
+        let lib = library(f.dir.path(), name, "t@localhost", &[("a.py", "x = 1\n")], 2);
+        let url = if name == "sibling" {
+            "../sibling.git"
+        } else {
+            "../../other-org/outside.git"
+        };
+        add_submodule(&root, &lib, name, Some(url));
+    }
+    let all = decisions(&f.repo);
+    let by_path = |path: &str| all.iter().find(|s| s.path == path).unwrap();
+    let sibling = by_path("sibling");
+    assert_eq!(
+        (sibling.indexed, sibling.namespace, sibling.inherits_trust),
+        (true, Namespace::Same, true)
+    );
+    let outside = by_path("outside");
+    assert_eq!(
+        (outside.indexed, outside.reason.clone(), outside.namespace),
+        (false, Reason::OtherOrganisation, Namespace::Different)
+    );
+    assert!(!outside.inherits_trust);
+}
+
 #[test]
 fn without_a_remote_authorship_alone_decides_and_trust_is_not_inherited() {
     let f = fixture();
