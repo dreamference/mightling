@@ -177,6 +177,9 @@ class RemoteCertificateAuthority:
             folder / f"{label}.csr",
             folder / f"{label}.crt",
         )
+        # Both are made beside the pair in use and replace it only once signed: a failed signing
+        # leaves the old key with its own certificate.
+        new_key, new_certificate = folder / f"{label}.key.new", folder / f"{label}.crt.new"
         made = cls._run(
             [
                 "openssl",
@@ -189,7 +192,7 @@ class RemoteCertificateAuthority:
                 "-subj",
                 f"/O=Mightling/CN={names[0]}",
                 "-keyout",
-                str(key),
+                str(new_key),
                 "-out",
                 str(request),
             ]
@@ -197,7 +200,7 @@ class RemoteCertificateAuthority:
         if made.returncode != 0:
             LOG.error(f"❌ openssl could not make the {label} key: {made.stderr.strip()[:300]}")
             return None
-        key.chmod(0o600)
+        new_key.chmod(0o600)
         extensions = "\n".join(
             [
                 "subjectAltName=" + ",".join(f"DNS:{name}" for name in names),
@@ -223,7 +226,7 @@ class RemoteCertificateAuthority:
                 "-days",
                 str(LEAF_DAYS),
                 "-out",
-                str(certificate),
+                str(new_certificate),
                 "-extfile",
                 str(extension_file),
             ]
@@ -233,6 +236,8 @@ class RemoteCertificateAuthority:
                 f"❌ openssl could not sign the {label} certificate: {signed.stderr.strip()[:300]}"
             )
             return None
+        new_key.replace(key)
+        new_certificate.replace(certificate)
         return certificate, key
 
     @classmethod

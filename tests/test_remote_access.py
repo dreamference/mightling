@@ -150,6 +150,23 @@ def test_the_ca_is_name_constrained_and_signs_only_what_it_may():
 
 
 @needs_openssl
+def test_a_reissue_that_cannot_be_signed_keeps_the_old_key_and_certificate(monkeypatch):
+    RemoteCertificateAuthority.ensure(BOX)
+    certificate, key = RemoteCertificateAuthority.issue("control-plane", [BOX])
+    before = (certificate.read_bytes(), key.read_bytes())
+    real = RemoteCertificateAuthority._run.__func__
+
+    def run(cls, argv, input_text=None):
+        if argv[1] == "x509":
+            return subprocess.CompletedProcess(argv, 1, "", "unable to load CA private key")
+        return real(cls, argv, input_text)
+
+    monkeypatch.setattr(RemoteCertificateAuthority, "_run", classmethod(run))
+    assert RemoteCertificateAuthority.issue("control-plane", [BOX]) is None
+    assert (certificate.read_bytes(), key.read_bytes()) == before, "the pair still matches"
+
+
+@needs_openssl
 def test_a_certificate_outside_the_constraints_does_not_verify():
     RemoteCertificateAuthority.ensure(BOX)
     certificate, _ = RemoteCertificateAuthority.issue("stray", ["www.bank.example"])
