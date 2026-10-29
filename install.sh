@@ -649,7 +649,10 @@ if [ "$ROLE" = "node" ]; then
         elif id -nG "$USER_NAME" | tr ' ' '\n' | grep -qx docker; then
             step done "docker group: $USER_NAME is in it"
         elif $SUDO usermod -aG docker "$USER_NAME" < /dev/null; then
-            step done "docker group: $USER_NAME added (your next login has it; this script used \`sg docker\` meanwhile)"
+            # Only the model's steps reach Docker, through `sg docker` (with_docker below).
+            meanwhile=""
+            if [ "$MODEL" = 1 ]; then meanwhile="; this script used \`sg docker\` meanwhile"; fi
+            step done "docker group: $USER_NAME added (your next login has it$meanwhile)"
         else
             step failed "docker group: \`sudo usermod -aG docker $USER_NAME\` failed"
         fi
