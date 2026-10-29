@@ -1446,7 +1446,7 @@ class GmailSearchService:
                 if not expected:
                     self._reply(401, {"error": NO_SECRET_ERROR})
                     return
-                if self.headers.get(AUTH_HEADER) != expected:
+                if not hmac.compare_digest((self.headers.get(AUTH_HEADER) or "").encode(), expected.encode()):
                     self._reply(401, {"error": "unauthorised"})
                     return
 

@@ -1034,3 +1034,21 @@ def test_a_search_failure_answers_500_instead_of_hanging(served):
         )[0]
         == 500
     )
+
+
+def test_the_shared_secret_is_compared_in_constant_time(served, monkeypatch):
+    import hmac
+
+    port, _, searched = served
+    compared = []
+    real = hmac.compare_digest
+
+    def recording(a, b):
+        compared.append(True)
+        return real(a, b)
+
+    monkeypatch.setattr(hmac, "compare_digest", recording)
+    body = json.dumps({"queries": ["cat"]}).encode()
+    headers = {"X-Mightling-Image-Token": "wrong", "Content-Length": str(len(body))}
+    assert _http(port, "POST", "/search", body=body, headers=headers)[0] == 403
+    assert compared and searched == []
