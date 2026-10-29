@@ -734,8 +734,7 @@ class SweBenchCommand:
         rows = SweBenchHarness.rows(dataset)
         wanted = set(cls._ids(args.instances) or [])
         if args.subset:
-            lines = Path(args.subset).read_text().splitlines()
-            wanted |= {line.strip() for line in lines if line.strip() and not line.startswith("#")}
+            wanted |= set(SweBenchShards.ids(Path(args.subset).read_text()))
         unknown = sorted(wanted - {row["instance_id"] for row in rows})
         if unknown:
             print(f"❌ Not in {dataset}: {', '.join(unknown[:5])}")  # noqa: T201 — CLI output
@@ -958,11 +957,7 @@ class SweBenchCommand:
 
         def read(path: Path) -> list[str] | None:
             try:
-                return [
-                    line.strip()
-                    for line in path.read_text().splitlines()
-                    if line.strip() and not line.startswith("#")
-                ]
+                return SweBenchShards.ids(path.read_text())
             except OSError as error:
                 print(f"❌ {path}: {error}")  # noqa: T201 — CLI output
                 return None
@@ -988,9 +983,7 @@ class SweBenchCommand:
         for path in SweBenchShards.write(
             source, ids, repos, count, out_dir or source.parent, balanced or None
         ):
-            shard = [
-                line for line in path.read_text().splitlines() if line and not line.startswith("#")
-            ]
+            shard = SweBenchShards.ids(path.read_text())
             print(f"✅ {path}: {len(shard)} tasks, {SweBenchShards.mix(shard, repos)}")  # noqa: T201 — CLI output
         return 0
 

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
+from dreamference.swe_bench.swe_bench_shards import SweBenchShards
 
 
 class SweBenchImageCache:
@@ -49,15 +50,11 @@ class SweBenchImageCache:
         for name in settings.image_cache_lists:
             path = Path(name).expanduser()
             try:
-                lines = path.read_text().splitlines()
+                text = path.read_text()
             except OSError:
                 print(f"⚠️  Image cache: cannot read the task list {path}; its images are not kept.")  # noqa: T201 — CLI output
                 continue
-            images |= {
-                cls.image_name(line.strip())
-                for line in lines
-                if line.strip() and not line.startswith("#")
-            }
+            images |= {cls.image_name(instance_id) for instance_id in SweBenchShards.ids(text)}
         return images
 
     @classmethod

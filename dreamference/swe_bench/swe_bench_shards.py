@@ -41,6 +41,19 @@ class SweBenchShards:
         return (index, count) if 1 <= index <= count <= MAX_SHARDS else None
 
     @classmethod
+    def ids(cls, text: str) -> list[str]:
+        """Reads the task ids a list holds, one per line.
+
+        Args:
+            text: The list's text; blank lines and `#` comments, indented or not, hold none.
+
+        Returns:
+            list[str]: The ids, in the list's order.
+        """
+        stripped = (line.strip() for line in text.splitlines())
+        return [line for line in stripped if line and not line.startswith("#")]
+
+    @classmethod
     def digest(cls, instance_ids: list[str]) -> str:
         """The digest the shards of one list share.
 

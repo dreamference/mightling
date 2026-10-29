@@ -168,11 +168,7 @@ class SweBenchRunner:
         known = [row["instance_id"] for row in SweBenchHarness.rows(dataset)]
         wanted: list[str] | None = None
         if subset:
-            wanted = [
-                line.strip()
-                for line in Path(subset).read_text().splitlines()
-                if line.strip() and not line.startswith("#")
-            ]
+            wanted = SweBenchShards.ids(Path(subset).read_text())
         if instances:
             wanted = (wanted or []) + list(instances)
         if wanted is None:

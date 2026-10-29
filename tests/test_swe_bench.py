@@ -2274,6 +2274,12 @@ def test_selection_is_sorted_limited_and_rejects_unknown_ids(bench, tmp_path):
         SweBenchRunner.select("verified", ["nope"], None, None)
 
 
+def test_an_indented_comment_in_a_task_list_is_a_comment_not_a_task(bench, tmp_path):
+    subset = tmp_path / "ids.txt"
+    subset.write_text("acme__widget-2\n  # left out for now: beta__gadget-7\n")
+    assert SweBenchRunner.select("verified", None, None, str(subset)) == ["acme__widget-2"]
+
+
 def test_settings_defaults_and_dataset_names():
     settings = SweBenchSettings({})
     assert (settings.task_timeout_s, settings.max_parallel, settings.task_context) == (

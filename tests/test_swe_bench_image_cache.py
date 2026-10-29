@@ -101,3 +101,9 @@ def test_a_night_can_ask_for_its_own_floor(disk):
 def test_an_unreadable_list_keeps_nothing_and_says_so(disk, tmp_path, capsys):
     assert SweBenchImageCache.cached_images(settings(tmp_path / "missing.txt")) == set()
     assert "cannot read the task list" in capsys.readouterr().out
+
+
+def test_an_indented_comment_in_a_cached_list_names_no_image(tmp_path):
+    lists = tmp_path / "list.txt"
+    lists.write_text("acme__widget-1\n    # acme__widget-2 is out\n")
+    assert SweBenchImageCache.cached_images(settings(lists)) == {f"{REPO}:acme-widget-1"}
