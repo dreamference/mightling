@@ -36,6 +36,39 @@ diff --git a/codex-rs/linux-sandbox/src/linux_run_main.rs b/codex-rs/linux-sandb
          permission_profile.to_runtime_permissions();
 +    file_system_sandbox_policy.entries.extend(ling_airgapped::host_sockets_at(on).into_iter().filter_map(|p| codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(p).ok()).map(|p| FileSystemSandboxEntry::new(p.into(), FileSystemAccessMode::Deny)));
      Ok(EffectivePermissions {
+diff --git a/codex-rs/sandboxing/src/policy_transforms.rs b/codex-rs/sandboxing/src/policy_transforms.rs
+--- a/codex-rs/sandboxing/src/policy_transforms.rs
++++ b/codex-rs/sandboxing/src/policy_transforms.rs
+@@ -667,2 +667,8 @@ pub fn should_require_platform_sandbox(
+ 
++/// Whether commands under this profile run with no platform sandbox, so nothing could cut their network (Mightling's `/airgapped on` refuses it, like Full Access).
++pub fn runs_without_platform_sandbox(profile: &PermissionProfile) -> bool {
++    let (file_system_policy, network_policy) = profile.to_runtime_permissions();
++    !should_require_platform_sandbox(&file_system_policy, network_policy, /*has_managed_network_requirements*/ false)
++}
++
+ #[cfg(test)]
+diff --git a/codex-rs/sandboxing/src/policy_transforms_tests.rs b/codex-rs/sandboxing/src/policy_transforms_tests.rs
+--- a/codex-rs/sandboxing/src/policy_transforms_tests.rs
++++ b/codex-rs/sandboxing/src/policy_transforms_tests.rs
+@@ -1402 +1402,17 @@ fn effective_file_system_sandbox_policy_merges_additional_write_roots() {
+ }
++
++#[test]
++fn a_profile_writing_the_whole_disk_with_the_network_on_runs_without_a_sandbox() {
++    use codex_protocol::models::PermissionProfile as SessionProfile;
++    let root_write = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
++        path: FileSystemPath::Special { value: FileSystemSpecialPath::Root },
++        access: FileSystemAccessMode::Write,
++        missing_path_behavior: None,
++    }]);
++    let custom = |network| SessionProfile::from_runtime_permissions(&root_write, network);
++    assert_eq!(super::runs_without_platform_sandbox(&custom(NetworkSandboxPolicy::Enabled)), true);
++    assert_eq!(super::runs_without_platform_sandbox(&SessionProfile::Disabled), true);
++    assert_eq!(super::runs_without_platform_sandbox(&custom(NetworkSandboxPolicy::Restricted)), false);
++    assert_eq!(super::runs_without_platform_sandbox(&SessionProfile::workspace_write()), false);
++    assert_eq!(super::runs_without_platform_sandbox(&SessionProfile::read_only()), false);
++}
 diff --git a/codex-rs/tui/src/chatwidget/permission_popups.rs b/codex-rs/tui/src/chatwidget/permission_popups.rs
 --- a/codex-rs/tui/src/chatwidget/permission_popups.rs
 +++ b/codex-rs/tui/src/chatwidget/permission_popups.rs
@@ -57,11 +90,11 @@ diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/ch
 +++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 @@ -539,2 +539,3 @@ impl ChatWidget {
              SlashCommand::Night => self.add_plain_history_lines(ling_launcher::night::command("", &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
-+            SlashCommand::Airgapped => self.add_plain_history_lines(ling_launcher::airgapped::session_command(self.thread_id, "", matches!(self.config.permissions.permission_profile(), PermissionProfile::Disabled)).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Airgapped => self.add_plain_history_lines(ling_launcher::airgapped::session_command(self.thread_id, "", codex_sandboxing::policy_transforms::runs_without_platform_sandbox(self.config.permissions.permission_profile())).into_iter().map(ratatui::text::Line::from).collect()),
              SlashCommand::Ide => {
 @@ -782,2 +783,3 @@ impl ChatWidget {
              SlashCommand::Night => self.add_plain_history_lines(ling_launcher::night::command(trimmed, &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
-+            SlashCommand::Airgapped => self.add_plain_history_lines(ling_launcher::airgapped::session_command(self.thread_id, trimmed, matches!(self.config.permissions.permission_profile(), PermissionProfile::Disabled)).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Airgapped => self.add_plain_history_lines(ling_launcher::airgapped::session_command(self.thread_id, trimmed, codex_sandboxing::policy_transforms::runs_without_platform_sandbox(self.config.permissions.permission_profile())).into_iter().map(ratatui::text::Line::from).collect()),
              SlashCommand::Voice => match trimmed.to_ascii_lowercase().as_str() {
 @@ -1208,2 +1210,3 @@ impl ChatWidget {
              | SlashCommand::Night
