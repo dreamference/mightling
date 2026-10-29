@@ -290,8 +290,16 @@ impl Context {
             if entry.store.is_empty() {
                 continue;
             }
+            // Only a store file in the scip directory itself, and not a link: a manifest shipped
+            // in a clone could name any SQLite file by an absolute path or with `..`.
+            let plain_name = matches!(
+                std::path::Path::new(&entry.store)
+                    .components()
+                    .collect::<Vec<_>>()[..],
+                [std::path::Component::Normal(_)]
+            );
             let path = scip_dir.join(&entry.store);
-            if !path.is_file() {
+            if !plain_name || !std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) {
                 continue;
             }
             match ScipStore::open(&path, entry) {

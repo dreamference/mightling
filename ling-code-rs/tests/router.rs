@@ -365,6 +365,31 @@ fn a_store_whose_own_tables_were_swapped_for_a_view_is_not_read() {
 }
 
 #[test]
+#[cfg(unix)]
+fn a_manifest_names_only_a_store_file_in_its_own_directory() {
+    // A shipped manifest could name any SQLite file by an absolute path or with `..`, or the
+    // store could be a link to one.
+    let f = fixture();
+    let dir = f.repo.scip_dir();
+    let outside = f.dir.path().join("outside.db");
+    std::fs::rename(dir.join("scip-python-shapes.db"), &outside).unwrap();
+    let key = "scip-python:shapes";
+    for store in [
+        outside.to_str().unwrap().to_string(),
+        "../../../outside.db".to_string(),
+        "linked.db".to_string(),
+    ] {
+        let _ = std::fs::remove_file(dir.join("linked.db"));
+        std::os::unix::fs::symlink(&outside, dir.join("linked.db")).unwrap();
+        let mut manifest = Manifest::load(&dir);
+        manifest.runs.get_mut(key).unwrap().store = store.clone();
+        manifest.save(&dir).unwrap();
+        let (_, out) = f.run(&["refs", "make_circle"]);
+        assert!(!out.contains("exact shapes/"), "{store}: {out}");
+    }
+}
+
+#[test]
 fn an_unknown_graph_schema_is_not_read() {
     let f = fixture();
     rusqlite::Connection::open(&f.graph_db)
