@@ -276,8 +276,9 @@ class SafeGit:
             text: Decode output as text.
 
         Returns:
-            subprocess.CompletedProcess: The result. On a timeout the exit code is 124 and stderr
-            says so, so no caller has to catch an exception it never had.
+            subprocess.CompletedProcess: The result. On a timeout the exit code is 124, and 127 or
+            126 when git is missing or cannot be started; stderr says so, so no caller has to
+            catch an exception it never had.
         """
         if timeout is None:
             index = cls._subcommand_index(args)
@@ -299,7 +300,9 @@ class SafeGit:
             return subprocess.CompletedProcess(
                 command, TIMED_OUT_EXIT, "" if text else b"", message if text else message.encode()
             )
-        except FileNotFoundError as error:
+        except OSError as error:
+            # 127 when there is no git, 126 when it cannot be started, as a shell reports them.
+            code = 127 if isinstance(error, FileNotFoundError) else 126
             return subprocess.CompletedProcess(
-                command, 127, "" if text else b"", str(error) if text else str(error).encode()
+                command, code, "" if text else b"", str(error) if text else str(error).encode()
             )

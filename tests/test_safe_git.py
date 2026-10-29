@@ -350,3 +350,15 @@ def test_the_rust_helper_and_the_desktop_app_pin_the_same_keys():
     }
     assert program_keys <= ts_keys, program_keys - ts_keys
     assert 'env.GIT_PROXY_COMMAND = "";' in ts
+
+
+def test_a_git_that_cannot_be_started_is_an_exit_code_not_an_exception(tmp_path, monkeypatch):
+    # Only a missing git came back as an exit code; a git it may not run (PermissionError) or any
+    # other start failure escaped to callers that only read the return code.
+    def refuse(command, **kwargs):
+        raise PermissionError(13, "Permission denied", "git")
+
+    monkeypatch.setattr(subprocess, "run", refuse)
+    result = SafeGit.run(["status"], tmp_path)
+    assert result.returncode == 126
+    assert "Permission denied" in result.stderr
