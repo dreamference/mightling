@@ -105,14 +105,16 @@ class LingServeLaunchBuilder:
             if speculative.get("num_speculative_tokens"):
                 args.extend(["--draft-block", str(speculative["num_speculative_tokens"])])
         if KV_PAGES_FEATURE in (recipe.get("engine_features") or []):
-            # A paged engine holds many sessions in one pool, so the recipe's conversation count
-            # (1.8.0: four at the full context) is affordable; an engine without the pool keeps its
-            # own sessions and batch.
-            if recipe.get("sessions"):
-                args.extend(["--sessions", str(recipe["sessions"])])
-            if recipe.get("batch"):
-                args.extend(["--batch", str(recipe["batch"])])
-            args.append(KV_PAGES_FLAG)
+            # An engine with the pool parses these flags. Paging is the recipe's choice
+            # (`kv_pages`, off at 1.8.0): the flat slots are the engine's own default, auto-sized
+            # from the host's memory, so the launch gives neither the pool nor a session count
+            # that only a pool affords (four full flat contexts would not fit).
+            if recipe.get("kv_pages"):
+                if recipe.get("sessions"):
+                    args.extend(["--sessions", str(recipe["sessions"])])
+                if recipe.get("batch"):
+                    args.extend(["--batch", str(recipe["batch"])])
+                args.append(KV_PAGES_FLAG)
             if recipe.get("vision") is False:
                 args.extend([VISION_FLAG, VISION_OFF])
         args.extend(str(a) for a in recipe.get("extra_args") or [])

@@ -13,6 +13,11 @@ answer and time against SGLang's.}}
 **LoRA adapters on ling-serve.** {{TBD: the adapter guard (`_engine_for_adapters`) lets ling-serve serve
 installed adapters; the messages that name 1.8.1 come out; measured against SGLang's adapter serving.}}
 
+**Four conversations at the full context (paged KV).** {{TBD: only if its night passes: the recipe's
+`kv_pages` (`QWEN38_LING_KV_PAGES`) on, so the launch passes `--sessions 4 --batch 4 --kv-pages` to the engine
+that 1.8.0 already ships with the pool off; the pooled rate, the slowest stream and the output against the flat
+slots, measured.}}
+
 **Fair pairing on by default.** {{TBD: only if its test night passes (greedy output identical, the
 slowest of four streams no slower, the pooled rate not materially lower): ling-serve gives every
 decoding conversation the same share of passes; `--fair-pairing 0` or `LING_FAIR_PAIRING=0` turns it

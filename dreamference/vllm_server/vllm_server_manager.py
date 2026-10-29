@@ -1600,7 +1600,7 @@ class VLLMServerManager:
         from dreamference.hardware.model_downloader import ModelDownloader
 
         cmd = [
-            "docker", "run", "--rm", "--entrypoint", LING_SERVE_PROGRAM,
+            "docker", "run", "--rm", "--gpus", "all", "--entrypoint", LING_SERVE_PROGRAM,
             *ModelDownloader.container_volume_args(),
             "-v", f"{Path.home() / '.cache' / 'dreamference'}:/root/.cache/dreamference",
             docker_image,

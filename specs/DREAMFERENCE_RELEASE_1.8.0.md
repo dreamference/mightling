@@ -59,12 +59,6 @@ answer after a shared beginning arrives in {{TBD}} s, against {{TBD}} s when it 
 short follow-up runs ahead of a long first read, and while others decode the long read goes in small
 chunks. A conversation used in the last 30 seconds is not evicted for a new one.
 
-{{TBD FAIR_PAIRING: keep this paragraph only if the pinned ling-serve image contains fair pairing
-(scratchpad report release-180-prep.md says), otherwise delete it: "**Fair pairing, included and off.**
-ling-serve can give every decoding conversation the same share of passes (`--fair-pairing 1`, or
-`LING_FAIR_PAIRING=1` in the server's environment). It ships switched off in 1.8.0, so the scheduling
-is the bar night's; it is meant to be on by default from 1.8.1, once its own test night passes."}}
-
 **A smaller image.** ling-serve's Docker image is under 1 GB, against SGLang's 34 GB; a node pulls it
 at the first `ling-admin server start` after the upgrade.
 

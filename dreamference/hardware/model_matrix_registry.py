@@ -422,30 +422,28 @@ ENGINE_LING: Final[str] = "ling"
 #
 # The commit the image's ling-serve was built from (the full hash, never abbreviated), recorded in
 # the image's labels (`org.opencontainers.image.revision`, `ai.dreamference.ling-engine.commit`).
-# 1.7.2: 8d112d0 (branch release/1.7.2-engine), bdda3a2 plus the tokenizer's BPE cache under a
-# shared mutex (main's 15e82b6 alone: concurrent requests could crash ling-serve in Tokenizer::bpe;
-# token ids unchanged, ling-tokenizer-threads-tests). bdda3a2 is the night-tested b8e9451 plus a
-# parse-only tool-call fix (branch fix/toolcall-text), greedy output token for token night 15's
-# binary on agentlong and --spec-check passing. The image's binary is sha256 8e517c88…7d81b2b3,
-# built under neutral paths (scripts/build_ling_serve_image.sh), its device code identical to the
-# first 8d112d0 build's (7c9098f1…, built under a home directory) and its greedy output identical
-# on agentlong.
+# 1.8.0: 02704d4, ling-engine main at the merge of its P4d branch (paged KV sizing in `--plan-only` and
+# the auto-size; the page pool stays off unless `--kv-pages` is given). The image's binary was built from
+# that commit under neutral paths (scripts/build_ling_serve_image.sh), flat greedy output identical to pre-P4d main's
+# (agentlong, four warm and one and two cold streams) and the same `--plan-only` plan.
+# Before it, 1.7.2 pinned 8d112d0 (bdda3a2 plus the tokenizer's BPE cache under a shared mutex). The fair
+# pairing flag (`--fair-pairing`, off) is not in this commit; it moves with 1.8.1.
 QWEN38_LING_ENGINE_COMMIT: Final[str] = "02704d4a004067f377242d5e74bab37b16b5bdaf"
 
 # What the engine at that commit has that an asset or a launch may depend on, so the runtime asks
 # a list rather than git: "sparse-head" (the drafter's sparse head, read from a file beside the
 # drafter) from ling-engine ec9dce8 on. A checkout-only test keeps the list true to the commit's
-# ancestry. Empty at 8d112d0 (bdda3a2's features).
+# ancestry. Empty at 1.7.2's 8d112d0; "kv-pages" (f180b44) and "sparse-head" (ec9dce8) are both ancestors of 02704d4.
 QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ("kv-pages", "sparse-head")
 
 # The last commit of ling-engine's P4b (BATCHING §5.3: `--kv-pages` with the KV page pool, admission by
 # pages, reclaim of idle sessions, the last resort), which is what lets four sessions at 262,144 tokens
 # fit where the flat KV cannot (~19 GB each). A ling-engine recipe lists "kv-pages" in `engine_features`
 # exactly when its `engine_commit` descends from it (tests/test_hardware.py checks that against the
-# submodule), and only then does the launch pass `--sessions`/`--batch` and `--kv-pages` (an engine
-# before it either exits 2 on `--kv-pages` or, flat, would allocate four full contexts). P4d makes the
-# pool ling-serve's default (`--no-kv-pages` gives the flat slots) and still accepts a bare `--kv-pages`,
-# so this commit stays the boundary: the launch passes the flag to every paged engine, before P4d and after.
+# submodule), and only then, with the recipe's `kv_pages` on, does the launch pass `--sessions`/`--batch` and `--kv-pages` (an engine
+# before it either exits 2 on `--kv-pages` or, flat, would allocate four full contexts). P4d's merge keeps the flat slots the default and takes `--kv-pages` (and
+# `--no-kv-pages`), so this commit stays the boundary for the flags; the recipe's `kv_pages` decides whether
+# the launch passes them.
 LING_ENGINE_KV_PAGES_SINCE: Final[str] = "f180b44a40369d7dd03f9ae97e7fa8be4ece1380"
 
 # The sessions and the batch the recipe asks of a paged engine (1.8.0: four conversations at the full
@@ -453,6 +451,9 @@ LING_ENGINE_KV_PAGES_SINCE: Final[str] = "f180b44a40369d7dd03f9ae97e7fa8be4ece13
 # every ling-serve since 8d112d0, but without the "kv-pages" feature they stay the engine's own
 # (auto-sized from MemAvailable at the 262,144 context, at most four, on an engine that has auto-size).
 QWEN38_LING_SESSIONS: Final[int] = 4
+# Whether the recipe turns the page pool on. Off at 1.8.0 (see the recipe); the pinned engine
+# (P4d merged) is flat by default and takes `--kv-pages` only when asked.
+QWEN38_LING_KV_PAGES: Final[bool] = False
 QWEN38_LING_BATCH: Final[int] = 4
 
 # The engine `server start` uses when neither `--engine` nor `server_engine` says. THE 1.8.0 SWITCH,
@@ -524,10 +525,14 @@ QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
     # programmatic dependent launch. Tree verification, the megakernel stages, two sessions and a
     # batch of two are the engine's defaults at QWEN38_LING_ENGINE_COMMIT.
     "extra_args": ["--graphs", "--pdl"],
-    # Four conversations at once (QWEN38_LING_SESSIONS/BATCH), applied only by an engine that has
-    # the KV page pool ("kv-pages" in `engine_features`).
+    # Four conversations at once (QWEN38_LING_SESSIONS/BATCH), applied only with `kv_pages` on, on an
+    # engine that has the KV page pool ("kv-pages" in `engine_features`). `kv_pages` is OFF at 1.8.0
+    # (the owner's decision of 2026-10-29: paged passes about 5% slower, ranges overlapping): the launch
+    # gives no `--kv-pages`, `--sessions` or `--batch`, and the engine's flat slots, auto-sized from the
+    # host's memory, serve. 1.8.1 turns it on (specs/DREAMFERENCE_RELEASE_1.8.1.md).
     "sessions": QWEN38_LING_SESSIONS,
     "batch": QWEN38_LING_BATCH,
+    "kv_pages": QWEN38_LING_KV_PAGES,
     # Image input is 1.8.1's (the owner's decision of 2026-10-29): ling-serve starts with its vision
     # tower off (`--vision off`, on an engine with the "kv-pages" feature), so /model_info says no
     # image understanding, the launcher declares text input only, and neither the tower nor its cache

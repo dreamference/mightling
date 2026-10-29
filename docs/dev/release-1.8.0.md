@@ -11,7 +11,11 @@ ling-engine `specs/DREAMFERENCE_LING_ENGINE_BATCHING.md` §5.3).
 - `QWEN38_LING_RECIPE` carries `sessions: 4` and `batch: 4` (`QWEN38_LING_SESSIONS`, `QWEN38_LING_BATCH`).
   `LingServeLaunchBuilder.server_args` passes `--sessions 4 --batch 4 --kv-pages` **only when the recipe's
   `engine_features` lists `"kv-pages"`**. At the 1.7.2 pin (8d112d0, no features) nothing changes: the engine's
-  own sessions, no flag it may not parse.
+  own sessions, no flag it may not parse. **Owner decision 2026-10-29: 1.8.0 ships with paging OFF.** The pin
+  (02704d4, P4d merged, features `kv-pages` and `sparse-head`) is flat by default, and the recipe's `kv_pages`
+  (`QWEN38_LING_KV_PAGES`) is `False`: the launch passes no `--sessions`, `--batch` or `--kv-pages` (still
+  `--vision off`), so the engine's flat slots, auto-sized from MemAvailable (3 x 262,144 on the node-b figures),
+  serve. 1.8.1 switches `kv_pages` on after its own night.
 - `LING_ENGINE_KV_PAGES_SINCE` is ling-engine's last P4b commit (`f180b44`). `tests/test_hardware.py` checks, in a
   checkout with the submodule, that a recipe lists `"kv-pages"` exactly when its `engine_commit` descends from it
   (the same rule as the sparse head).
@@ -55,12 +59,12 @@ Eight sessions only after the engine's eight-session reproduction and the owner'
    Never replace a pushed tag; a rebuild is a new push and a new digest. Add the vision libraries to
    `docker/ling-serve/Dockerfile` if the engine has vision.
 3. **Move the pin** in one commit on a branch (`models/pin-ling-serve-<commit12>`):
-   `scripts/pin_ling_serve_image.py COMMIT sha256:DIGEST --features kv-pages` (`--check` shows the diff first;
+   `scripts/pin_ling_serve_image.py COMMIT sha256:DIGEST --features kv-pages,sparse-head` (`--check` shows the diff first;
    add `sparse-head` if it was already listed). Then by hand: the comments above the constants in
    model_matrix_registry.py (the commit's story, the binary's sha256, the registry's earlier digests),
    `LING_ENGINE_KV_PAGES_SINCE` if P4c/P4d should be what gates the flags (change it to their last commit and
    re-run `tests/test_hardware.py` with the submodule fetched), `tests/test_ling_serve_engine.py`
-   (`startswith("8d112d0")`, `engine_features == []`), and the measured paragraph of
+   (`startswith("02704d4")`, `engine_features == ["kv-pages", "sparse-head"]`, `kv_pages is False`), and the measured paragraph of
    models-and-engines.md.
 4. **Live checks on the node** (nothing mocked): `ling-admin server start --engine ling`, then
    the NVFP4 canary and the tool call that `server start` runs, `server status` (the engine commit, `Sessions 4
