@@ -486,5 +486,11 @@ class ForgeRepositories:
             ForgeAccounts.admin_token(),
             {"archived": True, "private": True},
         )
+        if status != HTTPStatus.OK:
+            print(
+                f"❌ {len(bundles)} bundles are in {full_name}, but Forgejo did not make it private "
+                f"and archived ({status})."
+            )
+            return False
         print(f"✅ {len(bundles)} bundles are in {full_name} (private, archived, never mirrored).")
-        return status == HTTPStatus.OK
+        return True

@@ -121,6 +121,26 @@ def test_a_push_mirror_forgejo_would_not_remove_is_not_reported_removed(monkeypa
     assert "(500)" in lines[0]
 
 
+def test_an_archive_forgejo_would_not_make_private_is_not_reported_private(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(ForgeRepositories, "create", classmethod(lambda cls, *a, **k: True))
+    monkeypatch.setattr(ForgeAccounts, "admin_token", classmethod(lambda cls: "t"))
+    monkeypatch.setattr(
+        ForgeRepositories,
+        "git",
+        classmethod(lambda cls, *a, **k: subprocess.CompletedProcess(a, 0, "", "")),
+    )
+    monkeypatch.setattr(ForgeRepositories, "set_settings", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(
+        ForgeContainer, "api", classmethod(lambda cls, method, *a, **k: (500, None))
+    )
+    bundle = tmp_path / "old.bundle"
+    assert ForgeRepositories.import_bundles([bundle], "owner/archive-pre-rewrite") is False
+    out = capsys.readouterr().out
+    assert "private, archived" not in out and "(500)" in out
+
+
 # -- a throwaway Forgejo -----------------------------------------------------------------------------
 
 
