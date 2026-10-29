@@ -101,14 +101,23 @@ pub fn agent_with_redirects(proxy: Option<ureq::Proxy>, redirects: u32) -> ureq:
 /// The proxy for `url` from the environment, as `requests` chooses it: `<scheme>_proxy`, then
 /// `all_proxy`, each lower case over upper case, and none for a host `no_proxy` names (an exact
 /// host, a domain suffix with or without a leading dot, or `*`). Address ranges in `no_proxy`
-/// (`10.0.0.0/8`) are not supported.
-pub fn proxy_for(url: &str, env: impl Fn(&str) -> Option<String>) -> Option<ureq::Proxy> {
+/// (`10.0.0.0/8`) are not supported. A proxy ureq cannot use (`https://`, `socks5h://`) is an
+/// error naming the variable, never its value (it can hold a password): connecting without the
+/// proxy someone set would bypass it.
+pub fn proxy_for(
+    url: &str,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<Option<ureq::Proxy>, String> {
     let lookup = |name: &str| {
+        let upper = name.to_uppercase();
         env(name)
-            .or_else(|| env(&name.to_uppercase()))
-            .filter(|value| !value.trim().is_empty())
+            .map(|value| (name.to_string(), value))
+            .or_else(|| env(&upper).map(|value| (upper, value)))
+            .filter(|(_, value)| !value.trim().is_empty())
     };
-    let (scheme, rest) = url.split_once("://")?;
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return Ok(None);
+    };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     let host_port = authority
         .rsplit_once('@')
@@ -118,7 +127,7 @@ pub fn proxy_for(url: &str, env: impl Fn(&str) -> Option<String>) -> Option<ureq
         None => host_port.split(':').next().unwrap_or_default(),
     }
     .to_ascii_lowercase();
-    if let Some(no_proxy) = lookup("no_proxy") {
+    if let Some((_, no_proxy)) = lookup("no_proxy") {
         let bypass = no_proxy.split(',').map(str::trim).any(|entry| {
             // A port is dropped from `host:port`, but not from an IPv6 address, which is all colons.
             let entry = match entry.matches(':').count() {
@@ -132,12 +141,20 @@ pub fn proxy_for(url: &str, env: impl Fn(&str) -> Option<String>) -> Option<ureq
                         || host.ends_with(&format!(".{}", entry.to_ascii_lowercase()))))
         });
         if bypass {
-            return None;
+            return Ok(None);
         }
     }
-    let value = lookup(&format!("{}_proxy", scheme.to_ascii_lowercase()))
-        .or_else(|| lookup("all_proxy"))?;
-    ureq::Proxy::new(value).ok()
+    let Some((name, value)) =
+        lookup(&format!("{}_proxy", scheme.to_ascii_lowercase())).or_else(|| lookup("all_proxy"))
+    else {
+        return Ok(None);
+    };
+    ureq::Proxy::new(value).map(Some).map_err(|_| {
+        format!(
+            "request failed: the proxy in {name} is not one ling can use \
+             (http://, socks4://, socks4a:// or socks5://)"
+        )
+    })
 }
 
 /// The first `limit` characters of `text` (characters, not bytes, as Python's slicing counts).
