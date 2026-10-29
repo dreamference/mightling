@@ -120,6 +120,39 @@ impl DocsToml {
         self.save_to(&config::docs_toml())
     }
 
+    /// Changes `docs.toml` under its lock (`docs.toml.lock`): read afresh, changed by `change`,
+    /// written back when it changed. Two writers at once (`ling docs add` beside the session adding
+    /// the defaults) never lose one another's change. Returns the file as left and what `change`
+    /// returned.
+    pub fn update_at<T>(
+        path: &Path,
+        change: impl FnOnce(&mut DocsToml) -> Result<T>,
+    ) -> Result<(DocsToml, T)> {
+        use std::os::unix::fs::OpenOptionsExt;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let lock = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(path.with_extension("toml.lock"))?;
+        crate::host::flock(&lock, true)?;
+        let mut docs = DocsToml::load_from(path)?;
+        let before = docs.clone();
+        let out = change(&mut docs)?;
+        if docs != before {
+            docs.save_to(path)?;
+        }
+        Ok((docs, out))
+    }
+
+    /// [`DocsToml::update_at`] on the agent home's `docs.toml`.
+    pub fn update<T>(change: impl FnOnce(&mut DocsToml) -> Result<T>) -> Result<(DocsToml, T)> {
+        DocsToml::update_at(&config::docs_toml(), change)
+    }
+
     pub fn get(&self, name: &str) -> Option<&Collection> {
         self.collections.iter().find(|c| c.name == name)
     }
@@ -509,6 +542,44 @@ mod tests {
         assert!(docs
             .add(&home.join("notes"), Some("Bad Name"), &home)
             .is_err());
+    }
+
+    #[test]
+    fn two_writers_at_once_keep_both_changes() {
+        // One writer holds the lock while it saves; the other, started first, waits and then
+        // reads the file afresh, so neither change is lost.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("docs.toml");
+        let lock = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path.with_extension("toml.lock"))
+            .unwrap();
+        crate::host::flock(&lock, true).unwrap();
+        let other = {
+            let path = path.clone();
+            let root = dir.path().join("b");
+            std::thread::spawn(move || {
+                DocsToml::update_at(&path, |docs| {
+                    docs.collections.push(Collection::new("b", root));
+                    Ok(())
+                })
+                .unwrap()
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!path.exists(), "the other writer waits for the lock");
+        let mut first = DocsToml::default();
+        first
+            .collections
+            .push(Collection::new("a", dir.path().join("a")));
+        first.save_to(&path).unwrap();
+        drop(lock);
+        let (left, ()) = other.join().unwrap();
+        let names: Vec<_> = left.collections.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(names, ["a", "b"]);
+        assert_eq!(DocsToml::load_from(&path).unwrap(), left);
     }
 
     #[test]

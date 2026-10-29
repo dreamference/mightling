@@ -238,13 +238,15 @@ fn request_index(request: Request) -> Result<String> {
 /// the agent's sandbox the file cannot be written, and nothing is added there). Only in the
 /// user's own agent home, or when asked for explicitly ([`config::indexes_unasked`]).
 fn load_docs() -> Result<DocsToml> {
-    let mut docs = DocsToml::load()?;
+    let docs = DocsToml::load()?;
     let mut probe = docs.clone();
-    if config::indexes_unasked()
-        && !probe.ensure_defaults(&config::user_home()).is_empty()
-        && probe.save().is_ok()
-    {
-        docs = probe;
+    if config::indexes_unasked() && !probe.ensure_defaults(&config::user_home()).is_empty() {
+        // Added under the file's lock, read afresh, so a change made meanwhile is kept.
+        if let Ok((docs, _)) =
+            DocsToml::update(|docs| Ok(docs.ensure_defaults(&config::user_home())))
+        {
+            return Ok(docs);
+        }
     }
     Ok(docs)
 }
@@ -282,9 +284,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
     let mut out = std::io::stdout();
     match cli.command {
         Command::Add { folder, name } => {
-            let mut docs = load_docs()?;
-            let collection = docs.add(&folder, name.as_deref(), &config::user_home())?;
-            docs.save()?;
+            load_docs()?;
+            let (_, collection) =
+                DocsToml::update(|docs| docs.add(&folder, name.as_deref(), &config::user_home()))?;
             writeln!(
                 out,
                 "Added `{}`: {}",
@@ -302,9 +304,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
         }
         Command::Remove { name } => {
-            let mut docs = DocsToml::load()?;
-            let removed = docs.remove(&name)?;
-            docs.save()?;
+            let (_, removed) = DocsToml::update(|docs| docs.remove(&name))?;
             index::remove_database(&name)?;
             writeln!(out, "Removed `{name}` ({}); its index, which held the documents' text, is deleted. The files are untouched.", removed.root.display())?;
             if removed.default {
