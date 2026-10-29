@@ -138,6 +138,17 @@ def test_a_machine_with_nothing_old_says_nothing(opted_in, capsys):
     assert capsys.readouterr().err == ""
 
 
+def test_a_file_that_is_not_utf8_stops_its_step_not_the_command(opted_in, capsys):
+    # The migration runs before every ling-admin command: an authorized_keys with a Latin-1
+    # comment raised UnicodeDecodeError, which is no OSError, out of every one of them.
+    keys = NodeServe.authorized_keys()
+    keys.parent.mkdir(parents=True, exist_ok=True)
+    keys.write_bytes(b"ssh-ed25519 AAAAmine caf\xe9@laptop\n")
+    done = LegacyNameMigration.run()
+    assert len(done) == 1 and done[0].startswith("could not finish rewrite_authorized_keys: ")
+    assert keys.read_bytes() == b"ssh-ed25519 AAAAmine caf\xe9@laptop\n"
+
+
 def test_a_project_file_with_old_keys_is_named_not_rewritten(opted_in, monkeypatch, tmp_path, capsys):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "dreamference.toml").write_text('puffin_prompt = "high-swe"\n')
