@@ -26,9 +26,6 @@ STEP_GRAPHS_FLAG: Final[str] = "--graphs"
 KV_PAGES_FEATURE: Final[str] = "kv-pages"
 KV_PAGES_FLAG: Final[str] = "--kv-pages"
 
-# What `owned_by` says in ling-serve's /v1/models.
-LING_SERVE_OWNER: Final[str] = "ling-engine"
-
 
 class LingServeLaunchBuilder:
     """Builds ling-serve's command line from a model's registry recipe."""

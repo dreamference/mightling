@@ -42,7 +42,6 @@ PUBLIC_BIND_ADDRESS: Final[str] = "0.0.0.0"
 
 GATE_MEMORY: Final[str] = "256m"
 GATE_CPUS: Final[str] = "2"
-DEFAULT_PAUSE_S: Final[int] = 3600
 # How long a started gate has to answer its probe before the engine serves the port itself.
 START_WAIT_S: Final[float] = 10.0
 
