@@ -690,6 +690,27 @@ fn a_definition_without_symbol_information_is_repaired() {
     );
 }
 
+#[test]
+fn the_recorded_stores_use_a_rollback_journal_so_reading_one_leaves_no_files() {
+    // expt-convert writes WAL mode, and any reader of a WAL database whose directory is writable,
+    // even a read-only one, leaves `-shm` and `-wal` beside it: untracked files next to the
+    // tracked fixture. Bytes 18 and 19 of the header are 1 for a rollback journal, 2 for WAL.
+    let stores = common::fixture_dir().join("stores");
+    for entry in std::fs::read_dir(&stores).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|extension| extension != "db") {
+            continue;
+        }
+        let header = std::fs::read(&path).unwrap();
+        assert_eq!(
+            &header[18..20],
+            &[1, 1],
+            "{} is in WAL mode",
+            path.display()
+        );
+    }
+}
+
 fn strip_symbol_information(index: &[u8]) -> Vec<u8> {
     // A tiny rewriter for the test: drop field 3 of each document (field 2 of the index).
     fn varint(b: &[u8], p: &mut usize) -> u64 {

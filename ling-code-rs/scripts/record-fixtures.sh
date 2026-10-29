@@ -52,6 +52,9 @@ env -i HOME="$WORK" PATH="$(dirname "$(command -v node)"):/usr/bin:/bin" \
 for name in shapes geom tsgeom; do
   rm -f "$FIXTURE/stores/$name.db"
   "$SCIP" expt-convert "$WORK/$name.scip" --output "$FIXTURE/stores/$name.db" > /dev/null
+  # expt-convert writes WAL mode; anything that opened the tracked copy would then leave -shm and
+  # -wal beside it. A rollback journal leaves nothing behind a reader.
+  sqlite3 "$FIXTURE/stores/$name.db" "PRAGMA journal_mode=DELETE;" > /dev/null
   cp "$WORK/$name.scip" "$FIXTURE/stores/$name.scip"
 done
 ls -la "$FIXTURE/stores"
