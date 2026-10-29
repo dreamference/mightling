@@ -113,6 +113,14 @@ describe("window-side git", () => {
     await expect(git.apply(root, "--- a/../x\n+++ b/../x\n@@ -1 +1 @@\n-a\n+b\n", { cached: true })).rejects.toThrow("outside the repository");
   });
 
+  it.skipIf(process.platform === "win32")("takes a file's name as written, not as a pattern for others", async () => {
+    const root = repo();
+    for (const name of ["[ab].txt", "b.txt"]) fs.writeFileSync(path.join(root, name), "x\n");
+    await git.discard(root, ["[ab].txt"]);
+    expect(fs.existsSync(path.join(root, "[ab].txt"))).toBe(false);
+    expect(fs.existsSync(path.join(root, "b.txt"))).toBe(true);
+  });
+
   it("commits what is staged, or everything, and shows the Commit and Branch scopes", async () => {
     const root = repo();
     run(root, "checkout", "-q", "-b", "feature");
