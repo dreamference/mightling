@@ -112,4 +112,8 @@ class NightShiftIndex:
                 continue
         # The night run started with no index scope active (admission refuses otherwise), so
         # whatever is in the slice now is this run's.
-        subprocess.run(["systemctl", "--user", "stop", INDEX_SLICE], capture_output=True, timeout=60)
+        try:
+            subprocess.run(["systemctl", "--user", "stop", INDEX_SLICE], capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            # A stop that outlasts the timeout goes on in systemd; the night run must not end here.
+            pass

@@ -1031,6 +1031,19 @@ def test_the_installed_mightling_code_is_the_only_one_used(tmp_path, monkeypatch
     assert NightShiftIndex.refresh(str(binary), tmp_path, 30) == "not refreshed (exit 4): boom"
 
 
+def test_an_index_run_past_its_time_is_stopped_even_when_systemctl_hangs(tmp_path, monkeypatch):
+    binary = tmp_path / "ling-code"
+    binary.write_text("#!/bin/sh\nexec sleep 30\n")
+    binary.chmod(0o755)
+
+    def hanging(args, **kwargs):
+        # Stopping the index slice waits for its units' own stop timeouts.
+        raise subprocess.TimeoutExpired(args, kwargs.get("timeout", 0))
+
+    monkeypatch.setattr("dreamference.night_shift.night_shift_index.subprocess.run", hanging)
+    assert NightShiftIndex.refresh(str(binary), tmp_path, 0.5).startswith("stopped after 0 min")
+
+
 def test_a_refused_admission_keeps_the_queue_and_says_why(setup, fake_host):
     queue(setup["night"], setup["repo"])
     FakeHost.model = None
