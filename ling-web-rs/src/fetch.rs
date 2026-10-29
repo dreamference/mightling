@@ -325,7 +325,9 @@ pub fn render_text(page: &FetchedPage, max_chars: i64) -> String {
     out.push_str(&page.text);
     out.push('\n');
     if page.truncated {
-        out.push_str(&format!("\n[truncated at {max_chars} chars]\n"));
+        // The limit `page` cut at, not the one asked for.
+        let limit = max_chars.clamp(1, MAX_CHARS_CEILING);
+        out.push_str(&format!("\n[truncated at {limit} chars]\n"));
     }
     out
 }
