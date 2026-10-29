@@ -431,7 +431,7 @@ fi
 # (from 1.6.0 on). The bridge is installed and nothing more: it is off until `ling signal setup`,
 # which fetches signal-cli and its Java runtime, pinned (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §3).
 # ling-delegate, the delegation plugin's server as a binary of its own, is Linux only too and
-# installed beside ling without a link (the plugin starts `ling delegate mcp`).
+# linked like ling (see the install loop below).
 REQUIRED="ling codex-code-mode-host"
 OPTIONAL="ling-search ling-fetch ling-code"
 [ "$(uname -s)" = Linux ] && OPTIONAL="$OPTIONAL ling-docs ling-signal ling-delegate"
