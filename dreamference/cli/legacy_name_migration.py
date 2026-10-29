@@ -110,7 +110,7 @@ class LegacyNameMigration:
                      cls.rekey_paired_nodes, cls.move_desktop_data):
             try:
                 line = step()
-            except OSError as error:
+            except (OSError, ValueError) as error:  # ValueError: a file that is not UTF-8
                 line = f"could not finish {step.__name__}: {error}"
             if line:
                 done.append(line)
