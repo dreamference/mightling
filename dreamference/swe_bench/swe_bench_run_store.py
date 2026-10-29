@@ -52,13 +52,18 @@ class SweBenchRunStore:
     def runs(cls) -> List[str]:
         """
         Returns:
-            List[str]: The names of the runs on disk, oldest first.
+            List[str]: The names of the runs on disk, oldest first: by their manifest, written once
+            when the run starts (the directory's own time moves with every report and gate file).
         """
         root = swe_bench_settings.RESULTS_DIR / "runs"
         if not root.is_dir():
             return []
-        entries = [entry for entry in root.iterdir() if (entry / "manifest.json").is_file()]
-        return [entry.name for entry in sorted(entries, key=lambda entry: entry.stat().st_mtime)]
+        manifests = [entry / "manifest.json" for entry in root.iterdir()]
+        started = sorted(
+            (manifest for manifest in manifests if manifest.is_file()),
+            key=lambda manifest: manifest.stat().st_mtime,
+        )
+        return [manifest.parent.name for manifest in started]
 
     @classmethod
     def latest(cls) -> Optional[str]:
