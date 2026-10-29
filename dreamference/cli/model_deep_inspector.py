@@ -464,7 +464,7 @@ class ModelDeepInspector:
         if sizes:
             captured = [int(x) for x in re.findall(r"\d+", sizes.group(1))]
             rows["CUDA graphs"] = f"captured for batch sizes {captured}"
-            if max_num_seqs and max_num_seqs.isdigit():
+            if captured and max_num_seqs and max_num_seqs.isdigit():
                 configured = int(max_num_seqs)
                 headroom = [s for s in captured if s >= configured]
                 rows["Concurrency headroom"] = (
