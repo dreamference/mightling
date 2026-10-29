@@ -1130,7 +1130,8 @@ fn upload_paths(folder: &Path, name: &str) -> impl Iterator<Item = PathBuf> {
         _ => (name.to_string(), String::new()),
     };
     let folder = folder.to_path_buf();
-    std::iter::once(folder.join(name)).chain((1..).map(move |n| folder.join(format!("{stem}-{n}{extension}"))))
+    std::iter::once(folder.join(name))
+        .chain((1..).map(move |n| folder.join(format!("{stem}-{n}{extension}"))))
 }
 
 /// An attachment into an Ask thread's folder: `?thread=<id>&name=<file>&kind=image|file`, the
@@ -1160,10 +1161,20 @@ async fn upload(State(server): State<Arc<Server>>, Query(query): Query<HashMap<S
     let mut paths = upload_paths(&folder, &name);
     let (path, mut file) = loop {
         let path = paths.next().unwrap_or_default();
-        match tokio::fs::OpenOptions::new().write(true).create_new(true).open(&path).await {
+        match tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await
+        {
             Ok(file) => break (path, file),
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(err) => return text(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not write the attachment: {err}\n")),
+            Err(err) => {
+                return text(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!("Could not write the attachment: {err}\n"),
+                );
+            }
         }
     };
     let mut stream = request.into_body().into_data_stream();

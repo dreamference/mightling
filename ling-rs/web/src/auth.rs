@@ -126,14 +126,16 @@ pub fn owner_token(state: &Path) -> std::io::Result<String> {
             let _ = std::fs::remove_file(&staging);
             Ok(token)
         }
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => match std::fs::read_to_string(&path) {
-            Ok(text) if !text.trim().is_empty() => {
-                let _ = std::fs::remove_file(&staging);
-                Ok(text.trim().to_string())
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            match std::fs::read_to_string(&path) {
+                Ok(text) if !text.trim().is_empty() => {
+                    let _ = std::fs::remove_file(&staging);
+                    Ok(text.trim().to_string())
+                }
+                // An empty file (an earlier write cut short) is replaced.
+                _ => std::fs::rename(&staging, &path).map(|()| token),
             }
-            // An empty file (an earlier write cut short) is replaced.
-            _ => std::fs::rename(&staging, &path).map(|()| token),
-        },
+        }
         Err(err) => {
             let _ = std::fs::remove_file(&staging);
             Err(err)
@@ -384,9 +386,13 @@ pub fn revoke_device_by_id(state: &Path, id: &str) -> std::io::Result<Vec<Device
     revoke_devices_where(state, |d| d.id == id)
 }
 
-fn revoke_devices_where(state: &Path, matches: impl Fn(&Device) -> bool) -> std::io::Result<Vec<Device>> {
+fn revoke_devices_where(
+    state: &Path,
+    matches: impl Fn(&Device) -> bool,
+) -> std::io::Result<Vec<Device>> {
     change_devices(state, |devices| {
-        let (gone, kept): (Vec<Device>, Vec<Device>) = std::mem::take(devices).into_iter().partition(matches);
+        let (gone, kept): (Vec<Device>, Vec<Device>) =
+            std::mem::take(devices).into_iter().partition(matches);
         *devices = kept;
         let any = !gone.is_empty();
         (gone, any)
@@ -483,9 +489,15 @@ mod tests {
                     })
                 })
                 .collect();
-            let tokens: BTreeSet<String> = callers.into_iter().map(|caller| caller.join().unwrap()).collect();
+            let tokens: BTreeSet<String> = callers
+                .into_iter()
+                .map(|caller| caller.join().unwrap())
+                .collect();
             assert_eq!(tokens.len(), 1, "round {round}: {tokens:?}");
-            assert_eq!(std::fs::read_to_string(state.join("token")).unwrap().trim(), tokens.first().unwrap());
+            assert_eq!(
+                std::fs::read_to_string(state.join("token")).unwrap().trim(),
+                tokens.first().unwrap()
+            );
             let _ = std::fs::remove_dir_all(&state);
         }
     }
@@ -567,7 +579,10 @@ mod tests {
         let (phone, _) = add_device(&state, "phone").unwrap();
         let (_, agent_token) = add_device_of(&state, &phone, DeviceKind::Sync).unwrap();
         assert_eq!(revoke_device_by_id(&state, &phone).unwrap().len(), 1);
-        assert!(sync_device_for_token(&state, &agent_token).is_some(), "the agent named after the phone's id is still paired");
+        assert!(
+            sync_device_for_token(&state, &agent_token).is_some(),
+            "the agent named after the phone's id is still paired"
+        );
     }
 
     #[test]

@@ -516,11 +516,20 @@ async fn uploads_of_one_name_at_once_each_get_their_own_file() {
     for upload in uploads {
         let (status, _, body) = upload.await.unwrap();
         assert_eq!(status, StatusCode::OK, "{body}");
-        paths.push(serde_json::from_str::<Value>(&body).unwrap()["path"].as_str().unwrap().to_string());
+        paths.push(
+            serde_json::from_str::<Value>(&body).unwrap()["path"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
     }
     paths.sort();
     paths.dedup();
-    assert_eq!(paths.len(), 32, "each upload has a file of its own: {paths:?}");
+    assert_eq!(
+        paths.len(),
+        32,
+        "each upload has a file of its own: {paths:?}"
+    );
 }
 
 /// A phone bridge's image (`read=1`): its text is read by the offline reader, here a stand-in with
