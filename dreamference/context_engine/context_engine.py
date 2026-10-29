@@ -330,7 +330,7 @@ class ContextEngine:
         try:
             with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-            os.replace(tmp_file, self.index_file)
+            tmp_file.replace(self.index_file)
         except BaseException:
             tmp_file.unlink(missing_ok=True)
             raise

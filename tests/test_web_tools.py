@@ -77,7 +77,10 @@ def test_fetch_stops_reading_a_body_at_the_download_ceiling(online):
 def test_a_page_cut_at_the_download_ceiling_is_reported_truncated(online):
     # `truncated` only compared the extracted text with `max_chars`: a page that is mostly markup
     # was cut at the ceiling, its short text fitted, and the model was told it had the whole page.
-    markup = b"<html><head><title>T</title></head><body><p>start</p>" + b"<div></div>" * MAX_DOWNLOAD_BYTES
+    markup = (
+        b"<html><head><title>T</title></head><body><p>start</p>"
+        + b"<div></div>" * MAX_DOWNLOAD_BYTES
+    )
     page = Page(markup + b"<p>the end</p></body></html>")
     online.return_value = page
     outcome = WebTools.fetch("https://example.org")

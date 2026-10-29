@@ -92,7 +92,7 @@ class SQLiteContextStorage:
         """
         file_scores: Dict[str, float] = {}
         if self.db_path.exists():
-            conn: Optional[sqlite3.Connection] = None
+            conn: sqlite3.Connection | None = None
             try:
                 conn = sqlite3.connect(self.db_path)
                 conn.execute("PRAGMA mmap_size = 2147483648;")

@@ -1,5 +1,8 @@
 import os
 from pathlib import Path
+
+import pytest
+
 from dreamference.context_engine import ContextEngine
 
 def test_context_engine_indexing(tmp_path, monkeypatch):
@@ -198,10 +201,8 @@ def test_a_failed_index_save_leaves_the_previous_index_whole(tmp_path, monkeypat
         raise OSError("No space left on device")
 
     monkeypatch.setattr(context_engine.json, "dump", dump_then_die)
-    try:
+    with pytest.raises(OSError):
         engine.save_index()
-    except OSError:
-        pass
     assert engine.index_file.read_bytes() == before
     assert sorted(p.name for p in engine.dreamference_dir.iterdir()) == ["context.db", "context_index.json"]
 

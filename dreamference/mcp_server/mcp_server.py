@@ -26,8 +26,7 @@ SWE_BENCH_HOLDER: Final[str] = "SWE-bench"
 
 
 def _night_run_refusal() -> str | None:
-    """
-    Says why the context index is not built now, as `ling-admin index` would.
+    """Says why the context index is not built now, as `ling-admin index` would.
 
     Building it (a process pool and the embedding model) waits while a Night Shift or SWE-bench
     run holds the runner lock (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §6.2).
