@@ -46,7 +46,8 @@ pub struct TaskEnv {
     /// `$CODEX_HOME` (default `~/.mightling`).
     pub codex_home: PathBuf,
     pub max_parallel: usize,
-    /// The model server's host for `DREAMFERENCE_VLLM_HOST` (default: this machine).
+    /// The node `ling exec` uses, passed as `MIGHTLING_NODE` (§5.1): a name or id, never an
+    /// address. Unset, `ling` finds the model server through the launcher's own tiers.
     pub node: Option<String>,
     pub ling_bin: String,
 }
@@ -601,16 +602,11 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
         last_message.display().to_string(),
         prompt,
     ];
-    let host = std::env::var("DREAMFERENCE_VLLM_HOST")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .or_else(|| env.node.clone())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
     let agent_timeout = req.timeout_s.unwrap_or(DEFAULT_AGENT_TIMEOUT_S).clamp(60, MAX_AGENT_TIMEOUT_S);
     let spec = RunSpec {
         argv,
         cwd: wt.clone(),
-        env: vec![("DREAMFERENCE_VLLM_HOST".into(), host)],
+        env: node_env(env),
         timeout_s: agent_timeout,
         batch: true,
     };
@@ -766,6 +762,15 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
     Ok(log_and_return(&ledger, &repo_hash, env, finish(r)))
 }
 
+/// The environment `ling exec` gets beyond the server's own: `MIGHTLING_NODE` when the plugin's
+/// `node` is set (§5.1), else nothing, so a client keeps the launcher's tiers and a node its loopback.
+fn node_env(env: &TaskEnv) -> Vec<(String, String)> {
+    env.node
+        .iter()
+        .map(|n| ("MIGHTLING_NODE".to_string(), n.clone()))
+        .collect()
+}
+
 fn log_and_return(ledger: &Ledger, repo: &str, env: &TaskEnv, r: TaskResult) -> TaskResult {
     let _ = ledger.append(&json!({
         "kind": "task", "id": r.id, "ts": now(), "class": r.class, "repo": repo,
@@ -819,6 +824,8 @@ mod tests {
         /// `git status --ignored` output, before and after the model.
         ignored: RefCell<String>,
         ignored_after: String,
+        /// The extra environment `ling exec` got.
+        exec_env: RefCell<Vec<(String, String)>>,
     }
 
     impl Runner for World {
@@ -852,7 +859,7 @@ mod tests {
             if j.starts_with("ling exec ") {
                 assert!(spec.batch, "the model runs in the batch slice");
                 assert!(j.contains("-s workspace-write"));
-                assert!(spec.env.iter().any(|(k, _)| k == "DREAMFERENCE_VLLM_HOST"));
+                *self.exec_env.borrow_mut() = spec.env.clone();
                 for (p, c) in &self.writes {
                     let full = self.wt.join(p);
                     std::fs::create_dir_all(full.parent().unwrap()).unwrap();
@@ -919,6 +926,7 @@ mod tests {
             sandbox_ok: true,
             ignored: RefCell::new("!! .mypy_cache/\0".into()),
             ignored_after: "!! .mypy_cache/\0".into(),
+            exec_env: RefCell::new(vec![]),
         }
     }
 
@@ -954,6 +962,24 @@ mod tests {
         let text = std::fs::read_to_string(env.state_dir().join("ledger.jsonl")).unwrap();
         assert!(!text.contains("Set x to 1") && !text.contains("x = 1"));
         assert!(!env.state_dir().join("running").join(format!("{}.pid", r.id)).exists(), "slot released");
+    }
+
+    #[test]
+    fn the_plugin_node_reaches_ling_exec_as_mightling_node_and_never_as_an_address() {
+        let (wt, mut env) = setup("node");
+        let w = world(&wt);
+        assert!(execute(&request(&wt, "T3"), &w, &env).unwrap().pass);
+        assert!(
+            w.exec_env.borrow().is_empty(),
+            "unset: the launcher's tiers decide"
+        );
+        env.node = Some("node-a".into());
+        let w = world(&wt);
+        assert!(execute(&request(&wt, "T3"), &w, &env).unwrap().pass);
+        assert_eq!(
+            *w.exec_env.borrow(),
+            vec![("MIGHTLING_NODE".to_string(), "node-a".to_string())]
+        );
     }
 
     #[test]

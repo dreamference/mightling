@@ -10,7 +10,7 @@
     "node": {
       "type": "string",
       "title": "Mightling node",
-      "description": "Optional Mightling node name or id (the host of the model server for task; empty means this machine).",
+      "description": "Optional Mightling node name or id (passed to task's ling exec as MIGHTLING_NODE; empty lets ling find the model server itself).",
       "default": ""
     },
     "max_parallel": {
