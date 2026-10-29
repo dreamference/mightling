@@ -25,8 +25,6 @@ import subprocess
 from pathlib import Path
 from typing import Final, Optional
 
-import requests
-
 from dreamference.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
 
 DEFAULT_DIFFUSION_PORT: Final[int] = 8001
@@ -71,6 +69,8 @@ class DiffusionServerManager:
         Returns:
             bool: True when /health answers 200 (the service returns 503 while loading).
         """
+        # Not at the top: `ling-admin` imports this for every command (tests/test_cli_startup.py).
+        import requests
         try:
             return requests.get(f"{self.host}/health", timeout=timeout).status_code == 200
         except Exception:
@@ -86,6 +86,7 @@ class DiffusionServerManager:
         Returns:
             Optional[str]: 'ok', 'loading', the load error text, or None when unreachable.
         """
+        import requests
         try:
             payload = requests.get(f"{self.host}/health", timeout=timeout).json()
         except Exception:

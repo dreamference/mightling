@@ -15,8 +15,6 @@ import json
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Final
 
-import requests
-
 # The whole check, from the request to the last event. The answer is a few dozen tokens with
 # reasoning off; a first request after a boot can take over 10 s, which warm-up absorbs first.
 TOOL_CALL_CANARY_TIMEOUT_S: Final[float] = 60.0
@@ -98,6 +96,8 @@ class ToolCallCanary:
             Tuple[bool, str]: Whether a well-formed call came back, and one line saying what came
             back or what is likely at fault.
         """
+        # Not at the top: `ling-admin` imports this for every command (tests/test_cli_startup.py).
+        import requests
         post = post or requests.post
         started = clock()
         try:
