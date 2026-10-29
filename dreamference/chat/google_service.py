@@ -14,7 +14,6 @@ module's (`GoogleService.secret`).
 Nothing here prints: a failure is kept in `GoogleService.problem` for the CLI to say.
 """
 
-import contextlib
 import os
 import pathlib
 import shutil
@@ -81,37 +80,50 @@ class GoogleService:
 
         from dreamference.chat.gmail_credentials import CREDENTIALS_DIR
 
-        path = os.path.join(CREDENTIALS_DIR, SECRET_FILE_NAME)
+        path = pathlib.Path(CREDENTIALS_DIR, SECRET_FILE_NAME)
         try:
-            if os.path.exists(path):
-                with open(path) as handle:
-                    value = handle.read().strip()
-                if value:
-                    return value
+            value = path.read_text().strip() if path.exists() else ""
+            if value:
+                return value
             os.makedirs(CREDENTIALS_DIR, mode=0o700, exist_ok=True)
-            value = secrets_module.token_urlsafe(32)
-            # Written whole and private under a name of its own, then linked into place. A link
-            # never replaces a file, so of two first starts at once the later keeps the earlier's.
-            temporary = f"{path}.{secrets_module.token_hex(8)}.tmp"
-            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            try:
-                with os.fdopen(descriptor, "w") as handle:
-                    handle.write(value)
-                try:
-                    os.link(temporary, path)
-                except FileExistsError:
-                    with open(path) as handle:
-                        existing = handle.read().strip()
-                    if existing:
-                        return existing
-                    os.replace(temporary, path)
-            finally:
-                with contextlib.suppress(OSError):
-                    os.unlink(temporary)
-            return value
+            return cls._store_once(path, secrets_module.token_urlsafe(32))
         except OSError as exc:
             cls.problem = f"Could not store the Google service's shared secret: {exc}"
             return None
+
+    @classmethod
+    def _store_once(cls, path: pathlib.Path, value: str) -> str:
+        """Stores a secret unless another start stored one first.
+
+        It is written whole and private under a name of its own, then linked into place. A link
+        never replaces a file, so of two first starts at once the later keeps the earlier's.
+
+        Args:
+            path (pathlib.Path): Where the secret lives.
+            value (str): The secret to store when none is there yet.
+
+        Returns:
+            str: The secret now stored.
+
+        Raises:
+            OSError: The secret could not be written.
+        """
+        import secrets as secrets_module
+
+        temporary = path.with_name(f"{path.name}.{secrets_module.token_hex(8)}.tmp")
+        temporary.touch(mode=0o600, exist_ok=False)
+        try:
+            temporary.write_text(value)
+            try:
+                path.hardlink_to(temporary)
+            except FileExistsError:
+                existing = path.read_text().strip()
+                if existing:
+                    return existing
+                temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return value
 
     @classmethod
     def stage(cls, directory: str) -> bool:

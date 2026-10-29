@@ -16,6 +16,7 @@ It follows the same shape as the agent runners: provision the tooling if it is m
 off to a subprocess.
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -497,11 +498,9 @@ class DesktopRunner:
                 os.path.join(DESKTOP_ENTRY_DIR, f"{legacy}.desktop"),
                 os.path.join(ICON_DIR, f"{legacy}.png"),
             ):
-                if os.path.exists(stale):
-                    try:
-                        os.remove(stale)
-                    except OSError as exc:
-                        print(f"⚠️  Could not remove the old launcher {stale}: {exc}")
+                # A leftover that cannot be removed (root-owned after a sudo install) is harmless.
+                with contextlib.suppress(OSError):
+                    os.remove(stale)
 
         subprocess.run(
             ["update-desktop-database", DESKTOP_ENTRY_DIR],
