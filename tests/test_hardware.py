@@ -749,3 +749,12 @@ def test_a_failed_container_leaves_no_tensors_file(tmp_path, monkeypatch):
     tdir, docker_runs, _, _ = _tensorize_in_docker(tmp_path, monkeypatch, returncode=1)
     assert docker_runs
     assert not (tdir / "model.tensors").exists() and not (tdir / "model.tensors.partial").exists()
+
+
+def test_the_container_writes_the_tensors_under_another_name_and_the_host_renames_it(
+    tmp_path, monkeypatch
+):
+    # A container killed midway left a non-empty model.tensors, which reads as tensorized.
+    tdir, _, written, _ = _tensorize_in_docker(tmp_path, monkeypatch)
+    assert [path.name for path in written] == ["model.tensors.partial"]
+    assert (tdir / "model.tensors").exists() and not (tdir / "model.tensors.partial").exists()

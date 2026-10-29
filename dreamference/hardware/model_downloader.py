@@ -259,7 +259,9 @@ class ModelDownloader:
                     snap_rel = snapshot_dir.relative_to(hf_base)
                     tdir_rel = tdir.relative_to(dgx_base)
                     container_snap = f"{cls.CONTAINER_HF_HUB_DIR}/{snap_rel}"
-                    container_tfile = f"/root/.cache/dreamference/{tdir_rel}/model.tensors"
+                    # Written under the staging name and renamed here, as attempt 2 does: a container
+                    # killed midway must not leave a file that reads as tensorized.
+                    container_tfile = f"/root/.cache/dreamference/{tdir_rel}/{staging.name}"
 
                     from dreamference.vllm_server.vllm_server_manager import VLLMServerManager, DEFAULT_VLLM_IMAGE
                     if VLLMServerManager().ensure_docker_image(DEFAULT_VLLM_IMAGE):
@@ -314,7 +316,8 @@ class ModelDownloader:
                         f"serializer.write_module(model); serializer.close()"
                     ]
                     res = subprocess.run(cmd, capture_output=True, text=True)
-                    if res.returncode == 0 and tensors_file.exists():
+                    if res.returncode == 0 and staging.exists():
+                        staging.replace(tensors_file)
                         serialization_success = True
             except Exception as e:
                 pass
