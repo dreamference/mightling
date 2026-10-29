@@ -144,10 +144,8 @@ class StraceParser:
         udp_routes = {} if udp_routes is None else udp_routes
         fd, kind, inner = cls.fd_label(rest.split(",", 1)[0].strip())
         udp = kind in UDP_KINDS
-        if syscall in ("write", "writev"):
+        if syscall in ("write", "writev") and not udp:
             # Only a UDP socket's payload matters here: a stream's connect was already counted.
-            if udp:
-                cls._udp_payload(inner, trace, udp_routes)
             return
         # A sendmmsg carries several messages, each naming its own destination.
         messages = rest.split("{msg_hdr=")[1:] if syscall == SENDMMSG else []

@@ -1127,6 +1127,33 @@ def test_a_socket_connected_away_from_the_resolver_sends_it_no_query(fd, reconne
     assert trace.destinations == destinations
 
 
+@pytest.mark.parametrize(
+    "send",
+    [
+        f'write(7<UDP:[127.0.0.1:40000->127.0.0.53:53]>, "{QUERY}", 40) = 40',
+        f'writev(7<UDP:[127.0.0.1:40000->127.0.0.53:53]>, [{{iov_base="{QUERY}", iov_len=40}}], 1) = 40',
+    ],
+)
+def test_a_query_written_on_a_socket_connected_to_the_resolver_is_read(send):
+    # Go's resolver connects a UDP socket and write()s its query: the name is what the report shows.
+    trace = StraceParser.parse(TO_RESOLVER.format(fd="7<UDP:[555]>") + f"5 {send}\n")
+    assert trace.dns_names == {"audit-probe.example.com": 1}
+    assert trace.dns_servers == {"127.0.0.53:53": 1} and trace.destinations == {}
+
+
+@pytest.mark.parametrize(
+    "send",
+    [
+        f'write(8<TCP:[127.0.0.1:40001->127.0.0.53:53]>, "{QUERY}", 40) = 40',
+        f'writev(8<TCP:[127.0.0.1:40001->127.0.0.53:53]>, [{{iov_base="{QUERY}", iov_len=40}}], 1) = 40',
+    ],
+)
+def test_bytes_written_on_a_stream_to_the_resolver_are_not_read_as_a_datagram(send):
+    # A query over TCP comes after a two-byte length, and a stream's write is no datagram.
+    trace = StraceParser.parse(TO_RESOLVER.format(fd="8<TCP:[556]>") + f"5 {send}\n")
+    assert trace.dns_servers == {"127.0.0.53:53": 1} and trace.dns_names == {}
+
+
 def test_a_udp_connect_on_a_socket_already_connected_is_a_destination():
     # Only a socket that is not connected yet (its label an inode) can be a route lookup.
     trace = StraceParser.parse(
