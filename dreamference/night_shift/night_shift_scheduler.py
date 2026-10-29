@@ -23,6 +23,9 @@ UNIT: Final[str] = "mightling-night"
 # The comment line the launcher reads to show the enabled window in `/night list`.
 WINDOW_MARKER: Final[str] = "# Night Shift window: "
 
+# Characters that force a unit word into double quotes, besides whitespace.
+UNIT_QUOTED_CHARS: Final[str] = "\"'\\"
+
 
 class NightShiftScheduler:
     """Installs, removes and reports the `mightling-night` timer."""
@@ -77,9 +80,9 @@ class NightShiftScheduler:
 
     @classmethod
     def _unit_word(cls, text: str) -> str:
-        """
-        One word of a unit's ExecStart= or Environment= line: systemd splits those on whitespace
-        unless quoted and expands `%` specifiers in them.
+        """One word of a unit's ExecStart= or Environment= line, quoted and `%`-escaped.
+
+        systemd splits those lines on whitespace unless quoted and expands `%` specifiers in them.
 
         Args:
             text: The word.
@@ -88,7 +91,7 @@ class NightShiftScheduler:
             str: `text` with `%` doubled, quoted when it holds whitespace, a quote or a backslash.
         """
         text = text.replace("%", "%%")
-        if not any(char.isspace() or char in "\"'\\" for char in text):
+        if not any(char.isspace() or char in UNIT_QUOTED_CHARS for char in text):
             return text
         return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 

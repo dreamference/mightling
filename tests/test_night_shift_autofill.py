@@ -191,7 +191,9 @@ def test_a_queued_parametrized_test_is_not_queued_again(tmp_path: Path) -> None:
     key = "ci-test:tests/test_a.py::test_b[x-1]"
     candidate = AutofillCandidate(key, "ci", "t", "d", None, "a")
     task = NightShiftAutofill.task_text(candidate)
-    (night / "tasks" / "t1.json").write_text(json.dumps({"id": "t1", "status": "queued", "task": task}))
+    (night / "tasks" / "t1.json").write_text(
+        json.dumps({"id": "t1", "status": "queued", "task": task})
+    )
     assert NightShiftAutofill.queued_keys(night) == {key}
     assert NightShiftAutofill.pick(night, [candidate], 5, TODAY) == ([], [])
 

@@ -1003,7 +1003,10 @@ class NightShiftTaskRun:
         ):
             for venv in (worktree / ".venv", repo / ".venv"):
                 if (venv / "bin" / "python").is_file():
-                    return f"{shlex.quote(str(venv / 'bin' / 'python'))} -m pytest -q", "pytest (repository .venv)"
+                    return (
+                        f"{shlex.quote(str(venv / 'bin' / 'python'))} -m pytest -q",
+                        "pytest (repository .venv)",
+                    )
             return "python3 -m pytest -q", "pytest"
         if (worktree / "Cargo.toml").is_file():
             return "cargo test", "Cargo.toml"
