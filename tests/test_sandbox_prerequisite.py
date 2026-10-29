@@ -176,3 +176,14 @@ def test_profiles_are_found_by_their_attachment_not_a_mention(machine):
     (machine["profiles"] / "notes").write_text("# /usr/bin/bwrap is mentioned here only\n")
     (machine["profiles"] / "chrome").write_text("profile chrome /opt/google/chrome/chrome flags=(unconfined) {\n}\n")
     assert SandboxPrerequisite.profiles_attaching("/usr/bin/bwrap") == []
+
+
+@pytest.mark.parametrize("line", [
+    "profile /usr/bin/bwrap flags=(unconfined) {",   # named by its path
+    "/usr/bin/bwrap flags=(unconfined) {",           # the older form, without `profile`
+    '"/usr/bin/bwrap" {',
+])
+def test_profiles_are_found_in_every_form_that_attaches(machine, line):
+    (machine["profiles"] / "local-bwrap").write_text(f"{line}\n  /usr/bin/bwrap ix,\n}}\n")
+    (machine["profiles"] / "launcher").write_text("profile launcher /usr/bin/launcher {\n  /usr/bin/bwrap ix,\n}\n")
+    assert SandboxPrerequisite.profiles_attaching("/usr/bin/bwrap") == [str(machine["profiles"] / "local-bwrap")]
