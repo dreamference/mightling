@@ -142,6 +142,17 @@ def test_a_file_the_toml_parser_refuses_still_names_its_level_as_on_the_rust_sid
     assert resolve(cwd) == "off"
 
 
+def test_only_the_key_itself_names_the_level_in_a_file_the_toml_parser_refuses(tmp_path, monkeypatch):
+    # A longer key or one of the same length that only resembles it comes first and says `off`; the
+    # syntax error leaves the line reader alone to find the real key's `on`.
+    for name, user_text in {
+        "longer key": 'mightling_airgapped_note = "off"\nmightling_airgapped = "on"\nmodel = \n',
+        "same length": 'mightling_airgappex = "off"\nmightling_airgapped = "on"\nmodel = \n',
+    }.items():
+        cwd = _two_files(tmp_path / name, monkeypatch, None, user_text)
+        assert DreamferenceConfig.resolve_airgapped_level(cwd) == "on", name
+
+
 def test_a_named_config_file_replaces_the_working_directorys(tmp_path, monkeypatch):
     cwd = _two_files(tmp_path, monkeypatch, 'mightling_airgapped = "on"\n', None)
     named = tmp_path / "named.toml"
