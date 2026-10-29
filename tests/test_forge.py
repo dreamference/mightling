@@ -376,7 +376,7 @@ def test_added_lines_name_their_file_and_skip_exempt_ones():
 def test_the_mirror_scans_a_path_the_hook_cannot_exempt():
     # The hook passes exempt paths to awk only when they are plain; one with a space is scanned
     # there, so the GitHub mirror's own scan must not skip it either.
-    patch = "diff --git a/my notes b/my notes\n+++ b/my notes\n+secret\n"
+    patch = "diff --git a/my notes b/my notes\n+++ b/my notes\n@@ -0,0 +1 @@\n+secret\n"
     assert ForgeAnonymity.added_lines(patch, ["my notes"]) == "my notes\nmy notes: secret\n"
     assert "my notes" not in ForgeAnonymity.hook_script("full", ["my notes"])
 
