@@ -204,3 +204,18 @@ def test_a_plug_that_ignores_off_is_reported_and_the_node_is_not_waited_for(monk
     out = capsys.readouterr().out
     assert "still reports itself on" in out and "Power is back" not in out
     assert asked == ["house-1"]
+
+
+def test_a_reply_cut_off_mid_body_is_an_oserror_like_any_other_failed_reply(monkeypatch):
+    import http.client
+    import io
+
+    from dreamference.node import node_shelly_plug
+
+    class Cut(io.BytesIO):
+        def read(self, *args):
+            raise http.client.IncompleteRead(b'{"output"')
+
+    monkeypatch.setattr(node_shelly_plug.urllib.request, "urlopen", lambda url, timeout: Cut())
+    with pytest.raises(OSError):
+        NodeShellyPlug._get("http://p.local/rpc/Switch.GetStatus?id=0")
