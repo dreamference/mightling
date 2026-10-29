@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use ling_airgapped::{Level, Source, resolve_from, resolve_guarded, toml_value};
+use ling_airgapped::{Level, Source, config_value, resolve_from, resolve_guarded, toml_value};
 
 const SEEDS: [u64; 4] = [1, 0x9e37_79b9_7f4a_7c15, 0xdead_beef, 20_261_029];
 
@@ -376,42 +376,45 @@ fn configs(rng: &mut Rng) -> Vec<(PathBuf, String)> {
 }
 
 #[test]
-fn the_first_valid_tier_wins_and_among_files_the_strictest() {
+fn the_first_tier_wins_among_files_the_strictest_and_an_invalid_value_is_on() {
     each_case(3_000, |rng| {
         let (session, environment, configs) = (tier(rng), tier(rng), configs(rng));
         let resolved = resolve_from(session.as_deref(), environment.as_deref(), &configs);
 
+        // What cannot be read counts as on (AIRGAPPED §6.5), named once, in the order read.
         let mut invalid = Vec::new();
-        let mut valid = |value: Option<&str>| {
-            let value = value?;
-            let level = Level::parse(value);
-            if level.is_none() && !value.trim().is_empty() {
+        let mut level = |value: &str| {
+            Level::parse(value).unwrap_or_else(|| {
                 invalid.push(value.trim().to_string());
-            }
-            level
+                Level::On
+            })
         };
-        let expected = if let Some(level) = valid(session.as_deref()) {
-            (level, Source::Session)
-        } else if let Some(level) = valid(environment.as_deref()) {
-            (level, Source::Environment)
+        let expected = if let Some(value) = session.as_deref() {
+            (level(value), Source::Session)
+        } else if let Some(value) = environment
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            (level(value), Source::Environment)
         } else {
             let mut strictest = (Level::Off, Source::Default);
             for (path, text) in &configs {
-                if let Some(level) = valid(toml_value(text).as_deref())
-                    && (strictest.1 == Source::Default || level > strictest.0)
-                {
-                    strictest = (level, Source::ConfigFile(path.clone()));
+                let Some(value) = config_value(text).expect("the fuzzed files are TOML") else {
+                    continue;
+                };
+                let found = level(&value);
+                if strictest.1 == Source::Default || found > strictest.0 {
+                    strictest = (found, Source::ConfigFile(path.clone()));
                 }
             }
             strictest
         };
         let context = format!("{session:?} {environment:?} {configs:?}");
         assert_eq!((resolved.level, resolved.source), expected, "{context}");
-        // Each value passed over is named once, in the order the tiers are read.
         let named: Vec<&str> = resolved
             .invalid
             .iter()
-            .filter_map(|note| note.strip_prefix("ignored \"")?.split_once("\" from "))
+            .filter_map(|note| note.strip_prefix('"')?.split_once("\" from "))
             .map(|(value, _)| value)
             .collect();
         assert_eq!(named, invalid, "{context}");
