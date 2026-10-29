@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import tempfile
 import zipfile
@@ -209,24 +210,53 @@ class DocsEgressAudit:
                 trace_path,
                 ling_docs,
             ] + args
-            try:
-                result = subprocess.run(
-                    command,
-                    cwd=home,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=RUN_TIMEOUT_S,
-                )
-                outputs[step] = result.stdout + result.stderr
-            except (OSError, subprocess.SubprocessError) as error:
-                outputs[step] = str(error)
+            outputs[step] = cls.step(command, home, env)
             if pathlib.Path(trace_path).is_file():
                 with pathlib.Path(trace_path).open(errors="replace") as handle:
                     text += handle.read()
         indexed = "documents: ok" in outputs.get("index", "")
         found = FIXTURE_ANSWER in outputs.get("search", "").lower()
         return StraceParser.parse(text), indexed, found, outputs
+
+    @classmethod
+    def step(cls, command: list[str], home: str, env: dict[str, str]) -> str:
+        """
+        Runs one traced step in its own session, killing the whole session at the timeout.
+
+        Args:
+            command (list[str]): strace and the `ling-docs` command it traces.
+            home (str): The throwaway home it runs in.
+            env (dict[str, str]): Its environment.
+
+        Returns:
+            str: What it printed, the error that kept it from starting, or that it did not finish.
+        """
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=home,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+        except OSError as error:
+            return str(error)
+        try:
+            stdout, stderr = process.communicate(timeout=RUN_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            # The whole group: killing strace alone left the ling-docs it traced running, untraced.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            return f"did not finish within {RUN_TIMEOUT_S} s"
+        return stdout + stderr
 
     @classmethod
     def write_result(cls, trace: EgressTrace, verdict: EgressVerdict, ling_docs: str) -> str:
