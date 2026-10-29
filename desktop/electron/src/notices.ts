@@ -29,7 +29,8 @@ export const BODY_CAP = 160;
 /** `text` on one line, its whitespace folded, cut to `cap` characters with an ellipsis. */
 export function oneLine(text: string, cap: number): string {
   const line = text.replace(/\s+/g, " ").trim();
-  return line.length > cap ? `${line.slice(0, cap - 1).trimEnd()}…` : line;
+  // Cut whole characters: an emoji at the cut is dropped, not left half.
+  return line.length > cap ? `${line.slice(0, cap - 1).replace(/[\uD800-\uDBFF]$/, "").trimEnd()}…` : line;
 }
 
 /** A thread's name as the sidebar shows it: its given name, else its first words. */
