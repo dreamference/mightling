@@ -1116,6 +1116,14 @@ def test_settings_parse_durations_and_windows():
         NightShiftSettings.parse_duration("soon")
 
 
+def test_the_reports_review_command_quotes_a_repository_with_a_space():
+    record = {"id": "t", "repo": "/srv/my repo", "base": "a" * 40, "status": "done", "task": "x",
+              "result": {"branch": "night/t"}}
+    text = NightShiftReport.render(datetime.now().astimezone(), [record], [])
+    command = next(line for line in text.splitlines() if line.startswith("- `git -C"))
+    assert shlex.split(command[3:-1]) == ["git", "-C", "/srv/my repo", "diff", "a" * 12 + "..night/t"]
+
+
 def test_report_rows_carry_what_the_spec_lists():
     started = datetime(2026, 10, 1, 1, 0)
     tasks = [
