@@ -994,4 +994,111 @@ mod tests {
         assert_eq!(enter("/worktrees on"), None);
         assert_eq!(enter("fix /worktree on"), None);
     }
+
+    #[test]
+    fn a_new_session_is_not_nested_and_says_what_the_worktree_leaves_out() {
+        let fixture = Fixture::new("nested");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        write_mode(&home, Mode::Worktree).unwrap_or_default();
+        // Uncommitted changes in the source are not carried over, and the notice says so.
+        std::fs::write(repo.join("auth.py"), "def login():\n    return 'wip'\n").unwrap_or_default();
+        let prepared = prepare(vec!["ling".into()], Vec::new(), &home, true, &repo);
+        let lines = &prepared.lines;
+        assert!(lines.iter().any(|line| line.starts_with("Your uncommitted changes in") && line.ends_with("are not in the worktree.")), "{lines:?}");
+        let session = sessions(&home).pop().unwrap_or_else(|| panic!("no session: {lines:?}"));
+        assert!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default().contains("False"));
+        // A session started inside a session worktree works there.
+        let prepared = prepare(vec!["ling".into()], Vec::new(), &home, true, &session.checkout);
+        assert_eq!(prepared.cwd, None);
+        assert!(prepared.lines[0].starts_with(&format!("Worktree mode: this folder is already session {}'s worktree", session.id)), "{:?}", prepared.lines);
+        // Codex's --ignore-user-config leaves the session where it is.
+        let prepared = prepare(vec!["ling".into()], args(&["--ignore-user-config"]), &home, true, &repo);
+        assert_eq!(prepared.cwd, None);
+        // Outside a git repository the session edits in place, and says why.
+        let plain = fixture.root.join("plain");
+        std::fs::create_dir_all(&plain).unwrap_or_default();
+        let prepared = prepare(vec!["ling".into()], Vec::new(), &home, true, &plain);
+        assert_eq!(prepared.cwd, None);
+        assert!(prepared.lines[0].starts_with("Worktree mode is on, but") && prepared.lines[0].ends_with("in place."), "{:?}", prepared.lines);
+        assert_eq!(sessions(&home).len(), 1);
+    }
+
+    #[test]
+    fn ignored_files_are_left_out_of_apply() {
+        let fixture = Fixture::new("ignored");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        std::fs::write(repo.join(".gitignore"), "*.log\n").unwrap_or_default();
+        git(&repo, &["add", "-A"], None);
+        git(&repo, &["commit", "-qm", "ignore logs"], None);
+        let (session, cwd, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("run.log"), "noise\n").unwrap_or_default();
+        std::fs::write(session.checkout.join("new.py"), "x = 1\n").unwrap_or_default();
+        let (lines, code) = command(&home, &cwd, "apply", true);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(repo.join("new.py").is_file());
+        assert!(!repo.join("run.log").exists(), "{lines:?}");
+    }
+
+    #[test]
+    fn a_shell_lists_applies_by_id_and_hears_of_kept_sessions() {
+        let fixture = Fixture::new("shell");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (mut session, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("auth.py"), "def login():\n    return True\n").unwrap_or_default();
+        session.pid = u32::MAX - 1;
+        session.write().unwrap_or_default();
+        // A new session in the repository is told of the finished one that holds changes.
+        let prepared = prepare(vec!["ling".into()], Vec::new(), &home, true, &repo);
+        assert_eq!(prepared.lines, vec!["1 earlier worktree session of this repository has changes not applied: ling worktree list.".to_string()]);
+        assert_eq!(kept_line(2).as_deref(), Some("2 earlier worktree sessions of this repository have changes not applied: ling worktree list."));
+        // `ling worktree list`: each session, whether it runs, and what it holds.
+        let (lines, code) = command(&home, &repo, "list", false);
+        assert_eq!(code, 0);
+        assert!(lines[0].starts_with(&format!("{}  {}  finished, 1 file changed", session.id, session.branch)), "{lines:?}");
+        assert_eq!(lines[1].trim(), session.checkout.display().to_string());
+        // `ling worktree apply <id>` from the user's checkout brings it there.
+        let (lines, code) = command(&home, &repo, &format!("apply {}", session.id), false);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(lines[0].starts_with(&format!("Applied {} to", session.branch)), "{lines:?}");
+        assert!(std::fs::read_to_string(repo.join("auth.py")).unwrap_or_default().contains("True"));
+        // Status in place names the folder and branch, and leaves the footer the authority.
+        let (lines, _) = command(&home, &repo, "status", true);
+        assert_eq!(lines[0], "Worktree mode off: new sessions edit in place (the default).");
+        assert_eq!(lines[1], format!("This session edits {} in place, on main.", repo.display()));
+        assert!(lines[2].starts_with("The footer's folder is where edits land"), "{lines:?}");
+    }
+
+    #[test]
+    fn on_and_off_save_the_setting_and_leave_the_running_session() {
+        let fixture = Fixture::new("on-off");
+        let home = fixture.home();
+        let (lines, code) = command(&home, &fixture.repo(), "on", true);
+        assert_eq!(code, 0);
+        assert!(lines[0].starts_with("Worktree mode on (mightling-worktree-mode = \"worktree\""), "{lines:?}");
+        assert!(lines[1].starts_with("This session stays where it is"), "{lines:?}");
+        assert_eq!(configured(&home), Some(Mode::Worktree));
+        let (lines, code) = command(&home, &fixture.repo(), "off", false);
+        assert_eq!(code, 0);
+        assert!(lines[0].starts_with("Worktree mode off"), "{lines:?}");
+        assert!(!lines.iter().any(|line| line.starts_with("This session stays")), "{lines:?}");
+        assert_eq!(configured(&home), Some(Mode::Local));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_shell_does_not_discard_a_running_session() {
+        let fixture = Fixture::new("running");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (mut session, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("auth.py"), "changed\n").unwrap_or_default();
+        // Another live process owns it: the test's parent.
+        session.pid = std::os::unix::process::parent_id();
+        session.write().unwrap_or_default();
+        let (lines, code) = command(&home, &repo, &format!("discard {}", session.id), false);
+        assert_eq!(code, 1);
+        assert!(lines[0].contains("is still running"), "{lines:?}");
+        assert!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default().contains("changed"));
+        assert_eq!(prune(&home, &repo), 0, "a running session is never pruned");
+        assert!(session.checkout.is_dir());
+    }
 }
