@@ -88,7 +88,9 @@ export function PetView() {
           <form onSubmit={(event) => {
             event.preventDefault();
             if (!question.trim()) return;
-            send({ type: "pet/ask", prompt: question.trim() }).catch(() => {});
+            const asked = question.trim();
+            // Not sent: the question comes back to the box (unless something new was typed meanwhile).
+            send({ type: "pet/ask", prompt: asked }).catch(() => setQuestion((now) => now || asked));
             setQuestion("");
             toggle(false);
           }}>
