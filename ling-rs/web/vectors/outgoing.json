@@ -682,6 +682,13 @@
       "out": {"id": 126, "method": "thread/resume", "params": {"threadId": "repo-t1", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "config": {"approval_policy": "on-request"}}}
     },
     {
+      "name": "a bridge thread/resume of an Ask thread passes and stays in its scratch folder",
+      "bridge": true,
+      "message": {"id": 129, "method": "thread/resume", "params": {"threadId": "ask-9", "cwd": "/tmp", "sandbox": "danger-full-access"}},
+      "accept": true,
+      "out": {"id": 129, "method": "thread/resume", "params": {"threadId": "ask-9", "cwd": "ASK/ask-9", "sandbox": "workspace-write"}}
+    },
+    {
       "name": "a chat-work thread/start in a read-only checkout gets read-only sandbox and on-request approvals",
       "bridge": true,
       "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": true},
