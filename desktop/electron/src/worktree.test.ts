@@ -113,6 +113,16 @@ describe("managed worktrees", () => {
     await expect(worktree.remove(source, path.join(root, "abcd", "app"), root, null)).rejects.toThrow("is not a worktree of");
   });
 
+  it("are bound to one thread when two ask at once, and the other is told", async () => {
+    const { source, root } = repo();
+    const created = await worktree.create({ sourceCwd: source, base: null, withChanges: false, worktreeRoot: root });
+    const threads = Array.from({ length: 6 }, (_, index) => `thread-${index}`);
+    const results = await Promise.allSettled(threads.map((thread) => worktree.bindThread(created.root, thread)));
+    const bound = threads.filter((_, index) => results[index].status === "fulfilled");
+    expect(bound).toHaveLength(1);
+    expect(await worktree.owner(created.root)).toBe(bound[0]);
+  });
+
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("are kept when their snapshot fails, with the work in them", async () => {
     const { source, root } = repo();
     const created = await worktree.create({ sourceCwd: source, base: null, withChanges: false, worktreeRoot: root });

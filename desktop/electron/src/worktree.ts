@@ -205,7 +205,8 @@ export async function bindThread(checkout: string, threadId: string): Promise<vo
   if (existing === threadId) return;
   if (existing) throw new GitError(`worktree already belongs to thread ${existing}`);
   const file = path.resolve(checkout, (await git(checkout, ["rev-parse", "--git-path", OWNER_FILE])).trim());
-  const temporary = `${file}.${process.pid}.tmp`;
+  // One name per bind, not per process: two binds at once (two windows) must not write each other's file.
+  const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   await fsp.writeFile(temporary, JSON.stringify({ version: 1, ownerThreadId: threadId }));
   try {
     await fsp.link(temporary, file);
