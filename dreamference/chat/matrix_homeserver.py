@@ -32,6 +32,9 @@ MATRIX_IMAGE: Final[str] = (
     "ghcr.io/matrix-construct/tuwunel:v1.9.3"
     "@sha256:678b7f5350e06a41614444497c587da9dddf66767e4068a27480402f3c1367d0"
 )
+# The variable the container reads its registration token from; `docker run` takes the value from
+# its own environment, never its argv (`run_command`).
+TOKEN_ENV: Final[str] = "TUWUNEL_REGISTRATION_TOKEN"
 MATRIX_VOLUME: Final[str] = "dreamference-matrix-data"
 # The internal network: no route out. A fixed subnet so the container's address never moves.
 MATRIX_NETWORK: Final[str] = "dreamference-matrix"
@@ -61,11 +64,14 @@ class MatrixHomeserver:
     # -- seams the tests replace --------------------------------------------------------------
 
     @classmethod
-    def _run(cls, argv: List[str], timeout: int = 120) -> subprocess.CompletedProcess:
+    def _run(cls, argv: List[str], timeout: int = 120,
+             env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         """Runs a command, capturing its output. A missing program (Tailscale removed since `start`,
-        say) is a failed step, not an exception, so `stop` and `remove` still do the rest."""
+        say) is a failed step, not an exception, so `stop` and `remove` still do the rest. `env`
+        adds variables to the command's environment (a secret `docker run -e NAME` passes on)."""
         try:
-            return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+            return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False,
+                                  env={**os.environ, **env} if env else None)
         except FileNotFoundError as error:
             return subprocess.CompletedProcess(argv, 127, "", str(error))
 
@@ -149,13 +155,15 @@ class MatrixHomeserver:
     # -- Docker ---------------------------------------------------------------------------------
 
     @classmethod
-    def run_command(cls, server_name: str, token: str, push: bool) -> List[str]:
+    def run_command(cls, server_name: str, push: bool) -> List[str]:
         """
         Builds the `docker run` command.
 
+        The registration token (`TOKEN_ENV`) is named, not given: `docker run` reads it from its own
+        environment (`start`), so it never appears in an argv other local users can read in `/proc`.
+
         Args:
             server_name: The permanent server name.
-            token: The registration token: no account can be created without it.
             push: True puts the container on the sidecar network (push notifications can leave,
                 with event ids only); False, the default, on the internal network.
 
@@ -171,7 +179,6 @@ class MatrixHomeserver:
             "TUWUNEL_PORT": str(MATRIX_PORT),
             "TUWUNEL_ALLOW_FEDERATION": "false",
             "TUWUNEL_ALLOW_REGISTRATION": "true",
-            "TUWUNEL_REGISTRATION_TOKEN": token,
             "TUWUNEL_TRUSTED_SERVERS": "[]",
             "TUWUNEL_URL_PREVIEW_DOMAIN_EXPLICIT_ALLOWLIST": "[]",
         }
@@ -181,7 +188,7 @@ class MatrixHomeserver:
                 "-v", f"{MATRIX_VOLUME}:/var/lib/tuwunel"]
         for key, value in env.items():
             argv += ["-e", f"{key}={value}"]
-        return argv + [MATRIX_IMAGE]
+        return argv + ["-e", TOKEN_ENV, MATRIX_IMAGE]
 
     @classmethod
     def ensure_network(cls) -> bool:
@@ -336,7 +343,8 @@ class MatrixHomeserver:
             if push:
                 from dreamference.chat.sidecar_network import SidecarNetwork
                 SidecarNetwork.ensure()
-            created = cls._run(cls.run_command(name, admin["registration_token"], push), timeout=600)
+            created = cls._run(cls.run_command(name, push), timeout=600,
+                               env={TOKEN_ENV: admin["registration_token"]})
             if created.returncode != 0:
                 print(f"❌ The homeserver did not start: {created.stderr.strip()[:500]}")
                 return 1

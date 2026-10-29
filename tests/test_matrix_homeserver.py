@@ -20,13 +20,17 @@ class Machine:
     def __init__(self, tailnet_name: str = "node.tail1234.ts.net") -> None:
         self.tailnet_name = tailnet_name
         self.runs: list[list[str]] = []
+        self.environments: list[dict[str, str] | None] = []
         self.http: list[tuple[str, str, dict[str, Any] | None]] = []
         self.network = False
         self.container = False
         self.registered: list[str] = []
 
-    def run(self, argv: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
+    def run(
+        self, argv: list[str], timeout: int = 120, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess:
         self.runs.append(argv)
+        self.environments.append(env)
         out, code = "", 0
         if argv[:3] == ["tailscale", "status", "--json"]:
             if self.tailnet_name:
@@ -102,7 +106,7 @@ def machine(monkeypatch):
     monkeypatch.setattr(
         MatrixHomeserver,
         "_run",
-        classmethod(lambda cls, argv, timeout=120: fake.run(argv, timeout)),
+        classmethod(lambda cls, argv, timeout=120, env=None: fake.run(argv, timeout, env)),
     )
     monkeypatch.setattr(
         MatrixHomeserver,
@@ -134,7 +138,12 @@ def test_start_builds_a_homeserver_with_no_route_out_and_a_bot_account(machine, 
     env = [run[i + 1] for i, arg in enumerate(run) if arg == "-e"]
     assert "TUWUNEL_SERVER_NAME=node.tail1234.ts.net" in env
     assert "TUWUNEL_ALLOW_FEDERATION=false" in env
-    assert any(item.startswith("TUWUNEL_REGISTRATION_TOKEN=") and len(item) > 40 for item in env)
+    # The registration token reaches the container through docker's environment, never its argv:
+    # any local user can read a process's argv in /proc.
+    assert "TUWUNEL_REGISTRATION_TOKEN" in env
+    token = machine.environments[machine.runs.index(run)]["TUWUNEL_REGISTRATION_TOKEN"]
+    assert len(token) > 30
+    assert not [arg for argv in machine.runs for arg in argv if token in arg]
     assert run[-1] == mh.MATRIX_IMAGE and "@sha256:" in mh.MATRIX_IMAGE
     # The loopback proxy points at the container.
     service = (
@@ -412,7 +421,7 @@ def test_a_stopped_container_is_not_running(monkeypatch):
 def test_the_push_command_joins_the_sidecar_network_without_a_fixed_address():
     from dreamference.chat.sidecar_network import SIDECAR_NETWORK
 
-    argv = MatrixHomeserver.run_command("n.ts.net", "tok", push=True)
+    argv = MatrixHomeserver.run_command("n.ts.net", push=True)
     assert argv[argv.index("--network") + 1] == SIDECAR_NETWORK and "--ip" not in argv
     assert "TUWUNEL_ALLOW_FEDERATION=false" in argv
 
@@ -491,10 +500,10 @@ def test_start_stops_when_the_internal_network_cannot_be_created(machine, monkey
 def test_start_reports_why_the_container_did_not_start(machine, monkeypatch, capsys):
     real = machine.run
 
-    def run(argv, timeout=120):
+    def run(argv, timeout=120, env=None):
         if argv[:2] == ["docker", "run"]:
             return subprocess.CompletedProcess(argv, 125, "", "no space left on device")
-        return real(argv, timeout)
+        return real(argv, timeout, env)
 
     machine.run = run
     assert MatrixHomeserver.start() == 1
@@ -535,10 +544,10 @@ def test_start_makes_a_new_bot_when_the_stored_token_no_longer_works(machine):
 def test_start_warns_but_succeeds_when_tailscale_serve_is_refused(machine, capsys):
     real = machine.run
 
-    def run(argv, timeout=120):
+    def run(argv, timeout=120, env=None):
         if argv[:2] == ["tailscale", "serve"]:
             return subprocess.CompletedProcess(argv, 1, "", "HTTPS not enabled")
-        return real(argv, timeout)
+        return real(argv, timeout, env)
 
     machine.run = run
     assert MatrixHomeserver.start() == 0
