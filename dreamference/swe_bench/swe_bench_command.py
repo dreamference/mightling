@@ -9,6 +9,7 @@ import json
 import shutil
 import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -223,6 +224,25 @@ class SweBenchCommand:
         )
 
     @classmethod
+    def clock(cls, text: str) -> str:
+        """Checks a `--until` value, so a wrong one is a usage error rather than a traceback mid-run.
+
+        Args:
+            text: The value given.
+
+        Returns:
+            str: The value, unchanged.
+
+        Raises:
+            argparse.ArgumentTypeError: When it is not a time of day `HH:MM`.
+        """
+        try:
+            datetime.strptime(text, "%H:%M")
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"{text!r} is not a time of day HH:MM") from None
+        return text
+
+    @classmethod
     def add_parser(cls, subparsers: Any) -> None:
         """Registers `swe-bench` and its subcommands.
 
@@ -366,7 +386,9 @@ class SweBenchCommand:
             + HOOK_SETS["issue-v1"]
             + ". Independent of --task-rules, which only asks",
         )
-        run.add_argument("--until", default=None, help="HH:MM after which no new instance starts")
+        run.add_argument(
+            "--until", type=cls.clock, default=None, help="HH:MM after which no new instance starts"
+        )
         run.add_argument(
             "--idle-minutes",
             type=float,

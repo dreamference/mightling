@@ -2320,6 +2320,9 @@ def test_the_command_line_parses_every_subcommand():
         args.eval,
         args.until,
     ) == ("run", "a,b", 3, "x", True, "07:00")
+    for wrong in ("7", "25:00", "07:60", "seven"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["swe-bench", "run", "--until", wrong])
     for words in (
         ["setup", "--validate", "--limit", "5"],
         ["smoke"],
