@@ -168,13 +168,13 @@ Resolved before every command and every model request. First match wins:
 4. **`DEFAULT_MIGHTLING_AIRGAPPED`**, `"off"`.
 
 - **`/airgapped default <level>` always writes the user-level file,** with `toml_edit`, creating it if needed. If the repository's file or the environment variable would still give a different result, it says which and why.
-- **An invalid value** at any tier is skipped; `/airgapped` names it and where it was.
-- **The Python side** mirrors tiers 2–4. `DreamferenceConfig.mightling_airgapped` is the setting as one configuration file holds it, validated against the three names and written by `save_config()` only when it differs from the default; `DreamferenceConfig.resolve_airgapped_level(cwd)` is the resolver for anything that acts on the level, and takes the stricter of the two files as tier 3 does.
+- **What cannot be read counts as `on`** (since 1.8.1, §6.5): an invalid value at any tier, a file that exists but cannot be read, and a configuration file that is not TOML the resolver can follow. `/airgapped` names each and where it was. A file that does not exist is not a tier.
+- **Every other component asks this resolver** (§6.5): Python and the desktop app run `ling airgapped --json`. `DreamferenceConfig.mightling_airgapped` stays the setting as one configuration file holds it, written by `save_config()` only when it differs from the default; it decides nothing.
 - **Session files** older than 30 days are deleted by the launcher at start, as cave mode's are.
 
 ### 6.2 How the web commands learn the level
 
-`ling-search` and `ling-fetch` run inside the command sandbox, as children of the agent's shell. They resolve the level by the same four tiers, finding the session file through `CODEX_SESSION_ID` and `$CODEX_HOME` (default `~/.mightling`), both of which the sandbox can read and not write. The resolution is a small module in `ling-web-rs/` with the same unit tests as the launcher's, since the two crates share no code.
+`ling-search` and `ling-fetch` run inside the command sandbox, as children of the agent's shell. They resolve the level by the same four tiers, finding the session file through `CODEX_SESSION_ID` and `$CODEX_HOME` (default `~/.mightling`), both of which the sandbox can read and not write. Since 1.8.1 they link the resolver crate itself (`ling-airgapped = { path = "../ling-rs/airgapped" }`, §6.5); until then `ling-web-rs/` carried a byte-identical copy.
 
 **A second signal: the sandbox's own.** Codex sets `CODEX_SANDBOX_NETWORK_DISABLED=1` for a command it runs without a network. That happens at `on` under the read-only sandbox, and below `on` only where the user switched the sandbox's network off (§14.11; until 2026-10-22, at any level under a read-only sandbox). When either web command sees the variable it sends nothing and prints no restart hint, and the message depends on the level it resolved:
 - **`on`:** the message of §4.
@@ -202,6 +202,39 @@ Modelled on `0017-cave-mode` (removed 2026-10-28) and `0018-night-slash-command`
 - `codex-rs/core`: the one-line hook of §5.1, and one path dependency in its manifest: `ling-launcher`, or the leaf crate `ling-airgapped` if Phase 0 finds a cycle.
 
 **Budget.** When `0019` was designed, the series stood at 26,933 bytes under a 27,500-byte cap (`test_the_patches_stay_small`; the cap is 64,000 bytes today). `0018` cost 2,133 bytes for the slash command alone; the two `install` lines and the core hook add about 1.2 KB, so `0019` was estimated at 3.3 KB and the series at about 30.2 KB. The cap was raised in the same commit, explicitly, to the measured size rounded up to the next 500 bytes, as cave mode and `/night` did.
+
+### 6.5 One reader (1.8.1)
+
+The owner's decision of 2026-10-29: one reader, the Rust resolver asked through `ling airgapped`, and everything else fails closed when it cannot get an answer. Before 1.8.1 the level had six readers besides the crate (the docs index's own TOML reader, four in Python, the desktop app's parse of the status line), with different tiers, and several gave `off` when they could not read a file.
+
+**The reader is the crate `ling-rs/airgapped/`.** Every Rust component links it: the launcher, Codex's sandbox helper (patch `0019`), `ling web` and the app server's policy, the apps, the messenger bridges, `ling sync`, `ling-search` and `ling-fetch`, and `ling-docs`. The web and docs crates, built outside the Codex workspace with their own lockfiles, take it as a path dependency (`ling-airgapped = { path = "../ling-rs/airgapped" }`, as `ling-code-rs` takes `ling-safegit`). The byte-identical copy in `ling-web-rs/src/airgapped.rs` is gone; in its place a test checks that both crates name the path dependency and carry no resolver of their own, and that `CodexBrandedBuilder.crate_key` covers a crate's path dependencies, so a change to the resolver rebuilds `ling-search`, `ling-fetch` and `ling-docs`.
+
+**Everything else asks `ling airgapped --json`.** The answer is one line of JSON:
+
+```json
+{"level":"on","tier":"config","source":"mightling_airgapped in /repo/dreamference.toml","invalid":[]}
+```
+
+`tier` is `session`, `sealed`, `environment`, `config` or `default`; `source` is the label the status line shows; `invalid` names what was taken as `on` or passed over. Options: `--thread <id>` (a session's file and seal, as the text form), `--cwd <dir>` (the repository whose `dreamference.toml` is read, without changing folder) and `--sealed-by <pid>` (also `on` when a seal written by process `pid` holds its session, for an MCP server whose parent runs the session and which knows no thread id). `ling airgapped` is answered before the launcher looks for a model server or a node, so it needs neither and sends no multicast query. The text form is unchanged.
+
+**What cannot be read counts as `on`:**
+
+| At a tier that is consulted | Before 1.8.1 | Since |
+| --- | --- | --- |
+| A value that is not a level (`duckduckgo`, `nope`, an empty session file or `mightling_airgapped = ""`) | skipped, named | `on`, named |
+| A file that exists but cannot be read (permissions, not UTF-8) | skipped silently | `on`, named |
+| A configuration file the resolver cannot follow as TOML up to the key or the first table header (YAML, JSON, broken TOML) | read line by line | `on`, named |
+| A file that does not exist; an empty `DREAMFERENCE_MIGHTLING_AIRGAPPED` | not a tier | not a tier |
+
+Tiers keep their order and first match wins; among the configuration files the strictest wins, so one unreadable file is enough for `on`. A seal still holds `on` (§5.3). The resolver still reads a configuration file only up to the key or the first table header: a fault after that is not seen, because a TOML parser stays out of the sandbox helper.
+
+**Callers fail closed.** `AirgappedResolver` (`dreamference/config/airgapped_resolver.py`) is the Python side: it runs the built `ling` (`CodexBrandedBuilder.executable_path()`, or the binary it is given) with a five-second timeout and returns `on` when there is no binary, the command fails or times out, or the answer is not the JSON above. `DreamferenceConfig.resolve_airgapped_level`, the MCP server's web tools, the forge's mirrors, the image search MCP and Night Shift ask through it; the desktop app (`desktop/electron/src/airgapped.ts`) asks the same command and shows and enforces `on` when it gets no answer.
+
+- **Night Shift** asks twice, with `--cwd` at the task's worktree and at the main checkout, the session's id in `--thread`, and takes the stricter, as it read both files before.
+- **Dropped:** the forge read `mightling_airgapped` from `~/.mightling/config.toml` as well; nothing writes the key there (`/airgapped default` writes the user-level file), so that read is gone.
+- **A YAML or JSON file named by `DREAMFERENCE_CONFIG_PATH`** now gives `on`: the resolver reads TOML only. Point the variable at a TOML file, or set the level in the user-level file.
+
+**The conformance cases** are `ling-rs/airgapped/cases.json`, two kinds. `resolve` cases give the tiers as read (a session file's text or that it could not be read, the environment, each configuration file's text or that it could not be read, whether a seal holds the session and whether the level files are exposed) and the expected level, tier and number of notes; the crate's tests run them. `answer` cases give what `ling airgapped --json` printed (or that it printed nothing, failed or timed out) and the level a caller must act on; `tests/test_airgapped.py` runs them against `AirgappedResolver` and `desktop/electron/src/airgapped.test.ts` against the app's reader. A new reader passes both kinds or is not added.
 
 ---
 

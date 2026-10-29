@@ -1,0 +1,556 @@
+{
+ "about": "The air-gap level's conformance cases (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §6.5). `resolve`: the tiers as read and what the resolver decides, run by this crate's tests. `answer`: what `ling airgapped --json` printed (`stdout` null: it could not be run; `timeout`: it did not finish) and the level a caller acts on, run by tests/test_airgapped.py and desktop/electron/src/airgapped.test.ts.",
+ "resolve": [
+  {
+   "name": "nothing set is off",
+   "configs": [],
+   "expect": {
+    "level": "off",
+    "tier": "default",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a session file decides first",
+   "session": {
+    "text": "on\n"
+   },
+   "environment": "off",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "session",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a session at off wins over an environment at on",
+   "session": {
+    "text": "off\n"
+   },
+   "environment": "on",
+   "configs": [],
+   "expect": {
+    "level": "off",
+    "tier": "session",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a session file that is not a level is on",
+   "session": {
+    "text": "duckduckgo\n"
+   },
+   "environment": "off",
+   "configs": [],
+   "expect": {
+    "level": "on",
+    "tier": "session",
+    "notes": 1
+   }
+  },
+  {
+   "name": "an empty session file is on",
+   "session": {
+    "text": ""
+   },
+   "environment": "off",
+   "configs": [],
+   "expect": {
+    "level": "on",
+    "tier": "session",
+    "notes": 1
+   }
+  },
+  {
+   "name": "a session file that cannot be read is on",
+   "session": {
+    "unreadable": "permission denied"
+   },
+   "environment": "off",
+   "configs": [],
+   "expect": {
+    "level": "on",
+    "tier": "session",
+    "notes": 1
+   }
+  },
+  {
+   "name": "the environment decides before the files",
+   "environment": " Off ",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "mightling_airgapped = \"on\"\n"
+    }
+   ],
+   "expect": {
+    "level": "off",
+    "tier": "environment",
+    "notes": 0
+   }
+  },
+  {
+   "name": "an environment value that is not a level is on",
+   "environment": "nope",
+   "configs": [],
+   "expect": {
+    "level": "on",
+    "tier": "environment",
+    "notes": 1
+   }
+  },
+  {
+   "name": "true in the environment is not a level",
+   "environment": "true",
+   "configs": [],
+   "expect": {
+    "level": "on",
+    "tier": "environment",
+    "notes": 1
+   }
+  },
+  {
+   "name": "an empty environment variable is not a tier",
+   "environment": "",
+   "configs": [
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    }
+   ],
+   "expect": {
+    "level": "off",
+    "tier": "config",
+    "path": "user/config.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "the user's on beats the repository's off",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    },
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"on\"\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "user/config.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "the repository's on beats the user's off",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "mightling_airgapped = \"on\"\n"
+    },
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "two files at off name the first",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    },
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    }
+   ],
+   "expect": {
+    "level": "off",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a TOML boolean true is on",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "mightling_airgapped = true\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a TOML boolean false is off",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "mightling_airgapped = false\n"
+    }
+   ],
+   "expect": {
+    "level": "off",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a retired level in a file is on",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "mightling_airgapped = \"duckduckgo\"\n"
+    },
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 1
+   }
+  },
+  {
+   "name": "an empty value in a file is on",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "mightling_airgapped = \"\"\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 1
+   }
+  },
+  {
+   "name": "the key inside a table is not the setting",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "model = \"x\"\n[night]\nmightling_airgapped = \"on\"\n"
+    }
+   ],
+   "expect": {
+    "level": "off",
+    "tier": "default",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a file without the key is not a tier",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "model = \"x\"\n"
+    },
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    }
+   ],
+   "expect": {
+    "level": "off",
+    "tier": "config",
+    "path": "user/config.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a byte order mark is skipped",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "﻿mightling_airgapped = \"off\"\n"
+    }
+   ],
+   "expect": {
+    "level": "off",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a YAML file is on",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "model: x\nmightling_airgapped: off\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 1
+   }
+  },
+  {
+   "name": "a JSON file is on",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "{\"mightling_airgapped\": \"off\"}\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 1
+   }
+  },
+  {
+   "name": "broken TOML before the key is on",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "model = \"x\nmightling_airgapped = \"off\"\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 1
+   }
+  },
+  {
+   "name": "a plain key line after broken TOML is still on",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "model = = 1\nmightling_airgapped = \"off\"\n"
+    },
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 1
+   }
+  },
+  {
+   "name": "a configuration file that cannot be read is on",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "unreadable": "stream did not contain valid UTF-8"
+    },
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 1
+   }
+  },
+  {
+   "name": "a fault after the first table is not seen",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "text": "mightling_airgapped = \"off\"\n[night\n"
+    }
+   ],
+   "expect": {
+    "level": "off",
+    "tier": "config",
+    "path": "repo/dreamference.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "files are not read when the environment decides",
+   "environment": "off",
+   "configs": [
+    {
+     "path": "repo/dreamference.toml",
+     "unreadable": "permission denied"
+    }
+   ],
+   "expect": {
+    "level": "off",
+    "tier": "environment",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a seal holds on over an environment at off",
+   "environment": "off",
+   "configs": [],
+   "sealed": true,
+   "expect": {
+    "level": "on",
+    "tier": "sealed",
+    "notes": 1
+   }
+  },
+  {
+   "name": "a seal holds on with nothing set",
+   "configs": [],
+   "sealed": true,
+   "expect": {
+    "level": "on",
+    "tier": "sealed",
+    "notes": 1
+   }
+  },
+  {
+   "name": "an exposed session file may not loosen the files",
+   "session": {
+    "text": "off\n"
+   },
+   "configs": [
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"on\"\n"
+    }
+   ],
+   "exposed": true,
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "user/config.toml",
+    "notes": 1
+   }
+  },
+  {
+   "name": "an exposed session file may tighten them",
+   "session": {
+    "text": "on\n"
+   },
+   "configs": [
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"off\"\n"
+    }
+   ],
+   "exposed": true,
+   "expect": {
+    "level": "on",
+    "tier": "session",
+    "notes": 0
+   }
+  }
+ ],
+ "answer": [
+  {
+   "name": "off is off",
+   "stdout": "{\"level\":\"off\",\"tier\":\"default\",\"source\":\"default\",\"invalid\":[]}\n",
+   "status": 0,
+   "expect": "off"
+  },
+  {
+   "name": "on is on",
+   "stdout": "{\"level\":\"on\",\"tier\":\"config\",\"source\":\"mightling_airgapped in user/config.toml\",\"invalid\":[]}\n",
+   "status": 0,
+   "expect": "on"
+  },
+  {
+   "name": "notes do not change the level",
+   "stdout": "{\"level\":\"off\",\"tier\":\"environment\",\"source\":\"DREAMFERENCE_MIGHTLING_AIRGAPPED\",\"invalid\":[\"a note\"]}\n",
+   "status": 0,
+   "expect": "off"
+  },
+  {
+   "name": "no binary is on",
+   "stdout": null,
+   "status": null,
+   "expect": "on"
+  },
+  {
+   "name": "a timeout is on",
+   "stdout": null,
+   "status": null,
+   "timeout": true,
+   "expect": "on"
+  },
+  {
+   "name": "a failed command is on",
+   "stdout": "{\"level\":\"off\",\"tier\":\"default\",\"source\":\"default\",\"invalid\":[]}\n",
+   "status": 1,
+   "expect": "on"
+  },
+  {
+   "name": "the text form is not an answer",
+   "stdout": "Airgapped: off (default)\n",
+   "status": 0,
+   "expect": "on"
+  },
+  {
+   "name": "an empty answer is on",
+   "stdout": "",
+   "status": 0,
+   "expect": "on"
+  },
+  {
+   "name": "a level that is not one is on",
+   "stdout": "{\"level\":\"duckduckgo\",\"tier\":\"default\",\"source\":\"default\",\"invalid\":[]}\n",
+   "status": 0,
+   "expect": "on"
+  },
+  {
+   "name": "a level in capitals is not an answer",
+   "stdout": "{\"level\":\"OFF\",\"tier\":\"default\",\"source\":\"default\",\"invalid\":[]}\n",
+   "status": 0,
+   "expect": "on"
+  },
+  {
+   "name": "an answer without a level is on",
+   "stdout": "{\"tier\":\"default\",\"source\":\"default\",\"invalid\":[]}\n",
+   "status": 0,
+   "expect": "on"
+  },
+  {
+   "name": "a JSON value that is not an object is on",
+   "stdout": "[\"off\"]\n",
+   "status": 0,
+   "expect": "on"
+  },
+  {
+   "name": "trailing text after the answer is on",
+   "stdout": "{\"level\":\"off\",\"tier\":\"default\",\"source\":\"default\",\"invalid\":[]}\ngarbage\n",
+   "status": 0,
+   "expect": "on"
+  }
+ ]
+}
