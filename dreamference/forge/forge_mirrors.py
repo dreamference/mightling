@@ -165,7 +165,19 @@ class ForgeMirrors:
             return 1
         lines = cls.apply(plan)
         print("\n".join(lines))
-        return 0 if all(line.endswith(("mirrored", "mirror created")) for line in lines) else 1
+        return 0 if cls.took(lines) else 1
+
+    @staticmethod
+    def took(lines: list[str]) -> bool:
+        """Tell whether `apply` mirrored every repository.
+
+        Args:
+            lines: What `apply` answered.
+
+        Returns:
+            bool: True when every line says the repository is mirrored.
+        """
+        return all(line.endswith(("mirrored", "mirror created")) for line in lines)
 
     @classmethod
     def fetch_plan(cls) -> dict[str, Any] | None:
@@ -213,7 +225,9 @@ class ForgeMirrors:
         code = 0
         if ForgeSettings.role() == ROLE_MIRROR:
             lines = cls.apply(plan)
-            if not quiet:
+            if not cls.took(lines):
+                code = 1
+            if not quiet or code:
                 print("\n".join(f"   here: {line}" for line in lines))
         for record in NodePairing.paired():
             if record["node"] == plan["record_node"]:

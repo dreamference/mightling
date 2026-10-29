@@ -217,6 +217,10 @@ class ForgeBackup:
                 timeout=7200,
                 check=False,
             )
+        except subprocess.TimeoutExpired:
+            # ssh is killed by now; the set counts as not sent, so the nightly status says so.
+            print(f"⚠️  {record.get('name')} did not store the backup in time.")
+            return False
         finally:
             if packer.stdout:
                 packer.stdout.close()

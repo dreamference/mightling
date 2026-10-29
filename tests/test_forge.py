@@ -119,6 +119,38 @@ def test_the_switch_defaults_on_and_is_kept_in_the_nodes_config(monkeypatch):
     assert not ForgeSettings.enabled()
 
 
+def test_the_switch_finds_a_forge_table_written_with_spaces_or_a_comment(monkeypatch):
+    monkeypatch.delenv("DREAMFERENCE_FORGE", raising=False)
+    ForgeSettings.config_path().parent.mkdir(parents=True, exist_ok=True)
+    for header in ("[forge]  # the switch", "[ forge ]"):
+        ForgeSettings.config_path().write_text(f"{header}\nenabled = true\n")
+        ForgeSettings.set_enabled(False)
+        assert not ForgeSettings.enabled(), header
+        assert ForgeSettings.config_path().read_text().count("forge") == 1, header
+
+
+def test_a_stray_line_in_app_ini_does_not_cost_the_secrets(tmp_path):
+    # New secrets would leave every sealed field (tokens, 2FA, mirror credentials) unreadable.
+    path = ForgeAppIni.write(tmp_path, "gx10-1a2b", "record")
+    secrets = ForgeAppIni.read_secrets(tmp_path)
+    path.write_text(path.read_text() + "a line a hand edit left without an equals sign\n")
+    ForgeAppIni.write(tmp_path, "gx10-1a2b", "record")
+    assert ForgeAppIni.read_secrets(tmp_path) == secrets
+
+
+def test_a_forge_systemd_would_not_stop_is_not_reported_off(monkeypatch, capsys):
+    # The container would still be published on the LAN.
+    monkeypatch.setattr(
+        ForgeService,
+        "systemctl",
+        classmethod(lambda cls, *a: subprocess.CompletedProcess(a, 1, "", "Job timed out")),
+    )
+    monkeypatch.setattr(ForgeService, "advertise", classmethod(lambda cls, role: None))
+    assert ForgeService.off() == 1
+    out = capsys.readouterr().out
+    assert "✅" not in out and "Job timed out" in out
+
+
 def test_secrets_are_private_and_the_role_is_kept():
     path = ForgeSettings.write_secret("owner-password", "x" * 24)
     assert oct(path.stat().st_mode & 0o777) == "0o600"
@@ -701,6 +733,20 @@ def test_a_boolean_or_a_byte_order_mark_still_reads_as_airgapped():
     assert not ForgeGithubMirror.airgapped()
 
 
+@pytest.mark.parametrize("where", ["user default", "environment"])
+def test_the_airgapped_default_set_by_the_command_stops_the_mirror(monkeypatch, where):
+    """`/airgapped default on` writes the user-level file the resolver reads, not Codex's."""
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_CONFIG_PATH", raising=False)
+    if where == "environment":
+        monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
+    else:
+        user = Path("~/.config/dreamference/config.toml").expanduser()
+        user.parent.mkdir(parents=True, exist_ok=True)
+        user.write_text('mightling_airgapped = "on"\n')
+    assert ForgeGithubMirror.airgapped()
+
+
 # -- the phone account (§2.7) ------------------------------------------------------------------------
 
 
@@ -828,6 +874,22 @@ def test_a_mirror_node_pulls_each_shared_repository_with_the_read_token(monkeypa
     ForgeSettings.update_state(role="record")
     assert ForgeMirrors.apply({"record_node": "x", "repositories": []})[0].startswith("refused")
     assert ForgeMirrors.serve_apply("not json") == 2
+
+
+def test_a_sync_whose_own_mirrors_failed_says_so(monkeypatch, capsys):
+    from dreamference.node.node_pairing import NodePairing
+
+    ForgeSettings.update_state(role="mirror")
+    plan = {"record_node": "rec-1", "repositories": ["dreamference/mightling"]}
+    monkeypatch.setattr(ForgeMirrors, "fetch_plan", classmethod(lambda cls: plan))
+    monkeypatch.setattr(NodePairing, "paired", classmethod(lambda cls: []))
+    monkeypatch.setattr(
+        ForgeMirrors,
+        "apply",
+        classmethod(lambda cls, p: ["dreamference/mightling: not mirrored (HTTP 500: boom)"]),
+    )
+    assert ForgeMirrors.sync(quiet=True) == 1
+    assert "not mirrored (HTTP 500: boom)" in capsys.readouterr().out
 
 
 def test_the_forced_command_takes_only_the_forges_operations(monkeypatch):

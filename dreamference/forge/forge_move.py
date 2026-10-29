@@ -18,7 +18,9 @@ record. `promote <node>` restores the newest set that node holds and makes it th
 after that set are lost from the forge, not from the agents' worktrees, which push again.
 """
 
+import calendar
 import json
+import re
 import shutil
 import sys
 import time
@@ -365,13 +367,17 @@ class ForgeMove:
         root = ForgeBackup.received_dir()
         root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryFile(dir=root) as spool:
-            result = subprocess.run(
-                command,
-                stdout=spool,
-                stderr=subprocess.PIPE,
-                timeout=HAND_OVER_TIMEOUT_S,
-                check=False,
-            )
+            try:
+                result = subprocess.run(
+                    command,
+                    stdout=spool,
+                    stderr=subprocess.PIPE,
+                    timeout=HAND_OVER_TIMEOUT_S,
+                    check=False,
+                )
+            except (subprocess.TimeoutExpired, OSError) as error:
+                print(f"❌ The record did not hand a set over: {error}")
+                return None
             if result.returncode != 0:
                 print(
                     f"❌ The record did not hand a set over: {result.stderr.decode(errors='replace')[-300:]}"
@@ -412,7 +418,10 @@ class ForgeMove:
             stdout=sys.stdout.buffer,
             check=False,
         )
-        return 0 if packed.returncode == 0 else 1
+        if packed.returncode != 0:
+            cls.freeze(False)
+            return 1
+        return 0
 
     @classmethod
     def serve_become_mirror(cls, node_id: str, name: str) -> int:
@@ -515,7 +524,13 @@ class ForgeMove:
         """
         removed = []
         for folder in cls.old_data():
-            if time.time() - folder.stat().st_mtime > days * 86400:
+            # A rename keeps the folder's own time, so the stamp in its name says when it went aside.
+            stamp = re.search(r"(\d{8}-\d{6})$", folder.name)
+            try:
+                aside = calendar.timegm(time.strptime(stamp[1], "%Y%m%d-%H%M%S")) if stamp else None
+            except ValueError:
+                aside = None
+            if time.time() - (aside or folder.stat().st_mtime) > days * 86400:
                 shutil.rmtree(folder, ignore_errors=True)
                 removed.append(folder.name)
         return removed

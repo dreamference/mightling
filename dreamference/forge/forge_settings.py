@@ -195,7 +195,8 @@ class ForgeSettings:
                 if in_forge and not written:
                     out.append(f"enabled = {value}")
                     written = True
-                in_forge = stripped == FORGE_TABLE
+                # `[ forge ]` and `[forge]  # a comment` are the same table to TOML.
+                in_forge = "".join(stripped.split("#", 1)[0].split()) == FORGE_TABLE
             elif in_forge and stripped.split("=", 1)[0].strip() == ENABLED_KEY:
                 if not written:
                     out.append(f"enabled = {value}")

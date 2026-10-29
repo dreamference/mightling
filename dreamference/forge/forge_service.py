@@ -338,11 +338,14 @@ class ForgeService:
         """Stop the units and remove the advertisement, keeping the data (`forge off`).
 
         Returns:
-            int: 0.
+            int: 0, or 1 when systemd did not stop them.
         """
         ForgeSettings.set_enabled(False)
-        cls.systemctl("disable", "--now", UNIT, *TIMERS)
+        stopped = cls.systemctl("disable", "--now", UNIT, *TIMERS)
         cls.advertise(None)
+        if stopped.returncode != 0:
+            print(f"❌ systemd did not stop the forge: {(stopped.stderr or '').strip()[-300:]}")
+            return 1
         print(
             f"✅ The forge is off; its data stays in {ForgeSettings.share_dir()}. "
             "`ling-admin forge on` brings it back."

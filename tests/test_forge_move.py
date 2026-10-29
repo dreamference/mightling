@@ -90,6 +90,16 @@ def test_a_hand_over_whose_set_is_not_taken_unfreezes(monkeypatch):
     assert not ForgeMove.frozen_flag().exists()
 
 
+def test_a_hand_over_whose_stream_fails_unfreezes(monkeypatch, tmp_path):
+    ForgeSettings.update_state(role=ROLE_RECORD)
+    monkeypatch.setattr(ForgeBackup, "take", classmethod(lambda cls: tmp_path / NAME))
+    monkeypatch.setattr(
+        subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 2)
+    )
+    assert ForgeMove.serve_hand_over() == 1
+    assert not ForgeMove.frozen_flag().exists()
+
+
 # -- moving the role away --------------------------------------------------------------------------
 
 
@@ -245,6 +255,21 @@ def test_a_hand_over_the_record_refuses_brings_nothing(monkeypatch, capsys):
     assert "did not hand a set over: this node is not the forge" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    "failure", [subprocess.TimeoutExpired(["ssh"], 7200), FileNotFoundError("ssh")]
+)
+def test_a_hand_over_that_never_finishes_brings_nothing(failure, monkeypatch, capsys):
+    # pull_here unfreezes the record only when this returns; an escaping error left it frozen.
+    hand_over_answer(monkeypatch, b"")
+
+    def ssh(command, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", ssh)
+    assert ForgeMove.receive_hand_over(TARGET) is None
+    assert "did not hand a set over" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("data", [b"not a tar stream" * 40, b""])
 def test_a_hand_over_answer_that_is_not_a_set_brings_nothing(data, monkeypatch, capsys):
     hand_over_answer(monkeypatch, data)
@@ -269,7 +294,8 @@ def test_a_hand_over_named_outside_the_set_names_is_not_kept(monkeypatch):
 
 def test_set_aside_data_is_removed_only_after_the_back_window():
     parent = ForgeSettings.data_dir().parent
-    old, recent = parent / "data.record-20260901-000000", parent / "data.before-20261028-000000"
+    old = parent / "data.record-20200901-000000"
+    recent = parent / f"data.before-{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}"
     for folder in (old, recent):
         (folder / "git").mkdir(parents=True)
     (parent / "data.notes").write_text("a file, not a data folder")
@@ -277,3 +303,15 @@ def test_set_aside_data_is_removed_only_after_the_back_window():
     os.utime(old, (month_ago, month_ago))
     assert ForgeMove.prune_old_data() == [old.name]
     assert not old.exists() and recent.is_dir() and (parent / "data.notes").exists()
+
+
+def test_data_set_aside_today_is_kept_although_the_folder_itself_is_old():
+    # A rename keeps the folder's own time, which is when a file last went into it (set-up time).
+    parent = ForgeSettings.data_dir().parent
+    today = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    aside = parent / f"data.record-{today}"
+    (aside / "git").mkdir(parents=True)
+    months_ago = time.time() - 120 * 86400
+    os.utime(aside, (months_ago, months_ago))
+    assert ForgeMove.prune_old_data() == []
+    assert aside.is_dir()
