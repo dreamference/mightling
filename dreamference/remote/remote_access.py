@@ -56,6 +56,7 @@ from dreamference.remote.remote_tunnel import RemoteTunnel
 STORE_KEY_BYTES = 32
 RENEW_DAYS = 30
 ACTIVE = "active"
+ABSENT = "absent"
 WITHDRAWN = "withdrawn"
 SECRET_BYTES = 32
 DOT = "."
@@ -502,7 +503,25 @@ class RemoteAccess:
         if not needs_setup:
             token = RemoteSettings.read_private("admin-token")
             return (RemoteControlPlane.renew_token(dns_name, token) or token) if token else None
-        # The one start that may hand out an owner's token, on loopback, before the tunnel exists.
+        return cls._bootstrap_token(dns_name, node_id)
+
+    @classmethod
+    def _bootstrap_token(cls, dns_name: str, node_id: str) -> str | None:
+        """Makes the owner and the token, on the one start that allows `/api/setup` to give one.
+
+        That start is on loopback with no tunnel: a store lost while the tunnel kept running would
+        otherwise offer `/api/setup` to anyone through the box. `_stage_tunnel` starts it again.
+
+        Args:
+            dns_name: The box's public DNS name.
+            node_id: The node's id.
+
+        Returns:
+            str | None: The token, or None (the reason printed).
+        """
+        if RemoteTunnel.state() != ABSENT and not RemoteTunnel.stop():
+            print("❌ The control plane needs its owner made again, and the tunnel would not stop.")
+            return None
         if (
             not RemoteControlPlane.start(setup_pat=True)
             or RemoteControlPlane.wait_ready(dns_name) is None

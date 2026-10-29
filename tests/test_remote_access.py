@@ -291,6 +291,47 @@ def test_a_set_up_control_plane_never_starts_with_the_setup_token_allowed(seams,
     assert RemoteSettings.read_private("admin-token") == "nbp_new"
 
 
+def test_the_setup_token_start_waits_for_a_live_tunnel_to_stop(seams, monkeypatch):
+    # A store lost while the tunnel still runs: `/api/setup` must not be reachable through the box.
+    monkeypatch.setattr(RemoteTunnel, "state", classmethod(lambda cls: "active"))
+    monkeypatch.setattr(
+        RemoteTunnel, "stop", classmethod(lambda cls: seams.append(("tunnel-stop",)) or True)
+    )
+    assert RemoteAccess.setup(BOX, yes=True) == 0
+    order = [entry[0] if entry[0] != "start" else ("start", entry[1]) for entry in seams]
+    assert order.index("tunnel-stop") < order.index(("start", True)) < order.index("tunnel")
+
+
+def test_a_tunnel_that_will_not_stop_keeps_the_setup_token_off(seams, monkeypatch, capsys):
+    monkeypatch.setattr(RemoteTunnel, "state", classmethod(lambda cls: "active"))
+    monkeypatch.setattr(RemoteTunnel, "stop", classmethod(lambda cls: False))
+    assert RemoteAccess.setup(BOX, yes=True) != 0
+    assert ("start", True) not in seams
+    assert "the tunnel would not stop" in capsys.readouterr().out
+
+
+def test_a_set_up_control_plane_leaves_the_tunnel_running(seams, monkeypatch):
+    RemoteSettings.write_private("admin-token", "nbp_old\n")
+    monkeypatch.setattr(
+        RemoteControlPlane, "wait_ready", classmethod(lambda cls, d, seconds=120: False)
+    )
+    monkeypatch.setattr(
+        RemoteControlPlane, "renew_token", classmethod(lambda cls, d, t, user_id=None: "nbp_new")
+    )
+    monkeypatch.setattr(RemoteTunnel, "state", classmethod(lambda cls: "active"))
+    monkeypatch.setattr(RemoteTunnel, "stop", classmethod(lambda cls: pytest.fail("stopped")))
+    assert RemoteAccess.setup(BOX, yes=True) == 0
+
+
+def test_stop_stops_the_unit_and_keeps_it_enabled(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        RemoteTunnel, "_run", classmethod(lambda cls, argv: calls.append(argv) or _done(argv))
+    )
+    assert RemoteTunnel.stop()
+    assert calls == [["systemctl", "--user", "stop", "mightling-remote-tunnel.service"]]
+
+
 def test_a_setup_key_is_one_off_one_use_ten_minutes(monkeypatch):
     seen = {}
 
