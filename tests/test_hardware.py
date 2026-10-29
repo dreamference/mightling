@@ -119,8 +119,8 @@ def test_flexible_model_alias_resolution():
     aliases = [
         "qwen3.8-27b-nvfp4-dflash2",
         "RadixArk/Qwen3.8-27B-NVFP4",
-        "Qwen 3.8 27B (NVFP4 + DFlash2, SGLang)",
-        "qwen 3.8 27b (nvfp4 + dflash2, sglang)",
+        "Qwen 3.8 27B (NVFP4 + DFlash2, ling-serve)",
+        "qwen 3.8 27b (nvfp4 + dflash2, ling-serve)",
     ]
     for name in aliases:
         spec = ModelMatrixRegistry.get_spec(name)
@@ -182,7 +182,8 @@ def test_the_minima_candidate_differs_from_production_in_the_checkpoint_alone():
         DEFAULT_MODEL_ALIAS, ModelMatrixRegistry, QWEN38_LORA_RECIPE, QWEN38_SGLANG_RECIPE)
     key = "qwen3.8-27b-minima-nvfp4-dflash2"
     candidate = ModelMatrixRegistry.get_launch_overrides(key)
-    production = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS)
+    # Production's SGLang recipe (ling-serve is the default engine since 1.8.0; Minima runs SGLang).
+    production = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, "sglang")
     assert DEFAULT_MODEL_ALIAS == "qwen3.8-27b-nvfp4-dflash2"
     # Production adds only its adapters' settings, which Minima never takes: every one of its
     # layers is NVFP4, and LoRA on an NVFP4 layer crashed the probe's start under torch.compile.
@@ -410,7 +411,8 @@ def test_an_engine_asset_applies_only_to_its_engine_and_feature(monkeypatch):
     key, head = registry.DEFAULT_MODEL_ALIAS, registry.QWEN38_SPARSE_HEAD_ASSET["repo"]
     assert registry.ModelMatrixRegistry.get_engine_assets(key) == []
     assert head not in NodeModelSync.repos(key)
-    recipe = dict(registry.ModelMatrixRegistry.get_launch_overrides(key))
+    # The asset list lives in SGLang's recipe; each case below swaps only the engine and its features.
+    recipe = dict(registry.ModelMatrixRegistry.get_launch_overrides(key, "sglang"))
     cases = (("ling", [], False), ("ling", ["sparse-head"], True), ("sglang", ["sparse-head"], False))
     for engine, features, applies in cases:
         overrides = {**recipe, "engine": engine, "engine_features": features}

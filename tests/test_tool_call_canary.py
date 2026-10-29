@@ -55,6 +55,8 @@ def check(response, sent=None, **kwargs):
         if isinstance(response, Exception):
             raise response
         return response
+    # The hints these tests read name SGLang's flags; ling-serve (the default since 1.8.0) has its own.
+    kwargs.setdefault("engine", "sglang")
     return ToolCallCanary.run("http://127.0.0.1:8000/", SERVED, DEFAULT_MODEL_ALIAS, post=post, **kwargs)
 
 

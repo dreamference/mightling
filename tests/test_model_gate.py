@@ -750,8 +750,9 @@ def test_a_gate_that_cannot_start_leaves_the_engine_on_the_public_port(monkeypat
 def test_server_start_prepares_the_recipes_runtime_patch_before_the_engine(monkeypatch):
     mgr = VLLMServerManager()
     _, events = _quiet_start(monkeypatch, mgr, gate_starts=True)
-    mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False)
-    image = get_model_launch_overrides("qwen3.8-27b-nvfp4-dflash2")["docker_image"]
+    # SGLang's recipe carries runtime patches; ling-serve, the default since 1.8.0, carries none.
+    mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False, engine="sglang")
+    image = get_model_launch_overrides("qwen3.8-27b-nvfp4-dflash2", "sglang")["docker_image"]
     assert ("patch", image, 1) in events
     assert events.index(("patch", image, 1)) < events.index(("docker", "run"))
 
@@ -765,7 +766,7 @@ def test_a_runtime_patch_that_cannot_be_prepared_stops_the_start(monkeypatch):
         classmethod(lambda cls, image, patches: "1 anchor(s) of the patch to x.py no longer match"),
     )
     with pytest.raises(SystemExit) as stopped:
-        mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False)
+        mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False, engine="sglang")
     assert built == [] and ("docker", "run") not in events
     assert "❌ The recipe's SGLang runtime patch could not be prepared" in str(stopped.value.code)
     assert "no longer match" in str(stopped.value.code)
