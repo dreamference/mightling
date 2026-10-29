@@ -2022,7 +2022,7 @@ impl Context {
         if !self.submodules.is_empty() {
             lines.push("submodules: `ling-code submodules` shows the evidence; `include|exclude|auto <path>` changes it".to_string());
         }
-        if !crate::config::is_trusted(&self.repo.main_root) {
+        if indexing && !crate::config::is_trusted(&self.repo.main_root) {
             lines.push("untrusted: executing indexers (Rust, Java, .NET) do not run here; trust the project in ling to enable them".to_string());
         }
         lines
