@@ -498,6 +498,117 @@ def test_rank_thumbnails_are_downscaled_before_the_vision_call(tmp_path):
     assert sizes["bytes"] and all(b < len(big) / 4 for b in sizes["bytes"])
 
 
+class _RecordingFetcher(_Fetcher):
+    """Also records the size cap, the timeout and the exempted hosts of each fetch."""
+
+    def fetch(self, url, max_bytes, timeout, allow_hosts=frozenset(), **kwargs):
+        body = super().fetch(url, max_bytes, timeout, allow_hosts, **kwargs)
+        self.calls[-1].update(max_bytes=max_bytes, timeout=timeout)
+        return body
+
+
+def test_thumbnails_and_full_images_are_fetched_with_their_own_caps(tmp_path):
+    # IMAGE_SEARCH §2/§4: thumbnails 512 KB in 5 s and only they may reach the SearXNG host;
+    # full images 15 MB in 20 s with no exemption at all.
+    cand = _candidate(0)
+    table = {cand["thumb_url"]: _blocky_jpeg(0), cand["image_url"]: _blocky_jpeg(0, size=128)}
+    service, fetcher = _service(tmp_path, {"q": [cand]}, table, fetcher=_RecordingFetcher(table))
+    service.search(["q"])
+    by_url = {call["url"]: call for call in fetcher.calls}
+    assert by_url[cand["thumb_url"]] == {"url": cand["thumb_url"], "allow": {"searxng-host"},
+                                         "max_bytes": 512 * 1024, "timeout": 5.0}
+    assert by_url[cand["image_url"]] == {"url": cand["image_url"], "allow": set(),
+                                         "max_bytes": 15 * 1024 * 1024, "timeout": 20.0}
+
+
+@pytest.mark.parametrize("count, pool", [(1, 8), (4, 8), (10, 12)])
+def test_the_rank_pool_is_eight_or_the_count_plus_two(tmp_path, count, pool):
+    # IMAGE_SEARCH §2: SigLIP keeps max(8, count + 2) for the vision pass.
+    seen = {}
+
+    class _CountingRanker:
+        def rank(self, query, thumbnails):
+            seen["n"] = len(thumbnails)
+            return []
+
+    cands = [_candidate(i) for i in range(20)]
+    table = {c["thumb_url"]: _blocky_jpeg(100 + i) for i, c in enumerate(cands)}
+    service, _ = _service(tmp_path, {"q": cands}, table, ranker=_CountingRanker())
+    service.search(["q"], count=count)
+    assert seen["n"] == pool
+
+
+class _Future:
+    def __init__(self, url, run):
+        self.url, self.run = url, run
+        self.waited = self.cancelled = False
+
+    def result(self):
+        self.waited = True
+        return self.run()
+
+    def cancel(self):
+        self.cancelled = True
+        return True
+
+
+class _RecordingPool:
+    """Stands in for the worker pool: records each prefetch and when it was submitted."""
+
+    def __init__(self, events):
+        self.events = events
+        self.futures = []
+
+    def submit(self, fn, url):
+        self.events.append(("submit", url))
+        future = _Future(url, lambda: fn(url))
+        self.futures.append(future)
+        return future
+
+    def map(self, fn, items):
+        return map(fn, items)
+
+
+def test_full_images_are_prefetched_before_the_verdict_and_the_rest_cancelled(tmp_path):
+    # IMAGE_SEARCH §2: the prefetch of every fresh rank candidate starts before the vision
+    # call, a cached candidate prefetches nothing, and what the verdict drops is cancelled.
+    events = []
+
+    class _FirstOnly:
+        def rank(self, query, thumbnails):
+            events.append(("rank", len(thumbnails)))
+            return [0]
+
+    cached = _candidate("cached")
+    fresh = [_candidate(i) for i in range(3)]
+    table = {}
+    for i, cand in enumerate(fresh):
+        table[cand["thumb_url"]] = _blocky_jpeg(200 + i)
+        table[cand["image_url"]] = _blocky_jpeg(200 + i, size=128)
+    service, _ = _service(tmp_path, {"q": fresh + [cached]}, table, ranker=_FirstOnly())
+    service.store.persist(cached["image_url"], _blocky_jpeg(300), "cached one", 1)
+    pool = service._pool = _RecordingPool(events)
+
+    service.search(["q"])
+    submitted = [url for kind, url in events if kind == "submit"]
+    assert sorted(submitted) == sorted(c["image_url"] for c in fresh)
+    assert events.index(("rank", 4)) == len(submitted), "every prefetch starts before the verdict"
+    waited = [f for f in pool.futures if f.waited]
+    assert len(waited) <= 1
+    assert all(f.cancelled != f.waited for f in pool.futures), "each prefetch is used or cancelled"
+
+
+def test_the_spec_limits(tmp_path):
+    # IMAGE_SEARCH §2, §3: pool, pHash, redirect and garbage-collection limits.
+    from dreamference.chat import image_search_service as svc
+
+    assert (svc.CANDIDATE_POOL_SIZE, svc.RANK_CANDIDATES, svc.RESULT_COUNT, svc.MAX_RESULT_COUNT) == (30, 8, 4, 10)
+    assert svc.PHASH_HAMMING_MAX == 8 and svc.REDIRECT_CAP == 3
+    assert svc.GC_INTERVAL_SECONDS == 3600 and svc.GC_MAX_AGE_SECONDS == 7 * 24 * 3600
+    assert svc.GC_MAX_VOLUME_BYTES == 2 * 1024 ** 3
+    assert svc.SERVICE_PORT == 8768 and svc.AUTH_HEADER == "X-Mightling-Image-Token"
+
+
 # --- Downloader refusals -------------------------------------------------------------------
 
 
