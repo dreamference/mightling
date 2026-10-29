@@ -67,6 +67,11 @@ def test_a_repository_with_the_check_off_has_no_patterns_even_with_a_denylist():
     assert ForgeAnonymity.patterns("denylist", None) == []
 
 
+def test_a_denylist_entry_with_its_own_flags_still_checks_in_python():
+    patterns = ForgeAnonymity.denylist_patterns("(?i)node-q")
+    assert ForgeAnonymity.findings("pushed from NODE-Q today", patterns) == ["1: pattern #1"]
+
+
 def test_a_node_without_a_denylist_reads_none():
     assert ForgeAnonymity.read_denylist() is None
 

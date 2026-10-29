@@ -88,6 +88,11 @@ class ForgeAnonymity:
             entry = line.strip()
             if not entry or entry.startswith("#"):
                 continue
+            # Flags at an entry's start would land mid-pattern once wrapped, which Python refuses
+            # (and PCRE takes), so they become flags of the entry's own group.
+            flags = re.match(r"\(\?([imsx]+)\)", entry)
+            if flags:
+                entry = f"(?{flags[1]}:{entry[flags.end() :]})"
             try:
                 re.compile(entry)
                 body = entry
