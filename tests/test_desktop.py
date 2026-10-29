@@ -523,6 +523,28 @@ def test_registration_removes_launchers_left_by_earlier_binary_names(tmp_path):
     )
 
 
+def test_a_checkout_path_with_spaces_is_quoted_in_the_launcher_entry(tmp_path):
+    # The Exec key splits on spaces: unquoted, `/home/u/My Projects/…` launched `/home/u/My`.
+    from dreamference.chat import desktop_runner
+
+    entries, icons = tmp_path / "applications", tmp_path / "icons"
+    with (
+        patch.object(desktop_runner, "DESKTOP_ENTRY_DIR", str(entries)),
+        patch.object(desktop_runner, "ICON_DIR", str(icons)),
+        patch.object(
+            DesktopRunner, "binary_path", return_value="/home/u/My Projects/100%/Mightling"
+        ),
+        patch("subprocess.run"),
+    ):
+        assert DesktopRunner.install_desktop_entry() is True
+    entry = (entries / "ling-app.desktop").read_text()
+    assert 'Exec="/home/u/My Projects/100%%/Mightling" %U\n' in entry
+    # Quotes, dollars, backticks and backslashes are escaped inside the quotes, then the
+    # backslashes once more as the key is a string (Desktop Entry Specification, "Exec key").
+    assert DesktopRunner.exec_argument('/a b/$x"`\\y') == '"/a b/\\\\$x\\\\"\\\\`\\\\\\\\y"'
+    assert DesktopRunner.exec_argument("/opt/Mightling") == "/opt/Mightling"
+
+
 def test_desktop_entry_is_not_written_before_anything_is_built():
     # The Exec line has to point at a binary; on a first run there is not one yet.
     with (
@@ -538,7 +560,7 @@ def test_entry_exec_carries_no_environment():
     import inspect
 
     source = inspect.getsource(DesktopRunner.install_desktop_entry)
-    assert "Exec={binary} %U" in source
+    assert "Exec={cls.exec_argument(binary)} %U" in source
     assert "WEBKIT_DISABLE_DMABUF_RENDERER" not in source
 
 
