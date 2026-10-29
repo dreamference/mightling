@@ -219,7 +219,10 @@ class HardwareManager:
             return False, f"Model '{spec.name}' exceeds GB10 128GB unified memory budget ({spec.min_memory_gb} GB required)."
 
         if avail_mem > 0 and spec.min_memory_gb > avail_mem * 0.95:
-            return False, f"Model '{spec.name}' requires {spec.min_memory_gb} GB, but system only has {avail_mem} GB available."
+            return False, (
+                f"Model '{spec.name}' requires {spec.min_memory_gb} GB, more than the "
+                f"{avail_mem * 0.95:.1f} GB budget (95% of {avail_mem:.1f} GB unified memory)."
+            )
 
         return True, f"✅ Compatible: {spec.name} ({spec.notes})"
 
@@ -251,7 +254,10 @@ class HardwareManager:
             hw = cls.detect_gb10_hardware()
             avail_mem = hw.total_unified_memory_gb or 128.0
             if total_req > avail_mem * 0.95:
-                return False, f"Combined memory requirement ({total_req:.1f} GB) exceeds available unified memory ({avail_mem:.1f} GB)."
+                return False, (
+                    f"Combined memory requirement ({total_req:.1f} GB) exceeds the "
+                    f"{avail_mem * 0.95:.1f} GB budget (95% of {avail_mem:.1f} GB unified memory)."
+                )
             return True, f"✅ Speculative Decoding Qualified: {main_spec.name} + {draft_spec.name} (~{total_req:.1f} GB total memory)"
 
         return True, f"✅ Speculative decoding enabled for {main_model_key} with draft model {draft_model_key}"
