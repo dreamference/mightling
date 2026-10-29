@@ -592,7 +592,8 @@ impl Context {
                 .outline(path)?
                 .into_iter()
                 .filter(|n| n.start_line == line)
-                .min_by_key(|n| n.end_line - n.start_line);
+                // A node that ends before it starts (an unknown end) is the last choice.
+                .min_by_key(|n| n.end_line.checked_sub(n.start_line).unwrap_or(u32::MAX));
             let node = match node {
                 Some(node) => Some(node),
                 None => graph.enclosing(path, line)?,
