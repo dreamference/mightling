@@ -12,9 +12,11 @@ from conftest import (
     INSTALLED_BINARY_DIRS,
     MODEL_SERVER_PORTS,
     REAL_HOME,
+    REFUSED_ON_PATH,
     _classes_defined_in,
     _installed_binary,
     _under_real_home,
+    take_refusals,
 )
 
 
@@ -103,3 +105,13 @@ def test_the_runtime_folder_is_the_tests_own():
     assert not runtime.startswith("/run/user/") and Path(runtime).stat().st_mode & 0o777 == 0o700
     run_dir = FleetSession.new_run_dir()
     assert run_dir.parent == Path(runtime)
+
+
+def test_a_script_that_reaches_ssh_or_sudo_on_path_is_refused():
+    # A shell script finds these on PATH, past the subprocess guard: the stand-ins at its head refuse
+    # and record the call (the teardown fails a test that leaves one untaken).
+    assert {"ssh", "sudo", "rsync"} <= set(REFUSED_ON_PATH)
+    script = "ssh -o BatchMode=yes node-b true; echo $?; sudo -n true; echo $?"
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=10)
+    assert result.stdout.split() == ["255", "255"] and "a test ran the real ssh" in result.stderr
+    assert take_refusals() == ["ssh -o BatchMode=yes node-b true", "sudo -n true"]

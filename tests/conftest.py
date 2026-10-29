@@ -203,6 +203,47 @@ def _refuse_real_docker(monkeypatch, request):
         monkeypatch.setattr(subprocess, name, guarded(getattr(subprocess, name)))
 
 
+# Shell scripts the tests run (the night script, install.sh, the provisioning helpers) find ssh and
+# sudo on PATH, past the guard above: a night test ran the real `ssh` with an empty machine name
+# (2026-10-29). Refusing stand-ins head PATH for the whole session, and a test whose script reached
+# one fails; a test's own stand-ins, put before them on PATH, win.
+REFUSED_ON_PATH: tuple = ("ssh", "scp", "rsync", "sudo", "sg")
+_refusals: dict = {}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _refusing_stand_ins(tmp_path_factory):
+    folder = tmp_path_factory.mktemp("refused-tools")
+    log = folder / "refused.log"
+    log.touch()
+    for name in REFUSED_ON_PATH:
+        stand_in = folder / name
+        stand_in.write_text(f'#!/bin/sh\necho "{name} $*" >> "{log}"\n'
+                            f'echo "conftest: a test ran the real {name}" >&2\nexit 255\n')
+        stand_in.chmod(0o755)
+    path = os.environ.get("PATH", "")
+    os.environ["PATH"] = f"{folder}{os.pathsep}{path}"
+    _refusals.update(log=log, seen=0)
+    yield
+    os.environ["PATH"] = path
+
+
+@pytest.fixture(autouse=True)
+def _no_real_remote_tool(_refusing_stand_ins):
+    take_refusals()
+    yield
+    refused = take_refusals()
+    if refused:
+        pytest.fail(f"a script of the test ran a real remote or root tool: {refused}; put a stand-in on its PATH")
+
+
+def take_refusals() -> list:
+    """The calls the refusing stand-ins took since the last look (a guard test takes its own)."""
+    text = _refusals["log"].read_text()
+    new, _refusals["seen"] = text[_refusals["seen"]:], len(text)
+    return new.splitlines()
+
+
 # The throwaway Forgejo of tests/test_forge_private.py (FORGEJO §5.3): a test marked
 # `forge_container`, run only when MIGHTLING_FORGE_CONTAINER_TESTS=1, may run docker commands that
 # name its own container, network or image pin, never the node's forge (`mightling-forge`).
