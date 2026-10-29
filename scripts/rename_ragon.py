@@ -425,6 +425,71 @@ HOME_NEW = (
     '        resolve(std::env::var_os("CODEX_HOME").as_deref(), &home).map(|new| unmoved.unwrap_or(new))\n'
     "    else {\n"
 )
+# The AppArmor profile 1.8 and earlier installed for bubblewrap is `puffin-bwrap`; beside `ragon-bwrap`
+# AppArmor would attach neither, so host setup takes the old one away first (spec §3).
+BWRAP_LEGACY_CONST = 'PROFILE_PATH: Final[str] = f"{APPARMOR_DIR}/{PROFILE_NAME}"\n'
+BWRAP_LEGACY_CONST_NEW = BWRAP_LEGACY_CONST + (
+    "# The same profile under the name the releases before the rename installed it with.\n"
+    'LEGACY_PROFILE_NAMES: Final[tuple[str, ...]] = ("puffin-bwrap",)\n'
+)
+BWRAP_REMOVAL_ANCHOR = "    @classmethod\n    def profiles_attaching(cls, binary: str) -> list[str]:\n"
+BWRAP_REMOVAL = '''    @classmethod
+    def legacy_removal(cls) -> list[list[str]]:
+        """The root commands that take away the profile a release before the rename installed.
+
+        It attaches to the same binary as ours, and two profiles for one binary make AppArmor
+        attach neither, so it goes before ours is loaded.
+
+        Returns:
+            list[list[str]]: argv lists without `sudo`; empty when no such profile is there.
+        """
+        commands: list[list[str]] = []
+        for name in LEGACY_PROFILE_NAMES:
+            path = Path(APPARMOR_DIR) / name
+            if path.exists():
+                commands += [["apparmor_parser", "-R", str(path)], ["rm", "-f", str(path)]]
+        return commands
+
+'''
+BWRAP_OTHERS_OLD = (
+    "        others = [path for path in cls.profiles_attaching(bwrap) if Path(path).name != PROFILE_NAME]\n"
+)
+BWRAP_OTHERS_NEW = (
+    "        ours_or_older = (PROFILE_NAME, *LEGACY_PROFILE_NAMES)\n"
+    "        others = [path for path in cls.profiles_attaching(bwrap) if Path(path).name not in ours_or_older]\n"
+)
+BWRAP_UBUNTU_OLD = '            return [*removal, ["apparmor_parser", "-r", others[0]]]\n'
+BWRAP_UBUNTU_NEW = '            return [*cls.legacy_removal(), *removal, ["apparmor_parser", "-r", others[0]]]\n'
+BWRAP_OURS_OLD = "        staged = cls.staged_profile(bwrap)\n        return [\n"
+BWRAP_OURS_NEW = BWRAP_OURS_OLD + "            *cls.legacy_removal(),\n"
+BWRAP_STEP_OLD = "        if cls.sandbox_works() is not False:\n            return None\n"
+BWRAP_STEP_NEW = """        if cls.sandbox_works() is not False:
+            legacy = SandboxPrerequisite.legacy_removal()
+            if not legacy:
+                return None
+            # It works through the profile a release before the rename installed: that one goes and
+            # ours takes its place, in one step (two profiles for one binary attach neither).
+            return {
+                "name": "replace the older bubblewrap profile",
+                "why": "the profile an older release installed for `bwrap` is replaced by `ragon-bwrap`",
+                "commands": SandboxPrerequisite.fix_commands() or legacy,
+            }
+"""
+BWRAP_TEST_ANCHOR = '    assert SandboxPrerequisite.profiles_attaching("/usr/bin/bwrap") == []\n'
+BWRAP_TEST = BWRAP_TEST_ANCHOR + """
+
+def test_the_profile_an_older_release_installed_is_replaced_not_doubled(machine):
+    # 1.8 and earlier installed the same profile as `puffin-bwrap`; beside ours AppArmor would
+    # attach neither, so it is taken away first and is never the one loaded.
+    old = machine["profiles"] / "puffin-bwrap"
+    old.write_text(SandboxPrerequisite.profile_text("/usr/bin/bwrap").replace("ragon-bwrap", "puffin-bwrap"))
+    removal = [["apparmor_parser", "-R", str(old)], ["rm", "-f", str(old)]]
+    assert SandboxPrerequisite.legacy_removal() == removal
+    commands = SandboxPrerequisite.fix_commands()
+    assert commands[:2] == removal
+    assert commands[-1] == ["apparmor_parser", "-r", sandbox_prerequisite.PROFILE_PATH]
+"""
+
 COMPAT_EDITS = [
     ("ragon-rs/src/home.rs", HOME_ANCHOR, HOME_NEW, 1),
     ("ragon-rs/node-locator/src/lib.rs", LOC_ANCHOR, LOC_NEW, 1),
@@ -695,6 +760,13 @@ COMPAT_EDITS = [
         '    monkeypatch.delenv("MIGHTLING_LEGACY_MIGRATION", raising=False)\n',
         1,
     ),
+    ("dreamference/vllm_server/sandbox_prerequisite.py", BWRAP_LEGACY_CONST, BWRAP_LEGACY_CONST_NEW, 1),
+    ("dreamference/vllm_server/sandbox_prerequisite.py", BWRAP_REMOVAL_ANCHOR, BWRAP_REMOVAL + BWRAP_REMOVAL_ANCHOR, 1),
+    ("dreamference/vllm_server/sandbox_prerequisite.py", BWRAP_OTHERS_OLD, BWRAP_OTHERS_NEW, 1),
+    ("dreamference/vllm_server/sandbox_prerequisite.py", BWRAP_UBUNTU_OLD, BWRAP_UBUNTU_NEW, 1),
+    ("dreamference/vllm_server/sandbox_prerequisite.py", BWRAP_OURS_OLD, BWRAP_OURS_NEW, 1),
+    ("dreamference/vllm_server/host_safety_setup.py", BWRAP_STEP_OLD, BWRAP_STEP_NEW, 1),
+    ("tests/test_sandbox_prerequisite.py", BWRAP_TEST_ANCHOR, BWRAP_TEST, 1),
 ]
 
 
