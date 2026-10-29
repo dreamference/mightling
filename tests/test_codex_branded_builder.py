@@ -151,6 +151,22 @@ def test_the_patches_stay_small():
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 64_000
 
 
+def test_airgapped_treats_every_profile_without_a_sandbox_like_full_access():
+    # The air gap is enforced by the sandbox helper, and Codex runs no helper for any profile whose
+    # network is on and whose file system is fully writable: Full Access, but also a
+    # `[permissions]` profile with `":root" = "write"`. Asking only "is it Full Access?" let such a
+    # profile take `/airgapped on`, and a configured `on`, with commands that kept the network.
+    # Both checks now ask Codex's own question: does this profile get a sandbox?
+    texts = {Path(p).name: Path(p).read_text() for p in CodexBrandedBuilder.patches()}
+    no_sandbox = "!codex_sandboxing::policy_transforms::should_require_platform_sandbox(&f, n, false)"
+    tui = texts["0019-airgapped.patch"]
+    assert "PermissionProfile::Disabled)).into_iter()" not in tui
+    assert tui.count("permission_profile().to_runtime_permissions(); " + no_sandbox) == 2
+    app_server = texts["0023-airgapped-app-server.patch"]
+    assert "permission_refusal(matches!(p, PermissionProfile::Disabled)" not in app_server
+    assert "p.to_runtime_permissions(); " + no_sandbox in app_server
+
+
 def test_the_build_key_changes_with_the_patches(tmp_path):
     patch_dir = tmp_path / "patches"
     patch_dir.mkdir()
