@@ -454,12 +454,44 @@ class DreamferenceConfig:
         for path in files:
             if not path.is_file():
                 continue
-            level = cls.parse_airgapped_level(
-                ConfigFileStorageManager.load_config_dict(path).get("mightling_airgapped"))
-            if level is not None and (strictest is None or MIGHTLING_AIRGAPPED_LEVELS.index(level)
-                                      > MIGHTLING_AIRGAPPED_LEVELS.index(strictest)):
-                strictest = level
+            # The line the launcher reads, and the parsed value (a YAML or JSON file has no such
+            # line): a file the parser refuses must not loosen the level the launcher sees.
+            try:
+                line_value = cls.toml_airgapped_value(path.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                line_value = None
+            for value in (line_value, ConfigFileStorageManager.load_config_dict(path).get("mightling_airgapped")):
+                level = cls.parse_airgapped_level(value)
+                if level is not None and (strictest is None or MIGHTLING_AIRGAPPED_LEVELS.index(level)
+                                          > MIGHTLING_AIRGAPPED_LEVELS.index(strictest)):
+                    strictest = level
         return strictest or DEFAULT_MIGHTLING_AIRGAPPED
+
+    @classmethod
+    def toml_airgapped_value(cls, text: str) -> Optional[str]:
+        """
+        The value of the top-level `mightling_airgapped` key read line by line, as `toml_value` in
+        ling-rs/airgapped does: the first `mightling_airgapped = <value>` before any table header,
+        a byte order mark skipped, a comment and quotes stripped. A syntax error elsewhere in the
+        file does not hide it, as it would from a TOML parser.
+
+        Args:
+            text: The file's text.
+
+        Returns:
+            Optional[str]: The raw value, or None when there is no such line.
+        """
+        for line in text.lstrip("﻿").splitlines():
+            line = line.strip()
+            if line.startswith("["):
+                return None
+            if not line.startswith("mightling_airgapped"):
+                continue
+            rest = line[len("mightling_airgapped"):].lstrip()
+            if not rest.startswith("="):
+                continue
+            return rest[1:].split("#", 1)[0].strip().strip("\"'")
+        return None
 
     def save_config(self, target_path: Optional[Path] = None) -> Path:
         """
