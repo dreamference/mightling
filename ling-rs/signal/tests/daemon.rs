@@ -79,7 +79,8 @@ fn event(payload: Value) -> Message {
 }
 
 /// A stand-in for `ling web`'s `/ws`: answers every call, and plays one turn for `turn/start`.
-/// Records what the bridge asked for on `seen`.
+/// Records what the bridge asked for on `seen`. `airgap` is the level asked of the user and of each
+/// thread, or `sealed`: the user's level is `off` and every thread's `on`.
 async fn fake_ling_web(seen: tokio::sync::mpsc::UnboundedSender<Value>, airgap: &'static str) -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -87,15 +88,22 @@ async fn fake_ling_web(seen: tokio::sync::mpsc::UnboundedSender<Value>, airgap: 
         while let Ok((stream, _)) = listener.accept().await {
             let seen = seen.clone();
             tokio::spawn(async move {
-                // The air-gap poll is plain HTTP: answer it with `off`. Anything else is the bridge.
+                // The air-gap poll and checks are plain HTTP. Anything else is the bridge.
                 let mut peek = [0u8; 32];
                 let read = stream.peek(&mut peek).await.unwrap_or(0);
                 if peek[..read].starts_with(b"GET /api/airgapped") {
                     use tokio::io::AsyncWriteExt;
                     let mut stream = stream;
                     let mut request = vec![0u8; 4096];
-                    let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut request).await;
-                    let body = format!(r#"{{"level":"{airgap}","source":"test"}}"#);
+                    let read = tokio::io::AsyncReadExt::read(&mut stream, &mut request).await.unwrap_or(0);
+                    let line = String::from_utf8_lossy(&request[..read]).lines().next().unwrap_or_default().to_string();
+                    let thread = line.split_whitespace().nth(1).and_then(|path| path.split_once("?thread=")).map(|(_, id)| id.to_string());
+                    let body = match (thread, airgap) {
+                        (Some(thread), "sealed") => format!(r#"{{"level":"on","thread":"{thread}"}}"#),
+                        (Some(thread), level) => format!(r#"{{"level":"{level}","thread":"{thread}"}}"#),
+                        (None, "sealed") => r#"{"level":"off","source":"test"}"#.to_string(),
+                        (None, level) => format!(r#"{{"level":"{level}","source":"test"}}"#),
+                    };
                     let reply = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
                     let _ = stream.write_all(reply.as_bytes()).await;
                     return;
@@ -130,6 +138,60 @@ async fn fake_ling_web(seen: tokio::sync::mpsc::UnboundedSender<Value>, airgap: 
         }
     });
     port
+}
+
+/// §11: a thread at `/airgapped on` gets nothing from the phone. The new thread's level is asked
+/// before the first turn; at `on` the turn is never started and the owner is told so.
+#[tokio::test]
+async fn no_turn_starts_in_a_thread_at_airgapped_on() {
+    let dir = Scratch(std::env::temp_dir().join(format!("ling-signal-sealed-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    let state = dir.0.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let log = dir.0.join("signal-cli.log");
+    let (seen_tx, mut seen) = tokio::sync::mpsc::unbounded_channel();
+    let port = fake_ling_web(seen_tx, "sealed").await;
+    Config {
+        mode: Mode::Dedicated,
+        account: "+15550000".to_string(),
+        own_uuid: Some("bridge".to_string()),
+        owner: Some(Owner { aci: "owner".to_string(), fingerprint: "fp-owner".to_string() }),
+        binding: None,
+        port,
+        node: "test-node".to_string(),
+        signal_cli: fake_signal_cli(&dir.0, &log, &dedicated_messages()),
+        signal_cli_env: vec![],
+        signal_cli_version: "0.14.9".to_string(),
+        vision: false,
+        instance: None,
+        user: None,
+    }
+    .save(&state)
+    .unwrap();
+    ling_signal::state::save_cookie(&state, "mightling_device=test").unwrap();
+    let daemon = {
+        let (state, runtime) = (state.clone(), dir.0.join("run"));
+        tokio::spawn(async move { ling_signal::serve::serve(&state, Some(&runtime)).await })
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let text = std::fs::read_to_string(&log).unwrap_or_default();
+        let sends: Vec<Value> = text.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()).filter(|v| v["method"] == "send").collect();
+        if sends.iter().any(|s| s["params"]["message"].as_str().is_some_and(|m| m.contains("air-gapped") && m.contains("nothing was sent"))) {
+            assert!(!sends.iter().any(|s| s["params"]["message"].as_str().is_some_and(|m| m.contains("answer is"))), "{sends:?}");
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no refusal was sent; signal-cli saw:\n{text}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let mut methods = Vec::new();
+    while let Ok(message) = seen.try_recv() {
+        methods.extend(message["message"]["method"].as_str().map(str::to_string));
+    }
+    assert!(methods.contains(&"thread/start".to_string()) && !methods.contains(&"turn/start".to_string()), "{methods:?}");
+    let conversation: Value = serde_json::from_str(&std::fs::read_to_string(state.join("conversation.json")).unwrap()).unwrap();
+    assert!(conversation["current"].is_null(), "the sealed thread is left: {conversation}");
+    daemon.abort();
 }
 
 #[tokio::test]

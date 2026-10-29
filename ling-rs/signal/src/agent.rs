@@ -420,12 +420,33 @@ pub async fn chat_settings(port: u16, cookie: &str) -> Result<ChatSettings, Stri
 
 /// The user-level air-gap level, as `ling web` resolves it (`/api/airgapped`): true for `on`.
 pub async fn airgap_level(port: u16, cookie: &str) -> Result<bool, String> {
-    let request = format!("GET /api/airgapped HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n");
+    level_of(&airgapped(port, cookie, "/api/airgapped").await?)
+}
+
+/// One thread's air-gap level (`/api/airgapped?thread=<id>`), the strictest of its own, its
+/// folder's and the user's: Ok(true) at `on` (§11). An answer that does not name the thread, as the
+/// user-level one an older `ling web` gives, is an error, so the caller refuses.
+pub async fn thread_airgap(port: u16, cookie: &str, thread: &str) -> Result<bool, String> {
+    if thread.is_empty() || !thread.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(format!("not a thread id: {thread:?}"));
+    }
+    let value = airgapped(port, cookie, &format!("/api/airgapped?thread={thread}")).await?;
+    if value.get("thread").and_then(Value::as_str) != Some(thread) {
+        return Err("ling web did not report this thread's air-gap level".to_string());
+    }
+    level_of(&value)
+}
+
+async fn airgapped(port: u16, cookie: &str, path: &str) -> Result<Value, String> {
+    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n");
     let (status, _, body) = http(port, request.as_bytes()).await?;
     if status != 200 {
         return Err(format!("ling web did not report the air-gap level (HTTP {status})"));
     }
-    let value: Value = serde_json::from_slice(&body).map_err(|err| err.to_string())?;
+    serde_json::from_slice(&body).map_err(|err| err.to_string())
+}
+
+fn level_of(value: &Value) -> Result<bool, String> {
     match value.get("level").and_then(Value::as_str) {
         Some("on") => Ok(true),
         Some("off") => Ok(false),

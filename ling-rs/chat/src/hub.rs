@@ -105,9 +105,14 @@ pub fn off_node(adapter: &str) -> bool {
     matches!(adapter, "telegram" | "discord")
 }
 
+/// An off-node messenger's name, as its user knows it.
+fn messenger_name(adapter: &str) -> &'static str {
+    if adapter == "discord" { "Discord" } else { "Telegram" }
+}
+
 /// The one line an off-node messenger gets at `/airgapped on` instead of an answer.
 pub fn airgap_pause(adapter: &str) -> String {
-    let name = if adapter == "discord" { "Discord" } else { "Telegram" };
+    let name = messenger_name(adapter);
     format!("The air gap is on, so {name} is paused: it would carry this conversation off your machine. Use Matrix, or turn the air gap off on the machine.")
 }
 
@@ -663,7 +668,24 @@ impl Hub {
             "/use" => {
                 let recent = self.threads.chats.get(chat).map(|c| c.recent.clone()).unwrap_or_default();
                 let chosen = words.next().and_then(|n| n.parse::<usize>().ok()).and_then(|n| n.checked_sub(1)).and_then(|n| recent.get(n).cloned());
+                // SIGNAL §11: an off-node messenger does not switch to a thread at `/airgapped on`,
+                // nor to one whose level `ling web` did not give.
+                let sealed = match &chosen {
+                    Some(thread) if off_node(adapter_of(chat)) => self.thread_sealed(&thread.id).await,
+                    _ => Some(false),
+                };
                 match chosen {
+                    Some(thread) if sealed != Some(false) => {
+                        let why = match sealed {
+                            Some(_) => format!(
+                                "\"{}\" is air-gapped (/airgapped on in Mightling), so it isn't used from {}.",
+                                thread.name,
+                                messenger_name(adapter_of(chat))
+                            ),
+                            None => "Mightling's web server did not say whether that thread is air-gapped. Try again in a moment.".to_string(),
+                        };
+                        self.notice(chat, format!("Not switched: {why}"));
+                    }
                     Some(thread) => {
                         let entry = self.threads.chats.entry(chat.to_string()).or_default();
                         entry.current = Some(thread.id.clone());
@@ -765,8 +787,54 @@ impl Hub {
         Ok(thread)
     }
 
+    /// Whether `thread` is at `/airgapped on`: its own level, its folder's or the user's, the
+    /// strictest as `ling web` resolves them. `None` when `ling web` gave no answer naming this
+    /// thread, as an older one gives only the user's level.
+    async fn thread_sealed(&mut self, thread: &str) -> Option<bool> {
+        let answer = self.agent.web(&format!("/api/airgapped?thread={thread}"), None).await.ok()?;
+        if answer.get("thread").and_then(Value::as_str) != Some(thread) {
+            return None;
+        }
+        match answer.get("level").and_then(Value::as_str)? {
+            "off" => Some(false),
+            "on" => Some(true),
+            _ => None,
+        }
+    }
+
+    /// Whether the chat's current thread may take a message from here (SIGNAL §11): an off-node
+    /// messenger does not use a thread at `/airgapped on`, and leaves it, so the next message
+    /// starts a new one; without an answer nothing is sent and the thread is kept. Matrix stays
+    /// on this machine and is not asked, as at the user's `/airgapped on`.
+    async fn current_open_here(&mut self, chat: &str) -> bool {
+        let adapter = adapter_of(chat);
+        let Some(thread) = self.current(chat).filter(|_| off_node(adapter)) else { return true };
+        match self.thread_sealed(&thread).await {
+            Some(false) => true,
+            Some(true) => {
+                if let Some(entry) = self.threads.chats.get_mut(chat) {
+                    entry.current = None;
+                }
+                self.save_threads(Some(chat));
+                let name = messenger_name(adapter);
+                self.notice(
+                    chat,
+                    format!("This thread is air-gapped (/airgapped on in Mightling), so it isn't used from {name}; nothing was sent. Your next message starts a new thread."),
+                );
+                false
+            }
+            None => {
+                self.notice(chat, "Mightling's web server did not say whether this thread is air-gapped, so nothing was sent. Try again in a moment.");
+                false
+            }
+        }
+    }
+
     async fn message(&mut self, chat: &str, text: &str) {
         self.fresh_after_silence(chat);
+        if !self.current_open_here(chat).await {
+            return;
+        }
         let thread = match self.ensure_thread(chat, text).await {
             Ok(thread) => thread,
             Err(err) => {
@@ -805,6 +873,9 @@ impl Hub {
         let text = text.as_str();
         let first = if text.trim().is_empty() { "(image)" } else { text.trim() };
         self.fresh_after_silence(chat);
+        if !self.current_open_here(chat).await {
+            return;
+        }
         let thread = match self.ensure_thread(chat, first).await {
             Ok(thread) => thread,
             Err(err) => {
