@@ -297,7 +297,32 @@ pub fn remembered_at(path: &Path) -> Option<Node> {
 /// the remembered node otherwise: at its LAN address, or at its overlay name when the LAN
 /// address does not accept a connection, the node has one and the overlay is up.
 pub fn remote_node() -> Option<Node> {
-    remote_node_from(is_node(), remembered()).map(|node| reachable(node, lan_answers, overlay_up))
+    let pin = std::env::var(PIN_ENV).ok();
+    remote_node_pinned(pin.as_deref(), is_node(), remembered()).map(|node| reachable(node, lan_answers, overlay_up))
+}
+
+/// One command's choice of node, by name, address or id (the launcher reads it too).
+pub const PIN_ENV: &str = "MIGHTLING_NODE";
+
+/// [`remote_node_from`] with `MIGHTLING_NODE` given. A pin beats loopback on a node and the
+/// remembered node, as in the launcher. It names the remembered node (by name, address or id) or
+/// else a host: a bare name is looked up as `<name>.local`, since this crate does not browse.
+pub fn remote_node_pinned(pin: Option<&str>, is_node: bool, remembered: Option<Node>) -> Option<Node> {
+    let Some(pin) = pin.map(str::trim).filter(|pin| !pin.is_empty()) else {
+        return remote_node_from(is_node, remembered);
+    };
+    let wanted = pin.to_lowercase();
+    if let Some(node) = remembered.filter(|node| {
+        node.name.to_lowercase() == wanted
+            || node.name.to_lowercase() == wanted.trim_end_matches(".local")
+            || node.address.to_lowercase() == wanted
+            || (wanted.len() >= 4 && !node.node.is_empty() && node.node.to_lowercase().starts_with(&wanted))
+    }) {
+        return Some(node);
+    }
+    let bare = !pin.contains('.') && !pin.contains(':');
+    let address = if bare { format!("{pin}.local") } else { pin.to_string() };
+    Some(Node { name: pin.to_string(), address, model_port: DEFAULT_MODEL_PORT, search_port: Some(8888), ..Node::default() })
 }
 
 /// [`remote_node`]'s choice of address, with the LAN probe and NetBird's state given.
@@ -559,6 +584,22 @@ mod tests {
 
     fn enrolled() -> Node {
         Node { remote: "mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.netbird.selfhosted".to_string(), ..node() }
+    }
+
+    #[test]
+    fn a_pinned_node_beats_loopback_and_the_remembered_node() {
+        // Unset or blank: as before.
+        assert_eq!(remote_node_pinned(None, true, Some(node())), None);
+        assert_eq!(remote_node_pinned(Some(" "), false, Some(node())), Some(node()));
+        assert_eq!(remote_node_pinned(None, false, None), None);
+        // Naming the remembered node, by name or id, gives it back whole, even on a node.
+        assert_eq!(remote_node_pinned(Some("GX10-1a2b"), true, Some(node())), Some(node()));
+        assert_eq!(remote_node_pinned(Some("7c1e0c7a"), false, Some(node())), Some(node()));
+        // Another host: an address as it is, a bare name through mDNS; the search port is the default.
+        let other = remote_node_pinned(Some("10.0.0.7"), false, Some(node())).unwrap();
+        assert_eq!((other.search_url().as_deref(), other.model_url().as_str()), (Some("http://10.0.0.7:8888"), "http://10.0.0.7:8000"));
+        let bare = remote_node_pinned(Some("spark-9"), false, None).unwrap();
+        assert_eq!(bare.search_url().as_deref(), Some("http://spark-9.local:8888"));
     }
 
     #[test]
