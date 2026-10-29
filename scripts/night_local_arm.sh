@@ -105,8 +105,10 @@ start_with() {
 carries() {
     local args env pair
     [ -z "$ENGINE_ARGS$ENGINE_ENV" ] && return 0
-    args=" $(docker inspect "$SERVER" --format '{{join .Args " "}}' 2>/dev/null) "
-    case "$args" in *" $ENGINE_ARGS "*) ;; *) echo "command line without $ENGINE_ARGS" ;; esac
+    if [ -n "$ENGINE_ARGS" ]; then  # an arm with only ENGINE_ENV (a step trace) adds nothing to the command line
+        args=" $(docker inspect "$SERVER" --format '{{join .Args " "}}' 2>/dev/null) "
+        case "$args" in *" $ENGINE_ARGS "*) ;; *) echo "command line without $ENGINE_ARGS" ;; esac
+    fi
     env=$(docker inspect "$SERVER" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null)
     for pair in $ENGINE_ENV; do echo "$env" | grep -qxF -- "$pair" || echo "environment without $pair"; done
 }
