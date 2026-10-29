@@ -76,7 +76,7 @@ class AdapterStore:
         Args:
             entry: The entry; its `name` is the key.
         """
-        entries = cls.entries()
+        entries = cls._entries_to_change()
         entries[str(entry["name"])] = entry
         cls._write(entries)
 
@@ -90,11 +90,35 @@ class AdapterStore:
         Returns:
             bool: Whether there was one.
         """
-        entries = cls.entries()
+        entries = cls._entries_to_change()
         if entries.pop(name, None) is None:
             return False
         cls._write(entries)
         return True
+
+    @classmethod
+    def _entries_to_change(cls) -> dict[str, dict[str, object]]:
+        """The installed set about to be rewritten, refusing a file that cannot be read.
+
+        `entries()` reads such a file as empty, and rewriting that would forget every adapter it
+        records.
+
+        Returns:
+            dict[str, dict[str, object]]: Name to entry; empty when there is no file yet.
+
+        Raises:
+            ValueError: When the file exists but is not an installed set.
+        """
+        path = cls.path()
+        if not path.exists():
+            return {}
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise ValueError(f"{path} could not be read, so it was not changed ({error})") from error
+        if not isinstance(record, dict) or not isinstance(record.get("adapters"), dict):
+            raise ValueError(f"{path} is not an installed set, so it was not changed")
+        return cls.entries()
 
     @classmethod
     def _write(cls, entries: dict[str, dict[str, object]]) -> None:

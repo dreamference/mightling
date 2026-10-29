@@ -621,3 +621,18 @@ def test_the_sender_copies_signed_adapters_of_the_model_only(monkeypatch):
     assert code == 0 and len(lines) == 1
     assert [c[-1] for c in sent if c[0] == "ssh"] == [f"adapter-receive rust x/rust {COMMIT} 0"]
     assert NodeAdapterSync.after(1, "second", DEFAULT_MODEL_ALIAS, None) == (1, [])
+
+
+def test_an_installed_set_that_cannot_be_read_is_not_replaced_by_one_entry():
+    # Read as empty, the file used to be rewritten with the new entry alone: every adapter installed
+    # before it was forgotten (and its snapshot left behind, unremovable by `adapter remove`).
+    path = AdapterStore.path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = '{"schema": 1, "adapters": {"rust": {"name": "rust"}},\n'
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match=r"installed\.json"):
+        AdapterStore.put({"name": "go", "repo": "x/go", "commit": COMMIT})
+    with pytest.raises(ValueError, match=r"installed\.json"):
+        AdapterStore.drop("rust")
+    assert path.read_text(encoding="utf-8") == text
+    assert AdapterStore.entries() == {}
