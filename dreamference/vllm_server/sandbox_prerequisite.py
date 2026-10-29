@@ -178,7 +178,7 @@ class SandboxPrerequisite:
 
     @classmethod
     def profiles_attaching(cls, binary: str) -> list[str]:
-        """The profile files whose `profile` line attaches to a binary, read without root.
+        """The profile files with a profile that attaches to a binary, read without root.
 
         Args:
             binary: The absolute path of the executable.
@@ -193,8 +193,16 @@ class SandboxPrerequisite:
             except OSError:
                 continue
             for line in lines:
+                # `profile NAME PATH {`, `profile PATH {` and the older `PATH {` all attach; a rule
+                # naming the binary inside another profile (`PATH ix,`) does not open a block.
                 match line.split():
                     case ["profile", _, attachment, *_] if attachment.strip('"') == binary:
+                        found.append(str(path))
+                        break
+                    case ["profile", attachment, *_] if attachment.strip('"') == binary:
+                        found.append(str(path))
+                        break
+                    case [attachment, *_, "{"] if attachment.strip('"') == binary:
                         found.append(str(path))
                         break
         return found
