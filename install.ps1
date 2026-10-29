@@ -228,6 +228,11 @@ try {
             Fail "$SumsName does not match its checksum in SHA256SUMS; nothing was installed."
         }
         Say "  release $Tag is signed by Mightling's release key"
+    } elseif (-not $Version) {
+        # Asked for the latest release, an install takes whatever is marked latest: the tag of an
+        # unsigned one is only a name, and an old-looking one (v1.4.9) must not bypass the
+        # signature. A release from before signing is installed only when named with -Version.
+        Fail "the latest release ($Tag) is not signed (it has no SHA256SUMS.sig); nothing was installed. Pass -Version to install a release from before $SignedSince on purpose."
     } elseif (Test-SigningRequired $Tag) {
         Fail "release $Tag is not signed (it has no SHA256SUMS.sig); nothing was installed. Every release from $SignedSince on is signed by Mightling's release key, so an unsigned one did not come from its release job."
     } else {

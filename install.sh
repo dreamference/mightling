@@ -418,6 +418,12 @@ elif [ -n "$FROM" ] && [ "${TAG#this-}" != "$TAG" ]; then
     # release job made it, so there is no release signature to check, only its checksums. A
     # bundle of a release (VERSION `vX.Y.Z`) carries that release's signature and is checked above.
     say "⚠️  Bundle $TAG is a build copied from another node, not a release; it is checked against its checksums only."
+elif [ -z "$VERSION" ] && [ -z "$FROM" ]; then
+    # Asked for the latest release, an install takes whatever is marked latest: the tag of an
+    # unsigned one is only a name, and an old-looking one (v1.4.9) must not bypass the signature.
+    # A release from before signing is installed only when named with --version.
+    fail "the latest release ($TAG) is not signed (it has no SHA256SUMS.sig); nothing was installed. \
+Pass --version to install a release from before $SIGNED_SINCE on purpose."
 elif signing_required "$TAG"; then
     fail "release $TAG is not signed (it has no SHA256SUMS.sig); nothing was installed. Every release \
 from $SIGNED_SINCE on is signed by Mightling's release key, so an unsigned one did not come from its release job."
