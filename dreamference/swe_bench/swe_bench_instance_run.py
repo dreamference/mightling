@@ -1274,11 +1274,13 @@ class SweBenchInstanceRun:
         return ":".join(entries)
 
     def _start_container(self) -> str | None:
+        # First: a container of this name left by a run killed hard (a resume reuses the name)
+        # can still write into the scratch while the host clears and fills it.
+        SweBenchDocker.run(["rm", "-f", self.container], timeout=120)
         shutil.rmtree(self.scratch, ignore_errors=True)
         for sub in ("codex-home", "home"):
             (self.scratch / sub).mkdir(parents=True, exist_ok=True)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        SweBenchDocker.run(["rm", "-f", self.container], timeout=120)
         container_path = self.container_path(SweBenchDocker.image_path(self.image))
         environment = {
             "PATH": container_path,

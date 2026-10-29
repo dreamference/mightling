@@ -4731,6 +4731,33 @@ def test_a_task_restarts_at_most_once(bench):
     assert "PARTIAL AGAIN" in prediction("again", "acme__widget-1")
 
 
+def test_a_live_container_of_the_same_name_is_removed_before_its_scratch_is_rebuilt(
+    bench, monkeypatch
+):
+    # A run killed hard leaves its container running, and a resume reuses its name. Until it is
+    # removed, the image's own code can write into the scratch the host is clearing and filling
+    # (a link at `codex-home` would carry the host's hook files anywhere).
+    events = []
+    docker_run = bench["docker"].run
+
+    def recorded_run(command, *a, **k):
+        if command[:2] == ["rm", "-f"]:
+            events.append("rm")
+        return docker_run(command, *a, **k)
+
+    rmtree = shutil.rmtree
+
+    def recorded_rmtree(path, *a, **k):
+        if Path(path).parent.name == "scratch":
+            events.append("rmtree")
+        return rmtree(path, *a, **k)
+
+    monkeypatch.setattr(bench["docker"], "run", recorded_run)
+    monkeypatch.setattr(shutil, "rmtree", recorded_rmtree)
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert "rmtree" in events and events.index("rm") < events.index("rmtree")
+
+
 def test_the_refine_study_steps_compactions_do_not_count_towards_a_restart(bench):
     bench["docker"].default_mode = "compacting"
     bench["settings"] = SweBenchSettings({"task_timeout": "0.3s"})
