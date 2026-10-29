@@ -335,17 +335,34 @@ pub fn without_flags(args: Vec<OsString>) -> Vec<OsString> {
 /// exists: the only point at which setting a variable is sound.
 pub fn export_flag() {
     let args: Vec<OsString> = std::env::args_os().collect();
-    if let Some(on) = flag_setting(&args) {
+    let (exports, notice) = flag_exports(&args);
+    if let Some(notice) = notice {
+        eprintln!("{notice}");
+    }
+    for (name, value) in exports {
         // SAFETY: see above; no other thread can be reading the environment yet.
-        unsafe { std::env::set_var(ENV, if on { "on" } else { "off" }) };
+        unsafe { std::env::set_var(name, value) };
     }
-    if let Some(value) = version_flag(&args) {
-        if known_version(Some(&value)).is_none() {
-            eprintln!("refine: `{FLAG_VERSION} {value}` is not a version ({}); it is ignored.", VERSIONS.join(", "));
+}
+
+/// The variables the command line's flags set, in order, and a notice for a version flag whose
+/// value is not a version.
+fn flag_exports(args: &[OsString]) -> (Vec<(&'static str, String)>, Option<String>) {
+    let mut exports = Vec::new();
+    let mut notice = None;
+    if let Some(on) = flag_setting(args) {
+        exports.push((ENV, if on { "on" } else { "off" }.to_string()));
+    }
+    if let Some(value) = version_flag(args) {
+        // A value that is not a version passes to the next tier: the variable as it was.
+        match known_version(Some(&value)) {
+            Some(_) => exports.push((VERSION_ENV, value)),
+            None => {
+                notice = Some(format!("refine: `{FLAG_VERSION} {value}` is not a version ({}); it is ignored.", VERSIONS.join(", ")))
+            }
         }
-        // SAFETY: as above.
-        unsafe { std::env::set_var(VERSION_ENV, value) };
     }
+    (exports, notice)
 }
 
 // -- `ling exec` -----------------------------------------------------------------------------
@@ -854,6 +871,32 @@ mod tests {
         assert_eq!(
             without_flags(os(&["ling", "--refine", "--refine-version", "v2", "exec", "--refine-version=v2", "x", "--", "--refine-version", "v2"])),
             os(&["ling", "exec", "x", "--", "--refine-version", "v2"])
+        );
+    }
+
+    #[test]
+    fn a_version_flag_that_is_not_a_version_leaves_the_variable_to_answer() {
+        let table = |text: &str| text.parse::<toml::Table>().unwrap_or_default();
+        let config = table("mightling_refine_version = \"v1\"");
+        // The variable as `export_flag` leaves it, over a variable already set to v2.
+        let after = |args: &[&str]| {
+            let (exports, _) = flag_exports(&os(args));
+            exports
+                .into_iter()
+                .rev()
+                .find(|(name, _)| *name == VERSION_ENV)
+                .map(|(_, value)| value)
+                .or_else(|| Some("v2".to_string()))
+        };
+        // §4: a value that is not a version passes to the next tier, the variable, not the config.
+        assert_eq!(version(after(&["ling", "--refine-version", "bogus"]).as_deref(), &config), "v2");
+        let (_, notice) = flag_exports(&os(&["ling", "--refine-version", "bogus"]));
+        assert!(notice.is_some_and(|notice| notice.contains("bogus")));
+        assert_eq!(version(after(&["ling", "--refine-version", " V1 "]).as_deref(), &config), "v1");
+        assert_eq!(flag_exports(&os(&["ling", "--refine-version", "v1"])).1, None);
+        assert_eq!(
+            flag_exports(&os(&["ling", "--no-refine", "--refine-version=v2"])).0,
+            vec![(ENV, "off".to_string()), (VERSION_ENV, "v2".to_string())]
         );
     }
 
