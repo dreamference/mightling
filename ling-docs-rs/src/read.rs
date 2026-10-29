@@ -94,7 +94,7 @@ pub fn parse_locator(text: &str) -> Result<Locator> {
         Some((a, b)) => (a.trim().parse::<u32>(), b.trim().parse::<u32>()),
         None => (
             lines.trim().parse::<u32>(),
-            lines.trim().parse::<u32>().map(|n| n + 199),
+            lines.trim().parse::<u32>().map(|n| n.saturating_add(199)),
         ),
     };
     match (a, b) {
@@ -380,6 +380,14 @@ mod tests {
             assert!(parse_locator(text).is_err(), "{text}");
         }
         assert_eq!(parse_locator("p.1").unwrap(), Locator::Page(1));
+    }
+
+    #[test]
+    fn a_single_line_near_the_last_number_reads_to_the_end() {
+        assert_eq!(
+            parse_locator("lines 4294967290").unwrap(),
+            Locator::Lines(4294967290, u32::MAX)
+        );
     }
 
     #[test]
