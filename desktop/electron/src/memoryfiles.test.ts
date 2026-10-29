@@ -19,6 +19,18 @@ describe("the memory files", () => {
     expect((await listMemoryFiles(home))[0].text).toBe("short now");
   });
 
+  it("leaves no stray file when an edit cannot be saved, and saves two edits at once", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-memories-stray-"));
+    const root = path.join(home, "memories");
+    fs.mkdirSync(root);
+    fs.writeFileSync(path.join(root, "memory_summary.md"), "old");
+    await Promise.all([writeMemoryFile(home, "memory_summary.md", "one"), writeMemoryFile(home, "memory_summary.md", "two")]);
+    expect(["one", "two"]).toContain(fs.readFileSync(path.join(root, "memory_summary.md"), "utf8"));
+    vi.spyOn(fs.promises, "rename").mockRejectedValue(Object.assign(new Error("EXDEV"), { code: "EXDEV" }));
+    await expect(writeMemoryFile(home, "memory_summary.md", "new")).rejects.toThrow("EXDEV");
+    expect(fs.readdirSync(root)).toEqual(["memory_summary.md"]);
+  });
+
   it("lists the summary and the index when they exist, and saves an edit of one", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-memories-"));
     expect(await listMemoryFiles(home)).toEqual([]);

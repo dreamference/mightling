@@ -4,6 +4,7 @@
 // › Memories shows them and saves the user's edits; nothing else in that folder (the raw memories,
 // the rollout summaries, the pipeline's git baseline) is read or written here. No Electron here.
 
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -52,8 +53,13 @@ export async function writeMemoryFile(codexHome: string, name: unknown, text: un
   const full = path.join(root, name);
   const stat = await fs.promises.lstat(full).catch(() => null);
   if (!stat || !stat.isFile()) throw new Error("that memory file is not there any more");
-  const temp = `${full}.mightling-${process.pid}.tmp`;
-  await fs.promises.writeFile(temp, text, { mode: 0o600 });
-  await fs.promises.rename(temp, full);
+  const temp = `${full}.mightling-${randomUUID()}.tmp`;
+  try {
+    await fs.promises.writeFile(temp, text, { mode: 0o600, flag: "wx" });
+    await fs.promises.rename(temp, full);
+  } catch (error) {
+    await fs.promises.rm(temp, { force: true }).catch(() => undefined);
+    throw error;
+  }
   return null;
 }
