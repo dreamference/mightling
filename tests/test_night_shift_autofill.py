@@ -98,6 +98,17 @@ def test_candidates_come_from_ci_qa_and_specs_in_that_order(tmp_path: Path) -> N
     assert found[2].key == "qa-windows:12"
 
 
+def test_a_todo_named_in_prose_is_not_an_open_item(tmp_path: Path) -> None:
+    repo = repo_with_specs(
+        tmp_path,
+        "| `autofill` | queues unchecked `- [ ]` / `TODO:` lines in `specs/*.md` as tasks |\n"
+        "- TODO: shorten the retry loop\n",
+    )
+    assert [c.title for c in NightShiftAutofill.spec_candidates(repo)] == [
+        "open item in X.md: shorten the retry loop"
+    ]
+
+
 def test_ci_reads_only_the_repositorys_own_runs_never_a_forks_pull_request() -> None:
     # A fork's branch named `main` lists under `--branch main`; its log and workflow name are the
     # fork author's words, so they must never become a task's prompt.

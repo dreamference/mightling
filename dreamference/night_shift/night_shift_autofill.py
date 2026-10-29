@@ -355,8 +355,9 @@ class NightShiftAutofill:
             except OSError:
                 continue
             for number, line in enumerate(lines, 1):
-                found_item = re.match(r"\s*[-*] \[ \] (.+)", line) or re.search(
-                    r"\bTODO:\s*(.+)", line
+                # A TODO opens its line: one named mid-line is prose about TODOs, not an item.
+                found_item = re.match(r"\s*[-*] \[ \] (.+)", line) or re.match(
+                    r"\s*(?:[-*]\s+)?TODO:\s*(.+)", line
                 )
                 item = cls.clean(found_item.group(1)) if found_item else ""
                 if len(item) < MIN_ITEM_CHARS:
