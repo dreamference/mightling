@@ -480,7 +480,13 @@ pub fn validate(dir: &Path) -> Result<Staged, String> {
             "refused: the name {name:?} is not a legal skill name (lowercase letters, digits and hyphens, at most 64)"
         ));
     }
-    Ok(Staged { dir: dir.to_path_buf(), name, frontmatter, files: files_of(dir) })
+    let files = files_of(dir);
+    // Codex searches a skills folder to any depth, so a `SKILL.md` deeper down would be offered as
+    // a skill of its own that ling skill list, disable and the catalogue budget never see.
+    if let Some((nested, _)) = files.iter().find(|(file, _)| file.rsplit('/').next() == Some("SKILL.md") && file != "SKILL.md") {
+        return Err(format!("refused: {nested} would be offered as a skill of its own"));
+    }
+    Ok(Staged { dir: dir.to_path_buf(), name, frontmatter, files })
 }
 
 /// Every file below `dir`, relative, sorted, with its size; links are listed, not followed.
@@ -988,6 +994,16 @@ mod tests {
             std::fs::write(root.join(folder).join("SKILL.md"), text).unwrap_or_default();
             let result = validate(&root.join(folder));
             assert!(result.as_ref().is_err_and(|error| error.contains(expected)), "{folder}: {result:?}");
+        }
+        // A second skill inside the folder, even a hidden one, is not installed with it.
+        for nested in ["examples/other", ".hidden"] {
+            let folder = root.join("nested");
+            let _ = std::fs::remove_dir_all(&folder);
+            std::fs::create_dir_all(folder.join(nested)).unwrap_or_default();
+            std::fs::write(folder.join("SKILL.md"), SKILL).unwrap_or_default();
+            std::fs::write(folder.join(nested).join("SKILL.md"), SKILL).unwrap_or_default();
+            let result = validate(&folder);
+            assert!(result.as_ref().is_err_and(|error| error.contains(&format!("{nested}/SKILL.md would be offered"))), "{result:?}");
         }
     }
 
