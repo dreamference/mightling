@@ -58,6 +58,8 @@ pub struct Settings {
     pub submodule_max_files: usize,
     /// The file the settings were read from, if any.
     pub config_path: Option<PathBuf>,
+    /// Whether that file is the repository's own `dreamference.toml`, which a clone ships.
+    pub config_in_repo: bool,
 }
 
 impl Default for Settings {
@@ -77,6 +79,7 @@ impl Default for Settings {
             layers: Layers::All,
             submodule_max_files: 5000,
             config_path: None,
+            config_in_repo: false,
         }
     }
 }
@@ -85,14 +88,22 @@ impl Settings {
     /// Reads the settings: `DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then
     /// `~/.config/dreamference/config.toml`, the first that exists; every key is optional.
     pub fn load(repo_root: &Path) -> Settings {
-        Settings::load_with(config_file(repo_root), |key| std::env::var(key).ok())
+        let config_path = config_file(repo_root);
+        let in_repo = std::env::var_os("DREAMFERENCE_CONFIG_PATH").is_none()
+            && config_path.as_deref() == Some(repo_root.join("dreamference.toml").as_path());
+        Settings::load_with(config_path, in_repo, |key| std::env::var(key).ok())
     }
 
     /// The settings from `config_path`, then the variables `env` gives, which win over the file
     /// and apply without one.
-    fn load_with(config_path: Option<PathBuf>, env: impl Fn(&str) -> Option<String>) -> Settings {
+    fn load_with(
+        config_path: Option<PathBuf>,
+        config_in_repo: bool,
+        env: impl Fn(&str) -> Option<String>,
+    ) -> Settings {
         let mut settings = Settings {
             config_path,
+            config_in_repo,
             ..Settings::default()
         };
         settings.read_file();
@@ -130,7 +141,13 @@ impl Settings {
                 .filter(|v| *v >= 0)
                 .map(|v| v as u64)
         };
-        if let Some(host) = table.get("vllm_host").and_then(toml::Value::as_str) {
+        // The session probes this host outside the sandbox: from a file a clone ships, only one on
+        // this machine, as the launcher rules (never a host the repository's author picked).
+        if let Some(host) = table
+            .get("vllm_host")
+            .and_then(toml::Value::as_str)
+            .filter(|host| !settings.config_in_repo || host_is_local(host))
+        {
             settings.vllm_host = host.trim_end_matches('/').to_string();
         }
         if let Some(v) = int("code_index_scan_max_files") {
@@ -194,6 +211,28 @@ fn config_file(repo_root: &Path) -> Option<PathBuf> {
     global.is_file().then_some(global)
 }
 
+/// Whether `host` (a URL or a bare name, with or without a port) names this machine: a loopback
+/// address, `localhost` or the any-address. The launcher's rule for a repository's settings file.
+fn host_is_local(host: &str) -> bool {
+    let host = host.trim();
+    let rest = ["http://", "https://"]
+        .iter()
+        .find(|scheme| {
+            host.get(..scheme.len())
+                .is_some_and(|start| start.eq_ignore_ascii_case(scheme))
+        })
+        .map_or(host, |scheme| &host[scheme.len()..]);
+    let name = if let Some(bracketed) = rest.strip_prefix('[') {
+        bracketed.split(']').next().unwrap_or_default()
+    } else {
+        rest.split(['/', ':']).next().unwrap_or_default()
+    };
+    name.eq_ignore_ascii_case("localhost")
+        || name
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified())
+}
+
 /// Whether the user has marked `root` trusted in Codex's own per-project trust.
 ///
 /// Nothing inside the repository can grant trust (spec §9.1): a file there can be shipped in a
@@ -236,17 +275,56 @@ mod tests {
         let env = |key: &str| {
             (key == "DREAMFERENCE_VLLM_HOST").then(|| "http://gpu-node:8001/".to_string())
         };
-        let s = Settings::load_with(Some(file.clone()), env);
+        let s = Settings::load_with(Some(file.clone()), false, env);
         assert_eq!(s.vllm_host, "http://gpu-node:8001");
         std::fs::write(&file, "vllm_host = \"http://127.0.0.1:9000\"\n").unwrap();
         assert_eq!(
-            Settings::load_with(Some(file.clone()), env).vllm_host,
+            Settings::load_with(Some(file.clone()), false, env).vllm_host,
             "http://gpu-node:8001"
         );
         assert_eq!(
-            Settings::load_with(Some(file), |_| None).vllm_host,
+            Settings::load_with(Some(file), false, |_| None).vllm_host,
             "http://127.0.0.1:9000"
         );
+    }
+
+    #[test]
+    fn a_repository_settings_file_may_only_name_a_host_on_this_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("dreamference.toml");
+        let host = |text: &str, in_repo: bool, env: Option<&str>| {
+            std::fs::write(&file, text).unwrap();
+            Settings::load_with(Some(file.clone()), in_repo, |key| {
+                (key == "DREAMFERENCE_VLLM_HOST").then(|| env.map(str::to_string))?
+            })
+            .vllm_host
+        };
+        let remote = "vllm_host = \"http://collector.example:8000\"\n";
+        assert_eq!(host(remote, true, None), "http://localhost:8000");
+        assert_eq!(
+            host("vllm_host = \"http://127.0.0.1:9000/\"\n", true, None),
+            "http://127.0.0.1:9000"
+        );
+        assert_eq!(
+            host("vllm_host = \"http://[::1]:9000\"\n", true, None),
+            "http://[::1]:9000"
+        );
+        // The user's own file and variable stay trusted.
+        assert_eq!(host(remote, false, None), "http://collector.example:8000");
+        assert_eq!(
+            host(remote, true, Some("http://gpu-node:8001")),
+            "http://gpu-node:8001"
+        );
+        for name in ["localhost:8000", "0.0.0.0", "HTTP://LOCALHOST", "127.0.1.1"] {
+            assert!(host_is_local(name), "{name}");
+        }
+        for name in [
+            "http://localhost.example",
+            "http://10.0.0.1:8000",
+            "http://[fe80::1]",
+        ] {
+            assert!(!host_is_local(name), "{name}");
+        }
     }
 
     #[test]
