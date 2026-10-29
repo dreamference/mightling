@@ -1513,6 +1513,19 @@ def test_validation_decides_from_the_two_verdicts():
 # -- grading --------------------------------------------------------------------------------------
 
 
+def test_a_task_missing_from_the_dataset_is_named_so_and_pulls_no_image(bench, monkeypatch, capsys):
+    run(bench, instances=["acme__widget-1"])
+    store = SweBenchRunStore("r1")
+    bench["docker"].present.clear()
+    calls = len(bench["docker"].calls)
+    monkeypatch.setattr(SweBenchHarness, "rows", classmethod(lambda cls, dataset: []))
+    capsys.readouterr()
+    assert SweBenchEvaluator.grade(store, bench["settings"]) == {}
+    out = capsys.readouterr().out
+    assert "acme__widget-1 is not graded yet" in out and "dataset" in out and "image" not in out
+    assert not [call for call in bench["docker"].calls[calls:] if call[0] == "pull"]
+
+
 def test_eval_grades_only_the_ungraded_and_never_hands_the_harness_an_empty_patch(bench):
     bench["docker"].modes = {"acme__widget-2": "empty"}
     run(bench, instances=["acme__widget-1", "acme__widget-2"])

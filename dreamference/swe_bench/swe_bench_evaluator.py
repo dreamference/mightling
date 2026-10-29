@@ -323,13 +323,18 @@ class SweBenchEvaluator:
         gradable: List[Dict[str, Any]] = []
         for prediction in pending:
             instance_id = prediction["instance_id"]
+            if instance_id not in rows:
+                print(  # noqa: T201 — CLI output
+                    f"⚠️  {instance_id} is not graded yet: it is not in the downloaded dataset (swe-bench setup)"
+                )
+                continue
             image = images.get(instance_id)
             disk = cls.disk_problem(settings) if image and SweBenchDocker.image_digest(image) is None else None
             if disk:
                 print(f"⚠️  {instance_id} is not graded yet: {disk}")
                 continue
             digest = SweBenchDocker.ensure_image(image) if image else None
-            if digest is None or instance_id not in rows:
+            if digest is None:
                 print(f"⚠️  {instance_id} is not graded yet: its image is not available")
                 continue
             digests[instance_id] = digest
