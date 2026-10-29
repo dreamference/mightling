@@ -1007,40 +1007,46 @@ mod tests {
         } else {
             assert_eq!(roots, vec![home.clone(), PathBuf::from("/tmp")]);
         }
-        assert!(within(&home.join(".mightling"), &[home.clone()]));
+        assert!(within(
+            &home.join(".mightling"),
+            std::slice::from_ref(&home)
+        ));
         assert!(within(
             &home.join(".config/dreamference/config.toml"),
-            &[home.clone()]
+            std::slice::from_ref(&home)
         ));
         // Started in a project folder: it is not.
         assert!(!within(&home.join(".mightling"), &[home.join("project")]));
-        assert!(!within(&base.join("elsewhere"), &[home.clone()]));
+        assert!(!within(
+            &base.join("elsewhere"),
+            std::slice::from_ref(&home)
+        ));
         // A file not created yet, under a folder not created yet, is inside the folder it would be in.
         assert!(within(
             &home
                 .join(".config")
                 .join("dreamference")
                 .join("config.toml"),
-            &[home.clone()]
+            std::slice::from_ref(&home)
         ));
         assert!(!within(
             &base.join("elsewhere").join("not-yet"),
-            &[home.clone()]
+            std::slice::from_ref(&home)
         ));
         // A name that only shares a prefix is not inside, and a link is followed to where it leads.
-        assert!(!within(&base.join("home2"), &[home.clone()]));
+        assert!(!within(&base.join("home2"), std::slice::from_ref(&home)));
         #[cfg(unix)]
         {
             let _ = std::os::unix::fs::symlink(&home, base.join("link"));
             assert!(within(
                 &base.join("link").join(".mightling"),
-                &[home.clone()]
+                std::slice::from_ref(&home)
             ));
             // A file not yet written, reached through the link: still inside (macOS's /tmp and
             // /var are such links, and a user config file often does not exist yet).
             assert!(within(
                 &base.join("link").join(".config/dreamference/config.toml"),
-                &[home.clone()]
+                std::slice::from_ref(&home)
             ));
             assert!(within(
                 &home.join(".config/dreamference/config.toml"),
