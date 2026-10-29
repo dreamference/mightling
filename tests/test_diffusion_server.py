@@ -54,7 +54,25 @@ def test_launch_command_hardens_the_container_and_names_the_model():
         "dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1" in joined
     )
     assert "DREAMFERENCE_DIFFUSION_PORT=8001" in joined
-    assert "HF_TOKEN=tok" in joined
+    # The token goes by name only: the command is logged and shows in `ps`.
+    assert cmd[cmd.index("HF_TOKEN") - 1] == "-e"
+    assert not any("HF_TOKEN=" in part for part in cmd)
+
+
+def test_the_sidecar_hands_the_token_to_docker_run_in_its_environment(monkeypatch):
+    from dreamference.vllm_server import diffusion_server_manager as dsm
+
+    runs = []
+
+    class Done:
+        returncode, stderr = 0, ""
+
+    monkeypatch.setattr(dsm.subprocess, "run", lambda cmd, **kw: runs.append((cmd, kw)) or Done())
+    mgr = DiffusionServerManager()
+    assert mgr.start_server(DEFAULT_DIFFUSION_MODEL_ALIAS, DEFAULT_MODEL_ALIAS, hf_token="hf_secret")
+    ((cmd, kw),) = [(c, k) for c, k in runs if c[:2] == ["docker", "run"]]
+    assert not any("hf_secret" in part for part in cmd)
+    assert kw["env"]["HF_TOKEN"] == "hf_secret"
 
 
 def test_sidecar_rides_in_the_main_models_image_not_the_buildable_default():

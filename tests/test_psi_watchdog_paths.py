@@ -283,3 +283,36 @@ def test_the_socket_kill_posts_sigkill_for_the_container_id(docker_socket, reply
 
 def test_no_listener_on_the_socket_is_not_a_kill(docker_socket):
     assert MemoryPressureWatchdog("test-container")._kill_via_docker_socket() is False
+
+
+def _killed_directly(tmp_path, monkeypatch):
+    """A root watchdog whose direct SIGKILL reaches every PID of the container."""
+    procs = tmp_path / "cgroup.procs"
+    procs.write_text("4242\n")
+    monkeypatch.setattr(psi_watchdog.os, "kill", lambda pid, sig: None)
+    wd = MemoryPressureWatchdog("test-container")
+    wd._cgroup_procs = str(procs)
+    wd._direct_kill_ok = True
+    wd._container_id = "abc123"
+    return wd
+
+
+def test_a_direct_kill_turns_off_the_restart_policy_over_the_socket(
+    tmp_path, monkeypatch, docker_socket, no_docker_cli
+):
+    # dockerd saw the PIDs die, not a stop: `--restart unless-stopped` would bring the container
+    # back and reload the model on the host that just ran out of memory.
+    thread, received = _serve_once(docker_socket, b"HTTP/1.1 200 OK\r\n\r\n")
+    assert _killed_directly(tmp_path, monkeypatch)._kill() is True
+    thread.join(timeout=5)
+    head, _, body = received[0].partition(b"\r\n\r\n")
+    assert head.startswith(b"POST /containers/abc123/update HTTP/1.1\r\n")
+    assert body == b'{"RestartPolicy": {"Name": "no"}}'
+    assert no_docker_cli == []
+
+
+def test_without_the_socket_the_restart_policy_goes_through_the_cli(
+    tmp_path, monkeypatch, docker_socket, no_docker_cli
+):
+    assert _killed_directly(tmp_path, monkeypatch)._kill() is True
+    assert no_docker_cli == [["docker", "update", "--restart=no", "test-container"]]
