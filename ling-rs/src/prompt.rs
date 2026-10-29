@@ -479,7 +479,7 @@ pub async fn run_cli(args: &[String]) -> i32 {
             if installed.get(name).is_none() {
                 return not_installed(name, &installed);
             }
-            let (lines, code) = use_prompt(name);
+            let (lines, code) = use_prompt(name, &installed);
             for line in lines {
                 println!("{line}");
             }
@@ -573,7 +573,7 @@ async fn show(codex_home: &Path, prompt: &Prompt, composed: bool) -> i32 {
 }
 
 /// Writes `mightling_prompt = "<name>"` to the configuration file. Returns the lines and the code.
-fn use_prompt(name: &str) -> (Vec<String>, i32) {
+fn use_prompt(name: &str, installed: &Installed) -> (Vec<String>, i32) {
     let path = crate::config_file().or_else(|| {
         Some(ling_node_locator::home_dir()?.join(".config").join("dreamference").join("config.toml"))
     });
@@ -596,10 +596,16 @@ fn use_prompt(name: &str) -> (Vec<String>, i32) {
         "Prompt: {name} for new sessions ({TOML_KEY} in {}). Sessions already started keep theirs.",
         path.display()
     )];
-    if std::env::var(ENV_VAR).is_ok_and(|value| !value.trim().is_empty()) {
+    if environment_wins(std::env::var(ENV_VAR).ok().as_deref(), installed) {
         lines.push(format!("{ENV_VAR} is set, and it still wins for new sessions."));
     }
     (lines, 0)
+}
+
+/// Whether the variable's value outranks the file: set to an installed name. A name that is not
+/// installed is skipped at launch, so the file's choice applies.
+fn environment_wins(value: Option<&str>, installed: &Installed) -> bool {
+    value.is_some_and(|value| installed.get(value.trim()).is_some())
 }
 
 /// The TOML text with `mightling_prompt` set to `name`, everything else kept as written.
@@ -848,5 +854,10 @@ mod tests {
         assert_eq!(parsed["night"]["prompt"].as_str(), Some("x"));
         let again = with_choice(&updated, "default").unwrap();
         assert_eq!(again.matches(TOML_KEY).count(), 1);
+        // `use` says the variable still wins only when it would: set to an installed name.
+        assert!(environment_wins(Some(" offline "), &installed));
+        for loses in [None, Some(""), Some("  "), Some("high-sw")] {
+            assert!(!environment_wins(loses, &installed), "{loses:?}");
+        }
     }
 }
