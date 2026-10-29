@@ -66,3 +66,29 @@ def test_a_host_with_a_comma_or_a_space_is_no_entry():
     assert ProxyBypass.host_name("http://a b:8000") is None
     merged = ProxyBypass.merged(None, None, ("http://10.0.0.1,evil:8000",))
     assert merged == "localhost,127.0.0.1,::1"
+
+
+def test_the_configured_host_is_exempt_once_the_configuration_is_read(monkeypatch):
+    # The second apply: a host from the configuration, not from the environment, joins the list
+    # before any runner or command starts.
+    from types import SimpleNamespace
+
+    from dreamference.cli import dreamference_cli_controller as controller
+    from dreamference.vllm_server import SandboxPrerequisite
+
+    class RunnerStartedError(Exception):
+        pass
+
+    def runner(config):
+        raise RunnerStartedError
+
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+    monkeypatch.delenv("DREAMFERENCE_VLLM_HOST", raising=False)
+    monkeypatch.setattr(SandboxPrerequisite, "gate", classmethod(lambda cls, *a: True))
+    monkeypatch.setattr(controller, "DreamferenceConfig",
+                        lambda **kwargs: SimpleNamespace(vllm_host="http://10.7.8.9:8000", agent_runner="codex"))
+    monkeypatch.setattr(controller, "CodexRunner", runner)
+    with pytest.raises(RunnerStartedError):
+        controller.DreamferenceCLIController.run_cli(["audit", "egress"])
+    assert os.environ["NO_PROXY"] == os.environ["no_proxy"] == "localhost,127.0.0.1,::1,10.7.8.9"
