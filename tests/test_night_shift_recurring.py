@@ -311,6 +311,10 @@ def test_a_days_template_runs_on_its_weekdays_only() -> None:
             ["--agent", "codex", "night", "every", "--daily", "x"],
             ["--agent", "codex", "night", "every", "add", "--daily", "x"],
         ),
+        (
+            ["--config=x.toml", "night", "every", "--daily", "x"],
+            ["--config=x.toml", "night", "every", "add", "--daily", "x"],
+        ),
         (["night", "every", "add", "--daily", "x"], None),
         (["night", "every", "list"], None),
         (["night", "every", "drop", "r000000000001"], None),

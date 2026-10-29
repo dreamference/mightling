@@ -1962,8 +1962,12 @@ class DreamferenceCLIController:
             The arguments, with `add` inserted where the shorthand is used.
         """
         at = 0
-        while at < len(argv) and argv[at] in ("--config", "--agent", "--hf-token"):
-            at += 2
+        while at < len(argv):
+            option, joined, _ = argv[at].partition("=")
+            if option not in ("--config", "--agent", "--hf-token"):
+                break
+            # `--config x.toml` is two words, `--config=x.toml` one.
+            at += 1 if joined else 2
         cadences = ("--daily", "--weekly", "--days", "--every", "--monthly")
         flag = argv[at + 2:at + 3]
         if argv[at:at + 2] == ["night", "every"] and flag and flag[0].split("=")[0] in cadences:
