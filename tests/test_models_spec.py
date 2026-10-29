@@ -1,5 +1,6 @@
 """specs/DREAMFERENCE_MODELS.md, checked against the registry, the launch manager and detection."""
 
+import inspect
 import re
 import subprocess
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import jinja2
 import pytest
 
+from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
 from dreamference.hardware import hardware_manager
 from dreamference.hardware.hardware_manager import HardwareManager
 from dreamference.hardware.model_matrix_registry import (
@@ -141,3 +143,34 @@ def test_nothing_reads_the_gb10_override_variable():
         text=True,
     )
     assert found.returncode == 1, found.stdout
+
+
+def _nvfp4_canary_source() -> str:
+    """`server start`'s NVFP4 canary: from its condition up to the tool-call check that follows it."""
+    from dreamference.cli import dreamference_cli_controller as controller
+
+    source = inspect.getsource(controller)
+    start = source.index('if "nvfp4" in args.model.lower():')
+    return source[
+        start : source.index("cls._run_tool_call_canary(vllm_mgr, args.model, engine)", start)
+    ]
+
+
+def test_the_nvfp4_canary_sends_hello_for_ten_tokens_and_prints_the_spec_s_verdicts():
+    # §2.1 "Post-launch canary": one completion ("Hello", 10 tokens), only for an nvfp4 alias.
+    block = _nvfp4_canary_source()
+    assert '/v1/completions"' in block
+    assert '"prompt": "Hello"' in block and '"max_tokens": 10' in block
+    assert 'print("✅ NVFP4 Canary Passed' in block
+    assert "print(\"❌ NVFP4 Canary Failed: Output corrupted (all '!')" in block
+
+
+def test_the_nvfp4_canary_never_switches_models_or_relaunches():
+    # §2.1: "It does not switch models or relaunch; recovery is manual."
+    block = _nvfp4_canary_source()
+    for call in ("start_server(", "stop_server(", "main-model", "set_main_model", "--model"):
+        assert call not in block, call
+    # The only follow-up it has prints the command for the user to run.
+    assert "cls._suggest_engine_fallback(args.model, engine" in block
+    fallback = inspect.getsource(DreamferenceCLIController._suggest_engine_fallback)
+    assert "start_server(" not in fallback and "stop_server(" not in fallback
