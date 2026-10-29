@@ -11,9 +11,11 @@ use futures::SinkExt;
 use futures::StreamExt;
 use ling_sync::client::HubClient;
 use ling_sync::config::Settings;
+use ling_sync::live::Connection;
 use ling_sync::live::Host;
 use ling_web_server::app_server::Launch;
 use ling_web_server::auth;
+use ling_web_server::policy::Policy;
 use ling_web_server::server;
 use ling_web_server::server::Config;
 use ling_web_server::server::Server;
@@ -28,6 +30,22 @@ use tokio_tungstenite::tungstenite::Message;
 const T: &str = "01a0f1ae-2da4-7942-99ae-c3151dc137cc";
 const HIDDEN: &str = "01a0f1ae-2da4-7942-99ae-c3151dc15ec7";
 const NEW: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1a0e0";
+/// A throwaway thread, loaded: kept on this device like an excluded one.
+const EPHEMERAL: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1e9e9";
+/// Threads not loaded, which the server describes on `thread/read`: one in an excluded folder, one not.
+const UNLOADED_HIDDEN: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1b0b0";
+const UNLOADED: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1c0c0";
+
+/// What the stand-in server says about a thread, as `thread/resume` and `thread/read` answer it.
+fn described(thread: &str) -> Option<Value> {
+    match thread {
+        T | NEW | UNLOADED => Some(json!({ "id": thread, "cwd": "/home/user/app" })),
+        HIDDEN => Some(json!({ "id": thread, "cwd": "/home/user/secret/x" })),
+        UNLOADED_HIDDEN => Some(json!({ "id": thread, "cwd": "/home/user/secret/y" })),
+        EPHEMERAL => Some(json!({ "id": thread, "cwd": "/home/user/app", "ephemeral": true })),
+        _ => None,
+    }
+}
 
 struct Scratch(PathBuf);
 
@@ -60,17 +78,18 @@ async fn fake_app_server(socket: &Path) -> (mpsc::UnboundedReceiver<Value>, mpsc
                     let value: Value = serde_json::from_str(&text).unwrap();
                     let _ = heard_tx.send(value.clone());
                     let (Some(id), Some(method)) = (value.get("id").cloned(), value.get("method").and_then(Value::as_str)) else { continue };
+                    let thread = value.pointer("/params/threadId").and_then(Value::as_str).unwrap_or_default();
                     let result = match method {
-                        "thread/loaded/list" => json!({ "data": [T, HIDDEN], "nextCursor": null }),
-                        "thread/resume" => {
-                            let thread = value.pointer("/params/threadId").and_then(Value::as_str).unwrap_or_default();
-                            let cwd = if thread == HIDDEN { "/home/user/secret/x" } else { "/home/user/app" };
-                            json!({ "thread": { "id": thread, "cwd": cwd } })
-                        }
-                        "thread/start" => json!({ "thread": { "id": NEW, "cwd": value.pointer("/params/cwd").cloned().unwrap_or(Value::Null) } }),
-                        _ => json!({}),
+                        "thread/loaded/list" => Some(json!({ "data": [T, HIDDEN, EPHEMERAL], "nextCursor": null })),
+                        "thread/resume" | "thread/read" => described(thread).map(|thread| json!({ "thread": thread })),
+                        "thread/start" => Some(json!({ "thread": { "id": NEW, "cwd": value.pointer("/params/cwd").cloned().unwrap_or(Value::Null) } })),
+                        _ => Some(json!({})),
                     };
-                    let answer = json!({ "id": id, "result": result }).to_string();
+                    let answer = match result {
+                        Some(result) => json!({ "id": id, "result": result }),
+                        None => json!({ "id": id, "error": { "code": -32600, "message": "no such thread" } }),
+                    }
+                    .to_string();
                     if socket.send(Message::Text(answer.into())).await.is_err() {
                         break;
                     }
@@ -243,4 +262,66 @@ async fn a_phone_follows_a_turn_on_the_laptop_answers_its_approval_steers_and_st
     // A folder the laptop did not offer is refused by the hub.
     let (status, _) = command(&base, &phone, json!({ "kind": "start", "device": laptop, "cwd": "/home/user/secret/x", "text": "no" })).await;
     assert_eq!(status, 400);
+}
+
+/// What the stand-in server has heard since the last look, without waiting.
+fn heard_so_far(heard: &mut mpsc::UnboundedReceiver<Value>) -> Vec<Value> {
+    std::iter::from_fn(|| heard.try_recv().ok()).collect()
+}
+
+#[tokio::test]
+async fn the_host_refuses_what_concerns_a_thread_kept_on_this_device_and_answers_an_approval_in_its_own_thread() {
+    let scratch = scratch("kept");
+    let socket = scratch.0.join("s.sock");
+    let (mut heard_rx, say) = fake_app_server(&socket).await;
+    let (events, mut asked) = mpsc::unbounded_channel();
+    let connection = Connection::open(&socket, events).await.unwrap();
+    let settings = Settings { exclude: vec![PathBuf::from("/home/user/secret")], ..Settings::default() };
+    // Neither the excluded thread nor the throwaway is attached.
+    assert_eq!(connection.attach_loaded(&settings).await.into_iter().collect::<Vec<_>>(), vec![T.to_string()]);
+    let (policy, home) = (Policy::embedded(), scratch.0.join("home"));
+    let carry = |command: Value| {
+        let (connection, policy, home) = (connection.clone(), &policy, &home);
+        async move { connection.carry_out(policy, home, &command).await }
+    };
+    heard_so_far(&mut heard_rx);
+    let kept: Result<Option<String>, String> = Err("this thread is kept on this device".to_string());
+    // Send and stop leave a kept thread alone, loaded or not, and one the server does not know.
+    say.send(json!({ "method": "turn/started", "params": { "threadId": HIDDEN, "turn": { "id": "turn-h" } } })).unwrap();
+    say.send(json!({ "method": "turn/started", "params": { "threadId": EPHEMERAL, "turn": { "id": "turn-e" } } })).unwrap();
+    for thread in [HIDDEN, EPHEMERAL, UNLOADED_HIDDEN, "01a0f1ae-2da4-7942-99ae-c3151dc1ffff"] {
+        assert_eq!(carry(json!({ "kind": "send", "thread": thread, "text": "hi" })).await, kept, "send to {thread}");
+        assert_eq!(carry(json!({ "kind": "stop", "thread": thread })).await, kept, "stop on {thread}");
+    }
+    let methods: Vec<Value> = heard_so_far(&mut heard_rx).iter().map(|v| v["method"].clone()).collect();
+    assert!(methods.iter().all(|m| m == "thread/read"), "only reads, never a resume, a turn or an interrupt: {methods:?}");
+    // A published thread not loaded yet is resumed, then gets its turn.
+    assert_eq!(carry(json!({ "kind": "send", "thread": UNLOADED, "text": "hi" })).await, Ok(Some(UNLOADED.to_string())));
+    let methods: Vec<Value> = heard_so_far(&mut heard_rx).iter().map(|v| v["method"].clone()).collect();
+    assert_eq!(methods, vec![json!("thread/read"), json!("thread/resume"), json!("turn/start")]);
+    // Approvals: one not waiting, ones asked in kept threads, and one whose thread the hub names wrongly.
+    assert_eq!(carry(json!({ "kind": "approve", "thread": T, "request": 50, "decision": "accept" })).await, Err("that approval is not waiting any more".to_string()));
+    for (id, thread) in [(51, HIDDEN), (52, EPHEMERAL), (53, T)] {
+        say.send(json!({ "id": id, "method": "item/commandExecution/requestApproval", "params": { "threadId": thread, "command": "rm -rf build" } })).unwrap();
+    }
+    let mut requests = 0;
+    while requests < 3 {
+        let (_, message) = tokio::time::timeout(Duration::from_secs(10), asked.recv()).await.expect("asked in time").unwrap();
+        requests += usize::from(message.get("id").is_some());
+    }
+    assert_eq!(carry(json!({ "kind": "approve", "thread": T, "request": 51, "decision": "accept" })).await, kept);
+    assert_eq!(carry(json!({ "kind": "approve", "thread": T, "request": 52, "decision": "accept" })).await, kept);
+    assert_eq!(carry(json!({ "kind": "approve", "thread": HIDDEN, "request": 53, "decision": "accept" })).await, Ok(Some(T.to_string())));
+    // An answer is sent without waiting for one back: everything heard up to it is in order.
+    let mut answered = Vec::new();
+    while answered.last() != Some(&json!(53)) {
+        let value = heard(&mut heard_rx, |v| v.get("result").is_some()).await;
+        answered.push(value["id"].clone());
+    }
+    assert_eq!(answered, vec![json!(53)], "only the approval in a published thread is answered");
+    // A new thread starts only in a folder this device offers.
+    for cwd in ["/home/user/secret/x", "/home/user/elsewhere"] {
+        assert_eq!(carry(json!({ "kind": "start", "cwd": cwd, "text": "no" })).await, Err("a new thread starts in one of the folders this device offers".to_string()));
+    }
+    assert!(heard_so_far(&mut heard_rx).iter().all(|v| v["method"] != "thread/start"));
 }
