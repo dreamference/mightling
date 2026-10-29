@@ -113,3 +113,24 @@ def test_audit_egress_docs_takes_json_and_refuses_a_prompt(capsys):
         assert exit_info.value.code == 2
         docs_run.assert_not_called()
         assert "--prompt has no effect with --docs" in capsys.readouterr().out
+
+
+def test_logs_mcp_prints_its_heading_without_markup(tmp_path, capsys):
+    # The heading went through the builtin print with rich markup, which printed `[bold]` as is.
+    import sqlite3
+
+    import pytest
+
+    from dreamference.runner import CodexInstaller
+
+    with sqlite3.connect(tmp_path / "logs_2.sqlite") as conn:
+        conn.execute("CREATE TABLE logs (message TEXT)")
+        conn.execute("INSERT INTO logs VALUES ('mcp{server_name=search} Service initialized as client')")
+    conn.close()
+    with patch.object(CodexInstaller, "home_dir", return_value=str(tmp_path)):
+        with pytest.raises(SystemExit) as exit_info:
+            DreamferenceCLIController.run_cli(["logs", "mcp"])
+    assert exit_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "MCP server lifecycle (most recent first)" in out and "[bold]" not in out
+    assert "search" in out and "Service initialized as client" in out

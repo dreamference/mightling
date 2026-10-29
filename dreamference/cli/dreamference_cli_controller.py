@@ -2681,7 +2681,7 @@ class DreamferenceCLIController:
             if not seen:
                 print("No MCP lifecycle entries found. Run `RUST_LOG=codex_mcp=trace ling` to record some.")
             else:
-                print("[bold]MCP server lifecycle (most recent first)[/bold]\n")
+                console.print("[bold]MCP server lifecycle (most recent first)[/bold]\n")
                 for name, marker in seen:
                     icon = "✅" if marker == "Service initialized as client" else "⚠️ "
                     print(f"   {icon} {name:16} {marker}")
