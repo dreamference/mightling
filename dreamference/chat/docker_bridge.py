@@ -41,7 +41,9 @@ class DockerBridge:
 
         if host in LOOPBACK_HOSTS:
             host = cls.gateway()
-        return f"http://{host}:{port}/v1"
+        if ":" in host:
+            host = f"[{host}]"
+        return f"{parsed.scheme or 'http'}://{host}:{port}/v1"
 
     @classmethod
     def gateway(cls) -> str:

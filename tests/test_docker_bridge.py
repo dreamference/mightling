@@ -25,3 +25,12 @@ def test_routable_vllm_host_is_left_alone():
 def test_gateway_falls_back_when_docker_cannot_be_queried():
     with patch("subprocess.run", side_effect=OSError("no docker")):
         assert DockerBridge.gateway() == "172.17.0.1"
+
+
+def test_an_ipv6_host_and_an_https_scheme_survive_the_rewrite():
+    with patch.object(DockerBridge, "gateway", return_value="172.17.0.1"):
+        assert DockerBridge.container_vllm_url("http://[fd00::5]:8000") == "http://[fd00::5]:8000/v1"
+        assert DockerBridge.container_vllm_url("https://models.example:8443") == (
+            "https://models.example:8443/v1"
+        )
+        assert DockerBridge.container_vllm_url("http://[::1]:8000") == "http://172.17.0.1:8000/v1"
