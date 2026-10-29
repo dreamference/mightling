@@ -91,6 +91,22 @@ class ForgeSettings:
         return cls.data_dir().parent
 
     @classmethod
+    def make_private_dirs(cls) -> Path:
+        """Create the share and data folders 0700 and keep them so, whatever the umask.
+
+        They hold the SQLite database and the private repositories, which other local users
+        must not read, as the secrets and the backups already are not.
+
+        Returns:
+            Path: The data folder.
+        """
+        data = cls.data_dir()
+        data.mkdir(parents=True, exist_ok=True)
+        for folder in (cls.share_dir(), data):
+            folder.chmod(0o700)
+        return data
+
+    @classmethod
     def secrets_dir(cls) -> Path:
         """Return the folder of the forge's secrets.
 

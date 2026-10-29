@@ -157,7 +157,7 @@ class ForgeService:
         """Write the unit files and reload systemd."""
         folder = cls.unit_dir()
         folder.mkdir(parents=True, exist_ok=True)
-        (ForgeSettings.data_dir() / "mightling").mkdir(parents=True, exist_ok=True)
+        (ForgeSettings.make_private_dirs() / "mightling").mkdir(parents=True, exist_ok=True)
         for name, text in cls.units().items():
             (folder / name).write_text(text)
         cls.systemctl("daemon-reload")
@@ -231,7 +231,7 @@ class ForgeService:
         Returns:
             list[str]: The container's `docker run` command, resolved now.
         """
-        data = ForgeSettings.data_dir()
+        data = ForgeSettings.make_private_dirs()
         role = ForgeSettings.role() or ROLE_RECORD
         ForgeAppIni.write(data, cls.host_name(), role)
         ForgeAnonymity.write_patterns(data)
