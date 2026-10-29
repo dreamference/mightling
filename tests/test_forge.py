@@ -1189,3 +1189,21 @@ def test_the_forge_is_published_again_when_the_advertised_addresses_change(monke
     addresses[0] = f"{LAN}.1.20"
     ForgeService.tick()
     assert restarts == [1] and "addresses changed" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("flip", [False, True])
+def test_the_records_address_does_not_depend_on_the_order_avahi_lists_it_in(monkeypatch, flip):
+    from dreamference.node.node_browser import NodeBrowser
+
+    ForgeSettings.update_state(role="mirror", record_node="rec-1")
+    seen = [
+        {"node": "rec-1", "address": "fe80::1%eth0"},
+        {"node": "rec-1", "address": f"{LAN}.50.12"},
+        {"node": "rec-1", "address": f"{LAN}.50.11"},
+    ]
+    entries = seen[::-1] if flip else seen
+    monkeypatch.setattr(
+        NodeBrowser, "browse_service", classmethod(lambda cls, kind, timeout=6: entries)
+    )
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    assert ForgeService.record_address() == f"{LAN}.50.11", "else the tick restarts the mirror"
