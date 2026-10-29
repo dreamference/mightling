@@ -146,6 +146,19 @@ def test_minima_never_serves_adapters(verified):
     assert "--enable-lora" not in VLLMServerManager().build_launch_command(model=MINIMA, gate=True)
 
 
+def test_the_containers_cap_grows_by_the_loaded_cache_of_the_largest_adapter(monkeypatch):
+    sizes = {"rust": 1 << 28, "cpp": 1 << 26}
+    monkeypatch.setattr(
+        AdapterServing, "size", classmethod(lambda cls, entry: sizes[entry["name"]])
+    )
+    recipe = {"container_headroom_gb": 1.5, "lora": {"max_loaded_loras": 8}}
+    adapters = [{"name": "rust"}, {"name": "cpp"}]
+    # 8 loaded x 0.25 GiB, the largest of the two.
+    assert AdapterServing.with_headroom(recipe, adapters)["container_headroom_gb"] == 3.5
+    assert recipe["container_headroom_gb"] == 1.5
+    assert AdapterServing.with_headroom(recipe, []) is recipe
+
+
 def test_an_adapter_that_fails_its_check_is_not_served(monkeypatch, capsys):
     AdapterServing.checked.clear()
     install()
