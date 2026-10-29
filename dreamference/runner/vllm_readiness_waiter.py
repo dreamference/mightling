@@ -84,10 +84,12 @@ class VLLMReadinessWaiter:
         try:
             from dreamference.hardware import resolve_model_hf_repo
 
+            # The model the server runs, not the one the config names (AGENTS.md: ask the server):
+            # a request for any other id answers 404 and this never passes. Without an answer, the
+            # configured model's repo ID, not its alias, which the server never names itself after.
+            served = self.vllm_manager.get_models(timeout=2.0)
             payload = {
-                # The repo ID, not the alias: the server names the model after the checkpoint it
-                # was launched with, so a request for the alias answers 404 and this never passes.
-                "model": resolve_model_hf_repo(self.config.model),
+                "model": served[0] if served else resolve_model_hf_repo(self.config.model),
                 "messages": [{"role": "user", "content": "Ready?"}],
                 "max_tokens": 1,
                 "temperature": 0.0,

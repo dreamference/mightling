@@ -34,6 +34,7 @@ import re
 import sys
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Final, List, Optional
 
@@ -972,6 +973,9 @@ class CodexBrandedBuilder:
         command = ["cargo", "build", "--release", "--locked", "--target-dir", os.path.join(cache_dir, "target")]
         for name in bin_names:
             command += ["--bin", name]
+        # Keyed before the build, as the Codex build is: an edit made while cargo runs is not in
+        # this binary, so it must leave the crate stale.
+        key = cls.crate_key(crate_dir)
         print(f"🔨 Building {', '.join(bin_names)}{cls._through(cached)}...")
         if subprocess.call(command, cwd=crate_dir, env=environment) != 0:
             print(f"❌ The {os.path.basename(crate_dir)} build failed; see the cargo output above.")
@@ -979,12 +983,14 @@ class CodexBrandedBuilder:
         bin_dir = os.path.join(INSTALL_DIR, "bin")
         os.makedirs(bin_dir, exist_ok=True)
         for name in bin_names:
-            # Renamed over the old file, so a command running now keeps its binary.
-            staging = os.path.join(bin_dir, f".{name}.new")
+            # Renamed over the old file, so a command running now keeps its binary. The staging
+            # name is this install's own: crate builds run outside the Codex build's lock.
+            fd, staging = tempfile.mkstemp(dir=bin_dir, prefix=f".{name}.", suffix=".new")
+            os.close(fd)
             shutil.copy2(os.path.join(cache_dir, "target", "release", name + EXE_SUFFIX), staging)
             os.replace(staging, os.path.join(bin_dir, name + EXE_SUFFIX))
         with open(os.path.join(INSTALL_DIR, stamp_name), "w") as handle:
-            handle.write(f"{cls.crate_key(crate_dir)}\n")
+            handle.write(f"{key}\n")
         cls.link_onto_path()
         print(f"✅ Installed {', '.join(bin_names)} in {bin_dir}")
         return True
@@ -1113,7 +1119,9 @@ class CodexBrandedBuilder:
         if os.path.lexists(link) and not os.path.islink(link):
             print(f"⚠️ {link} exists and is not a link; leaving it. Run {target} directly.")
             return
-        staging = f"{link}.new"
+        # This process's own staging name: linking runs outside the build lock, and a shared name
+        # lets two processes remove or rename each other's link.
+        staging = f"{link}.{os.getpid()}.new"
         if os.path.lexists(staging):
             os.remove(staging)
         os.symlink(target, staging)

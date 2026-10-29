@@ -8,6 +8,7 @@ and launches VS Code.
 
 import os
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -70,6 +71,7 @@ class ContinueRunner:
         }
 
         if config_path.exists():
+            merged = False
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     existing = json.load(f)
@@ -77,8 +79,13 @@ class ContinueRunner:
                     existing["models"] = config_data["models"]
                     existing["tabAutocompleteModel"] = config_data["tabAutocompleteModel"]
                     config_data = existing
+                    merged = True
             except Exception:
                 pass
+            if not merged:
+                # Continue reads JSON with comments, which json.load cannot: keep the user's file
+                # rather than lose it to ours.
+                shutil.copy2(config_path, config_path.with_name("config.json.bak"))
 
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2)
