@@ -10,5 +10,9 @@
   "tests/test_legacy_name_migration.py": {
     "replaces": "tests/test_legacy_name_migration.py",
     "sha256": "d320c6ef91533c4c1134e5a41b974e71812103f4f7d6650e41be8166c0eb3e1f"
+  },
+  "tests/test_release_transition.py": {
+    "replaces": null,
+    "sha256": null
   }
 }

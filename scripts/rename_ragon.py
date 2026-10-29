@@ -57,7 +57,12 @@ EXCLUDE_PREFIXES = (
 )
 # The transition assets are renamed like everything else, then given the older names by COMPAT_EDITS;
 # the leftover check lets those through because the files must know every old name (spec §3).
-LEFTOVER_EXEMPT = {"install.sh", "install.ps1", ".github/workflows/release.yml"}
+LEFTOVER_EXEMPT = {
+    "install.sh",
+    "install.ps1",
+    ".github/workflows/release.yml",
+    "tests/test_release_transition.py",
+}
 # Paths that keep their name (their content is excluded too).
 PATH_KEEP = {
     "specs/DREAMFERENCE_RENAME_MIGHTLING.md",
@@ -958,7 +963,9 @@ def build_manifest(root):
             continue
         old = by_final.get(final)
         if old is None:
-            sys.exit(f"overlay file {final} replaces nothing on this tree")
+            # An added file (release material that exists only after the rename): nothing to replace.
+            manifest[final] = {"replaces": None, "sha256": None}
+            continue
         digest = hashlib.sha256((pathlib.Path(root) / old).read_bytes()).hexdigest()
         manifest[final] = {"replaces": old, "sha256": digest}
     (overlay / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -976,6 +983,14 @@ def apply_overlay(root, dry):
     for final, entry in sorted(manifest.items()):
         old = entry["replaces"]
         source = os.path.join(root, OVERLAY_DIR, final)
+        if old is None:
+            done.append(final)
+            if not dry:
+                dest = os.path.join(root, final)
+                pathlib.Path(os.path.dirname(dest)).mkdir(exist_ok=True, parents=True)
+                pathlib.Path(dest).write_bytes(pathlib.Path(source).read_bytes())
+                subprocess.run(["git", "-C", root, "add", final], check=True)
+            continue
         present = os.path.join(root, old)
         if pathlib.Path(present).exists():
             digest = hashlib.sha256(pathlib.Path(present).open("rb").read()).hexdigest()
