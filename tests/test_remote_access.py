@@ -1620,9 +1620,9 @@ def test_caa_is_written_once_and_left_alone_when_right(monkeypatch):
     assert RemotePublicCertificate.ensure_caa("remote.example.org", [ACCOUNT])
     writes = [(m, p) for m, p, _ in calls if m != "GET"]
     assert writes == [
+        ("POST", "/zones/z1/dns_records"),
+        ("POST", "/zones/z1/dns_records"),
         ("DELETE", "/zones/z1/dns_records/old"),
-        ("POST", "/zones/z1/dns_records"),
-        ("POST", "/zones/z1/dns_records"),
     ]
     assert all(
         b["name"] == "remote.example.org" and b["type"] == "CAA" for m, _, b in calls if m == "POST"

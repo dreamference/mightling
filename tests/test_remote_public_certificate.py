@@ -483,7 +483,15 @@ def test_wrong_records_are_deleted_and_the_right_ones_posted(monkeypatch):
     calls = _cloudflare(monkeypatch, zone=True, existing=stale)
     assert RemotePublicCertificate.ensure_caa(BOX, [ACCOUNT]) is True
     methods = [(m, p.rsplit("/", 1)[-1]) for m, p, _ in calls[2:]]
-    assert methods[0] == ("DELETE", "old1") and [m for m, _ in methods[1:]] == ["POST", "POST"]
+    assert [m for m, _ in methods[:2]] == ["POST", "POST"] and methods[2] == ("DELETE", "old1")
+
+
+def test_a_refused_caa_record_leaves_the_old_ones_in_place(monkeypatch):
+    """The old records were deleted first: a refused POST left the box's name without a CAA record."""
+    stale = [{"id": "old1", "data": {"flags": 0, "tag": "issue", "value": "letsencrypt.org"}}]
+    calls = _cloudflare(monkeypatch, zone=True, existing=stale, post_status=403)
+    assert RemotePublicCertificate.ensure_caa(BOX, [ACCOUNT]) is False
+    assert "DELETE" not in [m for m, *_ in calls]
 
 
 def test_a_refused_caa_record_is_false_and_the_log_names_the_messages(monkeypatch, caplog):
