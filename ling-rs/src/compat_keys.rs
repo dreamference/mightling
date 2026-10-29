@@ -338,6 +338,41 @@ mod tests {
     }
 
     #[test]
+    fn every_name_of_the_command_table_is_served() {
+        // §6.5.5's second group: Claude Code's name runs Codex's command.
+        for (claude, codex) in [
+            ("branch", "fork"),
+            ("keybindings", "keymap"),
+            ("tasks", "ps"),
+            ("plugin", "plugins"),
+            ("cost", "usage"),
+            ("stats", "usage"),
+            ("context", "status"),
+        ] {
+            assert_eq!(enter_in_mode(&format!("/{claude}"), &dir()), Some(Enter::Run(format!("/{codex}"))), "/{claude}");
+        }
+        for alias in ["/checkpoint", "/undo"] {
+            assert_eq!(enter_in_mode(alias, &dir()), enter_in_mode("/rewind", &dir()), "{alias}");
+        }
+        for name in ["/reload-skills", "/effort"] {
+            assert!(matches!(enter_in_mode(name, &dir()), Some(Enter::Say(_))), "{name}");
+        }
+        // The last group: one line saying the command is not part of the mode.
+        for name in [
+            "login", "logout", "upgrade", "usage-credits", "passes", "privacy-settings", "rate-limit-options", "mobile",
+            "desktop", "remote-control", "remote-env", "teleport", "web-setup", "install-github-app", "install-slack-app",
+            "chrome", "schedule", "ultrareview", "autofix-pr", "artifacts", "advisor", "fast", "insights", "release-notes",
+            "feedback", "bug", "radio", "stickers", "powerup", "heapdump", "focus", "output-style", "color", "scroll-speed",
+            "terminal-setup", "sandbox", "background", "voice",
+        ] {
+            let expected = format!("/{name} is not part of the compatibility mode.");
+            assert_eq!(enter_in_mode(&format!("/{name}"), &dir()), Some(Enter::Say(expected)), "/{name}");
+        }
+        // `/vim` is removed from Claude Code but stays `ling`'s own.
+        assert_eq!(enter_in_mode("/vim", &dir()), None);
+    }
+
+    #[test]
     fn memory_lists_the_files_from_the_project_root_down() {
         let root = std::env::temp_dir().join(format!("mightling-compat-keys-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
