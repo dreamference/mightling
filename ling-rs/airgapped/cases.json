@@ -301,6 +301,96 @@
    }
   },
   {
+   "name": "a mixed array before the key does not hide it",
+   "configs": [
+    {
+     "path": "user/config.toml",
+     "text": "ports = [1, \"a\"]\nmightling_airgapped = \"on\"\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "user/config.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a quoted key with an escape is the key",
+   "configs": [
+    {
+     "path": "user/config.toml",
+     "text": "\"\\u006dightling_airgapped\" = \"on\"\n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "user/config.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a trailing comment and capitals still name the level",
+   "configs": [
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"Off\" # set by /airgapped default\n[night]\nbroken =\n"
+    }
+   ],
+   "expect": {
+    "level": "off",
+    "tier": "config",
+    "path": "user/config.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a syntax error after the key does not hide it",
+   "configs": [
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped = \"on\"\nmodel = \n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "user/config.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a longer key does not name the level",
+   "configs": [
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgapped_note = \"off\"\nmightling_airgapped = \"on\"\nmodel = \n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "user/config.toml",
+    "notes": 0
+   }
+  },
+  {
+   "name": "a look-alike key of the same length does not name the level",
+   "configs": [
+    {
+     "path": "user/config.toml",
+     "text": "mightling_airgappex = \"off\"\nmightling_airgapped = \"on\"\nmodel = \n"
+    }
+   ],
+   "expect": {
+    "level": "on",
+    "tier": "config",
+    "path": "user/config.toml",
+    "notes": 0
+   }
+  },
+  {
    "name": "a YAML file is on",
    "configs": [
     {

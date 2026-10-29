@@ -135,7 +135,8 @@ class WebTools:
     def airgapped_level(cls) -> str:
         """
         The air-gap level in force for this server: there is no session here, so it is the
-        configured one (environment, then the stricter of the two configuration files).
+        configured one (environment, then the stricter of the two configuration files), as the
+        one reader resolves it, and `on` whenever `ling` cannot answer.
 
         Returns:
             str: `off` or `on`.
