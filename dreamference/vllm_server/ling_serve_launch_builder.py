@@ -36,6 +36,8 @@ KV_PAGES_FLAG: Final[str] = "--kv-pages"
 # `--fair-pairing 1|0` on one with "fair-pairing".
 PAGING_SWITCH_FEATURE: Final[str] = "paging-switch"
 FAIR_PAIRING_FEATURE: Final[str] = "fair-pairing"
+SWITCH_ON: Final[str] = "1"
+SWITCH_OFF: Final[str] = "0"
 NO_KV_PAGES_FLAG: Final[str] = "--no-kv-pages"
 FAIR_PAIRING_FLAG: Final[str] = "--fair-pairing"
 PAGING_ENV: Final[str] = "DREAMFERENCE_LING_PAGING"
@@ -81,8 +83,8 @@ class LingServeLaunchBuilder:
             bool: Whether the switch is on for this launch.
         """
         env = os.environ.get(env_name, "").strip()
-        if env in ("0", "1"):
-            return env == "1"
+        if env in (SWITCH_OFF, SWITCH_ON):
+            return env == SWITCH_ON
         value = recipe.get(key)
         return value if isinstance(value, bool) else default
 
@@ -138,26 +140,39 @@ class LingServeLaunchBuilder:
             )
             if speculative.get("num_speculative_tokens"):
                 args.extend(["--draft-block", str(speculative["num_speculative_tokens"])])
-        features = recipe.get("engine_features") or []
-        if KV_PAGES_FEATURE in features:
-            # An engine with the pool parses these flags. The sessions and the batch are the
-            # recipe's, paged or flat. Given both the sessions and the context, the engine sizes
-            # nothing and refuses a start it cannot hold. Paging is a per-launch switch (`kv_pages`),
-            # off in the recipe; an engine with the switch is told so explicitly.
-            if recipe.get("sessions"):
-                args.extend(["--sessions", str(recipe["sessions"])])
-            if recipe.get("batch"):
-                args.extend(["--batch", str(recipe["batch"])])
-            if cls.switch(recipe, "kv_pages", PAGING_ENV, True):
-                args.append(KV_PAGES_FLAG)
-            elif PAGING_SWITCH_FEATURE in features:
-                args.append(NO_KV_PAGES_FLAG)
-            if FAIR_PAIRING_FEATURE in features:
-                fair = cls.switch(recipe, "fair_pairing", FAIR_PAIRING_ENV, False)
-                args.extend([FAIR_PAIRING_FLAG, "1" if fair else "0"])
-            if recipe.get("vision") is False:
-                args.extend([VISION_FLAG, VISION_OFF])
+        if KV_PAGES_FEATURE in (recipe.get("engine_features") or []):
+            args.extend(cls._paged_engine_args(recipe))
         args.extend(str(a) for a in recipe.get("extra_args") or [])
+        return args
+
+    @classmethod
+    def _paged_engine_args(cls, recipe: dict[str, Any]) -> list[str]:
+        """Builds what only an engine with the page pool is given: sessions, KV layout, vision, pairing.
+
+        The sessions and the batch are the recipe's, paged or flat; given both and the context, the
+        engine sizes nothing and refuses a start it cannot hold. Paging is a per-launch switch.
+
+        Args:
+            recipe: The model's launch recipe, its `engine_features` naming "kv-pages".
+
+        Returns:
+            list[str]: The arguments, in launch order.
+        """
+        features = recipe.get("engine_features") or []
+        args: list[str] = []
+        if recipe.get("sessions"):
+            args.extend(["--sessions", str(recipe["sessions"])])
+        if recipe.get("batch"):
+            args.extend(["--batch", str(recipe["batch"])])
+        if cls.switch(recipe, "kv_pages", PAGING_ENV, True):
+            args.append(KV_PAGES_FLAG)
+        elif PAGING_SWITCH_FEATURE in features:
+            args.append(NO_KV_PAGES_FLAG)
+        if FAIR_PAIRING_FEATURE in features:
+            fair = cls.switch(recipe, "fair_pairing", FAIR_PAIRING_ENV, False)
+            args.extend([FAIR_PAIRING_FLAG, SWITCH_ON if fair else SWITCH_OFF])
+        if recipe.get("vision") is False:
+            args.extend([VISION_FLAG, VISION_OFF])
         return args
 
     @classmethod
@@ -211,7 +226,7 @@ class LingServeLaunchBuilder:
             **({"KV cache": "Paged"} if KV_PAGES_FLAG in args else {}),
             **({"KV cache": "Flat"} if NO_KV_PAGES_FLAG in args else {}),
             **(
-                {"Fair pairing": "On" if value(FAIR_PAIRING_FLAG) == "1" else "Off"}
+                {"Fair pairing": "On" if value(FAIR_PAIRING_FLAG) == SWITCH_ON else "Off"}
                 if value(FAIR_PAIRING_FLAG)
                 else {}
             ),

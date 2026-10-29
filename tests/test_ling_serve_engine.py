@@ -740,7 +740,10 @@ def test_paging_and_fair_pairing_are_off_in_the_recipe_and_switchable_per_launch
 
     def args(**changes):
         return LingServeLaunchBuilder.server_args(
-            "RadixArk/Qwen3.8-27B-NVFP4", {**recipe, "engine_features": features, **changes}, 8000, 262144
+            "RadixArk/Qwen3.8-27B-NVFP4",
+            {**recipe, "engine_features": features, **changes},
+            8000,
+            262144,
         )
 
     off = args()
