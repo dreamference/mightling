@@ -289,3 +289,34 @@ def test_every_key_save_config_writes_is_one_it_owns(tmp_path):
                               "mightling_refine_version": "v2"}.get(key, changed))
     config.save_config()
     assert set(ConfigFileStorageManager.load_config_dict(path)) == set(cfg_mod.CONFIG_KEYS)
+
+
+def test_saving_writes_no_token_and_no_level_that_came_from_the_environment(tmp_path, monkeypatch):
+    # `main-model set` saved every resolved field, so a shell's HF_TOKEN went into the file (with
+    # no file yet, `./dreamference.toml` in the working directory), and a session's
+    # DREAMFERENCE_MIGHTLING_AIRGAPPED=off removed the file's `on`. The file keeps what it held.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    for name in ("DREAMFERENCE_CONFIG_PATH", "DREAMFERENCE_MODEL", "DREAMFERENCE_HF_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HF_TOKEN", "hf_from_the_shell")
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "off")
+    monkeypatch.chdir(tmp_path)
+    config = DreamferenceConfig()
+    assert config.hf_token == "hf_from_the_shell"
+    config.model = "qwen3.8-27b-nvfp4-dflash2"
+    saved = config.save_config()
+    assert saved == tmp_path / "dreamference.toml"
+    assert "hf_from_the_shell" not in saved.read_text(encoding="utf-8")
+
+    saved.write_text('hf_token = "hf_in_the_file"\nmightling_airgapped = "on"\n', encoding="utf-8")
+    config = DreamferenceConfig()
+    assert (config.hf_token, config.mightling_airgapped) == ("hf_from_the_shell", "off")
+    config.model = "qwen3.8-27b-nvfp4-dflash2"
+    config.save_config()
+    assert ConfigFileStorageManager.load_config_dict(saved) == {
+        "hf_token": "hf_in_the_file", "mightling_airgapped": "on", "model": "qwen3.8-27b-nvfp4-dflash2"}
+    # A token given on the command line is still the caller's choice to save.
+    config = DreamferenceConfig(hf_token="hf_on_the_command_line")
+    config.save_config()
+    assert ConfigFileStorageManager.load_config_dict(saved)["hf_token"] == "hf_on_the_command_line"

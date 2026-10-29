@@ -228,6 +228,12 @@ class DreamferenceConfig:
             )
         )
 
+        # The values the environment supplied, which save_config() leaves out of the file: a
+        # shell's HF_TOKEN does not belong in a `dreamference.toml` that may sit in a repository.
+        self._from_environment: Dict[str, Any] = {}
+        if hf_token is None and (os.getenv("HF_TOKEN") is not None or os.getenv("DREAMFERENCE_HF_TOKEN") is not None):
+            self._from_environment["hf_token"] = self.hf_token
+
         # 8. Blackwell GB10 Performance Tuning Flags
         self.enable_prefix_caching: bool = bool(
             enable_prefix_caching
@@ -313,10 +319,13 @@ class DreamferenceConfig:
         # configuration file this object resolved: the launcher also reads the user-level file and
         # takes the stricter of the two, because the agent can write the repository's.
         self.mightling_airgapped: str = DEFAULT_MIGHTLING_AIRGAPPED
-        for candidate in (mightling_airgapped, os.getenv("DREAMFERENCE_MIGHTLING_AIRGAPPED"), self.file_data.get("mightling_airgapped")):
+        for tier, candidate in enumerate((mightling_airgapped, os.getenv("DREAMFERENCE_MIGHTLING_AIRGAPPED"),
+                                          self.file_data.get("mightling_airgapped"))):
             level = self.parse_airgapped_level(candidate)
             if level is not None:
                 self.mightling_airgapped = level
+                if tier == 1:
+                    self._from_environment["mightling_airgapped"] = level
                 break
 
         # The prompt's name, through the same tiers. Only its form is checked here: which prompts
@@ -550,6 +559,13 @@ class DreamferenceConfig:
         if self.mightling_refine != DEFAULT_MIGHTLING_REFINE: data["mightling_refine"] = self.mightling_refine
         if self.mightling_refine_version != DEFAULT_MIGHTLING_REFINE_VERSION:
             data["mightling_refine_version"] = self.mightling_refine_version
+
+        # A value still as the environment gave it stays what the file held, or absent.
+        for key, value in self._from_environment.items():
+            if getattr(self, key) == value:
+                data.pop(key, None)
+                if key in self.file_data:
+                    data[key] = self.file_data[key]
 
         return ConfigFileStorageManager.save_config_dict(out_path, data, owned=CONFIG_KEYS)
 
