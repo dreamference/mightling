@@ -173,7 +173,7 @@ mod tests {
             .filter(|w| w[0] == "--tmpfs")
             .map(|w| &w[1])
             .collect();
-        for hidden in ["/run", "/tmp", "/home/u"] {
+        for hidden in ["/run", "/tmp", "/var/tmp", "/dev/shm", "/home/u"] {
             assert!(
                 tmpfs.iter().any(|t| *t == hidden),
                 "{hidden} not hidden: {args:?}"
