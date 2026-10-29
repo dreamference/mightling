@@ -276,7 +276,11 @@ class RetiredWebChat:
             int: The exit code.
         """
         ask = ask or cls._ask_terminal
-        containers = cls.containers()
+        try:
+            containers = cls.containers()
+        except OSError as exc:
+            print(f"❌ Docker could not be run ({exc}), so nothing was checked or removed.")
+            return 1
         if containers:
             print(f"The retired Onyx web chat's containers: {', '.join(containers)}")
             if not (yes or ask("Stop and remove them? Saved chats stay in their Docker volumes. [y/N] ")):
