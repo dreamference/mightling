@@ -713,6 +713,23 @@ class ImageSearchService:
         self.fetcher = fetcher
         self._pool = ThreadPoolExecutor(max_workers=8)
 
+    @staticmethod
+    def alt_text(title: str) -> str:
+        """Makes a page's image title safe to stand between an embed's brackets.
+
+        The title is the web page's, and the model is told to copy the embed lines verbatim: a
+        bracket, parenthesis or line break in it would end the embed early and let the page write
+        its own markdown (a link, or an image from its own server) into the reply.
+
+        Args:
+            title (str): The title SearXNG or the store gave.
+
+        Returns:
+            str: The title on one line, without markdown's bracket characters, at most 120 long.
+        """
+        cleaned = re.sub(r"[\\\[\]()<>\x00-\x1f\x7f]+", " ", title)
+        return " ".join(cleaned.split())[:120].strip() or "image"
+
     def search(self, queries: List[str], count: int = RESULT_COUNT) -> Dict[str, str]:
         """
         Runs the full funnel for a set of queries.
@@ -750,7 +767,7 @@ class ImageSearchService:
                 "response": "No embeddable images were found for this search.",
                 "instructions": "Tell the user the image search came up empty.",
             }
-        lines = [f"![{w['title']}](/images/{w['file_id']}.jpg)" for w in winners]
+        lines = [f"![{self.alt_text(w['title'])}](/images/{w['file_id']}.jpg)" for w in winners]
         markdown = "\n\n".join(lines)
         # The instructions restate the embeds because models given only a pointer ("embed the
         # above") have answered `Done` and shown nothing -- the images render only if the model
