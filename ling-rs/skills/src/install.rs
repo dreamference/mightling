@@ -887,6 +887,24 @@ mod tests {
     }
 
     #[test]
+    fn a_bundle_of_more_than_five_thousand_files_is_refused() {
+        let root = scratch("unpack-many");
+        let names: Vec<String> = (0..MAX_FILES).map(|n| format!("f/{n}.md")).collect();
+
+        let mut zipped: Vec<(&str, &[u8], Option<u32>)> = vec![("SKILL.md", SKILL.as_bytes(), None)];
+        zipped.extend(names.iter().map(|name| (name.as_str(), b"x".as_slice(), None)));
+        let refused = unzip(&zip_of(&zipped), &root.join("zip"));
+        assert!(refused.as_ref().is_err_and(|error| error.contains("more than 5000 files")), "{refused:?}");
+        assert!(!root.join("zip").exists(), "the count is checked before anything is written");
+
+        let paths: Vec<String> = names.iter().map(|name| format!("r-1/skill/{name}")).collect();
+        let mut tarred: Vec<(&str, &str, u32)> = vec![("r-1/skill/SKILL.md", SKILL, 0o644)];
+        tarred.extend(paths.iter().map(|path| (path.as_str(), "x", 0o644)));
+        let refused = unpack(tarball(&tarred).as_slice(), &["skill".into()], &root.join("tar"));
+        assert!(refused.as_ref().is_err_and(|error| error.contains("more than 5000 files")), "{refused:?}");
+    }
+
+    #[test]
     fn a_chain_of_links_cannot_reach_outside_the_skill() {
         // Each link alone stays inside by its text; together, through one another, they would not.
         let ordered = |entries: &[(&str, Option<&str>)]| {
