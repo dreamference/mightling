@@ -108,6 +108,23 @@ def test_the_advised_utilization_leaves_the_host_its_reserve(monkeypatch, capsys
     assert 128.0 - advised * 128.0 >= HOST_MEMORY_RESERVE_GB
 
 
+@pytest.mark.parametrize(
+    "argv, fault",
+    [
+        (["earlyoom", "-m", "5", "-s", "100", "-s", "10"], "swap"),
+        (["earlyoom", "-m", "5", "-s", "100", "-m", "20"], "memory"),
+        (["earlyoom", "-m", "20", "-m", "5", "-s", "100"], None),
+    ],
+)
+def test_a_repeated_earlyoom_flag_is_read_as_earlyoom_reads_it(argv, fault):
+    # earlyoom parses its flags with getopt, so the last occurrence of a flag is the one in force.
+    result = VLLMServerManager._earlyoom_fault(argv)
+    if fault is None:
+        assert result is None
+    else:
+        assert result is not None and fault in result
+
+
 class _FakeWatchdog:
     def __init__(self, container, on_trip):
         self.stopped = False

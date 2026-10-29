@@ -1193,9 +1193,11 @@ class VLLMServerManager:
         Returns:
             Optional[float]: The SIGTERM component of the value — `-m 10,5` means SIGTERM at 10%
             and SIGKILL at 5%, and the SIGTERM point is the one reached first, so it governs.
-            None if the flag is absent or unparseable.
+            None if the flag is absent or unparseable. A repeated flag reads its last
+            occurrence, as earlyoom's getopt does.
         """
-        for index, arg in enumerate(argv):
+        for index in range(len(argv) - 1, 0, -1):
+            arg = argv[index]
             if arg == flag:
                 value = argv[index + 1] if index + 1 < len(argv) else ""
             elif arg.startswith(flag) and len(arg) > len(flag):
