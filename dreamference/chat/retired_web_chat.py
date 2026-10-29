@@ -160,12 +160,20 @@ class RetiredWebChat:
     def images(cls) -> List[str]:
         """
         Returns:
-            List[str]: Onyx's own images (`onyxdotapp/*`), as `repository:tag`.
+            List[str]: Onyx's own images (`onyxdotapp/*`), as `repository:tag`, or by id when a
+            newer pull took the tag (`docker rmi` refuses `repository:<none>`).
         """
-        result = _run(["docker", "images", "--format", "{{.Repository}}:{{.Tag}}"], timeout=30)
+        result = _run(
+            ["docker", "images", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}"], timeout=30
+        )
         if result.returncode != 0:
             return []
-        return [name for name in result.stdout.split() if name.startswith(ONYX_IMAGE_PREFIX)]
+        images = []
+        for line in result.stdout.splitlines():
+            name, _, ident = line.strip().partition(" ")
+            if name.startswith(ONYX_IMAGE_PREFIX):
+                images.append(ident if name.endswith(":<none>") and ident else name)
+        return images
 
     @classmethod
     def orphan_sidecars(cls) -> List[str]:
