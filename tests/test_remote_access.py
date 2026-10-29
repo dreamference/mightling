@@ -1590,6 +1590,7 @@ def _token():
     path = pathlib.Path(remote_settings.CLOUDFLARE_TOKEN_FILE).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("cf-secret-token\n")
+    path.chmod(0o600)
     return path
 
 
@@ -1675,6 +1676,15 @@ def test_caa_is_written_once_and_left_alone_when_right(monkeypatch):
     calls = _fake_cloudflare(monkeypatch, right)
     assert RemotePublicCertificate.ensure_caa("remote.example.org", [ACCOUNT])
     assert all(m == "GET" for m, _, _ in calls)
+
+
+def test_a_token_others_may_read_is_refused(caplog):
+    path = _token()
+    assert RemotePublicCertificate.token() == "cf-secret-token"
+    path.chmod(0o644)
+    assert RemotePublicCertificate.token() is None
+    assert f"chmod 600 {remote_settings.CLOUDFLARE_TOKEN_FILE}" in caplog.text
+    assert "cf-secret-token" not in caplog.text
 
 
 def test_obtain_without_a_token_runs_nothing(monkeypatch):

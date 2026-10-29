@@ -126,6 +126,7 @@ def test_the_relay_has_its_own_account_and_its_own_caa_record(monkeypatch):
     token.parent.mkdir(parents=True, exist_ok=True)
     token.write_text(SECRET_TOKEN)
     binary = RemotePublicCertificate.folder() / "bin" / "lego"
+    token.chmod(0o600)
     monkeypatch.setattr(RemotePublicCertificate, "lego", classmethod(lambda cls: binary))
     seen = []
 

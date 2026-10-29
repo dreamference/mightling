@@ -36,6 +36,7 @@ def _token(text="cf-secret-token\n"):
     path = Path(module.CLOUDFLARE_TOKEN_FILE).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
+    path.chmod(0o600)
     return path
 
 

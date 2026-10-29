@@ -54,8 +54,8 @@ an authority (the NetBird app reads only the phone's system store), so give the 
 from Let's Encrypt instead:
 
 1. Create an API token at Cloudflare that can edit DNS for your domain and save it, on the GB10,
-   in the file `~/.config/dreamference/cloudflare-token`. It is read from that file and never
-   printed.
+   in the file `~/.config/dreamference/cloudflare-token`, readable by you alone
+   (`chmod 600`; a file others may read is refused). It is read from that file and never printed.
 2. Try it against Let's Encrypt's test service first, then for real:
 
     ```bash
