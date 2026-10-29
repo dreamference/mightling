@@ -204,6 +204,30 @@ pub fn entered(name: &str, path: &Path) -> bool {
     !name.starts_with('.') && !SKIP_DIRS.contains(&name) && !build_tree(path)
 }
 
+/// Whether the walk itself reaches `target`, a resolved path inside `root`: no hidden, package or
+/// build folder on the way, and not a hidden file or one named like a secret. A followed link
+/// leads nowhere else (§5.2: excluded whatever the globs say).
+fn walk_reaches(root: &Path, target: &Path) -> bool {
+    let Ok(rel) = target.strip_prefix(root) else {
+        return false;
+    };
+    let mut path = root.to_path_buf();
+    for component in rel.components() {
+        let name = component.as_os_str().to_string_lossy();
+        path.push(&*name);
+        if name.starts_with('.') {
+            return false;
+        }
+        if path.is_file() {
+            return !secret_name(&name);
+        }
+        if !entered(&name, &path) {
+            return false;
+        }
+    }
+    true
+}
+
 fn globs(patterns: &[String]) -> Option<GlobSet> {
     if patterns.is_empty() {
         return None;
@@ -283,6 +307,12 @@ pub fn walk_in(
                 if !target.starts_with(&root) {
                     *out.skipped
                         .entry("symlink out of the collection")
+                        .or_default() += 1;
+                    continue;
+                }
+                if !walk_reaches(&root, &target) {
+                    *out.skipped
+                        .entry("symlink to what the walk skips")
                         .or_default() += 1;
                     continue;
                 }
@@ -590,6 +620,34 @@ mod tests {
         // The alias is kept under its own name (the hash makes it a duplicate later); the escape
         // and the loop add nothing.
         assert_eq!(rels(&collection), ["alias.md", "in.md"]);
+    }
+
+    #[test]
+    fn a_followed_link_reaches_nothing_the_walk_itself_skips() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("in.md"), b"x");
+        write(&root.join(".private/diary.md"), b"x");
+        write(&root.join("node_modules/pkg/README.md"), b"x");
+        write(&root.join("proj/target/CACHEDIR.TAG"), b"x");
+        write(&root.join("proj/target/doc.md"), b"x");
+        write(&root.join("keys/credentials.txt"), b"x");
+        let link = |target: &str, name: &str| {
+            std::os::unix::fs::symlink(root.join(target), root.join(name)).unwrap()
+        };
+        link(".private/diary.md", "diary.md");
+        link(".private", "private");
+        link("node_modules/pkg/README.md", "readme.md");
+        link("proj/target/doc.md", "built.md");
+        link("proj/target", "built");
+        link("keys/credentials.txt", "keys.txt");
+        let mut collection = Collection::new("docs", root.clone());
+        collection.follow_symlinks = true;
+        let found = walk(&collection, &home, true);
+        let rels: Vec<_> = found.candidates.iter().map(|c| c.rel.as_str()).collect();
+        assert_eq!(rels, ["in.md"]);
+        assert_eq!(found.skipped["symlink to what the walk skips"], 6);
     }
 
     #[test]
