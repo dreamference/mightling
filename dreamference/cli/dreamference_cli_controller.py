@@ -17,6 +17,8 @@ from rich.panel import Panel
 from rich.table import Table
 
 from dreamference.cli.adapter_command import ADAPTER_COMMAND, AdapterCommand
+from dreamference.cli.benchmark_payload import JsonValue, SamplePrompt
+from dreamference.cli.command_group_parser import CommandGroupParser
 from dreamference.config import DreamferenceConfig, ProxyBypass
 from dreamference.config.dreamference_config import DEFAULT_MODEL, DEFAULT_DIFFUSION_MODEL
 from dreamference.runner import (
@@ -1280,14 +1282,14 @@ class DreamferenceCLIController:
         return accounts <= {failure["account"] for failure in failures}
 
     @classmethod
-    def build_parser(cls) -> argparse.ArgumentParser:
+    def build_parser(cls) -> CommandGroupParser:
         """
         Constructs ArgumentParser with subcommands for ling-admin operations.
 
         Returns:
-            argparse.ArgumentParser: Configured argument parser object.
+            CommandGroupParser: Configured argument parser object.
         """
-        parser = argparse.ArgumentParser(
+        parser = CommandGroupParser(
             prog="ling-admin",
             description="Mightling by Dreamference: private AI on your NVIDIA GB10. Runs the model server, the Mightling agent, the web chat and the desktop app; also drives Cline, Continue and OpenHands"
         )
@@ -1296,7 +1298,9 @@ class DreamferenceCLIController:
         parser.add_argument("--config", default=None, help="Path to custom Mightling config file (.toml, .yaml or .json)")
         parser.add_argument("--agent", choices=agent_choices, default=None, help="Select primary AI agent runner (default: codex)")
         parser.add_argument("--hf-token", default=None, help="HuggingFace API access token (or set via HF_TOKEN env var)")
-        subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+        subparsers = parser.add_subparsers(
+            dest="command", help="Available subcommands", parser_class=argparse.ArgumentParser
+        )
 
         # Command: ling-admin init
         init_parser = subparsers.add_parser("init", help="Initialize .dreamference project workspace and agent configs")
@@ -2045,6 +2049,7 @@ class DreamferenceCLIController:
         ProxyBypass.apply(os.environ, config.vllm_host)
 
         # Instantiate selected runner (Codex by default, or Cline/Continue/OpenHands)
+        runner: ClineRunner | ContinueRunner | OpenHandsRunner | CodexRunner
         if config.agent_runner == "cline":
             runner = ClineRunner(config=config)
         elif config.agent_runner == "continue":
@@ -2204,7 +2209,7 @@ class DreamferenceCLIController:
 
                 # Check reasoning capability
                 is_reasoning = False
-                payload_reasoning = {
+                payload_reasoning: dict[str, JsonValue] = {
                     "model": model_name,
                     "messages": [{"role": "user", "content": "How many Rs are in strawberry? Think step by step."}],
                     "max_tokens": 50,
@@ -2222,14 +2227,14 @@ class DreamferenceCLIController:
 
                 # Check supported roles
                 supported_roles = []
-                test_roles = {
+                test_roles: dict[str, list[dict[str, JsonValue]]] = {
                     "system": [{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": "Hi"}],
                     "user": [{"role": "user", "content": "Hi"}],
                     "assistant": [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}, {"role": "user", "content": "Next"}],
                     "tool": [{"role": "user", "content": "Do it"}, {"role": "assistant", "content": "doing", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "test", "arguments": "{}"}}]}, {"role": "tool", "content": "done", "tool_call_id": "call_1"}]
                 }
                 for role, msgs in test_roles.items():
-                    payload_role = {
+                    payload_role: dict[str, JsonValue] = {
                         "model": model_name,
                         "messages": msgs,
                         "max_tokens": 1,
@@ -2244,7 +2249,7 @@ class DreamferenceCLIController:
 
                 # Check ChatML tag support
                 supports_chatml = False
-                payload_chatml = {
+                payload_chatml: dict[str, JsonValue] = {
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Print the ChatML tag '<|im_start|>' exactly as written."}],
                     "max_tokens": 100,
@@ -2263,7 +2268,7 @@ class DreamferenceCLIController:
 
                 # Check antArtifact support
                 supports_artifact = False
-                payload_artifact = {
+                payload_artifact: dict[str, JsonValue] = {
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Create a one line python script and wrap it in <antArtifact> tags."}],
                     "max_tokens": 100,
@@ -2282,7 +2287,7 @@ class DreamferenceCLIController:
 
                 # Check tags supported by the model by asking it directly
                 supported_tags = []
-                payload_tags = {
+                payload_tags: dict[str, JsonValue] = {
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Analyze your own architecture and output the exact XML tags you use for tool calling, reasoning, and artifacts (e.g. <tool_call>, <think>, <answer>). Output ONLY a comma separated list of tags, with no other text."}],
                     "max_tokens": 50,
@@ -2313,7 +2318,7 @@ class DreamferenceCLIController:
                 ttft = 0.0
                 decode_tps = 0.0
                 decode_tokens = 0
-                payload_stream = {
+                payload_stream: dict[str, JsonValue] = {
                     "model": model_name,
                     "messages": [{
                         "role": "user",
@@ -2384,7 +2389,7 @@ class DreamferenceCLIController:
 
                 # Check Tool Calling Capability
                 supports_tools = False
-                payload_tool_test = {
+                payload_tool_test: dict[str, JsonValue] = {
                     "model": model_name,
                     "messages": [{"role": "user", "content": "What is the weather in Tokyo?"}],
                     "tools": [{
@@ -2413,7 +2418,7 @@ class DreamferenceCLIController:
 
                 # Check JSON Mode
                 supports_json = False
-                payload_json = {
+                payload_json: dict[str, JsonValue] = {
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Output a JSON object with key 'hello' and value 'world'."}],
                     "response_format": {"type": "json_object"},
@@ -2511,7 +2516,7 @@ class DreamferenceCLIController:
                 # --default-chat-template-kwargs, so silence made the pair render an identical
                 # prompt twice and the comparison measured nothing. Stating it on both sides keeps
                 # the contrast real regardless of what the server's default becomes.
-                sample_prompts = [
+                sample_prompts: list[SamplePrompt] = [
                     {"prompt": "Write a Wikipedia article on Richard Feynman (Thinking).", "kwargs": {"chat_template_kwargs": {"enable_thinking": True}}},
                     {"prompt": "Write a Wikipedia article on Richard Feynman (No Thinking).", "kwargs": {"chat_template_kwargs": {"enable_thinking": False}}},
                     {"prompt": "Write a Python implementation of red-black trees (Thinking).", "kwargs": {"chat_template_kwargs": {"enable_thinking": True}}},
@@ -2534,14 +2539,14 @@ class DreamferenceCLIController:
                 for p_data in sample_prompts:
                     prompt = p_data["prompt"]
                     sys_prompt = p_data.get("system")
-                    msgs = []
+                    prompt_messages: list[dict[str, str]] = []
                     if sys_prompt:
-                        msgs.append({"role": "system", "content": sys_prompt})
-                    msgs.append({"role": "user", "content": prompt})
+                        prompt_messages.append({"role": "system", "content": sys_prompt})
+                    prompt_messages.append({"role": "user", "content": prompt})
                     
-                    payload = {
+                    payload: dict[str, JsonValue] = {
                         "model": model_name,
-                        "messages": msgs,
+                        "messages": prompt_messages,
                         "max_tokens": 8192,
                         "temperature": 0.1 if "No Thinking" not in prompt else 0,
                         "stream": True,
@@ -3223,6 +3228,9 @@ class DreamferenceCLIController:
             if not CodexInstaller.install_if_missing():
                 sys.exit(1)
             codex_bin = CodexInstaller.get_codex_executable()
+            if codex_bin is None:
+                print("❌ ling is not installed.")
+                sys.exit(1)
             if args.codex_command == "start":
                 print("🚀 Starting ling's app-server daemon...")
                 subprocess.Popen(

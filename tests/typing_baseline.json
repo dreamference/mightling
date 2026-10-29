@@ -1,12 +1,5 @@
 {
- "counts": {
-  "dreamference/cli/dreamference_cli_controller.py": {
-   "arg-type": 15,
-   "assignment": 3,
-   "attr-defined": 4,
-   "list-item": 2
-  }
- },
+ "counts": {},
  "mypy": "2.4.0",
- "total": 24
+ "total": 0
 }

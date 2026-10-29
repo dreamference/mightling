@@ -49,7 +49,8 @@ def mypy_counts(mypy: str) -> Counter:
         error = json.loads(line)
         if error["severity"] == "error":
             counts[(Path(error["file"]).as_posix(), error["code"] or "misc")] += 1
-    if not counts and result.returncode != 0:
+    # 1 means "reported something", which includes notes alone once no error is left; 2 is a crash.
+    if not counts and result.returncode > 1:
         raise RuntimeError(f"mypy failed without reporting an error:\n{result.stderr}")
     return counts
 
