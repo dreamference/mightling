@@ -269,6 +269,17 @@ fn parse_date(text: &str) -> Result<i64> {
     let [y, m, d] = parts[..] else {
         bail!("`{text}` is not a date (YYYY-MM-DD)")
     };
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let days_in_month = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => bail!("`{text}` is not a date (YYYY-MM-DD): there is no month {m}"),
+    };
+    if !(1..=days_in_month).contains(&d) {
+        bail!("`{text}` is not a date (YYYY-MM-DD): that month has {days_in_month} days");
+    }
     Ok(days_from_civil(y, m, d) * 86400)
 }
 
@@ -981,6 +992,22 @@ fn ocr_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_date_that_is_not_on_the_calendar_is_refused() {
+        assert_eq!(parse_date("1970-01-02").unwrap(), 86400);
+        assert!(parse_date("2028-02-29").is_ok(), "a leap day");
+        for bad in [
+            "2026-13-45",
+            "2026-00-10",
+            "2026-04-31",
+            "2026-02-29",
+            "2026-05-00",
+        ] {
+            let err = parse_date(bad).expect_err(bad).to_string();
+            assert!(err.contains("is not a date"), "{bad}: {err}");
+        }
+    }
 
     fn unit(page: Option<u32>, text: &str) -> ling_docs::extract::Unit {
         ling_docs::extract::Unit {
