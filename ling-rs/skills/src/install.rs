@@ -156,15 +156,21 @@ fn safe_relative(path: &Path) -> Option<PathBuf> {
 }
 
 /// Whether a link at `link` (relative to the skill's folder) pointing at `target` stays inside
-/// the folder.
+/// the folder. A `..` after a name is refused: the name may be another link, which the count of
+/// the text cannot follow (`z -> x/y/..` with `x/y -> ..` leaves the folder).
 fn link_stays_inside(link: &Path, target: &Path) -> bool {
     if target.is_absolute() {
         return false;
     }
     let mut depth: i64 = link.components().count() as i64 - 1;
+    let mut named = false;
     for component in target.components() {
         match component {
-            Component::Normal(_) => depth += 1,
+            Component::Normal(_) => {
+                depth += 1;
+                named = true;
+            }
+            Component::ParentDir if named => return false,
             Component::ParentDir => depth -= 1,
             Component::CurDir => {}
             _ => return false,
@@ -176,11 +182,19 @@ fn link_stays_inside(link: &Path, target: &Path) -> bool {
     true
 }
 
+/// Whether `relative` lies below a link already unpacked into `destination`: whatever is written
+/// there lands where the link points, and a link there counts its depth from the wrong folder.
+fn behind_a_link(destination: &Path, relative: &Path) -> bool {
+    relative.ancestors().skip(1).filter(|ancestor| !ancestor.as_os_str().is_empty()).any(|ancestor| {
+        destination.join(ancestor).symlink_metadata().is_ok_and(|metadata| metadata.file_type().is_symlink())
+    })
+}
+
 /// Unpacks one folder of a gzipped repository tarball (as GitHub serves it: one top-level folder,
 /// then the repository) into `destination`. Tries `paths` in order and returns the one found.
 ///
-/// Refuses a path that leaves the skill's folder, a link pointing outside it, anything that is not
-/// a file, folder or link, and a skill over [`MAX_BUNDLE_BYTES`].
+/// Refuses a path that leaves the skill's folder or lies below a link, a link pointing outside it,
+/// anything that is not a file, folder or link, and a skill over [`MAX_BUNDLE_BYTES`].
 pub fn unpack(tarball: impl Read, paths: &[String], destination: &Path) -> Result<String, String> {
     let wanted: Vec<PathBuf> = paths.iter().map(|path| PathBuf::from(path.trim_matches('/'))).collect();
     let mut found: Option<usize> = None;
@@ -211,6 +225,9 @@ pub fn unpack(tarball: impl Read, paths: &[String], destination: &Path) -> Resul
         let relative =
             safe_relative(&relative).ok_or_else(|| format!("refused: {} leaves the skill's folder", full.display()))?;
         let target = destination.join(&relative);
+        if behind_a_link(destination, &relative) {
+            return Err(format!("refused: {} lies behind a link", relative.display()));
+        }
         let kind = entry.header().entry_type();
         if kind.is_dir() {
             std::fs::create_dir_all(&target).map_err(|error| error.to_string())?;
@@ -264,6 +281,9 @@ pub fn unzip(bytes: &[u8], destination: &Path) -> Result<(), String> {
         let relative =
             safe_relative(Path::new(&name)).ok_or_else(|| format!("refused: {name} leaves the skill's folder"))?;
         let target = destination.join(&relative);
+        if behind_a_link(destination, &relative) {
+            return Err(format!("refused: {} lies behind a link", relative.display()));
+        }
         if entry.is_dir() {
             std::fs::create_dir_all(&target).map_err(|error| error.to_string())?;
             continue;
