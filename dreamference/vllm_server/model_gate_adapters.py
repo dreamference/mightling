@@ -418,6 +418,7 @@ class ModelGateAdapters:
         key = self.key()
         if key:
             lines.append(f"Authorization: Bearer {key}")
+        writer = None
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(*self.upstream), ENGINE_TIMEOUT_S
@@ -425,9 +426,11 @@ class ModelGateAdapters:
             writer.write(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + data)
             await writer.drain()
             answer = await asyncio.wait_for(reader.read(), ENGINE_TIMEOUT_S)
-            writer.close()
         except (TimeoutError, OSError):
             return 0, b""
+        finally:
+            if writer is not None:
+                writer.close()
         return self.parse_response(answer)
 
     @classmethod
