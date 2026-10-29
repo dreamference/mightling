@@ -360,7 +360,7 @@ class FleetHubFetch:
                 f"printf '%s %s %s\\n' {shlex.quote(donor_name)} {shlex.quote(fields[0])} "
                 f"{shlex.quote(fields[1])} "
                 f"> {workdir}/kh && for i in $(seq 1 20); do "
-                f"rsync -aH --partial --append-verify --timeout=120 --mkpath "
+                f"rsync -aH --safe-links --partial --append-verify --timeout=120 --mkpath "
                 f"-e {shlex.quote(transport)} "
                 f"{shlex.quote(f'{donor_user}@{donor_name}:{donor_hub}/{folder}/')} "
                 f"{shlex.quote(f'{self.remote_hub}/{folder}/')} && exit 0; s=$?; "
