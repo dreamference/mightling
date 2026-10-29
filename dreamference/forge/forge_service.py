@@ -238,7 +238,9 @@ class ForgeService:
         record_address = cls.record_address() if role == ROLE_MIRROR else None
         if role == ROLE_MIRROR:
             ForgeSettings.update_state(record_address_at_start=record_address or "")
-        return ForgeContainer.run_arguments(data, ForgeBind.lan_addresses(), record_address)
+        addresses = ForgeBind.advertised_addresses()
+        ForgeSettings.update_state(addresses_at_start=sorted(addresses))
+        return ForgeContainer.run_arguments(data, addresses, record_address)
 
     @classmethod
     def run(cls) -> int:
@@ -263,6 +265,28 @@ class ForgeService:
             bool: Whether the unit restarted.
         """
         return cls.systemctl("restart", UNIT).returncode == 0
+
+    @classmethod
+    def rebind(cls) -> bool:
+        """Restart the forge when it listens elsewhere than where the node advertises itself now.
+
+        `node disable` runs it, and the tick: the forge then follows the node off the LAN, back
+        onto it, and through a DHCP change. A failed `ip` reads as no LAN, so the forge falls
+        back to loopback and returns at the next tick.
+
+        Returns:
+            bool: Whether the forge was restarted.
+        """
+        if ForgeSettings.role() not in ROLES or not ForgeContainer.running():
+            return False
+        addresses = sorted(ForgeBind.advertised_addresses())
+        if addresses == ForgeSettings.state().get("addresses_at_start"):
+            return False
+        print(
+            "💡 The forge listens where the node advertises itself: "
+            f"{', '.join(addresses) or 'loopback only'} now; restarting its container."
+        )
+        return cls.restart()
 
     @classmethod
     def advertise(cls, role: str | None) -> None:
@@ -309,7 +333,7 @@ class ForgeService:
             print("⚠️  The forge's owner account is an administrator; it should not be.")
         cls.systemctl("start", *TIMERS)
         cls.advertise(role)
-        addresses = ForgeBind.lan_addresses()
+        addresses = ForgeBind.advertised_addresses()
         where = (
             ", ".join(f"http://{address}:{HTTP_PORT}/" for address in addresses) or "loopback only"
         )
@@ -416,15 +440,20 @@ class ForgeService:
                     print(line)
             except RuntimeError as error:
                 print(f"⚠️  Push mirrors not checked: {error}")
+        restarted = cls.rebind()
         if role == ROLE_MIRROR:
             address = cls.record_address()
-            if address and address != ForgeSettings.state().get("record_address_at_start"):
+            if (
+                not restarted
+                and address
+                and address != ForgeSettings.state().get("record_address_at_start")
+            ):
                 print(
                     "💡 The forge of record's address changed; restarting this mirror's container."
                 )
                 cls.restart()
             return 0
-        if role != ROLE_RECORD or not ForgeContainer.running():
+        if restarted or role != ROLE_RECORD or not ForgeContainer.running():
             return 0
         from dreamference.forge.forge_github_mirror import ForgeGithubMirror
         from dreamference.forge.forge_mirrors import ForgeMirrors

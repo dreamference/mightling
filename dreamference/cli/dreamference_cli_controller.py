@@ -3093,7 +3093,12 @@ class DreamferenceCLIController:
                     ForgeService.setup()
                 sys.exit(0 if enabled else 1)
             if args.node_command == "disable":
-                sys.exit(0 if NodeAdvertiser.disable() else 1)
+                disabled = NodeAdvertiser.disable()
+                if disabled:
+                    # The forge listens only where the node advertises itself (FORGEJO §0.3).
+                    from dreamference.forge.forge_service import ForgeService
+                    ForgeService.rebind()
+                sys.exit(0 if disabled else 1)
             if args.node_command == "status" and not args.name:
                 print(NodeAdvertiser.status())
                 sys.exit(0)
