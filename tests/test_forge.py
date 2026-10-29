@@ -129,6 +129,15 @@ def test_the_switch_finds_a_forge_table_written_with_spaces_or_a_comment(monkeyp
         assert ForgeSettings.config_path().read_text().count("forge") == 1, header
 
 
+def test_a_stray_line_in_app_ini_does_not_cost_the_secrets(tmp_path):
+    # New secrets would leave every sealed field (tokens, 2FA, mirror credentials) unreadable.
+    path = ForgeAppIni.write(tmp_path, "gx10-1a2b", "record")
+    secrets = ForgeAppIni.read_secrets(tmp_path)
+    path.write_text(path.read_text() + "a line a hand edit left without an equals sign\n")
+    ForgeAppIni.write(tmp_path, "gx10-1a2b", "record")
+    assert ForgeAppIni.read_secrets(tmp_path) == secrets
+
+
 def test_secrets_are_private_and_the_role_is_kept():
     path = ForgeSettings.write_secret("owner-password", "x" * 24)
     assert oct(path.stat().st_mode & 0o777) == "0o600"
