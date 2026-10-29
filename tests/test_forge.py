@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -94,6 +95,27 @@ def test_the_forge_follows_the_node_off_the_lan_and_back(monkeypatch, capsys):
         "`node disable` takes the forge off the LAN"
     )
     assert "loopback only" in capsys.readouterr().out
+
+
+def test_the_forge_folders_are_private_whatever_the_umask(monkeypatch):
+    monkeypatch.setattr(ForgeAppIni, "write", classmethod(lambda cls, *a: None))
+    monkeypatch.setattr(ForgeAnonymity, "write_patterns", classmethod(lambda cls, *a: None))
+    monkeypatch.setattr(ForgeService, "systemctl", classmethod(lambda cls, *a: None))
+    ForgeSettings.update_state(role="record")
+    folders = (ForgeSettings.share_dir(), ForgeSettings.data_dir())
+    previous = os.umask(0o022)
+    try:
+        for start in (ForgeService.install_units, ForgeService.run_arguments):
+            ForgeSettings.data_dir().mkdir(parents=True, exist_ok=True)
+            for folder in folders:
+                folder.chmod(0o755)
+            start()
+            modes = {folder.name: folder.stat().st_mode & 0o777 for folder in folders}
+            assert modes == {"forge": 0o700, "data": 0o700}, (
+                f"{start.__name__} leaves the forge open to other local users"
+            )
+    finally:
+        os.umask(previous)
 
 
 def test_every_publish_names_an_address():
