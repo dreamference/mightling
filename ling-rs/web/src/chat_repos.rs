@@ -376,12 +376,16 @@ impl CheckoutRecord {
 
     /// Canonical `<bridge>:<chat>` key for daily token budgets and pending notices.
     pub fn chat_key(&self) -> String {
-        let prefix = format!("{}:", self.bridge);
-        if self.chat.starts_with(&prefix) {
-            self.chat.clone()
-        } else {
-            format!("{}:{}", self.bridge, self.chat)
-        }
+        chat_key_of(&self.bridge, &self.chat)
+    }
+}
+
+/// The `<bridge>:<chat>` key of a chat, without doubling a prefix the chat id already has.
+fn chat_key_of(bridge: &str, chat: &str) -> String {
+    if chat.strip_prefix(bridge).is_some_and(|rest| rest.starts_with(':')) {
+        chat.to_string()
+    } else {
+        format!("{bridge}:{chat}")
     }
 }
 
@@ -2315,8 +2319,19 @@ async fn run_git_diff_capped(
             let _ = child.kill().await;
             let _ = child.wait().await;
             buf.truncate(MAX_DIFF_OUTPUT_BYTES);
-            while !buf.is_empty() && std::str::from_utf8(&buf).is_err() {
-                buf.pop();
+            // Drop only a character the cut split; a byte that is not UTF-8 earlier on (a Latin-1
+            // file) is the lossy conversion's, not a reason to drop everything after it.
+            if let Some(back) = buf.iter().rev().take(4).position(|byte| byte & 0xC0 != 0x80) {
+                let lead = buf.len() - 1 - back;
+                let width = match buf[lead] {
+                    0xC0..=0xDF => 2,
+                    0xE0..=0xEF => 3,
+                    0xF0..=0xF7 => 4,
+                    _ => 1,
+                };
+                if lead + width > buf.len() {
+                    buf.truncate(lead);
+                }
             }
             let mut text = String::from_utf8_lossy(&buf).into_owned();
             text.push_str(DIFF_CUT_SUFFIX);
@@ -2525,12 +2540,22 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
 
     let (created_new_worktree, candidate_thread, candidate_worktree_dir, candidate_branch) =
         if let Some(existing) = &existing_snapshot {
+            // A checkout opened while the repository was read-only has no branch: it gets its
+            // `phone/<thread>` once the repository is writable, or push, PR and merge refuse it.
             let branch = if forge_repo.read_only {
                 None
             } else {
-                existing.branch.clone()
+                existing.branch.clone().or_else(|| Some(format!("phone/{}", existing.thread)))
             };
             let wt_dir = PathBuf::from(&existing.dir);
+            if let (true, None, Some(name)) = (wt_dir.join(".git").exists(), &existing.branch, &branch) {
+                let on = run_git_checked(&server, Some(&wt_dir), &["symbolic-ref", "-q", "--short", "HEAD"], false).await;
+                if !on.is_ok_and(|out| out.trim() == name.as_str())
+                    && let Err(err) = run_git_checked(&server, Some(&wt_dir), &["checkout", "-b", name], false).await
+                {
+                    return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }));
+                }
+            }
             if !wt_dir.join(".git").exists() {
                 if let Err(err) = ensure_worktree(
                     &server,
@@ -2592,6 +2617,8 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
                 item.base = forge_repo.default_branch.clone();
                 if forge_repo.read_only {
                     item.branch = None;
+                } else if item.branch.is_none() && item.dir == candidate_dir_str {
+                    item.branch = candidate_branch.clone();
                 }
                 let rec = item.clone();
                 match save_index(&server.config.codex_home, &records) {
@@ -2610,6 +2637,8 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
             item.base = forge_repo.default_branch.clone();
             if forge_repo.read_only {
                 item.branch = None;
+            } else if item.branch.is_none() && item.dir == candidate_dir_str {
+                item.branch = candidate_branch.clone();
             }
             let winner = item.clone();
             match save_index(&server.config.codex_home, &records) {
@@ -2727,7 +2756,7 @@ async fn repo_off(State(server): State<Arc<Server>>, headers: HeaderMap, body: B
     if !KNOWN_BRIDGES.contains(&bridge) || chat.is_empty() || chat.len() > 200 {
         return json_response(StatusCode::BAD_REQUEST, json!({ "error": "valid bridge and chat are required" }));
     }
-    let chat_key = format!("{bridge}:{chat}");
+    let chat_key = chat_key_of(bridge, chat);
     let prev_repo = server
         .chat_repos
         .clear_current_repo(&server.config.codex_home, &chat_key);
@@ -2844,7 +2873,7 @@ async fn repo_current(
             json!({ "error": "bridge and chat query parameters are required" }),
         );
     }
-    let chat_key = format!("{bridge}:{chat}");
+    let chat_key = chat_key_of(bridge, chat);
     let current = server
         .chat_repos
         .current_repo(&server.config.codex_home, &chat_key);
@@ -4798,6 +4827,10 @@ async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
     let record = mreq.record.clone();
     let worktree_dir = mreq.worktree_dir.clone();
     let default_branch = record.base.clone();
+    // Already on main: `checkout -B` would reset it to the forge's and drop commits not yet pushed.
+    if record.branch.as_deref() == Some(default_branch.as_str()) {
+        return json_response(StatusCode::OK, json!({ "repo": record.repo, "branch": default_branch }));
+    }
 
     let repo_lock = server.chat_repos.repo_mutex(&record.repo);
     let _repo_guard = repo_lock.lock().await;
@@ -5296,7 +5329,7 @@ mod tests {
     }
 
     struct FakeForge {
-        repos: Value,
+        repos: Mutex<Value>,
         pulls: Mutex<Vec<FakePull>>,
         statuses: Mutex<HashMap<String, (String, u64)>>,
         default_mergeable: AtomicBool,
@@ -5306,7 +5339,7 @@ mod tests {
     impl FakeForge {
         fn new(repos: Value) -> Arc<Self> {
             Arc::new(Self {
-                repos,
+                repos: Mutex::new(repos),
                 pulls: Mutex::new(Vec::new()),
                 statuses: Mutex::new(HashMap::new()),
                 default_mergeable: AtomicBool::new(true),
@@ -5378,7 +5411,7 @@ mod tests {
                         let page = q.get("page").and_then(|p| p.parse::<usize>().ok()).unwrap_or(1);
                         st.record("GET", &format!("/api/v1/repos/search?page={page}"), Value::Null);
                         let body = if page == 1 {
-                            json!({ "ok": true, "data": st.repos })
+                            json!({ "ok": true, "data": *st.repos.lock().unwrap() })
                         } else {
                             json!({ "ok": true, "data": [] })
                         };
@@ -8552,6 +8585,131 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::FORBIDDEN, "{p_body}");
         assert!(p_body.contains("ling chat repos allow-main org/trunkrepo"), "{p_body}");
+    }
+
+    #[tokio::test]
+    async fn a_cut_diff_keeps_everything_before_the_cut_even_after_a_byte_that_is_not_utf8() {
+        let s = scratch("diff-latin1");
+        let (server, _probe) = test_server(&s.dir, None, false);
+        let mut text = "Caf".as_bytes().to_vec();
+        text.push(0xE9); // Latin-1, not UTF-8
+        text.extend_from_slice(b"\n");
+        text.extend_from_slice("€ abcdefghijklmnopqrstuvwxyz\n".repeat(MAX_DIFF_OUTPUT_BYTES / 30 + 500).as_bytes());
+        std::fs::write(s.dir.join("big.txt"), text).unwrap();
+        let diff = run_git_diff_capped(&server, &s.dir, &["diff", "--no-index", "--", "/dev/null", "big.txt"], false).await.unwrap();
+        assert!(diff.ends_with(DIFF_CUT_SUFFIX), "the diff was cut");
+        assert!(diff.len() > MAX_DIFF_OUTPUT_BYTES - 8, "only the split character is dropped: {} bytes", diff.len());
+    }
+
+    #[tokio::test]
+    async fn off_and_current_find_the_repo_open_set_for_a_chat_id_that_names_its_bridge() {
+        let s = scratch("chat-key");
+        let bare = make_bare_repo(&s.dir, "org/keyrepo");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/keyrepo",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+        let (st, _, body) =
+            post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/keyrepo", "bridge": "signal", "chat": "signal:+1555" })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let bridge = bridge_session_cookie(&server).await;
+        let (_, current, body) = get_json(&server, &bridge, "/api/repos/current?bridge=signal&chat=signal:%2B1555").await;
+        assert_eq!(current["repo"], "org/keyrepo", "{body}");
+        let (st, _, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(server.chat_repos.current_repo(&server.config.codex_home, "signal:+1555"), None, "/off cleared what /open set");
+    }
+
+    #[tokio::test]
+    async fn a_read_only_checkout_gets_its_phone_branch_once_the_repo_is_writable() {
+        let s = scratch("ro-to-rw");
+        let bare = make_bare_repo(&s.dir, "org/rorepo");
+        let listing = |push: bool| {
+            json!([{
+                "full_name": "org/rorepo",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": push, "admin": false },
+                "clone_url": format!("file://{}", bare.display()),
+            }])
+        };
+        let (forge_url, forge, _forge_task) = start_fake_forge_with_state(listing(false)).await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+        let open = json!({ "repo": "org/rorepo", "bridge": "signal", "chat": "c1" });
+        let (st, opened, body) = post_json(&server, &cookie, "/api/repos/open", open.clone()).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(opened["read_only"], true);
+        assert!(opened["branch"].is_null());
+        let thread = opened["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
+
+        *forge.repos.lock().unwrap() = listing(true);
+        server.chat_repos.invalidate_listing_cache().await;
+        let (st, again, body) = post_json(&server, &cookie, "/api/repos/open", open).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(again["thread"], json!(thread));
+        assert_eq!(again["read_only"], false);
+        assert_eq!(again["branch"], json!(format!("phone/{thread}")), "{again}");
+        assert_eq!(git_stdout(&wt, &["symbolic-ref", "--short", "HEAD"]).trim(), format!("phone/{thread}"));
+    }
+
+    #[tokio::test]
+    async fn repo_main_again_keeps_the_commits_not_yet_pushed() {
+        let s = scratch("main-again");
+        let bare = make_bare_repo(&s.dir, "org/mainrepo");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/mainrepo",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(s.dir.join("user/.gitconfig"), "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n").unwrap();
+        std::fs::write(server.config.user_config.as_ref().unwrap(), "[chat_repos]\nallow_main = [\"org/mainrepo\"]\n").unwrap();
+        let cookie = owner_cookie(&server).await;
+        let (_, opened, _) =
+            post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/mainrepo", "bridge": "signal", "chat": "c1" })).await;
+        let thread = opened["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
+
+        let nonce = get_nonce(&server, &cookie, &thread, "main").await;
+        let (st, _, body) = post_json(&server, &cookie, "/api/repos/main", json!({ "thread": thread, "confirm": nonce })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        std::fs::write(wt.join("unpushed.txt"), "not on the forge yet\n").unwrap();
+        let nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, body) =
+            post_json(&server, &cookie, "/api/repos/commit", json!({ "thread": thread, "message": "unpushed", "confirm": nonce })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let head = git_stdout(&wt, &["rev-parse", "HEAD"]);
+
+        // A second /main on a checkout already on main changes nothing.
+        let nonce = get_nonce(&server, &cookie, &thread, "main").await;
+        let (st, again, body) = post_json(&server, &cookie, "/api/repos/main", json!({ "thread": thread, "confirm": nonce })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(again["branch"], "main");
+        assert_eq!(git_stdout(&wt, &["rev-parse", "HEAD"]), head, "the unpushed commit is still main's tip");
     }
 
     #[tokio::test]

@@ -840,12 +840,14 @@ fn refuse_watch(server: &Server, headers: &HeaderMap) -> Option<Response> {
 }
 
 async fn websocket(State(server): State<Arc<Server>>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
-    let device_name = server.paired_device_name(&headers);
+    let device_token = server
+        .paired_device_name(&headers)
+        .and_then(|_| auth::cookie(header_str(&headers, header::COOKIE), auth::DEVICE_COOKIE).map(str::to_string));
     let bridge = server.is_bridge_caller(&headers);
     let watch = server.watch_device(&headers);
     upgrade
         .max_message_size(64 << 20)
-        .on_upgrade(move |socket| crate::relay::run_tab_with_bridge(socket, server, device_name, bridge, watch))
+        .on_upgrade(move |socket| crate::relay::run_tab_with_bridge(socket, server, device_token, bridge, watch))
 }
 
 /// The user-level air-gap level, for clients that cannot read the user's configuration: the Signal
@@ -1182,7 +1184,12 @@ async fn upload(State(server): State<Arc<Server>>, Query(query): Query<HashMap<S
             return text(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not write the attachment: {err}\n"));
         }
     }
-    let _ = file.flush().await;
+    // A write's error (a full disk) comes back from the next call on the file, here the flush.
+    if let Err(err) = file.flush().await {
+        drop(file);
+        let _ = tokio::fs::remove_file(&path).await;
+        return text(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not write the attachment: {err}\n"));
+    }
     drop(file);
     let mut answer = json!({ "path": path.to_string_lossy(), "bytes": written });
     if query.get("read").map(String::as_str) == Some("1") {

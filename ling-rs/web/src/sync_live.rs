@@ -352,7 +352,14 @@ impl Live {
                 command.error = Some("the device did not say how it went".to_string());
                 changed = true;
             }
-            if command.state == "waiting" && now.duration_since(UNIX_EPOCH + Duration::from_secs(command.at)).unwrap_or_default() > QUEUE_FOR {
+            // A command handed to an online host that went away before taking it: an approval, a
+            // stop or a new thread is never kept for later, a message no longer than one waiting.
+            let age = now.duration_since(UNIX_EPOCH + Duration::from_secs(command.at)).unwrap_or_default();
+            if command.state == "queued" && age > if command.kind == "send" { QUEUE_FOR } else { ANSWER_WITHIN } {
+                command.state = "expired".to_string();
+                changed = true;
+            }
+            if command.state == "waiting" && age > QUEUE_FOR {
                 command.state = "expired".to_string();
                 changed = true;
             }
@@ -461,10 +468,13 @@ impl Live {
     /// The events of a thread after `after`, and its state.
     pub fn follow(&self, thread: &str, after: u64) -> Following {
         let inner = self.lock();
-        let mut following = Following { next: after.max(inner.seq), ..Following::default() };
+        // Numbers start again with every run: a cursor past them was given out before a restart.
+        let restarted = after > inner.seq;
+        let after = if restarted { 0 } else { after };
+        let mut following = Following { next: after.max(inner.seq), reset: restarted, ..Following::default() };
         if let Some(live) = inner.threads.get(thread) {
             // Numbers are shared by every thread, so a gap is no loss; only a dropped event is.
-            following.reset = after > 0 && live.dropped > after;
+            following.reset = restarted || (after > 0 && live.dropped > after);
             following.events = live.events.iter().filter(|(seq, _)| *seq > after).cloned().collect();
             following.running = live.turn.is_some();
             following.turn = live.turn.clone().filter(|turn| !turn.is_empty());
@@ -570,6 +580,8 @@ impl Live {
     pub fn notices(&self, after: u64) -> (Vec<Notice>, u64) {
         let inner = self.lock();
         let latest = inner.notices.back().map_or(0, |notice| notice.seq);
+        // A cursor past this run's numbers is from before a restart: every notice since is new.
+        let after = if after > inner.seq { 0 } else { after };
         (inner.notices.iter().filter(|notice| notice.seq > after).cloned().collect(), latest)
     }
 
@@ -642,6 +654,26 @@ mod tests {
     }
 
     #[test]
+    fn a_cursor_from_before_a_restart_starts_over_and_misses_nothing_new() {
+        let dir = scratch("restart");
+        let laptop = device("lap", auth::Scope::Control, true);
+        let live = Live::new(dir.clone());
+        let turn = |n: u64| json!({ "method": "item/completed", "params": { "threadId": T, "n": n } });
+        live.host_post(&laptop, post((0..5).map(turn).chain([approval(1)]).collect(), &[T]), &owners, &title);
+        let cursor = live.follow(T, 0).next;
+        let (_, seen) = live.notices(0);
+        assert!(seen > 0);
+        drop(live);
+
+        // The numbers start again after a restart: a cursor past them is from the run before.
+        let live = Live::new(dir);
+        live.host_post(&laptop, post(vec![approval(2)], &[T]), &owners, &title);
+        let following = live.follow(T, cursor);
+        assert!(following.reset && following.events.len() == 1 && following.next == live.seq(), "{:?}", following.events);
+        assert_eq!(live.notices(seen).0.len(), 1);
+    }
+
+    #[test]
     fn a_command_reaches_the_host_that_holds_the_thread_and_comes_back_answered() {
         let live = Live::new(scratch("command"));
         let laptop = device("lap", auth::Scope::Control, true);
@@ -658,6 +690,21 @@ mod tests {
         answered.acks = vec![Ack { id: sent.id, ok: true, ..Ack::default() }];
         live.host_post(&laptop, answered, &owners, &title);
         assert_eq!(live.command_state(sent.id).unwrap().state, "done");
+    }
+
+    #[test]
+    fn an_approval_for_a_host_that_went_away_is_not_delivered_when_it_comes_back() {
+        let live = Live::new(scratch("vanished"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        live.host_post(&laptop, post(vec![json!({ "method": "turn/started", "params": { "threadId": T, "turn": { "id": "turn-1" } } }), approval(7)], &[T]), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        let ask = Ask { kind: "approve".to_string(), thread: Some(T.to_string()), request: Some(json!(7)), decision: Some("accept".to_string()), ..Ask::default() };
+        let sent = live.command(&phone, ask, "lap").unwrap();
+        assert_eq!(sent.state, "queued");
+        // The host never came for it; hours later it is back.
+        live.lock().commands.iter_mut().for_each(|command| command.at -= 3 * 60 * 60);
+        assert!(live.host_post(&laptop, post(vec![], &[T]), &owners, &title).is_empty());
+        assert_eq!(live.command_state(sent.id).unwrap().state, "expired");
     }
 
     #[test]

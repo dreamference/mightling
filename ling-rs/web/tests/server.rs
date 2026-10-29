@@ -423,6 +423,47 @@ async fn a_loopback_server_issues_no_pairing_code_from_the_devices_page() {
     assert!(!server.config.state_dir.join("pairing").exists() || std::fs::read_dir(server.config.state_dir.join("pairing")).unwrap().next().is_none());
 }
 
+/// An attachment the disk took only part of is an error, not a saved file: run in a child process
+/// of this test binary whose files may not grow past 1 MiB, as a full disk refuses a write.
+#[test]
+fn an_upload_the_disk_could_not_hold_is_refused_and_removed() {
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "an_upload_into_a_full_disk", "--ignored", "--nocapture"])
+        .env("LW_UPLOAD_FULL_DISK", "1")
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&child.stdout);
+    assert!(child.status.success() && out.contains("1 passed"), "{out}{}", String::from_utf8_lossy(&child.stderr));
+}
+
+#[tokio::test]
+#[ignore = "run by an_upload_the_disk_could_not_hold_is_refused_and_removed"]
+async fn an_upload_into_a_full_disk() {
+    if std::env::var_os("LW_UPLOAD_FULL_DISK").is_none() {
+        return;
+    }
+    let scratch = scratch("upload-full");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let cookie = sign_in(&server).await;
+    let root = server.ask_root();
+    let folder = ling_web_server::ask::new_folder(&root).unwrap();
+    ling_web_server::ask::link_thread(&root, "thr-1", &folder).unwrap();
+    // SAFETY: this process runs this one test; past the limit a write fails with EFBIG.
+    unsafe {
+        libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+        let limit = libc::rlimit { rlim_cur: 1 << 20, rlim_max: libc::RLIM_INFINITY };
+        assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &limit), 0);
+    }
+    let upload = request("POST", "/api/upload?thread=thr-1&name=big.bin&kind=file")
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::COOKIE, &cookie)
+        .body(Body::from(vec![0u8; 2 << 20]))
+        .unwrap();
+    let (status, _, body) = call(&server, upload).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert!(!folder.join("big.bin").exists());
+}
+
 #[tokio::test]
 async fn uploads_go_to_an_ask_threads_folder_within_the_caps() {
     let scratch = scratch("upload");
@@ -835,6 +876,92 @@ async fn a_watch_device_reads_and_follows_threads_and_changes_nothing() {
     let approval = browser.call(json!({ "type": "work/send", "message": { "id": 0, "result": { "decision": "accept" } } })).await;
     assert!(approval["error"].as_str().is_some_and(|e| e.contains("watch")), "{approval}");
     assert!(tokio::time::timeout(Duration::from_millis(500), app_server.recv()).await.is_err());
+
+    let _ = stop.send(());
+    serving.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_closed_tab_lets_go_of_the_server() {
+    let scratch = scratch("ws-closed");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let config = config(&scratch.dir, port, Vec::new());
+    let _app_server = fake_app_server(&config.socket).await;
+    let server = Server::new(config).unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = tokio::spawn(server::serve(server.clone(), vec![listener], async move {
+        let _ = stopped.await;
+    }));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let before = Arc::strong_count(&server);
+
+    let (_, token) = auth::add_device(&server.config.state_dir, "phone").unwrap();
+    let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let mut upgrade = format!("ws://127.0.0.1:{port}/ws").into_client_request_with_origin(port);
+    upgrade.headers_mut().insert(header::COOKIE, format!("{}={token}", auth::DEVICE_COOKIE).parse().unwrap());
+    let (websocket, _) = tokio_tungstenite::client_async(upgrade, tcp).await.unwrap();
+    let (mut sink, stream) = websocket.split();
+    sink.send(Message::Close(None)).await.unwrap();
+    drop((sink, stream));
+
+    // The tab's task ends with its socket: nothing of it is left holding the server.
+    let mut left = Arc::strong_count(&server);
+    for _ in 0..100 {
+        if left == before {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        left = Arc::strong_count(&server);
+    }
+    assert_eq!(left, before);
+
+    let _ = stop.send(());
+    serving.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_narrowed_or_revoked_with_its_tab_open_is_held_to_it_on_the_next_message() {
+    let scratch = scratch("ws-revoke");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let config = config(&scratch.dir, port, Vec::new());
+    let mut app_server = fake_app_server(&config.socket).await;
+    let server = Server::new(config).unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = tokio::spawn(server::serve(server.clone(), vec![listener], async move {
+        let _ = stopped.await;
+    }));
+
+    let state = server.config.state_dir.clone();
+    let (_, token) = auth::add_device(&state, "phone").unwrap();
+    let cookie = format!("{}={token}", auth::DEVICE_COOKIE);
+    let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let mut upgrade = format!("ws://127.0.0.1:{port}/ws").into_client_request_with_origin(port);
+    upgrade.headers_mut().insert(header::COOKIE, cookie.parse().unwrap());
+    let (websocket, _) = tokio_tungstenite::client_async(upgrade, tcp).await.unwrap();
+    let (sink, stream) = websocket.split();
+    let mut browser = Browser { sink, stream, next: 0 };
+    let started = browser.call(json!({ "type": "work/start" })).await;
+    assert!(started.get("error").is_none(), "{started}");
+    let turn = |id: u64| json!({ "type": "work/send", "message": { "id": id, "method": "turn/start", "params": { "threadId": "thr-1", "input": [] } } });
+    let sent = browser.call(turn(1)).await;
+    assert!(sent.get("error").is_none(), "{sent}");
+    assert_eq!(next_frame(&mut app_server).await.0["method"], "turn/start");
+
+    // Narrowed to watch: the open tab may no longer start work (SYNC §5.1, O4).
+    auth::set_scope(&state, "phone", auth::Scope::Watch).unwrap();
+    let refused = browser.call(turn(2)).await;
+    assert!(refused["error"].as_str().is_some_and(|e| e.contains("watch")), "{refused}");
+
+    // Revoked: the open tab is refused and closed, as its next request over HTTP would be.
+    auth::set_scope(&state, "phone", auth::Scope::Control).unwrap();
+    auth::revoke_device(&state, "phone").unwrap();
+    let revoked = browser.call(turn(3)).await;
+    assert!(revoked["error"].as_str().is_some_and(|e| e.contains("revoked")), "{revoked}");
+    assert!(tokio::time::timeout(Duration::from_millis(500), app_server.recv()).await.is_err());
+    let closed = tokio::time::timeout(Duration::from_secs(10), browser.stream.next()).await.unwrap();
+    assert!(!matches!(closed, Some(Ok(Message::Text(_)))), "{closed:?}");
 
     let _ = stop.send(());
     serving.await.unwrap().unwrap();
