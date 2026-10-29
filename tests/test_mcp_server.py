@@ -204,3 +204,12 @@ def test_a_request_longer_than_64_kib_is_answered_and_the_server_keeps_answering
     replies = _stdio_replies(tmp_path, (json.dumps(big) + "\n" + json.dumps(ping) + "\n").encode())
     assert [r.get("id") for r in replies] == [1, 2]
     assert "result" in replies[0]
+
+
+def test_a_tool_call_whose_params_or_arguments_are_null_is_answered():
+    # JSON-RPC allows `null` here; `params.get("arguments", {})` handed None on, and the tool
+    # failed with an AttributeError reported as an internal error (-32603).
+    for params in ({"name": "ide_get_active_editor", "arguments": None}, None):
+        req = {"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": params}
+        resp = MCPServer().handle_request(req)
+        assert "result" in resp, resp

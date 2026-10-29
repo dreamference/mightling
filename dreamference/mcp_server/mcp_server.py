@@ -65,7 +65,7 @@ class MCPServer:
         """
         method: Optional[str] = request.get("method")
         msg_id: Any = request.get("id")
-        params: Dict[str, Any] = request.get("params", {})
+        params: Dict[str, Any] = request.get("params") or {}
 
         if method == "initialize":
             return {
@@ -92,7 +92,7 @@ class MCPServer:
 
         elif method == "tools/call":
             tool_name: str = str(params.get("name", ""))
-            args: Dict[str, Any] = params.get("arguments", {})
+            args: Dict[str, Any] = params.get("arguments") or {}
             result_content = await self.execute_tool_async(tool_name, args)
             return {
                 "jsonrpc": "2.0",
