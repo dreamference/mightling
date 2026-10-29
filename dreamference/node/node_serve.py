@@ -257,7 +257,7 @@ class NodeServe:
             try:
                 request = json.loads(base64.urlsafe_b64decode(arguments[0].encode()))
                 record = NodeJob.submit(request, cls.admin_executable())
-            except (ValueError, TypeError) as error:
+            except (ValueError, TypeError, RecursionError) as error:
                 print(f"❌ The node refused the job: {error}", file=sys.stderr)
                 return 2
             print(f"🚀 Job {record['id']} started on {socket.gethostname()} "
