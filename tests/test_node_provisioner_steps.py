@@ -249,6 +249,13 @@ def test_a_refused_reboot_fails_the_os_update_and_a_dropped_session_does_not(
     monkeypatch.setattr(provisioner, "_step_probe", lambda host, session: True)
     assert provisioner._step_os_update("node-b", Session(reboot_code=1)) is False
     assert "reboot" in provisioner.results["node-b"]["reason"]
+    # Without the password sudo asks on the node's terminal, and nothing is captured.
+    session = Session(reboot_code=1)
+    plain = session.sudo
+    session.sudo = lambda line, password: subprocess.CompletedProcess(
+        [], plain(line, password).returncode
+    )
+    assert provisioner._step_os_update("node-b", session) is False
     assert provisioner._step_os_update("node-b", Session(reboot_code=255)) is True
 
 

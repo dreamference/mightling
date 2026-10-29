@@ -387,7 +387,7 @@ class NodeProvisioner:
             return self._fail(
                 host,
                 "OS update",
-                f"the reboot was refused: {(reboot.stderr or reboot.stdout).strip()[-200:]}",
+                f"the reboot was refused: {(reboot.stderr or reboot.stdout or '').strip()[-200:]}",
                 f"sudo systemctl reboot on {host}, then ling-admin node provision {host}",
             )
         session.close()
