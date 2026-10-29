@@ -1422,6 +1422,8 @@ def test_local_arms_serve_each_arm_on_this_machine_and_bring_production_back(tmp
         body = script.read()
     assert '--setenv=LOCAL_ARMS="$LOCAL_ARMS"' in body
     assert '--setenv=LOCAL_PROD_STOP="$LOCAL_PROD_STOP"' in body
+    assert '[ "$LOCAL_ARMS" = 1 ] && stop_timeout=(-p TimeoutStopSec=1h)' in body
+    assert '-p OOMPolicy=continue "${stop_timeout[@]}"' in body
 
 
 def test_without_local_arms_an_engine_arm_still_needs_its_remote_machine(tmp_path):
@@ -1478,3 +1480,16 @@ def test_engine_flags_without_local_arms_end_the_night_before_any_round(tmp_path
 def test_a_misspelt_engine_flag_ends_the_night_before_any_round(tmp_path):
     status, recorded, _ = night(tmp_path, "default+on-engine+engine-fair default", LOCAL_ARMS="1")
     assert status == 2 and not runs(recorded)
+
+
+def test_a_local_arms_night_unit_gets_an_hour_to_stop_and_others_the_default(tmp_path):
+    local = tmp_path / "local"
+    local.mkdir()
+    result, _, _, units, _ = start(local, "default tests-v2", free_gb=500, LOCAL_ARMS="1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert " -p TimeoutStopSec=1h " in f" {units[0]} "
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    result, _, _, units, _ = start(plain, "default tests-v2", free_gb=500)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "TimeoutStopSec" not in units[0]

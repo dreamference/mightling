@@ -584,7 +584,11 @@ print(f'🧹 {len(removed)} cached image(s) removed to make room for the night.'
     else
         what=$(echo $ARMS | sed 's/ / against /')
     fi
-    systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
+    # A local-arms night restores production at its end (an SGLang restore takes 10+ minutes): a stop
+    # must not kill it partway at the default 90 s.
+    local stop_timeout=()
+    [ "$LOCAL_ARMS" = 1 ] && stop_timeout=(-p TimeoutStopSec=1h)
+    systemd-run --user --unit="$UNIT" -p OOMPolicy=continue "${stop_timeout[@]}" \
         --description="SWE-bench night $NIGHT: $what" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=DATASET="$DATASET" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
         --setenv=IMAGE_CHUNK="$IMAGE_CHUNK" --setenv=SHARD="$SHARD" --setenv=LING_PIN_SHA256="$LING_PIN_SHA256" \

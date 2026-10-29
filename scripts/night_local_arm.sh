@@ -126,9 +126,14 @@ shim() {
         printf 'ARGS=(%s)
 ' "$(for a in $ENGINE_ARGS; do printf '%q ' "$a"; done)"
         cat <<'SHIM'
+# Only the run named `--name $NAME` (or `--name=$NAME`): the gate's run also names the server.
 if [ "${1:-}" = run ]; then
+    prev=
     for a in "$@"; do
-        if [ "$a" = "$NAME" ]; then shift; exec "$REAL" run "${ENVS[@]}" "$@" "${ARGS[@]}"; fi
+        if { [ "$prev" = --name ] && [ "$a" = "$NAME" ]; } || [ "$a" = "--name=$NAME" ]; then
+            shift; exec "$REAL" run "${ENVS[@]}" "$@" "${ARGS[@]}"
+        fi
+        prev=$a
     done
 fi
 exec "$REAL" "$@"

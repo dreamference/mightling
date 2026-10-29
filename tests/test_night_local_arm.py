@@ -37,6 +37,7 @@ case "$*" in
     fi
     case "$*" in *"--engine ling"*) image={ling} ;; *) image={sglang} ;; esac
     [ -e "$S/broken" ] && image=other
+    docker run -d --name dreamference-gate-8000 "$image" gate --upstream dreamference-vllm-8000
     if [ -e "$S/bypass" ]; then : > "$S/run"; else docker run -d --name dreamference-vllm-8000 "$image" serve; fi
     echo "$image" > "$S/image"; echo yes > "$S/server"; echo yes > "$S/gate" ;;
 esac
@@ -61,7 +62,12 @@ inspect)
     *Env*) grep -A1 -x -- -e "$S/run" | grep -vx -- -e | grep -vx -- -- ;;
     *) [ "$(cat "$S/$f")" = yes ] && echo true || echo false ;;
     esac ;;
-run) shift; printf '%s\\n' "$@" > "$S/run" ;;
+run)
+    shift
+    case " $* " in
+    *" dreamference-gate-8000 "*) printf '%s\\n' "$@" > "$S/gate-run" ;;
+    *) printf '%s\\n' "$@" > "$S/run" ;;
+    esac ;;
 stop) echo no > "$S/prod-$2"; echo "docker stop $2" >> "$S/calls" ;;
 start) echo yes > "$S/prod-$2"; echo "docker start $2" >> "$S/calls" ;;
 *) exit 1 ;;
@@ -257,6 +263,17 @@ def test_an_arms_engine_flags_and_environment_reach_its_container_and_nothing_el
     given = (state / "run").read_text().splitlines()
     assert given[:3] == ["-e", "LING_STEP_TRACE=/root/t/n22-x.jsonl", "-d"]
     assert given[-3:] == ["serve", "--fair-pairing", "1"]
+    # The gate's run names the server too, but not as its `--name`: nothing is added to it.
+    gate = (state / "gate-run").read_text().splitlines()
+    assert gate == [
+        "-d",
+        "--name",
+        "dreamference-gate-8000",
+        LING_IMAGE,
+        "gate",
+        "--upstream",
+        "dreamference-vllm-8000",
+    ]
     # Served again with the same flags: left up; with others: restarted with them.
     assert run("serve", "engine", **arm).returncode == 0
     assert calls(state).count("worktree server start --engine ling") == 1
