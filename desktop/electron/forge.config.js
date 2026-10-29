@@ -135,7 +135,7 @@ module.exports = {
         genericName: "AI assistant",
         description: "Private AI on your GB10: a coding agent and a chat assistant, nothing leaves your machine.",
         productDescription:
-          "Mightling's desktop app: Ask (questions with no project) and Work (the coding agent on your projects) in one window, on ling, which is bundled inside the app.",
+          "Mightling's desktop app: Ask (questions with no project) and Work (the coding agent on your projects) in as many windows as you open, all on one ling, which is bundled inside the app.",
         bin: app.executable,
         icon: path.join(__dirname, "icons", "icon.png"),
         categories: ["Utility", "Development"],

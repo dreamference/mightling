@@ -16,6 +16,11 @@ describe("the .deb's desktop entry", () => {
     expect(debOptions().mimeType).toEqual(["x-scheme-handler/ling", "x-scheme-handler/mightling"]);
     expect([app.scheme, ...app.legacySchemes]).toEqual(["ling", "mightling"]);
   });
+
+  it("describes the app as it is: several windows on the one bundled ling (§13)", () => {
+    expect(debOptions().productDescription).toMatch(/as many windows as you open/);
+    expect(debOptions().productDescription).not.toMatch(/one window/);
+  });
 });
 
 describe("the Mac bundle's Info.plist", () => {
