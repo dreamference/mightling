@@ -7,6 +7,7 @@
 // per-platform overrides, actions with a name, an icon and a script with per-platform overrides)
 // under the obvious names, and writes Mightling's own. No Electron here.
 
+import { randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
@@ -126,8 +127,19 @@ export async function writeEnvironment(project: string, edit: unknown): Promise<
   if (setup.trim()) document.setup = { script: setup };
   if (actions.length) document.actions = actions;
   const target = path.join(project, WRITE_FILE);
+  // The project's folders may be links: the file goes inside the project, and replaces a link rather than writing through it.
+  for (let folder = path.dirname(WRITE_FILE); folder !== "."; folder = path.dirname(folder)) {
+    if ((await userFs.lstatOrNull(path.join(project, folder)))?.isSymbolicLink()) throw new Error(`${folder} is a link, not a folder of the project`);
+  }
   await userFs.mkdir(path.dirname(target));
   const header = "# Mightling's local environment for this project (setup when a worktree is made; actions in the\n# app's top bar). Read by the Mightling desktop app; .codex/ environments are read too.\n";
-  await fsp.writeFile(target, header + stringify(document) + "\n");
+  const partial = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fsp.writeFile(partial, header + stringify(document) + "\n", { flag: "wx" });
+    await fsp.rename(partial, target);
+  } catch (error) {
+    await fsp.rm(partial, { force: true });
+    throw error;
+  }
   return WRITE_FILE;
 }

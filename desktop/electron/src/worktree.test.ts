@@ -220,6 +220,24 @@ describe("local environments", () => {
     fs.writeFileSync(path.join(source, ".mightling", "environment.toml"), "not = [toml");
     expect((await environments(source, "linux")).problems[0]).toMatch(/^\.mightling\/environment\.toml: /);
   });
+
+  // A cloned project chooses what its files are: a link there is not written through to the user's own files.
+  it("write the environment into the project, not through a link it holds", async () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), "ling-env-link-"));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "ling-env-outside-"));
+    fs.writeFileSync(path.join(outside, "bashrc"), "export KEEP=1\n");
+    fs.mkdirSync(path.join(project, ".mightling", "environments"), { recursive: true });
+    fs.symlinkSync(path.join(outside, "bashrc"), path.join(project, WRITE_FILE));
+    await writeEnvironment(project, { name: "Mine", setup: "uv sync", actions: [] });
+    expect(fs.readFileSync(path.join(outside, "bashrc"), "utf8")).toBe("export KEEP=1\n");
+    expect(fs.lstatSync(path.join(project, WRITE_FILE)).isFile()).toBe(true);
+    expect(fs.readFileSync(path.join(project, WRITE_FILE), "utf8")).toContain('name = "Mine"');
+
+    const linked = fs.mkdtempSync(path.join(os.tmpdir(), "ling-env-dir-"));
+    fs.symlinkSync(outside, path.join(linked, ".mightling"));
+    await expect(writeEnvironment(linked, { name: "Mine", setup: "", actions: [] })).rejects.toThrow(/is a link, not a folder of the project/);
+    expect(fs.readdirSync(outside)).toEqual(["bashrc"]);
+  });
 });
 
 describe("bottom-panel tasks", () => {
