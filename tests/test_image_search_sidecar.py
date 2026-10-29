@@ -361,3 +361,17 @@ def test_the_probe_drops_pythonpath_as_codex_does(tmp_path, monkeypatch):
     assert seen.read_text().strip() == "unset"
     assert ImageSearchMcp.probe(str(admin), {"PATH": os.environ["PATH"], "PYTHONPATH": "/x"})
     assert seen.read_text().strip() == "unset"
+
+
+def test_a_secret_another_start_created_first_is_the_one_kept(monkeypatch, store):
+    # Two first starts at once must agree on one secret, or the service and the MCP server differ.
+    real = image_search_sidecar.secrets_module.token_urlsafe
+
+    def racing(size):
+        store.mkdir(parents=True, exist_ok=True)
+        (store / "secret").write_text("theirs")
+        return real(size)
+
+    monkeypatch.setattr(image_search_sidecar.secrets_module, "token_urlsafe", racing)
+    assert ImageSearchSidecar.secret() == "theirs"
+    assert (store / "secret").read_text() == "theirs"

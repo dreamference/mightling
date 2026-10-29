@@ -16,6 +16,7 @@ first candidates directly (IMAGE_SEARCH §2), and it has no arm64 image upstream
 Nothing here prints: a failure is kept in `ImageSearchSidecar.problem` for the CLI to say.
 """
 
+import contextlib
 import json
 import os
 import secrets as secrets_module
@@ -104,9 +105,24 @@ class ImageSearchSidecar:
                     return value
             os.makedirs(IMAGE_SEARCH_DATA_DIR, mode=0o700, exist_ok=True)
             value = secrets_module.token_urlsafe(32)
-            with open(IMAGE_SEARCH_SECRET_FILE, "w") as handle:
-                handle.write(value)
-            os.chmod(IMAGE_SEARCH_SECRET_FILE, 0o600)
+            # Written whole and private under a name of its own, then linked into place. A link
+            # never replaces a file, so of two first starts at once the later keeps the earlier's.
+            temporary = f"{IMAGE_SEARCH_SECRET_FILE}.{secrets_module.token_hex(8)}.tmp"
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with os.fdopen(descriptor, "w") as handle:
+                    handle.write(value)
+                try:
+                    os.link(temporary, IMAGE_SEARCH_SECRET_FILE)
+                except FileExistsError:
+                    with open(IMAGE_SEARCH_SECRET_FILE) as handle:
+                        existing = handle.read().strip()
+                    if existing:
+                        return existing
+                    os.replace(temporary, IMAGE_SEARCH_SECRET_FILE)
+            finally:
+                with contextlib.suppress(OSError):
+                    os.unlink(temporary)
             return value
         except OSError as exc:
             cls.problem = f"Could not store the image search secret: {exc}"
