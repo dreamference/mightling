@@ -486,7 +486,13 @@ export async function installBundle(file: string, codexHome: string, places: Pla
     if (await exists(dir)) {
       const old = path.join(root, `.${summary.name}.${randomUUID()}.old`);
       await fs.rename(dir, old);
-      await fs.rename(partial, dir);
+      try {
+        await fs.rename(partial, dir);
+      } catch (error) {
+        // The installed bundle goes back where it was.
+        await fs.rename(old, dir).catch(() => undefined);
+        throw error;
+      }
       await fs.rm(old, { recursive: true, force: true });
     } else await fs.rename(partial, dir);
     return { name: summary.name, dir, server };

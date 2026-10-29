@@ -1,7 +1,8 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BUNDLE_NAME, bundleName, bundleServer, entryPath, fetchingCommand, installBundle, listBundles, readArchive, readBundle, removeBundle, settingValues, substitute, ENTRY_LIMIT } from "./mcpb";
 import { makeZip, manifestText, type FixtureEntry } from "./test-zip";
@@ -183,6 +184,26 @@ describe("installBundle, listBundles, removeBundle", () => {
     expect((await readBundle(file, codexHome, places)).summary.installed).toBe(true);
     await installBundle(file, codexHome, places, { ...options, replace: true });
     expect(fs.existsSync(path.join(codexHome, "mcpb", "notes-search", "left.txt"))).toBe(false);
+    expect(fs.readdirSync(path.join(codexHome, "mcpb"))).toEqual(["notes-search"]);
+  });
+  // The old bundle is moved aside before the new one takes its place: when that second move fails, the old one is put back.
+  it("keeps the installed bundle when its replacement cannot be moved in", async () => {
+    const file = bundle(good());
+    const options = { expected: "notes-search", values: { root: "/n" }, replace: true, platform: "linux" as const };
+    await installBundle(file, codexHome, places, options);
+    const dir = path.join(codexHome, "mcpb", "notes-search");
+    fs.writeFileSync(path.join(dir, "left.txt"), "x");
+    const rename = fsp.rename.bind(fsp);
+    const spy = vi.spyOn(fsp, "rename").mockImplementation(async (from, to) => {
+      if (String(from).endsWith(".partial") && to === dir) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+      return rename(from, to);
+    });
+    try {
+      await expect(installBundle(file, codexHome, places, options)).rejects.toThrow(/busy/);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(fs.readFileSync(path.join(dir, "left.txt"), "utf8")).toBe("x");
     expect(fs.readdirSync(path.join(codexHome, "mcpb"))).toEqual(["notes-search"]);
   });
   it("leaves nothing behind when an entry fails its checksum", async () => {
