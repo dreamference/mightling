@@ -198,6 +198,18 @@ def test_a_body_past_the_limit_is_cut_not_read_whole():
     assert listener.finish() == "enrolled:laptop"
 
 
+def test_a_client_that_connects_and_says_nothing_cannot_hold_the_listener(monkeypatch):
+    monkeypatch.setattr(module, "REQUEST_TIMEOUT_S", 0.5)
+    listener = _Listener()
+    idle = socket.create_connection(("127.0.0.1", listener.port), timeout=5)
+    try:
+        status, _ = listener.post(_good(), timeout=5)
+        assert status == 200
+    finally:
+        idle.close()
+    assert listener.finish() == "enrolled:laptop"
+
+
 def test_an_unused_code_expires(monkeypatch):
     clock = iter([0.0, 0.0, 61.0, 61.0, 61.0])
     monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))

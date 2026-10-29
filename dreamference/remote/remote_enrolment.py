@@ -40,6 +40,8 @@ NONCE_LENGTH: Final[int] = 32
 HEX_DIGITS: Final[str] = "0123456789abcdef"
 ERROR_KEY: Final[str] = "error"
 MAX_BODY: Final[int] = 4096
+# A client that connects and says nothing must not hold the one-client listener for ever.
+REQUEST_TIMEOUT_S: Final[float] = 10.0
 MAX_LABEL: Final[int] = 63
 HTTP_OK: Final[int] = 200
 HTTP_UNAUTHORIZED: Final[int] = 401
@@ -207,6 +209,8 @@ class RemoteEnrolment:
         state: dict[str, Any] = {"failures": 0, "outcome": None}
 
         class Handler(BaseHTTPRequestHandler):
+            timeout = REQUEST_TIMEOUT_S
+
             def log_message(self, *args: object) -> None:
                 return
 
