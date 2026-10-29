@@ -584,3 +584,17 @@ def test_a_serialization_that_fails_midway_leaves_no_tensors_file(tmp_path, monk
     ModelDownloader.tensorize_model(model_key, force=True)
     assert ModelDownloader.is_model_tensorized(model_key) is False
     assert not (ModelDownloader.get_tensorized_dir(model_key) / "model.tensors").exists()
+
+
+def test_a_cached_model_is_sized_by_its_blobs_not_also_by_its_snapshot_links(monkeypatch):
+    from dreamference.hardware import ModelDownloader
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    repo = ModelMatrixRegistry.resolve_hf_repo(model_key)
+    root = ModelDownloader.get_hf_cache_dir() / ("models--" + repo.replace("/", "--"))
+    (root / "blobs").mkdir(parents=True)
+    (root / "blobs" / "abc").write_bytes(b"\0" * 2048)
+    (root / "snapshots" / "rev").mkdir(parents=True)
+    (root / "snapshots" / "rev" / "model.safetensors").symlink_to("../../blobs/abc")
+    assert ModelDownloader._get_cache_size(model_key) == "2.0 KB"

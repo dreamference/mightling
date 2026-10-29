@@ -551,7 +551,10 @@ class ModelDownloader:
             if not cache_dir.exists():
                 return "0 B"
             
-            total_size = sum(f.stat().st_size for f in cache_dir.rglob("*") if f.is_file())
+            # Snapshots are links into blobs/: count each blob once.
+            total_size = sum(
+                f.stat().st_size for f in cache_dir.rglob("*") if f.is_file() and not f.is_symlink()
+            )
             for unit in ["B", "KB", "MB", "GB"]:
                 if total_size < 1024:
                     return f"{total_size:.1f} {unit}"
