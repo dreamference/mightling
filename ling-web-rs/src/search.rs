@@ -26,8 +26,7 @@ pub const SEARXNG_START_HINT: &str = "ling-admin searxng start";
 
 /// SearXNG answers HTML, or refuses with 403, unless `json` is among its `search.formats`, which
 /// the settings `ling-admin searxng start` writes include.
-pub const JSON_FORMAT_HINT: &str =
-    "SearXNG's settings do not enable its JSON API (no json in search.formats): ling-admin searxng start writes ones that do";
+pub const JSON_FORMAT_HINT: &str = "SearXNG's settings do not enable its JSON API (no json in search.formats): ling-admin searxng start writes ones that do";
 
 /// Said when SearXNG answers but no engine does, or answers with an error. It must not send the
 /// model to repair anything: until 2026-10-20 it named `docker restart dreamference-searxng`, an
@@ -42,18 +41,33 @@ pub const UNAVAILABLE_HINT: &str = "Web search is unavailable for now: the searc
 /// videos do not drown it; the others are asked when the question is theirs.
 pub const CATEGORIES: &[(&str, &str)] = &[
     ("general", "the web, Wikipedia and Wikidata (the default)"),
-    ("news", "news sites and news search, newest first with --time"),
-    ("science", "papers: arXiv, PubMed, Semantic Scholar, OpenAlex, Crossref, Google Scholar"),
-    ("it", "code and packages: GitHub, GitLab, Stack Overflow, crates.io, npm, PyPI, MDN, wikis"),
+    (
+        "news",
+        "news sites and news search, newest first with --time",
+    ),
+    (
+        "science",
+        "papers: arXiv, PubMed, Semantic Scholar, OpenAlex, Crossref, Google Scholar",
+    ),
+    (
+        "it",
+        "code and packages: GitHub, GitLab, Stack Overflow, crates.io, npm, PyPI, MDN, wikis",
+    ),
     ("map", "places: OpenStreetMap, Photon, Apple Maps"),
     ("images", "images"),
     ("videos", "videos: YouTube, PeerTube, Dailymotion, archives"),
     ("music", "music, lyrics, radio, podcasts"),
-    ("files", "apps: F-Droid, Google Play, the App Store, APKMirror"),
+    (
+        "files",
+        "apps: F-Droid, Google Play, the App Store, APKMirror",
+    ),
     ("social", "Mastodon, Lemmy, forums"),
     ("books", "books: Open Library, Goodreads"),
     ("dictionaries", "Wiktionary, Wordnik, Duden, Etymonline"),
-    ("wikimedia", "Wikivoyage, Wikiquote, Wikibooks, Wikisource, Wikiversity"),
+    (
+        "wikimedia",
+        "Wikivoyage, Wikiquote, Wikibooks, Wikisource, Wikiversity",
+    ),
     ("movies", "films: IMDb, Rotten Tomatoes"),
     ("weather", "weather"),
 ];
@@ -92,19 +106,33 @@ impl SearchOptions {
     ///
     /// Returns the error to print for a category or time range not in the lists, or a language
     /// that is not a language code.
-    pub fn new(category: Option<&str>, time_range: Option<&str>, language: Option<&str>) -> Result<SearchOptions, String> {
+    pub fn new(
+        category: Option<&str>,
+        time_range: Option<&str>,
+        language: Option<&str>,
+    ) -> Result<SearchOptions, String> {
         let mut options = SearchOptions::default();
         if let Some(category) = category.map(|value| value.trim().to_lowercase()) {
-            let category = if category == "social media" { "social".to_string() } else { category };
+            let category = if category == "social media" {
+                "social".to_string()
+            } else {
+                category
+            };
             if !CATEGORIES.iter().any(|(name, _)| *name == category) {
                 let names: Vec<&str> = CATEGORIES.iter().map(|(name, _)| *name).collect();
-                return Err(format!("unknown category {category:?}; one of: {}", names.join(", ")));
+                return Err(format!(
+                    "unknown category {category:?}; one of: {}",
+                    names.join(", ")
+                ));
             }
             options.category = category;
         }
         if let Some(time_range) = time_range.map(|value| value.trim().to_lowercase()) {
             if !TIME_RANGES.contains(&time_range.as_str()) {
-                return Err(format!("unknown time range {time_range:?}; one of: {}", TIME_RANGES.join(", ")));
+                return Err(format!(
+                    "unknown time range {time_range:?}; one of: {}",
+                    TIME_RANGES.join(", ")
+                ));
             }
             options.time_range = Some(time_range);
         }
@@ -112,10 +140,17 @@ impl SearchOptions {
             let valid = language == AUTO_LANGUAGE
                 || language == "all"
                 || (language.len() <= 6
-                    && language.split('-').next().is_some_and(|code| (2..=3).contains(&code.len()))
-                    && language.chars().all(|c| c.is_ascii_alphabetic() || c == '-'));
+                    && language
+                        .split('-')
+                        .next()
+                        .is_some_and(|code| (2..=3).contains(&code.len()))
+                    && language
+                        .chars()
+                        .all(|c| c.is_ascii_alphabetic() || c == '-'));
             if !valid {
-                return Err(format!("unknown language {language:?}; a code such as en, pt, uk, de-CH, or auto"));
+                return Err(format!(
+                    "unknown language {language:?}; a code such as en, pt, uk, de-CH, or auto"
+                ));
             }
             options.language = language.to_string();
         }
@@ -124,7 +159,11 @@ impl SearchOptions {
 
     /// The category as SearXNG names it.
     pub fn searxng_category(&self) -> &str {
-        if self.category == "social" { "social media" } else { &self.category }
+        if self.category == "social" {
+            "social media"
+        } else {
+            &self.category
+        }
     }
 }
 
@@ -200,7 +239,11 @@ pub fn start_hint(node: Option<&Node>) -> String {
 }
 
 fn node_label(node: &Node) -> &str {
-    if node.name.is_empty() { &node.address } else { &node.name }
+    if node.name.is_empty() {
+        &node.address
+    } else {
+        &node.name
+    }
 }
 
 /// Searches the web through SearXNG.
@@ -211,8 +254,19 @@ fn node_label(node: &Node) -> &str {
 /// instance that was running.
 ///
 /// At `on` nothing is sent; the binary refuses before calling this, and so does this function.
-pub fn search(base_url: &str, query: &str, max_results: i64, level: Level) -> Result<SearchPayload, SearchError> {
-    search_from(base_url, query, max_results, level, crate::node_locator::remote_node().as_ref())
+pub fn search(
+    base_url: &str,
+    query: &str,
+    max_results: i64,
+    level: Level,
+) -> Result<SearchPayload, SearchError> {
+    search_from(
+        base_url,
+        query,
+        max_results,
+        level,
+        crate::node_locator::remote_node().as_ref(),
+    )
 }
 
 /// [`search`], told which node the instance is on (`None`: this machine), for the hints.
@@ -223,7 +277,14 @@ pub fn search_from(
     level: Level,
     node: Option<&Node>,
 ) -> Result<SearchPayload, SearchError> {
-    search_with(base_url, query, max_results, level, node, &SearchOptions::default())
+    search_with(
+        base_url,
+        query,
+        max_results,
+        level,
+        node,
+        &SearchOptions::default(),
+    )
 }
 
 /// [`search_from`] with a category, a time range and a language.
@@ -256,10 +317,12 @@ pub fn search_with(
         &options.language,
     );
     let now = std::time::SystemTime::now();
-    if let Some(payload) = cache.as_ref().and_then(|cache| cache.get(&key, now)) {
-        if let Ok(found) = from_searxng(query, &payload, max_results, level) {
-            return Ok(found);
-        }
+    if let Some(found) = cache
+        .as_ref()
+        .and_then(|cache| cache.get(&key, now))
+        .and_then(|payload| from_searxng(query, &payload, max_results, level).ok())
+    {
+        return Ok(found);
     }
     if let Some(cache) = &cache {
         std::thread::sleep(cache.reserve(now));
@@ -306,10 +369,9 @@ pub fn search_with(
             hint: Some(JSON_FORMAT_HINT.to_string()),
         })?;
     let found = from_searxng(query, &payload, max_results, level)?;
-    if found.result_count > 0 || !found.answers.is_empty() {
-        if let Some(cache) = &cache {
-            cache.put(&key, &payload, std::time::SystemTime::now());
-        }
+    let worth_keeping = found.result_count > 0 || !found.answers.is_empty();
+    if let Some(cache) = cache.as_ref().filter(|_| worth_keeping) {
+        cache.put(&key, &payload, std::time::SystemTime::now());
     }
     Ok(found)
 }
@@ -327,7 +389,9 @@ pub fn comparable_url(url: &str) -> String {
         .split('&')
         .filter(|pair| {
             let name = pair.split('=').next().unwrap_or_default().to_lowercase();
-            !pair.is_empty() && !name.starts_with("utm_") && !["fbclid", "gclid", "msockid"].contains(&name.as_str())
+            !pair.is_empty()
+                && !name.starts_with("utm_")
+                && !["fbclid", "gclid", "msockid"].contains(&name.as_str())
         })
         .collect();
     let path = path.trim_end_matches('/');
@@ -351,7 +415,11 @@ pub fn merge_duplicates(results: impl IntoIterator<Item = SearchResult>) -> Vec<
         let key = comparable_url(&result.url);
         if let Some(index) = seen.iter().position(|known| *known == key) {
             let kept = &mut merged[index];
-            for engine in result.engines.into_iter().chain(std::iter::once(result.engine)) {
+            for engine in result
+                .engines
+                .into_iter()
+                .chain(std::iter::once(result.engine))
+            {
                 if !engine.is_empty() && !kept.engines.contains(&engine) {
                     kept.engines.push(engine);
                 }
@@ -380,7 +448,9 @@ fn infobox_results(payload: &Value) -> Vec<SearchResult> {
         .flatten()
         .filter_map(|infobox| {
             let id = infobox["id"].as_str().filter(|id| id.starts_with("http"));
-            let url = id.or_else(|| infobox["urls"][0]["url"].as_str())?.to_string();
+            let url = id
+                .or_else(|| infobox["urls"][0]["url"].as_str())?
+                .to_string();
             let engine = infobox["engine"].as_str().unwrap_or_default().to_string();
             let mut engines: Vec<String> = infobox["engines"]
                 .as_array()
@@ -420,7 +490,11 @@ pub fn from_searxng(
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|item| !boxed.iter().any(|url| item["url"].as_str() == Some(url.as_str())))
+        .filter(|item| {
+            !boxed
+                .iter()
+                .any(|url| item["url"].as_str() == Some(url.as_str()))
+        })
         .map(|item| SearchResult {
             title: text(item, "title"),
             url: text(item, "url"),
@@ -437,8 +511,10 @@ pub fn from_searxng(
                 .filter(|date| !date.is_empty())
                 .map(|date| date.chars().take(10).collect()),
         });
-    let results: Vec<SearchResult> =
-        merge_duplicates(infoboxes.into_iter().take(1).chain(web)).into_iter().take(limit).collect();
+    let results: Vec<SearchResult> = merge_duplicates(infoboxes.into_iter().take(1).chain(web))
+        .into_iter()
+        .take(limit)
+        .collect();
     let answers: Vec<Value> = payload["answers"].as_array().cloned().unwrap_or_default();
     let failed = payload["unresponsive_engines"]
         .as_array()
@@ -541,8 +617,18 @@ mod tests {
                 published: None,
             }
         );
-        assert_eq!(from_searxng("q", &payload, 0, Level::Off).unwrap().result_count, 1);
-        assert_eq!(from_searxng("q", &payload, -5, Level::Off).unwrap().result_count, 1);
+        assert_eq!(
+            from_searxng("q", &payload, 0, Level::Off)
+                .unwrap()
+                .result_count,
+            1
+        );
+        assert_eq!(
+            from_searxng("q", &payload, -5, Level::Off)
+                .unwrap()
+                .result_count,
+            1
+        );
     }
 
     #[test]
@@ -580,11 +666,20 @@ mod tests {
         // On a node, and on a client that remembers no node, `remote_node()` is None: loopback.
         assert_eq!(searxng_url_from(None, None), DEFAULT_SEARXNG_URL);
         assert_eq!(searxng_url_from(Some("  "), None), DEFAULT_SEARXNG_URL);
-        assert_eq!(searxng_url_from(None, Some(&remote())), "http://192.168.50.105:8888");
+        assert_eq!(
+            searxng_url_from(None, Some(&remote())),
+            "http://192.168.50.105:8888"
+        );
         // The override still wins, on either kind of machine.
-        assert_eq!(searxng_url_from(Some("http://10.0.0.9:1234"), Some(&remote())), "http://10.0.0.9:1234");
+        assert_eq!(
+            searxng_url_from(Some("http://10.0.0.9:1234"), Some(&remote())),
+            "http://10.0.0.9:1234"
+        );
         // A node that keeps its SearXNG to itself: nothing to connect to but loopback.
-        let unshared = Node { search_port: None, ..remote() };
+        let unshared = Node {
+            search_port: None,
+            ..remote()
+        };
         assert_eq!(searxng_url_from(None, Some(&unshared)), DEFAULT_SEARXNG_URL);
     }
 
@@ -595,8 +690,15 @@ mod tests {
             start_hint(Some(&remote())),
             "Web search runs on the Mightling node (gx10-1a2b). On the node: ling-admin searxng start"
         );
-        let unshared = Node { search_port: None, name: String::new(), ..remote() };
-        assert!(start_hint(Some(&unshared)).contains("(192.168.50.105), which does not share its SearXNG"));
+        let unshared = Node {
+            search_port: None,
+            name: String::new(),
+            ..remote()
+        };
+        assert!(
+            start_hint(Some(&unshared))
+                .contains("(192.168.50.105), which does not share its SearXNG")
+        );
         assert!(start_hint(Some(&unshared)).ends_with("ling-admin node enable"));
         // Nothing tells the model to repair the container: the engines refuse upstream, and a
         // restart changes nothing (2026-10-20).
@@ -607,9 +709,13 @@ mod tests {
     #[test]
     fn an_unreachable_node_is_named_in_the_error() {
         // Port 9 on loopback refuses at once; the hint is the client's, because a node was given.
-        let error = search_from("http://127.0.0.1:9", "q", 5, Level::Off, Some(&remote())).unwrap_err();
+        let error =
+            search_from("http://127.0.0.1:9", "q", 5, Level::Off, Some(&remote())).unwrap_err();
         assert!(error.error.contains("unreachable"), "{error:?}");
-        assert_eq!(error.hint.as_deref(), Some(start_hint(Some(&remote())).as_str()));
+        assert_eq!(
+            error.hint.as_deref(),
+            Some(start_hint(Some(&remote())).as_str())
+        );
     }
 
     #[test]
@@ -628,7 +734,10 @@ mod tests {
             json!([]),
         );
         let found = from_searxng("q", &payload, 5, Level::Off).unwrap();
-        assert_eq!(found.results[0].engines, vec!["duckduckgo".to_string(), "brave".to_string()]);
+        assert_eq!(
+            found.results[0].engines,
+            vec!["duckduckgo".to_string(), "brave".to_string()]
+        );
         assert_eq!(found.airgapped, "off");
     }
 
@@ -639,7 +748,12 @@ mod tests {
             json!([]),
             json!([["brave", "CAPTCHA"]]),
         );
-        assert_eq!(from_searxng("q", &payload, 5, Level::Off).unwrap().result_count, 1);
+        assert_eq!(
+            from_searxng("q", &payload, 5, Level::Off)
+                .unwrap()
+                .result_count,
+            1
+        );
     }
 
     #[test]
@@ -657,16 +771,38 @@ mod tests {
             "content": "Lisbon is the capital of Portugal.", "engine": "wikipedia", "engines": ["wikipedia"]
         }]);
         let found = from_searxng("lisbon", &payload, 5, Level::Off).unwrap();
-        let urls: Vec<&str> = found.results.iter().map(|result| result.url.as_str()).collect();
-        assert_eq!(urls, ["https://en.wikipedia.org/wiki/Lisbon", "https://visitlisboa.com"]);
+        let urls: Vec<&str> = found
+            .results
+            .iter()
+            .map(|result| result.url.as_str())
+            .collect();
+        assert_eq!(
+            urls,
+            [
+                "https://en.wikipedia.org/wiki/Lisbon",
+                "https://visitlisboa.com"
+            ]
+        );
         assert_eq!(found.results[0].title, "Lisbon");
-        assert_eq!(found.results[0].snippet, "Lisbon is the capital of Portugal.");
+        assert_eq!(
+            found.results[0].snippet,
+            "Lisbon is the capital of Portugal."
+        );
         assert_eq!(found.results[0].engines, ["wikipedia"]);
 
         // Only an infobox, every web engine refusing: an answer, not "could not reach any engine".
-        let mut only = searxng(json!([]), json!([]), json!([["brave", "too many requests"]]));
+        let mut only = searxng(
+            json!([]),
+            json!([]),
+            json!([["brave", "too many requests"]]),
+        );
         only["infoboxes"] = payload["infoboxes"].clone();
-        assert_eq!(from_searxng("lisbon", &only, 5, Level::Off).unwrap().result_count, 1);
+        assert_eq!(
+            from_searxng("lisbon", &only, 5, Level::Off)
+                .unwrap()
+                .result_count,
+            1
+        );
     }
 
     #[test]
@@ -682,8 +818,19 @@ mod tests {
             json!([]),
         );
         let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
-        let urls: Vec<&str> = found.results.iter().map(|result| result.url.as_str()).collect();
-        assert_eq!(urls, ["https://www.example.org/trams/", "https://news.example/a", "https://example.org/trams?page=2"]);
+        let urls: Vec<&str> = found
+            .results
+            .iter()
+            .map(|result| result.url.as_str())
+            .collect();
+        assert_eq!(
+            urls,
+            [
+                "https://www.example.org/trams/",
+                "https://news.example/a",
+                "https://example.org/trams?page=2"
+            ]
+        );
         assert_eq!(found.results[0].engines, ["mwmbl", "duckduckgo web"]);
         assert_eq!(found.results[0].snippet, "the 28");
         assert_eq!(found.results[1].published.as_deref(), Some("2026-10-20"));
@@ -696,9 +843,16 @@ mod tests {
         assert_eq!(options.searxng_category(), "social media");
         assert_eq!(options.time_range.as_deref(), Some("week"));
         assert_eq!(options.language, "pt");
-        assert_eq!(SearchOptions::new(None, None, None).unwrap(), SearchOptions::default());
+        assert_eq!(
+            SearchOptions::new(None, None, None).unwrap(),
+            SearchOptions::default()
+        );
         assert_eq!(SearchOptions::default().language, AUTO_LANGUAGE);
-        assert!(SearchOptions::new(Some("shopping"), None, None).unwrap_err().contains("one of: general, news"));
+        assert!(
+            SearchOptions::new(Some("shopping"), None, None)
+                .unwrap_err()
+                .contains("one of: general, news")
+        );
         assert!(SearchOptions::new(None, Some("hour"), None).is_err());
         assert!(SearchOptions::new(None, None, Some("en; rm -rf")).is_err());
         assert!(SearchOptions::new(None, None, Some("de-CH")).is_ok());
@@ -706,7 +860,13 @@ mod tests {
 
     #[test]
     fn nothing_found_with_every_engine_answering_is_an_empty_result() {
-        let found = from_searxng("q", &searxng(json!([]), json!([]), json!([])), 5, Level::Off).unwrap();
+        let found = from_searxng(
+            "q",
+            &searxng(json!([]), json!([]), json!([])),
+            5,
+            Level::Off,
+        )
+        .unwrap();
         assert_eq!(found.result_count, 0);
     }
 
@@ -717,7 +877,8 @@ mod tests {
             json!(["42"]),
             json!([]),
         );
-        let printed = serde_json::to_string(&from_searxng("q", &payload, 5, Level::Off).unwrap()).unwrap();
+        let printed =
+            serde_json::to_string(&from_searxng("q", &payload, 5, Level::Off).unwrap()).unwrap();
         assert_eq!(
             printed,
             r#"{"airgapped":"off","query":"q","result_count":1,"answers":["42"],"results":[{"title":"A","url":"https://a","snippet":"s","engine":"e","engines":[]}]}"#
@@ -745,7 +906,13 @@ mod tests {
     #[test]
     fn at_most_three_answers() {
         let payload = searxng(json!([]), json!(["1", "2", "3", "4"]), json!([]));
-        assert_eq!(from_searxng("q", &payload, 5, Level::Off).unwrap().answers.len(), 3);
+        assert_eq!(
+            from_searxng("q", &payload, 5, Level::Off)
+                .unwrap()
+                .answers
+                .len(),
+            3
+        );
     }
 
     #[test]

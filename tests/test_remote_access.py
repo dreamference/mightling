@@ -1929,3 +1929,168 @@ def test_the_join_script_runs_against_stand_in_commands_and_never_shows_the_key(
     config = (home / ".ssh" / "config").read_text()
     assert "Host gx10-remote" in config and "HostName mightling-ab.netbird.selfhosted" in config
     assert "User owner" in config
+
+
+# -- refusals and failures of the commands ----------------------------------------------------------
+
+
+def _plane(monkeypatch, peers=PEERS, deleted=None, delete_ok=True):
+    monkeypatch.setattr(RemoteControlPlane, "peers", classmethod(lambda cls, d, t: peers))
+    monkeypatch.setattr(
+        RemoteControlPlane,
+        "delete_peer",
+        classmethod(
+            lambda cls, d, t, p: (deleted if deleted is not None else []).append(p) or delete_ok
+        ),
+    )
+
+
+def test_revoke_and_peers_need_remote_access_set_up(monkeypatch, capsys):
+    _plane(monkeypatch)
+    assert RemoteAccess.revoke("laptop") == 3
+    assert RemoteAccess.peers() == 3
+    assert capsys.readouterr().out.count("not set up") == 2
+    RemoteSettings.write({"dns_name": BOX})
+    assert RemoteAccess.peers() == 3, "no admin token yet"
+
+
+def test_revoke_and_peers_report_a_management_that_does_not_answer(monkeypatch, capsys):
+    _set_up()
+    _plane(monkeypatch, peers=None)
+    assert RemoteAccess.revoke("laptop") == 1
+    assert RemoteAccess.peers() == 1
+    assert capsys.readouterr().out.count("Management did not answer") == 2
+
+
+def test_revoke_with_no_match_deletes_nothing_and_lists_the_peers(monkeypatch, capsys):
+    _set_up()
+    deleted = []
+    _plane(monkeypatch, deleted=deleted)
+    assert RemoteAccess.revoke("nobody") == 1 and deleted == []
+    out = capsys.readouterr().out
+    assert "No peer" in out and "laptop-2" in out
+
+
+def test_revoke_says_so_when_management_refuses_the_deletion(monkeypatch, capsys):
+    _set_up()
+    _plane(monkeypatch, delete_ok=False)
+    assert RemoteAccess.revoke("laptop-2") == 1
+    assert "refused to delete" in capsys.readouterr().out
+
+
+def test_peers_prints_one_line_each_sorted_by_name(monkeypatch, capsys):
+    _set_up()
+    _plane(monkeypatch)
+    assert RemoteAccess.peers() == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert [line.split()[0] for line in lines] == ["laptop", "laptop-2", f"mightling-{NODE_ID}"]
+    assert "last seen t" in lines[1] and "connected" in lines[0]
+
+
+def test_a_peer_with_missing_fields_is_listed_not_a_raise():
+    assert RemoteAccess.peer_lines([{"id": "p"}, {}]) != []
+
+
+def test_remove_declined_changes_nothing(monkeypatch, capsys):
+    _set_up()
+    monkeypatch.setattr(RemoteAccess, "_confirm", classmethod(lambda cls, q: False))
+    monkeypatch.setattr(
+        RemoteBox, "remove", classmethod(lambda cls, *a, **k: pytest.fail("removed the box"))
+    )
+    assert RemoteAccess.remove() == 1
+    assert RemoteSettings.read() is not None and "Nothing changed" in capsys.readouterr().out
+
+
+def test_remove_answered_by_end_of_input_changes_nothing(monkeypatch):
+    _set_up()
+
+    def eof(prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", eof)
+    monkeypatch.setattr(
+        RemoteBox, "remove", classmethod(lambda cls, *a, **k: pytest.fail("removed the box"))
+    )
+    assert RemoteAccess.remove() == 1
+
+
+def test_remove_with_nothing_set_up_is_a_quiet_success(capsys):
+    assert RemoteAccess.remove(yes=True) == 0
+    assert "not set up" in capsys.readouterr().out
+
+
+def test_remove_fails_when_the_box_cannot_be_cleaned_but_still_removes_the_tunnel(monkeypatch):
+    _set_up()
+    calls = []
+    monkeypatch.setattr(RemoteBox, "remove", classmethod(lambda cls, d, ssh_to=None: False))
+    monkeypatch.setattr(RemoteTunnel, "remove", classmethod(lambda cls: calls.append("tunnel")))
+    assert RemoteAccess.remove(yes=True) == 1 and calls == ["tunnel"]
+
+
+def test_a_summary_names_the_tunnel_only_when_set_up(monkeypatch):
+    assert RemoteAccess.summary() == {"set_up": False}
+    _set_up()
+    monkeypatch.setattr(RemoteTunnel, "state", classmethod(lambda cls: "active"))
+    summary = RemoteAccess.summary()
+    assert summary["set_up"] is True and summary["tunnel"] == "active"
+    assert summary["dns_name"] == BOX and summary["box_only"] is False
+
+
+def test_a_bundle_file_is_not_made_when_management_mints_no_key(monkeypatch, tmp_path, capsys):
+    _bundle_file_ready(monkeypatch)
+    monkeypatch.setattr(RemoteControlPlane, "setup_key", classmethod(lambda cls, *a, **k: None))
+    target = tmp_path / "bundle.json"
+    assert RemoteAccess.bundle_file(str(target)) == 1
+    assert not target.exists()
+
+
+def test_a_bundle_file_that_appears_while_minting_is_not_overwritten(monkeypatch, tmp_path, capsys):
+    _bundle_file_ready(monkeypatch)
+    target = tmp_path / "bundle.json"
+
+    def racing_key(cls, *a, **k):
+        target.write_text("someone else's")
+        return "SECRET-KEY-1"
+
+    monkeypatch.setattr(RemoteControlPlane, "setup_key", classmethod(racing_key))
+    assert RemoteAccess.bundle_file(str(target)) == 1
+    assert target.read_text() == "someone else's"
+    assert "SECRET-KEY-1" not in capsys.readouterr().out
+
+
+def test_a_code_needs_remote_access_set_up_and_listens_on_nothing(monkeypatch, capsys):
+    monkeypatch.setattr(
+        RemoteEnrolment, "serve", classmethod(lambda cls, *a, **k: pytest.fail("listened"))
+    )
+    assert RemoteAccess.code() == 3
+    assert "not set up" in capsys.readouterr().out
+
+
+def _code_ready(monkeypatch, outcome):
+    _set_up()
+    monkeypatch.setattr(RemoteAccess, "_node_id", classmethod(lambda cls: NODE_ID))
+
+    def serve(cls, code, mint):
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(RemoteEnrolment, "serve", classmethod(serve))
+
+
+@pytest.mark.parametrize(
+    "outcome, status, words",
+    [
+        ("enrolled:laptop", 0, "laptop has its bundle"),
+        ("withdrawn", 1, "ten wrong attempts"),
+        ("expired", 1, "expired"),
+        (KeyboardInterrupt(), 1, "withdrawn"),
+        (OSError("address in use"), 1, "Could not listen"),
+    ],
+)
+def test_a_code_ends_with_a_status_and_a_word_for_every_outcome(
+    monkeypatch, capsys, outcome, status, words
+):
+    _code_ready(monkeypatch, outcome)
+    assert RemoteAccess.code() == status
+    assert words in capsys.readouterr().out

@@ -1,0 +1,82 @@
+# The rename rehearsal (specs/DREAMFERENCE_RENAME_RAGON.md §9.3), on every push to main: the
+# rename script from the branch rename/ragon-script runs over a copy of main, so a change on main
+# that breaks one of its anchors shows the same day instead of at the next weekly rehearsal.
+#
+# What runs, in the runner's own throwaway checkout: the rename itself (contents, paths, the
+# overlay, the compatibility edits and the ruff pass), the leftover check (`--check`), then the
+# renamed copy's Python test suite, the rename's own tests among them. Not run here: cargo, npm,
+# the codex build and the egress audit (the rest of §9.3's `--verify`), nor anything needing a GPU,
+# Docker or the network beyond pip.
+#
+# It never commits, pushes or publishes: the checkout keeps no credentials and the token can only
+# read. A failed compatibility edit names its anchor (an error annotation on the run). Pushes to
+# other branches and tags never start it, and the release workflows neither wait for it nor call
+# it. Delete this file once the rename has landed on main.
+name: Ragon rename rehearsal
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only main's newest commit matters: a newer push cancels a rehearsal still running.
+concurrency:
+  group: ragon-rename-rehearsal
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          # The pip cache is keyed on a dependency file, and this project declares its
+          # dependencies in setup.py, not requirements.txt or pyproject.toml.
+          cache-dependency-path: setup.py
+      - name: Install
+        # `.[dev]` brings the pinned ruff the rename's formatting pass and the ratchet tests need.
+        run: pip install -e ".[dev]" pytest
+      - name: Fetch the rename script
+        # Unstaged, as in a rehearsal by hand: the script's own files are not part of the tree it renames.
+        run: |
+          git fetch --no-tags --depth=1 origin rename/ragon-script
+          git archive FETCH_HEAD scripts/rename_ragon.py scripts/ragon_overlay tests/test_rename_ragon.py | tar -x
+          echo "Rename script: rename/ragon-script at $(git rev-parse --short FETCH_HEAD), main at ${GITHUB_SHA::8}" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Rename
+        # The script's ruff pass uses this interpreter, which has the pinned ruff from `.[dev]`.
+        run: |
+          log="$RUNNER_TEMP/rename.log"
+          if ! python scripts/rename_ragon.py --root . --report "$RUNNER_TEMP/rename-report.txt" > "$log" 2>&1; then
+            tail -n 30 "$log"
+            anchor=$(grep -m1 "compat edit anchor" "$log" || true)
+            echo "::error title=Rename script stopped::${anchor:-$(tail -n 1 "$log")}"
+            exit 1
+          fi
+          grep -E "^(compat edits|ruff-formatted files|contents changed):" "$log" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Leftover check
+        run: |
+          if ! python scripts/rename_ragon.py --root . --check > "$RUNNER_TEMP/leftovers.txt"; then
+            head -n 50 "$RUNNER_TEMP/leftovers.txt"
+            echo "::error title=Leftovers::$(tail -n 1 "$RUNNER_TEMP/leftovers.txt") of the old name after the rename"
+            exit 1
+          fi
+          tail -n 1 "$RUNNER_TEMP/leftovers.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Install the renamed package
+        # The new console scripts (the admin command's new name) that some tests look for.
+        run: pip install --no-deps -e .
+      # No GPU or Docker needed: every hardware and subprocess call in the suite is mocked.
+      - name: Test the renamed copy
+        run: python -m pytest tests/ -q -p no:cacheprovider

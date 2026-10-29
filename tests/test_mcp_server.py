@@ -157,3 +157,39 @@ def test_web_search_sends_the_category_time_range_and_detected_language():
     assert first["categories"] == "social media" and first["time_range"] == "week"
     assert first["language"] == "auto"
     assert "time_range" not in second
+
+
+def _stdio_replies(tmp_path, stdin: bytes) -> list:
+    """Feeds raw bytes to the real stdio loop of this checkout and returns its replies."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    # This checkout first: from `tmp_path` an editable install elsewhere would be imported instead.
+    root = str(Path(__file__).resolve().parents[1])
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [root, os.environ.get("PYTHONPATH")]))}
+    out = subprocess.run(
+        [sys.executable, "-c", "from dreamference.mcp_server import main; main()"],
+        input=stdin, capture_output=True, timeout=60, cwd=tmp_path, env=env,
+    ).stdout
+    return [json.loads(line) for line in out.decode().splitlines()]
+
+
+def test_a_line_that_is_not_utf8_is_a_parse_error_and_the_server_keeps_answering(tmp_path):
+    ping = json.dumps({"jsonrpc": "2.0", "id": 7, "method": "ping"}).encode()
+    replies = _stdio_replies(tmp_path, b'{"jsonrpc": "2.0", "id": 1, "method": "\xff\xfe"}\n' + ping + b"\n")
+    assert [r.get("id") for r in replies] == [None, 7]
+    assert replies[0]["error"]["code"] == -32700
+    assert replies[1]["result"] == {}
+
+
+def test_a_request_longer_than_64_kib_is_answered_and_the_server_keeps_answering(tmp_path):
+    # A diff for ide_apply_diff is easily larger than asyncio's default line limit.
+    big = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+           "params": {"name": "ide_apply_diff",
+                      "arguments": {"file_path": "a.py", "diff_content": "+x\n" * 50_000}}}
+    ping = {"jsonrpc": "2.0", "id": 2, "method": "ping"}
+    replies = _stdio_replies(tmp_path, (json.dumps(big) + "\n" + json.dumps(ping) + "\n").encode())
+    assert [r.get("id") for r in replies] == [1, 2]
+    assert "result" in replies[0]

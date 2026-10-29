@@ -123,6 +123,20 @@ REMOTE_HOST=${REMOTE_HOST:-}
 OVERLAY_DOMAIN=${OVERLAY_DOMAIN:-netbird.selfhosted}
 # The helper's folder there (its ling-serve, serve.py, lease and logs), when not its default ~/ab-n12.
 REMOTE_AB_DIR=${REMOTE_AB_DIR:-}
+# LOCAL_ARMS=1: the same arms (`on-sglang`, `on-engine`) on this machine's own model server instead of REMOTE's,
+# one at a time, each started by `ling-admin server start --engine sglang|ling` from the worktree, so with the image
+# and the recipe REF pins, behind the gate (scripts/night_local_arm.sh; the 1.8.0 bar night, one replica per
+# machine). Production comes back at the end, on a failure and on a stop: LOCAL_RESTORE_ENGINE=sglang (Mightling's
+# SGLang, the default) or none, with LOCAL_PROD_STOP naming the containers that are production instead (stopped
+# for the night, started again after it).
+LOCAL_ARMS=${LOCAL_ARMS:-0}
+LOCAL_PROD_STOP=${LOCAL_PROD_STOP:-}
+LOCAL_RESTORE_ENGINE=${LOCAL_RESTORE_ENGINE:-sglang}
+# LOCAL_STEP_TRACE=1: an engine arm writes its step trace (ling-serve's LING_STEP_TRACE, one JSON line per unit) to
+# ~/.cache/dreamference/night-traces/<run>.jsonl, kept in $D/step-trace/ once production is back. An arm part
+# `engine-<flag>-<value>` passes `--<flag> <value>` to the arm's engine (LOCAL_ARMS=1 only).
+LOCAL_STEP_TRACE=${LOCAL_STEP_TRACE:-0}
+TRACE_HOST=${TRACE_HOST:-$HOME/.cache/dreamference/night-traces}
 # A series of nights pinned to one commit and one `ling` build (the owner's decision of 2026-10-20 for nights
 # 14-16, the three thirds of fresh-150k, whose runs `swe-bench merge` joins only when they measured the same
 # thing): REF is a full 40-character commit. The first `start` at that REF builds `ling` from the worktree
@@ -204,6 +218,9 @@ arm_flags() {
             drop-*|drop_*) echo "❌ Arm $1: write the drop-first compaction arm as drop-outputs." >&2; return 2 ;;
             on-sglang|on-engine) ;;  # the model server, not an option of the run (arm_server)
             on-*) echo "❌ Arm $1: write the model server as on-sglang or on-engine." >&2; return 2 ;;
+            engine-*)  # a flag of the arm's engine (LOCAL_ARMS=1: engine_args), not an option of the run
+                echo "$part" | grep -qE '^engine-[a-z][a-z-]*[a-z]-[A-Za-z0-9._]+$' \
+                    || { echo "❌ Arm $1: write an engine flag as engine-<flag>-<value>, e.g. engine-fair-pairing-1." >&2; return 2; } ;;
             sampling-nonthinking) flags="$flags --sampling nonthinking" ;;
             compat-claude) flags="$flags --compat claude" ;;
             compat*) echo "❌ Arm $1: write the compatibility arm as compat-claude." >&2; return 2 ;;
@@ -216,6 +233,16 @@ arm_flags() {
         esac
     done
     echo "${flags# }"
+}
+# The engine flags of an arm's `engine-<flag>-<value>` parts, e.g. engine-fair-pairing-1: `--fair-pairing 1`.
+engine_args() {
+    local part out=""
+    for part in $(echo "$1" | tr + ' '); do
+        case "$part" in engine-*) ;; *) continue ;; esac
+        echo "$part" | grep -qE '^engine-[a-z][a-z-]*[a-z]-[A-Za-z0-9._]+$' || return 2
+        out="$out --$(echo "$part" | sed -E 's/^engine-(.*)-([^-]+)$/\1 \2/')"
+    done
+    echo "${out# }"
 }
 arm_name() { echo "$1" | tr ,+ --; }
 # The arm's model server on REMOTE (`sglang` or `engine`), or nothing: this machine's server.
@@ -237,6 +264,7 @@ remote_names() {
 # Serves the arm's model server on REMOTE (stopping production and the other arm there) and points the run at it.
 remote_serve() {
     local server=$1 port out
+    if [ "$LOCAL_ARMS" = 1 ]; then local_arm serve "$server" "${2:-}" "${3:-}"; return; fi
     case "$server" in sglang) port=30000 ;; engine) port=8300 ;; *) return 2 ;; esac
     [ -n "$REMOTE" ] || { echo "❌ REMOTE is not set: name the engine's machine (its ssh name) for an on-$server arm."; return 1; }
     remote_names
@@ -251,9 +279,40 @@ remote_serve() {
 }
 # Production back on REMOTE, both arms stopped; `remote_restore keep`: the arms stopped and the GPU lock kept.
 remote_restore() {
+    if [ "$LOCAL_ARMS" = 1 ]; then local_arm restore ${1:-}; return; fi
     remote_names
     timeout 30m ssh -o BatchMode=yes "$REMOTE_SSH" ${REMOTE_AB_DIR:+AB_DIR=$REMOTE_AB_DIR} bash -s -- restore ${1:-} < "$WT/scripts/engine_ab_remote.sh" 2>&1 | tail -2 | sed 's/^/   /'
     unset DREAMFERENCE_VLLM_HOST
+}
+# LOCAL_ARMS=1: the arm on this machine's server (the run reaches it as every local night does: no
+# DREAMFERENCE_VLLM_HOST), or production back.
+local_arm() {
+    local out rc args="" env=""
+    if [ "$1" = serve ]; then
+        args=$(engine_args "${3:-}") || return 2
+        if [ "$LOCAL_STEP_TRACE" = 1 ] && [ "$2" = engine ] && [ -n "${4:-}" ]; then
+            mkdir -p "$TRACE_HOST" && env="LING_STEP_TRACE=/root/.cache/dreamference/night-traces/$4.jsonl"
+        fi
+        set -- serve "$2"
+    fi
+    out=$(WT="$WT" PY="$PY" PROD_STOP="$LOCAL_PROD_STOP" RESTORE_ENGINE="$LOCAL_RESTORE_ENGINE" \
+        ENGINE_ARGS="$args" ENGINE_ENV="$env" bash "${LOCAL_ARM_HELPER:-$WT/scripts/night_local_arm.sh}" "$@" 2>&1)
+    rc=$?
+    echo "$out" | tail -3 | sed 's/^/   /'
+    [ "$1" = serve ] || return "$rc"
+    [ "$rc" -eq 0 ] && echo "$out" | grep -q '^ready ' || return 1
+    log "$2 serving on this machine ($(echo "$out" | sed -n 's/^ready //p'))"
+}
+# The step traces of this night's engine rounds (and smokes), kept beside its runs.
+keep_traces() {
+    [ "$LOCAL_STEP_TRACE" = 1 ] || return 0
+    local f n=0
+    mkdir -p "$D/step-trace"
+    for f in "$TRACE_HOST/$PREFIX"-*.jsonl; do
+        [ -e "$f" ] || continue
+        cp "$f" "$D/step-trace/" && n=$((n + 1))
+    done
+    log "$n step trace(s) kept in $D/step-trace"
 }
 free_gb() { df --output=avail -BG "${DISK_PATH:-$HOME/.cache}" | tail -1 | tr -dc '0-9'; }
 # Waits for the disk after a round stopped short; returns non-zero when the disk was not short or never came back.
@@ -320,8 +379,8 @@ smoke() {
         [ "$REFINE" = 1 ] && extra="$extra --refine"
         run="$PREFIX-smoke-$name-$stamp"
         server=$(arm_server "$arm")
-        if [ -n "$server" ] && ! remote_serve "$server"; then
-            echo "❌ Night $NIGHT not started: arm $arm's model server ($server on $REMOTE) did not come up."
+        if [ -n "$server" ] && ! remote_serve "$server" "$arm" "$run"; then
+            echo "❌ Night $NIGHT not started: arm $arm's model server ($server on ${REMOTE:-this machine}) did not come up."
             return 1
         fi
         wait_out_index "before the smoke of $arm"
@@ -525,13 +584,18 @@ print(f'🧹 {len(removed)} cached image(s) removed to make room for the night.'
     else
         what=$(echo $ARMS | sed 's/ / against /')
     fi
-    systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
+    # A local-arms night restores production at its end (an SGLang restore takes 10+ minutes): a stop
+    # must not kill it partway at the default 90 s.
+    local stop_timeout=()
+    [ "$LOCAL_ARMS" = 1 ] && stop_timeout=(-p TimeoutStopSec=1h)
+    systemd-run --user --unit="$UNIT" -p OOMPolicy=continue "${stop_timeout[@]}" \
         --description="SWE-bench night $NIGHT: $what" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=DATASET="$DATASET" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
         --setenv=IMAGE_CHUNK="$IMAGE_CHUNK" --setenv=SHARD="$SHARD" --setenv=LING_PIN_SHA256="$LING_PIN_SHA256" \
         --setenv=RESERVE_GB="$RESERVE_GB" --setenv=NIGHT_WINS="$NIGHT_WINS" --setenv=INDEX_WAIT_S="$INDEX_WAIT_S" \
         --setenv=BEST_OF="$BEST_OF" --setenv=CHOOSER_SERVER="$CHOOSER_SERVER" --setenv=CHOOSER_SEED="$CHOOSER_SEED" \
         --setenv=REMOTE="$REMOTE" --setenv=REMOTE_HOST="$REMOTE_HOST" --setenv=REMOTE_AB_DIR="$REMOTE_AB_DIR" \
+        --setenv=LOCAL_ARMS="$LOCAL_ARMS" --setenv=LOCAL_PROD_STOP="$LOCAL_PROD_STOP" --setenv=LOCAL_RESTORE_ENGINE="$LOCAL_RESTORE_ENGINE" --setenv=LOCAL_STEP_TRACE="$LOCAL_STEP_TRACE" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1" \
         || { echo "❌ Could not start $UNIT."; uses_remote && remote_restore; exit 1; }
     echo "✅ Started $UNIT; log: $D/run.log"
@@ -638,8 +702,9 @@ run() {
     done
     # The engine A/B: production on REMOTE comes back however the night ends (a stopped unit gets TERM, and the
     # EXIT trap runs on the way out); once both rounds have run it comes back at once, before the regrades.
+    if [ "$LOCAL_ARMS" != 1 ] && [ -n "$(engine_args "$ARMS")" ]; then fail "engine flags in [$ARMS] (they need LOCAL_ARMS=1)" 2; fi
     if uses_remote; then
-        trap 'remote_restore' EXIT
+        trap 'remote_restore; keep_traces' EXIT
         trap 'exit 143' TERM INT
     fi
     for arm in $record $candidate; do
@@ -648,7 +713,7 @@ run() {
         [ "$REFINE" = 1 ] && extra="$extra --refine"
         server=$(arm_server "$arm")
         if [ -n "$server" ]; then
-            remote_serve "$server" || fail "serving $server on $REMOTE for $PREFIX-$name" 1
+            remote_serve "$server" "$arm" "$PREFIX-$name" || fail "serving $server on ${REMOTE:-this machine} for $PREFIX-$name" 1
         fi
         check_pin
         log "round $PREFIX-$name"
@@ -671,7 +736,7 @@ run() {
     done
     # Production back now; the EXIT trap's second restore would find no lease and wait 30 min for a lock that is
     # by then someone else's.
-    if uses_remote; then remote_restore; trap - EXIT; fi
+    if uses_remote; then remote_restore; keep_traces; trap - EXIT; fi
     for name in $rname $cname; do
         log "regrade $PREFIX-$name with the test files dropped"
         admin swe-bench eval "$PREFIX-$name" --drop-test-hunks --remove-images $(chunk_flags)

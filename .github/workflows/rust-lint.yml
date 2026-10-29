@@ -1,0 +1,49 @@
+# Format and lint gate for the standalone Rust crates (those with their own lockfile, built outside
+# the Codex workspace): `cargo fmt --check` and `cargo clippy --locked -- -D warnings`. Never runs
+# cargo inside codex/ (AGENTS.md). The three main crates pin 1.95.0 in their rust-toolchain.toml;
+# the same version is installed here so the eval crate (no toolchain file) is linted by it too.
+name: Rust lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - ling-web-rs
+          - ling-code-rs
+          - ling-docs-rs
+          - ling-docs-rs/eval/rustpdf
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: "1.95.0"
+          components: clippy, rustfmt
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ matrix.crate }}/target
+          key: rust-lint-${{ matrix.crate }}-${{ hashFiles(format('{0}/Cargo.lock', matrix.crate)) }}
+          restore-keys: rust-lint-${{ matrix.crate }}-
+      - name: Format
+        working-directory: ${{ matrix.crate }}
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: ${{ matrix.crate }}
+        run: cargo clippy --locked -- -D warnings

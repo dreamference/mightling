@@ -18,15 +18,25 @@ pub const MAX_HOPS: u32 = 10;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
     /// A Google search for `query`; `kgmid` names the Knowledge Graph entity it is about.
-    Search { query: String, kgmid: Option<String> },
+    Search {
+        query: String,
+        kgmid: Option<String>,
+    },
     /// A Google Maps place or search; `coordinates` is `"lat, lng"` when the URL carries them.
-    Place { name: String, coordinates: Option<String> },
+    Place {
+        name: String,
+        coordinates: Option<String>,
+    },
 }
 
 /// Where a walk ended: at a Google target (never requested), or at a response that is not a
 /// redirect, whose body the fetch reads as it reads any page.
 pub enum Walked {
-    Target { final_url: String, status: u16, target: Target },
+    Target {
+        final_url: String,
+        status: u16,
+        target: Target,
+    },
     Response(ureq::Response),
 }
 
@@ -46,15 +56,28 @@ fn parts(url: &str) -> Option<Parts<'_>> {
         Some(slash) => before_query.split_at(slash),
         None => (before_query, ""),
     };
-    let host_port = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
-    let host = host_port.split(':').next().unwrap_or_default().to_ascii_lowercase();
-    Some(Parts { scheme, host, path, query })
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = host_port
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    Some(Parts {
+        scheme,
+        host,
+        path,
+        query,
+    })
 }
 
 /// True for a link a phone's Google "share" button makes: `share.google/…`, `maps.app.goo.gl/…`
 /// and `goo.gl/maps/…`. Only these start a walk; every other URL is fetched as it always was.
 pub fn is_share_link(url: &str) -> bool {
-    let Some(parts) = parts(url) else { return false };
+    let Some(parts) = parts(url) else {
+        return false;
+    };
     match parts.host.as_str() {
         "share.google" | "maps.app.goo.gl" => true,
         "goo.gl" | "www.goo.gl" => parts.path.starts_with("/maps/"),
@@ -69,12 +92,14 @@ fn is_google_host(host: &str) -> bool {
         .strip_prefix("www.")
         .or_else(|| host.strip_prefix("maps."))
         .unwrap_or(host);
-    let Some(tld) = host.strip_prefix("google.") else { return false };
+    let Some(tld) = host.strip_prefix("google.") else {
+        return false;
+    };
     let labels: Vec<&str> = tld.split('.').collect();
     labels.len() <= 2
-        && labels
-            .iter()
-            .all(|label| (2..=3).contains(&label.len()) && label.chars().all(|c| c.is_ascii_alphabetic()))
+        && labels.iter().all(|label| {
+            (2..=3).contains(&label.len()) && label.chars().all(|c| c.is_ascii_alphabetic())
+        })
 }
 
 /// Percent-decodes `text`, reading `+` as a space as a query string means it.
@@ -86,7 +111,10 @@ pub fn percent_decode(text: &str, plus_is_space: bool) -> String {
         let byte = bytes[index];
         let hex = || {
             let digits = bytes.get(index + 1..index + 3)?;
-            digits.iter().all(u8::is_ascii_hexdigit).then(|| std::str::from_utf8(digits).ok())?
+            digits
+                .iter()
+                .all(u8::is_ascii_hexdigit)
+                .then(|| std::str::from_utf8(digits).ok())?
         };
         match byte {
             b'%' => match hex().and_then(|digits| u8::from_str_radix(digits, 16).ok()) {
@@ -110,7 +138,8 @@ fn query_param(query: &str, name: &str) -> Option<String> {
     query.split('&').find_map(|pair| {
         let (key, value) = pair.split_once('=')?;
         let value = percent_decode(value, true);
-        (percent_decode(key, true) == name && !value.trim().is_empty()).then(|| value.trim().to_string())
+        (percent_decode(key, true) == name && !value.trim().is_empty())
+            .then(|| value.trim().to_string())
     })
 }
 
@@ -127,7 +156,9 @@ fn coordinates_in(segment: &str) -> Option<String> {
 /// URL with `q=` or `query=`). `None` for anything else, Google or not.
 pub fn classify(url: &str) -> Option<Target> {
     let parts = parts(url)?;
-    if !matches!(parts.scheme.to_ascii_lowercase().as_str(), "http" | "https") || !is_google_host(&parts.host) {
+    if !matches!(parts.scheme.to_ascii_lowercase().as_str(), "http" | "https")
+        || !is_google_host(&parts.host)
+    {
         return None;
     }
     if parts.path == "/search" {
@@ -135,16 +166,24 @@ pub fn classify(url: &str) -> Option<Target> {
         let query = query_param(parts.query, "q").or_else(|| kgmid.clone())?;
         return Some(Target::Search { query, kgmid });
     }
-    let maps_path = parts.path.strip_prefix("/maps").filter(|rest| rest.is_empty() || rest.starts_with('/'));
+    let maps_path = parts
+        .path
+        .strip_prefix("/maps")
+        .filter(|rest| rest.is_empty() || rest.starts_with('/'));
     let maps_path = match maps_path {
         Some(rest) => rest,
         None if parts.host.starts_with("maps.") => parts.path,
         None => return None,
     };
-    let segments: Vec<&str> = maps_path.split('/').filter(|segment| !segment.is_empty()).collect();
+    let segments: Vec<&str> = maps_path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
     let coordinates = segments.iter().find_map(|segment| coordinates_in(segment));
     let named = match segments.as_slice() {
-        ["place" | "search", name, ..] if !name.starts_with('@') => Some(percent_decode(name, true)),
+        ["place" | "search", name, ..] if !name.starts_with('@') => {
+            Some(percent_decode(name, true))
+        }
         _ => None,
     };
     let name = named
@@ -171,14 +210,21 @@ pub fn resolve_location(base: &str, location: &str) -> String {
     if location.starts_with('/') {
         return format!("{origin}{location}");
     }
-    let path = rest[authority_end..].split(['?', '#']).next().unwrap_or_default();
+    let path = rest[authority_end..]
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default();
     let directory = path.rsplit_once('/').map_or("", |(directory, _)| directory);
     format!("{origin}{directory}/{location}")
 }
 
 /// Walks the redirects from `start` with `agent`, which must not follow redirects itself, reading
 /// each `Location` with `classify` before it is requested. Errors are worded as a fetch's are.
-pub fn walk(agent: &ureq::Agent, start: &str, classify: impl Fn(&str) -> Option<Target>) -> Result<Walked, String> {
+pub fn walk(
+    agent: &ureq::Agent,
+    start: &str,
+    classify: impl Fn(&str) -> Option<Target>,
+) -> Result<Walked, String> {
     let mut current = start.to_string();
     for _ in 0..=MAX_HOPS {
         let response = agent
@@ -187,15 +233,25 @@ pub fn walk(agent: &ureq::Agent, start: &str, classify: impl Fn(&str) -> Option<
             .call()
             .map_err(crate::fetch::request_error)?;
         let status = response.status();
-        let location = response.header("Location").filter(|_| (300..400).contains(&status));
-        let Some(location) = location else { return Ok(Walked::Response(response)) };
+        let location = response
+            .header("Location")
+            .filter(|_| (300..400).contains(&status));
+        let Some(location) = location else {
+            return Ok(Walked::Response(response));
+        };
         let next = resolve_location(&current, location);
         if let Some(target) = classify(&next) {
-            return Ok(Walked::Target { final_url: next, status, target });
+            return Ok(Walked::Target {
+                final_url: next,
+                status,
+                target,
+            });
         }
         current = next;
     }
-    Err(format!("request failed: more than {MAX_HOPS} redirects from {start}"))
+    Err(format!(
+        "request failed: more than {MAX_HOPS} redirects from {start}"
+    ))
 }
 
 /// The page `ling-fetch` returns for a share link that opens `target`: what it is, in words, and
@@ -244,11 +300,17 @@ mod tests {
     use super::*;
 
     fn search(query: &str, kgmid: Option<&str>) -> Option<Target> {
-        Some(Target::Search { query: query.into(), kgmid: kgmid.map(Into::into) })
+        Some(Target::Search {
+            query: query.into(),
+            kgmid: kgmid.map(Into::into),
+        })
     }
 
     fn place(name: &str, coordinates: Option<&str>) -> Option<Target> {
-        Some(Target::Place { name: name.into(), coordinates: coordinates.map(Into::into) })
+        Some(Target::Place {
+            name: name.into(),
+            coordinates: coordinates.map(Into::into),
+        })
     }
 
     #[test]
@@ -265,28 +327,40 @@ mod tests {
     #[test]
     fn a_search_url_gives_its_query_and_entity() {
         assert_eq!(
-            classify("https://www.google.com/search?kgmid=/g/11synth01&hl=pt-PT&q=Some+Synthetic+Song&shem=abc"),
+            classify(
+                "https://www.google.com/search?kgmid=/g/11synth01&hl=pt-PT&q=Some+Synthetic+Song&shem=abc"
+            ),
             search("Some Synthetic Song", Some("/g/11synth01"))
         );
         assert_eq!(
             classify("https://www.google.pt/search?q=caf%C3%A9%20%26%20bar&kgmid=%2Fm%2F0test"),
             search("café & bar", Some("/m/0test"))
         );
-        assert_eq!(classify("https://google.co.uk/search?kgmid=/g/11only"), search("/g/11only", Some("/g/11only")));
+        assert_eq!(
+            classify("https://google.co.uk/search?kgmid=/g/11only"),
+            search("/g/11only", Some("/g/11only"))
+        );
         assert_eq!(classify("https://www.google.com/search?hl=en"), None);
     }
 
     #[test]
     fn a_maps_url_gives_its_place_and_coordinates() {
         assert_eq!(
-            classify("https://www.google.com/maps/place/Caf%C3%A9+Synthetic/@38.7139,-9.1394,17z/data=!3m1!4b1"),
+            classify(
+                "https://www.google.com/maps/place/Caf%C3%A9+Synthetic/@38.7139,-9.1394,17z/data=!3m1!4b1"
+            ),
             place("Café Synthetic", Some("38.7139, -9.1394"))
         );
         assert_eq!(
-            classify("https://www.google.pt/maps/search/Synthetic+Bakery/@41.15,-8.61,15z?entry=ttu"),
+            classify(
+                "https://www.google.pt/maps/search/Synthetic+Bakery/@41.15,-8.61,15z?entry=ttu"
+            ),
             place("Synthetic Bakery", Some("41.15, -8.61"))
         );
-        assert_eq!(classify("https://maps.google.com/?q=Synthetic+Park&ftid=0x1:0x2"), place("Synthetic Park", None));
+        assert_eq!(
+            classify("https://maps.google.com/?q=Synthetic+Park&ftid=0x1:0x2"),
+            place("Synthetic Park", None)
+        );
         assert_eq!(
             classify("https://www.google.com/maps/search/?api=1&query=Synthetic+Museum"),
             place("Synthetic Museum", None)
@@ -311,11 +385,26 @@ mod tests {
     #[test]
     fn locations_are_resolved_against_the_url_that_sent_them() {
         let base = "https://share.google/dir/AbC?x=1";
-        assert_eq!(resolve_location(base, "https://www.google.com/search?q=a"), "https://www.google.com/search?q=a");
-        assert_eq!(resolve_location(base, "//www.google.com/x"), "https://www.google.com/x");
-        assert_eq!(resolve_location(base, "/next?y=2"), "https://share.google/next?y=2");
-        assert_eq!(resolve_location(base, "other"), "https://share.google/dir/other");
-        assert_eq!(resolve_location("http://127.0.0.1:9/s", "/page"), "http://127.0.0.1:9/page");
+        assert_eq!(
+            resolve_location(base, "https://www.google.com/search?q=a"),
+            "https://www.google.com/search?q=a"
+        );
+        assert_eq!(
+            resolve_location(base, "//www.google.com/x"),
+            "https://www.google.com/x"
+        );
+        assert_eq!(
+            resolve_location(base, "/next?y=2"),
+            "https://share.google/next?y=2"
+        );
+        assert_eq!(
+            resolve_location(base, "other"),
+            "https://share.google/dir/other"
+        );
+        assert_eq!(
+            resolve_location("http://127.0.0.1:9/s", "/page"),
+            "http://127.0.0.1:9/page"
+        );
     }
 
     #[test]
@@ -332,14 +421,39 @@ mod tests {
             "https://share.google/AbC",
             "https://www.google.com/search?q=Song".into(),
             302,
-            &Target::Search { query: "Some Song".into(), kgmid: Some("/g/11synth".into()) },
+            &Target::Search {
+                query: "Some Song".into(),
+                kgmid: Some("/g/11synth".into()),
+            },
         );
         assert_eq!(found.title, "Some Song");
-        assert!(found.text.contains("\"Some Song\" (Knowledge Graph id /g/11synth)"), "{}", found.text);
-        assert!(found.text.contains("ling-search \"Some Song\""), "{}", found.text);
+        assert!(
+            found
+                .text
+                .contains("\"Some Song\" (Knowledge Graph id /g/11synth)"),
+            "{}",
+            found.text
+        );
+        assert!(
+            found.text.contains("ling-search \"Some Song\""),
+            "{}",
+            found.text
+        );
         assert_eq!((found.status, found.truncated), (302, false));
-        let at = page("u", "f".into(), 302, &Target::Place { name: "Café".into(), coordinates: Some("1, 2".into()) });
+        let at = page(
+            "u",
+            "f".into(),
+            302,
+            &Target::Place {
+                name: "Café".into(),
+                coordinates: Some("1, 2".into()),
+            },
+        );
         assert_eq!(at.title, "Café");
-        assert!(at.text.contains("\"Café\" at coordinates 1, 2"), "{}", at.text);
+        assert!(
+            at.text.contains("\"Café\" at coordinates 1, 2"),
+            "{}",
+            at.text
+        );
     }
 }

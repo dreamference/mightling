@@ -133,6 +133,7 @@ struct Tab {
     reader: Option<JoinHandle<()>>,
     shared: Arc<Shared>,
     bridge: bool,
+    watch: bool,
 }
 
 fn event(channel: &str, payload: Value) -> Value {
@@ -140,12 +141,12 @@ fn event(channel: &str, payload: Value) -> Value {
 }
 
 pub async fn run_tab(socket: WebSocket, server: Arc<Server>) {
-    run_tab_with_bridge(socket, server, None, false).await;
+    run_tab_with_bridge(socket, server, None, false, false).await;
 }
 
 pub async fn run_tab_for_device(socket: WebSocket, server: Arc<Server>, device_name: Option<String>) {
     let bridge = device_name.as_deref().is_some_and(ask::is_bridge_device);
-    run_tab_with_bridge(socket, server, device_name, bridge).await;
+    run_tab_with_bridge(socket, server, device_name, bridge, false).await;
 }
 
 pub async fn run_tab_with_bridge(
@@ -153,6 +154,7 @@ pub async fn run_tab_with_bridge(
     server: Arc<Server>,
     _device_name: Option<String>,
     bridge: bool,
+    watch: bool,
 ) {
     let (mut to_browser, mut from_browser) = socket.split();
     let (out, mut outgoing) = mpsc::unbounded_channel::<Value>();
@@ -188,6 +190,7 @@ pub async fn run_tab_with_bridge(
         reader: None,
         shared: Arc::new(Shared::for_tab(tab_id)),
         bridge,
+        watch,
     };
     while let Some(Ok(frame)) = from_browser.next().await {
         let text = match frame {
@@ -305,6 +308,7 @@ impl Tab {
         let Some(upstream_tx) = self.upstream_tx.as_ref() else {
             return Err("the agent's server is not running".to_string());
         };
+        let message = watch_message(self.watch, message)?;
         let policy = &self.server.policy;
         // A named prompt's text is read before vetting: composing it may take a moment.
         let named = message
@@ -416,14 +420,81 @@ impl Tab {
     }
 }
 
-/// Defense in depth: refuses a `bridge=1` session's `turn/start` or `turn/steer` on a repository
-/// thread whose record's `bridge` is `telegram` or `discord` (CHAT_REPOS §2, §5.3).
+/// The requests that put input into an existing thread, each naming it in `params.threadId`.
+const BRIDGE_REPO_INPUT_REQUESTS: [&str; 8] = [
+    "turn/start",
+    "turn/steer",
+    "thread/queue/add",
+    "thread/queue/update",
+    "thread/queue/start",
+    "thread/goal/set",
+    "thread/shellCommand",
+    "review/start",
+];
+
+/// What a device with the `watch` scope may send: reading and following threads, nothing that
+/// starts, steers, answers or changes anything (SYNC §5.1, O4). Files, git and search outside a
+/// thread are not reading a thread either.
+const WATCH_REQUESTS: &[&str] = &[
+    "initialize",
+    "account/read",
+    "config/read",
+    "configRequirements/read",
+    "model/list",
+    "permissionProfile/list",
+    "collaborationMode/list",
+    "project/list",
+    "project/read",
+    "thread/resume",
+    "thread/list",
+    "thread/read",
+    "thread/loaded/list",
+    "thread/turns/list",
+    "thread/items/list",
+    "thread/search",
+    "thread/unsubscribe",
+    "thread/queue/list",
+    "thread/goal/get",
+    "memory/status",
+    "skills/list",
+    "plugin/list",
+    "plugin/read",
+    "plugin/installed",
+    "hooks/list",
+    "mcpServerStatus/list",
+    "app/list",
+];
+
+/// A `watch` device's message, refused unless it only reads or follows: an answer to the
+/// server's request (an approval) is refused, and `thread/resume` keeps only the thread it
+/// follows, so it cannot change the thread's model, folder or sandbox on the way.
+pub fn watch_message(watch: bool, message: Value) -> Result<Value, String> {
+    if !watch {
+        return Ok(message);
+    }
+    let refused = || "This device may watch threads only; ask for control in Settings › Devices on the Mightling machine.".to_string();
+    let method = message.get("method").and_then(Value::as_str);
+    let request = message.get("id").is_some();
+    match method {
+        Some("initialized") if !request => Ok(message),
+        Some("thread/resume") if request => {
+            let thread = message.pointer("/params/threadId").cloned().ok_or_else(refused)?;
+            Ok(json!({ "id": message["id"], "method": "thread/resume", "params": { "threadId": thread } }))
+        }
+        Some(method) if request && WATCH_REQUESTS.contains(&method) => Ok(message),
+        _ => Err(refused()),
+    }
+}
+
+/// Defense in depth: refuses a `bridge=1` session's request that puts input into a repository
+/// thread (a turn, a steer, a queued message, a goal, a shell command or a review) when the
+/// thread's record's `bridge` is `telegram` or `discord` (CHAT_REPOS §2, §5.3).
 pub fn check_bridge_repo_turn(server: &Server, bridge: bool, vetted: &Value) -> Result<(), String> {
     if !bridge {
         return Ok(());
     }
     let method = vetted.get("method").and_then(Value::as_str);
-    if !matches!(method, Some("turn/start") | Some("turn/steer")) {
+    if !method.is_some_and(|m| BRIDGE_REPO_INPUT_REQUESTS.contains(&m)) {
         return Ok(());
     }
     let Some(thread_id) = vetted.pointer("/params/threadId").and_then(Value::as_str) else {

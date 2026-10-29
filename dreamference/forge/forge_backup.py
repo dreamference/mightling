@@ -396,6 +396,10 @@ class ForgeBackup:
             RuntimeError: The set is incomplete or the database could not be rebuilt.
         """
         manifest = json.loads((folder / "manifest.json").read_text())
+        # A received set is another node's word: its refs are compared after the data is replaced.
+        refs = manifest.get("refs") if isinstance(manifest, dict) else None
+        if not isinstance(refs, dict) or not all(isinstance(r, dict) for r in refs.values()):
+            raise RuntimeError("the set's manifest lists no refs")
         target.parent.mkdir(parents=True, exist_ok=True)
         extract = Path(tempfile.mkdtemp(prefix="forge-restore-", dir=target.parent))
         try:

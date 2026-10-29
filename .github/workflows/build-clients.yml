@@ -79,7 +79,9 @@ jobs:
       # unset on a CI build: an empty value would read as a version.
       - name: Version
         if: ${{ inputs.version != '' }}
-        run: echo "MIGHTLING_VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: echo "MIGHTLING_VERSION=$INPUT_VERSION" >> "$GITHUB_ENV"
       # The Codex build's target directory runs to many gigabytes; the hosted Linux image ships
       # toolchains this build never uses.
       - name: Disk space

@@ -142,6 +142,7 @@
 /dreamference/swe_bench/                        @dreamference/benchmarks
 /scripts/swe_bench_*                            @dreamference/benchmarks
 /scripts/engine_ab_remote.sh                    @dreamference/benchmarks
+/scripts/night_local_arm.sh                     @dreamference/benchmarks
 /scripts/ask_evals/                             @dreamference/benchmarks
 /scripts/industry_evals/                        @dreamference/benchmarks
 /scripts/context_budget_*                       @dreamference/benchmarks

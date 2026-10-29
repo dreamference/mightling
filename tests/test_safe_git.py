@@ -15,7 +15,14 @@ from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
 from dreamference.node.node_job import NodeJob
 from dreamference.runner.safe_git import FIXED_CONFIG, SafeGit
 
-PLAIN_ENV = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_PAGER="", GIT_TERMINAL_PROMPT="0")
+# A developer's global config (a signing key, say) must not change what the controls prove.
+PLAIN_ENV = dict(
+    os.environ,
+    GIT_CONFIG_NOSYSTEM="1",
+    GIT_CONFIG_GLOBAL=os.devnull,
+    GIT_PAGER="",
+    GIT_TERMINAL_PROMPT="0",
+)
 
 
 def _plain(repo: Path, *args: str) -> None:

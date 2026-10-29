@@ -41,6 +41,11 @@ from typing import Final
 MIN_GAP_HOURS: Final[int] = 3
 DRY_RUN_WORKFLOW: Final[str] = "release-dry-run.yml"
 RELEASE_WORKFLOW: Final[str] = "release.yml"
+# Workflows that never gate a release: the release itself and its trigger, and the rehearsal of a
+# future rename (it must never hold a 1.x release).
+NOT_A_GATE: Final[frozenset[str]] = frozenset(
+    {RELEASE_WORKFLOW, "release-on-green.yml", "ragon-rename-rehearsal.yml"}
+)
 ACTIVE: Final[frozenset[str]] = frozenset(
     {"queued", "in_progress", "waiting", "pending", "requested"}
 )
@@ -265,11 +270,7 @@ class ReleaseOnGreen:
             The reason, or None.
         """
         runs = self.api(f"actions/runs?head_sha={head}&per_page=100")["workflow_runs"]
-        others = [
-            r
-            for r in runs
-            if r["path"].rsplit("/", 1)[-1] not in (RELEASE_WORKFLOW, "release-on-green.yml")
-        ]
+        others = [r for r in runs if r["path"].rsplit("/", 1)[-1] not in NOT_A_GATE]
         for r in others:
             if r["status"] in ACTIVE:
                 return f"{r['name']} is still {r['status']} on {head[:10]}"

@@ -485,7 +485,12 @@ class RemoteControlPlane:
                 "pat_expire_in": 1,
             },
         )
-        if status != HTTP_OK or not body.get("personal_access_token"):
+        if (
+            status != HTTP_OK
+            or not isinstance(body, dict)
+            or not body.get("personal_access_token")
+            or not body.get("user_id")
+        ):
             LOG.error(f"❌ The control plane refused its first setup ({status}): {str(body)[:300]}")
             return None
         return cls.renew_token(dns_name, body["personal_access_token"], body["user_id"])
@@ -508,7 +513,7 @@ class RemoteControlPlane:
                 [
                     user
                     for user in users
-                    if isinstance(user, dict) and user.get("role") == OWNER_ROLE
+                    if isinstance(user, dict) and user.get("role") == OWNER_ROLE and user.get("id")
                 ]
                 if status == HTTP_OK
                 else []
@@ -523,7 +528,7 @@ class RemoteControlPlane:
             {"name": f"mightling-node-{time.strftime('%Y%m%d')}", "expires_in": TOKEN_DAYS},
             token=token,
         )
-        if status != HTTP_OK or not body.get("plain_token"):
+        if status != HTTP_OK or not isinstance(body, dict) or not body.get("plain_token"):
             LOG.error(
                 f"❌ The control plane refused a management token ({status}): {str(body)[:300]}"
             )
@@ -552,6 +557,8 @@ class RemoteControlPlane:
         if status != HTTP_OK or not isinstance(tokens, list):
             return
         for entry in tokens:
+            if not isinstance(entry, dict):
+                continue
             name = str(entry.get("name", ""))
             if entry.get("id") != keep and (
                 name.startswith("mightling-node-") or name == SETUP_TOKEN_NAME
@@ -596,7 +603,7 @@ class RemoteControlPlane:
             },
             token=token,
         )
-        if status != HTTP_OK or not body.get("key"):
+        if status != HTTP_OK or not isinstance(body, dict) or not body.get("key"):
             LOG.error(f"❌ The control plane refused a setup key ({status}): {str(body)[:300]}")
             return None
         return body["key"]

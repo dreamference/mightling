@@ -335,10 +335,15 @@ fn limit_findings(table: &Table, now: i64, label: &dyn Fn(&str) -> String) -> Ve
             (None, _) => format!("resets {}", limit.reset_text),
         };
         let lifts_at = if limit.reset_of.is_none() { limit.reset } else { None };
-        let open = match lifts_at {
-            Some(reset) => now < reset,
-            None => now - last_seen < 6 * 3600,
-        };
+        // A limit that every stopped agent has since worked past is lifted, whatever the reset text said
+        // (a raised spend limit or another account lifts it before the reset).
+        let resumed = !agents.is_empty()
+            && agents.iter().all(|a| table.agents.get(a).is_some_and(|ag| ag.last != Last::Limit(key.clone()) && ag.last_ts > last_seen + 60));
+        let open = !resumed
+            && match lifts_at {
+                Some(reset) => now < reset,
+                None => now - last_seen < 6 * 3600,
+            };
         if open {
             findings.push(Finding {
                 check: "C3",
@@ -350,7 +355,7 @@ fn limit_findings(table: &Table, now: i64, label: &dyn Fn(&str) -> String) -> Ve
                 urgent: true,
                 consecutive: 1,
             });
-        } else if let Some(reset) = lifts_at.filter(|reset| now - reset < 3600) {
+        } else if let Some(reset) = lifts_at.filter(|reset| (0..3600).contains(&(now - reset))) {
             findings.push(Finding {
                 check: "C3",
                 kind: "limit-lifted",
@@ -511,6 +516,24 @@ mod tests {
         let lifted: Vec<_> = later.iter().filter(|f| f.check == "C3").collect();
         assert_eq!(lifted[0].kind, "limit-lifted");
         assert!(run(&table, &config, ts("2026-10-27T02:30:00Z"), &env()).iter().all(|f| f.check != "C3"));
+    }
+
+    #[test]
+    fn a_limit_every_stopped_agent_has_worked_past_is_not_open() {
+        let now = ts("2026-10-28T13:00:00Z");
+        let mut table = Table::default();
+        let limit = Limit { kind: "weekly".into(), reset: Some(ts("2026-11-01T05:00:00Z")), reset_text: "Nov 1, 5am".into(), reset_of: None, seen_day: String::new() };
+        for key in ["s", "s/a1"] {
+            let mut a = agent(key, key.contains('/'), now - 60);
+            a.last = Last::Result;
+            table.agents.insert(key.into(), a);
+            table.events.push(Event { ts: now - 3600, agent: key.into(), kind: EventKind::Limit(limit.clone()) });
+        }
+        let config = Config::defaults(Path::new("/home/u"));
+        assert!(run(&table, &config, now, &env()).iter().all(|f| f.check != "C3"));
+        // One agent still stopped keeps it open.
+        table.agents.get_mut("s/a1").unwrap().last = Last::Limit(limit.key());
+        assert_eq!(run(&table, &config, now, &env()).iter().filter(|f| f.check == "C3").count(), 1);
     }
 
     #[test]

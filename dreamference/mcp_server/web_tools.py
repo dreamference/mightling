@@ -29,6 +29,7 @@ call the way `ling-search` and `ling-fetch` resolve it for a command with no ses
 nothing is sent, at `off` nothing changes.
 """
 
+import codecs
 import os
 import re
 from typing import Any, Dict, Final, List
@@ -216,16 +217,22 @@ class WebTools:
         limit = max(1, min(int(max_chars), MAX_CHARS_CEILING))
         content_type = response.headers.get("Content-Type", "")
         raw: bytes = getattr(response, "_body", b"")
+        encoding = response.encoding or "utf-8"
+        try:
+            codecs.lookup(encoding)
+        except LookupError:
+            # The page's server names the charset: an unknown one used to raise out of this tool.
+            encoding = "utf-8"
 
         if "html" in content_type.lower():
-            decoded = raw.decode(response.encoding or "utf-8", errors="replace")
+            decoded = raw.decode(encoding, errors="replace")
             extracted = cls._html_to_text(decoded)
             title, text = extracted["title"], extracted["text"]
         else:
             # Plain text, JSON, source files: hand them back as-is rather than running a markup
             # parser over something that is not markup.
             title = ""
-            text = raw.decode(response.encoding or "utf-8", errors="replace")
+            text = raw.decode(encoding, errors="replace")
 
         return {
             "url": url,

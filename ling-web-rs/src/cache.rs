@@ -60,7 +60,9 @@ fn fnv1a(text: &str) -> u64 {
 }
 
 fn unix_millis(time: SystemTime) -> u128 {
-    time.duration_since(UNIX_EPOCH).map(|elapsed| elapsed.as_millis()).unwrap_or_default()
+    time.duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or_default()
 }
 
 impl Cache {
@@ -95,12 +97,19 @@ impl Cache {
         let cache_home = xdg_cache_home
             .filter(|dir| !dir.trim().is_empty())
             .map(PathBuf::from)
-            .or_else(|| home.filter(|dir| !dir.trim().is_empty()).map(|dir| Path::new(dir).join(".cache")));
-        let user = user.filter(|name| !name.is_empty() && !name.contains('/')).unwrap_or("user");
+            .or_else(|| {
+                home.filter(|dir| !dir.trim().is_empty())
+                    .map(|dir| Path::new(dir).join(".cache"))
+            });
+        let user = user
+            .filter(|name| !name.is_empty() && !name.contains('/'))
+            .unwrap_or("user");
         cache_home
             .map(|dir| dir.join("dreamference").join("ling-search"))
             .into_iter()
-            .chain(std::iter::once(std::env::temp_dir().join(format!("ling-search-{user}"))))
+            .chain(std::iter::once(
+                std::env::temp_dir().join(format!("ling-search-{user}")),
+            ))
             .find_map(Self::at)
     }
 
@@ -111,7 +120,11 @@ impl Cache {
         use std::os::unix::fs::DirBuilderExt;
         use std::os::unix::fs::MetadataExt;
         if !dir.exists() {
-            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).ok()?;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&dir)
+                .ok()?;
         }
         let meta = std::fs::symlink_metadata(&dir).ok()?;
         if !meta.is_dir() || meta.mode() & 0o022 != 0 {
@@ -161,14 +174,18 @@ impl Cache {
         let entry = json!({"key": key, "saved_ms": unix_millis(now) as u64, "payload": payload});
         let path = self.entry(key);
         let temporary = path.with_extension(format!("tmp{}", std::process::id()));
-        if std::fs::write(&temporary, entry.to_string()).is_ok() && std::fs::rename(&temporary, &path).is_err() {
+        if std::fs::write(&temporary, entry.to_string()).is_ok()
+            && std::fs::rename(&temporary, &path).is_err()
+        {
             let _ = std::fs::remove_file(&temporary);
         }
         self.prune(now);
     }
 
     fn prune(&self, now: SystemTime) {
-        let Ok(entries) = std::fs::read_dir(&self.dir) else { return };
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             let stale = entry
@@ -177,7 +194,10 @@ impl Cache {
                 .ok()
                 .and_then(|modified| now.duration_since(modified).ok())
                 .is_some_and(|age| age > TTL + TTL);
-            let ours = path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.contains(".json") || name.contains(".tmp"));
+            let ours = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains(".json") || name.contains(".tmp"));
             if stale && ours {
                 let _ = std::fs::remove_file(path);
             }
@@ -205,7 +225,13 @@ impl Cache {
 
 /// The key an answer is stored under: everything that changes what SearXNG answers.
 pub fn key(base_url: &str, query: &str, categories: &str, language: &str) -> String {
-    format!("{}\n{}\n{}\n{}", base_url.trim_end_matches('/'), categories, language, query.trim())
+    format!(
+        "{}\n{}\n{}\n{}",
+        base_url.trim_end_matches('/'),
+        categories,
+        language,
+        query.trim()
+    )
 }
 
 #[cfg(test)]
@@ -213,7 +239,10 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ling-search-cache-test-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "ling-search-cache-test-{}-{name}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
@@ -228,11 +257,26 @@ mod tests {
         let key = key("http://127.0.0.1:8888/", "lisbon tram", "general", "en");
         assert_eq!(cache.get(&key, start), None);
         cache.put(&key, &payload, start);
-        assert_eq!(cache.get(&key, start + Duration::from_secs(60)), Some(payload));
+        assert_eq!(
+            cache.get(&key, start + Duration::from_secs(60)),
+            Some(payload)
+        );
         assert_eq!(cache.get(&key, start + TTL), None);
         // Another query, or the same one for another instance, is another entry.
-        assert_eq!(cache.get(&super::key("http://127.0.0.1:8888", "lisbon", "general", "en"), start), None);
-        assert_eq!(cache.get(&super::key("http://10.0.0.2:8888", "lisbon tram", "general", "en"), start), None);
+        assert_eq!(
+            cache.get(
+                &super::key("http://127.0.0.1:8888", "lisbon", "general", "en"),
+                start
+            ),
+            None
+        );
+        assert_eq!(
+            cache.get(
+                &super::key("http://10.0.0.2:8888", "lisbon tram", "general", "en"),
+                start
+            ),
+            None
+        );
         let _ = std::fs::remove_dir_all(cache.dir());
     }
 
