@@ -200,7 +200,7 @@ describe("the policy", () => {
     expect(() => parsePolicy({ ...file, windowTools: { bad: {} } })).toThrow();
     expect(() => parsePolicy({ ...file, repoPrompts: ["unnamed"] })).toThrow();
     expect(() => parsePolicy({ ...file, repoPrompts: ["ask"] })).toThrow();
-    expect(() => parsePolicy({ ...file, airgappedRefusedRequests: ["not/allowed"] })).toThrow();
+    expect(() => parsePolicy({ ...file, airgappedRefusedRequests: [...file.airgappedRefusedRequests, "not/allowed"] })).toThrow(/must be allowed at off/);
 
     expect(levelMatters(null)).toBe(false);
     expect(levelMatters({ method: "initialized" })).toBe(false);
