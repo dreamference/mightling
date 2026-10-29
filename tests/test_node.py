@@ -2871,3 +2871,15 @@ def test_a_service_file_value_with_a_line_break_is_read_back_whole():
 
     assert records["version"] == "1.0\nbeta"
     assert records["node"] == "node-a"
+
+
+def test_a_nodes_records_cannot_name_a_different_address_or_port():
+    line = (
+        "=;eth0;IPv4;spark;_mightling-node._tcp;local;spark.local;10.0.0.5;8000;"
+        '"node=n1" "address=10.9.9.9" "port=22" "host=other.local" "name=other" "interface=lo"'
+    )
+
+    (node,) = NodeBrowser.parse(line)
+
+    assert (node["address"], node["port"], node["host"]) == ("10.0.0.5", "8000", "spark.local")
+    assert (node["name"], node["interface"], node["node"]) == ("spark", "eth0", "n1")
