@@ -326,6 +326,12 @@ BUILD_OLD_ASSETS = (
 )
 BUILD_OLD_ASSETS_NEW = "          # release.yml adds the older asset names to 1.9.0 only, over the same bytes.\n"
 
+# This machine may hold the profile 1.8 and earlier installed (a test's host must not see it).
+HOST_FIXTURE_LAST = '    monkeypatch.setattr(SandboxPrerequisite, "profiles_attaching", classmethod(lambda cls, binary: []))\n'
+HOST_FIXTURE_NEW = HOST_FIXTURE_LAST + (
+    '    monkeypatch.setattr(SandboxPrerequisite, "legacy_removal", classmethod(lambda cls: []))\n'
+)
+
 SCIP_FILTER_OLD = "WHERE name NOT LIKE 'puffin\\\\_%' ESCAPE '\\\\' AND name NOT LIKE 'sqlite\\\\_%' ESCAPE '\\\\'"
 SCIP_FILTER_NEW = (
     "WHERE name NOT LIKE 'ragon\\\\_%' ESCAPE '\\\\' AND name NOT LIKE 'puffin\\\\_%' ESCAPE '\\\\'\n"
@@ -786,6 +792,7 @@ COMPAT_EDITS = [
     ("dreamference/vllm_server/host_safety_setup.py", BWRAP_STEP_OLD, BWRAP_STEP_NEW, 1),
     ("tests/test_sandbox_prerequisite.py", BWRAP_TEST_ANCHOR, BWRAP_TEST, 1),
     (".github/workflows/release-build.yml", BUILD_OLD_ASSETS, BUILD_OLD_ASSETS_NEW, 1),
+    ("tests/test_release_install.py", HOST_FIXTURE_LAST, HOST_FIXTURE_NEW, 1),
 ]
 
 
