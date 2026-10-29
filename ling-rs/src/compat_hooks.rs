@@ -642,6 +642,24 @@ mod tests {
     }
 
     #[test]
+    fn every_event_named_here_is_one_the_pinned_codex_has() {
+        // The launcher's tests run in the build's export, beside Codex's crates: a Codex bump that
+        // renames or drops an event fails here instead of in a user's session.
+        let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/src/protocol.rs");
+        let source = std::fs::read_to_string(&file).unwrap_or_else(|err| panic!("{}: {err}", file.display()));
+        let body = source.split("pub enum HookEventName {").nth(1).and_then(|rest| rest.split('}').next()).expect("HookEventName");
+        let codex: Vec<&str> = body
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with("//") && !line.starts_with('#'))
+            .map(|line| line.trim_end_matches(','))
+            .filter(|name| !name.is_empty())
+            .collect();
+        let missing: Vec<&&str> = EVENTS.iter().filter(|event| !codex.contains(event)).collect();
+        assert!(missing.is_empty(), "not events of the pinned Codex: {missing:?} (it has {codex:?})");
+    }
+
+    #[test]
     fn matchers_become_what_codex_reads() {
         assert_eq!(translate_matcher(None), Ok(None));
         assert_eq!(translate_matcher(Some("*")), Ok(None));
