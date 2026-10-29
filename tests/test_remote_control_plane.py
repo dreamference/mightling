@@ -276,10 +276,28 @@ def test_a_setup_reply_without_a_token_is_refused(monkeypatch):
     assert RemoteControlPlane.bootstrap(BOX, "node1") is None
 
 
+@pytest.mark.parametrize("body", [[], ["x"], "text", None, 5])
+def test_a_reply_that_is_not_an_object_is_a_refusal_not_a_raise(monkeypatch, body):
+    _api(monkeypatch, (200, body))
+    assert RemoteControlPlane.bootstrap(BOX, "node1") is None
+    assert RemoteControlPlane.renew_token(BOX, "tok", "u1") is None
+    assert RemoteControlPlane.setup_key(BOX, "tok", "phone") is None
+
+
+def test_a_setup_reply_missing_the_owners_id_is_refused_not_raised(monkeypatch):
+    _api(monkeypatch, (200, {"personal_access_token": "pat"}))
+    assert RemoteControlPlane.bootstrap(BOX, "node1") is None
+
+
 def test_a_renewal_without_an_owner_in_the_user_list_gives_none(monkeypatch):
     _api(monkeypatch, (200, [{"id": "u2", "role": "admin"}, "junk", 3]))
     assert RemoteControlPlane.renew_token(BOX, "tok") is None
     _api(monkeypatch, (500, {"error": "x"}))
+    assert RemoteControlPlane.renew_token(BOX, "tok") is None
+
+
+def test_an_owner_entry_without_an_id_is_refused_not_raised(monkeypatch):
+    _api(monkeypatch, (200, [{"role": "owner"}]))
     assert RemoteControlPlane.renew_token(BOX, "tok") is None
 
 
@@ -312,6 +330,14 @@ def test_a_token_list_that_is_not_a_list_is_left_alone(monkeypatch):
     calls = _api(monkeypatch, (200, {"error": "x"}))
     RemoteControlPlane.prune_tokens(BOX, "tok", "u1", "new")
     assert [method for method, *_ in calls] == ["GET"]
+
+
+def test_a_token_list_with_junk_entries_is_pruned_without_a_raise(monkeypatch):
+    calls = _api(
+        monkeypatch, lambda method, path: (200, [None, "x", {"id": "o", "name": "setup-token"}])
+    )
+    RemoteControlPlane.prune_tokens(BOX, "tok", "u1", "new")
+    assert [path for method, path, *_ in calls if method == "DELETE"] == ["/api/users/u1/tokens/o"]
 
 
 def test_a_refused_setup_key_gives_none(monkeypatch):
