@@ -1763,7 +1763,6 @@ pub fn valid_repo_name(name: &str) -> bool {
         || name.contains("://")
         || name.starts_with('/')
         || name.starts_with('~')
-        || name.contains("..")
         || name.contains('\\')
         || name.contains('\0')
     {
@@ -8717,6 +8716,16 @@ mod tests {
         let (st, again, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(again["repo"], Value::Null, "{body}");
+    }
+
+    #[test]
+    fn a_repository_name_may_hold_two_dots_but_not_a_dot_dot_segment() {
+        // Forgejo allows `a..b`; only a whole `..` segment would leave the folder.
+        assert!(valid_repo_name("org/a..b"));
+        assert!(valid_repo_name("org..x/repo"));
+        for bad in ["org/..", "../repo", "org/.", "org/a/b", "org/a\\b", "/org/repo", "https://h/o/r", "org/a b"] {
+            assert!(!valid_repo_name(bad), "{bad}");
+        }
     }
 
     #[tokio::test]
