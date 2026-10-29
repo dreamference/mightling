@@ -1873,6 +1873,14 @@ def test_a_job_cannot_make_the_node_run_its_git_hooks(job_node, tmp_path):
         capture_output=True, text=True,
     ).stdout.split()
     assert changed == ["data.txt"]
+    # `git worktree remove` refuses a tree whose `.git` is not the link it wrote; the tree, with
+    # the job's repository in it, must not wait for the prune.
+    assert not (NodeJob.job_dir(job["id"]) / "tree").exists()
+    listed = subprocess.run(
+        ["git", "--git-dir", str(job_node["repo"]), "worktree", "list", "--porcelain"],
+        capture_output=True, text=True,
+    ).stdout
+    assert str(NodeJob.job_dir(job["id"]) / "tree") not in listed
 
 
 def test_out_cannot_reach_outside_the_worktree_through_a_link(job_node, tmp_path):
