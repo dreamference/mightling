@@ -882,24 +882,24 @@ fn watch(
     let mut current: Option<i64> = None;
     let mut since = Instant::now();
     loop {
-        for event in read_new(events, offset)? {
+        for event in read_marks(events, offset)? {
             if let Some(id) = event.finished() {
                 finished.push(id);
                 current = None;
-            } else if let Event::Start { id } = event {
-                current = Some(id);
+            } else if event.event == "start" {
+                current = Some(event.id);
             }
             // A start, an end or a page read: the time limit starts again.
             since = Instant::now();
         }
         if let Some(status) = child.try_wait()? {
             // Events written just before the exit.
-            for event in read_new(events, offset)? {
+            for event in read_marks(events, offset)? {
                 if let Some(id) = event.finished() {
                     finished.push(id);
                     current = None;
-                } else if let Event::Start { id } = event {
-                    current = Some(id);
+                } else if event.event == "start" {
+                    current = Some(event.id);
                 }
             }
             use std::os::unix::process::ExitStatusExt;
@@ -933,7 +933,7 @@ fn watch(
             let _ = env.host.stop(unit);
             let _ = child.kill();
             let _ = child.wait();
-            for event in read_new(events, offset)? {
+            for event in read_marks(events, offset)? {
                 if let Some(id) = event.finished() {
                     finished.push(id);
                     if current == Some(id) {
@@ -949,6 +949,60 @@ fn watch(
             return Ok((finished, current.map(|id| (id, why)), Stop::TimedOut));
         }
         std::thread::sleep(env.poll);
+    }
+}
+
+/// An event's kind, document and error, without its result.
+#[derive(Debug, Deserialize)]
+struct Mark {
+    event: String,
+    id: i64,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+impl Mark {
+    /// The document an event ends, if it ends one (as [`Event::finished`]).
+    fn finished(&self) -> Option<i64> {
+        matches!(self.event.as_str(), "done" | "failed" | "ocr" | "ocrfailed").then_some(self.id)
+    }
+}
+
+/// [`Mark`]s of the events appended since `offset` (whole lines only). The supervisor runs
+/// outside every memory cap, and a `done` line holds its document's whole text: a line is never
+/// held, its result is skipped as it is parsed.
+fn read_marks(path: &Path, offset: &mut u64) -> Result<Vec<Mark>> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut out = Vec::new();
+    loop {
+        file.seek(std::io::SeekFrom::Start(*offset))?;
+        let mut reader = std::io::BufReader::new(&file);
+        let mut len = 0u64;
+        let mut whole = false;
+        loop {
+            let buf = reader.fill_buf()?;
+            if buf.is_empty() {
+                break;
+            }
+            if let Some(at) = buf.iter().position(|b| *b == b'\n') {
+                len += at as u64 + 1;
+                whole = true;
+                break;
+            }
+            let n = buf.len();
+            len += n as u64;
+            reader.consume(n);
+        }
+        if !whole {
+            return Ok(out);
+        }
+        file.seek(std::io::SeekFrom::Start(*offset))?;
+        let line = std::io::BufReader::new((&file).take(len));
+        if let Ok(mark) = serde_json::from_reader::<_, Mark>(line) {
+            out.push(mark);
+        }
+        *offset += len;
     }
 }
 
@@ -1273,8 +1327,8 @@ pub fn index_file(
         }
         // A file the extractor could not read ends here, with its own reason.
         let mut offset = 0;
-        for event in read_new(&events, &mut offset)? {
-            if let Event::Failed { error, .. } = event {
+        for event in read_marks(&events, &mut offset)? {
+            if let ("failed", Some(error)) = (event.event.as_str(), event.error) {
                 let conn = store::open_rw(&db)?;
                 store::set_status(&conn, id, &format!("failed: {error}"))?;
                 let _ = std::fs::remove_dir_all(&scratch);
@@ -1653,6 +1707,7 @@ pub fn reconcile(
 mod tests {
     use super::*;
     use crate::discover::{Candidate, Kind as FileKind};
+    use std::io::Write;
 
     fn candidate(dir: &Path, rel: &str, body: &[u8]) -> Candidate {
         let abs = dir.join(rel);
@@ -1869,5 +1924,74 @@ mod tests {
         let read = read_new(&path, &mut offset).unwrap();
         assert_eq!(read.len(), 1);
         assert!(offset > 0);
+    }
+
+    #[test]
+    fn the_supervisor_reads_what_events_end_without_their_results() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        std::fs::write(&path, b"").unwrap();
+        let done = Event::Done {
+            id: 2,
+            result: crate::extract::Extracted {
+                units: vec![crate::extract::Unit {
+                    loc: "lines 1-1".into(),
+                    page: None,
+                    line_first: Some(1),
+                    line_last: Some(1),
+                    heading: String::new(),
+                    group: None,
+                    text: "x\n\"y\"".repeat(100_000),
+                }],
+                ..Default::default()
+            },
+        };
+        append_event(&path, &Event::Start { id: 2 }).unwrap();
+        append_event(&path, &done).unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"not an event\n")
+            .unwrap();
+        append_event(
+            &path,
+            &Event::Failed {
+                id: 3,
+                error: "bad".into(),
+            },
+        )
+        .unwrap();
+        let whole = std::fs::metadata(&path).unwrap().len();
+        // A line still being written is left for the next read.
+        let start = serde_json::to_string(&Event::Start { id: 4 }).unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(start.as_bytes())
+            .unwrap();
+        let mut offset = 0;
+        let marks = read_marks(&path, &mut offset).unwrap();
+        assert_eq!(offset, whole);
+        let seen: Vec<(&str, i64, Option<i64>, Option<&str>)> = marks
+            .iter()
+            .map(|m| (m.event.as_str(), m.id, m.finished(), m.error.as_deref()))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("start", 2, None, None),
+                ("done", 2, Some(2), None),
+                ("failed", 3, Some(3), Some("bad")),
+            ]
+        );
+        let mut events = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        events.write_all(b"\n").unwrap();
+        let marks = read_marks(&path, &mut offset).unwrap();
+        assert_eq!((marks[0].event.as_str(), marks[0].id), ("start", 4));
     }
 }
