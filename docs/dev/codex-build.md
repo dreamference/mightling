@@ -111,7 +111,16 @@ Codex needs V8 built with pointer compression and the sandbox on, which denoland
 
 ### No `--locked`
 
-Upstream's `Cargo.lock` records the workspace crates at `0.0.0`, which its release job bumps just before building. Only those 158 entries change; third-party pins do not.
+The export's `Cargo.lock` records the workspace crates at one version and `stamp_version()` sets another, so Cargo rewrites those entries. Third-party pins do not change.
+
+Those pins come from `codex-patches/Cargo.lock`, which `prepare_source()` copies over the exported one. Upstream's lock cannot pin the crates that `ling-rs/` brings in (`pgp`, `mdns-sd`, `ferrisetw` and some fifty more). Until 2026-10-29 every build resolved them afresh from crates.io, so a release could ship whatever version was newest that day. `tests/test_codex_branded_builder.py` checks two things: the lock names every third-party crate of `ling-rs/`, and it was made for the submodule's commit (`CODEX_LOCKFILE_COMMIT`).
+
+**After a submodule bump, or a new dependency in `ling-rs/`:**
+
+1. Run `ling-admin codex build --force`. Cargo keeps every pin the lock still fits and resolves only what is new.
+2. Copy `~/.cache/dreamference/puffin-codex/src/codex-rs/Cargo.lock` over `codex-patches/Cargo.lock`.
+3. Set `CODEX_LOCKFILE_COMMIT` to the new commit.
+4. Review the diff: it should touch only the crates the change explains.
 
 ### Never run cargo inside `codex/`
 
