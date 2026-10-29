@@ -876,6 +876,22 @@ def test_a_mirror_node_pulls_each_shared_repository_with_the_read_token(monkeypa
     assert ForgeMirrors.serve_apply("not json") == 2
 
 
+def test_a_sync_whose_own_mirrors_failed_says_so(monkeypatch, capsys):
+    from dreamference.node.node_pairing import NodePairing
+
+    ForgeSettings.update_state(role="mirror")
+    plan = {"record_node": "rec-1", "repositories": ["dreamference/mightling"]}
+    monkeypatch.setattr(ForgeMirrors, "fetch_plan", classmethod(lambda cls: plan))
+    monkeypatch.setattr(NodePairing, "paired", classmethod(lambda cls: []))
+    monkeypatch.setattr(
+        ForgeMirrors,
+        "apply",
+        classmethod(lambda cls, p: ["dreamference/mightling: not mirrored (HTTP 500: boom)"]),
+    )
+    assert ForgeMirrors.sync(quiet=True) == 1
+    assert "not mirrored (HTTP 500: boom)" in capsys.readouterr().out
+
+
 def test_the_forced_command_takes_only_the_forges_operations(monkeypatch):
     from dreamference.forge.forge_serve import ForgeServe
 
