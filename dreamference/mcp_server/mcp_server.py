@@ -207,10 +207,13 @@ class MCPServer:
                 indexed = CodeIndexSearch.search(query, top_k=top_k)
                 if indexed is not None:
                     return indexed
-                refusal = None if self.context_engine.index_file.exists() else _night_run_refusal()
-                if refusal:
-                    return {"error": refusal}
-                self.context_engine.index_workspace()
+                # Built only when no index loads, and then not during a night run: checking only
+                # that the file exists let one that `load_index` rejects be rebuilt beside the run.
+                if not self.context_engine.load_index():
+                    refusal = _night_run_refusal()
+                    if refusal:
+                        return {"error": refusal}
+                    self.context_engine.index_workspace(force_reindex=True)
                 return self.context_engine.search_code(query, top_k=top_k)
             return await asyncio.to_thread(_do_search)
 

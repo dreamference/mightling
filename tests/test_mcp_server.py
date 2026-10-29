@@ -152,6 +152,7 @@ def test_code_search_falls_back_to_the_context_engine(tmp_path, monkeypatch):
     from dreamference.mcp_server import CodeIndexSearch
 
     engine = MagicMock()
+    engine.load_index.return_value = False
     engine.search_code.return_value = [{"rel_path": "x.py", "score": 1.0}]
     monkeypatch.setattr(MCPServer, "context_engine", property(lambda self: engine))
     # Not installed.
@@ -226,7 +227,7 @@ def test_code_search_does_not_build_the_context_index_during_a_night_run(tmp_pat
     from dreamference.night_shift import NightShiftQueue
 
     engine = MagicMock()
-    engine.index_file.exists.return_value = False
+    engine.load_index.return_value = False
     monkeypatch.setattr(MCPServer, "context_engine", property(lambda self: engine))
     monkeypatch.setattr("dreamference.mcp_server.code_index_search.INSTALL_DIR", str(tmp_path / "nowhere"))
     monkeypatch.setattr(NightShiftQueue, "runner_holder", classmethod(lambda cls, night_dir=None: "a SWE-bench run"))
@@ -235,9 +236,27 @@ def test_code_search_does_not_build_the_context_index_during_a_night_run(tmp_pat
     assert "SWE-bench run" in result["error"] and "swe-bench status" in result["error"]
 
     # An index already on disk is only read, so it still answers.
-    engine.index_file.exists.return_value = True
+    engine.load_index.return_value = True
     engine.search_code.return_value = [{"rel_path": "x.py", "score": 1.0}]
     assert MCPServer().execute_tool("workspace_search_code", {"query": "x"}) == [{"rel_path": "x.py", "score": 1.0}]
+
+
+def test_code_search_does_not_rebuild_an_unreadable_index_during_a_night_run(tmp_path, monkeypatch):
+    # Only a missing index file was checked: one on disk that `load_index` rejects (an older
+    # format, a damaged file) was rebuilt beside the run all the same.
+    from dreamference.context_engine import ContextEngine, embedding_calculator
+    from dreamference.night_shift import NightShiftQueue
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+    (tmp_path / "a.py").write_text("def alpha():\n    pass\n")
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_file.write_text('{"files": {}}')  # written before the TF-IDF tables were kept
+    monkeypatch.setattr(MCPServer, "context_engine", property(lambda self: engine))
+    monkeypatch.setattr("dreamference.mcp_server.code_index_search.INSTALL_DIR", str(tmp_path / "nowhere"))
+    monkeypatch.setattr(NightShiftQueue, "runner_holder", classmethod(lambda cls, night_dir=None: "a night run"))
+    result = MCPServer().execute_tool("workspace_search_code", {"query": "alpha"})
+    assert "night run" in result["error"]
+    assert engine.index_file.read_text() == '{"files": {}}'
 
 
 def test_null_params_and_arguments_are_read_as_empty():
