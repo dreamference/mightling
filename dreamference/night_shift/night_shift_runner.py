@@ -118,18 +118,17 @@ class NightShiftRunner:
                 cls.ignore_sessions = ignore_sessions
                 reason = cls.admit(vllm_host, mightling_bin, idle, end)
                 if reason:
+                    # The tasks on other nodes are still waited for below.
                     notes.append(f"Not run: {reason}. The tasks stay queued for the next night.")
                     print(f"⚠️  {reason}")
-                    cls.remote.collect(night_dir, sent, end, notes, wait=False)
-                    cls._write_report(night_dir, started, cls._reread(night_dir, looked_at), notes)
-                    return 0
-                lanes, lane_notes = cls.lanes(vllm_host, settings)
-                local = lanes[0]
-                notes.append(cls.budget_note(local["parallel"], local["budget"], local["kv_pool"], settings))
-                notes.extend(lane_notes)
-                cls.refresh_indexes(local_tasks, settings, end, notes)
-                cls.schedule(night_dir, local_tasks, settings, mightling_bin, vllm_host, end, local["parallel"],
-                             notes, context_budget=local["budget"], lanes=lanes)
+                else:
+                    lanes, lane_notes = cls.lanes(vllm_host, settings)
+                    local = lanes[0]
+                    notes.append(cls.budget_note(local["parallel"], local["budget"], local["kv_pool"], settings))
+                    notes.extend(lane_notes)
+                    cls.refresh_indexes(local_tasks, settings, end, notes)
+                    cls.schedule(night_dir, local_tasks, settings, mightling_bin, vllm_host, end,
+                                 local["parallel"], notes, context_budget=local["budget"], lanes=lanes)
             cls.remote.collect(night_dir, sent, end, notes, wait=False)
         # Waiting for other nodes uses nothing of this machine's, so it does not hold the runner
         # lock: `server start`, `codex build` and `index` refuse while that is held.
