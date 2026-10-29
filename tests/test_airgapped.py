@@ -191,3 +191,20 @@ def test_at_off_the_mcp_search_asks_the_category_as_before(monkeypatch):
         WebTools.search("python asyncio")
     params = get.call_args.kwargs["params"]
     assert params["categories"] == "general" and "engines" not in params
+
+
+def test_the_mcp_web_tools_resolve_the_level_on_every_call(monkeypatch):
+    from unittest.mock import MagicMock, patch
+    from dreamference.mcp_server.web_tools import AIRGAPPED_ON_MESSAGE, WebTools
+
+    # The server is long-lived: a level set after it started applies to its next call (§7).
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "off")
+    response = MagicMock()
+    response.json.return_value = {"results": []}
+    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response) as get:
+        WebTools.search("python asyncio")
+        monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
+        found = WebTools.search("python asyncio")
+        page = WebTools.fetch("https://example.com")
+    assert get.call_count == 1
+    assert found["error"] == AIRGAPPED_ON_MESSAGE and page["error"] == AIRGAPPED_ON_MESSAGE
