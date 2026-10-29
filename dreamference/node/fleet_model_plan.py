@@ -111,9 +111,9 @@ class FleetModelPlan:
             needed_bytes: What is to be copied.
 
         Returns:
-            bool: True if the copy leaves the margin free.
+            bool: True if the copy leaves the margin free, or there is nothing to copy.
         """
-        return free_gb * GIB - needed_bytes >= DISK_MARGIN_GB * GIB
+        return needed_bytes <= 0 or free_gb * GIB - needed_bytes >= DISK_MARGIN_GB * GIB
 
     @classmethod
     def _embedding_folder(cls) -> str:

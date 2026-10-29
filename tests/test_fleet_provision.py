@@ -297,6 +297,12 @@ def test_insufficient_disk_is_refused_before_any_copy():
     assert not FleetModelPlan.fits(60, 50 * 1024 ** 3)
 
 
+def test_a_node_short_of_disk_that_has_every_model_is_not_refused():
+    # Nothing to copy needs no margin: a full node that has the model can still be updated.
+    assert FleetModelPlan.fits(5, 0)
+    assert FleetModelPlan.fits(0, 0)
+
+
 # -- discovery -------------------------------------------------------------------------------------
 
 def avahi_line(service, name, host, address):
