@@ -97,7 +97,8 @@ class AdapterCommand:
 
         Args:
             args: The parsed arguments.
-            config: The configuration (the model server's address, the configured model).
+            config: The configuration (the model server's address, the configured model, the Hub
+                token).
 
         Returns:
             int: The exit code.
@@ -114,7 +115,7 @@ class AdapterCommand:
         base = AdapterVerifier.served_base(config.vllm_host, config.model)
         handlers = {
             "list": cls._list,
-            "install": cls._install,
+            "install": lambda args, base: cls._install(args, base, config.hf_token),
             "remove": cls._remove,
             "verify": cls._verify,
         }
@@ -179,8 +180,14 @@ class AdapterCommand:
         return 0
 
     @classmethod
-    def _install(cls, args: argparse.Namespace, base: dict[str, str] | None) -> int:
-        """`adapter install <name>[@<version>] | --repo <org>/<repo>@<commit> [--third-party]`."""
+    def _install(
+        cls, args: argparse.Namespace, base: dict[str, str] | None, token: str | None = None
+    ) -> int:
+        """`adapter install <name>[@<version>] | --repo <org>/<repo>@<commit> [--third-party]`.
+
+        The token is the configuration's, in the model download's order (INFERENCE §2.1):
+        `--hf-token`, `HF_TOKEN`, `DREAMFERENCE_HF_TOKEN`, then the config file's `hf_token`.
+        """
         if (args.name is None) == (args.repo is None):
             print("❌ Name a catalogued adapter or give --repo <org>/<repo>@<commit>, not both.")
             return 2
@@ -192,7 +199,7 @@ class AdapterCommand:
         confirm = cls._confirm if args.third_party else None
         try:
             entry = AdapterInstaller.install(
-                args.name, args.repo, base, confirm=confirm, token=args.hf_token
+                args.name, args.repo, base, confirm=confirm, token=token
             )
         except ValueError as error:
             print(f"❌ {error}. Nothing was installed.")

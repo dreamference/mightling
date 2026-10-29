@@ -569,6 +569,39 @@ def test_on_a_client_the_command_names_the_node(capsys):
     assert "installed on the node" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("argv", "env", "expected"),
+    [
+        ([], {"DREAMFERENCE_HF_TOKEN": "from-dreamference-env"}, "from-dreamference-env"),
+        ([], {"HF_TOKEN": "from-hf-env", "DREAMFERENCE_HF_TOKEN": "x"}, "from-hf-env"),
+        (["--hf-token", "from-flag"], {"HF_TOKEN": "from-hf-env"}, "from-flag"),
+    ],
+)
+def test_install_takes_the_hub_token_in_the_model_downloads_order(monkeypatch, argv, env, expected):
+    from dreamference.config import DreamferenceConfig
+    from dreamference.node.node_identity import NodeIdentity
+
+    for name in ("HF_TOKEN", "DREAMFERENCE_HF_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: object()))
+    monkeypatch.setattr(AdapterVerifier, "served_base", classmethod(lambda cls, host, model: None))
+    tokens = []
+
+    def install(cls, name, repo, base, confirm=None, token=None):
+        tokens.append(token)
+        raise ValueError("stopped by the test")
+
+    monkeypatch.setattr(AdapterInstaller, "install", classmethod(install))
+    args = DreamferenceCLIController.build_parser().parse_args(
+        ["adapter", "install", "rust", *argv]
+    )
+    config = DreamferenceConfig(hf_token=getattr(args, "hf_token", None))
+    assert AdapterCommand.run(args, config) == 1
+    assert tokens == [expected]
+
+
 # -- the copy to a paired node -----------------------------------------------------------------------
 
 
