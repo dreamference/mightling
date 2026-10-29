@@ -116,3 +116,24 @@ Before starting the app: nothing where it can start its sandbox, the helper line
 ## 8. How to test without the profile
 
 The profile attaches by path, so a copy of the app at another path (`~/.local/opt/mightling-test/`) runs as a fresh user's would; run it from `systemd-run --user --wait --pipe`, whose label is `unconfined` (check `cat /proc/self/attr/current`), never from a PyCharm terminal. For `ling`'s bubblewrap, which is always `/usr/bin/bwrap`, run `ling` under `aa-exec -p unprivileged_userns` in such a unit. Nothing under `/etc`, no sudo.
+
+## Status against the code, 2026-10-29
+
+Checked against `main` at `5a0b85c2`. Branch `no-sudo/detection` is fully merged (`a88790cf`; `git log origin/main..origin/no-sudo/detection` is empty), so nothing of this spec waits on a branch any more. Everything §5.3, §6 and §7.1 ask for is in the code; what is missing is the documentation of §7.2 and one difference in the unpacked build's script.
+
+| Requirement (§) | Status | Where / what is missing |
+| --- | --- | --- |
+| Probe bubblewrap once before a sandboxed session, on the first `bwrap` on PATH (§6.1) | Built | `ling-rs/src/userns.rs` `sandbox_now`, `find_bwrap`, `probe`, `outcome`; skipped inside a `ling` session (`inside_sandbox`) and for Full Access (`startup_lines`'s `full_access`) |
+| The start-up warning: what fails, that approving runs a command with all the user's access, that `/airgapped on` is refused (§6.1) | Built | `userns.rs` `startup_lines`, `startup_lines_now`, called from `ling-rs/src/lib.rs` (launch, beside the Windows lines) |
+| The self-contained one-line fix, the node's `ling-admin host setup` line, and the per-machine variants: a profile present but not loaded, two profiles for one bwrap, a sysctl other than the AppArmor one, no bwrap at all (§6.1) | Built | `userns.rs` `fix_command`, `profile_text`, `fix_lines`, `profiles_attaching`, `host_now`; tests `a_profile_already_there_is_loaded_and_two_are_brought_back_to_one`, `missing_bubblewrap_and_other_kernels_get_their_own_answer`, `the_profile_compiles` |
+| A configured `on` stops the launch without the sandbox (§3.2, §6.2) | Built | `userns.rs` `airgapped_conflict_now`, called in `lib.rs` before the start-up lines |
+| `/airgapped on` and `ling airgapped default on` answer "Airgapped not changed" without the sandbox (§3.2, §6.2) | Built | `ling-rs/src/airgapped.rs` `command` asks `userns::on_refusal_now()` for both forms; `run_cli` and the slash command both go through `command` |
+| Full Access never offered as the way out; no sysctl, no `--no-sandbox` advice (§3.2, §6.1) | Built | the texts of `userns.rs` `fix_lines`; desktop.md item 1's test greps for `--no-sandbox` |
+| `ling app` borrows a root-owned setuid helper of nine browsers and apps when no profile covers a user-owned binary, and says so; a profile still wins (§5.3) | Built | `ling-rs/src/app.rs` `SETUID_HELPERS`, `chromium_sandbox`, `covering_profile`, `launch_with` (sets `CHROME_DEVEL_SANDBOX`) |
+| A helper speaking another protocol is reported from the log, never silently (§5.3) | Built | `app.rs` `SANDBOX_FAILURES` includes `setuid sandbox` |
+| No profile and no helper: warn with both fixes, then start and report the failure (§5.3, §6.3) | Built | `app.rs` `chromium_sandbox` (the `install-sandbox-profile.sh` and `ling-admin desktop install` lines) |
+| `install-sandbox-profile.sh` names the helper and the one-line start command (§5.3) | Built differently | `desktop/electron/linux/install-sandbox-profile.sh` looks for three helpers by default (Chrome, Edge, Brave; `MIGHTLING_SANDBOX_HELPERS` overrides), not the nine `ling app` tries |
+| `ling-admin host setup` never writes a second profile for the same bwrap (§6.4) | Built | `dreamference/vllm_server/sandbox_prerequisite.py` `SandboxPrerequisite.fix_commands`, `profiles_attaching` |
+| Install docs tell administrators: one root step per machine on 24.04, none for `ling` on 25.04 and later; the `.deb` writes the app's profile; `puffin-bwrap` or Ubuntu's `bwrap-userns-restrict`, never both (§7.2) | Missing | Only the developer notes say it (`docs/dev/host-safety.md`, "Without sudo"). `docs/getting-started.md` and `docs/admin.md` have no such paragraph |
+| The user docs describe the borrowed-helper route (§5.3) | Missing | `docs/desktop.md`, "From a zip or an unpacked folder", says the app ships no setuid helper and gives only the profile; it does not say that `ling app` uses an installed browser's helper without an administrator |
+| Flatpak (§4), a Landlock fallback (§3.1), a SUID helper of our own (§5.1) | Not built, by decision (§7.3) | — |

@@ -192,3 +192,31 @@ The Rust launcher has its own unit tests, run in the build export with `cargo te
 - **[DREAMFERENCE_MIGHTLING_CODE_INDEX.md](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md):** the code index for `ling` (`ling-code`, implemented 2026-10-01)
 - **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md):** agent integration
 - **[DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md):** source layout
+
+---
+
+## Status against the code, 2026-10-29
+
+Checked against `origin/main` at `5a0b85c2`: every package file under `dreamference/context_engine/`, the `init` and `index` entry points in the CLI controller, the MCP server's use of the engine, and the list of test files. The pipeline, search and cache sections match the code; the three known gaps in §5 are all still open. Two statements in the prose are wrong (tokenization of snake_case, and the ignored directory names), and the test table is two files short.
+
+| Requirement (§) | Status | Where / what is missing |
+| --- | --- | --- |
+| `ling-admin init` forces a full re-index of the current directory; `index [--dir] [--force]` reuses an existing index without `--force` (§1.1) | Built | `dreamference/cli/dreamference_cli_controller.py` `init` branch (`index_workspace(force_reindex=True)`), `index` branch (`ContextEngine(workspace_root=target_dir)`) |
+| Discovery in a git repository through `SafeGit` (`ls-files -z --cached --others --exclude-standard`), submodules dropped by the file check (§1.2 step 1) | Built | `context_engine.py` `ContextEngine.collect_files`; `dreamference/runner/safe_git.py` sets `core.fsmonitor`, `core.gitProxy` and `gpg.ssh.defaultKeyCommand` empty |
+| Outside a repository or without git: `os.walk` skipping `IGNORE_DIRS` (§1.2 step 1) | Built | `collect_files` (any failure of `ls-files`, including a non-zero exit, falls back to the walk) |
+| `IGNORE_DIRS`, `IGNORE_EXTENSIONS`, symlinks, 1 MiB cap, NUL byte in the first 8 KiB (§1.2 step 1) | Built differently | all present (`IGNORE_DIRS`, `IGNORE_EXTENSIONS`, `MAX_FILE_BYTES`, `BINARY_SNIFF_BYTES`, `_process_single_file`), but `is_ignored` tests every part of the **absolute** path, so a workspace that sits under a directory named `build`, `dist`, `target` or similar indexes no files at all; the spec says names are skipped inside the workspace |
+| Reset of `files`, `symbols`, `fts_context` before a rebuild (§1.2 step 2) | Built | `index_workspace` |
+| Parallel parse with `ProcessPoolExecutor(max_workers=max(1, min(8, cpu_count, files // 32 + 1)))`, results consumed inside the pool's `with` (§1.2 step 3) | Built | `index_workspace` |
+| Schema: `files`, `symbols`, FTS5 `fts_context(rel_path UNINDEXED, content)`, `embeddings` as a plain table, `mmap_size` 2 GB per connection (§1.2 step 4, 6) | Built | `sqlite_context_storage.py` `SQLiteContextStorage.init_db`, `store_embeddings`, `load_embeddings` |
+| TF-IDF with one `Counter` per document (§1.2 step 5) | Built | `tfidf_calculator.py` `TFIDFCalculator.compute_matrix` |
+| Embeddings: nomic v1.5, `trust_remote_code=True`, `search_document: ` prefix, first 1,024 tokens, batches of 8, CPU, normalised, lazy load, none stored if the model cannot load (§1.2 step 6, §4) | Built | `embedding_calculator.py` `EmbeddingCalculator._get_model`, `embed_texts`, `compute_embeddings`; constants `MAX_SEQUENCE_TOKENS`, `ENCODE_BATCH_SIZE`, `EMBEDDING_DEVICE` |
+| Save `context_index.json` with symbols, file metadata, `idf_table`, `tf_idf_index` (§1.2 step 7) | Built | `ContextEngine.save_index` |
+| Symbols: classes and functions from `ast`, unqualified name, positional-argument signature, docstring, silent on syntax errors, `.py` only (§2) | Built | `ast_symbol_extractor.py` `ASTSymbolExtractor.extract_python_ast`; `_process_single_file` calls it for `.py` only |
+| Tokenization: `[A-Za-z0-9_]+` runs, camelCase and snake_case split, lowercased (§2) | Built differently | camelCase is split and each whole word is kept too; snake_case is **not** split (`get_user_name` stays one token), and single-character tokens are dropped (`TFIDFCalculator.tokenize`). The FTS5 query keeps only tokens for which `str.isalnum()` is true (`SQLiteContextStorage.search_fts`), so a snake_case query token never reaches FTS5 and is matched by TF-IDF alone |
+| Hybrid search: FTS5 with `OR`, `2 × top_k` rows, `2 / (rank + 1)`; TF-IDF sum; dense `3.0 × max(0, cos)` with the `search_query: ` prefix, skipped without vectors or model; top `top_k` (§3) | Built | `ContextEngine.search_code`, `SQLiteContextStorage.search_fts` |
+| Result record `{rel_path, score, symbols, size_bytes}`, no snippets (§3) | Built | `search_code` |
+| Cache: reuse of `context_index.json` without `--force`, vectors read back from `embeddings`, JSON without `tf_idf_index` rebuilt, locations under `.dreamference/` (§4) | Built | `ContextEngine.load_index`, `get_summary` |
+| Known gap: dense search sees only a file's head (§5) | Still open | one vector per file, truncated at 1,024 tokens (`embedding_calculator.py`); no chunking anywhere |
+| Known gap: not air-gapped by default, the model is not pre-downloaded (§5) | Still open | the only reference to the nomic model outside the engine is `EMBEDDING_MODEL`; `init` fetches LLM weights only. Loading also runs the model repository's own code (`trust_remote_code=True`, no pinned revision), which the spec records but which makes the first online use a code download as well as a weights download |
+| Known gap: symbols are Python only (§5) | Still open for this engine | no Rust or TypeScript extraction in `dreamference/context_engine/`; the `ling-code` index (`DREAMFERENCE_MIGHTLING_CODE_INDEX.md`) is the separate path for other languages |
+| Test table lists every `test_*.py` file in `tests/` ("all 110", header and §6) | Built differently | `tests/` holds 112 such files; `test_context_engine_lazy_imports.py` and `test_night_local_arm.py` are not in the table |
