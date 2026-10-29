@@ -1026,10 +1026,22 @@ fn read_new(path: &Path, offset: &mut u64) -> Result<Vec<Event>> {
     Ok(out)
 }
 
+/// Appends the supervisor's own event. A worker killed while writing leaves its last line
+/// unfinished: that line is ended first, or the two would merge and this event be lost.
 fn append_event(path: &Path, event: &Event) -> Result<()> {
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
-    writeln!(file, "{}", serde_json::to_string(event)?)?;
+    use std::io::{Read, Write};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .append(true)
+        .open(path)?;
+    let len = file.metadata()?.len();
+    let mut last = [b'\n'];
+    if len > 0 {
+        file.seek(std::io::SeekFrom::Start(len - 1))?;
+        file.read_exact(&mut last)?;
+    }
+    let lead = if last[0] == b'\n' { "" } else { "\n" };
+    writeln!(file, "{lead}{}", serde_json::to_string(event)?)?;
     Ok(())
 }
 
@@ -1467,8 +1479,10 @@ pub fn index_worker_with(
     let now = now();
     let mut written = 0usize;
     let file = std::fs::File::open(events)?;
-    for line in std::io::BufReader::new(file).lines() {
-        let Ok(event) = serde_json::from_str::<Event>(&line?) else {
+    // Bytes, not lines of text: a line a killed worker cut inside a character is skipped, not
+    // the end of the run.
+    for line in std::io::BufReader::new(file).split(b'\n') {
+        let Ok(event) = serde_json::from_slice::<Event>(&line?) else {
             continue;
         };
         match event {
@@ -1993,5 +2007,59 @@ mod tests {
         events.write_all(b"\n").unwrap();
         let marks = read_marks(&path, &mut offset).unwrap();
         assert_eq!((marks[0].event.as_str(), marks[0].id), ("start", 4));
+    }
+
+    #[test]
+    fn a_failure_appended_after_a_killed_workers_partial_line_is_still_recorded() {
+        struct Ones;
+        impl crate::embed::Embed for Ones {
+            fn dim(&self) -> usize {
+                4
+            }
+            fn name(&self) -> &str {
+                "ones"
+            }
+            fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+                Ok(vec![1.0; 4])
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("c.db");
+        let events = dir.path().join("events.jsonl");
+        let conn = store::open_rw(&db).unwrap();
+        conn.execute("INSERT INTO documents(id, path, kind, size, mtime_ns, status, title) VALUES (5, 'a.txt', 'text', 10, 1, 'pending', 'a')", []).unwrap();
+        drop(conn);
+        // The worker was killed while writing the document's text, inside a character.
+        let mut partial = br#"{"event":"start","id":5}
+{"event":"done","id":5,"result":{"units":[{"loc":"lines 1-1","text":"caf"#
+            .to_vec();
+        partial.push(0xC3);
+        std::fs::write(&events, &partial).unwrap();
+        append_event(
+            &events,
+            &Event::Failed {
+                id: 5,
+                error: "killed".into(),
+            },
+        )
+        .unwrap();
+        let mut offset = 0;
+        let marks = read_marks(&events, &mut offset).unwrap();
+        assert!(
+            marks
+                .iter()
+                .any(|m| m.event == "failed" && m.id == 5 && m.error.as_deref() == Some("killed")),
+            "{marks:?}"
+        );
+        let mut log = Vec::new();
+        index_worker("docs", &db, &events, &Ones, &crate::chunk::Words, &mut log).unwrap();
+        let conn = store::open_ro(&db).unwrap().unwrap();
+        let status: String = conn
+            .query_row("SELECT status FROM documents WHERE id = 5", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        // Recorded, so the next scan does not read it again until it changes.
+        assert_eq!(status, "failed: killed");
     }
 }
