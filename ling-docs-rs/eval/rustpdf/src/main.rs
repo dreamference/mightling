@@ -9,7 +9,7 @@ fn main() {
     let pages: Result<Vec<String>, String> = match engine {
         "pdf-extract" => pdf_extract::extract_text_by_pages(path).map_err(|e| e.to_string()),
         "pdf_oxide" => (|| {
-            let mut doc = pdf_oxide::PdfDocument::open(path).map_err(|e| e.to_string())?;
+            let doc = pdf_oxide::PdfDocument::open(path).map_err(|e| e.to_string())?;
             let n = doc.page_count().map_err(|e| e.to_string())?;
             let mut out = Vec::with_capacity(n);
             for i in 0..n {

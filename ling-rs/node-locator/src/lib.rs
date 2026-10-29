@@ -71,12 +71,14 @@ impl Node {
 
     /// SearXNG's base URL, when the node shares it.
     pub fn search_url(&self) -> Option<String> {
-        self.search_port.map(|port| format!("http://{}:{port}", url_host(&self.address)))
+        self.search_port
+            .map(|port| format!("http://{}:{port}", url_host(&self.address)))
     }
 
     /// The web UI's base URL, when the node shares it.
     pub fn web_url(&self) -> Option<String> {
-        self.web_port.map(|port| format!("http://{}:{port}", url_host(&self.address)))
+        self.web_port
+            .map(|port| format!("http://{}:{port}", url_host(&self.address)))
     }
 
     /// The file's text: one flat JSON object, written whole.
@@ -104,8 +106,17 @@ impl Node {
     /// Reads the file's text. `None` unless it is an object with an address.
     pub fn parse(text: &str) -> Option<Node> {
         let fields = flat_object(text)?;
-        let get = |key: &str| fields.iter().find(|(name, _)| name == key).map(|(_, value)| value.as_str());
-        let port = |key: &str| get(key).and_then(|value| value.parse::<u16>().ok()).filter(|port| *port != 0);
+        let get = |key: &str| {
+            fields
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.as_str())
+        };
+        let port = |key: &str| {
+            get(key)
+                .and_then(|value| value.parse::<u16>().ok())
+                .filter(|port| *port != 0)
+        };
         let address = get("address")?.trim().to_string();
         if address.is_empty() {
             return None;
@@ -129,13 +140,21 @@ impl Node {
         let remote = self.remote.to_ascii_lowercase();
         !self.node.is_empty()
             && remote.len() > OVERLAY_PREFIX.len() + self.node.len() + 1
-            && remote.starts_with(&format!("{OVERLAY_PREFIX}{}.", self.node.to_ascii_lowercase()))
-            && remote.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+            && remote.starts_with(&format!(
+                "{OVERLAY_PREFIX}{}.",
+                self.node.to_ascii_lowercase()
+            ))
+            && remote
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
     }
 
     /// This node at its overlay name instead of its LAN address.
     pub fn via_overlay(&self) -> Node {
-        Node { address: self.remote.clone(), ..self.clone() }
+        Node {
+            address: self.remote.clone(),
+            ..self.clone()
+        }
     }
 }
 
@@ -268,6 +287,8 @@ pub fn node_file() -> Option<PathBuf> {
 }
 
 /// The file that marks a machine as a node, and holds its id.
+// One line on purpose: a test checks the path's source text.
+#[rustfmt::skip]
 pub fn node_id_file() -> Option<PathBuf> {
     Some(home_dir()?.join(".config").join("dreamference").join("node-id"))
 }
@@ -298,7 +319,8 @@ pub fn remembered_at(path: &Path) -> Option<Node> {
 /// address does not accept a connection, the node has one and the overlay is up.
 pub fn remote_node() -> Option<Node> {
     let pin = std::env::var(PIN_ENV).ok();
-    remote_node_pinned(pin.as_deref(), is_node(), remembered()).map(|node| reachable(node, lan_answers, overlay_up))
+    remote_node_pinned(pin.as_deref(), is_node(), remembered())
+        .map(|node| reachable(node, lan_answers, overlay_up))
 }
 
 /// One command's choice of node, by name, address or id (the launcher reads it too).
@@ -307,7 +329,11 @@ pub const PIN_ENV: &str = "MIGHTLING_NODE";
 /// [`remote_node_from`] with `MIGHTLING_NODE` given. A pin beats loopback on a node and the
 /// remembered node, as in the launcher. It names the remembered node (by name, address or id) or
 /// else a host: a bare name is looked up as `<name>.local`, since this crate does not browse.
-pub fn remote_node_pinned(pin: Option<&str>, is_node: bool, remembered: Option<Node>) -> Option<Node> {
+pub fn remote_node_pinned(
+    pin: Option<&str>,
+    is_node: bool,
+    remembered: Option<Node>,
+) -> Option<Node> {
     let Some(pin) = pin.map(str::trim).filter(|pin| !pin.is_empty()) else {
         return remote_node_from(is_node, remembered);
     };
@@ -316,13 +342,25 @@ pub fn remote_node_pinned(pin: Option<&str>, is_node: bool, remembered: Option<N
         node.name.to_lowercase() == wanted
             || node.name.to_lowercase() == wanted.trim_end_matches(".local")
             || node.address.to_lowercase() == wanted
-            || (wanted.len() >= 4 && !node.node.is_empty() && node.node.to_lowercase().starts_with(&wanted))
+            || (wanted.len() >= 4
+                && !node.node.is_empty()
+                && node.node.to_lowercase().starts_with(&wanted))
     }) {
         return Some(node);
     }
     let bare = !pin.contains('.') && !pin.contains(':');
-    let address = if bare { format!("{pin}.local") } else { pin.to_string() };
-    Some(Node { name: pin.to_string(), address, model_port: DEFAULT_MODEL_PORT, search_port: Some(8888), ..Node::default() })
+    let address = if bare {
+        format!("{pin}.local")
+    } else {
+        pin.to_string()
+    };
+    Some(Node {
+        name: pin.to_string(),
+        address,
+        model_port: DEFAULT_MODEL_PORT,
+        search_port: Some(8888),
+        ..Node::default()
+    })
 }
 
 /// [`remote_node`]'s choice of address, with the LAN probe and NetBird's state given.
@@ -351,24 +389,37 @@ pub fn overlay_up() -> bool {
 /// JSON library: the management object holds no nested object, and the peers' own `connected`
 /// (a count) is outside it.
 pub fn management_connected(status: &str) -> bool {
-    let Some(start) = status.find("\"management\"") else { return false };
+    let Some(start) = status.find("\"management\"") else {
+        return false;
+    };
     let rest = &status[start..];
-    let (Some(open), Some(close)) = (rest.find('{'), rest.find('}')) else { return false };
+    let (Some(open), Some(close)) = (rest.find('{'), rest.find('}')) else {
+        return false;
+    };
     if close < open {
         return false;
     }
     let object = &rest[open..close];
-    let Some(key) = object.find("\"connected\"") else { return false };
-    object[key + "\"connected\"".len()..].trim_start().trim_start_matches(':').trim_start().starts_with("true")
+    let Some(key) = object.find("\"connected\"") else {
+        return false;
+    };
+    object[key + "\"connected\"".len()..]
+        .trim_start()
+        .trim_start_matches(':')
+        .trim_start()
+        .starts_with("true")
 }
 
 /// Whether the node's LAN address accepts a connection on the model port, within a moment.
 fn lan_answers(node: &Node) -> bool {
-    let addresses: Vec<SocketAddr> = match (node.address.as_str(), node.model_port).to_socket_addrs() {
-        Ok(addresses) => addresses.collect(),
-        Err(_) => return false,
-    };
-    addresses.iter().any(|address| TcpStream::connect_timeout(address, LAN_PROBE).is_ok())
+    let addresses: Vec<SocketAddr> =
+        match (node.address.as_str(), node.model_port).to_socket_addrs() {
+            Ok(addresses) => addresses.collect(),
+            Err(_) => return false,
+        };
+    addresses
+        .iter()
+        .any(|address| TcpStream::connect_timeout(address, LAN_PROBE).is_ok())
 }
 
 /// [`remote_node`] with its two inputs given.
@@ -407,7 +458,12 @@ pub struct WifiInterface {
 impl WifiInterface {
     /// Whether the connection's setting keeps power saving off.
     pub fn setting_off(&self) -> bool {
-        let first = self.setting.split(' ').next().unwrap_or_default().to_lowercase();
+        let first = self
+            .setting
+            .split(' ')
+            .next()
+            .unwrap_or_default()
+            .to_lowercase();
         POWERSAVE_OFF.contains(&first.as_str())
     }
 
@@ -422,13 +478,31 @@ impl WifiInterface {
         let mut commands = Vec::new();
         if !self.setting_off() {
             commands.push(
-                ["nmcli", "connection", "modify", self.connection.as_str(), "802-11-wireless.powersave", "2"]
-                    .map(String::from)
-                    .to_vec(),
+                [
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    self.connection.as_str(),
+                    "802-11-wireless.powersave",
+                    "2",
+                ]
+                .map(String::from)
+                .to_vec(),
             );
         }
         if self.radio == Some(true) {
-            commands.push(["iw", "dev", self.device.as_str(), "set", "power_save", "off"].map(String::from).to_vec());
+            commands.push(
+                [
+                    "iw",
+                    "dev",
+                    self.device.as_str(),
+                    "set",
+                    "power_save",
+                    "off",
+                ]
+                .map(String::from)
+                .to_vec(),
+            );
         }
         commands
     }
@@ -441,8 +515,11 @@ pub fn connected_wifi_devices(listing: &str) -> Vec<String> {
         .filter_map(|line| {
             // Device names, types and states hold no colon, so the terse fields split cleanly.
             let fields: Vec<&str> = line.split(':').collect();
-            (fields.len() >= 3 && fields[1] == "wifi" && fields[2].starts_with("connected") && !fields[0].is_empty())
-                .then(|| fields[0].to_string())
+            (fields.len() >= 3
+                && fields[1] == "wifi"
+                && fields[2].starts_with("connected")
+                && !fields[0].is_empty())
+            .then(|| fields[0].to_string())
         })
         .collect()
 }
@@ -462,24 +539,45 @@ pub fn radio_power_save(output: &str) -> Option<bool> {
 /// Reads every connected Wi-Fi interface through `read`, which runs one command and returns its
 /// output, or `None` when the program is missing or fails.
 pub fn wifi_interfaces_with(read: &dyn Fn(&[&str]) -> Option<String>) -> Vec<WifiInterface> {
-    let Some(listing) = read(&["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"]) else {
+    let Some(listing) = read(&["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"])
+    else {
         return Vec::new();
     };
     let mut found = Vec::new();
     for device in connected_wifi_devices(&listing) {
-        let Some(connection) = read(&["nmcli", "-g", "GENERAL.CONNECTION", "device", "show", device.as_str()]) else {
+        let Some(connection) = read(&[
+            "nmcli",
+            "-g",
+            "GENERAL.CONNECTION",
+            "device",
+            "show",
+            device.as_str(),
+        ]) else {
             continue;
         };
         let connection = connection.trim().to_string();
         if connection.is_empty() {
             continue;
         }
-        let setting = read(&["nmcli", "-g", "802-11-wireless.powersave", "connection", "show", connection.as_str()])
-            .map(|text| text.trim().to_string())
-            .filter(|text| !text.is_empty())
-            .unwrap_or_else(|| "unknown".to_string());
-        let radio = read(&["iw", "dev", device.as_str(), "get", "power_save"]).and_then(|text| radio_power_save(&text));
-        found.push(WifiInterface { device, connection, setting, radio });
+        let setting = read(&[
+            "nmcli",
+            "-g",
+            "802-11-wireless.powersave",
+            "connection",
+            "show",
+            connection.as_str(),
+        ])
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+        let radio = read(&["iw", "dev", device.as_str(), "get", "power_save"])
+            .and_then(|text| radio_power_save(&text));
+        found.push(WifiInterface {
+            device,
+            connection,
+            setting,
+            radio,
+        });
     }
     found
 }
@@ -487,12 +585,17 @@ pub fn wifi_interfaces_with(read: &dyn Fn(&[&str]) -> Option<String>) -> Vec<Wif
 /// The one hint line for interfaces that save power, with the commands that turn it off; `None`
 /// when none does.
 pub fn wifi_hint_from(interfaces: &[WifiInterface]) -> Option<String> {
-    let saving: Vec<&WifiInterface> = interfaces.iter().filter(|interface| interface.saves_power()).collect();
+    let saving: Vec<&WifiInterface> = interfaces
+        .iter()
+        .filter(|interface| interface.saves_power())
+        .collect();
     if saving.is_empty() {
         return None;
     }
-    let named: Vec<String> =
-        saving.iter().map(|interface| format!("{} ({})", interface.device, interface.connection)).collect();
+    let named: Vec<String> = saving
+        .iter()
+        .map(|interface| format!("{} ({})", interface.device, interface.connection))
+        .collect();
     let commands: Vec<String> = saving
         .iter()
         .flat_map(|interface| interface.fix_commands())
@@ -521,8 +624,15 @@ pub fn wifi_power_save_hint() -> Option<String> {
 /// A word as a shell reads it back: as it is when that is safe, in single quotes otherwise.
 fn shell_quote(word: &str) -> String {
     let safe = !word.is_empty()
-        && word.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | ',' | '+' | '=' | '@'));
-    if safe { word.to_string() } else { format!("'{}'", word.replace('\'', "'\\''")) }
+        && word.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '-' | '_' | '.' | '/' | ':' | ',' | '+' | '=' | '@')
+        });
+    if safe {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
 }
 
 /// Runs one reading in the C locale, with a deadline. `None` when the program is missing, fails or
@@ -583,23 +693,41 @@ mod tests {
     }
 
     fn enrolled() -> Node {
-        Node { remote: "mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.netbird.selfhosted".to_string(), ..node() }
+        Node {
+            remote: "mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.netbird.selfhosted".to_string(),
+            ..node()
+        }
     }
 
     #[test]
     fn a_pinned_node_beats_loopback_and_the_remembered_node() {
         // Unset or blank: as before.
         assert_eq!(remote_node_pinned(None, true, Some(node())), None);
-        assert_eq!(remote_node_pinned(Some(" "), false, Some(node())), Some(node()));
+        assert_eq!(
+            remote_node_pinned(Some(" "), false, Some(node())),
+            Some(node())
+        );
         assert_eq!(remote_node_pinned(None, false, None), None);
         // Naming the remembered node, by name or id, gives it back whole, even on a node.
-        assert_eq!(remote_node_pinned(Some("GX10-1a2b"), true, Some(node())), Some(node()));
-        assert_eq!(remote_node_pinned(Some("7c1e0c7a"), false, Some(node())), Some(node()));
+        assert_eq!(
+            remote_node_pinned(Some("GX10-1a2b"), true, Some(node())),
+            Some(node())
+        );
+        assert_eq!(
+            remote_node_pinned(Some("7c1e0c7a"), false, Some(node())),
+            Some(node())
+        );
         // Another host: an address as it is, a bare name through mDNS; the search port is the default.
         let other = remote_node_pinned(Some("10.0.0.7"), false, Some(node())).unwrap();
-        assert_eq!((other.search_url().as_deref(), other.model_url().as_str()), (Some("http://10.0.0.7:8888"), "http://10.0.0.7:8000"));
+        assert_eq!(
+            (other.search_url().as_deref(), other.model_url().as_str()),
+            (Some("http://10.0.0.7:8888"), "http://10.0.0.7:8000")
+        );
         let bare = remote_node_pinned(Some("spark-9"), false, None).unwrap();
-        assert_eq!(bare.search_url().as_deref(), Some("http://spark-9.local:8888"));
+        assert_eq!(
+            bare.search_url().as_deref(),
+            Some("http://spark-9.local:8888")
+        );
     }
 
     #[test]
@@ -620,20 +748,44 @@ mod tests {
             "evil.example/mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.x",
             "laptop.netbird.selfhosted",
         ] {
-            assert!(!Node { remote: remote.to_string(), ..node() }.overlay_name_is_its_own(), "{remote}");
+            assert!(
+                !Node {
+                    remote: remote.to_string(),
+                    ..node()
+                }
+                .overlay_name_is_its_own(),
+                "{remote}"
+            );
         }
-        assert!(!Node { node: String::new(), ..enrolled() }.overlay_name_is_its_own());
+        assert!(
+            !Node {
+                node: String::new(),
+                ..enrolled()
+            }
+            .overlay_name_is_its_own()
+        );
     }
 
     #[test]
     fn a_silent_lan_address_falls_back_to_the_overlay_name_only_while_the_overlay_is_up() {
-        assert_eq!(reachable(enrolled(), |_| true, || true).address, "192.168.50.105");
+        assert_eq!(
+            reachable(enrolled(), |_| true, || true).address,
+            "192.168.50.105"
+        );
         assert_eq!(
             reachable(enrolled(), |_| false, || true).model_url(),
             "http://mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.netbird.selfhosted:8000"
         );
-        assert_eq!(reachable(enrolled(), |_| false, || false).address, "192.168.50.105", "overlay down: the name is never resolved");
-        assert_eq!(reachable(node(), |_| false, || true).address, "192.168.50.105", "no overlay name, no fallback");
+        assert_eq!(
+            reachable(enrolled(), |_| false, || false).address,
+            "192.168.50.105",
+            "overlay down: the name is never resolved"
+        );
+        assert_eq!(
+            reachable(node(), |_| false, || true).address,
+            "192.168.50.105",
+            "no overlay name, no fallback"
+        );
     }
 
     #[test]
@@ -656,43 +808,77 @@ mod tests {
 
     #[test]
     fn what_a_node_does_not_share_is_absent_not_zero() {
-        let unshared = Node { web_port: None, search_port: None, ..node() };
+        let unshared = Node {
+            web_port: None,
+            search_port: None,
+            ..node()
+        };
         let text = unshared.render();
         assert!(!text.contains("web_port") && !text.contains("search_port"));
         assert_eq!(Node::parse(&text), Some(unshared.clone()));
         assert_eq!(unshared.search_url(), None);
         assert_eq!(unshared.web_url(), None);
-        assert_eq!(Node::parse("{\"address\": \"10.0.0.2\", \"search_port\": 0, \"web_port\": null}").and_then(|n| n.search_port), None);
+        assert_eq!(
+            Node::parse("{\"address\": \"10.0.0.2\", \"search_port\": 0, \"web_port\": null}")
+                .and_then(|n| n.search_port),
+            None
+        );
     }
 
     #[test]
     fn urls_use_the_address_and_bracket_ipv6() {
         assert_eq!(node().model_url(), "http://192.168.50.105:8000");
-        assert_eq!(node().search_url().as_deref(), Some("http://192.168.50.105:8888"));
-        assert_eq!(node().web_url().as_deref(), Some("http://192.168.50.105:3000"));
-        let v6 = Node { address: "fe80::1%wlan0".to_string(), ..node() };
+        assert_eq!(
+            node().search_url().as_deref(),
+            Some("http://192.168.50.105:8888")
+        );
+        assert_eq!(
+            node().web_url().as_deref(),
+            Some("http://192.168.50.105:3000")
+        );
+        let v6 = Node {
+            address: "fe80::1%wlan0".to_string(),
+            ..node()
+        };
         assert_eq!(v6.model_url(), "http://[fe80::1%wlan0]:8000");
-        let named = Node { address: "spark.lan".to_string(), ..node() };
+        let named = Node {
+            address: "spark.lan".to_string(),
+            ..node()
+        };
         assert_eq!(named.model_url(), "http://spark.lan:8000");
     }
 
     #[test]
     fn a_file_set_by_hand_needs_only_an_address() {
         let parsed = Node::parse("{ \"address\" : \"10.0.0.2\" }");
-        assert_eq!(parsed.as_ref().map(|n| n.model_port), Some(DEFAULT_MODEL_PORT));
+        assert_eq!(
+            parsed.as_ref().map(|n| n.model_port),
+            Some(DEFAULT_MODEL_PORT)
+        );
         assert_eq!(parsed.as_ref().map(|n| n.node.as_str()), Some(""));
     }
 
     #[test]
     fn anything_that_is_not_the_file_is_refused() {
-        for text in ["", "[]", "{", "{\"address\": \"\"}", "{\"name\": \"x\"}", "{\"address\": {\"a\": 1}}", "{\"address\": \"a\"} x"] {
+        for text in [
+            "",
+            "[]",
+            "{",
+            "{\"address\": \"\"}",
+            "{\"name\": \"x\"}",
+            "{\"address\": {\"a\": 1}}",
+            "{\"address\": \"a\"} x",
+        ] {
             assert_eq!(Node::parse(text), None, "{text}");
         }
     }
 
     #[test]
     fn strings_with_quotes_and_escapes_survive() {
-        let odd = Node { name: "a \"b\" \\ c\n".to_string(), ..node() };
+        let odd = Node {
+            name: "a \"b\" \\ c\n".to_string(),
+            ..node()
+        };
         assert_eq!(Node::parse(&odd.render()), Some(odd));
     }
 
@@ -704,7 +890,8 @@ mod tests {
     }
 
     const WIFI_ONLY: &str = "wlP9s9:wifi:connected\np2p-dev-wlP9s9:wifi-p2p:disconnected\nenP7s7:ethernet:unavailable\nlo:loopback:connected (externally)\n";
-    const ETHERNET_ONLY: &str = "enP7s7:ethernet:connected\nwlP9s9:wifi:disconnected\nlo:loopback:connected (externally)\n";
+    const ETHERNET_ONLY: &str =
+        "enP7s7:ethernet:connected\nwlP9s9:wifi:disconnected\nlo:loopback:connected (externally)\n";
 
     /// A machine's nmcli and iw, answered from strings: (listing, connection, setting, radio).
     /// `None` for a program that is missing or fails.
@@ -717,11 +904,25 @@ mod tests {
         move |argv: &[&str]| -> Option<String> {
             match argv {
                 ["nmcli", "-t", ..] => listing.map(String::from),
-                ["nmcli", "-g", "GENERAL.CONNECTION", "device", "show", "wlP9s9"] => Some(format!("{connection}\n")),
-                ["nmcli", "-g", "802-11-wireless.powersave", "connection", "show", name] if *name == connection => {
-                    Some(format!("{setting}\n"))
+                [
+                    "nmcli",
+                    "-g",
+                    "GENERAL.CONNECTION",
+                    "device",
+                    "show",
+                    "wlP9s9",
+                ] => Some(format!("{connection}\n")),
+                [
+                    "nmcli",
+                    "-g",
+                    "802-11-wireless.powersave",
+                    "connection",
+                    "show",
+                    name,
+                ] if *name == connection => Some(format!("{setting}\n")),
+                ["iw", "dev", "wlP9s9", "get", "power_save"] => {
+                    radio.map(|state| format!("Power save: {state}\n"))
                 }
-                ["iw", "dev", "wlP9s9", "get", "power_save"] => radio.map(|state| format!("Power save: {state}\n")),
                 _ => panic!("unexpected reading {argv:?}"),
             }
         }
@@ -729,28 +930,45 @@ mod tests {
 
     #[test]
     fn only_connected_wifi_devices_are_read() {
-        assert_eq!(connected_wifi_devices(WIFI_ONLY), vec!["wlP9s9".to_string()]);
+        assert_eq!(
+            connected_wifi_devices(WIFI_ONLY),
+            vec!["wlP9s9".to_string()]
+        );
         assert!(connected_wifi_devices(ETHERNET_ONLY).is_empty());
         assert!(connected_wifi_devices("").is_empty());
-        assert_eq!(connected_wifi_devices("wlan0:wifi:connected (externally)\n"), vec!["wlan0".to_string()]);
+        assert_eq!(
+            connected_wifi_devices("wlan0:wifi:connected (externally)\n"),
+            vec!["wlan0".to_string()]
+        );
     }
 
     #[test]
     fn the_radio_says_on_off_or_nothing() {
         assert_eq!(radio_power_save("Power save: on\n"), Some(true));
         assert_eq!(radio_power_save("Power save: off"), Some(false));
-        assert_eq!(radio_power_save("command failed: Operation not supported (-95)"), None);
+        assert_eq!(
+            radio_power_save("command failed: Operation not supported (-95)"),
+            None
+        );
         assert_eq!(radio_power_save(""), None);
     }
 
     #[test]
     fn wifi_saving_power_gets_one_hint_with_both_commands() {
         for setting in ["default", "enable", "3", "unknown"] {
-            let found = wifi_interfaces_with(&machine(Some(WIFI_ONLY), "TP-Link_DA74", setting, Some("on")));
+            let found = wifi_interfaces_with(&machine(
+                Some(WIFI_ONLY),
+                "TP-Link_DA74",
+                setting,
+                Some("on"),
+            ));
             assert_eq!(found.len(), 1, "{setting}");
             let hint = wifi_hint_from(&found).expect("a hint");
             assert!(!hint.contains('\n'), "one line: {hint}");
-            assert!(hint.starts_with("Hint: Wi-Fi power saving is on for wlP9s9 (TP-Link_DA74)"), "{hint}");
+            assert!(
+                hint.starts_with("Hint: Wi-Fi power saving is on for wlP9s9 (TP-Link_DA74)"),
+                "{hint}"
+            );
             assert!(hint.ends_with(
                 "Turn it off: sudo nmcli connection modify TP-Link_DA74 802-11-wireless.powersave 2 \
                  && sudo iw dev wlP9s9 set power_save off"
@@ -761,7 +979,8 @@ mod tests {
     #[test]
     fn power_saving_off_for_good_and_now_gets_no_hint() {
         for setting in ["disable", "2", "2 (disable)"] {
-            let found = wifi_interfaces_with(&machine(Some(WIFI_ONLY), "home", setting, Some("off")));
+            let found =
+                wifi_interfaces_with(&machine(Some(WIFI_ONLY), "home", setting, Some("off")));
             assert_eq!(wifi_hint_from(&found), None, "{setting}");
         }
         // iw missing or silent: the setting decides.
@@ -773,18 +992,49 @@ mod tests {
     #[test]
     fn each_half_of_the_fix_is_named_only_when_it_is_needed() {
         // Set, not yet reconnected: the radio still sleeps.
-        let set = wifi_hint_from(&wifi_interfaces_with(&machine(Some(WIFI_ONLY), "home", "disable", Some("on")))).unwrap();
-        assert!(set.ends_with("Turn it off: sudo iw dev wlP9s9 set power_save off"), "{set}");
+        let set = wifi_hint_from(&wifi_interfaces_with(&machine(
+            Some(WIFI_ONLY),
+            "home",
+            "disable",
+            Some("on"),
+        )))
+        .unwrap();
+        assert!(
+            set.ends_with("Turn it off: sudo iw dev wlP9s9 set power_save off"),
+            "{set}"
+        );
         // Awake now, but it comes back at the next reconnect; iw cannot say.
-        let unset = wifi_hint_from(&wifi_interfaces_with(&machine(Some(WIFI_ONLY), "home", "default", None))).unwrap();
-        assert!(unset.ends_with("Turn it off: sudo nmcli connection modify home 802-11-wireless.powersave 2"), "{unset}");
+        let unset = wifi_hint_from(&wifi_interfaces_with(&machine(
+            Some(WIFI_ONLY),
+            "home",
+            "default",
+            None,
+        )))
+        .unwrap();
+        assert!(
+            unset.ends_with(
+                "Turn it off: sudo nmcli connection modify home 802-11-wireless.powersave 2"
+            ),
+            "{unset}"
+        );
     }
 
     #[test]
     fn a_connection_name_is_quoted_for_the_shell() {
-        let hint = wifi_hint_from(&wifi_interfaces_with(&machine(Some(WIFI_ONLY), "Bob's Wi-Fi", "default", Some("off")))).unwrap();
+        let hint = wifi_hint_from(&wifi_interfaces_with(&machine(
+            Some(WIFI_ONLY),
+            "Bob's Wi-Fi",
+            "default",
+            Some("off"),
+        )))
+        .unwrap();
         assert!(hint.contains("on for wlP9s9 (Bob's Wi-Fi)"), "{hint}");
-        assert!(hint.ends_with("sudo nmcli connection modify 'Bob'\\''s Wi-Fi' 802-11-wireless.powersave 2"), "{hint}");
+        assert!(
+            hint.ends_with(
+                "sudo nmcli connection modify 'Bob'\\''s Wi-Fi' 802-11-wireless.powersave 2"
+            ),
+            "{hint}"
+        );
         assert_eq!(shell_quote("TP-Link_DA74"), "TP-Link_DA74");
         assert_eq!(shell_quote(""), "''");
         assert_eq!(shell_quote("a b"), "'a b'");
@@ -794,9 +1044,14 @@ mod tests {
     #[test]
     fn no_networkmanager_or_no_wifi_says_nothing() {
         assert!(wifi_interfaces_with(&machine(None, "home", "default", Some("on"))).is_empty());
-        assert!(wifi_interfaces_with(&machine(Some(ETHERNET_ONLY), "home", "default", Some("on"))).is_empty());
+        assert!(
+            wifi_interfaces_with(&machine(Some(ETHERNET_ONLY), "home", "default", Some("on")))
+                .is_empty()
+        );
         // A Wi-Fi device with no connection named is skipped, not guessed at.
-        assert!(wifi_interfaces_with(&machine(Some(WIFI_ONLY), "", "default", Some("on"))).is_empty());
+        assert!(
+            wifi_interfaces_with(&machine(Some(WIFI_ONLY), "", "default", Some("on"))).is_empty()
+        );
         assert_eq!(wifi_hint_from(&[]), None);
     }
 

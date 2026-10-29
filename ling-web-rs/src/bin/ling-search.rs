@@ -58,13 +58,20 @@ fn main() -> ExitCode {
         // can tell a refused search from an empty one.
         if args.json {
             let refused = serde_json::json!({"airgapped": level.name(), "error": message});
-            println!("{}", serde_json::to_string_pretty(&refused).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&refused).unwrap_or_default()
+            );
         } else {
             println!("❌ {message}");
         }
         return ExitCode::FAILURE;
     }
-    let options = match search::SearchOptions::new(args.category.as_deref(), args.time.as_deref(), args.lang.as_deref()) {
+    let options = match search::SearchOptions::new(
+        args.category.as_deref(),
+        args.time.as_deref(),
+        args.lang.as_deref(),
+    ) {
         Ok(options) => options,
         Err(message) => {
             println!("❌ {message}");
@@ -81,7 +88,10 @@ fn main() -> ExitCode {
         ) {
             Ok(payload) => {
                 if args.json {
-                    println!("{}", serde_json::to_string_pretty(&payload).unwrap_or_default());
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&payload).unwrap_or_default()
+                    );
                 } else {
                     print!("{}", read::render_text(&payload));
                 }
