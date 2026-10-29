@@ -411,6 +411,11 @@ class ForgeBackup:
         refs = manifest.get("refs") if isinstance(manifest, dict) else None
         if not isinstance(refs, dict) or not all(isinstance(r, dict) for r in refs.values()):
             raise RuntimeError("the set's manifest lists no refs")
+        try:
+            json.loads((folder / "secrets.json").read_text())
+        except (OSError, ValueError) as error:
+            # Without them the push hook's denylist would stay behind (`restore_secrets`).
+            raise RuntimeError("the set's secrets are not readable") from error
         target.parent.mkdir(parents=True, exist_ok=True)
         extract = Path(tempfile.mkdtemp(prefix="forge-restore-", dir=target.parent))
         try:
