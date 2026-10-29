@@ -473,6 +473,13 @@ mod tests {
     }
 
     #[test]
+    fn a_meta_naming_utf16_is_read_as_utf8() {
+        // An ASCII `<meta>` cannot be UTF-16, so the HTML standard reads such a page as UTF-8.
+        let page = "<meta charset=\"utf-16\"><p>café</p>";
+        assert_eq!(decode(page.as_bytes(), "text/html", true), page);
+    }
+
+    #[test]
     fn rendering_matches_the_python_command() {
         let page = FetchedPage {
             url: "u".into(),
