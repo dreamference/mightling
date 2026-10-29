@@ -29,8 +29,9 @@
 //!   [--instance NAME --user USER]`
 //! - `retool --state DIR --signal-cli PATH --version V [--env K=V]…`: `setup --refresh`'s update of
 //!   the runtime the bridge starts
-//! - `pair --state DIR --port N --code CODE [--device NAME]`: trade a `ling web pair` code for the
-//!   device cookie, as `signal-bridge` or the instance's own device name
+//! - `pair --state DIR --port N [--code CODE] [--device NAME]`: trade a `ling web pair` code for the
+//!   device cookie, as `signal-bridge` or the instance's own device name; without `--code` it reads
+//!   the code from stdin, which is how `setup` hands it over (a command line is public)
 //! - `account --state DIR`: the number, the mode, the user served and the account id (§18.4)
 //! - `bind --state DIR`: a fresh six-digit code that makes its first sender the owner
 //! - `trust-owner --state DIR`: §5.3 on the bridge's data, with the unit stopped
@@ -402,7 +403,7 @@ fn run_refresh(args: &[String], invocation: &Invocation) -> i32 {
         Err(code) => return code,
     };
     let arch = std::env::consts::ARCH;
-    let work = std::env::temp_dir().join(format!("ling-signal-refresh-{}", std::process::id()));
+    let work = setup::work_dir(&std::env::temp_dir(), "ling-signal-refresh");
     let java_present = setup::java_home().join("bin/java").exists();
     let signal_cli_present = setup::signal_cli_program().exists() && (arch != "aarch64" || setup::native_dir().join("libsignal_jni.so").exists());
     let mut plan = setup::refresh_plan(&bridge, &work, arch, java_present, signal_cli_present, &instances);
@@ -425,7 +426,10 @@ fn run_refresh(args: &[String], invocation: &Invocation) -> i32 {
         println!("Nothing was changed.");
         return 1;
     }
-    let _ = std::fs::create_dir_all(&work);
+    if let Err(err) = setup::make_work_dir(&work) {
+        eprintln!("❌ Could not make the scratch folder {}: {err}. Nothing was changed.", work.display());
+        return 1;
+    }
     for step in &plan {
         println!("🔑 {}", step.display());
         let mut command = step.command.clone();
@@ -434,6 +438,7 @@ fn run_refresh(args: &[String], invocation: &Invocation) -> i32 {
         }
         if let Err(output) = run_command(&command, step.stdin.as_deref()) {
             eprintln!("❌ That step failed:\n{output}");
+            let _ = std::fs::remove_dir_all(&work);
             return 1;
         }
     }
@@ -461,10 +466,11 @@ fn run_verify_signal_cli(args: &[String]) -> i32 {
 }
 
 fn run_pair(args: &[String]) -> i32 {
-    let (Some(state_dir), Some(code)) = (flag(args, "--state"), flag(args, "--code")) else {
-        eprintln!("pair needs --state and --code");
+    let Some(state_dir) = flag(args, "--state") else {
+        eprintln!("pair needs --state, and --code or the code on stdin");
         return 2;
     };
+    let code = flag(args, "--code").unwrap_or_else(|| code_from(std::io::stdin().lock()));
     let port = flag(args, "--port").and_then(|p| p.parse().ok()).unwrap_or(3100);
     let device = flag(args, "--device").unwrap_or_else(|| crate::agent::DEVICE_NAME.to_string());
     match runtime().block_on(crate::agent::pair(port, &code, &device)) {
@@ -483,6 +489,13 @@ fn run_pair(args: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// The first line of `input`, trimmed: the code `setup` writes to `pair`'s stdin.
+fn code_from(mut input: impl BufRead) -> String {
+    let mut line = String::new();
+    let _ = input.read_line(&mut line);
+    line.trim().to_string()
 }
 
 fn run_bind(args: &[String]) -> i32 {
@@ -750,7 +763,7 @@ fn run_setup(args: &[String], invocation: &Invocation) -> i32 {
         }
     };
     let user = if dry_run { String::new() } else { current_user() };
-    let work = std::env::temp_dir().join(format!("ling-signal-setup-{}", std::process::id()));
+    let work = setup::work_dir(&std::env::temp_dir(), "ling-signal-setup");
     let account_exists = host.account_exists(&instance.account());
     let java_present = setup::java_home().join("bin/java").exists();
     let signal_cli_present = setup::signal_cli_program().exists() && (arch != "aarch64" || setup::native_dir().join("libsignal_jni.so").exists());
@@ -825,7 +838,10 @@ fn run_setup(args: &[String], invocation: &Invocation) -> i32 {
         eprintln!("❌ {number} is already the bridge `{holder}`'s; one Signal account has one bridge. Nothing was changed.");
         return 1;
     }
-    let _ = std::fs::create_dir_all(&work);
+    if let Err(err) = setup::make_work_dir(&work) {
+        eprintln!("❌ Could not make the scratch folder {}: {err}. Nothing was changed.", work.display());
+        return 1;
+    }
     for step in &plan {
         println!("🔑 {}", step.display());
         let mut command = step.command.clone();
@@ -895,8 +911,7 @@ fn finish_setup(instance: &Instance, host: &Host, args: &[String], number: Optio
     };
     let bridge_bin = unit::BRIDGE_PATH.to_string();
     let state_dir = instance.state_dir();
-    let pair = [bridge_bin.clone(), "pair".into(), "--state".into(), state_dir.clone(), "--port".into(), port.to_string(), "--code".into(), pairing, "--device".into(), instance.device_name()];
-    if let Err(output) = run_command(&setup::as_bridge(instance, &pair), None) {
+    if let Err(output) = run_command(&setup::pair_command(instance, port), Some(&format!("{pairing}\n"))) {
         eprintln!("❌ {output}");
         return Err(Abandon { linked_device: linked });
     }
@@ -1234,6 +1249,12 @@ mod tests {
 
     fn args(words: &[&str]) -> Vec<String> {
         words.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn pair_takes_the_code_from_the_first_line_of_stdin() {
+        assert_eq!(code_from(" 12345678 \nmore\n".as_bytes()), "12345678");
+        assert_eq!(code_from("".as_bytes()), "");
     }
 
     /// A node of its own for one test: state folders, system accounts, unit files and memory in a
