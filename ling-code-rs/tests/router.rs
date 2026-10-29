@@ -1032,3 +1032,17 @@ fn an_exact_outline_lists_a_definition_once_when_its_duplicate_is_not_adjacent()
         "{out}"
     );
 }
+
+#[test]
+fn callers_never_lists_the_definition_line_of_a_changed_file() {
+    // The text search over a changed file finds the definition too; it calls nothing.
+    let f = fixture();
+    let geometry = std::fs::read_to_string(f.repo.root.join("shapes/geometry.py")).unwrap();
+    f.write("shapes/geometry.py", &format!("{geometry}\n# touched\n"));
+    let (_, out) = f.run(&["callers", "make_circle"]);
+    assert!(
+        out.contains("exact shapes/cli.py:9  in shapes.cli.main"),
+        "{out}"
+    );
+    assert!(!out.contains("(text) shapes/geometry.py:26"), "{out}");
+}

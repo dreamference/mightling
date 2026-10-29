@@ -999,9 +999,15 @@ impl Context {
     pub fn callers(&self, query: &str) -> Result<Answer> {
         let mut answer = self.refs(query)?;
         answer.op = "callers".to_string();
+        let name = query_segments(query).last().cloned().unwrap_or_default();
         let mut rows = Vec::new();
         for row in std::mem::take(&mut answer.rows) {
             if row.detail == "definition" || row.detail == "import" {
+                continue;
+            }
+            // The text search over a changed file finds the definition as well.
+            if row.tag == Some(Tag::Text) && defines_on_line(&self.repo, &row.path, row.line, &name)
+            {
                 continue;
             }
             let caller = match row.tag {
