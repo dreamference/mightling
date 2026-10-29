@@ -7,8 +7,8 @@ with a wide candidate pool, in-memory thumbnail fetches behind a hardened SSRF g
 pre-filter over the thumbnails, perceptual-hash collapse of visual near-duplicates, a vision
 re-rank by the served multimodal model with the full downloads already prefetching
 speculatively, and finally persistence of the winners into a local store that ``ling web`` and the
-desktop app serve back at ``/images/{file_id}.jpg`` (specs/DREAMFERENCE_MIGHTLING_ASK.md §6). Caching locally is the point: hotlinked
-images die of CORP blocks and link rot; cached ones render forever.
+desktop app serve back at ``/images/{file_id}.jpg`` (specs/DREAMFERENCE_MIGHTLING_ASK.md §6).
+Caching locally is the point: hotlinked images die of CORP blocks and link rot; cached ones render forever.
 
 **Deviation from the spec, stated loudly:** the spec names FastAPI. This service is standard
 library plus Pillow instead, for the same reason the Gmail sidecar is stdlib-only -- it runs in
@@ -144,12 +144,12 @@ class HardenedFetcher:
             try:
                 infos = resolver(host, None)
             except OSError as exc:
-                raise FetchRejected(f"DNS failure for {host}: {exc}")
+                raise FetchRejected(f"DNS failure for {host}: {exc}") from exc
             return infos[0][4][0]
         try:
             infos = resolver(host, None)
         except OSError as exc:
-            raise FetchRejected(f"DNS failure for {host}: {exc}")
+            raise FetchRejected(f"DNS failure for {host}: {exc}") from exc
         if not infos:
             raise FetchRejected(f"{host} resolved to nothing")
         pinned = None
@@ -157,8 +157,8 @@ class HardenedFetcher:
             address = info[4][0]
             try:
                 parsed = ipaddress.ip_address(address)
-            except ValueError:
-                raise FetchRejected(f"{host} resolved to non-address {address!r}")
+            except ValueError as exc:
+                raise FetchRejected(f"{host} resolved to non-address {address!r}") from exc
             if (
                 parsed.is_private
                 or parsed.is_loopback
@@ -1033,7 +1033,7 @@ def serve(port: int = SERVICE_PORT, secret: str | None = None) -> None:
             self.end_headers()
             self.wfile.write(encoded)
 
-        def do_GET(self) -> None:  # noqa: N802 - name fixed by http.server
+        def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path == "/health":
                 self._reply(200, {"status": "ok"})
@@ -1070,7 +1070,7 @@ def serve(port: int = SERVICE_PORT, secret: str | None = None) -> None:
                 return
             self._reply(404, {"error": "not found"})
 
-        def do_POST(self) -> None:  # noqa: N802 - name fixed by http.server
+        def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path != "/search":
                 self._reply(404, {"error": "not found"})

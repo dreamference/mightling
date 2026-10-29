@@ -474,7 +474,10 @@ class NightShiftRemote:
                 "waits until a night run is started there"
             )
         if NightShiftQueue.runner_active():
-            return f"{NightShiftQueue.runner_holder() or 'a run'} is in progress there; the task waits for the next night"
+            return (
+                f"{NightShiftQueue.runner_holder() or 'a run'} is in progress there; "
+                "the task waits for the next night"
+            )
         try:
             start, end = NightShiftSettings.parse_window(NightShiftSettings().window)
         except ValueError:

@@ -66,6 +66,7 @@ class SweBenchGateHold:
     # -- the `with` block ----------------------------------------------------------------------
 
     def __enter__(self) -> "SweBenchGateHold":
+        """Starts the hold."""
         self.started = time.time()
         self._earlier = self.read(self.store)
         self.tick()
@@ -74,6 +75,7 @@ class SweBenchGateHold:
         return self
 
     def __exit__(self, *_: Any) -> None:
+        """Stops the hold."""
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=HEARTBEAT_S + 5)

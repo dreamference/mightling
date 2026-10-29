@@ -315,7 +315,11 @@ class SweBenchCommand:
         run.add_argument(
             "--prompt",
             default=None,
-            help="The system prompt the agent starts with: default, offline (default without the web and email blocks), high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one)",
+            help=(
+                "The system prompt the agent starts with: default, offline (default without the web "
+                "and email blocks), high-swe, or a custom one in $CODEX_HOME/system-prompts "
+                "(default: the configured one)"
+            ),
         )
         run.add_argument(
             "--mask",
@@ -326,7 +330,10 @@ class SweBenchCommand:
         run.add_argument(
             "--strip-names",
             action="store_true",
-            help="Take the files, modules, functions and classes the reference fix touches out of each issue's text before the agent sees it",
+            help=(
+                "Take the files, modules, functions and classes the reference fix touches out of "
+                "each issue's text before the agent sees it"
+            ),
         )
         run.add_argument(
             "--refine",

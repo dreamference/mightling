@@ -1,4 +1,4 @@
-"""One run's files (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §4):
+"""One run's files (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §4).
 
 ```text
 runs/<run>/manifest.json       what was measured; written once

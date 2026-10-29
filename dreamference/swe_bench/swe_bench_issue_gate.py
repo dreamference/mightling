@@ -237,6 +237,7 @@ class SweBenchIssueGate:
 
     @classmethod
     def words(cls, segment: str) -> list[str]:
+        """Splits a shell segment into its words."""
         try:
             return shlex.split(segment, comments=False, posix=True)
         except ValueError:
@@ -308,6 +309,7 @@ class SweBenchIssueGate:
 
     @classmethod
     def squeeze(cls, text: str) -> str:
+        """Removes all whitespace from the text."""
         return re.sub(r"\s+", "", text)
 
     @classmethod

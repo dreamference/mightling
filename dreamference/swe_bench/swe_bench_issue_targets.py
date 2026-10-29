@@ -467,7 +467,10 @@ class SweBenchIssueTargets:
             `git ls-files`, a marker line, and `git grep`'s hits.
         """
         names = [name for name in names if IDENTIFIER.fullmatch(name)][:MAX_NAMES]
-        script = 'cd "${TESTBED:-/testbed}" || exit 3\npwd\ngit -c core.quotePath=false ls-files\necho "@@definitions@@"\n'
+        script = (
+            'cd "${TESTBED:-/testbed}" || exit 3\npwd\n'
+            'git -c core.quotePath=false ls-files\necho "@@definitions@@"\n'
+        )
         if names:
             pattern = (
                 r"^[[:space:]]*(async[[:space:]]+)?(def|class)[[:space:]]+("

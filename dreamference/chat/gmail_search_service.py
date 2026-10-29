@@ -405,6 +405,7 @@ class GmailSearchService:
 
     @classmethod
     def delete_token(cls, address: str, directory: str | None = None) -> bool:
+        """Removes one account's stored token; True when there was one."""
         import json
         import os
 
@@ -431,6 +432,7 @@ class GmailSearchService:
         refresh_token: str | None = None,
         scopes: list[str] | None = None,
     ) -> bool:
+        """Stores one account's token with its lifetime."""
         path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
         stored = cls._raw(directory)
         accounts = stored.get("accounts", {})
@@ -758,10 +760,10 @@ class GmailSearchService:
 
     @classmethod
     def _all_mail_folder(cls, connection: imaplib.IMAP4_SSL) -> str:
-        """Finds the folder holding every message once, by its special-use attribute.
+        r"""Finds the folder holding every message once, by its special-use attribute.
 
         The English name `[Gmail]/All Mail` is what most examples hard-code, and it is wrong for
-        every account whose interface language is not English. The `\\All` attribute in the LIST
+        every account whose interface language is not English. The `\All` attribute in the LIST
         response is the same folder under any language.
 
         Args:
@@ -954,7 +956,8 @@ class GmailSearchService:
     def workspace(cls, path: str, query: dict[str, list[str]]) -> dict[str, Any]:
         """Answers the read-only Drive and Calendar endpoints.
 
-        Spec: specs/DREAMFERENCE_MIGHTLING_APPS.md §9, §9a. The paths are `/drive/search`, `/drive/file/<id>`, `/calendar/events`, `/calendar/event/<calendar>/<id>`.
+        Spec: specs/DREAMFERENCE_MIGHTLING_APPS.md §9, §9a. The paths are `/drive/search`,
+        `/drive/file/<id>`, `/calendar/events`, `/calendar/event/<calendar>/<id>`.
 
         Args:
             path (str): The request path.
@@ -1198,8 +1201,8 @@ class GmailSearchService:
                     if app == "gmail"
                     else (
                         f'<p class="note">ⓘ Google will describe {name} access as full access ("see, edit, create and '
-                        "delete\"): GNOME's client may ask for nothing narrower. Mightling only reads; it has no way to "
-                        "change or delete anything.</p>"
+                        "delete\"): GNOME's client may ask for nothing narrower. Mightling only "
+                        "reads; it has no way to change or delete anything.</p>"
                     )
                 )
                 self._html(
@@ -1328,7 +1331,7 @@ class GmailSearchService:
                     return
                 self._reply(404, {"error": "not found"})
 
-            def do_GET(self) -> None:  # noqa: N802 - name fixed by http.server
+            def do_GET(self) -> None:
                 parsed = urllib.parse.urlparse(self.path)
                 query = urllib.parse.parse_qs(parsed.query)
 

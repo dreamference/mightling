@@ -7,8 +7,8 @@ This module provides the EgressAudit class. It runs one real `ling` session unde
 server, `ling web serve`, answering one Ask thread asked through it; with `--compat claude` the
 compatibility mode's print mode in a repository holding Claude Code's files), in a throwaway
 repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked
-of a resolver and every process the session started, with a verdict. It makes "your code stays on your machine" something a user can check and re-check
-after each Codex bump, instead of a promise.
+of a resolver and every process the session started, with a verdict. It makes "your code stays on
+your machine" something a user can check and re-check after each Codex bump, instead of a promise.
 
 The audit reads; the one thing it writes outside its scratch directory is the `--json` result
 under `$CODEX_HOME/audit/`.
@@ -711,12 +711,14 @@ class EgressAudit:
             unit = f"{SIGNAL_INSTANCE_PREFIX}{name}{SIGNAL_INSTANCE_SUFFIX}"
             if cls._unit_enabled(unit, user=False):
                 lines.append(
-                    f"Signal bridge `{name}` enabled ({unit}): signal-cli connects to Signal's servers, outside this trace. "
+                    f"Signal bridge `{name}` enabled ({unit}): signal-cli connects to Signal's servers, "
+                    "outside this trace. "
                     f"`ling signal remove --name {name}` turns it off."
                 )
         if cls._unit_enabled(CHAT_UNIT, user=True) and cls._chat_file("telegram.json").get("token"):
             lines.append(
-                f"Telegram bridge enabled ({CHAT_UNIT}): `ling chat serve` connects to Telegram's Bot API, outside this trace. "
+                f"Telegram bridge enabled ({CHAT_UNIT}): `ling chat serve` connects to Telegram's Bot API, "
+                "outside this trace. "
                 "`ling chat telegram off` or `ling chat stop` turns it off."
             )
         if cls._unit_enabled(MATRIX_PROXY_UNIT, user=True):
@@ -985,7 +987,8 @@ class EgressAudit:
             if page:
                 print(
                     f"ℹ️  Preview tab: the audit's page {'loaded and ran' if page.loaded() else 'did not load'}; "
-                    "it reached for example.com, .org and .net by picture, script, stylesheet, fetch, prefetch hints and a link"
+                    "it reached for example.com, .org and .net by picture, script, stylesheet, fetch, "
+                    "prefetch hints and a link"
                 )
             for line in cls.render(trace, verdict, allowed):
                 print(line)
@@ -998,14 +1001,20 @@ class EgressAudit:
                     print("💡 The interface opened and took the prompt, but no reply was recorded.")
                 if app:
                     print(
-                        "💡 The app did not run its audit session to the end: start it by hand on this display to see why."
+                        "💡 The app did not run its audit session to the end: start it by hand on this "
+                        "display to see why."
                     )
                 print(
                     f"💡 The session needs the model server at {vllm_host}: `ling-admin server start`."
                 )
             if write_json:
                 print(
-                    f"💡 Full result: {cls.write_result(trace, verdict, allowed, cls.build_identity(mightling_bin), session)}"
+                    "💡 Full result: "
+                    + str(
+                        cls.write_result(
+                            trace, verdict, allowed, cls.build_identity(mightling_bin), session
+                        )
+                    )
                 )
         finally:
             if page:

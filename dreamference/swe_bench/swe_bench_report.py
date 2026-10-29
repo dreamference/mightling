@@ -556,7 +556,10 @@ class SweBenchReport:
             if setting == "on"
             else "as asked"
         )
-        return f"{'Turn-end compaction':<20}{setting} ({percent}% of the usable window on every exec command line: {how})"
+        return (
+            f"{'Turn-end compaction':<20}{setting} ({percent}% of the usable window on every exec "
+            f"command line: {how})"
+        )
 
     @classmethod
     def apply_patch_summary(

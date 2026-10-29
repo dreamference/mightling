@@ -230,10 +230,12 @@ class MatrixHomeserver:
 
     @classmethod
     def container_exists(cls) -> bool:
+        """Tells whether the homeserver container exists."""
         return cls._run(["docker", "inspect", MATRIX_CONTAINER], timeout=30).returncode == 0
 
     @classmethod
     def container_running(cls) -> bool:
+        """Tells whether the homeserver container is running."""
         result = cls._run(
             ["docker", "inspect", "-f", "{{.State.Running}}", MATRIX_CONTAINER], timeout=30
         )
@@ -261,6 +263,7 @@ class MatrixHomeserver:
 
     @classmethod
     def unit_dir(cls) -> str:
+        """Returns the systemd user unit directory."""
         return os.path.expanduser("~/.config/systemd/user")
 
     @classmethod
@@ -306,6 +309,7 @@ class MatrixHomeserver:
 
     @classmethod
     def wait_until_answering(cls, seconds: int = 60) -> bool:
+        """Waits until the homeserver answers, for up to `seconds`."""
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             status, _ = cls._http("GET", f"{PROXY_URL}/_matrix/client/versions")
@@ -498,6 +502,7 @@ class MatrixHomeserver:
 
     @classmethod
     def status(cls) -> int:
+        """Prints the homeserver's state and returns the exit code."""
         admin = cls._load("matrix-admin.json")
         config = cls._load("matrix.json")
         if not admin:
@@ -508,7 +513,12 @@ class MatrixHomeserver:
             f"Container:   {'running' if cls.container_running() else 'stopped'} ({MATRIX_CONTAINER})"
         )
         print(
-            f"Network:     {'sidecar network, push notifications can leave' if admin.get('push') else 'internal, no route out'}"
+            "Network:     "
+            + (
+                "sidecar network, push notifications can leave"
+                if admin.get("push")
+                else "internal, no route out"
+            )
         )
         print(f"Tailscale:   {cls.tailscale_name() or 'not running'}")
         print(f"Bot:         {config.get('user_id', 'not created')}")

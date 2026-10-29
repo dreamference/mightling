@@ -331,7 +331,7 @@ class StraceParser:
 
     @classmethod
     def unescape(cls, literal: str) -> bytes:
-        """Decodes strace's C-style escapes: `\\n`, octal `\\236` and `\\0`, hex `\\x1f`.
+        r"""Decodes strace's C-style escapes: `\n`, octal `\236` and `\0`, hex `\x1f`.
 
         Args:
             literal (str): The text between the quotes.

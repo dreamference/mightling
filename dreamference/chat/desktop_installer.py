@@ -340,7 +340,8 @@ class DesktopInstaller:
         print("⚠️  The Mightling desktop toolchain is incomplete:")
         if "node" in missing:
             print(
-                f"   • Node.js {MIN_NODE_VERSION[0]}.{MIN_NODE_VERSION[1]} or later is needed (Electron, Vite and Forge run on it)."
+                f"   • Node.js {MIN_NODE_VERSION[0]}.{MIN_NODE_VERSION[1]} or later is needed "
+                "(Electron, Vite and Forge run on it)."
             )
         if "npm" in missing:
             print("   • npm is needed to install the app's packages.")

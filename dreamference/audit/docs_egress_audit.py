@@ -57,7 +57,8 @@ class DocsEgressAudit:
         objects = [
             "<< /Type /Catalog /Pages 2 0 R >>",
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+            "/Resources << /Font << /F1 5 0 R >> >> >>",
             f"<< /Length {len(content)} >>\nstream\n{content}\nendstream",
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
         ]
@@ -113,11 +114,13 @@ class DocsEgressAudit:
         ) as archive:
             archive.writestr(
                 "word/document.xml",
-                f"<w:document {word}><w:body><w:p><w:r><w:t>Gulls follow fishing boats.</w:t></w:r></w:p></w:body></w:document>",
+                f"<w:document {word}><w:body><w:p><w:r><w:t>Gulls follow fishing boats.</w:t></w:r></w:p>"
+                "</w:body></w:document>",
             )
         with (pathlib.Path(folder) / "survey.eml").open("w") as handle:
             handle.write(
-                "From: warden@example.org\nSubject: Survey dates\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=b\n\n"
+                "From: warden@example.org\nSubject: Survey dates\nMIME-Version: 1.0\n"
+                "Content-Type: multipart/mixed; boundary=b\n\n"
                 "--b\nContent-Type: text/plain\n\nThe survey runs in June.\n--b\nContent-Type: text/csv\n"
                 "Content-Disposition: attachment; filename=counts.csv\n\nSpecies,Pairs\nRazorbill,57\n--b--\n"
             )

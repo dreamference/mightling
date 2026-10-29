@@ -69,7 +69,10 @@ class NightShiftIndex:
             output, _ = process.communicate(timeout=timeout_s)
         except subprocess.TimeoutExpired:
             cls._stop(process)
-            return f"stopped after {int(timeout_s // 60)} min ([night] index_timeout); the tasks start on the index as it was"
+            return (
+                f"stopped after {int(timeout_s // 60)} min ([night] index_timeout); "
+                "the tasks start on the index as it was"
+            )
         if process.returncode != 0:
             last = (output.strip().splitlines() or ["no output"])[-1]
             return f"not refreshed (exit {process.returncode}): {last[:200]}"

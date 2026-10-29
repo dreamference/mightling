@@ -4,8 +4,8 @@
 
 This module provides the PreviewPage class: a loopback HTTP server, for the length of one
 `ling-admin audit egress --app` session, serving one page that reaches for the internet every
-way a page can (a picture, a script, a stylesheet, a `fetch`, DNS prefetch and preconnect hints (in the page and added by script),
-a link followed by script). The app opens it in a preview tab (`MIGHTLING_APP_AUDIT_PREVIEW`);
+way a page can (a picture, a script, a stylesheet, a `fetch`, DNS prefetch and preconnect hints (in
+the page and added by script), a link followed by script). The app opens it in a preview tab (`MIGHTLING_APP_AUDIT_PREVIEW`);
 the preview's rules must turn every one of those away before a connection or a DNS query, which
 the trace then shows. The page's own port is the one loopback port it adds to the allowlist.
 """
@@ -42,12 +42,13 @@ class PreviewPage:
     """A loopback server for the audit's preview page, recording what was asked of it."""
 
     def __init__(self) -> None:
+        """Starts with no request recorded."""
         self.paths: list[str] = []
         page = PAGE.encode()
         paths = self.paths
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802 (the standard library's name)
+            def do_GET(self) -> None:
                 paths.append(self.path)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -90,7 +91,9 @@ class PreviewPage:
         self._server.server_close()
 
     def __enter__(self) -> "PreviewPage":
+        """Starts the server for the length of the `with` block."""
         return self.start()
 
     def __exit__(self, *exc: object) -> None:
+        """Stops the server."""
         self.stop()

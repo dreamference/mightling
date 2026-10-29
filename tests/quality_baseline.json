@@ -7,7 +7,6 @@
    "PQ002": 1
   },
   "dreamference/audit/docs_egress_audit.py": {
-   "E501": 3,
    "PLR2004": 1,
    "PTH118": 12,
    "T201": 11
@@ -15,7 +14,6 @@
   "dreamference/audit/egress_audit.py": {
    "BLE001": 1,
    "C901": 3,
-   "E501": 6,
    "PLR0912": 1,
    "PLR0913": 2,
    "PLR0915": 2,
@@ -31,15 +29,11 @@
    "T201": 26
   },
   "dreamference/audit/preview_page.py": {
-   "D105": 2,
-   "D107": 1,
    "E501": 1,
-   "PLR2004": 1,
-   "RUF100": 1
+   "PLR2004": 1
   },
   "dreamference/audit/strace_parser.py": {
    "C901": 1,
-   "D301": 1,
    "PLR0912": 1,
    "PLR2004": 20,
    "PTH119": 1
@@ -53,7 +47,6 @@
    "RUF001": 1
   },
   "dreamference/chat/desktop_installer.py": {
-   "E501": 1,
    "PLR2004": 7,
    "PTH111": 1,
    "PTH113": 2,
@@ -92,9 +85,7 @@
   "dreamference/chat/gmail_search_service.py": {
    "BLE001": 8,
    "C901": 5,
-   "D102": 2,
-   "D301": 1,
-   "E501": 3,
+   "E501": 1,
    "PLR0911": 2,
    "PLR0912": 2,
    "PLR0915": 1,
@@ -104,7 +95,6 @@
    "PTH107": 1,
    "PTH118": 7,
    "PTH123": 7,
-   "RUF100": 1,
    "S110": 2
   },
   "dreamference/chat/google_service.py": {
@@ -118,15 +108,12 @@
   },
   "dreamference/chat/image_search_service.py": {
    "ANN401": 7,
-   "B904": 3,
    "BLE001": 11,
    "C901": 2,
-   "E501": 1,
    "N818": 1,
    "PLR1702": 1,
    "PLR2004": 10,
    "PTH118": 3,
-   "RUF100": 2,
    "S110": 1
   },
   "dreamference/chat/image_search_sidecar.py": {
@@ -136,8 +123,6 @@
   },
   "dreamference/chat/matrix_homeserver.py": {
    "C901": 1,
-   "D102": 5,
-   "E501": 1,
    "PLR0911": 1,
    "PLR0912": 1,
    "PLR2004": 10,
@@ -555,11 +540,9 @@
    "PLR2004": 7,
    "PTH115": 1,
    "PTH118": 1,
-   "PTH119": 4,
-   "RUF002": 1
+   "PTH119": 4
   },
   "dreamference/night_shift/night_shift_index.py": {
-   "E501": 1,
    "PLR2004": 2,
    "PTH118": 1
   },
@@ -569,7 +552,6 @@
    "PTH111": 1
   },
   "dreamference/night_shift/night_shift_remote.py": {
-   "E501": 1,
    "PLR0911": 1,
    "PLR1702": 1,
    "PLR2004": 6,
@@ -1010,7 +992,6 @@
   },
   "dreamference/swe_bench/swe_bench_command.py": {
    "ANN401": 1,
-   "E501": 2,
    "PLR0911": 1,
    "PLR2004": 8,
    "T201": 36
@@ -1025,7 +1006,6 @@
   "dreamference/swe_bench/swe_bench_gate_hold.py": {
    "ANN401": 1,
    "BLE001": 1,
-   "D105": 2,
    "PLR2004": 2,
    "S110": 1,
    "SIM105": 1
@@ -1057,7 +1037,6 @@
    "ANN401": 1,
    "BLE001": 2,
    "C901": 2,
-   "D102": 2,
    "PLR0911": 1,
    "PLR1702": 5,
    "PLR2004": 21,
@@ -1067,7 +1046,6 @@
   },
   "dreamference/swe_bench/swe_bench_issue_targets.py": {
    "C901": 3,
-   "E501": 1,
    "PLR0912": 1,
    "PLR0915": 1,
    "PLR1702": 1,
@@ -1085,12 +1063,10 @@
   "dreamference/swe_bench/swe_bench_report.py": {
    "ANN401": 11,
    "C901": 3,
-   "E501": 1,
    "PLR2004": 20
   },
   "dreamference/swe_bench/swe_bench_run_store.py": {
    "C901": 1,
-   "D415": 1,
    "PLR2004": 8
   },
   "dreamference/swe_bench/swe_bench_runner.py": {
@@ -1876,5 +1852,5 @@
   }
  },
  "ruff": "0.16.10",
- "total": 5172
+ "total": 5127
 }
