@@ -402,7 +402,7 @@ fn run_refresh(args: &[String], invocation: &Invocation) -> i32 {
         Err(code) => return code,
     };
     let arch = std::env::consts::ARCH;
-    let work = std::env::temp_dir().join(format!("ling-signal-refresh-{}", std::process::id()));
+    let work = setup::work_dir(&std::env::temp_dir(), "ling-signal-refresh");
     let java_present = setup::java_home().join("bin/java").exists();
     let signal_cli_present = setup::signal_cli_program().exists() && (arch != "aarch64" || setup::native_dir().join("libsignal_jni.so").exists());
     let mut plan = setup::refresh_plan(&bridge, &work, arch, java_present, signal_cli_present, &instances);
@@ -425,7 +425,10 @@ fn run_refresh(args: &[String], invocation: &Invocation) -> i32 {
         println!("Nothing was changed.");
         return 1;
     }
-    let _ = std::fs::create_dir_all(&work);
+    if let Err(err) = setup::make_work_dir(&work) {
+        eprintln!("❌ Could not make the scratch folder {}: {err}. Nothing was changed.", work.display());
+        return 1;
+    }
     for step in &plan {
         println!("🔑 {}", step.display());
         let mut command = step.command.clone();
@@ -434,6 +437,7 @@ fn run_refresh(args: &[String], invocation: &Invocation) -> i32 {
         }
         if let Err(output) = run_command(&command, step.stdin.as_deref()) {
             eprintln!("❌ That step failed:\n{output}");
+            let _ = std::fs::remove_dir_all(&work);
             return 1;
         }
     }
@@ -750,7 +754,7 @@ fn run_setup(args: &[String], invocation: &Invocation) -> i32 {
         }
     };
     let user = if dry_run { String::new() } else { current_user() };
-    let work = std::env::temp_dir().join(format!("ling-signal-setup-{}", std::process::id()));
+    let work = setup::work_dir(&std::env::temp_dir(), "ling-signal-setup");
     let account_exists = host.account_exists(&instance.account());
     let java_present = setup::java_home().join("bin/java").exists();
     let signal_cli_present = setup::signal_cli_program().exists() && (arch != "aarch64" || setup::native_dir().join("libsignal_jni.so").exists());
@@ -825,7 +829,10 @@ fn run_setup(args: &[String], invocation: &Invocation) -> i32 {
         eprintln!("❌ {number} is already the bridge `{holder}`'s; one Signal account has one bridge. Nothing was changed.");
         return 1;
     }
-    let _ = std::fs::create_dir_all(&work);
+    if let Err(err) = setup::make_work_dir(&work) {
+        eprintln!("❌ Could not make the scratch folder {}: {err}. Nothing was changed.", work.display());
+        return 1;
+    }
     for step in &plan {
         println!("🔑 {}", step.display());
         let mut command = step.command.clone();

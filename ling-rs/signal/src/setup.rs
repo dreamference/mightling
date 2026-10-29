@@ -158,6 +158,25 @@ fn runtime_steps(bridge: &Path, work: &Path, arch: &str, java_present: bool, sig
     steps
 }
 
+/// The scratch folder for the downloads, under `parent` (the temporary directory), named so no one
+/// can make it ahead: root unpacks from it what was checked as the user, so another local user who
+/// owned it could swap an archive between the check and the unpacking.
+pub fn work_dir(parent: &Path, prefix: &str) -> PathBuf {
+    use rand::Rng;
+    parent.join(format!("{prefix}-{}-{:016x}", std::process::id(), rand::rng().random::<u64>()))
+}
+
+/// Makes `work` the user's own (0700), refusing one that already exists, a link included.
+pub fn make_work_dir(work: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(work)
+}
+
 /// The bridge binary already installed in /usr/local/lib/mightling, against the one setup would
 /// install (§18.8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -699,6 +718,36 @@ mod tests {
         assert_eq!(found, (InstalledBridge::Missing, InstalledBridge::Same, InstalledBridge::Different));
         // The SHA-256 of the bytes, in hex (as `sha256sum` prints it).
         assert_eq!(digest.as_deref(), Some("c6e7b4f83cfe2169910422f47b941d2386297109ffad0f18014455cfbfed3b5f"));
+    }
+
+    #[test]
+    fn the_scratch_folder_is_unguessable_private_and_never_one_made_before() {
+        let parent = std::env::temp_dir().join(format!("ling-signal-work-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&parent);
+        std::fs::create_dir_all(&parent).unwrap();
+        let (first, second) = (work_dir(&parent, "ling-signal-setup"), work_dir(&parent, "ling-signal-setup"));
+        assert_ne!(first, second, "a name another user can predict lets them make the folder first");
+        assert_eq!(first.parent(), Some(parent.as_path()));
+        make_work_dir(&first).unwrap();
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(&first).unwrap().permissions().mode() & 0o777
+        };
+        // A folder someone made first (here: the one just made) is refused, and so is a link.
+        let again = make_work_dir(&first);
+        #[cfg(unix)]
+        let linked = {
+            std::os::unix::fs::symlink(&first, &second).unwrap();
+            make_work_dir(&second)
+        };
+        let _ = std::fs::remove_dir_all(&parent);
+        assert!(again.is_err());
+        #[cfg(unix)]
+        {
+            assert_eq!(mode, 0o700);
+            assert!(linked.is_err());
+        }
     }
 
     #[test]
