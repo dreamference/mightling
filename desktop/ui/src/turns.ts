@@ -158,8 +158,9 @@ export async function askOnce(client: RpcClient, listen: Listen, options: { cwd:
   const threadId = started.thread.id;
   let said = "";
   let stop: () => void = () => {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const answered = new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       stop();
       reject(new Error("the model did not answer in time"));
     }, options.timeoutMs ?? 300_000);
@@ -180,6 +181,8 @@ export async function askOnce(client: RpcClient, listen: Listen, options: { cwd:
     await client.request("turn/start", { threadId, input: [{ type: "text", text: options.prompt, text_elements: [] }] });
     return (await answered).trim();
   } finally {
+    // A turn that could not start leaves no time-out behind to reject later.
+    clearTimeout(timer);
     stop();
     client.request("thread/unsubscribe", { threadId }).catch(() => {});
   }
