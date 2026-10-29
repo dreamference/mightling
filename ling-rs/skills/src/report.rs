@@ -169,7 +169,7 @@ pub fn list(plan: &Plan, machine: &Machine, settings: &Settings, all: bool) -> V
             repository.root.display()
         ));
     }
-    lines
+    printable(lines)
 }
 
 /// `on`, `off`, `not trusted` or `on, no folder` for the repository's foreign skill folders.
@@ -279,7 +279,27 @@ pub fn show(entry: &Entry, machine: &Machine) -> Vec<String> {
             scripts.len()
         ));
     }
+    printable(lines)
+}
+
+/// `lines` with what a terminal would act on written out instead: a skill's name, description and
+/// file names come from whoever wrote it, and an escape sequence among them could move the cursor
+/// and paint over the lines above, the scan verdict and the scripts `ling skill add` asks about.
+/// Line breaks and tabs stay; other control characters and the bidirectional overrides that
+/// reorder what is shown are given as `\u{…}`.
+pub fn printable(lines: Vec<String>) -> Vec<String> {
+    let acted_on = |ch: char| {
+        (ch.is_control() && ch != '\n' && ch != '\t') || matches!(ch, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    };
     lines
+        .into_iter()
+        .map(|line| {
+            if !line.contains(acted_on) {
+                return line;
+            }
+            line.chars().map(|ch| if acted_on(ch) { ch.escape_unicode().to_string() } else { ch.to_string() }).collect()
+        })
+        .collect()
 }
 
 /// What `ling skill add` shows before anything is installed (spec §6.2 step 4): the name and
@@ -349,7 +369,7 @@ pub fn staged(staged: &install::Staged, origin: &install::Origin, plan: &Plan, m
         None => format!("  Catalogue:   +{} tokens each session", grouped(cost)),
     });
     lines.push("Nothing runs by being installed. Its scripts run only as commands the model issues, under the session's sandbox.".to_string());
-    lines
+    printable(lines)
 }
 
 #[cfg(test)]
@@ -441,5 +461,26 @@ mod tests {
         assert!(text.contains("Files:       2 ("), "{text}");
         assert!(text.contains("  scripts/run.sh  10"), "{text}");
         assert!(text.contains("Scripts:     1 file(s) under scripts/"), "{text}");
+    }
+
+    #[test]
+    fn what_a_skill_says_cannot_paint_over_the_summary() {
+        let fixture = Fixture::new("report-escapes");
+        let dir = fixture.skill(".claude/skills/paint", "paint", "");
+        std::fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: paint\ndescription: \"Fine.\\r\\e[2K\\e[1A\\x9b1A\\u202edlrow\"\n---\n# Body\n",
+        )
+        .unwrap_or_default();
+        std::fs::create_dir_all(dir.join("scripts")).unwrap_or_default();
+        std::fs::write(dir.join("scripts/run\u{1b}[3A.sh"), "#!/bin/sh\n").unwrap_or_default();
+        let staged_skill = install::validate(&dir).unwrap_or_else(|error| panic!("{error}"));
+        let machine = fixture.machine();
+        let plan = plan(&machine, &Settings::default());
+        let text = staged(&staged_skill, &install::Origin::default(), &plan, &machine).join("\n");
+        assert!(!text.contains(['\u{1b}', '\u{9b}', '\u{202e}', '\r']), "{text:?}");
+        assert!(text.contains("Description: Fine.\\u{d}\\u{1b}[2K\\u{1b}[1A\\u{9b}1A\\u{202e}dlrow"), "{text}");
+        assert!(text.contains("scripts/run\\u{1b}[3A.sh"), "{text}");
+        assert_eq!(printable(vec!["a\tb\nc".to_string()]), vec!["a\tb\nc".to_string()]);
     }
 }
