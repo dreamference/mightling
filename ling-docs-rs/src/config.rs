@@ -482,6 +482,13 @@ mod tests {
             ),
             (64, 2000, 120, 45, 1024, 1)
         );
+        // §11: on unless set off, the one model this build knows, OCR on with its limits.
+        assert!(s.enabled);
+        assert_eq!(s.embedding_model, "snowflake-arctic-embed-m-v2.0-int8");
+        assert_eq!((s.ocr, s.ocr_max_pages, s.ocr_timeout_s), (true, 500, 120));
+        assert!((s.ocr_send_below - 0.92).abs() < 1e-6);
+        // §7.5: the staleness key a chunking change is detected by.
+        assert_eq!(chunking_key(), "tokens=512 overlap=0.15 chunker=1");
     }
 
     #[test]

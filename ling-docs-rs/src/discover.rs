@@ -594,6 +594,43 @@ mod tests {
     }
 
     #[test]
+    fn every_secret_name_is_skipped_and_lingignore_cannot_take_one_back() {
+        for name in [
+            ".env",
+            ".env.local",
+            "id_rsa",
+            "id_ed25519.pub",
+            "server.pem",
+            "tls.key",
+            "cert.p12",
+            "Credentials.json",
+        ] {
+            assert!(secret_name(name), "{name}");
+        }
+        for name in ["notes.md", "keyboard.txt", "valid_ids.csv"] {
+            assert!(!secret_name(name), "{name}");
+        }
+        // Readable kinds named like secrets; `.lingignore` only excludes, so `!` keeps them out.
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("Documents");
+        for name in [
+            "id_notes.md",
+            "server.pem.txt",
+            "tls.key.md",
+            "cert.p12.txt",
+        ] {
+            write(&root.join(name), b"x");
+        }
+        write(&root.join("plan.md"), b"x");
+        write(&root.join(".lingignore"), b"!id_notes.md\n!*.txt\n");
+        let found = walk(&Collection::new("documents", root), &home, true);
+        let rels: Vec<&str> = found.candidates.iter().map(|c| c.rel.as_str()).collect();
+        assert_eq!(rels, ["plan.md"]);
+        assert_eq!(found.skipped["named like a secret"], 4);
+    }
+
+    #[test]
     fn symlinks_are_skipped_or_kept_inside_the_root() {
         let home = tempfile::tempdir().unwrap();
         let home = home.path().canonicalize().unwrap();

@@ -269,6 +269,40 @@ mod tests {
     }
 
     #[test]
+    fn a_collection_that_keeps_changing_is_due_after_the_longest_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().canonicalize().unwrap();
+        let root = home.join("Documents");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("old.md"), b"x").unwrap();
+        let Some(mut watcher) = Watcher::new(100) else {
+            return;
+        };
+        watcher.watch(&[Collection::new("documents", root.clone())], &home);
+        // A deletion marks the collection too.
+        std::fs::remove_file(root.join("old.md")).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(watcher.poll(&home).is_empty(), "not quiet yet");
+        assert!(watcher.dirty.contains_key("documents"));
+        // Changing since LONGEST ago and changed just now: due although never quiet.
+        let now = Instant::now();
+        watcher
+            .dirty
+            .insert("documents".into(), (now - LONGEST, now));
+        assert_eq!(watcher.poll(&home), ["documents"]);
+        // Changing for less than LONGEST and not quiet: not yet.
+        let now = Instant::now();
+        watcher
+            .dirty
+            .insert("documents".into(), (now - LONGEST / 2, now));
+        assert!(watcher.poll(&home).is_empty());
+        assert_eq!(
+            (QUIET, LONGEST),
+            (Duration::from_secs(15), Duration::from_secs(120))
+        );
+    }
+
+    #[test]
     fn the_budget_bounds_the_watches() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().canonicalize().unwrap();
