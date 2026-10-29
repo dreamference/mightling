@@ -91,6 +91,23 @@ def test_the_advised_utilization_fits_beside_the_side_services(monkeypatch, caps
     assert advised * 128.0 + transient + side <= available
 
 
+def test_the_advised_utilization_leaves_the_host_its_reserve(monkeypatch, capsys):
+    import re
+
+    import dreamference.hardware as hardware
+    from dreamference.vllm_server.vllm_server_manager import HOST_MEMORY_RESERVE_GB
+
+    mgr = _gb10_manager(monkeypatch, available=120.0)
+    recipe = {"gpu_memory_utilization": 0.95}
+    monkeypatch.setattr(hardware, "get_model_launch_overrides", lambda model, engine=None: recipe)
+    with pytest.raises(SystemExit):
+        mgr.start_server(model="qwen2.5-coder-32b", background=False, gate=False)
+    out = capsys.readouterr().out
+    advised = float(re.search(r"gpu_memory_utilization to at most (\d\.\d+)", out).group(1))
+    # Rounded to the nearest hundredth, 116/128 became 0.91, which the same check refuses again.
+    assert 128.0 - advised * 128.0 >= HOST_MEMORY_RESERVE_GB
+
+
 class _FakeWatchdog:
     def __init__(self, container, on_trip):
         self.stopped = False
