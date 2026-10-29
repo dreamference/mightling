@@ -4,7 +4,7 @@ Developer notes behind the "Models and the model server" summary in `AGENTS.md`.
 
 ## Config precedence
 
-`config/dreamference_config.py`: every field resolves through the same 4-step chain, in `DreamferenceConfig.__init__`: constructor kwarg → `DREAMFERENCE_*` env var → `dreamference.toml` (local, then `~/.config/dreamference/config.toml`) → module-level `DEFAULT_*` constant. `save_config()` deliberately writes only values that differ from the defaults, so a round-trip does not fossilize defaults into the TOML.
+`config/dreamference_config.py`: every field resolves through the same 4-step chain, in `DreamferenceConfig.__init__`: constructor kwarg → `DREAMFERENCE_*` env var → `dreamference.toml` (local, then `~/.config/dreamference/config.toml`) → module-level `DEFAULT_*` constant. `save_config()` deliberately writes only values that differ from the defaults, so a round-trip does not fossilize defaults into the TOML. A repository's own `dreamference.toml` may set no network key (`NETWORK_KEYS`, today `vllm_host`): it is ignored with one warning and the user's file decides; the launcher and `ling-code` follow the same rule.
 
 ## A model may name its engine
 
