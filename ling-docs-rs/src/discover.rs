@@ -241,6 +241,8 @@ pub fn walk_in(
     let secret: Vec<PathBuf> = secret_dirs_in(&root, &home, codex_home);
     let include = globs(&collection.include);
     let exclude = globs(&collection.exclude);
+    // An exclude pattern that does not parse keeps every file out rather than none.
+    let bad_exclude = collection.exclude.iter().any(|p| Glob::new(p).is_err());
     let max_size = collection.max_file_mb.saturating_mul(1 << 20);
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut stack: Vec<(PathBuf, Vec<Gitignore>)> = vec![(root.clone(), Vec::new())];
@@ -357,6 +359,10 @@ pub fn walk_in(
                 .strip_prefix(&root)
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|_| name.clone());
+            if bad_exclude {
+                *out.skipped.entry("exclude glob not valid").or_default() += 1;
+                continue;
+            }
             if include.as_ref().is_some_and(|g| !g.is_match(&rel))
                 || exclude.as_ref().is_some_and(|g| g.is_match(&rel))
             {
@@ -702,5 +708,20 @@ mod tests {
         let no_images = walk(&c, &home, false);
         assert!(!no_images.candidates.iter().any(|x| x.kind == Kind::Image));
         assert_eq!(no_images.skipped["type not read"], 1);
+    }
+
+    #[test]
+    fn an_exclude_glob_that_does_not_parse_keeps_everything_out() {
+        // Dropping the pattern would index the very files it was written to keep out.
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("private/a.md"), b"hello");
+        write(&root.join("b.md"), b"hello");
+        let mut c = Collection::new("docs", root);
+        c.exclude = vec!["private/**".into(), "notes/[".into()];
+        let found = walk(&c, &home, true);
+        assert!(found.candidates.is_empty(), "{:?}", found.candidates);
+        assert_eq!(found.skipped["exclude glob not valid"], 2);
     }
 }
