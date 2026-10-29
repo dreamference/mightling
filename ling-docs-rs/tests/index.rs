@@ -1840,3 +1840,90 @@ fn an_extractor_change_reads_only_its_kind_again_and_embeds_only_changed_chunks(
     index::run(&env, &docs, None, false).unwrap();
     assert!(host.started.lock().unwrap().is_empty());
 }
+
+/// Spec §5.2, §7.3, §10.2, §10.3: what `add`, `status` and `remove` tell the user, on a machine
+/// without the runtime, and the folders `add` refuses.
+#[test]
+fn add_status_and_remove_say_what_the_spec_says() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let user = root.join("user");
+    let agent = user.join(".mightling");
+    let papers = user.join("Papers");
+    std::fs::create_dir_all(&papers).unwrap();
+    std::fs::create_dir_all(&agent).unwrap();
+    let run = |args: &[&str]| {
+        Command::new(exe())
+            .args(args)
+            .current_dir(&root)
+            .env("HOME", &user)
+            .env("CODEX_HOME", &agent)
+            .env("DREAMFERENCE_CONFIG_PATH", root.join("no-config.toml"))
+            .env("XDG_RUNTIME_DIR", root.join("no-run"))
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+            .env("MIGHTLING_DOCS_LIB_DIR", root.join("no-lib"))
+            .env("MIGHTLING_DOCS_MODEL_DIR", root.join("no-model"))
+            .env_remove("DREAMFERENCE_MIGHTLING_DOCS")
+            .output()
+            .unwrap()
+    };
+    let text = |output: &std::process::Output| {
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    };
+
+    // Without the runtime, indexing waits and says how to get it.
+    let added = run(&["add", papers.to_str().unwrap()]);
+    assert!(added.status.success(), "{}", text(&added));
+    let said = text(&added);
+    assert!(said.contains("Added `papers`"), "{said}");
+    assert!(
+        said.contains("Indexing waits:") && said.contains("ling-admin docs setup"),
+        "{said}"
+    );
+
+    // The status says the index never goes to the network.
+    let status = run(&["status"]);
+    assert!(
+        text(&status).contains("unaffected by /airgapped"),
+        "{}",
+        text(&status)
+    );
+    let status = run(&["status", "--json"]);
+    let json: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert!(
+        json["network"].as_str().unwrap().contains("local only"),
+        "{json}"
+    );
+
+    // Removing deletes the database and says so; the files stay.
+    std::fs::create_dir_all(agent.join("docs")).unwrap();
+    std::fs::write(agent.join("docs/papers.db"), b"x").unwrap();
+    std::fs::write(papers.join("keep.md"), b"# kept\n").unwrap();
+    let removed = run(&["remove", "papers"]);
+    assert!(removed.status.success(), "{}", text(&removed));
+    let said = text(&removed);
+    assert!(
+        said.contains("is deleted") && said.contains("files are untouched"),
+        "{said}"
+    );
+    assert!(!agent.join("docs/papers.db").exists());
+    assert!(papers.join("keep.md").exists());
+    let listed = run(&["list", "--json"]);
+    assert_eq!(String::from_utf8_lossy(&listed.stdout).trim(), "[]");
+
+    // The whole home and `/` are refused.
+    for folder in [user.to_str().unwrap(), "/"] {
+        let refused = run(&["add", folder]);
+        assert!(!refused.status.success(), "{folder}: {}", text(&refused));
+        assert!(
+            text(&refused).contains("cannot be a collection")
+                || text(&refused).contains("whole home folder"),
+            "{}",
+            text(&refused)
+        );
+    }
+}
