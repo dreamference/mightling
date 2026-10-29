@@ -63,7 +63,13 @@ export class UndoStack {
   async undo(): Promise<string | null> {
     const action = this.done.pop();
     if (!action) return null;
-    await action.undo();
+    try {
+      await action.undo();
+    } catch (error) {
+      // Not undone: it stays to be tried again.
+      this.done.push(action);
+      throw error;
+    }
     this.undone.push(action);
     return action.label;
   }
@@ -71,8 +77,13 @@ export class UndoStack {
   async redo(): Promise<string | null> {
     const action = this.undone.pop();
     if (!action) return null;
-    await action.redo();
-    this.done.push(action);
+    try {
+      await action.redo();
+    } catch (error) {
+      this.undone.push(action);
+      throw error;
+    }
+    this.done = [...this.done, action].slice(-50);
     return action.label;
   }
 
