@@ -299,14 +299,32 @@ OLD_ASSETS_STEP = r"""      # 1.9.0 publishes the binaries three times, under ra
               ragon-*.gz) cp "$file" "$dir/ling${base#ragon}" ;;
               ragon-*.sha256sums) sed 's/ragon/ling/' "$file" > "$dir/ling${base#ragon}" ;;
             esac
+            # 1.4.x was built for Linux only, and its `puffin update` asks only for these five names.
+            [[ "$base" == *-unknown-linux-gnu.* ]] || continue
             case "$base" in
               ragon-aarch64-*.gz|ragon-x86_64-*.gz|ragon-search-*.gz|ragon-fetch-*.gz|ragon-code-*.gz)
                 cp "$file" "$dir/puffin${base#ragon}" ;;
               ragon-aarch64-*.sha256sums|ragon-x86_64-*.sha256sums)
-                grep -v -E 'ragon-(docs|app)' "$file" | sed 's/ragon/puffin/' > "$dir/puffin${base#ragon}" ;;
+                grep -E '  (ragon(-search|-fetch|-code)?|codex-code-mode-host)-(aarch64|x86_64)-unknown-linux-gnu\.gz$' "$file" \
+                  | sed 's/ragon/puffin/' > "$dir/puffin${base#ragon}" ;;
             esac
           done < <(find artifacts -type f -name 'ragon-*' | sort)
 """
+
+# The older names are added by release.yml (OLD_ASSETS_STEP) for 1.9.0 only, not in every build.
+BUILD_OLD_ASSETS = (
+    '          # The transition from Puffin (specs/DREAMFERENCE_RENAME_RAGON.md §4.1): a 1.4.x\n'
+    '          # `puffin update` asks for these exact names, so the same binaries are published under\n'
+    '          # them too, with a checksum file that lists them. The new binary migrates the old\n'
+    '          # installation the first time it runs. Dropped in a later release, announced in its notes.\n'
+    '          for name in "" -search -fetch -code; do\n'
+    '            cp "dist/ragon$name-$target.gz" "dist/puffin$name-$target.gz"\n'
+    '          done\n'
+    '          (cd dist && sha256sum "puffin-$target.gz" "codex-code-mode-host-$target.gz" \\\n'
+    '            "puffin-search-$target.gz" "puffin-fetch-$target.gz" "puffin-code-$target.gz" \\\n'
+    '            > "puffin-$target.sha256sums")\n'
+)
+BUILD_OLD_ASSETS_NEW = "          # release.yml adds the older asset names to 1.9.0 only, over the same bytes.\n"
 
 SCIP_FILTER_OLD = "WHERE name NOT LIKE 'puffin\\\\_%' ESCAPE '\\\\' AND name NOT LIKE 'sqlite\\\\_%' ESCAPE '\\\\'"
 SCIP_FILTER_NEW = (
@@ -767,6 +785,7 @@ COMPAT_EDITS = [
     ("dreamference/vllm_server/sandbox_prerequisite.py", BWRAP_OURS_OLD, BWRAP_OURS_NEW, 1),
     ("dreamference/vllm_server/host_safety_setup.py", BWRAP_STEP_OLD, BWRAP_STEP_NEW, 1),
     ("tests/test_sandbox_prerequisite.py", BWRAP_TEST_ANCHOR, BWRAP_TEST, 1),
+    (".github/workflows/release-build.yml", BUILD_OLD_ASSETS, BUILD_OLD_ASSETS_NEW, 1),
 ]
 
 
