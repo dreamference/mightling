@@ -838,3 +838,21 @@ def test_a_refresh_that_rotates_the_refresh_token_stores_the_new_one(tmp_path, m
     stored = GmailSearchService._raw(directory)["accounts"]["a@x.com"]
     assert GmailSearchService._unseal(stored["refresh_token"], directory) == "ref-new"
 
+
+
+def test_a_sealing_key_another_request_created_first_is_the_one_kept(tmp_path, monkeypatch):
+    # Two first saves at once: the one that loses must not replace the key the other sealed with.
+    from dreamference.chat import gmail_search_service as svc_mod
+    from dreamference.chat.gmail_search_service import KEY_NAME, GmailSearchService
+
+    winner = b"w" * 32
+    real = svc_mod.secrets.token_bytes
+
+    def racing(n):
+        (tmp_path / KEY_NAME).write_bytes(winner)
+        return real(n)
+
+    monkeypatch.setattr(svc_mod.secrets, "token_bytes", racing)
+    assert GmailSearchService._key(str(tmp_path)) == winner
+    assert (tmp_path / KEY_NAME).read_bytes() == winner
+    assert [path.name for path in tmp_path.iterdir()] == [KEY_NAME]
