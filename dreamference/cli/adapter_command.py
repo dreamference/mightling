@@ -7,6 +7,7 @@ through the node's `/v1/models`. Only `install` reaches the network; `list`, `li
 
 import argparse
 import json
+import sys
 from typing import Final
 
 from dreamference.config import DreamferenceConfig
@@ -78,7 +79,9 @@ class AdapterCommand:
             help="Install an adapter that is not signed by Dreamference (asks you to type its name)",
         )
         install.add_argument(
-            "--hf-token", default=None, help="A Hugging Face token, for a private repository"
+            "--hf-token",
+            default=argparse.SUPPRESS,
+            help="A Hugging Face token, for a private repository",
         )
         remove = commands.add_parser("remove", help="Remove an installed adapter and its files")
         remove.add_argument("name", help="The installed adapter")
@@ -228,6 +231,10 @@ class AdapterCommand:
         print(
             f"    It is {manifest.display_name} ({manifest.name} {manifest.version}): {manifest.description}"
         )
+        # Piped input is a script or an agent, which the typed name exists to keep out.
+        if not sys.stdin.isatty():
+            print("❌ A third-party adapter is confirmed at a terminal: run this command in one.")
+            return False
         try:
             typed = input("    Type the adapter's name to install it: ")
         except EOFError:

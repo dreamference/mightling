@@ -1304,7 +1304,7 @@ class DreamferenceCLIController:
         init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
         init_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
         init_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
-        init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+        init_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
 
         # Command: ling-admin run
         run_parser = subparsers.add_parser("run", help="Run an autonomous coding task")
@@ -1312,7 +1312,7 @@ class DreamferenceCLIController:
         run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         run_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
         run_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
-        run_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+        run_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
         run_parser.add_argument(
             "--compat",
@@ -1408,7 +1408,7 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
         start_server_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
-        start_server_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+        start_server_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
         start_server_parser.add_argument("--num-scheduler-steps", type=int, default=None, help="Multi-step scheduling iterations per step")
         start_server_parser.add_argument("--attention-backend", default=None, help="Attention backend (FLASHINFER, FLASH_ATTN, auto)")
         start_server_parser.add_argument("--kv-cache-dtype", default=None, help="KV cache precision (auto, fp8)")
@@ -2681,7 +2681,7 @@ class DreamferenceCLIController:
             if not seen:
                 print("No MCP lifecycle entries found. Run `RUST_LOG=codex_mcp=trace ling` to record some.")
             else:
-                print("[bold]MCP server lifecycle (most recent first)[/bold]\n")
+                console.print("[bold]MCP server lifecycle (most recent first)[/bold]\n")
                 for name, marker in seen:
                     icon = "✅" if marker == "Service initialized as client" else "⚠️ "
                     print(f"   {icon} {name:16} {marker}")
@@ -2988,6 +2988,7 @@ class DreamferenceCLIController:
                         print(f"\n❌ The model server stopped before it answered. Its log: "
                               f"docker logs dreamference-vllm-{args.port}")
                         cls._suggest_engine_fallback(args.model, engine, "to start")
+                        sys.exit(1)
 
                     # Do not block: exit after health check passes (server keeps running)
                     
@@ -3234,7 +3235,10 @@ class DreamferenceCLIController:
                 print("✅ ling's app-server daemon started.")
             elif args.codex_command == "stop":
                 print("🛑 Stopping ling's app-server daemon...")
-                subprocess.call([codex_bin, "app-server", "daemon", "stop"])
+                returncode = subprocess.call([codex_bin, "app-server", "daemon", "stop"])
+                if returncode != 0:
+                    print(f"❌ ling's app-server daemon did not stop (exit code {returncode}).")
+                    sys.exit(returncode)
                 print("✅ ling's app-server daemon stopped.")
 
         elif args.command == "logs":
@@ -3289,6 +3293,7 @@ class DreamferenceCLIController:
                 subprocess.run(cmd, check=True)
             except subprocess.CalledProcessError as e:
                 print(f"❌ Benchmark failed: {e}")
+                sys.exit(1)
             except KeyboardInterrupt:
                 print("\n⏹️  Benchmark cancelled.")
 

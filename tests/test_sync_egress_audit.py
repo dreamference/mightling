@@ -134,3 +134,50 @@ def test_the_cli_runs_it_and_refuses_a_prompt(capsys):
         assert exit_info.value.code == 2
         sync_run.assert_not_called()
     assert "--prompt has no effect with --sync" in capsys.readouterr().out
+
+
+def test_the_sync_and_docs_audits_fail_a_networked_git_command():
+    # Only the session audit judged networked git; a sync cycle or a ling-docs run that started
+    # `git fetch` (one that reached nothing, say) passed.
+    from dreamference.audit import DocsEgressAudit
+    from dreamference.audit.egress_trace import EgressTrace
+
+    trace = EgressTrace(processes={"ling": 1, "git": 1}, networked_git=["git fetch origin"])
+    sync = SyncEgressAudit.judge(trace, PORT, published=True, exec_held=True)
+    docs = DocsEgressAudit.judge(trace, indexed=True, found=True)
+    for verdict in (sync, docs):
+        assert verdict.status == FAIL
+        assert any("git fetch origin" in problem for problem in verdict.problems)
+
+
+def test_a_cycle_cut_off_at_the_timeout_is_a_failed_trace_and_leaves_nothing_running(
+    tmp_path, monkeypatch, capsys
+):
+    # strace was killed alone at the timeout: the agent went on untraced, and a thread it had
+    # already published made the cut-off trace a pass.
+    import time
+
+    from dreamference.audit import sync_egress_audit
+    from dreamference.audit.egress_trace import EgressTrace
+
+    child = tmp_path / "child"
+    monkeypatch.setattr(sync_egress_audit, "STEP_TIMEOUT_S", 1)
+    said = SyncEgressAudit.step(
+        "sh", ["-c", f"sleep 30 & echo $! > '{child}'; wait"], {**os.environ, "HOME": str(tmp_path)}
+    )
+    assert said.startswith(sync_egress_audit.TIMED_OUT)
+    pid = int(child.read_text())
+    time.sleep(0.2)
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+    trace = EgressTrace(processes={"ling": 1}, destinations={f"127.0.0.1:{PORT}": 1})
+    cut = SyncEgressAudit.judge(trace, PORT, published=True, exec_held=True, finished=False)
+    assert cut.status == TRACE_FAILED
+    outputs = {"agent": said}
+    with (
+        patch.object(SyncEgressAudit, "trace", return_value=(trace, PORT, True, True, outputs)),
+        patch("shutil.which", return_value="/usr/bin/strace"),
+    ):
+        assert SyncEgressAudit.run(ling="/opt/ling") == 2
+    assert "trace failed" in capsys.readouterr().out

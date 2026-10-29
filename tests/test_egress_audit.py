@@ -975,3 +975,17 @@ def test_the_compatibility_audit_trusts_its_repository_and_approves_only_the_std
     assert "trust_level = \"trusted\"" in (home / "config.toml").read_text(encoding="utf-8")
     CompatPrintSession.approve_fixture_server(["/opt/ling", "exec", "x"], repo, {"CODEX_HOME": str(home)})
     assert len(calls) == 1, "only the compatibility session approves anything"
+
+
+def test_every_address_a_sendmmsg_names_is_counted():
+    # Only the first message's address was read: a batch that sent its second datagram elsewhere
+    # left that destination out of the trace.
+    def message(address, port):
+        return (f'{{msg_hdr={{msg_name={{sa_family=AF_INET, sin_port=htons({port}), '
+                f'sin_addr=inet_addr("{address}")}}, msg_namelen=16, msg_iov=[{{iov_base="x", iov_len=1}}], '
+                f'msg_iovlen=1, msg_controllen=0, msg_flags=0}}, msg_len=1}}')
+
+    line = (f'5 sendmmsg(7<UDP:[1234]>, [{message("127.0.0.1", 9000)}, '
+            f'{message("140.82.112.3", 443)}], 2, 0) = 2\n')
+    trace = StraceParser.parse(line)
+    assert trace.destinations == {"127.0.0.1:9000": 1, "140.82.112.3:443": 1}

@@ -301,3 +301,31 @@ def test_every_setting_ling_docs_reads_reaches_its_mcp_server():
     )
     assert "DREAMFERENCE_MIGHTLING_DOCS_EMBEDDING_MODEL" in read
     assert read <= forwarded, sorted(read - forwarded)
+
+
+def test_the_docs_audit_leaves_nothing_running_after_a_step_runs_out_of_time(tmp_path, monkeypatch):
+    # strace was killed alone at the timeout, so the ling-docs it traced went on, untraced.
+    import stat
+    import time
+
+    from dreamference.audit import docs_egress_audit
+
+    child = tmp_path / "child"
+    ling_docs = tmp_path / "ling-docs"
+    ling_docs.write_text(f"#!/bin/sh\nsleep 30 & echo $! >> '{child}'; wait\n")
+    strace = tmp_path / "strace"
+    # The stand-in strace runs what follows its `-o <file>` argument.
+    strace.write_text('#!/bin/sh\nwhile [ "$1" != -o ]; do shift; done; shift 2; exec "$@"\n')
+    for script in (ling_docs, strace):
+        script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    monkeypatch.setattr(docs_egress_audit, "RUN_TIMEOUT_S", 1)
+    work = tmp_path / "work"
+    work.mkdir()
+    _, indexed, found, outputs = DocsEgressAudit.trace(str(ling_docs), str(work))
+    assert (indexed, found) == (False, False)
+    assert outputs["index"] == "did not finish within 1 s"
+    time.sleep(0.2)
+    for pid in child.read_text().split():
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(pid), 0)

@@ -113,3 +113,105 @@ def test_audit_egress_docs_takes_json_and_refuses_a_prompt(capsys):
         assert exit_info.value.code == 2
         docs_run.assert_not_called()
         assert "--prompt has no effect with --docs" in capsys.readouterr().out
+
+
+def test_logs_mcp_prints_its_heading_without_markup(tmp_path, capsys):
+    # The heading went through the builtin print with rich markup, which printed `[bold]` as is.
+    import sqlite3
+
+    import pytest
+
+    from dreamference.runner import CodexInstaller
+
+    with sqlite3.connect(tmp_path / "logs_2.sqlite") as conn:
+        conn.execute("CREATE TABLE logs (message TEXT)")
+        conn.execute("INSERT INTO logs VALUES ('mcp{server_name=search} Service initialized as client')")
+    conn.close()
+    with patch.object(CodexInstaller, "home_dir", return_value=str(tmp_path)), pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(["logs", "mcp"])
+    assert exit_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "MCP server lifecycle (most recent first)" in out and "[bold]" not in out
+    assert "search" in out and "Service initialized as client" in out
+
+
+def test_a_failed_benchmark_exits_with_an_error(capsys):
+    # `vllm bench serve` failing was printed and the command still exited 0, so a script or a
+    # night job took the failed run for a finished one.
+    import subprocess
+
+    import pytest
+
+    failed = subprocess.CalledProcessError(1, ["docker", "exec"])
+    with patch("dreamference.hardware.resolve_model_hf_repo", return_value="org/model"), \
+            patch.object(subprocess, "run", side_effect=failed) as run, \
+            pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(["benchmark_server", "--dataset-path", "/data/sonnet.txt"])
+    assert run.call_count == 1 and exit_info.value.code == 1
+    assert "Benchmark failed" in capsys.readouterr().out
+
+
+def test_server_start_exits_with_an_error_when_the_server_stopped_before_it_answered(monkeypatch, capsys):
+    # The failure was printed and `server start` still exited 0, so a script went on to use a
+    # server that was not there.
+    import pytest
+
+    from dreamference.chat.google_service import GoogleService
+    from dreamference.chat.image_search_sidecar import ImageSearchSidecar
+    from dreamference.chat.speech_sidecar import SpeechSidecar
+    from dreamference.cli import dreamference_cli_controller as controller
+    from dreamference.node import NodeAdvertiser
+    from dreamference.vllm_server import DiffusionServerManager, VLLMServerManager
+
+    class Monitor:
+        server_ready = False
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    stopped = []
+    for sidecar in (GoogleService, SpeechSidecar):
+        monkeypatch.setattr(sidecar, "ensure_on_node", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(ImageSearchSidecar, "ensure_on_node", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(NodeAdvertiser, "on_server_starting", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(NodeAdvertiser, "on_server_stopped", classmethod(lambda cls, *a, **k: stopped.append(True)))
+    monkeypatch.setattr(controller, "create_model_loading_monitor", lambda *a, **k: Monitor())
+    # The container ran and its log stream ended without the server answering.
+    monkeypatch.setattr(VLLMServerManager, "start_server", lambda self, **_: None)
+    monkeypatch.setattr(DiffusionServerManager, "remove_leftover", classmethod(lambda cls, port=8001: None))
+    with pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(["server", "start", "--no-diffusion"])
+    assert exit_info.value.code == 1 and stopped == [True]
+    assert "The model server stopped before it answered" in capsys.readouterr().out
+
+
+def test_codex_stop_reports_a_daemon_that_did_not_stop(capsys):
+    # The stop command's exit code was ignored: "stopped" was printed and the command exited 0.
+    import subprocess
+
+    import pytest
+
+    from dreamference.runner import CodexInstaller
+
+    with patch.object(CodexInstaller, "install_if_missing", return_value=True), \
+            patch.object(CodexInstaller, "get_codex_executable", return_value="/opt/ling/bin/ling"), \
+            patch.object(subprocess, "call", return_value=3) as call, \
+            pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(["codex", "stop"])
+    call.assert_called_once_with(["/opt/ling/bin/ling", "app-server", "daemon", "stop"])
+    assert exit_info.value.code == 3
+    assert "daemon stopped" not in capsys.readouterr().out
+
+
+def test_a_global_hf_token_reaches_the_subcommands_that_also_take_one():
+    # Each subcommand's own --hf-token defaulted to None, which overwrote the token given before
+    # the subcommand: `ling-admin --hf-token T server start` started anonymously.
+    parser = DreamferenceCLIController.build_parser()
+    for command in (["init"], ["server", "start"], ["adapter", "install", "rust", "--repo", "o/r"]):
+        assert parser.parse_args(["--hf-token", "T", *command]).hf_token == "T", command
+        assert parser.parse_args([*command, "--hf-token", "U"]).hf_token == "U", command
+        assert parser.parse_args(command).hf_token is None, command
+    assert parser.parse_args(["--hf-token", "T", "run", "hello"]).hf_token == "T"

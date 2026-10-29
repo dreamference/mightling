@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -239,3 +240,38 @@ def test_the_package_this_suite_imports_is_a_source_tree():
     assert CodexBrandedBuilder.has_source()
     assert not LegacyNameMigration.release_install()
     assert not LegacyNameMigration.allowed()
+
+
+def test_authorized_keys_is_replaced_whole_or_not_at_all(tmp_path):
+    # It was rewritten in place: a write cut short left sshd a truncated file, locking out every
+    # key in it, the owner's own included.
+    keys = NodeServe.authorized_keys()
+    keys.parent.mkdir(parents=True, exist_ok=True)
+    before = (
+        "ssh-ed25519 AAAAmine me@laptop\n"
+        f'command="{tmp_path}/puffin-admin node serve-job --key k1",no-pty ssh-ed25519 AAAAsender puffin-node\n')
+    keys.write_text(before)
+    keys.chmod(0o600)
+
+    with patch.object(Path, "replace", side_effect=OSError("disk full")), pytest.raises(OSError):
+        LegacyNameMigration.rewrite_authorized_keys()
+    assert keys.read_text() == before
+    assert LegacyNameMigration.rewrite_authorized_keys()
+    assert KEY_COMMENT in keys.read_text() and "AAAAmine" in keys.read_text()
+    assert oct(keys.stat().st_mode & 0o777) == "0o600"
+    assert [entry.name for entry in keys.parent.iterdir()] == [keys.name]
+
+
+def test_an_old_key_beside_its_new_name_is_dropped_not_doubled(tmp_path):
+    # Renaming it beside the new key wrote the key twice, which no TOML reader loads: every
+    # setting in the file fell back to its default.
+    import tomllib
+
+    config = tmp_path / "config.toml"
+    config.write_text(
+        'puffin_airgapped = "off"\nmightling_airgapped = "on"\npuffin_model = "m"\n'
+        '[night]\nmightling_airgapped = "x"\n[forge]\npuffin_airgapped = "on"\n')
+    assert LegacyNameMigration.rewrite_keys(config)
+    assert tomllib.loads(config.read_text()) == {
+        "mightling_airgapped": "on", "mightling_model": "m",
+        "night": {"mightling_airgapped": "x"}, "forge": {"mightling_airgapped": "on"}}
