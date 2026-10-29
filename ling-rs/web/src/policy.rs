@@ -875,6 +875,31 @@ mod tests {
         assert_eq!(policy.vet_outgoing(&message, &mut HashSet::new(), &Unsure).unwrap()["params"]["cwd"], "ASK/ask-7");
     }
 
+    /// A resumed thread's prompt is the one its folder is named for, up to the `-` before its hex.
+    #[test]
+    fn a_resumed_thread_s_prompt_is_read_from_its_folder_s_whole_name() {
+        struct Folder(&'static str);
+        impl PromptSource for Folder {
+            fn composed(&self, name: &str) -> Result<String, String> {
+                Ok(name.to_string())
+            }
+            fn new_scratch_folder(&self, _prompt: &str) -> Result<String, String> {
+                Err("none".to_string())
+            }
+            fn scratch_folder_of(&self, _thread_id: &str) -> Option<String> {
+                Some(self.0.to_string())
+            }
+            fn airgapped_on(&self, _thread_id: Option<&str>) -> bool {
+                false
+            }
+        }
+        let policy = Policy::embedded();
+        let message = serde_json::json!({"id": 1, "method": "thread/resume", "params": {"threadId": "t1"}});
+        let config = |folder| policy.vet_outgoing(&message, &mut HashSet::new(), &Folder(folder)).unwrap()["params"].get("config").cloned();
+        assert_eq!(config("/scratch/chat-1a2b").unwrap()["approval_policy"], "never");
+        assert_eq!(config("/scratch/chatter-1a2b"), None);
+    }
+
     #[test]
     fn a_thread_and_its_folder_are_read_from_what_the_server_says() {
         let started = serde_json::json!({"method": "thread/started", "params": {"thread": {"id": "t1", "cwd": "/work/repo"}}});
