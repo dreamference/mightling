@@ -255,7 +255,7 @@ export function levelMatters(message: unknown, policy: Policy = POLICY): boolean
 
 /** The prompt with a config of its own whose threads live in `folder` (`<prompt>-<hex>`). */
 function promptOfFolder(policy: Policy, folder: string): string | undefined {
-  const base = folder.split("/").pop() ?? folder;
+  const base = folder.split(/[\\/]/).pop() ?? folder;
   return [...policy.promptThreadConfig.keys()].find((prompt) => base.startsWith(`${prompt}-`));
 }
 

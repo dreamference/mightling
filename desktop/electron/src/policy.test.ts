@@ -131,6 +131,9 @@ describe("the policy", () => {
     // A phone's thread continued in a project leaves its prompt's config behind.
     expect(vet("thread/fork", "chat-3", "WORK/repo").config).toBeUndefined();
     expect((vet("thread/fork", "chat-3", "/home/user").config as Record<string, unknown>).approval_policy).toBe("never");
+    // Windows names the folder with backslashes.
+    const windows = { ...source(), scratchFolderOf: (thread: string) => (thread.startsWith("chat-") ? `C:\\ASK\\${thread}` : null) };
+    expect((vet("thread/resume", "chat-3", "C:\\x", windows).config as Record<string, unknown>).approval_policy).toBe("never");
     // A Work thread's fork is not the policy's to place: as asked, as before.
     expect(vet("thread/fork", "w1", "WORK/repo").sandbox).toBe("danger-full-access");
     // A source that cannot tell a Work folder keeps every Ask fork in its folder.
