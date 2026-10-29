@@ -332,6 +332,13 @@ class FleetHubFetch:
             return False
         workdir, public = lines[0].strip(), lines[1].strip()
         try:
+            # The removal below finds the key by its comment: only that exact line is authorised.
+            parts = public.split(" ")
+            if not (
+                HOST_KEY.fullmatch(" ".join(parts[:KEY_FIELDS])) and parts[KEY_FIELDS:] == [token]
+            ):
+                LOG.warning("The key made for the LAN copy is not one it can remove; no LAN copy.")
+                return False
             hostkey = donor.run("cat /etc/ssh/ssh_host_ed25519_key.pub")
             fields = (hostkey.stdout or "").split()
             if hostkey.returncode != 0 or len(fields) < KEY_FIELDS:

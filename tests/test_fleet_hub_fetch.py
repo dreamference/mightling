@@ -140,6 +140,12 @@ def test_a_file_that_still_differs_after_the_copy_fails_the_folder(hub):
     assert not outcome["ok"] and "config.json" in outcome["why"]
 
 
+def keygen(script, key="ssh-ed25519 AAAAkey"):
+    """The recipient's answer to the LAN copy's key generation, with the comment the script asked for."""
+    token = script.split(" -C ")[1].split()[0]
+    return completed(0, f"/tmp/work\n{key} {token}\n")
+
+
 def test_the_lan_copy_authorises_an_ephemeral_key_pins_the_host_key_and_always_cleans_up(hub):
     recipient, donor = RemoteSession(), RemoteSession()
     donor.host = "house-2"
@@ -147,7 +153,7 @@ def test_the_lan_copy_authorises_an_ephemeral_key_pins_the_host_key_and_always_c
     def recipient_run(script, input_text=None, timeout=None, **kwargs):
         recipient.commands.append(script)
         if "ssh-keygen" in script:
-            return completed(0, "/tmp/work\nssh-ed25519 AAAAkey mightling-lan-copy-x\n")
+            return keygen(script)
         return completed(0)
 
     def donor_run(script, input_text=None, timeout=None, **kwargs):
@@ -188,7 +194,7 @@ def test_a_donor_cannot_reach_the_recipients_shell_through_its_host_key(hub):
     def recipient_run(script, input_text=None, timeout=None, **kwargs):
         recipient.commands.append(script)
         if "ssh-keygen" in script:
-            return completed(0, "/tmp/work\nssh-ed25519 AAAAkey mightling-lan-copy-x\n")
+            return keygen(script)
         return completed(0)
 
     def donor_run(script, input_text=None, timeout=None, **kwargs):
@@ -211,7 +217,7 @@ def test_a_lan_copy_key_whose_removal_fails_is_named_in_a_warning(hub, caplog):
 
     def recipient_run(script, input_text=None, timeout=None, **kwargs):
         if "ssh-keygen" in script:
-            return completed(0, "/tmp/work\nssh-ed25519 AAAAkey mightling-lan-copy-x\n")
+            return keygen(script)
         return completed(0)
 
     def donor_run(script, input_text=None, timeout=None, **kwargs):
@@ -224,6 +230,32 @@ def test_a_lan_copy_key_whose_removal_fails_is_named_in_a_warning(hub, caplog):
     with caplog.at_level("WARNING"):
         assert fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
     assert "mightling-lan-copy-" in caplog.text and "spark-1a2b.local" in caplog.text
+
+
+def test_a_lan_copy_authorises_only_a_key_the_removal_will_find(hub):
+    # The key is removed from the donor by its comment; a recipient that answered with another
+    # comment, or more than a key, would keep a login on the donor until the key expired.
+    for answer in (
+        lambda script: completed(0, "/tmp/work\nssh-ed25519 AAAAkey someone-else\n"),
+        lambda script: completed(0, "/tmp/work\nssh-ed25519 AAAAkey\n"),
+        lambda script: keygen(script, key="ssh-rsa AAAAkey"),
+        lambda script: keygen(script, key='from="*" ssh-ed25519 AAAAkey'),
+    ):
+        recipient, donor = RemoteSession(), RemoteSession()
+
+        def recipient_run(script, input_text=None, timeout=None, answer=answer, **kwargs):
+            return answer(script) if "ssh-keygen" in script else completed(0)
+
+        def donor_run(script, input_text=None, timeout=None, donor=donor, **kwargs):
+            donor.commands.append(script)
+            if "ssh_host_ed25519" in script:
+                return completed(0, "ssh-ed25519 AAAAhost root@x\n")
+            return completed(0)
+
+        recipient.run, donor.run = recipient_run, donor_run
+        fetch, _ = fetcher(hub, recipient)
+        assert not fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
+        assert not any("printf" in c and "authorized_keys" in c for c in donor.commands)
 
 
 # -- the provisioner -------------------------------------------------------------------------------
