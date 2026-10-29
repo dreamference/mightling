@@ -343,13 +343,20 @@ def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(
     assert NodeSettings.load() == {"advertise": False, "web": False}
 
 
-def test_disable_without_root_still_stops_the_advertisement(machine, capsys):
+def test_disable_without_root_still_stops_the_advertisement(machine, monkeypatch, capsys):
+    # The real sudo wrapper with no way to root: it prints the command and runs nothing.
+    from conftest import REAL_RUN_PRIVILEGED
+    from dreamference.vllm_server.host_safety_setup import HostSafetySetup
+
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", REAL_RUN_PRIVILEGED)
+    monkeypatch.setattr(HostSafetySetup, "root_mode", classmethod(lambda cls, yes=False: None))
     NodeServiceFile.service_path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.0.0", "ready"))
     NodeSettings.save(advertise=True)
     assert NodeAdvertiser.disable() is True
     assert NodeServiceFile.service_path.read_text() == ""
     assert NodeServiceFile.read() is None
-    assert "emptied" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "emptied" in out and f"sudo rm -f {NodeServiceFile.service_path}" in out
 
 
 def test_status_says_what_clients_see(machine, monkeypatch):
