@@ -416,7 +416,7 @@ class NodePairing:
         if public_key is None:
             print("❌ ssh-keygen could not create the pairing key.")
             return False
-        record = {
+        record: dict[str, Any] = {
             "node": target["node"],
             "name": target["name"],
             "address": target["address"],

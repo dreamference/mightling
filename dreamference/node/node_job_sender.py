@@ -260,10 +260,11 @@ class NodeJobSender:
         Returns:
             int: 0, or 1 when the node is not paired.
         """
-        records = [NodePairing.find(name)] if name else NodePairing.paired()
-        if name and records[0] is None:
+        found = NodePairing.find(name) if name else None
+        if name and found is None:
             print(f"❌ {name} is not a paired node.")
             return 1
+        records = [found] if found is not None else NodePairing.paired()
         if not records:
             print("No node is paired (`ling-admin node add <node>`).")
             return 0
@@ -328,7 +329,7 @@ class NodeJobSender:
     def _fetch_branch(cls, job_id: str, quiet_when_absent: bool) -> bool:
         sent = cls._sent(job_id)
         record = NodePairing.find(sent["node"], browse=False) if sent else None
-        if record is None:
+        if sent is None or record is None:
             if not quiet_when_absent:
                 print(f"❌ No job {job_id} was sent from this machine to a node that is still paired.")
             return False
@@ -353,7 +354,7 @@ class NodeJobSender:
         """Copies the files a job kept under `--out` to `received_dir`, from the node's tar stream."""
         sent = cls._sent(job_id)
         record = NodePairing.find(sent["node"], browse=False) if sent else None
-        if record is None:
+        if sent is None or record is None:
             return False
         target = cls.received_dir(job_id)
         try:

@@ -328,6 +328,8 @@ class NodeServe:
         from dreamference.night_shift.night_shift_host import NightShiftHost
         from dreamference.night_shift.night_shift_queue import NightShiftQueue
         from dreamference.node.node_advertiser import NodeAdvertiser
+        available: int | None
+        total: int | None
         try:
             available = NightShiftHost.mem_available_bytes()
             total = NightShiftHost.mem_total_bytes()

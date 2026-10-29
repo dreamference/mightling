@@ -145,7 +145,7 @@ class MCPServer:
             return {"status": "success", "message": f"Opened {path} at line {line}:{col}"}
 
         elif tool_name == "ide_apply_diff":
-            path: str = str(args.get("file_path", ""))
+            path = str(args.get("file_path", ""))
             # Nothing here writes files, and no IDE companion applies the diff. This used to answer
             # "success", so an agent carried on as though an edit had landed that never did.
             return {

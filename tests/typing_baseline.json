@@ -28,15 +28,9 @@
    "attr-defined": 4,
    "list-item": 2
   },
-  "dreamference/config/dreamference_config.py": {
-   "assignment": 1
-  },
   "dreamference/hardware/model_downloader.py": {
    "assignment": 1,
    "attr-defined": 1
-  },
-  "dreamference/mcp_server/mcp_server.py": {
-   "no-redef": 1
   },
   "dreamference/night_shift/night_shift_best_of_n.py": {
    "arg-type": 1
@@ -57,26 +51,6 @@
    "assignment": 1,
    "var-annotated": 1
   },
-  "dreamference/node/node_job.py": {
-   "arg-type": 3,
-   "union-attr": 2
-  },
-  "dreamference/node/node_job_sender.py": {
-   "arg-type": 1,
-   "index": 5
-  },
-  "dreamference/node/node_model_sync.py": {
-   "union-attr": 1
-  },
-  "dreamference/node/node_pairing.py": {
-   "arg-type": 1
-  },
-  "dreamference/node/node_remote.py": {
-   "assignment": 1
-  },
-  "dreamference/node/node_serve.py": {
-   "assignment": 1
-  },
   "dreamference/runner/cline_runner.py": {
    "list-item": 1
   },
@@ -92,9 +66,6 @@
   },
   "dreamference/swe_bench/swe_bench_arm_smoke.py": {
    "union-attr": 4
-  },
-  "dreamference/swe_bench/swe_bench_evaluator.py": {
-   "assignment": 1
   },
   "dreamference/swe_bench/swe_bench_images.py": {
    "assignment": 1
@@ -142,5 +113,5 @@
   }
  },
  "mypy": "2.4.0",
- "total": 134
+ "total": 116
 }
