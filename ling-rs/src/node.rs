@@ -731,9 +731,7 @@ pub fn list_json(inputs: &Inputs, adverts: &[Advert], models: &[Option<crate::Se
             })
         })
         .collect();
-    let away = in_use.filter(|used| {
-        !adverts.iter().any(|advert| (!used.node.is_empty() && advert.node.node == used.node) || advert.node.address == used.address)
-    });
+    let away = in_use.filter(|used| !adverts.iter().any(|advert| is_used(used, &advert.node)));
     serde_json::json!({
         "thisMachine": this_machine,
         "nodes": nodes,
@@ -777,9 +775,7 @@ pub fn list_lines(inputs: &Inputs, adverts: &[Advert], models: &[Option<crate::S
         }
     }
     if let Some(used) = in_use {
-        let seen = adverts.iter().any(|advert| {
-            (!used.node.is_empty() && advert.node.node == used.node) || advert.node.address == used.address
-        });
+        let seen = adverts.iter().any(|advert| is_used(used, &advert.node));
         if !seen && inputs.overlay && used.overlay_name_is_its_own() {
             lines.push(format!("* {}  {}/v1  over the overlay (remote access)", label(used), used.via_overlay().model_url()));
         } else if !seen {
@@ -1343,6 +1339,20 @@ mod tests {
         let on_node = list_lines(&Inputs { is_node: true, ..Inputs::default() }, &[spark1()], &[None]);
         assert!(on_node[0].starts_with("This machine is a node") && on_node[1].starts_with("  spark-1"));
         assert_eq!(list_lines(&Inputs::default(), &[], &[]), vec!["No Mightling node answered on this network.".to_string()]);
+    }
+
+    #[test]
+    fn another_node_at_the_remembered_address_does_not_hide_that_the_remembered_one_is_away() {
+        // The remembered node has an id, so it is found by its id; another node that now has its
+        // old address is not it, in the list as in `resolve`.
+        let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
+        let other = advert("spark-2", "22222222-bbbb", "192.168.50.105");
+        let lines = list_lines(&inputs, std::slice::from_ref(&other), &[None]);
+        assert!(lines[0].starts_with("  spark-2"), "{lines:?}");
+        assert!(lines.last().is_some_and(|line| line.starts_with("* spark-1") && line.ends_with("did not answer this browse")), "{lines:?}");
+        let list = list_json(&inputs, &[other], &[None], None);
+        assert_eq!(list["nodes"][0]["inUse"], false);
+        assert_eq!(list["rememberedAway"]["name"], "spark-1");
     }
 
     #[test]
