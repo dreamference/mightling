@@ -162,7 +162,8 @@ impl DocsToml {
     }
 
     /// Adds `documents` and `downloads` when their folders exist, the user has not removed them,
-    /// and no collection has that name or root yet. Returns the names added.
+    /// and no collection has that name yet or a root inside, at or around theirs. Returns the names
+    /// added.
     pub fn ensure_defaults(&mut self, user_home: &Path) -> Vec<String> {
         let mut added = Vec::new();
         for (name, folder) in default_folders(user_home) {
@@ -172,7 +173,13 @@ impl DocsToml {
             let Ok(root) = folder.canonicalize() else {
                 continue;
             };
-            if !root.is_dir() || self.collections.iter().any(|c| c.root == root) {
+            // A folder inside another collection, or holding one, would be indexed twice.
+            if !root.is_dir()
+                || self
+                    .collections
+                    .iter()
+                    .any(|c| root.starts_with(&c.root) || c.root.starts_with(&root))
+            {
                 continue;
             }
             if validate_root(&root, user_home).is_err() {
@@ -641,6 +648,22 @@ mod tests {
         let mut docs = DocsToml::default();
         assert_eq!(docs.ensure_defaults(&home), vec!["documents".to_string()]);
         assert_eq!(docs.get("documents").unwrap().root, home.join("Dokumente"));
+    }
+
+    #[test]
+    fn a_default_folder_inside_another_collection_is_not_added_twice() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::create_dir_all(home.join(".config")).unwrap();
+        std::fs::create_dir_all(home.join("Documents/Downloads")).unwrap();
+        std::fs::write(
+            home.join(".config/user-dirs.dirs"),
+            "XDG_DOWNLOAD_DIR=\"$HOME/Documents/Downloads\"\n",
+        )
+        .unwrap();
+        let mut docs = DocsToml::default();
+        assert_eq!(docs.ensure_defaults(&home), vec!["documents".to_string()]);
+        assert!(docs.get("downloads").is_none());
     }
 
     #[test]
