@@ -245,12 +245,13 @@ def test_a_toml_file_the_launcher_reads_is_read_here_too(tmp_path):
 def test_saving_never_overwrites_a_file_it_could_not_read(tmp_path):
     # Reading a broken file gives {}, so saving into it kept none of its tables and keys.
     import pytest
+
     from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
 
     path = tmp_path / "dreamference.toml"
     text = 'model = "x"\n[night]\nwindow = \n'
     path.write_text(text, encoding="utf-8")
-    with pytest.raises(ValueError, match="dreamference.toml"):
+    with pytest.raises(ValueError, match=r"dreamference\.toml"):
         ConfigFileStorageManager.save_config_dict(path, {"model": "y"})
     assert path.read_text(encoding="utf-8") == text
 
@@ -326,8 +327,8 @@ def test_saving_replaces_the_file_whole_through_a_link_and_keeps_its_mode(tmp_pa
     # The file was truncated and rewritten in place: a launcher reading it meanwhile, or a save
     # that failed half-way, saw an empty or partial file (the Rust side writes atomically). A
     # config kept as a link into a dotfiles folder must stay a link, and a 0600 file 0600.
-    import os
     import pytest
+
     from dreamference.config import config_file_storage_manager as storage
 
     real = tmp_path / "dotfiles" / "config.toml"
@@ -339,7 +340,7 @@ def test_saving_replaces_the_file_whole_through_a_link_and_keeps_its_mode(tmp_pa
     storage.ConfigFileStorageManager.save_config_dict(link, {"model": "y"})
     assert link.is_symlink() and storage.ConfigFileStorageManager.load_config_dict(real) == {"model": "y"}
     assert real.stat().st_mode & 0o777 == 0o600
-    assert sorted(os.listdir(real.parent)) == ["config.toml"]
+    assert sorted(entry.name for entry in real.parent.iterdir()) == ["config.toml"]
 
     def broken(data, handle):
         handle.write("model = ")
@@ -348,4 +349,4 @@ def test_saving_replaces_the_file_whole_through_a_link_and_keeps_its_mode(tmp_pa
     with pytest.raises(RuntimeError):
         storage.ConfigFileStorageManager.save_config_dict(link, {"model": "z"})
     assert real.read_text(encoding="utf-8") == 'model = "y"\n'
-    assert sorted(os.listdir(real.parent)) == ["config.toml"]
+    assert sorted(entry.name for entry in real.parent.iterdir()) == ["config.toml"]

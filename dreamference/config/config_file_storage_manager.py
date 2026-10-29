@@ -8,8 +8,9 @@ Dreamference configuration dictionaries to YAML or JSON formats.
 import json
 import os
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Dict
 
 try:
     import yaml
@@ -61,9 +62,8 @@ class ConfigFileStorageManager:
             return toml.loads(text)
 
     @classmethod
-    def parse_config_file(cls, path: Path) -> Dict[str, Any]:
-        """
-        Parses a configuration file, raising when it cannot.
+    def parse_config_file(cls, path: Path) -> dict[str, Any]:
+        """Parses a configuration file, raising when it cannot.
 
         TOML goes through `tomllib` (TOML 1.0, what the Rust launcher's parser and the other Python
         readers of the file accept), and a leading byte order mark is skipped: the `toml` package
@@ -135,7 +135,7 @@ class ConfigFileStorageManager:
                     yaml.dump(data, f, default_flow_style=False)
                 else:
                     json.dump(data, f, indent=2)
-            os.replace(staging, target)
+            staging.replace(target)
         except BaseException:
             staging.unlink(missing_ok=True)
             raise

@@ -230,7 +230,7 @@ class DreamferenceConfig:
 
         # The values the environment supplied, which save_config() leaves out of the file: a
         # shell's HF_TOKEN does not belong in a `dreamference.toml` that may sit in a repository.
-        self._from_environment: Dict[str, Any] = {}
+        self._from_environment: dict[str, Any] = {}
         if hf_token is None and (os.getenv("HF_TOKEN") is not None or os.getenv("DREAMFERENCE_HF_TOKEN") is not None):
             self._from_environment["hf_token"] = self.hf_token
 
@@ -488,9 +488,9 @@ class DreamferenceConfig:
 
     @classmethod
     def toml_airgapped_value(cls, text: str) -> Optional[str]:
-        """
-        The value of the top-level `mightling_airgapped` key read line by line, as `toml_value` in
-        ling-rs/airgapped does: the first `mightling_airgapped = <value>` before any table header,
+        """The value of the top-level `mightling_airgapped` key, read line by line.
+
+        As `toml_value` in ling-rs/airgapped does: the first `mightling_airgapped = <value>` before any table header,
         a byte order mark skipped, a comment and quotes stripped. A syntax error elsewhere in the
         file does not hide it, as it would from a TOML parser.
 
