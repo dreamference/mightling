@@ -383,9 +383,19 @@ pub fn output_text(value: &Value) -> String {
     }
 }
 
-/// A `call_id` as a file name: anything but ASCII letters, digits, `-` and `_` becomes `_`.
+/// A `call_id` as a file name: anything but ASCII letters, digits, `-` and `_` becomes `_`. An id
+/// that changed also gets `~` and a hash of the whole id, so `call.1` and `call_1` do not share
+/// a copy (a copy is written once, and the second would name the first's output); a safe id is
+/// its own name, and never holds a `~`.
 fn file_name(id: &str) -> String {
-    id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
+    let safe = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    let name: String = id.chars().map(|c| if safe(c) { c } else { '_' }).collect();
+    if !id.is_empty() && id.chars().all(safe) {
+        return name;
+    }
+    // FNV-1a: stable across builds and platforms, unlike the standard library's hasher.
+    let hash = id.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3));
+    format!("{name}~{hash:016x}")
 }
 
 fn clip(text: &str, limit: usize) -> String {
@@ -643,6 +653,24 @@ mod tests {
         let before = items.clone();
         apply(&mut items, 1_000_000, |e| &mut e.item);
         assert_eq!(items, before);
+    }
+
+    #[test]
+    fn ids_that_differ_only_in_unsafe_characters_keep_their_own_copies() {
+        let scratch = Scratch::new("unsafe");
+        let (dotted, plain) = (exec_output("call.1", 20), exec_output("call_1", 30));
+        save_copy(&scratch.0, &dotted).unwrap_or_default();
+        save_copy(&scratch.0, &plain).unwrap_or_default();
+        assert_ne!(copy_path(&scratch.0, "call.1"), copy_path(&scratch.0, "call_1"));
+        assert_ne!(copy_path(&scratch.0, "call.1"), copy_path(&scratch.0, "call:1"));
+        for (id, output) in [("call.1", &dotted), ("call_1", &plain)] {
+            assert_eq!(std::fs::read_to_string(copy_path(&scratch.0, id)).unwrap_or_default(), output_text(output), "{id}");
+        }
+        // The segment files too: two segments whose first ids differ so are two files.
+        State { masked: ["call.1".to_string()].into(), after_last_move: Some(1) }.save(&scratch.0, "call.1").unwrap_or_default();
+        assert_eq!(State::load(&scratch.0, "call_1"), State::default());
+        // An id that is already a safe name is the name, as the spec's paths show.
+        assert!(copy_path(&scratch.0, "call_ca1c38ae56a14f70ae27cdc6").ends_with("outputs/call_ca1c38ae56a14f70ae27cdc6.txt"));
     }
 
     #[test]
