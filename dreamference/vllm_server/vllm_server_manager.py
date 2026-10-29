@@ -2056,7 +2056,11 @@ class VLLMServerManager:
         if background:
             if cmd and cmd[0] == "docker":
                 cmd.insert(2, "-d")
-                subprocess.run(cmd, check=True, env=env)
+                try:
+                    subprocess.run(cmd, check=True, env=env)
+                except BaseException:
+                    self._abandon_launch(port)
+                    raise
                 self.process = subprocess.Popen(
                     ["docker", "logs", "-f", container_name],
                     stdout=subprocess.PIPE,
@@ -2079,10 +2083,25 @@ class VLLMServerManager:
         else:
             try:
                 subprocess.run(cmd, check=True, env=env)
+            except BaseException:
+                self._abandon_launch(port)
+                raise
             finally:
                 if self.watchdog is not None:
                     self.watchdog.stop()
             return None
+
+    def _abandon_launch(self, port: int) -> None:
+        """Takes down what start_server set up around an engine that did not start: the watchdog,
+        and the gate, which alone would hold the public port and answer every request 502."""
+        if self.watchdog is not None:
+            self.watchdog.stop()
+            self.watchdog = None
+        from dreamference.vllm_server.model_gate import ModelGate
+        try:
+            ModelGate.stop(port)
+        except OSError:
+            pass  # No docker, so no gate; the launch's own error is the one to report.
 
     def stop_server(self, port: int = 8000) -> None:
         """

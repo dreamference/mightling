@@ -42,13 +42,11 @@ def test_a_failed_compile_cache_clear_is_tried_again_on_the_next_launch(monkeypa
     assert len(attempts) == 2
 
 
-def test_the_advised_utilization_fits_beside_the_side_services(monkeypatch, capsys):
-    import re
-
+def _gb10_manager(monkeypatch, available, side=0.0, transient=5.0):
+    """A manager whose start_server reaches the launch on a 128 GB GB10, touching nothing real."""
     from dreamference.hardware.hardware_manager import HardwareManager, HardwareTelemetry
     from dreamference.vllm_server import vllm_server_manager as vsm
 
-    total, available, transient, side = 128.0, 70.0, 5.0, 10.0
     mgr = VLLMServerManager()
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
     monkeypatch.setattr(mgr, "ensure_docker_image", lambda image: True)
@@ -57,7 +55,7 @@ def test_the_advised_utilization_fits_beside_the_side_services(monkeypatch, caps
     monkeypatch.setattr(mgr, "_evict_model_page_cache", lambda model: 0.0)
     monkeypatch.setattr(mgr, "_estimate_model_weights_gb", lambda model: 20.0)
     monkeypatch.setattr(mgr, "load_transient_gb", lambda model, weights: (transient, "test"))
-    monkeypatch.setattr(mgr, "side_service_allowance", lambda: [("the forge", side)])
+    monkeypatch.setattr(mgr, "side_service_allowance", lambda: [("the forge", side)] if side else [])
     monkeypatch.setattr(vsm.subprocess, "check_output", lambda *a, **k: "")
     monkeypatch.setattr(
         HardwareManager,
@@ -65,14 +63,63 @@ def test_the_advised_utilization_fits_beside_the_side_services(monkeypatch, caps
         classmethod(
             lambda cls: HardwareTelemetry(
                 is_gb10=True, gpu_name="NVIDIA GB10", driver_version="0", arch="aarch64",
-                total_unified_memory_gb=total, available_memory_gb=available,
-                used_memory_gb=total - available, vram_gb=0.0,
+                total_unified_memory_gb=128.0, available_memory_gb=available,
+                used_memory_gb=128.0 - available, vram_gb=0.0,
             )
         ),
     )
+    return mgr
+
+
+def test_the_advised_utilization_fits_beside_the_side_services(monkeypatch, capsys):
+    import re
+
+    available, transient, side = 70.0, 5.0, 10.0
+    mgr = _gb10_manager(monkeypatch, available, side=side, transient=transient)
     with pytest.raises(SystemExit):
         mgr.start_server(model="qwen2.5-coder-32b", background=False, gate=False)
     out = capsys.readouterr().out
     advised = float(re.search(r"gpu_memory_utilization to at most (\d\.\d+)", out).group(1))
     # Taking the advice must pass the same check that refused this launch.
-    assert advised * total + transient + side <= available
+    assert advised * 128.0 + transient + side <= available
+
+
+class _FakeWatchdog:
+    def __init__(self, container, on_trip):
+        self.stopped = False
+
+    def start(self):
+        return True
+
+    def stop(self):
+        self.stopped = True
+
+
+@pytest.mark.parametrize("background", [True, False])
+def test_a_failed_docker_run_takes_down_the_gate_and_the_watchdog(monkeypatch, background):
+    import subprocess
+
+    from dreamference.vllm_server import vllm_server_manager as vsm
+    from dreamference.vllm_server.adapter_serving import AdapterServing
+    from dreamference.vllm_server.model_gate import ModelGate
+
+    mgr = _gb10_manager(monkeypatch, available=120.0)
+    monkeypatch.setattr("dreamference.hardware.download_model", lambda *a, **k: True)
+    monkeypatch.setattr(mgr, "_reset_stale_compile_cache", lambda *a, **k: False)
+    monkeypatch.setattr(AdapterServing, "prepare", classmethod(lambda cls, *a: None))
+    monkeypatch.setattr(mgr, "build_launch_command", lambda **kwargs: ["docker", "run", "image"])
+    monkeypatch.setattr(vsm, "MemoryPressureWatchdog", _FakeWatchdog)
+    monkeypatch.setattr(ModelGate, "start", classmethod(lambda cls, port, image: True))
+    stopped = []
+    monkeypatch.setattr(ModelGate, "stop", classmethod(lambda cls, port: stopped.append(port)))
+
+    def run(cmd, **kwargs):
+        if cmd[:2] == ["docker", "run"]:
+            raise subprocess.CalledProcessError(125, cmd)
+
+    monkeypatch.setattr(vsm.subprocess, "run", run)
+    with pytest.raises(subprocess.CalledProcessError):
+        mgr.start_server(model="qwen2.5-coder-32b", background=background, gate=True)
+    # Left behind, the gate holds the public port and answers every request 502.
+    assert stopped == [8000]
+    assert mgr.watchdog is None or mgr.watchdog.stopped
