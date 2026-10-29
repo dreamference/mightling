@@ -111,9 +111,10 @@ pub struct Resolved {
 
 /// The value of the top-level `mightling_airgapped` key in TOML text: a line `mightling_airgapped =
 /// "<value>"` before the first table header. Enough for a key this crate writes itself, and it
-/// keeps a TOML parser out of the sandbox helper.
+/// keeps a TOML parser out of the sandbox helper. A leading byte order mark is skipped: Windows
+/// PowerShell's `-Encoding UTF8` writes one, and the key must not be missed behind it.
 pub fn toml_value(text: &str) -> Option<String> {
-    for line in text.lines() {
+    for line in text.trim_start_matches('\u{feff}').lines() {
         let line = line.trim();
         if line.starts_with('[') {
             return None;
@@ -748,6 +749,25 @@ mod tests {
         assert_eq!(
             toml_value("  [ night ]\nmightling_airgapped = \"on\"\n"),
             None
+        );
+    }
+
+    #[test]
+    fn a_byte_order_mark_does_not_hide_the_key() {
+        // Windows PowerShell 5's `Out-File -Encoding UTF8` starts the file with one.
+        let bom = "\u{feff}mightling_airgapped = \"on\"\r\n";
+        assert_eq!(toml_value(bom).as_deref(), Some("on"));
+        assert_eq!(
+            toml_value("\u{feff}[night]\nmightling_airgapped = \"on\"\n"),
+            None
+        );
+        // The user's `on`, so written, still beats the repository's `off`.
+        let user_on = config("/home/u/.config/dreamference/config.toml", bom);
+        let repo_off = config("/repo/dreamference.toml", "mightling_airgapped = \"off\"\n");
+        let resolved = resolve_from(None, None, &[repo_off, user_on.clone()]);
+        assert_eq!(
+            (resolved.level, resolved.source),
+            (Level::On, Source::ConfigFile(user_on.0))
         );
     }
 
