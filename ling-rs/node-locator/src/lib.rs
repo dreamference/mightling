@@ -255,14 +255,36 @@ fn string(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String
                 'r' => out.push('\r'),
                 't' => out.push('\t'),
                 'u' => {
-                    let code: String = (0..4).map(|_| chars.next()).collect::<Option<String>>()?;
-                    out.push(char::from_u32(u32::from_str_radix(&code, 16).ok()?)?);
+                    // A character outside the BMP is a pair of escaped UTF-16 halves.
+                    let high = hex4(chars)?;
+                    let code = if (0xd800..0xdc00).contains(&high) {
+                        if chars.next()? != '\\' || chars.next()? != 'u' {
+                            return None;
+                        }
+                        let low = hex4(chars)?;
+                        if !(0xdc00..0xe000).contains(&low) {
+                            return None;
+                        }
+                        0x10000 + ((high - 0xd800) << 10) + (low - 0xdc00)
+                    } else {
+                        high
+                    };
+                    out.push(char::from_u32(code)?);
                 }
                 other => out.push(other),
             },
             c => out.push(c),
         }
     }
+}
+
+/// The four hex digits of a `\u` escape.
+fn hex4(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<u32> {
+    let code: String = (0..4).map(|_| chars.next()).collect::<Option<String>>()?;
+    if !code.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(&code, 16).ok()
 }
 
 /// The user's home folder: `HOME`, or `USERPROFILE` on Windows.
@@ -869,6 +891,18 @@ mod tests {
             "{address: \"a\"}",
         ] {
             assert_eq!(Node::parse(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_character_outside_the_bmp_escaped_as_two_halves_is_read() {
+        // A JSON writer that escapes non-ASCII (Python's json.dump does by default) writes 😀 as
+        // two UTF-16 halves; a node file set by hand that way was refused whole.
+        let parsed = Node::parse("{\"address\": \"a\", \"name\": \"\\uD83D\\ude00 lab\"}").unwrap();
+        assert_eq!(parsed.name, "😀 lab");
+        for half in ["\\ud83d", "\\ud83d x", "\\ud83d\\u0041", "\\ude00"] {
+            let text = format!("{{\"address\": \"a\", \"name\": \"{half}\"}}");
+            assert_eq!(Node::parse(&text), None, "{text}");
         }
     }
 
