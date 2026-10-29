@@ -4,6 +4,7 @@
 import io
 import json
 import os
+import re
 import subprocess
 
 import pytest
@@ -104,6 +105,22 @@ def test_the_python_sidecars_run_an_image_pinned_by_digest():
         name, _, digest = image.partition("@sha256:")
         assert name == "python:3-slim", image
         assert len(digest) == 64 and all(c in "0123456789abcdef" for c in digest), image
+
+
+def test_the_image_search_service_installs_pillow_only_as_pinned_wheels(monkeypatch, store):
+    # The digest pins the image, but Pillow comes from PyPI at every boot: unpinned, the next
+    # release anyone publishes there would run beside the service's secret and image store.
+
+    fake = FakeDocker()
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured", siglip=False) is True
+    (run,) = fake.runs(IMAGE_SEARCH_CONTAINER_NAME)
+    script = run[run.index("-c") + 1]
+    installs = [part for part in script.split(";") if "pip install" in part]
+    assert installs and all("--require-hashes" in p and "--only-binary=:all:" in p for p in installs)
+    requirement = image_search_sidecar.PILLOW_REQUIREMENT
+    assert re.fullmatch(r"pillow==[0-9.]+( --hash=sha256:[0-9a-f]{64}){2}", requirement)
+    assert f"'{requirement}'" in script
 
 
 def test_without_siglip_the_service_is_told_to_skip_the_prefilter(monkeypatch, store):

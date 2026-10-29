@@ -60,10 +60,19 @@ HEALTH_WAIT_SECONDS: Final[int] = 30
 # Pillow is the service's one third-party need; the stock image lacks it and the container runs as
 # the user, so it is installed into /tmp at boot (kept across a plain restart). Offline the install
 # fails and the service runs without the stages that decode images.
+# It is installed only as one of these two wheels (CPython 3.14, the image's, on arm64 and x86-64),
+# so what PyPI publishes next never runs beside the service's secret: bump both with the image.
+PILLOW_REQUIREMENT: Final[str] = (
+    "pillow==13.0.0"
+    " --hash=sha256:5933fcea5a5ba64c686f55c886a115cbfd92f2900460784a1e79909fdbafd7b6"
+    " --hash=sha256:e91c2b1cbeae768c98752e67e717e283d68dae45717b41f2d91eaee648e37b7d"
+)
 BOOT_SCRIPT: Final[str] = (
     "export PIP_TARGET=/tmp/pylib PYTHONPATH=/tmp/pylib;"
     "python3 -c 'import PIL' 2>/dev/null"
-    " || pip install -q --no-cache-dir pillow || true;"
+    f" || (printf '%s\\n' '{PILLOW_REQUIREMENT}' > /tmp/pillow.txt"
+    " && pip install -q --no-cache-dir --require-hashes --only-binary=:all: -r /tmp/pillow.txt)"
+    " || true;"
     f"python3 /config/{STAGED_SERVICE}"
 )
 
