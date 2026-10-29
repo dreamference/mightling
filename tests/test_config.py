@@ -282,8 +282,9 @@ def test_every_key_save_config_writes_is_one_it_owns(tmp_path):
     from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
 
     path = tmp_path / "all.json"
-    config = DreamferenceConfig(config_file=str(path))
-    for key in cfg_mod.CONFIG_KEYS:
+    # The token is saved only as an argument names it (an assigned one is not).
+    config = DreamferenceConfig(config_file=str(path), hf_token="x")
+    for key in sorted(set(cfg_mod.CONFIG_KEYS) - {"hf_token"}):
         value = getattr(config, key)
         changed = (not value) if isinstance(value, bool) else (value + 1) if isinstance(value, int) else "x"
         setattr(config, key, {"server_engine": "ling", "mightling_airgapped": "on",

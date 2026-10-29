@@ -228,11 +228,9 @@ class DreamferenceConfig:
             )
         )
 
-        # The values the environment supplied, which save_config() leaves out of the file: a
-        # shell's HF_TOKEN does not belong in a `dreamference.toml` that may sit in a repository.
+        # The values the environment supplied, which save_config() leaves out of the file (the
+        # token is kept out by `_hf_token_to_save` above).
         self._from_environment: dict[str, Any] = {}
-        if hf_token is None and (os.getenv("HF_TOKEN") is not None or os.getenv("DREAMFERENCE_HF_TOKEN") is not None):
-            self._from_environment["hf_token"] = self.hf_token
 
         # 8. Blackwell GB10 Performance Tuning Flags
         self.enable_prefix_caching: bool = bool(
