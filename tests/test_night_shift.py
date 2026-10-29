@@ -1105,6 +1105,19 @@ def test_a_refused_admission_still_waits_for_the_tasks_on_other_nodes(setup, fak
     assert "Not run: the model server at http://x is not answering" in report
 
 
+def test_a_repeating_task_not_queued_on_an_empty_night_still_reaches_a_report(tmp_path):
+    from dreamference.night_shift.night_shift_recurring import NightShiftRecurring
+    night, gone = tmp_path / "night", tmp_path / "gone"
+    gone.mkdir()
+    NightShiftRecurring.add(night, gone, "Tidy up", "daily")
+    gone.rmdir()
+    quiet = NightShiftSettings({"compaction_audit": False})
+    assert NightShiftRunner.run(night_dir=night, mightling_bin="ling", vllm_host="http://127.0.0.1:9",
+                                settings=quiet) == 0
+    (report,) = (night / "reports").glob("*.md")
+    assert "not queued" in report.read_text()
+
+
 def test_a_second_runner_is_refused_while_the_lock_is_held(setup, fake_host):
     queue(setup["night"], setup["repo"])
     with NightShiftQueue.runner_lock(setup["night"]) as held:
