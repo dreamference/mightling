@@ -105,7 +105,7 @@ class NodeServe:
         kept = [entry for entry in existing if f"--key {tag}" not in entry]
         kept.append(line)
         # Replaced where it really is: a link (a dotfiles checkout's file) stays a link.
-        target = path.resolve()
+        target = path.resolve() if path.exists() else path
         staging = target.with_name(f".{target.name}.{os.getpid()}.tmp")
         staging.write_text("\n".join(kept) + "\n")
         os.chmod(staging, 0o600)
@@ -132,7 +132,7 @@ class NodeServe:
                 if not (f"--key {tag}" in entry and entry.rstrip().endswith(KEY_COMMENT))]
         if len(kept) == len(lines):
             return False
-        target = path.resolve()
+        target = path.resolve() if path.exists() else path
         staging = target.with_name(f".{target.name}.{os.getpid()}.tmp")
         staging.write_text("\n".join(kept) + ("\n" if kept else ""))
         os.chmod(staging, 0o600)

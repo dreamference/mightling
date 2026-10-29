@@ -420,6 +420,11 @@ def test_a_linked_authorized_keys_stays_a_link_to_the_file_it_names(tmp_path):
     assert path.is_symlink() and "AAAAfirst" in kept.read_text()
     assert NodeServe.unauthorize(NodeServe.key_tag("ssh-ed25519 AAAAfirst a"))
     assert path.is_symlink() and kept.read_text() == "ssh-ed25519 AAAAown my laptop\n"
+    # A link to nothing (its folder is gone) is replaced by the file, as before.
+    path.unlink()
+    path.symlink_to(tmp_path / "gone" / "authorized_keys")
+    assert NodeServe.authorize("ssh-ed25519 AAAAfirst a")
+    assert not path.is_symlink() and "AAAAfirst" in path.read_text()
 
 
 @pytest.mark.parametrize("key", ["", "ssh-ed25519", "not a key at all"])
