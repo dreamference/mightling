@@ -8,6 +8,7 @@ sets the key up once; the user never types an SSH command.
 
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -27,6 +28,11 @@ KEY_NAME: Final[str] = "mightling-node_ed25519"
 KEY_RESTRICTIONS: Final[str] = (
     "restrict,no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc"
 )
+
+# What a node id may be (`NodeIdentity` writes a UUID). An id arrives from the network, in a
+# browse's TXT record or a login's output, and names the node's record file and host-key alias, so
+# anything that could name another path is refused.
+NODE_ID: Final[re.Pattern] = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,63}")
 
 # The marker that tells Mightling's lines in `authorized_keys` from the user's own.
 KEY_COMMENT: Final[str] = "mightling-node"
@@ -346,7 +352,12 @@ class NodePairing:
 
         Returns:
             Path: Where its record is kept.
+
+        Raises:
+            ValueError: If `node_id` is not a node id.
         """
+        if not NODE_ID.fullmatch(node_id):
+            raise ValueError(f"{node_id!r} is not a node id")
         return cls.nodes_dir() / f"{node_id}.json"
 
     @classmethod
@@ -360,7 +371,11 @@ class NodePairing:
                 record = json.loads(path.read_text())
             except (OSError, ValueError):
                 continue
-            if isinstance(record, dict) and record.get("node") and record.get("address"):
+            if (
+                isinstance(record, dict)
+                and NODE_ID.fullmatch(str(record.get("node") or ""))
+                and record.get("address")
+            ):
                 records.append(record)
         return sorted(records, key=lambda record: record.get("name", ""))
 
@@ -511,7 +526,7 @@ class NodePairing:
 
         answer = session.run(f"{REMOTE_ADMIN} node id && hostname")
         lines = answer.stdout.split()
-        if answer.returncode != 0 or len(lines) < 2:
+        if answer.returncode != 0 or len(lines) < 2 or not NODE_ID.fullmatch(lines[0]):
             print(f"❌ {session.host} did not report a node id (is Mightling installed there?).")
             return None
         record = {
@@ -694,7 +709,7 @@ class NodePairing:
         """
         wanted = name.strip().lower()
         for node in NodeBrowser.browse():
-            if not node.get("node"):
+            if not NODE_ID.fullmatch(node.get("node") or ""):
                 continue
             if wanted in (node["name"].lower(), node["address"].lower(), node["node"].lower()) or (
                 len(wanted) >= 4 and node["node"].lower().startswith(wanted)

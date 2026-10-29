@@ -70,6 +70,8 @@ THUMB_TIMEOUT_SECONDS: Final[float] = 5.0
 FULL_MAX_BYTES: Final[int] = 15 * 1024 * 1024
 FULL_TIMEOUT_SECONDS: Final[float] = 20.0
 REDIRECT_CAP: Final[int] = 3
+# The largest search request body read: five short queries and a count fit many times over.
+MAX_REQUEST_BYTES: Final[int] = 1024 * 1024
 
 GC_MAX_AGE_SECONDS: Final[int] = 7 * 24 * 3600
 GC_INTERVAL_SECONDS: Final[int] = 3600
@@ -1086,7 +1088,15 @@ def serve(port: int = SERVICE_PORT, secret: str | None = None) -> None:
             if expected and self.headers.get(AUTH_HEADER, "") != expected:
                 self._reply(403, {"error": "bad token"})
                 return
-            length = int(self.headers.get("Content-Length", 0))
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+            except ValueError:
+                length = -1
+            # A negative or huge length used to block the read until the client hung up, and one
+            # that is not a number dropped the connection with no answer.
+            if not 0 <= length <= MAX_REQUEST_BYTES:
+                self._reply(400, {"error": "bad Content-Length"})
+                return
             try:
                 body = json.loads(self.rfile.read(length).decode() or "{}")
                 queries = body.get("queries") or []
