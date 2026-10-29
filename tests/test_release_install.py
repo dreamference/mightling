@@ -786,6 +786,14 @@ def test_a_node_reinstalls_a_wheel_of_the_same_version(tmp_path, release_server)
     assert any("--force-reinstall" in args and "--no-deps" in args for args in wheel), pip
 
 
+def test_an_option_without_its_value_is_named(tmp_path, release_server):
+    # `shift 2` past the end used to end the script under `set -e` with no word.
+    for option in ("--role", "--version", "--from"):
+        result = run_install(tmp_path, release_server(binaries()), option)
+        assert result.returncode == 1
+        assert f"{option} needs a value" in result.stderr, result.stderr
+
+
 def test_the_node_role_needs_the_wheel(tmp_path, release_server):
     # The binaries are placed first; a release with no wheel then stops the node half by name.
     result = run_install(tmp_path, release_server(binaries()), "--role", "node")
