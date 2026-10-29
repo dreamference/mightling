@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 # Docker's conventional default-bridge gateway, used when it cannot be read.
 DEFAULT_BRIDGE_GATEWAY: Final[str] = "172.17.0.1"
 LOOPBACK_HOSTS: Final[tuple] = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+# Only an IPv6 address has a colon in its host part; a URL must bracket it.
+IPV6_SEPARATOR: Final[str] = ":"
 
 
 class DockerBridge:
@@ -41,7 +43,7 @@ class DockerBridge:
 
         if host in LOOPBACK_HOSTS:
             host = cls.gateway()
-        if ":" in host:
+        if IPV6_SEPARATOR in host:
             host = f"[{host}]"
         return f"{parsed.scheme or 'http'}://{host}:{port}/v1"
 

@@ -292,15 +292,27 @@ class RetiredWebChat:
             print("✅ The Onyx containers are gone; its volumes and images are kept.")
         else:
             print("No Onyx container is left.")
+        return cls._remove_data(delete_data, ask)
+
+    @classmethod
+    def _remove_data(cls, delete_data: bool, ask: Callable[[str], bool]) -> int:
+        """Step 2 of `ling-admin chat remove`: the volumes, images and networks Onyx left.
+
+        Args:
+            delete_data (bool): Delete them without asking.
+            ask (Callable[[str], bool]): Asks a yes/no question.
+
+        Returns:
+            int: The exit code.
+        """
         volumes, images, orphans, networks = cls.volumes(), cls.images(), cls.orphan_sidecars(), cls.networks()
         if not (volumes or images or orphans or networks):
             print("No Onyx data is left either.")
             return 0
         print(f"Kept: volumes {', '.join(volumes) or 'none'}; images {', '.join(images) or 'none'}; "
-              f"sidecars on Onyx's network {', '.join(orphans) or 'none'}; networks {', '.join(networks) or 'none'}.")
-        if orphans:
-            print("💡 `ling-admin images start` and `ling-admin voice start` run image search and voice "
-                  "without them.")
+              f"sidecars on Onyx's network {', '.join(orphans) or 'none'}; networks {', '.join(networks) or 'none'}."
+              + ("\n💡 `ling-admin images start` and `ling-admin voice start` run image search and voice "
+                 "without them." if orphans else ""))
         if not (delete_data or ask("Delete these too? The saved chats and Onyx accounts cannot be "
                                    "recovered. [y/N] ")):
             print("Kept. `ling-admin chat remove --delete-data` deletes them later.")

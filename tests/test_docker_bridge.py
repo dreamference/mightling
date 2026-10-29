@@ -29,7 +29,9 @@ def test_gateway_falls_back_when_docker_cannot_be_queried():
 
 def test_an_ipv6_host_and_an_https_scheme_survive_the_rewrite():
     with patch.object(DockerBridge, "gateway", return_value="172.17.0.1"):
-        assert DockerBridge.container_vllm_url("http://[fd00::5]:8000") == "http://[fd00::5]:8000/v1"
+        assert (
+            DockerBridge.container_vllm_url("http://[fd00::5]:8000") == "http://[fd00::5]:8000/v1"
+        )
         assert DockerBridge.container_vllm_url("https://models.example:8443") == (
             "https://models.example:8443/v1"
         )

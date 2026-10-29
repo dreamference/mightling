@@ -16,9 +16,9 @@ first candidates directly (IMAGE_SEARCH §2), and it has no arm64 image upstream
 Nothing here prints: a failure is kept in `ImageSearchSidecar.problem` for the CLI to say.
 """
 
-import contextlib
 import json
 import os
+import pathlib
 import secrets as secrets_module
 import shutil
 import subprocess
@@ -97,36 +97,48 @@ class ImageSearchSidecar:
         Returns:
             Optional[str]: The secret, or None if it could not be stored (see `problem`).
         """
+        path = pathlib.Path(IMAGE_SEARCH_SECRET_FILE)
         try:
-            if os.path.exists(IMAGE_SEARCH_SECRET_FILE):
-                with open(IMAGE_SEARCH_SECRET_FILE) as handle:
-                    value = handle.read().strip()
-                if value:
-                    return value
+            value = path.read_text().strip() if path.exists() else ""
+            if value:
+                return value
             os.makedirs(IMAGE_SEARCH_DATA_DIR, mode=0o700, exist_ok=True)
-            value = secrets_module.token_urlsafe(32)
-            # Written whole and private under a name of its own, then linked into place. A link
-            # never replaces a file, so of two first starts at once the later keeps the earlier's.
-            temporary = f"{IMAGE_SEARCH_SECRET_FILE}.{secrets_module.token_hex(8)}.tmp"
-            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            try:
-                with os.fdopen(descriptor, "w") as handle:
-                    handle.write(value)
-                try:
-                    os.link(temporary, IMAGE_SEARCH_SECRET_FILE)
-                except FileExistsError:
-                    with open(IMAGE_SEARCH_SECRET_FILE) as handle:
-                        existing = handle.read().strip()
-                    if existing:
-                        return existing
-                    os.replace(temporary, IMAGE_SEARCH_SECRET_FILE)
-            finally:
-                with contextlib.suppress(OSError):
-                    os.unlink(temporary)
-            return value
+            return cls._store_once(path, secrets_module.token_urlsafe(32))
         except OSError as exc:
             cls.problem = f"Could not store the image search secret: {exc}"
             return None
+
+    @classmethod
+    def _store_once(cls, path: pathlib.Path, value: str) -> str:
+        """Stores a secret unless another start stored one first.
+
+        It is written whole and private under a name of its own, then linked into place. A link
+        never replaces a file, so of two first starts at once the later keeps the earlier's.
+
+        Args:
+            path (pathlib.Path): Where the secret lives.
+            value (str): The secret to store when none is there yet.
+
+        Returns:
+            str: The secret now stored.
+
+        Raises:
+            OSError: The secret could not be written.
+        """
+        temporary = path.with_name(f"{path.name}.{secrets_module.token_hex(8)}.tmp")
+        temporary.touch(mode=0o600, exist_ok=False)
+        try:
+            temporary.write_text(value)
+            try:
+                path.hardlink_to(temporary)
+            except FileExistsError:
+                existing = path.read_text().strip()
+                if existing:
+                    return existing
+                temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return value
 
     @classmethod
     def stage(cls) -> bool:

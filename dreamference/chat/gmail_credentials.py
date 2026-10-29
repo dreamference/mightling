@@ -14,7 +14,7 @@ mounted folder when a connection completes in the browser.
 """
 
 import os
-from typing import Dict, Final, List
+from typing import Final
 
 from dreamference.chat.gmail_search_service import GmailSearchService
 
@@ -45,12 +45,12 @@ class GmailCredentials:
         return True
 
     @classmethod
-    def load(cls) -> List[Dict[str, str]]:
+    def load(cls) -> list[dict[str, str]]:
         """
         Reads the stored tokens.
 
         Returns:
-            List[Dict[str, str]]: The address and access token of each connected account
+            list[dict[str, str]]: The address and access token of each connected account
                 whose token is valid; empty if none is.
         """
         return GmailSearchService.credentials(CREDENTIALS_DIR)

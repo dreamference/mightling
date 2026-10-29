@@ -17,7 +17,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, Final, Optional
+from typing import Any, Final, Optional
 
 from dreamference.chat.gmail_credentials import CREDENTIALS_DIR
 from dreamference.chat.gmail_search_service import IMAP_TIMEOUT_SECONDS, MAX_RESULT_LIMIT
@@ -29,16 +29,16 @@ GMAIL_SERVICE_URL: Final[str] = f"http://127.0.0.1:{GOOGLE_HOST_PORT}"
 # read here: a client that created one would hold a secret the running service does not know.
 SERVICE_SECRET_PATH: Final[str] = os.path.join(CREDENTIALS_DIR, SECRET_FILE_NAME)
 
-NOT_RUNNING_ERROR: Final[Dict[str, str]] = {
+NOT_RUNNING_ERROR: Final[dict[str, str]] = {
     "error": "Gmail service is not running.",
     "hint": "Start it with: ling-admin google start",
 }
 # Accounts are searched one after another, so with several a search can outlast the timeout.
-SLOW_ERROR: Final[Dict[str, str]] = {
+SLOW_ERROR: Final[dict[str, str]] = {
     "error": "Gmail service did not answer in time.",
     "hint": "Try a narrower query, or again in a moment",
 }
-NOT_SET_UP_ERROR: Final[Dict[str, str]] = {
+NOT_SET_UP_ERROR: Final[dict[str, str]] = {
     "error": "Gmail has not been set up.",
     "hint": "Run: ling-admin google start, then connect Gmail with /apps in ling",
 }
@@ -50,17 +50,17 @@ class GmailClient:
     """
 
     @classmethod
-    def status(cls) -> Dict[str, Any]:
+    def status(cls) -> dict[str, Any]:
         """
         Asks which accounts are connected. Needs no secret: the endpoint exposes no mail.
 
         Returns:
-            Dict[str, Any]: `connected` and `email` (comma-separated addresses), or an error.
+            dict[str, Any]: `connected` and `email` (comma-separated addresses), or an error.
         """
         return cls._get("/status", authenticated=False)
 
     @classmethod
-    def search(cls, query: str, limit: int = 10) -> Dict[str, Any]:
+    def search(cls, query: str, limit: int = 10) -> dict[str, Any]:
         """
         Searches every connected mailbox with Gmail's own query syntax.
 
@@ -69,13 +69,13 @@ class GmailClient:
             limit (int): How many messages to return; clamped to the service's maximum.
 
         Returns:
-            Dict[str, Any]: `messages`, newest first, and `errors` for accounts that failed.
+            dict[str, Any]: `messages`, newest first, and `errors` for accounts that failed.
         """
         limit = max(1, min(limit, MAX_RESULT_LIMIT))
         return cls._get("/search?" + urllib.parse.urlencode({"query": query, "limit": limit}))
 
     @classmethod
-    def read(cls, message_id: str) -> Dict[str, Any]:
+    def read(cls, message_id: str) -> dict[str, Any]:
         """
         Reads one message, by the opaque id `search` printed.
 
@@ -83,7 +83,7 @@ class GmailClient:
             message_id (str): The service's `"<account>|<X-GM-MSGID>"` id, as printed.
 
         Returns:
-            Dict[str, Any]: Headers and `body`, or an error.
+            dict[str, Any]: Headers and `body`, or an error.
         """
         # `@` and `|` stay literal: the id is "<account>|<id>", and a service started before it
         # learned to decode its path would look up the encoded form and find nothing.
@@ -98,7 +98,7 @@ class GmailClient:
             return None
 
     @classmethod
-    def _get(cls, path: str, authenticated: bool = True) -> Dict[str, Any]:
+    def _get(cls, path: str, authenticated: bool = True) -> dict[str, Any]:
         headers = {}
         if authenticated:
             secret = cls._secret()
@@ -117,11 +117,9 @@ class GmailClient:
                 body = {}
             message = body.get("error") if isinstance(body, dict) else None
             return {"error": message or f"Gmail service answered HTTP {error.code}."}
-        except TimeoutError:
-            return dict(SLOW_ERROR)
-        except urllib.error.URLError as error:
-            return dict(SLOW_ERROR if isinstance(error.reason, TimeoutError) else NOT_RUNNING_ERROR)
-        except ConnectionError:
-            return dict(NOT_RUNNING_ERROR)
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+            # urlopen wraps a timeout while connecting in URLError, but not one while reading.
+            reason = getattr(error, "reason", error)
+            return dict(SLOW_ERROR if isinstance(reason, TimeoutError) else NOT_RUNNING_ERROR)
         except ValueError:
             return {"error": "Gmail service returned something that is not JSON."}

@@ -860,7 +860,9 @@ def test_no_two_modules_differ_only_in_case():
     assert not clashes
 
 
-def test_a_launcher_left_by_an_earlier_name_that_cannot_be_removed_does_not_fail_registration(tmp_path):
+def test_a_launcher_left_by_an_earlier_name_that_cannot_be_removed_does_not_fail_registration(
+    tmp_path,
+):
     # An entry an install under sudo left root-owned must not undo the registration just written.
     from dreamference.chat import desktop_runner
 

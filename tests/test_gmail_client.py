@@ -799,7 +799,6 @@ def test_a_refresh_that_rotates_the_refresh_token_stores_the_new_one(tmp_path, m
     assert GmailSearchService._unseal(stored["refresh_token"], directory) == "ref-new"
 
 
-
 def test_a_sealing_key_another_request_created_first_is_the_one_kept(tmp_path, monkeypatch):
     # Two first saves at once: the one that loses must not replace the key the other sealed with.
     from dreamference.chat import gmail_search_service as svc_mod
@@ -820,11 +819,9 @@ def test_a_sealing_key_another_request_created_first_is_the_one_kept(tmp_path, m
 
 def test_a_service_that_answers_too_slowly_is_not_reported_as_stopped(tmp_path):
     # Several accounts are searched one after another; a slow answer is not a stopped service.
-    import socket
-
     secret = tmp_path / "service-secret"
     secret.write_text("s")
-    for failure in (TimeoutError("timed out"), urllib.error.URLError(socket.timeout("timed out"))):
+    for failure in (TimeoutError("timed out"), urllib.error.URLError(TimeoutError("timed out"))):
 
         def slow(request, timeout=None, failure=failure):
             raise failure

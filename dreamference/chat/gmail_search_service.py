@@ -84,6 +84,7 @@ CREDENTIALS_LOCK: Final[threading.Lock] = threading.Lock()
 # The key the stored token is sealed with. See `_seal`: this is obfuscation with a clear threat
 # model, not a secret-management system.
 KEY_NAME: Final[str] = "credentials.key"
+KEY_BYTES: Final[int] = 32
 
 GOOGLE_OAUTH_CLIENT_ID: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_ID", "44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com")
 GOOGLE_OAUTH_CLIENT_SECRET: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_SECRET", "-gMLuQyDiI0XrQS_vx_mhuYF")
@@ -136,6 +137,8 @@ NO_SECRET_ERROR: Final[str] = "No shared secret: recreate it with ling-admin goo
 
 IMAP_HOST: Final[str] = "imap.gmail.com"
 IMAP_PORT: Final[int] = 993
+# imaplib sends arguments as they are, so one of these would end the command's line.
+LINE_BREAK: Final[re.Pattern] = re.compile(r"[\r\n]")
 
 # Gmail allows fifteen simultaneous IMAP connections per account. The service opens one per request
 # and closes it, which keeps it far below that without any pooling; the timeout is what stops a
@@ -236,35 +239,30 @@ class GmailSearchService:
         Returns:
             bytes: A 32-byte key.
         """
-        path = os.path.join(directory or CONFIG_DIR, KEY_NAME)
-        try:
-            with open(path, "rb") as handle:
-                key = handle.read()
-            if len(key) == 32:
+        path = pathlib.Path(directory or CONFIG_DIR, KEY_NAME)
+        with contextlib.suppress(OSError):
+            key = path.read_bytes()
+            if len(key) == KEY_BYTES:
                 return key
-        except OSError:
-            pass
-        key = secrets.token_bytes(32)
-        temporary = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+        key = secrets.token_bytes(KEY_BYTES)
+        temporary = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         try:
             with open(temporary, "wb", opener=lambda name, flags: os.open(name, flags, 0o600)) as handle:
                 handle.write(key)
             try:
                 # Appears whole or not at all, and never over a key another request made first:
                 # tokens it sealed with that key would no longer open.
-                os.link(temporary, path)
+                path.hardlink_to(temporary)
             except FileExistsError:
-                with open(path, "rb") as handle:
-                    existing = handle.read()
-                if len(existing) == 32:
+                existing = path.read_bytes()
+                if len(existing) == KEY_BYTES:
                     return existing
-                os.replace(temporary, path)
+                temporary.replace(path)
             except OSError:
                 # A file system without hard links: still whole, if not first-come.
-                os.replace(temporary, path)
+                temporary.replace(path)
         finally:
-            with contextlib.suppress(OSError):
-                os.unlink(temporary)
+            temporary.unlink(missing_ok=True)
         return key
 
     @classmethod
@@ -610,10 +608,8 @@ class GmailSearchService:
                 connections[cred["email"]] = conn
             except Exception as error:
                 failures.append({"account": cred["email"], "error": cls._describe(error)})
-                if conn is not None:
-                    # Connected but refused: the socket is not left open until garbage collection.
-                    with contextlib.suppress(Exception):
-                        conn.logout()
+                # Connected but refused: the socket is not left open until garbage collection.
+                cls._logout(conn)
         if not connections:
             return {}, "Could not connect to any Gmail accounts.", failures
         return connections, None, failures
@@ -850,7 +846,7 @@ class GmailSearchService:
             status, data = connection.uid("SEARCH", "CHARSET", "UTF-8", "X-GM-RAW")
         except (imaplib.IMAP4.error, OSError):
             status, data = "NO", None
-        if status != "OK" and query.isascii() and not ("\r" in query or "\n" in query):
+        if status != "OK" and query.isascii() and not LINE_BREAK.search(query):
             # Some servers reject CHARSET on a non-standard search key. An ASCII query can be sent
             # the ordinary quoted way, so it is worth one retry before giving up; not one with a
             # line break, which would end the quoted string's line and start a command of its own.
@@ -1073,34 +1069,58 @@ class GmailSearchService:
 
         # Every account was logged in to find the one holding the message; all are logged out.
         try:
-            if email and email in connections:
-                conn = connections[email]
-                try:
-                    status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
-                    if status == "OK" and data[0]:
-                        uid = data[0].split()[0].decode("ascii")
-                        return cls._fetch_body(conn, uid)
-                except Exception as e:
-                    return {"error": str(e)}
-                return {"error": "Message not found"}
-
-            for conn in connections.values():
-                try:
-                    status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
-                    if status == "OK" and data[0]:
-                        uid = data[0].split()[0].decode("ascii")
-                        res = cls._fetch_body(conn, uid)
-                        if res and "error" not in res:
-                            return res
-                except Exception:
-                    pass
-            return {"error": "Message not found"}
+            return cls._find_message(connections, email, real_id)
         finally:
             for conn in connections.values():
-                try:
-                    conn.logout()
-                except Exception:
-                    pass
+                cls._logout(conn)
+
+    @classmethod
+    def _logout(cls, connection: imaplib.IMAP4_SSL | None) -> None:
+        """Logs out without letting a failure surface as the request's failure.
+
+        Args:
+            connection (imaplib.IMAP4_SSL | None): The connection; None has nothing to log out of.
+        """
+        if connection is not None:
+            with contextlib.suppress(Exception):
+                connection.logout()
+
+    @classmethod
+    def _find_message(
+        cls, connections: dict[str, imaplib.IMAP4_SSL], email: str | None, real_id: str
+    ) -> dict[str, Any]:
+        """Reads a message from the account named, or from the first account that holds it.
+
+        Args:
+            connections (dict[str, imaplib.IMAP4_SSL]): Open mailboxes by address.
+            email (str | None): The account the message id came from, when it says.
+            real_id (str): Gmail's message id, digits only.
+
+        Returns:
+            dict[str, Any]: Headers and `body`, or an error.
+        """
+        if email and email in connections:
+            conn = connections[email]
+            try:
+                status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
+                if status == "OK" and data[0]:
+                    uid = data[0].split()[0].decode("ascii")
+                    return cls._fetch_body(conn, uid)
+            except Exception as e:
+                return {"error": str(e)}
+            return {"error": "Message not found"}
+
+        for conn in connections.values():
+            try:
+                status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
+                if status == "OK" and data[0]:
+                    uid = data[0].split()[0].decode("ascii")
+                    res = cls._fetch_body(conn, uid)
+                    if res and "error" not in res:
+                        return res
+            except Exception:
+                pass
+        return {"error": "Message not found"}
 
     @classmethod
     def _close(cls, connection: imaplib.IMAP4_SSL) -> None:

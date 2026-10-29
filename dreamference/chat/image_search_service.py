@@ -32,6 +32,7 @@ import ipaddress
 import json
 import math
 import os
+import pathlib
 import re
 import socket
 import sqlite3
@@ -445,15 +446,14 @@ class ImageStore:
             except Exception:
                 pass
         # The new file replaces the old in one step, so a reader is never served half an image.
-        target = self.path(file_id)
-        temporary = f"{target}.{os.getpid()}.{threading.get_ident()}.tmp"
+        target = pathlib.Path(self.path(file_id))
+        temporary = target.with_name(f"{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         try:
             with open(temporary, "wb") as fh:
                 fh.write(payload)
-            os.replace(temporary, target)
+            temporary.replace(target)
         finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+            temporary.unlink(missing_ok=True)
         with self._lock:
             self._db.execute(
                 "INSERT OR REPLACE INTO images (file_id, source_url, phash, title, created)"
