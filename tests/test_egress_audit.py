@@ -1083,3 +1083,13 @@ def test_a_query_in_a_later_message_of_a_sendmmsg_is_read():
     )
     assert trace.destinations == {"192.0.2.7:443": 1} and trace.dns_servers == {"127.0.0.53:53": 1}
     assert trace.dns_names == {"audit-probe.example.com": 1}
+
+
+def test_a_failed_execve_that_strace_split_is_not_a_program_that_ran():
+    trace = StraceParser.parse(
+        '5 execve("/usr/bin/git", ["git", "fetch"], 0x0 /* 1 var */ <unfinished ...>\n'
+        '6 write(2</dev/null>, "x", 1) = 1\n'
+        "5 <... execve resumed>) = -1 ENOENT (No such file or directory)\n"
+    )
+    assert trace.processes == {} and trace.networked_git == []
+    assert EgressAudit.judge(trace, ALLOWED, replied=True).status == TRACE_FAILED
