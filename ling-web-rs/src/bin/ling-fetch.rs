@@ -34,7 +34,13 @@ struct Args {
 fn main() -> ExitCode {
     let args = Args::parse();
     if let Some(message) = ling_web::refusal_now() {
-        println!("❌ {message}");
+        // As `ling-search --json`: the level, so a script can tell a refusal from a failure.
+        if args.json && args.download.is_none() {
+            let level = ling_web::level().name();
+            print_json(&serde_json::json!({"airgapped": level, "error": message}));
+        } else {
+            println!("❌ {message}");
+        }
         return ExitCode::FAILURE;
     }
     if let Some(dest) = &args.download {
@@ -62,8 +68,19 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            println!("❌ {error}");
+            if args.json {
+                print_json(&serde_json::json!({"error": error}));
+            } else {
+                println!("❌ {error}");
+            }
             ExitCode::FAILURE
         }
     }
+}
+
+fn print_json(value: &serde_json::Value) {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value).unwrap_or_default()
+    );
 }
