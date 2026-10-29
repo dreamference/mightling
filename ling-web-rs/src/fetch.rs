@@ -300,9 +300,17 @@ pub fn decode(body: &[u8], content_type: &str, is_html: bool) -> String {
         let label = META_CHARSET.captures(head)?.get(1)?.as_bytes().to_vec();
         String::from_utf8(label).ok()
     };
+    // A header charset no encoding knows (`charset=`, a typo) leaves the meta in charge.
+    let known = |label: String| Encoding::for_label(label.as_bytes());
     let encoding = declared
-        .or_else(|| if is_html { sniffed() } else { None })
-        .and_then(|label| Encoding::for_label(label.as_bytes()))
+        .and_then(known)
+        .or_else(|| {
+            if is_html {
+                sniffed().and_then(known)
+            } else {
+                None
+            }
+        })
         .unwrap_or(encoding_rs::UTF_8);
     let (text, _, _) = encoding.decode(body);
     text.into_owned()
