@@ -84,6 +84,8 @@ export function insights(codexHome: string, now: number = Date.now()): Insights 
     } catch {
       return;
     }
+    // newest first (the folders are YYYY/MM/DD, the files start with their time), so the cap drops the oldest
+    entries.sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
     for (const entry of entries) {
       if (files.length >= MAX_FILES) return;
       const full = path.join(dir, entry.name);
