@@ -127,6 +127,19 @@ def test_install_writes_executable_hooks_and_removes_a_trigger_no_longer_wanted(
     assert "frozen" in hook.read_text(), "an unchecked repository still refuses pushes while frozen"
 
 
+def test_a_hook_rewrite_that_fails_leaves_the_old_hook_whole(tmp_path, monkeypatch):
+    repository = tmp_path / "o" / "r.git"
+    ForgeAnonymity.install(repository, "full", [], True, trigger=False)
+    hook = repository / "hooks" / "pre-receive.d" / forge_anonymity.HOOK_NAME
+    before = hook.read_text()
+    monkeypatch.setattr(ForgeAnonymity, "hook_script", classmethod(lambda cls, *a: "\udc80"))
+    with pytest.raises(UnicodeEncodeError):
+        ForgeAnonymity.install(repository, "full", [], True, trigger=False)
+    assert hook.read_text() == before, "a push meanwhile still runs the whole check"
+    assert stat.S_IMODE(hook.stat().st_mode) == 0o755
+    assert [path.name for path in hook.parent.iterdir()] == [hook.name]
+
+
 def test_an_exempt_path_with_shell_characters_never_reaches_the_hook():
     hook = ForgeAnonymity.hook_script(
         "full", ["tests/test_anonymity.py", "x'; touch pwned #"], True

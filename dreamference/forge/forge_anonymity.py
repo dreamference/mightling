@@ -336,8 +336,16 @@ class ForgeAnonymity:
             trigger_path.unlink()
         for path, text in scripts.items():
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-            Path(path).chmod(0o755)
+            # Every tick rewrites the hooks; a push meanwhile must find the old one or the new one
+            # whole, never an empty file that exits 0.
+            staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+            try:
+                staging.write_text(text)
+                staging.chmod(0o755)
+                staging.replace(path)
+            except BaseException:
+                staging.unlink(missing_ok=True)
+                raise
 
     @classmethod
     def added_text(
