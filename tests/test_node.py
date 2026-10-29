@@ -1419,6 +1419,7 @@ def test_a_job_is_a_capped_unit_of_its_own_not_a_child_of_the_connection():
     properties = [argv[i + 1] for i, word in enumerate(argv) if word == "-p"]
     assert f"MemoryMax={16 * 1024**3}" in properties and "MemorySwapMax=0" in properties
     assert "RuntimeMaxSec=7200" in properties
+    assert "TasksMax=4096" in properties  # a fork bomb ends at its own unit, not the user's slice
     assert argv[-4:] == ["/home/u/.local/bin/ling-admin", "node", "job-exec", "20261002-1200-abc"]
 
 
