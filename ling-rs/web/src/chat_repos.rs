@@ -3746,7 +3746,7 @@ async fn read_owner_git_identity(server: &Server) -> Result<(String, String), St
         }
         let file_str = file.to_string_lossy().into_owned();
         if name.is_none()
-            && let Ok(out) = run_git(server, None, &["config", "--file", &file_str, "--get", "user.name"], false).await
+            && let Ok(out) = run_git(server, None, &["config", "--includes", "--file", &file_str, "--get", "user.name"], false).await
             && out.status.success()
         {
             let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -3755,7 +3755,7 @@ async fn read_owner_git_identity(server: &Server) -> Result<(String, String), St
             }
         }
         if email.is_none()
-            && let Ok(out) = run_git(server, None, &["config", "--file", &file_str, "--get", "user.email"], false).await
+            && let Ok(out) = run_git(server, None, &["config", "--includes", "--file", &file_str, "--get", "user.email"], false).await
             && out.status.success()
         {
             let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -8719,6 +8719,19 @@ mod tests {
         let (st, again, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(again["repo"], Value::Null, "{body}");
+    }
+
+    #[tokio::test]
+    async fn the_owner_identity_is_read_through_an_included_git_config() {
+        let s = scratch("identity-include");
+        let (server, _probe) = test_server(&s.dir, None, true);
+        std::fs::write(s.dir.join("user/identity.inc"), "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n").unwrap();
+        std::fs::write(s.dir.join("user/.gitconfig"), "[include]\n\tpath = identity.inc\n").unwrap();
+        assert_eq!(
+            read_owner_git_identity(&server).await,
+            Ok(("owner".to_string(), "owner@127.0.0.1".to_string())),
+            "git itself reads the included file, so the commit identity must too"
+        );
     }
 
     #[test]
