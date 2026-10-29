@@ -163,6 +163,7 @@ export async function create(options: CreateOptions): Promise<Created> {
     await removeEmptyBucket(root);
     throw new GitError(`cannot create managed worktree: ${(error as Error).message}`);
   }
+  let included: string[];
   try {
     const config = (await git(root, ["rev-parse", "--path-format=absolute", "--git-path", "config.worktree"])).trim();
     await git(root, ["config", "--file", config, "core.worktree", root]);
@@ -171,11 +172,11 @@ export async function create(options: CreateOptions): Promise<Created> {
       const changes = await snapshot(sourceRoot, `source-${path.basename(path.dirname(root))}`);
       if (changes) await applySnapshot(root, changes);
     }
+    included = await copyInto(sourceRoot, root, await includedIgnoredFiles(sourceRoot));
   } catch (error) {
     await removeChecked(sourceRoot, root, null).catch(() => {});
     throw new GitError(`cannot populate managed worktree: ${(error as Error).message}`);
   }
-  const included = await copyInto(sourceRoot, root, await includedIgnoredFiles(sourceRoot));
   const cwd = path.join(root, relative);
   if (!(await userFs.exists(cwd))) {
     await removeChecked(sourceRoot, root, null).catch(() => {});

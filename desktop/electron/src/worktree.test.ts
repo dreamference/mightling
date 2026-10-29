@@ -113,6 +113,17 @@ describe("managed worktrees", () => {
     await expect(worktree.remove(source, path.join(root, "abcd", "app"), root, null)).rejects.toThrow("is not a worktree of");
   });
 
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("are not left behind when a file .worktreeinclude names cannot be copied", async () => {
+    const { source, root } = repo();
+    fs.chmodSync(path.join(source, ".env"), 0o000);
+    try {
+      await expect(worktree.create({ sourceCwd: source, base: null, withChanges: false, worktreeRoot: root })).rejects.toThrow();
+    } finally {
+      fs.chmodSync(path.join(source, ".env"), 0o644);
+    }
+    expect(run(source, "worktree", "list", "--porcelain").match(/^worktree /gm)).toHaveLength(1);
+  });
+
   it("are bound to one thread when two ask at once, and the other is told", async () => {
     const { source, root } = repo();
     const created = await worktree.create({ sourceCwd: source, base: null, withChanges: false, worktreeRoot: root });
