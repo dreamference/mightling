@@ -716,6 +716,36 @@ fn run(cli: Cli) -> Result<ExitCode> {
 
 /// `ling-docs extract` (PDF_SEARCH §4): the extractor in a capped scope and bwrap where the user's
 /// systemd is reachable, else (inside the agent's sandbox) a plain child under `RLIMIT_AS`.
+/// Units shown by `extract`: the page (a PDF) and the text.
+type Shown = Vec<(Option<u32>, String)>;
+
+/// The units `extract` prints, by page (a PDF) or the file's sections (text): the requested ones
+/// only, in order. Returns them, the page to go on from, and whether any was left out.
+fn select_units(
+    units: &[ling_docs::extract::Unit],
+    range: Option<(u32, u32)>,
+    max_chars: usize,
+) -> (Shown, Option<u32>, bool) {
+    let mut shown: Shown = Vec::new();
+    let mut used = 0;
+    let mut next = None;
+    for unit in units {
+        if let (Some((a, b)), Some(p)) = (range, unit.page) {
+            if p < a || p > b {
+                continue;
+            }
+        }
+        // Within the cap once one is shown, a range asked for as well (PDF_SEARCH §4).
+        if used > 0 && used + unit.text.chars().count() > max_chars {
+            next = unit.page;
+            return (shown, next, true);
+        }
+        used += unit.text.chars().count();
+        shown.push((unit.page, unit.text.clone()));
+    }
+    (shown, next, false)
+}
+
 fn extract_command(
     file: &std::path::Path,
     page: Option<u32>,
@@ -763,23 +793,7 @@ fn extract_command(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    // Units by page (a PDF) or the file's sections (text), the requested ones only.
-    let mut shown: Vec<(Option<u32>, String)> = Vec::new();
-    let mut used = 0;
-    let mut next = None;
-    for unit in &extracted.units {
-        if let (Some((a, b)), Some(p)) = (range, unit.page) {
-            if p < a || p > b {
-                continue;
-            }
-        }
-        if range.is_none() && used > 0 && used + unit.text.chars().count() > max_chars {
-            next = unit.page;
-            break;
-        }
-        used += unit.text.chars().count();
-        shown.push((unit.page, unit.text.clone()));
-    }
+    let (shown, next, cut) = select_units(&extracted.units, range, max_chars);
     let scans: Vec<u32> = extracted
         .needs_ocr
         .iter()
@@ -804,7 +818,7 @@ fn extract_command(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "file": name, "title": extracted.title, "page_count": extracted.pages, "returned": returned,
-                "pages": pages, "needs_ocr": scans, "next_page": next,
+                "pages": pages, "needs_ocr": scans, "next_page": next, "truncated": cut,
             }))?
         )?;
         return Ok(ExitCode::SUCCESS);
@@ -845,12 +859,18 @@ fn extract_command(
                 out,
                 "-- more: ling-docs extract {} --pages {n}-{}",
                 file.display(),
-                (n + 4).min(count)
+                range.map_or(n + 4, |(_, b)| b).min(count)
             )?;
         }
     } else {
         for (_, text) in &shown {
             writeln!(out, "{}", text.trim_end())?;
+        }
+        if cut {
+            writeln!(
+                out,
+                "-- cut at --max-chars {max_chars}: the rest of {name} is not shown"
+            )?;
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -956,4 +976,35 @@ fn ocr_file(
         read(1, &img)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unit(page: Option<u32>, text: &str) -> ling_docs::extract::Unit {
+        ling_docs::extract::Unit {
+            loc: String::new(),
+            page,
+            line_first: None,
+            line_last: None,
+            heading: String::new(),
+            group: None,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn extract_keeps_to_max_chars_and_says_what_it_left_out() {
+        // A text file: the sections after the cap are left out, and that is said.
+        let text = [unit(None, &"a".repeat(60)), unit(None, &"b".repeat(60))];
+        let (shown, next, cut) = select_units(&text, None, 100);
+        assert_eq!((shown.len(), next, cut), (1, None, true));
+        // A page range is kept to the cap too, and says where to go on.
+        let pdf: Vec<_> = (1..=4).map(|p| unit(Some(p), &"x".repeat(60))).collect();
+        let (shown, next, cut) = select_units(&pdf, Some((2, 4)), 100);
+        assert_eq!((shown.len(), next, cut), (1, Some(3), true));
+        let (shown, next, cut) = select_units(&pdf, Some((2, 3)), 1000);
+        assert_eq!((shown.len(), next, cut), (2, None, false));
+    }
 }
