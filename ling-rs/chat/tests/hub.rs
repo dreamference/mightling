@@ -78,6 +78,10 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
                 // `ling web`'s Night Shift routes: one repository, a queue of one, one report after "".
                 AgentCommand::Web { path, body, reply } => {
                     agent_log.requests.lock().unwrap().push(("web".to_string(), json!({ "path": path, "body": body })));
+                    if let Some(answer) = repo_web(&path, body.as_ref()) {
+                        let _ = reply.send(answer);
+                        continue;
+                    }
                     let answer = if path == "/api/night/repos" {
                         json!({ "repos": [{ "path": "/w/app", "name": "app" }] })
                     } else if path == "/api/night/add" {
@@ -165,6 +169,37 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
 }
 
 const CHAT: &str = "telegram:7";
+
+/// `ling web`'s repository routes for `/push` and `/merge`: Telegram chat 70 works in checkout
+/// `co-1` of org/widget (its notices go elsewhere), chat 71 in `co-moved` (the branch moves
+/// before the push), chat 72 in `co-2` (its own notices reach it). Other chats have none.
+fn repo_web(path: &str, body: Option<&Value>) -> Option<Result<Value, String>> {
+    let checkout = |thread: &str, notified: bool| {
+        json!({ "repo": "org/widget", "topic_repo_names": [], "checkout": {
+            "thread": thread, "repo": "org/widget", "branch": format!("phone/{thread}"), "base": "main", "notified": notified } })
+    };
+    if path.starts_with("/api/repos/current?bridge=telegram&chat=70") {
+        return Some(Ok(checkout("co-1", false)));
+    }
+    if path.starts_with("/api/repos/current?bridge=telegram&chat=71") {
+        return Some(Ok(checkout("co-moved", false)));
+    }
+    if path.starts_with("/api/repos/current?bridge=telegram&chat=72") {
+        return Some(Ok(checkout("co-2", true)));
+    }
+    if path.starts_with("/api/repos/state?thread=co-") {
+        return Some(Ok(json!({ "confirm": "0123456789abcdef0123456789abcdef", "unpushed": 2, "ahead": 3, "head": "f".repeat(40) })));
+    }
+    let thread = body.and_then(|b| b.get("thread")).and_then(Value::as_str).unwrap_or_default();
+    match path {
+        "/api/repos/push" if thread == "co-moved" => {
+            Some(Err("the branch moved since you confirmed; confirm again".to_string()))
+        }
+        "/api/repos/push" => Some(Ok(json!({ "pushed": 2, "branch": format!("phone/{thread}") }))),
+        "/api/repos/merge" => Some(Ok(json!({ "merged": true, "branch": format!("phone/{thread}"), "into": "main" }))),
+        _ => None,
+    }
+}
 
 async fn next(rx: &mut mpsc::UnboundedReceiver<Outbound>) -> Outbound {
     tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("no output in time").expect("channel closed")
@@ -1059,4 +1094,117 @@ async fn a_new_launch_pair_from_the_same_user_closes_the_old_prompt_as_declined(
     );
     settle().await;
     assert_eq!(*approved_ids.lock().unwrap(), vec!["pair-req-2".to_string()]);
+}
+
+/// The next output for `chat`, skipping drafts and other chats' outputs.
+async fn next_for(rx: &mut mpsc::UnboundedReceiver<Outbound>, chat: &str) -> Outbound {
+    loop {
+        let out = next_settled(rx).await;
+        let target = match &out {
+            Outbound::Approval { chat, .. } | Outbound::ApprovalClosed { chat, .. } | Outbound::Notice { chat, .. } => chat.clone(),
+            _ => String::new(),
+        };
+        if target == chat {
+            return out;
+        }
+    }
+}
+
+fn repo_posts(rig: &Rig, path: &str) -> Vec<Value> {
+    rig.log.params("web").into_iter().filter(|p| p["path"] == path).map(|p| p["body"].clone()).collect()
+}
+
+/// `/push` (CHAT_REPOS §4.7) asks with counts and checked names only, and sends `ling web`'s
+/// confirmation nonce only when the button is pressed in the same chat, once.
+#[tokio::test]
+async fn push_asks_with_counts_only_and_pushes_once_only_when_pressed_in_its_chat() {
+    let mut rig = rig("repo-push", default_script(), false, |_| {});
+    let chat = "telegram:70";
+    rig.inbound.send(text(chat, "/push")).unwrap();
+    let Outbound::Approval { id, text: prompt, options, .. } = next_for(&mut rig.telegram, chat).await else {
+        panic!("no confirmation asked")
+    };
+    assert_eq!(prompt, "Push 2 commits of org/widget (phone/co-1) to the forge?");
+    assert_eq!(options, ["Push".to_string(), "Cancel".to_string()]);
+    assert!(repo_posts(&rig, "/api/repos/push").is_empty(), "nothing is pushed before the press");
+
+    // A press from another chat, or a nonce the hub never issued, pushes nothing.
+    rig.inbound.send(Inbound::Answer { chat: "telegram:99".into(), approval: id.clone(), choice: 0 }).unwrap();
+    rig.inbound.send(Inbound::Answer { chat: chat.into(), approval: "deadbeef00000000".into(), choice: 0 }).unwrap();
+    settle().await;
+    assert!(repo_posts(&rig, "/api/repos/push").is_empty());
+
+    rig.inbound.send(Inbound::Answer { chat: chat.into(), approval: id.clone(), choice: 0 }).unwrap();
+    assert_eq!(
+        next_for(&mut rig.telegram, chat).await,
+        Outbound::ApprovalClosed { chat: chat.into(), id: id.clone(), outcome: "Pushing.".into() }
+    );
+    assert_eq!(
+        next_for(&mut rig.telegram, chat).await,
+        Outbound::Notice { chat: chat.into(), text: "Pushed 2 commits of org/widget.".into() }
+    );
+    assert_eq!(
+        repo_posts(&rig, "/api/repos/push"),
+        vec![json!({ "thread": "co-1", "confirm": "0123456789abcdef0123456789abcdef" })]
+    );
+
+    // A second press finds it closed and pushes nothing more.
+    rig.inbound.send(Inbound::Answer { chat: chat.into(), approval: id, choice: 0 }).unwrap();
+    assert_eq!(
+        next_for(&mut rig.telegram, chat).await,
+        Outbound::Notice { chat: chat.into(), text: "That request is no longer open.".into() }
+    );
+    assert_eq!(repo_posts(&rig, "/api/repos/push").len(), 1);
+}
+
+/// Cancel sends nothing; a branch that moved is said in fixed words; a chat that gets the
+/// checkout's own notices is not told twice; a chat with no checkout is told so.
+#[tokio::test]
+async fn merge_cancel_sends_nothing_and_outcomes_are_said_in_fixed_words() {
+    let mut rig = rig("repo-merge", default_script(), false, |_| {});
+    let chat = "telegram:70";
+    rig.inbound.send(text(chat, "/merge")).unwrap();
+    let Outbound::Approval { id, text: prompt, options, .. } = next_for(&mut rig.telegram, chat).await else {
+        panic!("no confirmation asked")
+    };
+    assert_eq!(prompt, "Merge 3 commits of org/widget (phone/co-1) into main?");
+    assert_eq!(options, ["Merge".to_string(), "Cancel".to_string()]);
+    rig.inbound.send(Inbound::Answer { chat: chat.into(), approval: id.clone(), choice: 1 }).unwrap();
+    assert_eq!(
+        next_for(&mut rig.telegram, chat).await,
+        Outbound::ApprovalClosed { chat: chat.into(), id, outcome: "Cancelled.".into() }
+    );
+    settle().await;
+    assert!(repo_posts(&rig, "/api/repos/merge").is_empty(), "Cancel sends nothing");
+
+    let moved = "telegram:71";
+    rig.inbound.send(text(moved, "/push")).unwrap();
+    let Outbound::Approval { id, .. } = next_for(&mut rig.telegram, moved).await else { panic!("no confirmation asked") };
+    rig.inbound.send(Inbound::Answer { chat: moved.into(), approval: id, choice: 0 }).unwrap();
+    assert!(matches!(next_for(&mut rig.telegram, moved).await, Outbound::ApprovalClosed { .. }));
+    assert_eq!(
+        next_for(&mut rig.telegram, moved).await,
+        Outbound::Notice { chat: moved.into(), text: "The branch moved since you confirmed; send /push again.".into() }
+    );
+
+    let notified = "telegram:72";
+    rig.inbound.send(text(notified, "/merge")).unwrap();
+    let Outbound::Approval { id, .. } = next_for(&mut rig.telegram, notified).await else { panic!("no confirmation asked") };
+    rig.inbound.send(Inbound::Answer { chat: notified.into(), approval: id, choice: 0 }).unwrap();
+    assert!(matches!(next_for(&mut rig.telegram, notified).await, Outbound::ApprovalClosed { .. }));
+    settle().await;
+    assert_eq!(repo_posts(&rig, "/api/repos/merge").len(), 1);
+    let mut said = Vec::new();
+    while let Ok(out) = rig.telegram.try_recv() {
+        if matches!(&out, Outbound::Notice { chat, .. } if chat == notified) {
+            said.push(out);
+        }
+    }
+    assert!(said.is_empty(), "the checkout's own Merged notice says it: {said:?}");
+
+    rig.inbound.send(text("telegram:73", "/push")).unwrap();
+    assert_eq!(
+        next_for(&mut rig.telegram, "telegram:73").await,
+        Outbound::Notice { chat: "telegram:73".into(), text: "No repository is open in this chat; open the app.".into() }
+    );
 }
