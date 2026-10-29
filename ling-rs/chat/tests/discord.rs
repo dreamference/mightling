@@ -389,6 +389,8 @@ struct Gateway {
     url: String,
     frames: Arc<Mutex<Vec<Value>>>,
     connections: Arc<Mutex<usize>>,
+    /// The first connection drops after its events, with no op 7 to ask for a resume.
+    drops: bool,
 }
 
 async fn gateway(State(gateway): State<Gateway>, upgrade: WebSocketUpgrade) -> impl IntoResponse {
@@ -410,6 +412,9 @@ async fn play(gateway: Gateway, mut socket: WebSocket) {
         let ready = json!({ "session_id": "sess-1", "resume_gateway_url": gateway.url });
         let _ = socket.send(send(json!({ "op": 0, "s": 1, "t": "READY", "d": ready }))).await;
         let _ = socket.send(send(json!({ "op": 0, "s": 2, "t": "MESSAGE_CREATE", "d": dm("111", "222", "hi") }))).await;
+        if gateway.drops {
+            return;
+        }
         let _ = socket.send(send(json!({ "op": 7, "d": null }))).await;
     } else {
         let _ = socket.send(Message::Close(Some(CloseFrame { code: 4004, reason: "Authentication failed.".into() }))).await;
@@ -421,7 +426,7 @@ async fn play(gateway: Gateway, mut socket: WebSocket) {
 async fn the_gateway_identifies_resumes_after_a_reconnect_and_stops_on_a_bad_token() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
-    let stand = Gateway { url: url.clone(), frames: Arc::default(), connections: Arc::default() };
+    let stand = Gateway { url: url.clone(), frames: Arc::default(), connections: Arc::default(), drops: false };
     let app = Router::new().route("/", axum::routing::get(gateway)).with_state(stand.clone());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let gateway_url = url.clone();
@@ -455,11 +460,35 @@ async fn the_gateway_identifies_resumes_after_a_reconnect_and_stops_on_a_bad_tok
     assert_eq!(rest.calls(), vec!["GET /gateway/bot"]);
 }
 
+/// A connection that drops resumes from the last event it passed on, not from the last one saved,
+/// or Discord replays the events between and the hub runs them twice.
+#[tokio::test]
+async fn a_dropped_connection_resumes_from_the_last_event() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let stand = Gateway { url: url.clone(), frames: Arc::default(), connections: Arc::default(), drops: true };
+    let app = Router::new().route("/", axum::routing::get(gateway)).with_state(stand.clone());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let gateway_url = url.clone();
+    let (_rest, api) = stand_in(Arc::new(move |call, _| match call {
+        "GET /gateway/bot" => (StatusCode::OK, json!({ "url": gateway_url })),
+        _ => (StatusCode::OK, json!({})),
+    }))
+    .await;
+    let dir = scratch("gateway-drop");
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let first = tokio::time::timeout(Duration::from_secs(20), discord_gateway::connect_once(&api, &dir, &tx, 100)).await.unwrap();
+    assert_eq!(first, Ended::Resume);
+    assert_eq!(DiscordState::load(&dir).seq, Some(2));
+    let _ = tokio::time::timeout(Duration::from_secs(20), discord_gateway::connect_once(&api, &dir, &tx, 100)).await.unwrap();
+    assert_eq!(stand.frames.lock().unwrap()[1]["d"]["seq"], 2);
+}
+
 #[tokio::test]
 async fn the_identify_limit_stops_the_gateway_before_it_identifies() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
-    let stand = Gateway { url: url.clone(), frames: Arc::default(), connections: Arc::default() };
+    let stand = Gateway { url: url.clone(), frames: Arc::default(), connections: Arc::default(), drops: false };
     let app = Router::new().route("/", axum::routing::get(gateway)).with_state(stand.clone());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let (_rest, api) = stand_in(Arc::new(move |_, _| (StatusCode::OK, json!({ "url": url })))).await;

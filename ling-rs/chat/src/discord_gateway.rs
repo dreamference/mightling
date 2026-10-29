@@ -150,70 +150,76 @@ pub async fn connect_once(api: &DiscordApi, dir: &PathBuf, events: &mpsc::Unboun
     }
     let mut next_beat = Instant::now() + interval.mul_f64(f64::from(jitter_ms(1000)) / 1000.0);
     let mut acked = true;
-    loop {
-        tokio::select! {
-            _ = tokio::time::sleep_until(next_beat) => {
-                if !acked {
-                    // A zombie connection: close it (not with 1000, which ends the session) and resume.
-                    let _ = socket.close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame { code: 4000.into(), reason: "".into() })).await;
-                    return Ended::Resume;
-                }
-                acked = false;
-                next_beat = Instant::now() + interval;
-                if socket.send(Message::text(json!({ "op": 1, "d": state.seq }).to_string())).await.is_err() {
-                    return Ended::Resume;
-                }
-            }
-            frame = socket.next() => {
-                let text = match frame {
-                    Some(Ok(Message::Text(text))) => text,
-                    Some(Ok(Message::Close(frame))) => return closed(frame.map(|frame| u16::from(frame.code))),
-                    Some(Ok(_)) => continue,
-                    _ => return Ended::Resume,
-                };
-                let frame: Value = serde_json::from_str(&text).unwrap_or_default();
-                match frame.get("op").and_then(Value::as_u64) {
-                    Some(0) => {
-                        if let Some(seq) = frame.get("s").and_then(Value::as_u64) {
-                            state.seq = Some(seq);
-                        }
-                        let name = frame.get("t").and_then(Value::as_str).unwrap_or_default().to_string();
-                        let data = frame.get("d").cloned().unwrap_or_default();
-                        if name == "READY" {
-                            state.session_id = data.get("session_id").and_then(Value::as_str).map(str::to_string);
-                            state.resume_url = data.get("resume_gateway_url").and_then(Value::as_str).map(str::to_string);
-                            let _ = state.save(dir);
-                        } else if name == "RESUMED" {
-                            let _ = state.save(dir);
-                        } else if events.send((name, data)).is_err() {
-                            return Ended::Fatal("the bridge stopped".to_string());
-                        }
-                        // The sequence is saved now and then, so a restart resumes close to here.
-                        if state.seq.is_some_and(|seq| seq % 20 == 0) {
-                            let _ = state.save(dir);
-                        }
-                    }
-                    Some(1) => {
-                        let _ = socket.send(Message::text(json!({ "op": 1, "d": state.seq }).to_string())).await;
-                    }
-                    Some(7) => {
-                        let _ = state.save(dir);
+    // A reconnect reloads the state, so the sequence is saved on every way out, not only now and then.
+    let ended = async {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep_until(next_beat) => {
+                    if !acked {
+                        // A zombie connection: close it (not with 1000, which ends the session) and resume.
                         let _ = socket.close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame { code: 4000.into(), reason: "".into() })).await;
                         return Ended::Resume;
                     }
-                    Some(9) => {
-                        if frame.get("d") == Some(&Value::Bool(true)) {
+                    acked = false;
+                    next_beat = Instant::now() + interval;
+                    if socket.send(Message::text(json!({ "op": 1, "d": state.seq }).to_string())).await.is_err() {
+                        return Ended::Resume;
+                    }
+                }
+                frame = socket.next() => {
+                    let text = match frame {
+                        Some(Ok(Message::Text(text))) => text,
+                        Some(Ok(Message::Close(frame))) => return closed(frame.map(|frame| u16::from(frame.code))),
+                        Some(Ok(_)) => continue,
+                        _ => return Ended::Resume,
+                    };
+                    let frame: Value = serde_json::from_str(&text).unwrap_or_default();
+                    match frame.get("op").and_then(Value::as_u64) {
+                        Some(0) => {
+                            if let Some(seq) = frame.get("s").and_then(Value::as_u64) {
+                                state.seq = Some(seq);
+                            }
+                            let name = frame.get("t").and_then(Value::as_str).unwrap_or_default().to_string();
+                            let data = frame.get("d").cloned().unwrap_or_default();
+                            if name == "READY" {
+                                state.session_id = data.get("session_id").and_then(Value::as_str).map(str::to_string);
+                                state.resume_url = data.get("resume_gateway_url").and_then(Value::as_str).map(str::to_string);
+                                let _ = state.save(dir);
+                            } else if name == "RESUMED" {
+                                let _ = state.save(dir);
+                            } else if events.send((name, data)).is_err() {
+                                return Ended::Fatal("the bridge stopped".to_string());
+                            }
+                            // The sequence is saved now and then, so a restart resumes close to here.
+                            if state.seq.is_some_and(|seq| seq % 20 == 0) {
+                                let _ = state.save(dir);
+                            }
+                        }
+                        Some(1) => {
+                            let _ = socket.send(Message::text(json!({ "op": 1, "d": state.seq }).to_string())).await;
+                        }
+                        Some(7) => {
+                            let _ = state.save(dir);
+                            let _ = socket.close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame { code: 4000.into(), reason: "".into() })).await;
                             return Ended::Resume;
                         }
-                        tokio::time::sleep(Duration::from_millis(1000 + u64::from(jitter_ms(4000)))).await;
-                        return Ended::Identify;
+                        Some(9) => {
+                            if frame.get("d") == Some(&Value::Bool(true)) {
+                                return Ended::Resume;
+                            }
+                            tokio::time::sleep(Duration::from_millis(1000 + u64::from(jitter_ms(4000)))).await;
+                            return Ended::Identify;
+                        }
+                        Some(11) => acked = true,
+                        _ => {}
                     }
-                    Some(11) => acked = true,
-                    _ => {}
                 }
             }
         }
     }
+    .await;
+    let _ = state.save(dir);
+    ended
 }
 
 fn closed(code: Option<u16>) -> Ended {
