@@ -424,7 +424,8 @@ fn set_default(thread_id: Option<&str>, level: Level) -> Vec<String> {
     let written = path
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&path, updated));
+        .map_err(anyhow::Error::from)
+        .and_then(|()| crate::write_through(&path, updated.as_bytes()));
     if let Err(err) = written {
         return vec![format!("Could not write {}: {err}", path.display())];
     }

@@ -1383,6 +1383,32 @@ pub(crate) fn write_atomically(path: &Path, contents: &[u8]) -> anyhow::Result<(
     Ok(())
 }
 
+/// Writes a file the user keeps, such as Dreamference's configuration, whole as
+/// [`write_atomically`] does, but through a link (a dotfiles folder keeps its link) and with the
+/// file's mode kept: that file can hold a token, and a new file would take the umask's mode.
+pub(crate) fn write_through(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let permissions = std::fs::metadata(&target).ok().map(|meta| meta.permissions());
+    let name = target
+        .file_name()
+        .context("a config path has no file name")?
+        .to_string_lossy();
+    let staging = target.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let written = std::fs::File::create(&staging)
+        .and_then(|mut file| {
+            // The mode first, so the contents are never readable by more than the file was.
+            if let Some(permissions) = permissions {
+                file.set_permissions(permissions)?;
+            }
+            file.write_all(contents)
+        })
+        .and_then(|()| std::fs::rename(&staging, &target));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&staging);
+    }
+    written.with_context(|| format!("could not write {}", target.display()))
+}
+
 /// Applies the launcher's settings to the text of a `config.toml`.
 ///
 /// Editing the document rather than appending text matters: TOML scopes a bare key to the most
@@ -2077,6 +2103,32 @@ mod tests {
             .map(|entries| entries.filter_map(Result::ok).filter(|e| e.file_name() != "config.toml").count())
             .unwrap_or(usize::MAX);
         assert_eq!(leftovers, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_users_config_is_written_through_its_link_whole_and_keeps_its_mode() {
+        use std::io::Read;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mightling-through-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("dotfiles")).unwrap_or_default();
+        let (target, link) = (dir.join("dotfiles").join("config.toml"), dir.join("config.toml"));
+        std::fs::write(&target, "hf_token = \"t\"\n").unwrap_or_default();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap_or_default();
+        std::os::unix::fs::symlink(&target, &link).unwrap_or_default();
+        let mut before = std::fs::File::open(&link).expect("open");
+        write_through(&link, b"hf_token = \"t\"\nmightling_prompt = \"terse\"\n").expect("write");
+        assert!(std::fs::symlink_metadata(&link).is_ok_and(|meta| meta.file_type().is_symlink()));
+        assert_eq!(std::fs::read_to_string(&target).unwrap_or_default(), "hf_token = \"t\"\nmightling_prompt = \"terse\"\n");
+        let mode = std::fs::metadata(&target).map(|meta| meta.permissions().mode() & 0o777).unwrap_or_default();
+        assert_eq!(mode, 0o600);
+        // A reader that opened the file before still sees the old one, whole.
+        let mut old = String::new();
+        before.read_to_string(&mut old).unwrap_or_default();
+        assert_eq!(old, "hf_token = \"t\"\n");
+        assert_eq!(std::fs::read_dir(dir.join("dotfiles")).map(Iterator::count).unwrap_or_default(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
