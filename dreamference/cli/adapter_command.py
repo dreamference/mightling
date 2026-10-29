@@ -79,7 +79,9 @@ class AdapterCommand:
             help="Install an adapter that is not signed by Dreamference (asks you to type its name)",
         )
         install.add_argument(
-            "--hf-token", default=argparse.SUPPRESS, help="A Hugging Face token, for a private repository"
+            "--hf-token",
+            default=argparse.SUPPRESS,
+            help="A Hugging Face token, for a private repository",
         )
         remove = commands.add_parser("remove", help="Remove an installed adapter and its files")
         remove.add_argument("name", help="The installed adapter")

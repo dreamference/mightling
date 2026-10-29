@@ -29,6 +29,8 @@ from typing import Dict, Final, List, Optional, Tuple
 from dreamference.audit.egress_trace import EgressTrace
 
 DNS_PORT: Final[int] = 53
+# The one send call that carries a vector of messages, each with its own destination.
+SENDMMSG: Final[str] = "sendmmsg"
 
 # git subcommands that reach a network (`push` beyond the spec's list: it is one too).
 NETWORKED_GIT: Final[frozenset] = frozenset({"ls-remote", "fetch", "clone", "pull", "push", "remote-https", "remote-http"})
@@ -117,7 +119,7 @@ class StraceParser:
                 cls._udp_payload(inner, trace, udp_routes)
             return
         # A sendmmsg carries several messages, each naming its own destination.
-        messages = rest.split("{msg_hdr=")[1:] if syscall == "sendmmsg" else []
+        messages = rest.split("{msg_hdr=")[1:] if syscall == SENDMMSG else []
         destination = cls.destination_in(messages[0] if messages else rest)
         if destination is not None:
             address, port = destination

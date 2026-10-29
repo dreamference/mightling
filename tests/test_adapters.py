@@ -647,8 +647,15 @@ def test_the_third_party_confirmation_needs_a_terminal(monkeypatch, capsys):
     from dreamference.hardware.adapter_manifest import AdapterManifest
 
     manifest = AdapterManifest(
-        name="rust", display_name="Rust", version="1", description="d", base_repo=BASE_REPO,
-        base_revision="r", base_digest="d", rank=8, target_modules=("q_proj",),
+        name="rust",
+        display_name="Rust",
+        version="1",
+        description="d",
+        base_repo=BASE_REPO,
+        base_revision="r",
+        base_digest="d",
+        rank=8,
+        target_modules=("q_proj",),
     )
     piped = io.StringIO("rust\n")
     monkeypatch.setattr("sys.stdin", piped)

@@ -253,9 +253,8 @@ def test_authorized_keys_is_replaced_whole_or_not_at_all(tmp_path):
     keys.write_text(before)
     keys.chmod(0o600)
 
-    with patch.object(legacy_name_migration.os, "replace", side_effect=OSError("disk full")):
-        with pytest.raises(OSError):
-            LegacyNameMigration.rewrite_authorized_keys()
+    with patch.object(Path, "replace", side_effect=OSError("disk full")), pytest.raises(OSError):
+        LegacyNameMigration.rewrite_authorized_keys()
     assert keys.read_text() == before
     assert LegacyNameMigration.rewrite_authorized_keys()
     assert KEY_COMMENT in keys.read_text() and "AAAAmine" in keys.read_text()

@@ -104,7 +104,9 @@ def test_fetch_reads_a_page_that_names_an_unknown_charset_as_utf8(online, conten
         ("café".encode(), "text/plain"),
     ],
 )
-def test_fetch_decodes_a_page_whose_server_names_no_charset_by_its_content(online, body, content_type):
+def test_fetch_decodes_a_page_whose_server_names_no_charset_by_its_content(
+    online, body, content_type
+):
     # requests answers ISO-8859-1 for any text/* reply without a charset (`response.encoding`),
     # which turned every such UTF-8 page into mojibake ("cafÃ©").
     online.return_value = Page(body, content_type=content_type, encoding="ISO-8859-1")

@@ -127,9 +127,8 @@ def test_logs_mcp_prints_its_heading_without_markup(tmp_path, capsys):
         conn.execute("CREATE TABLE logs (message TEXT)")
         conn.execute("INSERT INTO logs VALUES ('mcp{server_name=search} Service initialized as client')")
     conn.close()
-    with patch.object(CodexInstaller, "home_dir", return_value=str(tmp_path)):
-        with pytest.raises(SystemExit) as exit_info:
-            DreamferenceCLIController.run_cli(["logs", "mcp"])
+    with patch.object(CodexInstaller, "home_dir", return_value=str(tmp_path)), pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(["logs", "mcp"])
     assert exit_info.value.code == 0
     out = capsys.readouterr().out
     assert "MCP server lifecycle (most recent first)" in out and "[bold]" not in out
@@ -145,9 +144,9 @@ def test_a_failed_benchmark_exits_with_an_error(capsys):
 
     failed = subprocess.CalledProcessError(1, ["docker", "exec"])
     with patch("dreamference.hardware.resolve_model_hf_repo", return_value="org/model"), \
-            patch.object(subprocess, "run", side_effect=failed) as run:
-        with pytest.raises(SystemExit) as exit_info:
-            DreamferenceCLIController.run_cli(["benchmark_server", "--dataset-path", "/data/sonnet.txt"])
+            patch.object(subprocess, "run", side_effect=failed) as run, \
+            pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(["benchmark_server", "--dataset-path", "/data/sonnet.txt"])
     assert run.call_count == 1 and exit_info.value.code == 1
     assert "Benchmark failed" in capsys.readouterr().out
 
@@ -199,9 +198,9 @@ def test_codex_stop_reports_a_daemon_that_did_not_stop(capsys):
 
     with patch.object(CodexInstaller, "install_if_missing", return_value=True), \
             patch.object(CodexInstaller, "get_codex_executable", return_value="/opt/ling/bin/ling"), \
-            patch.object(subprocess, "call", return_value=3) as call:
-        with pytest.raises(SystemExit) as exit_info:
-            DreamferenceCLIController.run_cli(["codex", "stop"])
+            patch.object(subprocess, "call", return_value=3) as call, \
+            pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(["codex", "stop"])
     call.assert_called_once_with(["/opt/ling/bin/ling", "app-server", "daemon", "stop"])
     assert exit_info.value.code == 3
     assert "daemon stopped" not in capsys.readouterr().out

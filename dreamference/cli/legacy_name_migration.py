@@ -160,8 +160,10 @@ class LegacyNameMigration:
     @classmethod
     def rewrite_keys(cls, path: Path) -> bool:
         """
-        Rewrites `puffin_<key> =` lines to `mightling_<key> =`, whole-line key matches only. An old
-        key whose new name is already set in the same table is dropped: the new one is what is read.
+        Rewrites `puffin_<key> =` lines to `mightling_<key> =`, whole-line key matches only.
+
+        An old key whose new name is already set in the same table is dropped: the new one is
+        what is read.
 
         Args:
             path: A `dreamference.toml`-style file; a missing one is not an error.
@@ -174,16 +176,16 @@ class LegacyNameMigration:
         text = path.read_text()
         key = re.compile(rf"^(\s*)({LEGACY_KEY_PREFIX}|{KEY_PREFIX})([A-Za-z0-9_]+)(\s*=)")
         lines = text.splitlines(keepends=True)
-        tables: List[str] = []
+        tables: list[str] = []
         table = ""
         for line in lines:
             if re.match(r"\s*\[", line):
                 table = line.strip()
             tables.append(table)
-        current = {(table, match.group(3)) for line, table in zip(lines, tables)
+        current = {(table, match.group(3)) for line, table in zip(lines, tables, strict=True)
                    if (match := key.match(line)) and match.group(2) == KEY_PREFIX}
-        out: List[str] = []
-        for line, table in zip(lines, tables):
+        out: list[str] = []
+        for line, table in zip(lines, tables, strict=True):
             match = key.match(line)
             if match and match.group(2) == LEGACY_KEY_PREFIX:
                 if (table, match.group(3)) in current:
@@ -323,8 +325,8 @@ class LegacyNameMigration:
         staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         try:
             staging.write_text("".join(out))
-            os.chmod(staging, 0o600)
-            os.replace(staging, path)
+            staging.chmod(0o600)
+            staging.replace(path)
         finally:
             staging.unlink(missing_ok=True)
         return f"pointed {changed} paired sender(s) at ling-admin in {path}"

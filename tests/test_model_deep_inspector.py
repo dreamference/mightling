@@ -1,5 +1,7 @@
-"""`ling-admin main-model inspect --deep` probes, on stand-ins for the server's metrics and log, so
-no test here reaches a server or a container.
+"""`ling-admin main-model inspect --deep` probes.
+
+They run on stand-ins for the server's metrics and log, so no test here reaches a server or a
+container.
 """
 
 from unittest.mock import patch
@@ -22,8 +24,10 @@ def test_a_metrics_read_that_fails_midway_keeps_the_workloads_already_measured()
         counters["per_pos"] = [p + 8 for p in counters["per_pos"]]
         return dict(counters)
 
-    with patch.object(ModelDeepInspector, "_spec_counters", classmethod(spec_counters)), \
-            patch("requests.post"):
+    with (
+        patch.object(ModelDeepInspector, "_spec_counters", classmethod(spec_counters)),
+        patch("requests.post"),
+    ):
         rows = ModelDeepInspector.profile_acceptance_by_workload("h", "http://h/v1", "m")
     assert len(WORKLOAD_PROBES) >= 2
     assert rows and rows[0]["category"] == WORKLOAD_PROBES[0][0]

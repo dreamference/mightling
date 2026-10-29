@@ -74,6 +74,8 @@ REQUEST_TIMEOUT_S: Final[float] = 25.0
 MAX_DOWNLOAD_BYTES: Final[int] = 5 * 1024 * 1024
 # Default cap on the text handed back. Callers can ask for more, but not for the whole 5 MB.
 DEFAULT_MAX_CHARS: Final[int] = 20_000
+# How a Content-Type header names its charset.
+CHARSET_PARAM: Final[str] = "charset="
 MAX_CHARS_CEILING: Final[int] = 100_000
 # Everything that carries no prose. Dropped before text extraction so the result reads like the
 # page rather than like its source.
@@ -225,7 +227,7 @@ class WebTools:
             encoding = "utf-8"
 
         is_html = "html" in content_type.lower()
-        if "charset=" in content_type.lower():
+        if CHARSET_PARAM in content_type.lower():
             decoded = raw.decode(encoding, errors="replace")
         else:
             # requests names ISO-8859-1 for any text/* reply without a charset, which turned every

@@ -12,6 +12,7 @@ thread reached the hub and the `ling exec` session did not (O2). The node is nam
 No model server is needed: sync never talks to one.
 """
 
+import contextlib
 import datetime
 import hashlib
 import json
@@ -85,7 +86,8 @@ class SyncEgressAudit:
             servers = ", ".join(sorted(trace.dns_servers))
             problems.append(f"sent a DNS query to {servers} whose name could not be read")
         problems += [
-            f"ran a git command that reaches a network: {command}" for command in trace.networked_git
+            f"ran a git command that reaches a network: {command}"
+            for command in trace.networked_git
         ]
         if not exec_held:
             problems.append(
@@ -98,7 +100,9 @@ class SyncEgressAudit:
         if not finished:
             return EgressVerdict(
                 TRACE_FAILED,
-                [f"the agent cycle did not finish within {STEP_TIMEOUT_S} s, so the trace is cut off"],
+                [
+                    f"the agent cycle did not finish within {STEP_TIMEOUT_S} s, so the trace is cut off"
+                ],
             )
         if not published:
             return EgressVerdict(
@@ -187,14 +191,10 @@ class SyncEgressAudit:
             stdout, stderr = process.communicate(timeout=STEP_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             # The whole group: killing strace alone left the agent it traced running, untraced.
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
+            with contextlib.suppress(subprocess.TimeoutExpired):
                 process.communicate(timeout=10)
-            except subprocess.TimeoutExpired:
-                pass
             return f"{TIMED_OUT} within {STEP_TIMEOUT_S} s"
         return stdout + stderr
 

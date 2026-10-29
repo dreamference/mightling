@@ -175,7 +175,9 @@ def test_a_cycle_cut_off_at_the_timeout_is_a_failed_trace_and_leaves_nothing_run
     cut = SyncEgressAudit.judge(trace, PORT, published=True, exec_held=True, finished=False)
     assert cut.status == TRACE_FAILED
     outputs = {"agent": said}
-    with patch.object(SyncEgressAudit, "trace", return_value=(trace, PORT, True, True, outputs)), \
-            patch("shutil.which", return_value="/usr/bin/strace"):
+    with (
+        patch.object(SyncEgressAudit, "trace", return_value=(trace, PORT, True, True, outputs)),
+        patch("shutil.which", return_value="/usr/bin/strace"),
+    ):
         assert SyncEgressAudit.run(ling="/opt/ling") == 2
     assert "trace failed" in capsys.readouterr().out

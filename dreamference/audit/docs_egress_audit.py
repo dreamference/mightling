@@ -9,6 +9,7 @@ embedder run in `systemd-run --scope` (which execs the command, so strace follow
 with an empty network namespace; the trace covers them too.
 """
 
+import contextlib
 import datetime
 import hashlib
 import json
@@ -148,7 +149,8 @@ class DocsEgressAudit:
             for name, count in sorted(trace.dns_names.items())
         ]
         problems += [
-            f"ran a git command that reaches a network: {command}" for command in trace.networked_git
+            f"ran a git command that reaches a network: {command}"
+            for command in trace.networked_git
         ]
         if problems:
             return EgressVerdict(FAIL, problems)
@@ -220,8 +222,7 @@ class DocsEgressAudit:
 
     @classmethod
     def step(cls, command: list[str], home: str, env: dict[str, str]) -> str:
-        """
-        Runs one traced step in its own session, killing the whole session at the timeout.
+        """Runs one traced step in its own session, killing the whole session at the timeout.
 
         Args:
             command (list[str]): strace and the `ling-docs` command it traces.
@@ -247,14 +248,10 @@ class DocsEgressAudit:
             stdout, stderr = process.communicate(timeout=RUN_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             # The whole group: killing strace alone left the ling-docs it traced running, untraced.
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
+            with contextlib.suppress(subprocess.TimeoutExpired):
                 process.communicate(timeout=10)
-            except subprocess.TimeoutExpired:
-                pass
             return f"did not finish within {RUN_TIMEOUT_S} s"
         return stdout + stderr
 
