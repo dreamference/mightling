@@ -508,7 +508,9 @@ def test_the_pre_load_check_on_a_full_plan_turns_on_the_engines_16_gb_reserve(
     _stub_start(monkeypatch, mgr, calls)
     monkeypatch.setattr(mgr, "load_transient_gb", lambda model, weights_gb: (transient_gb, "test"))
     monkeypatch.setattr(
-        mgr, "side_service_allowance", lambda: [("the forge, mightling-forge", side_gb)] if side_gb else []
+        mgr,
+        "side_service_allowance",
+        lambda: [("the forge, mightling-forge", side_gb)] if side_gb else [],
     )
     assert (transient_gb + side_gb < ENGINE_HOST_RESERVE_GB) == starts
     if starts:
