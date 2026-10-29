@@ -1316,7 +1316,9 @@ class DreamferenceCLIController:
         init_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
         init_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
-        init_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
+        init_parser.add_argument(
+            "--agent", choices=agent_choices, default=argparse.SUPPRESS, help="Primary AI agent runner"
+        )
         init_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
 
         # Command: ling-admin run
@@ -1324,7 +1326,9 @@ class DreamferenceCLIController:
         run_parser.add_argument("prompt", type=str, help="Task prompt for AI agent")
         run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         run_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
-        run_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
+        run_parser.add_argument(
+            "--agent", choices=agent_choices, default=argparse.SUPPRESS, help="Primary AI agent runner"
+        )
         run_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
         run_parser.add_argument(

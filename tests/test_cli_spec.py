@@ -29,6 +29,30 @@ def option(path, flag):
     return next(a for a in subparser(path)._actions if flag in a.option_strings)
 
 
+def test_the_global_options_come_before_the_subcommand():
+    parser = DreamferenceCLIController.build_parser()
+    assert option([], "--agent").choices == ["codex", "cline", "continue", "openhands"]
+    assert not any("--debug" in a.option_strings for a in subparser([])._actions)
+    # `init` and `run` repeat --agent and --hf-token; left off there, they keep the global value.
+    # `run`'s --agent defaulted to None and replaced it, so `--agent cline run` ran Codex.
+    for command in (["run", "hi"], ["init"]):
+        args = parser.parse_args(["--config", "x.toml", "--agent", "cline", "--hf-token", "t", *command])
+        assert (args.config, args.agent, args.hf_token) == ("x.toml", "cline", "t"), command
+        args = parser.parse_args([*command, "--agent", "openhands"])
+        assert args.agent == "openhands", command
+
+
+def test_a_global_agent_picks_the_runner_for_run(clean_env, monkeypatch):
+    from dreamference.runner import CodexRunner, ContinueRunner
+    sessions = []
+    for runner in (CodexRunner, ContinueRunner):
+        monkeypatch.setattr(runner, "run_session", lambda self, prompt, debug=False, **k: sessions.append(
+            (type(self).__name__, prompt)) or 0)
+    with pytest.raises(SystemExit):
+        DreamferenceCLIController.run_cli(["--agent", "continue", "run", "hello"])
+    assert sessions == [("ContinueRunner", "hello")]
+
+
 @pytest.mark.parametrize("path, flag, default", [
     (["server", "stop"], "--port", 8000),
     (["server", "remove"], "--port", 8000),
