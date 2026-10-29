@@ -145,7 +145,7 @@ class RemoteEnrolment:
             return None
         if not all(c in HEX_DIGITS for c in nonce):
             return None
-        if not hmac.compare_digest(proof.lower(), cls.client_proof(code, nonce)):
+        if not hmac.compare_digest(proof.lower().encode(), cls.client_proof(code, nonce).encode()):
             return None
         client = str(request.get("client") or "client")[:63]
         bundle = make_bundle(client)
