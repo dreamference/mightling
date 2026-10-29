@@ -5,10 +5,10 @@ session when image search is set up on this machine (its secret file exists, wri
 `ling-admin images start`), the machine is a node and the configured air gap is not `on`; Codex
 starts it as a child of the session's `ling` process. Every call:
 
-- resolves the air gap first: the configured level (`DreamferenceConfig.resolve_airgapped_level`,
-  the Python copy of `ling-rs/airgapped`'s tiers 2 to 4), then a seal the parent process wrote
-  (`ling-apps`' `sealed_by`, read the same way here), because a session can be switched to `on`
-  after it started and a server runs outside the command sandbox;
+- resolves the air gap first, through the one reader (`ling airgapped --json --sealed-by <parent>`,
+  `AirgappedResolver`): the configured level, then a seal the parent process wrote, because a
+  session can be switched to `on` after it started and a server runs outside the command sandbox;
+  `on` whenever `ling` cannot answer;
 - asks the sidecar on loopback with its shared secret, nothing else;
 - answers the sidecar's Markdown lines (`![title](/images/<id>.jpg)`), which `ling web` and the
   desktop app show as images, with the instruction to copy them into the answer verbatim.
@@ -46,8 +46,6 @@ DEFAULT_COUNT: Final[int] = 4
 # connection, so a probe costs one process start.
 LIST_TOOLS_LINE: Final[str] = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
 PROBE_TIMEOUT_SECONDS: Final[int] = 30
-# `ling-rs/airgapped` SEAL_DIR, under the user's runtime folder.
-SEAL_DIR_NAME: Final[str] = "ling-airgapped"
 
 TOOL: Final[Dict[str, Any]] = {
     "name": TOOL_NAME,
@@ -145,53 +143,15 @@ class ImageSearchMcp:
             return 0, {"error": f"the image search service did not answer ({error}); start it with `ling-admin images start`"}
 
     @classmethod
-    def seal_dir(cls) -> Optional[str]:
-        """
-        Returns:
-            Optional[str]: Where sessions held at `on` leave their seals (`ling-rs/airgapped`).
-        """
-        runtime = os.environ.get("XDG_RUNTIME_DIR", "")
-        if not (os.path.isabs(runtime) and os.path.isdir(runtime)):
-            runtime = f"/run/user/{os.getuid()}"
-            if not os.path.isdir(runtime):
-                return None
-        return os.path.join(runtime, SEAL_DIR_NAME)
-
-    @classmethod
-    def sealed_by(cls, pid: int) -> bool:
-        """Whether a seal written by process `pid` holds its session at `on`.
-
-        Args:
-            pid (int): The session process: this server's parent.
-
-        Returns:
-            bool: True if a seal's content is that pid.
-        """
-        folder = cls.seal_dir()
-        if not folder:
-            return False
-        try:
-            names = os.listdir(folder)
-        except OSError:
-            return False
-        for name in names:
-            try:
-                with open(os.path.join(folder, name)) as handle:
-                    if handle.read().strip() == str(pid):
-                        return True
-            except OSError:
-                continue
-        return False
-
-    @classmethod
     def live_air_gapped(cls) -> bool:
         """
         Returns:
-            bool: True at a configured `on`, or when the parent session sealed itself at `on`.
+            bool: True at a configured `on`, when the parent session sealed itself at `on`, or
+            when `ling` cannot say.
         """
-        from dreamference.config import DreamferenceConfig
+        from dreamference.config import AirgappedResolver
 
-        return DreamferenceConfig.resolve_airgapped_level() == "on" or cls.sealed_by(os.getppid())
+        return AirgappedResolver.level(sealed_by=os.getppid()) == "on"
 
     # -- the protocol -----------------------------------------------------------------------------
 

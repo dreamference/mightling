@@ -292,10 +292,14 @@ def test_the_session_seal_of_the_parent_process_counts(monkeypatch, tmp_path):
     (runtime / "ling-airgapped").mkdir(parents=True)
     (runtime / "ling-airgapped" / "thread-1").write_text(f"{os.getppid()}\n")
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
-    assert ImageSearchMcp.sealed_by(os.getppid()) is True
-    assert ImageSearchMcp.sealed_by(os.getppid() + 100000) is False
     monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    # The one reader is asked for this server's parent; how it reads a seal is the crate's case.
+    log = tmp_path / "asked"
+    monkeypatch.setenv("FAKE_LING_AIRGAPPED_LOG", str(log))
     assert ImageSearchMcp.live_air_gapped() is True
+    assert log.read_text() == f"airgapped --json --sealed-by {os.getppid()}\n"
+    (runtime / "ling-airgapped" / "thread-1").write_text(f"{os.getppid() + 100000}\n")
+    assert ImageSearchMcp.live_air_gapped() is False
 
 
 def test_without_a_secret_the_live_search_says_how_to_set_it_up(store):

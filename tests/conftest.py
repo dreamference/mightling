@@ -160,6 +160,66 @@ def _no_model_gate_probe(monkeypatch):
     monkeypatch.setattr(ModelGate, "probe", classmethod(lambda cls, host, timeout=2.0: None))
 
 
+# Python asks the built `ling` for the air-gap level (`AirgappedResolver`, AIRGAPPED §6.5), which a
+# test may not run, and without an answer the level is `on`. This stand-in answers
+# `ling airgapped --json` in the tiers' order for the plain forms a test writes (a session file,
+# the variable, a `mightling_airgapped = "…"` line before any table, a seal by pid); how the crate
+# reads anything less plain is pinned by its own cases (ling-rs/airgapped/cases.json `resolve`),
+# not here. It writes its arguments to `$FAKE_LING_AIRGAPPED_LOG` when set.
+FAKE_LING_AIRGAPPED = r"""#!/bin/sh
+[ -n "$FAKE_LING_AIRGAPPED_LOG" ] && printf '%s\n' "$*" >> "$FAKE_LING_AIRGAPPED_LOG"
+shift 2
+thread= cwd=$PWD pid=
+while [ $# -gt 0 ]; do
+  case "$1" in --thread) thread=$2 ;; --cwd) cwd=$2 ;; --sealed-by) pid=$2 ;; esac
+  shift 2
+done
+answer() { printf '{"level":"%s","tier":"%s","source":"stand-in","invalid":[]}\n' "$1" "$2"; exit 0; }
+level_of() {
+  case $(printf '%s' "$1" | tr -d ' \t\r\n' | tr 'A-Z' 'a-z') in off) echo off ;; *) echo on ;; esac
+}
+sealed() {
+  [ -n "$pid" ] && for seal in "${XDG_RUNTIME_DIR:-/nonexistent}"/ling-airgapped/*; do
+    [ -f "$seal" ] && [ "$(cat "$seal")" = "$pid" ] && return 0
+  done
+  return 1
+}
+decided() { if [ "$1" = off ] && sealed; then answer on sealed; fi; answer "$1" "$2"; }
+session=${CODEX_HOME:-$HOME/.mightling}/airgapped/$thread
+if [ -n "$thread" ] && [ -f "$session" ]; then decided "$(level_of "$(cat "$session")")" session; fi
+if [ -n "$DREAMFERENCE_MIGHTLING_AIRGAPPED" ]; then
+  decided "$(level_of "$DREAMFERENCE_MIGHTLING_AIRGAPPED")" environment
+fi
+level=
+for file in "${DREAMFERENCE_CONFIG_PATH:-$cwd/dreamference.toml}" "$HOME/.config/dreamference/config.toml"; do
+  [ -f "$file" ] || continue
+  value=$(sed -n '/^[[:space:]]*\[/q; s/^[[:space:]]*mightling_airgapped[[:space:]]*=[[:space:]]*//p' "$file")
+  value=$(printf '%s\n' "$value" | head -n 1)
+  [ -n "$value" ] || continue
+  value=$(printf '%s' "$value" | sed 's/[[:space:]]*#.*//; s/^"\(.*\)"$/\1/')
+  [ "$(level_of "$value")" = on ] && level=on || level=${level:-off}
+done
+[ -n "$level" ] && decided "$level" config
+decided off default
+"""
+from dreamference.config.airgapped_resolver import AirgappedResolver  # noqa: E402
+
+REAL_AIRGAPPED_BINARY = AirgappedResolver.binary
+
+
+@pytest.fixture(scope="session")
+def fake_ling_airgapped(tmp_path_factory) -> str:
+    script = tmp_path_factory.mktemp("fake-ling") / "ling"
+    script.write_text(FAKE_LING_AIRGAPPED)
+    script.chmod(0o755)
+    return str(script)
+
+
+@pytest.fixture(autouse=True)
+def _airgapped_from_a_stand_in(monkeypatch, fake_ling_airgapped):
+    monkeypatch.setattr(AirgappedResolver, "binary", classmethod(lambda cls: fake_ling_airgapped))
+
+
 @pytest.fixture(autouse=True)
 def _refuse_real_docker(monkeypatch, request):
     # A test that reached the retired web chat's Gmail start ran `docker rm -f dreamference-gmail`

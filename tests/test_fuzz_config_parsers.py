@@ -1,4 +1,4 @@
-# ruff: noqa: B023, C901, PTH111, RUF001
+# ruff: noqa: B023, C901, RUF001
 """Seeded random inputs for the configuration readers, writers and tiers.
 
 No `random` module and no extra dependency: a small xorshift generator, a fixed seed list, so a
@@ -14,7 +14,6 @@ a long hunt is `MIGHTLING_FUZZ_CASES=200000`. The properties:
 
 import json
 import os
-from pathlib import Path
 
 import pytest
 
@@ -429,32 +428,6 @@ def test_the_config_path_resolves_in_tier_order(seed, tmp_path, monkeypatch):
         else:
             expected = work / "dreamference.toml"
         assert ConfigPathResolver.resolve_path(custom) == expected.resolve()
-
-
-# -- the air-gap level across two files ---------------------------------------------------------
-
-
-@pytest.mark.parametrize("seed", SEEDS)
-def test_the_air_gap_level_is_the_stricter_of_the_two_files(seed, tmp_path, monkeypatch):
-    rng = XorShift64(seed)
-    clear_environment(monkeypatch)
-    home = Path(os.path.expanduser("~"))
-    user_file = home / ".config" / "dreamference" / "config.toml"
-    user_file.parent.mkdir(parents=True, exist_ok=True)
-    local = tmp_path / "dreamference.toml"
-    for _ in range(max(1, CASES // 4)):
-        levels = []
-        for path in (local, user_file):
-            path.unlink(missing_ok=True)
-            choice = rng.below(5)
-            if choice == 0:
-                continue
-            mark = "﻿" if rng.chance(1, 3) else ""
-            level = rng.pick(("on", "off", "ON", " off "))
-            path.write_text(f'{mark}mightling_airgapped = "{level}"\n', encoding="utf-8")
-            levels.append(level.strip().lower())
-        expected = "on" if "on" in levels else "off"
-        assert DreamferenceConfig.resolve_airgapped_level(cwd=tmp_path) == expected, levels
 
 
 # -- NO_PROXY -----------------------------------------------------------------------------------

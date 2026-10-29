@@ -180,21 +180,6 @@ def test_a_default_host_and_agent_are_not_fossilised_into_the_config(tmp_path):
         "vllm_host": "http://spark-2.local:8000", "agent_runner": "cline"}
 
 
-def test_a_valid_toml_file_the_old_reader_refused_still_turns_the_air_gap_on(tmp_path, monkeypatch):
-    # Valid TOML that the `toml` package refused (a mixed-type array), misread (an escaped
-    # quoted key) or missed (a byte order mark): each read as `off`, the Rust resolver as `on`.
-    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
-    for text in (
-        'x = [1, "a"]\nmightling_airgapped = "on"\n',
-        '"\\u006dightling_airgapped" = "on"\n',
-        '\ufeffmightling_airgapped = "on"\n',
-    ):
-        path = tmp_path / "dreamference.toml"
-        path.write_text(text, encoding="utf-8")
-        monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(path))
-        assert DreamferenceConfig.resolve_airgapped_level() == "on", text
-
-
 def test_a_config_file_saved_with_a_byte_order_mark_is_read_whole(tmp_path):
     # Windows editors put U+FEFF first. TOML then read the first key as "\ufeffmightling_airgapped",
     # so the level the file sets was ignored (the air gap silently off), and JSON refused the file.

@@ -1335,9 +1335,7 @@ def test_a_stopped_repository_stops_the_run_and_opens_an_issue(monkeypatch):
 def test_airgapped_on_stops_the_mirror(monkeypatch):
     ForgeSettings.update_state(role="record")
     ForgeGithubMirror.save_settings(True, "dgxcoder")
-    config = Path("~/.mightling/config.toml").expanduser()
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text('mightling_airgapped = "on"\n')
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
     monkeypatch.setattr(
         ForgeGithubMirror, "mirror_one", classmethod(lambda *a: pytest.fail("sent while airgapped"))
     )
@@ -1345,19 +1343,15 @@ def test_airgapped_on_stops_the_mirror(monkeypatch):
     assert "airgapped" in ForgeGithubMirror.status()["stopped"]
 
 
-def test_a_boolean_or_a_byte_order_mark_still_reads_as_airgapped():
-    # The Rust resolver reads both files as `on`; the mirror read them as `off`.
-    config = Path("~/.mightling/config.toml").expanduser()
-    config.parent.mkdir(parents=True, exist_ok=True)
-    for text in (
-        "mightling_airgapped = true\n",
-        '\ufeffmightling_airgapped = "on"\n',
-        'mightling_airgapped = " ON "\n',
-    ):
-        config.write_text(text, encoding="utf-8")
-        assert ForgeGithubMirror.airgapped(), text
-    config.write_text("mightling_airgapped = false\n")
-    assert not ForgeGithubMirror.airgapped()
+def test_the_mirror_stops_when_ling_cannot_say_the_level(monkeypatch, tmp_path):
+    # The one reader fails closed (AIRGAPPED §6.5): no answer is `on`, and nothing is sent.
+    from dreamference.config import AirgappedResolver
+
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    monkeypatch.setattr(
+        AirgappedResolver, "binary", classmethod(lambda cls: str(tmp_path / "no-ling"))
+    )
+    assert ForgeGithubMirror.airgapped()
 
 
 @pytest.mark.parametrize("where", ["user default", "environment"])

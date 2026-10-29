@@ -32,6 +32,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final
 
+from dreamference.config.airgapped_resolver import AirgappedResolver
 from dreamference.config.dreamference_config import MIGHTLING_AIRGAPPED_LEVELS, DreamferenceConfig
 from dreamference.config.proxy_bypass import ProxyBypass
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
@@ -69,9 +70,8 @@ ANNOUNCES_WORK: Final[re.Pattern] = re.compile(
 KILL_GRACE_S: Final[int] = 30
 
 # `/airgapped` (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §3): the variable that overrides the
-# configuration files, and the key those files carry. Mirrors ling-rs/airgapped/src/lib.rs.
+# configuration files, as ling-rs/airgapped/src/lib.rs names it.
 AIRGAPPED_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_AIRGAPPED"
-AIRGAPPED_KEY: Final[str] = "mightling_airgapped"
 SEALED: Final[str] = MIGHTLING_AIRGAPPED_LEVELS[-1]
 # The system prompt a new session starts with (specs/DREAMFERENCE_MIGHTLING_PROMPT.md §7); `[night] prompt`.
 PROMPT_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_PROMPT"
@@ -1093,10 +1093,12 @@ class NightShiftTaskRun:
     def airgapped_level(
         cls, worktree: Path, session: str | None, codex_home: Path, repo: Path | None = None
     ) -> str:
-        """Resolves the `/airgapped` level for a command run in `worktree`, in the launcher's order
-        (ling-rs/airgapped): the session's file, the environment variable, then the strictest
-        of the configuration files (a repository's file may tighten the user's level and never
-        loosen it), then `off`.
+        """Resolves the `/airgapped` level for a command run in `worktree`, as the one reader does.
+
+        That is `ling airgapped --json` (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §6.5): the
+        session's file, the environment variable, then the strictest of the configuration files
+        (a repository's file may tighten the user's level and never loosen it), then `off`; `on`
+        whenever `ling` cannot answer.
 
         The main checkout's `dreamference.toml` is read beside the worktree's: it is usually
         untracked, so a worktree has no copy of it, and a level the user set there for this
@@ -1111,52 +1113,12 @@ class NightShiftTaskRun:
         Returns:
             str: `off` or `on`.
         """
-        tiers: list[str | None] = []
-        if session and re.fullmatch(r"[A-Za-z0-9-]+", session):
-            try:
-                tiers.append((codex_home / "airgapped" / session).read_text())
-            except OSError:
-                pass
-        tiers.append(os.environ.get(AIRGAPPED_ENV))
-        for value in tiers:
-            level = DreamferenceConfig.parse_airgapped_level(value)
-            if level:
-                return level
-        named = os.environ.get("DREAMFERENCE_CONFIG_PATH")
-        files = (
-            [Path(named)]
-            if named
-            else [worktree / "dreamference.toml"] + ([repo / "dreamference.toml"] if repo else [])
-        )
-        files.append(Path(os.path.expanduser("~/.config/dreamference/config.toml")))
-        strictest = MIGHTLING_AIRGAPPED_LEVELS[0]
-        for path in files:
-            level = DreamferenceConfig.parse_airgapped_level(
-                cls._toml_top_level(path, AIRGAPPED_KEY)
-            )
-            if level and MIGHTLING_AIRGAPPED_LEVELS.index(level) > MIGHTLING_AIRGAPPED_LEVELS.index(
-                strictest
-            ):
-                strictest = level
-        return strictest
-
-    @classmethod
-    def _toml_top_level(cls, path: Path, key: str) -> str | None:
-        """The value of a top-level `key = "value"` line before the first table, as the helper reads it."""
-        try:
-            text = path.read_text(errors="replace")
-        except OSError:
-            return None
-        for line in text.splitlines():
-            line = line.strip()
-            if line.startswith("["):
-                return None
-            if not line.startswith(key):
-                continue
-            rest = line[len(key) :].lstrip()
-            if rest.startswith("="):
-                return rest[1:].split("#")[0].strip().strip("\"'")
-        return None
+        environment = dict(os.environ, CODEX_HOME=str(codex_home))
+        levels = [
+            AirgappedResolver.level(cwd=folder, thread=session, environment=environment)
+            for folder in [worktree] + ([repo] if repo and repo != worktree else [])
+        ]
+        return SEALED if SEALED in levels else levels[0]
 
     @classmethod
     def announces_work(cls, message: str) -> bool:

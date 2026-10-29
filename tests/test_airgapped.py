@@ -1,19 +1,25 @@
 """`/airgapped` (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md): the Python side of the setting, and what
 Python, the launcher and the web commands must agree on -- the default level, and one resolver."""
 
+import json
 import os
 import re
 from pathlib import Path
 
 import pytest
+from conftest import REAL_AIRGAPPED_BINARY
 
+import dreamference.config.airgapped_resolver as resolver_mod
 import dreamference.config.dreamference_config as cfg_mod
-from dreamference.config import DreamferenceConfig
+from dreamference.config import AirgappedResolver, DreamferenceConfig
+from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
 
 REPO = Path(__file__).resolve().parent.parent
 LEAF_RS = REPO / "ling-rs" / "airgapped" / "src" / "lib.rs"
-WEB_COPY_RS = REPO / "ling-web-rs" / "src" / "airgapped.rs"
+CASES = json.loads((REPO / "ling-rs" / "airgapped" / "cases.json").read_text())
 LAUNCHER_RS = REPO / "ling-rs" / "src" / "airgapped.rs"
+# The crates outside the Codex workspace that act on the level: each links the one reader.
+LINKING_CRATES = ("ling-web-rs", "ling-docs-rs")
 
 
 def test_the_level_resolves_through_the_tiers(tmp_path, monkeypatch):
@@ -26,7 +32,10 @@ def test_the_level_resolves_through_the_tiers(tmp_path, monkeypatch):
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_airgapped == "on"
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "OFF")
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_airgapped == "off"
-    assert DreamferenceConfig(config_file=str(cfg_file), mightling_airgapped="On").mightling_airgapped == "on"
+    assert (
+        DreamferenceConfig(config_file=str(cfg_file), mightling_airgapped="On").mightling_airgapped
+        == "on"
+    )
 
 
 def test_an_invalid_value_is_skipped_not_adopted(tmp_path, monkeypatch):
@@ -34,9 +43,17 @@ def test_an_invalid_value_is_skipped_not_adopted(tmp_path, monkeypatch):
     cfg_file.write_text('mightling_airgapped: "on"\n')
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "sealed")
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_airgapped == "on"
-    assert DreamferenceConfig(config_file=str(cfg_file), mightling_airgapped="max").mightling_airgapped == "on"
+    assert (
+        DreamferenceConfig(config_file=str(cfg_file), mightling_airgapped="max").mightling_airgapped
+        == "on"
+    )
     # `duckduckgo` was a level until 2026-10-03; a value left behind is invalid like any other.
-    assert DreamferenceConfig(config_file=str(cfg_file), mightling_airgapped="duckduckgo").mightling_airgapped == "on"
+    assert (
+        DreamferenceConfig(
+            config_file=str(cfg_file), mightling_airgapped="duckduckgo"
+        ).mightling_airgapped
+        == "on"
+    )
     assert DreamferenceConfig.parse_airgapped_level("ddg") is None
 
 
@@ -70,10 +87,28 @@ def test_the_default_and_the_level_names_match_the_rust_side():
         assert f'=> "{name}"' in text, name
 
 
-def test_the_web_commands_carry_the_same_resolver():
-    # ling-web-rs is built on its own, outside the Codex workspace, so it holds a copy; a level
-    # the sandbox and the web commands resolved differently would be a restriction with a hole.
-    assert WEB_COPY_RS.read_bytes() == LEAF_RS.read_bytes()
+def test_the_web_and_docs_commands_link_the_one_reader():
+    # ling-web-rs and ling-docs-rs are built on their own, outside the Codex workspace. They held
+    # copies of the resolver (one byte-identical, one rewritten) until 2026-10-29; a level the
+    # sandbox and a command resolved differently would be a restriction with a hole, so each now
+    # links the crate itself and keeps no reader of its own.
+    for crate in LINKING_CRATES:
+        manifest = (REPO / crate / "Cargo.toml").read_text()
+        assert re.search(
+            r'^ling-airgapped = \{ path = "\.\./ling-rs/airgapped" \}', manifest, re.M
+        ), crate
+        assert not (REPO / crate / "src" / "airgapped.rs").exists(), crate
+        assert "ling-airgapped" in (REPO / crate / "Cargo.lock").read_text(), crate
+    for crate in LINKING_CRATES:
+        sources = "\n".join(path.read_text() for path in (REPO / crate / "src").rglob("*.rs"))
+        for reader in (
+            "fn toml_value",
+            "fn configured_on",
+            "fn config_texts",
+            "fn sealed_in",
+            "fn seal_dir",
+        ):
+            assert reader not in sources, f"{crate} reads the setting itself ({reader})"
 
 
 def test_only_on_is_described_as_having_no_network():
@@ -84,7 +119,92 @@ def test_only_on_is_described_as_having_no_network():
     assert "no network" in re.search(r'pub const ON_TEXT: &str = "([^"]+)";', text).group(1)
 
 
-# -- the resolver for whatever acts on the level in Python (spec §7) -------------------------------
+# -- the one reader as Python asks it (spec §6.5) --------------------------------------------------
+
+
+def _answering(tmp_path, case) -> str:
+    """A `ling` that answers as the case says: its output and exit status, never, or not at all."""
+    if case.get("timeout"):
+        text = "#!/bin/sh\nexec sleep 30\n"
+    elif case["stdout"] is None:
+        return str(tmp_path / "missing" / "ling")
+    else:
+        (tmp_path / "stdout").write_text(case["stdout"])
+        text = f"#!/bin/sh\ncat '{tmp_path / 'stdout'}'\nexit {case['status']}\n"
+    binary = tmp_path / "ling"
+    binary.write_text(text)
+    binary.chmod(0o755)
+    return str(binary)
+
+
+@pytest.mark.parametrize("case", CASES["answer"], ids=[case["name"] for case in CASES["answer"]])
+def test_an_answer_is_off_only_when_it_is_well_formed_and_says_off(tmp_path, monkeypatch, case):
+    # The shared cases: desktop/electron/src/airgapped.test.ts runs the same ones.
+    monkeypatch.setattr(resolver_mod, "RESOLVE_TIMEOUT_SECONDS", 0.5)
+    assert AirgappedResolver.level(binary=_answering(tmp_path, case)) == case["expect"]
+
+
+def test_the_answer_cases_cover_every_way_of_failing():
+    names = {case["name"] for case in CASES["answer"]}
+    assert {
+        "no binary is on",
+        "a timeout is on",
+        "a failed command is on",
+        "an empty answer is on",
+    } <= names
+    assert {case["expect"] for case in CASES["answer"]} == {"off", "on"}
+
+
+def test_the_one_asked_is_the_built_ling_never_one_on_path():
+    assert (
+        REAL_AIRGAPPED_BINARY.__func__(AirgappedResolver) == CodexBrandedBuilder.executable_path()
+    )
+
+
+def test_the_question_names_the_folder_the_session_and_the_parent(tmp_path):
+    ask = AirgappedResolver.command
+    assert ask("ling") == ["ling", "airgapped", "--json"]
+    assert ask("ling", cwd=tmp_path, thread="abc-1", sealed_by=42) == [
+        "ling",
+        "airgapped",
+        "--json",
+        "--thread",
+        "abc-1",
+        "--cwd",
+        str(tmp_path),
+        "--sealed-by",
+        "42",
+    ]
+
+
+def test_the_configured_level_is_the_one_reader_s_for_the_folder(tmp_path, monkeypatch):
+    log = tmp_path / "asked"
+    monkeypatch.setenv("FAKE_LING_AIRGAPPED_LOG", str(log))
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    assert DreamferenceConfig.resolve_airgapped_level(tmp_path) == "off"
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "sealed")
+    assert DreamferenceConfig.resolve_airgapped_level() == "on"
+    assert log.read_text().splitlines() == [
+        f"airgapped --json --cwd {tmp_path}",
+        "airgapped --json",
+    ]
+
+
+def test_without_an_answer_the_configured_level_is_on(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        AirgappedResolver, "binary", classmethod(lambda cls: str(tmp_path / "no-ling"))
+    )
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "off")
+    assert DreamferenceConfig.resolve_airgapped_level() == "on"
+
+
+def test_python_reads_no_air_gap_file_itself():
+    # The tiers are read in one place; a Python copy of them drifted from the crate twice.
+    for path in (REPO / "dreamference").rglob("*.py"):
+        text = path.read_text()
+        assert "toml_airgapped_value" not in text and "_toml_top_level" not in text, path
+        assert "SEAL_DIR" not in text and '"ling-airgapped"' not in text, path
+
 
 def _two_files(tmp_path, monkeypatch, repo_text, user_text):
     """A working directory and a home, each with (or without) a configuration file."""
@@ -101,61 +221,6 @@ def _two_files(tmp_path, monkeypatch, repo_text, user_text):
     return cwd
 
 
-def test_between_the_two_files_the_stricter_wins_as_on_the_rust_side(tmp_path, monkeypatch):
-    # The cases of `between_the_two_files_the_strictest_wins` in ling-rs/airgapped/src/lib.rs.
-    resolve = DreamferenceConfig.resolve_airgapped_level
-    # A repository file the agent can write does not loosen the user's level.
-    cwd = _two_files(tmp_path / "a", monkeypatch, 'mightling_airgapped = "off"\n', 'mightling_airgapped = "on"\n')
-    assert resolve(cwd) == "on"
-    # It may tighten it.
-    cwd = _two_files(tmp_path / "b", monkeypatch, 'mightling_airgapped = "on"\n', 'mightling_airgapped = "off"\n')
-    assert resolve(cwd) == "on"
-    # A file without the key does not count, and neither does a missing file.
-    cwd = _two_files(tmp_path / "c", monkeypatch, 'model = "x"\n', 'mightling_airgapped = "on"\n')
-    assert resolve(cwd) == "on"
-    cwd = _two_files(tmp_path / "d", monkeypatch, None, None)
-    assert resolve(cwd) == "off"
-
-
-def test_the_environment_decides_before_the_files_and_an_invalid_value_falls_through(tmp_path, monkeypatch):
-    cwd = _two_files(tmp_path, monkeypatch, 'mightling_airgapped = "on"\n', 'mightling_airgapped = "on"\n')
-    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "off")
-    assert DreamferenceConfig.resolve_airgapped_level(cwd) == "off"
-    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "sealed")
-    assert DreamferenceConfig.resolve_airgapped_level(cwd) == "on"
-
-
-def test_a_file_the_toml_parser_refuses_still_names_its_level_as_on_the_rust_side(tmp_path, monkeypatch):
-    # ling-rs/airgapped reads the key line by line (`toml_value`), so a byte order mark (PowerShell's
-    # `-Encoding UTF8`), a TOML 1.0 mixed array or a syntax error further down does not hide it.
-    # The Python copy parsed the whole file and read every one of these as `off`.
-    resolve = DreamferenceConfig.resolve_airgapped_level
-    for name, user_text in {
-        "bom": '﻿mightling_airgapped = "on"\n',
-        "mixed array": 'mightling_airgapped = "on"\nports = [1, "a"]\n',
-        "syntax error": 'mightling_airgapped = "on"\nmodel = \n',
-        "comment": 'mightling_airgapped = "On" # set by /airgapped default\n[night]\nbroken =\n',
-        # The parser skips a byte order mark itself; with a syntax error only the line reader is left.
-        "bom and syntax error": '﻿mightling_airgapped = "on"\nmodel = \n',
-    }.items():
-        cwd = _two_files(tmp_path / name, monkeypatch, None, user_text)
-        assert resolve(cwd) == "on", name
-    # The key counts only before the first table header, as there.
-    cwd = _two_files(tmp_path / "table", monkeypatch, None, '[night]\nmightling_airgapped = "on"\n')
-    assert resolve(cwd) == "off"
-
-
-def test_only_the_key_itself_names_the_level_in_a_file_the_toml_parser_refuses(tmp_path, monkeypatch):
-    # A longer key or one of the same length that only resembles it comes first and says `off`; the
-    # syntax error leaves the line reader alone to find the real key's `on`.
-    for name, user_text in {
-        "longer key": 'mightling_airgapped_note = "off"\nmightling_airgapped = "on"\nmodel = \n',
-        "same length": 'mightling_airgappex = "off"\nmightling_airgapped = "on"\nmodel = \n',
-    }.items():
-        cwd = _two_files(tmp_path / name, monkeypatch, None, user_text)
-        assert DreamferenceConfig.resolve_airgapped_level(cwd) == "on", name
-
-
 def test_a_named_config_file_replaces_the_working_directorys(tmp_path, monkeypatch):
     cwd = _two_files(tmp_path, monkeypatch, 'mightling_airgapped = "on"\n', None)
     named = tmp_path / "named.toml"
@@ -164,7 +229,9 @@ def test_a_named_config_file_replaces_the_working_directorys(tmp_path, monkeypat
     assert DreamferenceConfig.resolve_airgapped_level(cwd) == "off"
 
 
-def test_a_config_path_that_is_not_a_file_is_passed_over_without_a_word(tmp_path, capsys, monkeypatch):
+def test_a_config_path_that_is_not_a_file_is_passed_over_without_a_word(
+    tmp_path, capsys, monkeypatch
+):
     # The MCP server asks here and speaks JSON-RPC on stdout, so a warning printed for a directory
     # would break its stream; a FIFO in that place would block the read for good.
     cwd = _two_files(tmp_path, monkeypatch, None, 'mightling_airgapped = "on"\n')
@@ -186,8 +253,10 @@ def test_a_config_file_that_cannot_be_read_counts_as_absent_as_on_the_rust_side(
 
 # -- the MCP server's web tools follow the level ---------------------------------------------------
 
+
 def test_at_on_the_mcp_web_tools_send_nothing(monkeypatch):
     from unittest.mock import patch
+
     from dreamference.mcp_server.web_tools import AIRGAPPED_ON_MESSAGE, WebTools
 
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
@@ -198,26 +267,29 @@ def test_at_on_the_mcp_web_tools_send_nothing(monkeypatch):
     assert found == {"query": "python asyncio", "airgapped": "on", "error": AIRGAPPED_ON_MESSAGE}
     assert page == {"url": "https://example.com", "airgapped": "on", "error": AIRGAPPED_ON_MESSAGE}
     # An IDE has no slash command: the message names the setting, not `/airgapped`.
-    assert "/airgapped" not in AIRGAPPED_ON_MESSAGE and "mightling_airgapped = on" in AIRGAPPED_ON_MESSAGE
+    assert (
+        "/airgapped" not in AIRGAPPED_ON_MESSAGE
+        and "mightling_airgapped = on" in AIRGAPPED_ON_MESSAGE
+    )
 
 
-def test_a_leftover_duckduckgo_level_searches_as_off(monkeypatch):
-    from unittest.mock import MagicMock, patch
+def test_a_leftover_duckduckgo_level_counts_as_on(monkeypatch):
+    from unittest.mock import patch
+
     from dreamference.mcp_server.web_tools import WebTools
 
-    # `duckduckgo` was a level until 2026-10-03 (DuckDuckGo answered SearXNG with a CAPTCHA); a
-    # value left behind is ignored, so search asks the category's engines as at `off`.
+    # `duckduckgo` was a level until 2026-10-03 (DuckDuckGo answered SearXNG with a CAPTCHA). A
+    # value left behind was ignored until the one reader (§6.5): a value that is not a level now
+    # counts as `on`, so nothing is sent.
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "duckduckgo")
-    response = MagicMock()
-    response.json.return_value = {"results": [{"title": "t", "url": "u", "content": "c", "engine": "bing"}]}
-    with patch("dreamference.mcp_server.web_session.WebSession.get", return_value=response) as get:
-        assert WebTools.search("python asyncio")["result_count"] == 1
-    params = get.call_args.kwargs["params"]
-    assert params["categories"] == "general" and "engines" not in params
+    with patch("dreamference.mcp_server.web_session.WebSession.get") as get:
+        assert WebTools.search("python asyncio")["airgapped"] == "on"
+    get.assert_not_called()
 
 
 def test_at_off_the_mcp_search_asks_the_category_as_before(monkeypatch):
     from unittest.mock import MagicMock, patch
+
     from dreamference.mcp_server.web_tools import WebTools
 
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "off")
@@ -250,6 +322,11 @@ def test_the_mcp_web_tools_resolve_the_level_on_every_call(monkeypatch):
 def test_the_slash_command_sits_after_permissions_with_its_description():
     # §6.4: both set what the agent may reach, so the popup lists them together.
     patch = (REPO / "codex-patches" / "0019-airgapped.patch").read_text()
-    slash = patch.split("+++ b/codex-rs/tui/src/slash_command.rs\n", 1)[1].split("\ndiff --git ", 1)[0]
+    slash = patch.split("+++ b/codex-rs/tui/src/slash_command.rs\n", 1)[1].split(
+        "\ndiff --git ", 1
+    )[0]
     assert "     Permissions,\n+    Airgapped,\n" in slash
-    assert '+            SlashCommand::Airgapped => "set how much of the internet this session may use",' in slash
+    assert (
+        '+            SlashCommand::Airgapped => "set how much of the internet this session may use",'
+        in slash
+    )

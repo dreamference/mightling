@@ -973,39 +973,50 @@ class CodexBrandedBuilder:
         return digest.hexdigest()[:12]
 
     @classmethod
-    def path_dependencies(cls, crate_dir: str) -> List[str]:
-        """
-        Lists the crates a crate takes by `path =`, and theirs, so that its key covers their source.
+    def path_dependencies(cls, crate_dir: str) -> list[str]:
+        """Lists the crates a crate takes by `path =`, and theirs, so that its key covers their source.
 
         Args:
             crate_dir (str): The crate's directory.
 
         Returns:
-            List[str]: The existing dependency directories, normalized and in a stable order;
+            list[str]: The existing dependency directories, normalized and in a stable order;
             empty when `Cargo.toml` is missing or not TOML.
         """
-        root = os.path.normpath(crate_dir)
-        found: List[str] = []
+        root = Path(os.path.normpath(crate_dir))
+        found: set[Path] = set()
         pending = [root]
         while pending:
-            current = pending.pop(0)
-            try:
-                with open(os.path.join(current, "Cargo.toml"), "rb") as handle:
-                    manifest = tomllib.load(handle)
-            except (OSError, tomllib.TOMLDecodeError):
-                continue
-            tables = [manifest.get(key, {}) for key in ("dependencies", "build-dependencies")]
-            for target in manifest.get("target", {}).values():
-                tables.extend(target.get(key, {}) for key in ("dependencies", "build-dependencies"))
-            for table in tables:
-                for spec in table.values():
-                    if not isinstance(spec, dict) or not isinstance(spec.get("path"), str):
-                        continue
-                    dependency = os.path.normpath(os.path.join(current, spec["path"]))
-                    if os.path.isdir(dependency) and dependency not in found and dependency != root:
-                        found.append(dependency)
-                        pending.append(dependency)
-        return sorted(found)
+            current = pending.pop()
+            for relative in cls.manifest_paths(current / "Cargo.toml"):
+                dependency = Path(os.path.normpath(current / relative))
+                if dependency.is_dir() and dependency not in found and dependency != root:
+                    found.add(dependency)
+                    pending.append(dependency)
+        return sorted(str(dependency) for dependency in found)
+
+    @classmethod
+    def manifest_paths(cls, manifest_path: Path) -> list[str]:
+        """The `path =` of every dependency a `Cargo.toml` names, for any target.
+
+        Args:
+            manifest_path (Path): The manifest.
+
+        Returns:
+            list[str]: The paths as written; empty when the file is missing or not TOML.
+        """
+        try:
+            manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            return []
+        sections = [manifest, *manifest.get("target", {}).values()]
+        tables = [section.get(key, {}) for section in sections for key in ("dependencies", "build-dependencies")]
+        return [
+            spec["path"]
+            for table in tables
+            for spec in table.values()
+            if isinstance(spec, dict) and isinstance(spec.get("path"), str)
+        ]
 
     @classmethod
     def crate_is_current(cls, crate_dir: str, stamp_name: str, bin_names: tuple) -> bool:

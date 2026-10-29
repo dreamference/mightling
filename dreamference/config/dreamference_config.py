@@ -14,6 +14,7 @@ from typing import Dict, Any, ClassVar, Optional, Tuple, Final
 from dreamference.hardware import MODEL_MATRIX, check_model_compatibility
 from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS, DEFAULT_DIFFUSION_MODEL_ALIAS
 from dreamference.config.config_path_resolver import ConfigPathResolver
+from dreamference.config.airgapped_resolver import AirgappedResolver
 from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
 
 # System defaults
@@ -469,17 +470,16 @@ class DreamferenceConfig:
         return name if MIGHTLING_PROMPT_NAME.fullmatch(name) else None
 
     @classmethod
-    def resolve_airgapped_level(cls, cwd: Optional[Path] = None) -> str:
-        """
-        Resolves the configured air-gap level the way the Rust side does for a command with no
-        session (`ling-rs/airgapped`, tiers 2 to 4): `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the
-        **stricter** of the two configuration files, then the default.
+    def resolve_airgapped_level(cls, cwd: Path | None = None) -> str:
+        """Resolves the configured air-gap level for a command with no session.
 
-        The two files are the one `DREAMFERENCE_CONFIG_PATH` names (or `<cwd>/dreamference.toml`)
-        and the user-level `~/.config/dreamference/config.toml`. The stricter wins because an agent
-        can write the repository's file: it may tighten the user's level, never loosen it. An
-        instance's `mightling_airgapped` reads one file only, so anything that *acts* on the level
-        (the MCP server's web tools) asks here.
+        The one reader decides (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §6.5): `ling airgapped
+        --json`, through `AirgappedResolver`, which takes `on` when `ling` cannot answer. Its tiers
+        are `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the **stricter** of the file
+        `DREAMFERENCE_CONFIG_PATH` names (or `<cwd>/dreamference.toml`) and the user-level
+        `~/.config/dreamference/config.toml`, then the default; a file it cannot read counts as
+        `on`. An instance's `mightling_airgapped` reads one file only, so anything that *acts* on
+        the level (the MCP server's web tools) asks here.
 
         Args:
             cwd: The directory whose `dreamference.toml` counts; defaults to the current one.
@@ -487,56 +487,7 @@ class DreamferenceConfig:
         Returns:
             str: `off` or `on`.
         """
-        level = cls.parse_airgapped_level(os.getenv("DREAMFERENCE_MIGHTLING_AIRGAPPED"))
-        if level is not None:
-            return level
-        custom = os.getenv("DREAMFERENCE_CONFIG_PATH")
-        files = [Path(custom)] if custom else [Path(cwd or Path.cwd()) / "dreamference.toml"]
-        user_level = Path.home() / ".config" / "dreamference" / "config.toml"
-        if user_level not in files:
-            files.append(user_level)
-        strictest: Optional[str] = None
-        for path in files:
-            if not path.is_file():
-                continue
-            # The line the launcher reads, and the parsed value (a YAML or JSON file has no such
-            # line): a file the parser refuses must not loosen the level the launcher sees.
-            try:
-                line_value = cls.toml_airgapped_value(path.read_text(encoding="utf-8", errors="replace"))
-            except OSError:
-                line_value = None
-            for value in (line_value, ConfigFileStorageManager.load_config_dict(path).get("mightling_airgapped")):
-                level = cls.parse_airgapped_level(value)
-                if level is not None and (strictest is None or MIGHTLING_AIRGAPPED_LEVELS.index(level)
-                                          > MIGHTLING_AIRGAPPED_LEVELS.index(strictest)):
-                    strictest = level
-        return strictest or DEFAULT_MIGHTLING_AIRGAPPED
-
-    @classmethod
-    def toml_airgapped_value(cls, text: str) -> Optional[str]:
-        """The value of the top-level `mightling_airgapped` key, read line by line.
-
-        As `toml_value` in ling-rs/airgapped does: the first `mightling_airgapped = <value>` before any table header,
-        a byte order mark skipped, a comment and quotes stripped. A syntax error elsewhere in the
-        file does not hide it, as it would from a TOML parser.
-
-        Args:
-            text: The file's text.
-
-        Returns:
-            Optional[str]: The raw value, or None when there is no such line.
-        """
-        for line in text.lstrip("﻿").splitlines():
-            line = line.strip()
-            if line.startswith("["):
-                return None
-            if not line.startswith("mightling_airgapped"):
-                continue
-            rest = line[len("mightling_airgapped"):].lstrip()
-            if not rest.startswith("="):
-                continue
-            return rest[1:].split("#", 1)[0].strip().strip("\"'")
-        return None
+        return AirgappedResolver.level(cwd=cwd)
 
     def _take_network_keys_from_user_file(self) -> None:
         """Drop the repository's network keys from `file_data`, saying so, and take the user's own.
