@@ -757,6 +757,19 @@ fn a_page_cut_at_the_size_cap_is_marked_truncated() {
 }
 
 #[test]
+fn a_binary_body_is_refused_rather_than_printed_as_text() {
+    let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01".to_vec();
+    let server = Server::start(move |_| response("200 OK", "image/png", &png, ""));
+    let output = fetch(&[&server.base], &[]);
+    assert_eq!(output.status.code(), Some(1), "{}", stdout(&output));
+    assert!(
+        stdout(&output).starts_with("❌ not text: image/png, 20 bytes"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
 fn fetch_uses_the_environment_proxy_except_for_no_proxy_hosts() {
     let proxy = Server::start(|_| response("200 OK", "text/plain", b"via proxy", ""));
     let output = fetch(
