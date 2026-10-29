@@ -451,7 +451,7 @@ class NodePairing:
         answer = cls.run(record, "info")
         if answer.returncode != 0:
             print(f"❌ The node did not answer through the new key: {answer.stderr.strip()[-200:]}")
-            cls.record_path(record["node"]).unlink(missing_ok=True)
+            cls.record_path(str(record["node"])).unlink(missing_ok=True)
             return False
         try:
             info = json.loads(answer.stdout)
@@ -463,7 +463,7 @@ class NodePairing:
                 if isinstance(info, dict) and info.get("node")
                 else "❌ The node did not report its id through the new key; pairing removed."
             )
-            cls.record_path(record["node"]).unlink(missing_ok=True)
+            cls.record_path(str(record["node"])).unlink(missing_ok=True)
             return False
         print(
             f"✅ Paired with {record['name']}. This key can ask it for `ling-admin node` operations and nothing else."
