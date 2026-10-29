@@ -114,6 +114,24 @@ def test_a_node_that_was_never_enabled_is_never_advertised_by_a_side_effect():
     assert NodeIdentity.read() is not None
 
 
+def test_building_ling_or_the_window_makes_the_machine_a_node(monkeypatch):
+    from dreamference.chat import DesktopRunner
+    from dreamference.cli import main
+    from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+
+    monkeypatch.setattr(DesktopRunner, "install", classmethod(lambda cls: 0))
+    monkeypatch.setattr(DesktopRunner, "build", classmethod(lambda cls: 0))
+    monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexBrandedBuilder, "build", classmethod(lambda cls, force=False: True))
+    for argv in (["desktop", "install"], ["desktop", "build"], ["codex", "build"]):
+        NodeIdentity.path().unlink(missing_ok=True)
+        monkeypatch.setattr("sys.argv", ["ling-admin", *argv])
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+        assert exit_info.value.code == 0, argv
+        assert NodeIdentity.read() is not None, argv
+
+
 def test_server_start_and_stop_move_the_advertised_state(capsys):
     NodeServiceFile.service_path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.0.0"))
     NodeAdvertiser.on_server_starting("qwen3.8-27b-nvfp4-dflash2", 8001)
@@ -325,13 +343,47 @@ def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(
     assert NodeSettings.load() == {"advertise": False, "web": False}
 
 
-def test_disable_without_root_still_stops_the_advertisement(machine, capsys):
+def test_disable_without_root_still_stops_the_advertisement(machine, monkeypatch, capsys):
+    # The real sudo wrapper with no way to root: it prints the command and runs nothing.
+    from conftest import REAL_RUN_PRIVILEGED
+
+    from dreamference.vllm_server.host_safety_setup import HostSafetySetup
+
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", REAL_RUN_PRIVILEGED)
+    monkeypatch.setattr(HostSafetySetup, "root_mode", classmethod(lambda cls, yes=False: None))
     NodeServiceFile.service_path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.0.0", "ready"))
     NodeSettings.save(advertise=True)
     assert NodeAdvertiser.disable() is True
     assert NodeServiceFile.service_path.read_text() == ""
     assert NodeServiceFile.read() is None
-    assert "emptied" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "emptied" in out and f"sudo rm -f {NodeServiceFile.service_path}" in out
+
+
+def test_disable_puts_a_lan_web_unit_back_on_loopback_and_leaves_others_alone(
+    machine, monkeypatch, ling_web, tmp_path
+):
+    """ASK §17: `node disable` runs `ling web start` (loopback) only when the unit was on the LAN."""
+    unit = tmp_path / "mightling-web.service"
+    monkeypatch.setattr("dreamference.node.node_advertiser.WEB_UNIT", str(unit))
+    NodeSettings.save(advertise=True)
+
+    # A machine that never ran `ling web`: nothing is started.
+    assert NodeAdvertiser.serve_web(False) is False
+    NodeAdvertiser.disable()
+    assert ling_web() == []
+
+    # A unit already on loopback is left as it is.
+    unit.write_text("[Service]\nExecStart=/x/ling web serve\n")
+    NodeAdvertiser.disable()
+    assert ling_web() == []
+
+    # A unit on the network goes back to loopback.
+    unit.write_text("[Service]\nExecStart=/x/ling web serve --lan\n")
+    NodeSettings.save(advertise=True)
+    NodeAdvertiser.disable()
+    assert ling_web() == ["web start"]
+    assert NodeSettings.load()["advertise"] is False
 
 
 def test_status_says_what_clients_see(machine, monkeypatch):
@@ -1226,6 +1278,25 @@ def test_the_stricter_of_the_two_airgap_levels_applies(monkeypatch):
     assert NodeJob.validate(job_request())["airgapped"] == "off"
 
 
+def test_a_repository_config_cannot_loosen_the_user_level_airgap_of_a_node_job(tmp_path, monkeypatch):
+    # The agent can write the repository's dreamference.toml; the user-level file's `on` must
+    # still reach the request and the node's own level, as it reaches the launcher.
+    from dreamference.node import NodeJob, NodeJobSender
+
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_CONFIG_PATH", raising=False)
+    user_level = Path.home() / ".config" / "dreamference" / "config.toml"
+    user_level.parent.mkdir(parents=True, exist_ok=True)
+    user_level.write_text('mightling_airgapped = "on"\n')
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    (repo / "dreamference.toml").write_text('mightling_airgapped = "off"\n')
+    monkeypatch.chdir(repo)
+    assert NodeJobSender.compose(str(repo), "a" * 40, ["true"], None, None, None)["airgapped"] == "on"
+    assert NodeJob.node_airgap_level() == "on"
+
+
 def test_the_sandbox_writes_only_the_worktree_hides_the_home_folder_and_the_gpu(tmp_path):
     from dreamference.node import NodeJob
 
@@ -1865,6 +1936,26 @@ def test_only_paths_the_node_allows_are_bound_and_only_read_only(job_node, tmp_p
             NodeJob.validate(job_request(binds=[path]))
 
 
+def test_a_job_binds_at_most_sixteen_paths(job_node, tmp_path, monkeypatch):
+    from dreamference.node import NodeJob
+
+    root = tmp_path / "datasets"
+    paths = [str(root / f"set{i}") for i in range(17)]
+    for path in paths:
+        Path(path).mkdir(parents=True)
+    config = tmp_path / "home-config.toml"
+    config.write_text(f'[node]\nbindable = ["{root}"]\n')
+    monkeypatch.setattr(
+        "os.path.expanduser",
+        lambda path: (
+            str(config) if path.endswith("config.toml") else path.replace("~", os.environ["HOME"])
+        ),
+    )
+    assert NodeJob.validate(job_request(binds=paths[:16]))["binds"] == paths[:16]
+    with pytest.raises(ValueError, match="at most 16"):
+        NodeJob.validate(job_request(binds=paths))
+
+
 def test_finished_jobs_are_pruned_a_day_after_the_fetch_or_after_fourteen_days(job_node, capsys):
     from datetime import datetime, timedelta
 
@@ -1999,6 +2090,16 @@ def test_a_paired_node_serving_the_same_model_is_a_lane_and_every_other_is_named
     )
 
 
+def test_night_shift_and_swe_bench_use_every_paired_node_by_default():
+    from dreamference.night_shift.night_shift_settings import NightShiftSettings
+    from dreamference.node import NodeLanes
+    from dreamference.swe_bench.swe_bench_settings import SweBenchSettings
+
+    assert NightShiftSettings({}).nodes == "paired" and SweBenchSettings({}).nodes == "paired"
+    assert NodeLanes.wanted(NightShiftSettings({}).nodes) is None
+    assert NodeLanes.wanted(SweBenchSettings({"nodes": "none"}).nodes) == []
+
+
 def test_the_sender_always_sends_caps_and_reaches_the_node_through_the_pairing(
     tmp_path, monkeypatch
 ):
@@ -2088,6 +2189,12 @@ def test_the_jobs_own_options_are_not_read_as_node_runs():
     assert (options.bind, options.out, options.setup) == (["/data/a"], "ckpt", "uv sync")
     assert command == ["python", "--bind", "x"]
     assert split([])[1] == []
+    # An option it does not know, before `--` or where the command would start, is refused
+    # rather than run as (part of) the command.
+    for words in (["--memroy", "16G", "--", "python"], ["--memroy", "16G", "python"], ["python", "--", "x"]):
+        with pytest.raises(SystemExit) as exit_info:
+            split(words)
+        assert exit_info.value.code == 2, words
 
 
 def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(
@@ -2290,6 +2397,26 @@ def test_every_node_command_reaches_its_handler(monkeypatch, capsys):
         ("serve-job", "info", "abc"),
         ("sync-model", "spark-2", "m", "10.0.0.2"),
     ]
+
+
+def test_node_add_defaults_to_ssh_port_22_and_this_users_name(monkeypatch):
+    from dreamference.cli import main
+    from dreamference.node import NodePairing
+
+    calls = []
+    monkeypatch.setattr(
+        NodePairing,
+        "add",
+        classmethod(
+            lambda cls, name, user=None, ssh_port=None: calls.append((name, user, ssh_port)) or True
+        ),
+    )
+    for argv in (["add", "spark-2"], ["add", "spark-3", "--user", "owner", "--ssh-port", "2222"]):
+        monkeypatch.setattr("sys.argv", ["ling-admin", "node", *argv])
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+        assert exit_info.value.code == 0, argv
+    assert calls == [("spark-2", None, 22), ("spark-3", "owner", 2222)]
 
 
 # -- copying a model to another node (§12.2) -------------------------------------------------------

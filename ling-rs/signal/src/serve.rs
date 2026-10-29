@@ -785,7 +785,7 @@ impl Daemon {
             let name = entry.file_name().to_string_lossy().into_owned();
             let age = entry.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| now.duration_since(t).ok()).unwrap_or_default();
             let held = self.held_attachments.contains(&name);
-            if (!held && age >= Duration::from_secs(120)) || age >= Duration::from_secs(3600) {
+            if swept(age, held) {
                 let _ = std::fs::remove_file(entry.path());
                 self.held_attachments.remove(&name);
             }
@@ -838,5 +838,32 @@ impl Daemon {
             "updatedMs": now_ms(),
         });
         let _ = state::write_status(runtime, &status);
+    }
+}
+
+/// Whether the sweep deletes a downloaded attachment of this age: after two minutes unless it is
+/// held for an upload, and after an hour in any case (§19.1).
+fn swept(age: Duration, held: bool) -> bool {
+    (!held && age >= Duration::from_secs(120)) || age >= Duration::from_secs(3600)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_attachment_goes_after_two_minutes_or_an_hour_if_held() {
+        assert!(!swept(Duration::from_secs(119), false));
+        assert!(swept(Duration::from_secs(120), false));
+        assert!(!swept(Duration::from_secs(3599), true));
+        assert!(swept(Duration::from_secs(3600), true));
+    }
+
+    #[test]
+    fn the_retries_the_air_gap_poll_and_the_timer_keep_their_spec_values() {
+        assert_eq!(BACKOFF_S, [1, 2, 5, 10, 30], "§8: 1, 2, 5, 10, then every 30 s");
+        assert_eq!(AIRGAP_EVERY, Duration::from_secs(5), "§11: asked every 5 s");
+        assert_eq!(DISAPPEARING_S, 604_800, "§4.2: one week");
+        assert_eq!(STATUS_EDITS, 8, "§19.8: at most 8 edits");
     }
 }

@@ -71,11 +71,9 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
             ticks.is_multiple_of(PROBE_EVERY) && trigger.observe(probe.state(), Instant::now());
         if !busy {
             child = None;
-            let interval_passed = last_start
-                .map(|t| t.elapsed() >= Duration::from_secs(settings.min_interval_s))
-                .unwrap_or(true);
             if let Some(request) = pending {
-                if interval_passed || request == Request::IndexExact {
+                let interval = Duration::from_secs(settings.min_interval_s);
+                if may_start(request, last_start, interval, Instant::now()) {
                     pending = None;
                     last_start = Some(Instant::now());
                     let exact = request == Request::IndexExact || wants_exact(&repo, &settings);
@@ -168,6 +166,17 @@ impl IdleTrigger {
     fn claim(&mut self, head: String) {
         self.claimed = Some(head);
     }
+}
+
+/// Whether the coalesced request may start now (spec §9.2): a follow-up waits
+/// `code_index_min_interval` after the last start, unless it asks for `--exact`.
+fn may_start(
+    request: Request,
+    last_start: Option<Instant>,
+    interval: Duration,
+    now: Instant,
+) -> bool {
+    request == Request::IndexExact || last_start.is_none_or(|t| now.duration_since(t) >= interval)
 }
 
 /// Whether the executing indexers are due at launch: a trusted repository, or a trusted submodule
@@ -320,5 +329,65 @@ mod tests {
         let now = Instant::now();
         assert!(!trigger.may_claim("a", Some(now), HOUR, now + HOUR / 2));
         assert!(trigger.may_claim("a", Some(now), HOUR, now + HOUR));
+    }
+
+    /// One tick of `run`'s queue handling: drain and coalesce, then start when free and due.
+    fn tick(
+        state: &std::path::Path,
+        pending: &mut Option<Request>,
+        last_start: &mut Option<Instant>,
+        busy: bool,
+        now: Instant,
+    ) -> Option<Request> {
+        if let Some(request) = requests::drain(state) {
+            *pending = (*pending).max(Some(request));
+        }
+        let request = (*pending)?;
+        if busy || !may_start(request, *last_start, HOUR, now) {
+            return None;
+        }
+        *pending = None;
+        *last_start = Some(now);
+        Some(request)
+    }
+
+    #[test]
+    fn five_triggers_make_one_run_and_one_coalesced_follow_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path();
+        let (mut pending, mut last_start) = (None, None);
+        let now = Instant::now();
+        let mut started = Vec::new();
+        requests::append(state, Request::Index).unwrap();
+        started.extend(tick(state, &mut pending, &mut last_start, false, now));
+        // Four more while the first run is in flight, a few seconds apart.
+        for i in 1..5 {
+            requests::append(state, Request::Index).unwrap();
+            let at = now + Duration::from_secs(3 * i);
+            started.extend(tick(state, &mut pending, &mut last_start, true, at));
+        }
+        assert_eq!(pending, Some(Request::Index));
+        // The run ends; the follow-up waits for the interval since the last start.
+        let mut at = now + Duration::from_secs(60);
+        while at < now + HOUR * 2 {
+            started.extend(tick(state, &mut pending, &mut last_start, false, at));
+            at += Duration::from_secs(60);
+        }
+        assert_eq!(started, vec![Request::Index, Request::Index]);
+        assert_eq!(last_start, Some(now + HOUR));
+        assert_eq!(pending, None);
+    }
+
+    #[test]
+    fn an_exact_request_skips_the_interval() {
+        let now = Instant::now();
+        assert!(!may_start(Request::Index, Some(now), HOUR, now + HOUR / 2));
+        assert!(may_start(
+            Request::IndexExact,
+            Some(now),
+            HOUR,
+            now + HOUR / 2
+        ));
+        assert!(may_start(Request::Index, None, HOUR, now));
     }
 }

@@ -66,7 +66,36 @@ fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.iter().position(|arg| arg == flag).and_then(|index| args.get(index + 1)).map(String::as_str)
 }
 
+/// The argument `ling sync <args>` does not take, if any: an unknown flag, a stray word, or a flag
+/// missing its value. Checked before any command acts (`forget` deletes the hub's store).
+fn unexpected_argument(args: &[String]) -> Option<String> {
+    let (command, rest) = args.split_first()?;
+    let (switches, valued): (&[&str], &[&str]) = match command.as_str() {
+        "enable" => (&["--no-unit"], &["--code", "--name", "--port"]),
+        "status" => (&["--json"], &[]),
+        "agent" => (&["--once"], &[]),
+        "disable" | "forget" => (&[], &[]),
+        "exclude" => return (rest.len() != 1).then(|| "Usage: ling sync exclude <folder>".to_string()),
+        _ => return None,
+    };
+    let mut words = rest.iter();
+    while let Some(word) = words.next() {
+        if valued.contains(&word.as_str()) {
+            if words.next().is_none() {
+                return Some(format!("`ling sync {command} {word}` needs a value"));
+            }
+        } else if !switches.contains(&word.as_str()) {
+            return Some(format!("`ling sync {command}` takes no `{word}`"));
+        }
+    }
+    None
+}
+
 pub async fn run_cli(args: &[String], environment: Environment) -> i32 {
+    if let Some(problem) = unexpected_argument(args) {
+        eprintln!("{problem}\n{USAGE}");
+        return 2;
+    }
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.first().copied() {
         Some("enable") => enable(&args[1..], &environment).await,
@@ -551,6 +580,22 @@ async fn run_agent(environment: &Environment, once: bool) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_command_refuses_an_unknown_flag_and_a_stray_word() {
+        let words = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for command in ["enable", "status", "disable", "forget", "agent"] {
+            assert!(unexpected_argument(&words(&[command, "--bogus-flag"])).is_some(), "{command} took an unknown flag");
+            assert!(unexpected_argument(&words(&[command, "stray"])).is_some(), "{command} took a stray word");
+        }
+        assert!(unexpected_argument(&words(&["exclude", "/a", "/b"])).is_some());
+        assert!(unexpected_argument(&words(&["exclude"])).is_some());
+        assert!(unexpected_argument(&words(&["exclude", "/a"])).is_none());
+        assert!(unexpected_argument(&words(&["enable", "--code", "1 2", "--name", "n", "--port", "3100", "--no-unit"])).is_none());
+        assert!(unexpected_argument(&words(&["enable", "--code"])).is_some(), "a flag with no value");
+        assert!(unexpected_argument(&words(&["status", "--json"])).is_none());
+        assert!(unexpected_argument(&words(&["agent", "--once"])).is_none());
+    }
 
     #[test]
     fn only_the_users_own_network_is_a_hub_address() {

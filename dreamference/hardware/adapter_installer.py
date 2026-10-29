@@ -268,6 +268,10 @@ class AdapterInstaller:
         """
         if repo is not None:
             source, commit = AdapterCatalog.parse_repo(repo)
+            # No catalogue entry gives its size before the manifest is fetched: keep the margin.
+            problem = cls.free_space_problem(0)
+            if problem:
+                raise ValueError(problem)
             return source, commit, None
         name, _, version = (spec or "").partition(VERSION_SEPARATOR)
         entry = AdapterCatalog.find(name, version or None)

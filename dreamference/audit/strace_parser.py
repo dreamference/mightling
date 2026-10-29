@@ -57,6 +57,14 @@ UDP_KINDS: Final[frozenset] = frozenset({"UDP", "UDPv6", "UDPLITE", "UDPLITEv6"}
 # `1234 <... execve resumed>) = 0`: the result of a call another process's line interrupted.
 RESUMED_EXECVE: Final[re.Pattern] = re.compile(r"^(?:\[pid\s+(\d+)\]\s+|(\d+)\s+)?<\.\.\. execve resumed>.*\)\s*=\s*(-?\d+)")
 
+# `1234 <... sendmmsg resumed>[{msg_hdr=…}], 1, 0) = 1`: strace decodes a sendmmsg's messages only
+# once it returns, so when another line interrupted it, every address it sent to is on this line.
+RESUMED_SENDMMSG: Final[re.Pattern] = re.compile(
+    r"^(?:\[pid\s+(\d+)\]\s+|(\d+)\s+)?<\.\.\. sendmmsg resumed>(.*)$"
+)
+
+UNFINISHED: Final[str] = "<unfinished ...>"
+
 SIMPLE_ESCAPES: Final[Dict[str, int]] = {
     "n": 10, "t": 9, "r": 13, "v": 11, "f": 12, "a": 7, "b": 8, "e": 27, "\\": 92, '"': 34, "'": 39,
 }
@@ -83,14 +91,11 @@ class StraceParser:
         udp_routes: Dict[str, str] = {}
         # An execve whose result is on a later line (`<unfinished ...>`), by pid.
         pending_execve: Dict[str, str] = {}
+        # A sendmmsg whose messages are on a later line, by pid: its descriptor so far.
+        pending_sendmmsg: dict[str, str] = {}
         for line in text.splitlines():
             line = line.strip()
-            resumed = RESUMED_EXECVE.match(line)
-            if resumed:
-                trace.lines += 1
-                started = pending_execve.pop(resumed.group(1) or resumed.group(2) or "", None)
-                if started is not None and int(resumed.group(3)) == 0:
-                    cls._read_execve(started, trace)
+            if cls._read_resumed(line, trace, pending_execve, pending_sendmmsg, resolver_sockets, udp_routes):
                 continue
             match = LINE.match(line)
             if not match:
@@ -98,13 +103,39 @@ class StraceParser:
             trace.lines += 1
             pid = match.group(1) or match.group(2) or ""
             syscall, rest = match.group(3), match.group(4)
-            if syscall == "execve" and rest.rstrip().endswith("<unfinished ...>"):
+            if syscall == "execve" and rest.rstrip().endswith(UNFINISHED):
                 pending_execve[pid] = rest
             elif syscall == "execve":
                 cls._read_execve(rest, trace)
+            elif syscall == SENDMMSG and rest.rstrip().endswith(UNFINISHED):
+                pending_sendmmsg[pid] = rest.rstrip()[:-len(UNFINISHED)]
             elif syscall in ("connect", "sendto", "sendmsg", "sendmmsg", "write", "writev"):
                 cls._read_socket_call(pid, syscall, rest, trace, resolver_sockets, udp_routes)
+        # A sendmmsg that never returned (its process was killed): its descriptor is all there is.
+        for pid, started in pending_sendmmsg.items():
+            cls._read_socket_call(pid, SENDMMSG, started, trace, resolver_sockets, udp_routes)
         return trace
+
+    @classmethod
+    def _read_resumed(cls, line: str, trace: EgressTrace, pending_execve: dict[str, str],
+                      pending_sendmmsg: dict[str, str], resolver_sockets: dict[tuple[str, str], str],
+                      udp_routes: dict[str, str]) -> bool:
+        """Reads a `<... resumed>` line of an execve or a sendmmsg; False for any other line."""
+        resumed = RESUMED_EXECVE.match(line)
+        if resumed:
+            trace.lines += 1
+            started = pending_execve.pop(resumed.group(1) or resumed.group(2) or "", None)
+            if started is not None and int(resumed.group(3)) == 0:
+                cls._read_execve(started, trace)
+            return True
+        resumed = RESUMED_SENDMMSG.match(line)
+        if resumed:
+            trace.lines += 1
+            pid = resumed.group(1) or resumed.group(2) or ""
+            sent = pending_sendmmsg.pop(pid, "") + resumed.group(3)
+            cls._read_socket_call(pid, SENDMMSG, sent, trace, resolver_sockets, udp_routes)
+            return True
+        return False
 
     @classmethod
     def _read_socket_call(cls, pid: str, syscall: str, rest: str, trace: EgressTrace,

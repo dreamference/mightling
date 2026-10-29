@@ -284,6 +284,37 @@ mod state_file_tests {
         assert!(!state.join("code_index.building").exists());
     }
 
+    /// Inside Codex's read-only sandbox `.git` cannot be written, and outside it a query must not
+    /// race the user's own git: `git status` never refreshes the index (spec §2, §12).
+    #[test]
+    fn git_never_writes_the_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .current_dir(dir.path())
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+        };
+        run(&["init", "-q"]);
+        std::fs::write(dir.path().join("a.txt"), "a\n").unwrap();
+        run(&["add", "a.txt"]);
+        run(&["commit", "-q", "-m", "a"]);
+        let index = dir.path().join(".git/index");
+        let before = std::fs::read(&index).unwrap();
+        // A new mtime with the same content: a plain `git status` would rewrite the index.
+        std::fs::File::options()
+            .write(true)
+            .open(dir.path().join("a.txt"))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
+            .unwrap();
+        assert_eq!(git(dir.path(), &["status", "--porcelain"]).unwrap(), "");
+        assert_eq!(std::fs::read(&index).unwrap(), before);
+    }
+
     #[test]
     fn an_existing_file_is_opened_without_truncating_it() {
         let dir = tempfile::tempdir().unwrap();

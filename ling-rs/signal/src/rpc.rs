@@ -374,7 +374,11 @@ done
     fn the_daemon_trusts_new_keys_on_first_use_only() {
         let launch = Launch::json_rpc("/opt/signal-cli".into(), std::path::Path::new("/var/lib/m/signal-cli"), "+15550000", vec![]);
         let args = launch.args.join(" ");
+        assert!(args.starts_with("--config /var/lib/m/signal-cli "));
         assert!(args.contains("--trust-new-identities on-first-use"));
+        // Messages are read from the start, and stories never (§2).
+        assert!(args.contains("jsonRpc --receive-mode on-start"));
+        assert!(args.contains("--ignore-stories"));
         assert!(args.contains("-a +15550000 "));
         assert!(args.contains("jsonRpc"));
         // signal-cli cannot fetch an attachment later, so the owner's are downloaded (§19.1).

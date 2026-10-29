@@ -9,6 +9,7 @@ import hashlib
 import json
 import pathlib
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,8 +22,13 @@ from dreamference.hardware.model_downloader import ModelDownloader
 from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS, QWEN38_LORA_RECIPE
 from dreamference.vllm_server.adapter_serving import AdapterServing
 from dreamference.vllm_server.model_gate import ModelGate
-from dreamference.vllm_server.model_gate_adapters import KEY_FILE, LIST_FILE, ModelGateAdapters
-from dreamference.vllm_server.model_gate_service import ModelGateService
+from dreamference.vllm_server.model_gate_adapters import (
+    KEY_FILE,
+    LIST_FILE,
+    REFUSED_PATHS,
+    ModelGateAdapters,
+)
+from dreamference.vllm_server.model_gate_service import READ_ONLY_PATHS, ModelGateService
 from dreamference.vllm_server.sglang_runtime_patcher import SGLangRuntimePatcher
 from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
 
@@ -138,6 +144,19 @@ def test_an_installed_adapter_turns_on_the_recipes_lora_flags_behind_the_gate(
 def test_minima_never_serves_adapters(verified):
     install(base_revision="16e768e7d0461b0b86e565ecedd08a24eca53e9a")
     assert "--enable-lora" not in VLLMServerManager().build_launch_command(model=MINIMA, gate=True)
+
+
+def test_the_containers_cap_grows_by_the_loaded_cache_of_the_largest_adapter(monkeypatch):
+    sizes = {"rust": 1 << 28, "cpp": 1 << 26}
+    monkeypatch.setattr(
+        AdapterServing, "size", classmethod(lambda cls, entry: sizes[entry["name"]])
+    )
+    recipe = {"container_headroom_gb": 1.5, "lora": {"max_loaded_loras": 8}}
+    adapters = [{"name": "rust"}, {"name": "cpp"}]
+    # 8 loaded x 0.25 GiB, the largest of the two.
+    assert AdapterServing.with_headroom(recipe, adapters)["container_headroom_gb"] == 3.5
+    assert recipe["container_headroom_gb"] == 1.5
+    assert AdapterServing.with_headroom(recipe, []) is recipe
 
 
 def test_an_adapter_that_fails_its_check_is_not_served(monkeypatch, capsys):
@@ -342,6 +361,7 @@ class Engine(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     seen: ClassVar[list] = []
     loaded: ClassVar[list] = []
+    load_seconds: ClassVar[float] = 0.0
 
     def log_message(self, *args):
         pass
@@ -363,6 +383,7 @@ class Engine(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         Engine.seen.append(("POST", self.path, self.headers.get("Authorization"), body))
         if self.path == "/load_lora_adapter":
+            time.sleep(Engine.load_seconds)
             Engine.loaded.append(body["lora_name"])
         elif self.path == "/unload_lora_adapter":
             Engine.loaded.remove(body["lora_name"])
@@ -371,7 +392,7 @@ class Engine(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def gate(tmp_path):
-    Engine.seen, Engine.loaded = [], []
+    Engine.seen, Engine.loaded, Engine.load_seconds = [], [], 0.0
     engine = ThreadingHTTPServer(("127.0.0.1", 0), Engine)
     threading.Thread(target=engine.serve_forever, daemon=True).start()
     state = tmp_path / "gate"
@@ -446,6 +467,42 @@ def test_an_adapter_whose_files_changed_is_refused_and_never_loaded(gate):
         and json.load(refused.value)["error"]["code"] == "adapter_unavailable"
     )
     assert not [entry for entry in Engine.seen if entry[1] == "/load_lora_adapter"]
+
+
+def test_concurrent_first_requests_for_an_adapter_wait_on_one_load(gate):
+    Engine.load_seconds = 0.5
+    answers = []
+
+    def ask():
+        answers.append(call(gate["port"], "/v1/responses", {"model": f"{BASE}+rust"}))
+
+    threads = [threading.Thread(target=ask) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=20)
+    assert answers == [f'data: {{"model":"{BASE}+rust"}}\n\n'.encode()] * 4
+    assert len([entry for entry in Engine.seen if entry[1] == "/load_lora_adapter"]) == 1
+
+
+def test_the_load_endpoints_are_never_read_only_probes():
+    assert not set(REFUSED_PATHS) & set(READ_ONLY_PATHS)
+    assert not [path for path in REFUSED_PATHS if path.startswith("/v1/models/")]
+
+
+@pytest.mark.parametrize(
+    ("networks", "status"), [(["127.0.0.0/8", "::1/128"], 403), (["192.0.2.0/24"], 503)]
+)
+def test_the_load_endpoints_are_refused_while_a_run_holds_the_gate(
+    gate, monkeypatch, networks, status
+):
+    held = {"state": "closed", "run": "night", "networks": networks}
+    monkeypatch.setattr(ModelGateService, "state", classmethod(lambda cls, *args, **kw: held))
+    for path in REFUSED_PATHS:
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            call(gate["port"], path, {"lora_name": "evil", "lora_path": "/tmp/evil"})
+        assert refused.value.code == status
+    assert not [entry for entry in Engine.seen if entry[0] == "POST"]
 
 
 @pytest.mark.parametrize(

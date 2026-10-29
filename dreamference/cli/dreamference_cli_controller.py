@@ -7,14 +7,11 @@ renders Rich terminal user interfaces, and coordinates backend component executi
 """
 
 import argparse
+import functools
 import os
 import sys
 import time
-from typing import Final, List, Optional
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
+from typing import TYPE_CHECKING, Final, List, Optional
 
 from dreamference.cli.adapter_command import ADAPTER_COMMAND, AdapterCommand
 from dreamference.config import DreamferenceConfig, ProxyBypass
@@ -32,8 +29,19 @@ from dreamference.forge.forge_command import ForgeCommand
 from dreamference.mcp_server import main as run_mcp_server
 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 
-# Global Rich console instance for styled terminal outputs
-console: Final[Console] = Console()
+if TYPE_CHECKING:
+    from rich.console import Console
+
+
+@functools.cache
+def rich_console() -> "Console":
+    """Rich's console for styled terminal output, made at its first use.
+
+    Rich is not imported at the top: `--help` and `ling-admin mcp` never draw with it, and every
+    command imports this module (tests/test_cli_startup.py).
+    """
+    from rich.console import Console
+    return Console()
 
 # Where `ling-admin benchmark_server` stages vLLM's sonnet corpus. The text itself is embedded in
 # sonnet_dataset.py rather than read out of the image or fetched, because images disagree about
@@ -51,7 +59,8 @@ class DreamferenceCLIController:
     @classmethod
     def display_header(cls) -> None:
         """Renders the Rich header panel: Mightling by Dreamference, and the GB10 target architecture."""
-        console.print(Panel.fit(
+        from rich.panel import Panel
+        rich_console().print(Panel.fit(
             "[bold green]⚡ Mightling[/bold green] [dim]by Dreamference[/dim] - Autonomous Local Agentic Coding Engine\n"
             "[dim]Exclusive Target Hardware: NVIDIA GB10 (Blackwell Architecture | 128 GB Unified Memory)[/dim]",
             border_style="green"
@@ -190,6 +199,7 @@ class DreamferenceCLIController:
             except ValueError:
                 pass
 
+        from rich.table import Table
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("Workload")
         table.add_column("Acceptance", justify="right")
@@ -1095,6 +1105,9 @@ class DreamferenceCLIController:
         Executes `ling-admin status` command, displaying hardware metrics, vLLM health, Codex/Cline/Continue/OpenHands config,
         and context engine index telemetry in formatted Rich panels.
         """
+        from rich.panel import Panel
+        from rich.table import Table
+        console = rich_console()
         cls.display_header()
         hw = detect_gb10_hardware()
         config = DreamferenceConfig()
@@ -2053,6 +2066,11 @@ class DreamferenceCLIController:
             runner = OpenHandsRunner(config=config)
         else:
             runner = CodexRunner(config=config)
+
+        # Rich from here on: the commands above it (`mcp`, `images mcp`) never draw with it.
+        from rich.console import Console
+        from rich.table import Table
+        console = rich_console()
 
         # Dispatch subcommand logic
         if args.command == "model":
