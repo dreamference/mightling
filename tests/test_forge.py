@@ -1229,3 +1229,18 @@ def test_a_repository_git_cannot_read_does_not_match_the_manifest(tmp_path, monk
     # A repository with no commit yet has no refs; one git cannot read has none either.
     manifest = {"refs": {"o/new": {}}}
     assert ForgeBackup.compare(manifest, tmp_path / "repos"), "an unreadable repository passed"
+
+
+def test_the_app_ini_is_on_disk_before_it_replaces_the_old_one(tmp_path, monkeypatch):
+    import os
+
+    events = []
+    real_fsync, real_replace = os.fsync, Path.replace
+    monkeypatch.setattr(os, "fsync", lambda fd: events.append("fsync") or real_fsync(fd))
+    monkeypatch.setattr(
+        Path, "replace", lambda self, target: events.append("replace") or real_replace(self, target)
+    )
+    ForgeAppIni.write(tmp_path, "gx10-1a2b", "record")
+    assert events[:2] == ["fsync", "replace"], (
+        "an empty app.ini after a power cut means new secrets"
+    )
