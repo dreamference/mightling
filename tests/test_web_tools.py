@@ -70,7 +70,7 @@ def test_fetch_stops_reading_a_body_at_the_download_ceiling(online):
     page = Page(b"a" * (MAX_DOWNLOAD_BYTES * 2), content_type="text/plain")
     online.return_value = page
     outcome = WebTools.fetch("https://example.org", max_chars=10)
-    assert page.read == MAX_DOWNLOAD_BYTES
+    assert page.read == MAX_DOWNLOAD_BYTES + 8192  # one chunk past the ceiling tells a cut body
     assert outcome["text"] == "a" * 10 and outcome["truncated"] is True
 
 
@@ -92,6 +92,16 @@ def test_a_page_cut_at_the_download_ceiling_is_reported_truncated(online):
     online.return_value = whole
     outcome = WebTools.fetch("https://example.org")
     assert "all of it" in outcome["text"] and outcome["truncated"] is False and whole.closed
+
+
+def test_a_body_of_exactly_the_download_ceiling_is_not_reported_truncated(online):
+    # Reaching the ceiling was taken as passing it, so a complete body of exactly 5 MiB was cut.
+    head, tail = b"<html><body><p>all of it</p><!--", b"--></body></html>"
+    body = head + b" " * (MAX_DOWNLOAD_BYTES - len(head) - len(tail)) + tail
+    assert len(body) == MAX_DOWNLOAD_BYTES
+    online.return_value = Page(body)
+    outcome = WebTools.fetch("https://example.org")
+    assert "all of it" in outcome["text"] and outcome["truncated"] is False
 
 
 def test_fetch_reduces_html_to_its_title_and_readable_text(online):

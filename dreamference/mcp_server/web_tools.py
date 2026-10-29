@@ -146,7 +146,7 @@ class WebTools:
 
         Returns:
             requests.Response: The response, closed, with `_body` holding at most
-            MAX_DOWNLOAD_BYTES and `_cut` true when the body reached that ceiling.
+            MAX_DOWNLOAD_BYTES and `_cut` true when the body went past that ceiling.
         """
         response = requests.get(
             url,
@@ -162,12 +162,14 @@ class WebTools:
             for chunk in response.iter_content(8192):
                 chunks.append(chunk)
                 total += len(chunk)
-                if total >= MAX_DOWNLOAD_BYTES:
+                # Past the ceiling, not at it: a complete body of exactly MAX_DOWNLOAD_BYTES used
+                # to be reported cut. One more chunk is read to tell the two apart.
+                if total > MAX_DOWNLOAD_BYTES:
                     break
         finally:
             response.close()
         response._body = b"".join(chunks)[:MAX_DOWNLOAD_BYTES]  # type: ignore[attr-defined]
-        response._cut = total >= MAX_DOWNLOAD_BYTES  # type: ignore[attr-defined]
+        response._cut = total > MAX_DOWNLOAD_BYTES  # type: ignore[attr-defined]
         return response
 
     @classmethod
