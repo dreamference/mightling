@@ -237,6 +237,33 @@ def test_a_failed_os_update_does_not_reboot(provisioner):
     assert provisioner.results["node-b"]["left"] == "ling-admin node provision node-b --os-update"
 
 
+@pytest.mark.parametrize("failing", ["apt-get", "fwupdmgr"])
+def test_the_os_update_line_fails_when_apt_fails_and_only_then(provisioner, tmp_path, failing):
+    # The line runs in a shell whose PATH holds only stand-ins: an apt that fails must fail the
+    # step, a firmware tool with nothing to do (exit 2) must not.
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    (stubs / "sh").symlink_to("/bin/sh")
+    for tool, code in (("apt-get", 100), ("fwupdmgr", 2)):
+        (stubs / tool).write_text(f"#!/bin/sh\nexit {code if tool == failing else 0}\n")
+        (stubs / tool).chmod(0o755)
+
+    class Shell(Session):
+        def sudo(self, line, password):
+            self.ran.append(line)
+            if "dist-upgrade" not in line:
+                return subprocess.CompletedProcess([], 0, "", "")
+            return subprocess.run(
+                ["/bin/sh", "-c", line], env={"PATH": str(stubs)}, capture_output=True, check=False
+            )
+
+    provisioner.options["os_update"] = True
+    session = Shell()
+    provisioner._wait_for_ssh = lambda session: False
+    provisioner._step_os_update("node-b", session)
+    assert ("systemctl reboot" in session.ran) is (failing == "fwupdmgr")
+
+
 def test_an_os_update_stops_a_running_server_and_fails_when_the_machine_does_not_come_back(
     provisioner, monkeypatch
 ):

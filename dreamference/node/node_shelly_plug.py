@@ -11,6 +11,7 @@ module speaks the unauthenticated form only: the plug must sit on a network nobo
 Network access goes through `_get`, which the tests replace.
 """
 
+import http.client
 import json
 import re
 import urllib.error
@@ -47,7 +48,12 @@ class NodeShellyPlug:
         try:
             with urllib.request.urlopen(url, timeout=TIMEOUT_S) as response:
                 body = json.load(response)
-        except (urllib.error.URLError, ValueError, TimeoutError) as error:
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            ValueError,
+            TimeoutError,
+        ) as error:
             raise OSError(str(error)) from error
         if not isinstance(body, dict):
             raise OSError("the plug answered with something other than an object")

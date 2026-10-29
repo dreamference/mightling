@@ -826,7 +826,10 @@ def test_pairing_checks_that_the_machine_that_answered_is_the_advertised_node(mo
     monkeypatch.setattr(
         NodePairing,
         "authorize_on_node",
-        classmethod(lambda cls, record, public_key: sent.append(public_key) or True),
+        classmethod(lambda cls, record, public_key, identity=None: sent.append(public_key) or True),
+    )
+    monkeypatch.setattr(
+        NodePairing, "ssh_config", classmethod(lambda cls, host: (None, NodePairing.key_path()))
     )
     answers = {"info": json.dumps({"node": "2222-bbbb", "linger": False})}
     monkeypatch.setattr(
@@ -907,11 +910,12 @@ def test_node_add_takes_the_user_from_ssh_config_before_the_local_user(monkeypat
     monkeypatch.setattr(subprocess, "run", _ssh_stand_in(calls))
     assert NodePairing.add("spark-2") is True
     assert NodePairing.paired()[0]["user"] == getpass.getuser()
-    # --user wins over both, and ssh -G is not asked for a user.
+    # --user wins over both; ssh -G is still asked for the name's key, never for the address's.
     calls.clear()
     monkeypatch.setattr(subprocess, "run", _ssh_stand_in(calls, ssh_g="user remote-acct\n"))
     assert NodePairing.add("spark-2", user="given") is True
-    assert NodePairing.paired()[0]["user"] == "given" and ["ssh", "-G", "spark-2"] not in calls
+    assert NodePairing.paired()[0]["user"] == "given"
+    assert [call for call in calls if call[:2] == ["ssh", "-G"]] == [["ssh", "-G", "spark-2"]]
 
 
 def test_node_add_names_the_user_tried_when_the_login_is_refused(monkeypatch, capsys):
@@ -1807,6 +1811,32 @@ def test_out_files_come_back_and_a_hostile_archive_cannot_write_outside(
         not (received.parent.parent / "escape.txt").exists()
         and not (tmp_path / "escape.txt").exists()
     )
+
+
+def test_an_unreadable_out_stream_does_not_leave_the_fetch_waiting_forever(
+    tmp_path, monkeypatch
+):
+    import threading
+
+    from dreamference.node import NodeJobSender, NodePairing
+
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    NodeJobSender._remember("20261002-1200-abc", paired_record(), str(tmp_path), "calc-0123456789")
+    # Not a tar, and more of it than a pipe holds: the reader stops at the first block.
+    monkeypatch.setattr(
+        NodePairing,
+        "ssh_command",
+        classmethod(lambda cls, record, request: ["sh", "-c", "yes | head -c 2000000"]),
+    )
+    results = []
+    worker = threading.Thread(
+        target=lambda: results.append(NodeJobSender._fetch_out("20261002-1200-abc", True)),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=30)
+    assert not worker.is_alive()
+    assert results == [False]
 
 
 def test_only_paths_the_node_allows_are_bound_and_only_read_only(job_node, tmp_path, monkeypatch):
