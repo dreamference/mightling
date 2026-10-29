@@ -642,3 +642,21 @@ def test_a_model_tensorized_at_one_pin_is_not_loaded_once_the_pin_moves(tmp_path
     assert ModelDownloader.is_model_tensorized(model_key) is True
     monkeypatch.setattr(ModelMatrixRegistry, "pinned_revision", classmethod(lambda cls, k: "b" * 40))
     assert ModelDownloader.is_model_tensorized(model_key) is False
+
+
+def test_the_container_mounts_a_relative_hf_home_by_its_absolute_path(tmp_path, monkeypatch):
+    # Docker reads a bare name before the colon as a named volume, not the host folder.
+    from dreamference.hardware import ModelDownloader
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HF_HOME", "hf")
+    args = ModelDownloader.container_volume_args()
+    assert args == ["-v", f"{tmp_path / 'hf'}:{ModelDownloader.CONTAINER_HF_HOME}"]
+
+
+def test_a_cache_path_docker_cannot_mount_is_refused_by_name(tmp_path, monkeypatch):
+    from dreamference.hardware import ModelDownloader
+
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "a:b"))
+    with pytest.raises(ValueError, match="cannot be mounted"):
+        ModelDownloader.container_volume_args()

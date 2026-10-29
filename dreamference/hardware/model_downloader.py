@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 
+# `docker -v` ends the host path at the first colon, so no host path may hold one.
+VOLUME_SEPARATOR = ":"
+
 class ModelDownloader:
     """
     Utility class managing pre-downloading and local cache verification for LLM weights.
@@ -74,8 +77,12 @@ class ModelDownloader:
         Returns:
             List[str]: `-v` options, with the host directories created if missing.
         """
-        home = cls.get_hf_home()
-        hub = cls.get_hf_cache_dir()
+        # Docker reads a relative path as a volume name, not a host folder.
+        home = cls.get_hf_home().absolute()
+        hub = cls.get_hf_cache_dir().absolute()
+        for path in (home, hub):
+            if VOLUME_SEPARATOR in str(path):
+                raise ValueError(f"{path} cannot be mounted into the container: rename it")
         home.mkdir(parents=True, exist_ok=True)
         args = ["-v", f"{home}:{cls.CONTAINER_HF_HOME}"]
         if hub != home / "hub":
