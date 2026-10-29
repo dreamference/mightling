@@ -16,6 +16,7 @@ import gzip
 import hashlib
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -172,17 +173,19 @@ class FleetBundle:
         if shutil.which("gh") is None:
             print("❌ --from release downloads with `gh`, which is not installed here.")
             return None
-        tag = f"v{version.lstrip('v')}" if version else None
-        bundle = Path(BUNDLE_ROOT) / f"bundle-{tag or 'latest'}"
+        tag = f"v{version.lstrip('v')}" if version else cls.latest_tag()
+        if tag is None:
+            return None
+        bundle = Path(BUNDLE_ROOT) / f"bundle-{tag}"
         target = cls.target()
-        if (bundle / f"ling-{target}.sha256sums").is_file() and tag:
+        if (bundle / f"ling-{target}.sha256sums").is_file():
             return bundle
         bundle.mkdir(parents=True, exist_ok=True)
         command = [
             "gh",
             "release",
             "download",
-            *([tag] if tag else []),
+            tag,
             "-R",
             RELEASE_REPO,
             "-D",
@@ -205,8 +208,27 @@ class FleetBundle:
         if result.returncode != 0:
             print(f"❌ Could not download the release: {result.stderr.strip()[-300:]}")
             return None
-        (bundle / "VERSION").write_text(f"{tag or 'latest'}\n")
+        (bundle / "VERSION").write_text(f"{tag}\n")
         return bundle
+
+    @classmethod
+    def latest_tag(cls) -> Optional[str]:
+        """
+        Returns:
+            Optional[str]: The latest release's tag, or None. A bundle records the tag, never
+            "latest": a node installed from one release must not look current against the next.
+        """
+        result = subprocess.run(
+            ["gh", "release", "view", "-R", RELEASE_REPO, "--json", "tagName", "-q", ".tagName"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        tag = result.stdout.strip()
+        if result.returncode != 0 or not re.fullmatch(r"v[0-9][0-9A-Za-z.+-]*", tag):
+            print(f"❌ Could not find the latest release: {result.stderr.strip()[-300:] or tag}")
+            return None
+        return tag
 
     @classmethod
     def expected_version(cls, source: str = SOURCE_THIS) -> str | None:

@@ -914,6 +914,8 @@ def test_bundle_from_release_downloads_with_gh_and_caches_tagged_release(
         gh_calls.append(argv)
         if len(gh_calls) == 1:
             return subprocess.CompletedProcess(argv, 1, "", "release not found")
+        if argv[:3] == ["gh", "release", "view"]:
+            return subprocess.CompletedProcess(argv, 0, "v1.8.0\n", "")
         dest = Path(argv[argv.index("-D") + 1])
         (dest / f"ling-{FleetBundle.target()}.sha256sums").write_text("ok\n", encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, "", "")
@@ -928,9 +930,11 @@ def test_bundle_from_release_downloads_with_gh_and_caches_tagged_release(
     assert FleetBundle.build("release=v1.7.0") == tagged
     assert len(gh_calls) == 2
 
+    # The latest release is recorded by its tag: a node installed from it is updated by the next.
     latest = FleetBundle.build("release")
-    assert latest is not None and FleetBundle.version(latest) == "latest"
-    assert len(gh_calls) == 3
+    assert latest is not None and FleetBundle.version(latest) == "v1.8.0"
+    assert [call[:3] for call in gh_calls[2:]] == [["gh", "release", "view"], ["gh", "release", "download"]]
+    assert "v1.8.0" in gh_calls[3]
 
 
 def test_bundle_rejects_empty_release_version_and_passes_valid_version(
