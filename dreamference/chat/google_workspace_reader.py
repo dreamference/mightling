@@ -30,6 +30,7 @@ CALENDAR_API: Final[str] = "https://www.googleapis.com/calendar/v3"
 # The same caps as Gmail's: enough for the model to choose from, and a body it can read whole.
 MAX_RESULTS: Final[int] = 20
 MAX_EVENTS: Final[int] = 50
+MAX_WINDOW_DAYS: Final[int] = 366
 MAX_TEXT_CHARACTERS: Final[int] = 20_000
 
 # A plain-text file is downloaded whole only below this; Google refuses exports over 10 MB anyway.
@@ -316,6 +317,23 @@ class GoogleWorkspaceReader:
         return moment.astimezone(datetime.UTC)
 
     @classmethod
+    def _too_long(cls, start: str, end: str) -> bool:
+        """Whether a calendar window spans more than `MAX_WINDOW_DAYS`.
+
+        Args:
+            start (str): RFC 3339 lower bound.
+            end (str): RFC 3339 upper bound.
+
+        Returns:
+            bool: True only when both times parse and lie too far apart; Google answers the rest.
+        """
+        try:
+            span = datetime.datetime.fromisoformat(end) - datetime.datetime.fromisoformat(start)
+        except (TypeError, ValueError):
+            return False
+        return span > datetime.timedelta(days=MAX_WINDOW_DAYS)
+
+    @classmethod
     def calendar_events(
         cls,
         accounts: list[Account],
@@ -341,9 +359,11 @@ class GoogleWorkspaceReader:
             Dict[str, Any]: `events`, earliest first, plus `errors` for calendars that failed.
         """
         holders = cls.holding(accounts, CALENDAR_SCOPE)
-        if not holders:
+        if not holders or cls._too_long(start, end):
             return {
-                "error": "No connected account has Google Calendar access. Connect it with /apps."
+                "error": f"from and to may be at most {MAX_WINDOW_DAYS} days apart."
+                if holders
+                else "No connected account has Google Calendar access. Connect it with /apps."
             }
         limit = max(1, min(limit, MAX_EVENTS))
         params = {

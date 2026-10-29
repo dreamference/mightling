@@ -530,3 +530,17 @@ def test_the_shared_secret_is_created_once_and_kept_private(monkeypatch, tmp_pat
     path = folder / "service-secret"
     assert path.read_text() == first
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_calendar_window_over_366_days_is_refused(google):
+    # §9a caps the window at 366 days; a leap year from one day to the same day still fits.
+    fake = google({"/calendar/v3/calendars/primary/events": {"items": []}})
+    too_long = GoogleWorkspaceReader.calendar_events(
+        ACCOUNTS, "2026-01-01T00:00:00Z", "2027-01-03T00:00:00Z", calendar="primary"
+    )
+    assert "366 days" in too_long["error"]
+    assert not fake.requests
+    a_year = GoogleWorkspaceReader.calendar_events(
+        ACCOUNTS, "2027-03-01T00:00:00Z", "2028-03-01T00:00:00Z", calendar="primary"
+    )
+    assert a_year == {"events": []}
