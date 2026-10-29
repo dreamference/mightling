@@ -416,6 +416,31 @@ def test_a_line_shaped_like_a_file_header_does_not_end_the_scan(hooked_repositor
     assert refused.returncode != 0 and "anonymity check" in refused.stderr
 
 
+@pytest.mark.parametrize("parents", [2, 3])
+def test_lines_a_merge_adds_itself_are_checked(hooked_repository, parents):
+    # `git log -p` shows no patch for a merge: a line its resolution added went unread.
+    bare, work, _ = hooked_repository
+    commit(work, "a.txt", "one\n")
+    assert push(work, bare).returncode == 0
+    known = subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    sides = [f"side{n}" for n in range(1, parents)]
+    for side in sides:
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", side, known], check=True)
+        commit(work, f"{side}.txt", "side\n")
+    subprocess.run(["git", "-C", str(work), "checkout", "-q", "main"], check=True)
+    subprocess.run(
+        ["git", "-C", str(work), "merge", "-q", "--no-ff", "--no-commit", *sides], check=True
+    )
+    (work / "a.txt").write_text(f"one\n+ reach {LAN}.7.105\n")
+    subprocess.run(["git", "-C", str(work), "commit", "-qam", "merge"], check=True)
+    added = ForgeAnonymity.added_text(work, ["HEAD"], [known], ["tests/test_anonymity.py"])
+    assert f"a.txt: {'+' * (parents - 1)}+ reach {LAN}.7.105" in added
+    refused = push(work, bare)
+    assert refused.returncode != 0 and "anonymity check" in refused.stderr
+
+
 # -- storage ---------------------------------------------------------------------------------------
 
 
