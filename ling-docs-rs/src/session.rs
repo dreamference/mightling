@@ -74,7 +74,7 @@ pub fn run(parent: Option<i32>) -> Result<()> {
     }
     DocsToml::update(|docs| Ok(docs.ensure_defaults(&config::user_home())))?;
     let exe = std::env::current_exe()?;
-    let interval = Duration::from_secs(settings.scan_interval_min * 60);
+    let interval = settings.scan_interval();
     let mut pending = vec![Request::All];
     let mut last_scan = Instant::now();
     let mut child: Option<Child> = None;

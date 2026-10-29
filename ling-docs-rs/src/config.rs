@@ -260,6 +260,11 @@ pub fn config_file() -> Option<PathBuf> {
 }
 
 impl Settings {
+    /// The wait between two change scans.
+    pub fn scan_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.scan_interval_min.saturating_mul(60))
+    }
+
     pub fn load() -> Settings {
         let table = config_file()
             .and_then(|p| std::fs::read_to_string(p).ok())
@@ -442,6 +447,19 @@ mod tests {
         let s = Settings::from_sources(&table, &env);
         assert!(s.enabled);
         assert_eq!(s.bm25_weight, 0.25);
+    }
+
+    #[test]
+    fn a_scan_interval_too_long_to_count_in_seconds_is_the_longest_wait() {
+        let s = Settings {
+            scan_interval_min: u64::MAX / 2,
+            ..Settings::default()
+        };
+        assert_eq!(s.scan_interval(), std::time::Duration::from_secs(u64::MAX));
+        assert_eq!(
+            Settings::default().scan_interval(),
+            std::time::Duration::from_secs(600)
+        );
     }
 
     #[test]
