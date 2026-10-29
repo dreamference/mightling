@@ -264,8 +264,10 @@ class ModelDownloader:
                     container_tfile = f"/root/.cache/dreamference/{tdir_rel}/{staging.name}"
 
                     from dreamference.vllm_server.vllm_server_manager import VLLMServerManager, DEFAULT_VLLM_IMAGE
-                    if VLLMServerManager().ensure_docker_image(DEFAULT_VLLM_IMAGE):
-                        print(f"   Using {DEFAULT_VLLM_IMAGE} Docker container for model weight serialization...")
+                    # ensure_docker_image pulls the image; when it could not, the next attempt runs.
+                    if not VLLMServerManager().ensure_docker_image(DEFAULT_VLLM_IMAGE):
+                        raise RuntimeError(f"{DEFAULT_VLLM_IMAGE} is not available")
+                    print(f"   Using {DEFAULT_VLLM_IMAGE} Docker container for model weight serialization...")
                         
                     total_cpus = os.cpu_count() or 1
                     cpus_limit = max(1.0, total_cpus * 0.7)
