@@ -1,5 +1,5 @@
 // A thread exported to a file (the owner's decision 6): messages and changed files, redacted by default.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_EXPORT, exportName, redact, threadHtml, threadMarkdown, type ExportSource } from "./exportthread";
 
@@ -57,5 +57,19 @@ describe("a redacted export's edges", () => {
     expect(threadHtml(titled, DEFAULT_EXPORT)).not.toContain("/home/user/src");
     expect(redact("/home/user/src/fetcher-old/x and /home/user/src/fetcher/run.py", DEFAULT_EXPORT, { cwd: "/home/user/src/fetcher", home: null }))
       .toBe("…/x and ./run.py");
+  });
+});
+
+describe("an export's date", () => {
+  it("is the day where the user is, not the UTC one", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-01T04:30:00Z"));
+    try {
+      expect(threadMarkdown(source, DEFAULT_EXPORT)).toContain("Exported from Mightling on 2026-02-28.");
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
   });
 });

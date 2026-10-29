@@ -76,10 +76,13 @@ function itemMarkdown(item: ThreadItem, options: ExportOptions): string | null {
   }
 }
 
+/** Today's date where the user is (`toISOString` would give the UTC one). */
+const localDay = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
 /** The thread as Markdown, redacted as the options say. */
 export function threadMarkdown(source: ExportSource, options: ExportOptions): string {
   const body = source.turns.flatMap((turn) => turn.items.map((item) => itemMarkdown(item, options)).filter((part): part is string => Boolean(part)));
-  const text = [`# ${source.title}`, `_Exported from Mightling on ${new Date().toISOString().slice(0, 10)}._`, ...body].join("\n\n") + "\n";
+  const text = [`# ${source.title}`, `_Exported from Mightling on ${localDay(new Date())}._`, ...body].join("\n\n") + "\n";
   return redact(text, options, { cwd: source.cwd, home: source.home });
 }
 
