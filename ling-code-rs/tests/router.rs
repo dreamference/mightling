@@ -961,3 +961,19 @@ fn layers_exact_answers_from_scip_alone() {
     );
     assert!(!out.contains("layers = exact"), "{out}");
 }
+
+#[test]
+fn version_prints_its_own_version_and_each_pinned_tool() {
+    let f = fixture();
+    let (code, out) = f.run(&["--version"]);
+    assert_eq!(code, 0, "{out}");
+    let mut lines = out.lines();
+    assert_eq!(
+        lines.next(),
+        Some(format!("ling-code {}", env!("CARGO_PKG_VERSION")).as_str())
+    );
+    for (tool, version) in ling_code::PINNED_TOOLS {
+        assert_eq!(lines.next(), Some(format!("  {tool} {version}").as_str()));
+    }
+    assert_eq!(lines.next(), None, "{out}");
+}
