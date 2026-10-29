@@ -101,8 +101,15 @@ APP_DIR="${MIGHTLING_APP_DIR:-}"
 say()  { printf '%s\n' "$*" 2>/dev/null || true; }
 fail() { printf '❌ %s\n' "$*" >&2 2>/dev/null || true; exit 1; }
 
-# The comment block at the top, without its `# `.
-usage() { awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; }
+# The comment block at the top, without its `# `. Read from standard input (`curl … | bash -s --
+# --help`) the script is no file, so there is no header to read: it says where to find one.
+usage() {
+    if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+        awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}"
+    else
+        say "The help is the comment at the top of install.sh: download it (curl -fsSLO <the URL you piped>), then: bash install.sh --help"
+    fi
+}
 
 # What the summary lists: `step done|failed|off|available <text>`. A step is done or failed; `off`
 # is only ever an opt-out given on the command line, `available` only the system updates.
