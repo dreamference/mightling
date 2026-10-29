@@ -55,8 +55,11 @@ export function languageOf(path: string): string | null {
 
 /** The folder a path is in ("/" for a top-level one). */
 export function parentOf(path: string): string {
-  const cut = path.replace(/[\\/]+$/, "").lastIndexOf("/");
-  return cut <= 0 ? "/" : path.slice(0, cut);
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  if (cut <= 0) return "/";
+  // `C:\a.md` is in `C:\`, not in `C:` (the current folder on that drive).
+  return /^[A-Za-z]:$/.test(trimmed.slice(0, cut)) ? trimmed.slice(0, cut + 1) : trimmed.slice(0, cut);
 }
 
 /** `child` under the folder `dir`, absolute as the server wants it. */
@@ -73,7 +76,7 @@ export function resolvedPath(dir: string | null | undefined, path: string): stri
 export function relativeTo(root: string | null, path: string): string {
   if (!root) return path;
   const base = root.replace(/[\\/]+$/, "");
-  return path.startsWith(`${base}/`) ? path.slice(base.length + 1) : path;
+  return path.startsWith(`${base}/`) || path.startsWith(`${base}\\`) ? path.slice(base.length + 1) : path;
 }
 
 /** Names the tree leaves out: the repository's own database, which nobody reads by hand. */

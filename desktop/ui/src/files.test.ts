@@ -104,3 +104,12 @@ describe("a folder the tree cannot read", () => {
     expect(folderError("No such file or directory (os error 2)")).toBe("No such file or directory (os error 2)");
   });
 });
+
+describe("a Windows path in the file helpers", () => {
+  it("has its folder and its place under a root, as a POSIX one does", () => {
+    expect(parentOf("C:\\docs\\a.md")).toBe("C:\\docs");
+    expect(parentOf("/srv/a.md")).toBe("/srv");
+    expect(relativeTo("C:\\proj", "C:\\proj\\src\\a.ts")).toBe("src\\a.ts");
+    expect(relativeTo("/proj/", "/proj/src/a.ts")).toBe("src/a.ts");
+  });
+});
