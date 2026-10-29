@@ -981,3 +981,21 @@ def test_a_moved_forge_keeps_the_denylist(tmp_path, repositories):
     (folder / "secrets.json").write_text(json.dumps({"anonymity-denylist": "node-q\n"}))
     ForgeBackup.restore_secrets(folder)
     assert ForgeAnonymity.read_denylist() == "node-q\n"
+
+
+@pytest.mark.parametrize("flip", [False, True])
+def test_the_records_address_does_not_depend_on_the_order_avahi_lists_it_in(monkeypatch, flip):
+    from dreamference.node.node_browser import NodeBrowser
+
+    ForgeSettings.update_state(role="mirror", record_node="rec-1")
+    seen = [
+        {"node": "rec-1", "address": "fe80::1%eth0"},
+        {"node": "rec-1", "address": f"{LAN}.50.12"},
+        {"node": "rec-1", "address": f"{LAN}.50.11"},
+    ]
+    entries = seen[::-1] if flip else seen
+    monkeypatch.setattr(
+        NodeBrowser, "browse_service", classmethod(lambda cls, kind, timeout=6: entries)
+    )
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    assert ForgeService.record_address() == f"{LAN}.50.11", "else the tick restarts the mirror"

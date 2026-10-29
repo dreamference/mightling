@@ -53,6 +53,8 @@ TIMERS: Final[tuple] = (
 GIB_IN_GB: Final[float] = 1024**3 / 1000**3
 # The forge of record hands the mirror plan to its paired nodes at most this often.
 MIRROR_SYNC_INTERVAL_S: Final[int] = 3600
+# An IPv6 address has it and an IPv4 one has not.
+IPV6_SEPARATOR: Final[str] = ":"
 
 
 class ForgeService:
@@ -219,10 +221,14 @@ class ForgeService:
         wanted = ForgeSettings.state().get("record_node")
         if not wanted:
             return None
-        for entry in NodeBrowser.browse_service(SERVICE_TYPE) + NodeBrowser.browse():
-            if entry.get("node") == wanted and entry.get("address"):
-                return entry["address"].split("%")[0]
-        return None
+        found = {
+            entry["address"].split("%")[0]
+            for entry in NodeBrowser.browse_service(SERVICE_TYPE) + NodeBrowser.browse()
+            if entry.get("node") == wanted and entry.get("address")
+        }
+        # The same pick whatever order avahi lists them in (IPv4 first): the tick restarts a
+        # mirror whose record address differs from the one it started with.
+        return min(found, key=lambda address: (IPV6_SEPARATOR in address, address), default=None)
 
     @classmethod
     def run_arguments(cls) -> list[str]:
