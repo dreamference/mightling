@@ -1524,7 +1524,7 @@ pub fn with_local_model_args(args: Vec<OsString>, model_id: &str) -> Vec<OsStrin
         let provider = local_provider.unwrap_or(PROVIDER);
         injected.extend(["-c".into(), format!("model_provider=\"{provider}\"").into()]);
     }
-    if !has(&["--model", "-m"]) {
+    if !has(&["--model", "-m"]) && option_values(&user_args, &["-m"]).next().is_none() {
         injected.extend(["--model".into(), model_id.into()]);
     }
     let mut args = args.into_iter();
@@ -1721,9 +1721,11 @@ mod tests {
 
     #[test]
     fn a_model_the_user_names_is_left_alone() {
-        let args: Vec<OsString> = ["ling", "-m", "other"].iter().map(OsString::from).collect();
-        let out = with_local_model_args(args, "Intel/Qwen");
-        assert!(!out.iter().any(|arg| arg == "Intel/Qwen"));
+        // `-mother` too: clap reads it as `-m other`, and a second `--model` makes it refuse to start.
+        for given in [&["-m", "other"][..], &["--model", "other"], &["--model=other"], &["-mother"]] {
+            let out = prepared(&[&["ling"][..], given].concat());
+            assert!(!out.iter().any(|arg| arg == "Intel/Qwen"), "{given:?}: {out:?}");
+        }
     }
 
     #[test]
