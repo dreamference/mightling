@@ -101,8 +101,9 @@ class SQLiteContextStorage:
                     cursor.execute("SELECT rel_path, rank FROM fts_context WHERE fts_context MATCH ? ORDER BY rank LIMIT ?", (clean_query, top_k * 2))
                     for row in cursor.fetchall():
                         r_path, rank = row[0], abs(row[1])
-                        # Invert rank score so higher values indicate better relevance
-                        file_scores[r_path] = file_scores.get(r_path, 0.0) + (1.0 / (rank + 1.0)) * 2.0
+                        # FTS5's rank is bm25 negated, so its magnitude already grows with relevance;
+                        # mapped into [0, 2). (It was inverted, which scored the strongest match lowest.)
+                        file_scores[r_path] = file_scores.get(r_path, 0.0) + (rank / (rank + 1.0)) * 2.0
                 conn.close()
             except Exception:
                 pass

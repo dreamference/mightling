@@ -162,3 +162,20 @@ def test_a_workspace_inside_a_directory_named_like_build_output_is_indexed(tmp_p
     engine.index_workspace(force_reindex=True)
     assert set(engine.indexed_files) == {"lib.py"}
 
+
+def test_the_full_text_score_is_highest_for_the_strongest_match(tmp_path):
+    # FTS5's rank is bm25 negated: the best match is the most negative. Its magnitude was then
+    # inverted a second time, so the strongest match scored lowest.
+    from dreamference.context_engine.sqlite_context_storage import SQLiteContextStorage
+
+    storage = SQLiteContextStorage(tmp_path / "context.db")
+    conn = storage.init_db()
+    with conn:
+        conn.execute("INSERT INTO fts_context VALUES (?, ?);", ("strong.py", "alpha alpha alpha alpha alpha beta"))
+        conn.execute("INSERT INTO fts_context VALUES (?, ?);",
+                     ("weak.py", "alpha gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi"))
+        for i in range(8):
+            conn.execute("INSERT INTO fts_context VALUES (?, ?);", (f"other{i}.py", "nothing here at all"))
+    conn.close()
+    scores = storage.search_fts(["alpha"], top_k=5)
+    assert scores["strong.py"] > scores["weak.py"] > 0
