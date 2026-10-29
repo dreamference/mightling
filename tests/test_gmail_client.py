@@ -578,3 +578,30 @@ def test_workspace_dispatch_covers_drive_and_calendar_routes(monkeypatch):
         "event": "ev-9",
     }
     assert GmailSearchService.workspace("/unknown", {}) == {"error": "not found"}
+
+
+def test_search_across_accounts_returns_the_newest_messages_of_all_of_them(monkeypatch):
+    # Each account gives its newest `limit`; cutting the concatenation at `limit` kept only the
+    # first account's, however old, and dropped the other's newer mail.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    class Conn:
+        def logout(self):
+            pass
+
+    dates = {
+        "old@example.com": ["Mon, 01 Jun 2026 10:00:00 +0000", "Sun, 31 May 2026 10:00:00 +0000"],
+        "new@example.com": ["Wed, 28 Oct 2026 10:00:00 +0000", "Tue, 27 Oct 2026 10:00:00 +0000"],
+    }
+    connections = {address: Conn() for address in dates}
+
+    def headers(cls, conn, uids):
+        address = next(name for name, open_conn in connections.items() if open_conn is conn)
+        return [{"id": str(n), "from": "x", "subject": "s", "date": d} for n, d in enumerate(dates[address])]
+
+    monkeypatch.setattr(GmailSearchService, "_open_mailboxes", classmethod(lambda cls: (dict(connections), None, [])))
+    monkeypatch.setattr(GmailSearchService, "_search_uids", classmethod(lambda cls, conn, query: [b"1", b"2"]))
+    monkeypatch.setattr(GmailSearchService, "_fetch_headers", classmethod(headers))
+    found = GmailSearchService.search("invoice", 2)["messages"]
+    assert [m["date"] for m in found] == dates["new@example.com"]
+    assert all(m["id"].startswith("new@example.com|") for m in found)

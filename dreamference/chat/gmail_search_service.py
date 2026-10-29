@@ -45,6 +45,7 @@ mail.
 """
 
 import base64
+import datetime
 import email
 import email.header
 import email.utils
@@ -815,11 +816,33 @@ class GmailSearchService:
                     connection.logout()
                 except Exception:
                     pass
-        
+
+        if len(connections) > 1:
+            # Each account gave its own newest; across accounts only the Date header orders them.
+            all_messages.sort(key=cls._sent_at, reverse=True)
         answer: Dict[str, Any] = {"messages": all_messages[:limit]}
         if failures:
             answer["errors"] = failures
         return answer
+
+    @classmethod
+    def _sent_at(cls, message: dict[str, str]) -> float:
+        """Reads when a result was sent, for ordering results from several accounts.
+
+        Args:
+            message (dict[str, str]): One summary from `_fetch_headers`.
+
+        Returns:
+            float: Seconds since the epoch; 0 for a missing or unreadable Date, which sorts last.
+        """
+        try:
+            sent = email.utils.parsedate_to_datetime(message.get("date", ""))
+        except (TypeError, ValueError, IndexError):
+            return 0.0
+        if sent.tzinfo is None:
+            # `-0000` means "zone unknown"; UTC is the closest reading.
+            sent = sent.replace(tzinfo=datetime.UTC)
+        return sent.timestamp()
 
     @classmethod
     def _fetch_headers(cls, connection: imaplib.IMAP4_SSL, uids: List[bytes]) -> List[Dict[str, str]]:
