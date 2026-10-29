@@ -58,6 +58,10 @@ describe("several repositories", () => {
     expect(repoOf("notes.md", cwd, repos)).toBeNull();
     expect(repoOf("/home/u/src/shop/web/app.ts", null, repos)).toBe(repos[1]);
     expect(repoOf("web2/app.ts", cwd, repos)).toBeNull();
+    // A path out of the thread's folder, and a Windows share's.
+    expect(repoOf("../web/app.ts", "/srv/shop/api", ["/srv/shop/web"])).toBe("/srv/shop/web");
+    expect(repoOf("./app.ts", "/srv/shop/web", ["/srv/shop/web"])).toBe("/srv/shop/web");
+    expect(repoOf("\\\\nas\\src\\web\\app.ts", "C:\\work", ["\\\\nas\\src\\web"])).toBe("\\\\nas\\src\\web");
     expect(repoOf("app.ts", null, repos)).toBeNull();
   });
 

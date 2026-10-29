@@ -14,6 +14,17 @@ export interface Lines {
 
 const slashes = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "");
 
+/** A `/` path with its `.` and `..` steps taken (`/w/api/../web` is `/w/web`); never above its root. */
+function withoutDots(path: string): string {
+  const parts: string[] = [];
+  for (const part of path.split("/")) {
+    if (part === ".") continue;
+    if (part !== "..") parts.push(part);
+    else if (parts.length > 1 && parts[parts.length - 1] !== "") parts.pop();
+  }
+  return parts.join("/");
+}
+
 /** A repository's name as the selector shows it: its folder's. */
 export function repoName(repo: string): string {
   return repo.split(/[\\/]/).filter(Boolean).pop() ?? repo;
@@ -35,8 +46,9 @@ export function turnBase(cwd: string | null, repos: string[], root: string | nul
 
 /** The repository of `repos` (absolute top levels) a turn's file is in, the innermost one; null for none. */
 export function repoOf(file: string, cwd: string | null, repos: string[]): string | null {
-  const absolute = file.startsWith("/") || /^[A-Za-z]:[\\/]/.test(file) ? slashes(file) : cwd ? `${slashes(cwd)}/${slashes(file)}` : null;
-  if (!absolute) return null;
+  const joined = /^([\\/]|[A-Za-z]:[\\/])/.test(file) ? slashes(file) : cwd ? `${slashes(cwd)}/${slashes(file)}` : null;
+  if (!joined) return null;
+  const absolute = withoutDots(joined);
   let best: string | null = null;
   for (const repo of repos) {
     const top = slashes(repo);
