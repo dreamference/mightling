@@ -221,6 +221,12 @@ class NodeModelSync:
             return 2
         hub = cls.hub()
         hub.mkdir(parents=True, exist_ok=True)
+        # A receiver killed with its ssh session never reached its `finally`: its staging, up to a
+        # whole model, would stay in the hub for good.
+        for stale in hub.glob(".mightling-sync-*"):
+            pid = stale.name.rpartition("-")[2]
+            if pid.isdigit() and not cls._running(int(pid)):
+                shutil.rmtree(stale, ignore_errors=True)
         free = shutil.disk_usage(hub).free
         if free < size + DISK_MARGIN:
             print(f"❌ This node has {free / GIB:.0f} GiB free; the copy needs {(size + DISK_MARGIN) / GIB:.0f} "
@@ -241,6 +247,17 @@ class NodeModelSync:
             shutil.rmtree(staging, ignore_errors=True)
         print(json.dumps({"model": model_key, "added": added, "already_here": kept}))
         return 0
+
+    @classmethod
+    def _running(cls, pid: int) -> bool:
+        """Whether a process with this pid exists (one of another user counts)."""
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True
+        return True
 
     @classmethod
     def _unpack(cls, stream: Any, staging: Path, allowed: set, size: int) -> str | None:

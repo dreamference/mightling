@@ -2535,8 +2535,20 @@ def test_the_receiving_node_decides_what_lands_in_its_cache(tmp_path, monkeypatc
     assert (
         receive(monkeypatch, hub, [(f"{folder}/blobs/{digest}", good)], size=10**18) == 2
     )  # no room
+    # A receiver that was killed (its ssh dropped) left its staging behind: the next one removes
+    # it, and leaves a staging whose receiver still runs.
+    import subprocess
+
+    ended = subprocess.Popen(["true"])
+    ended.wait()
+    for pid in (ended.pid, os.getppid()):
+        (hub / f".mightling-sync-{pid}").mkdir(parents=True)
+        (hub / f".mightling-sync-{pid}" / "part").write_bytes(b"x")
     assert receive(monkeypatch, hub, [(f"{folder}/blobs/{digest}", good)]) == 0
     assert (hub / folder / "blobs" / digest).read_bytes() == good
+    assert [path.name for path in hub.glob(".mightling-sync-*")] == [f".mightling-sync-{os.getppid()}"]
+    (hub / f".mightling-sync-{os.getppid()}" / "part").unlink()
+    (hub / f".mightling-sync-{os.getppid()}").rmdir()
     # A second copy keeps what is there.
     assert receive(monkeypatch, hub, [(f"{folder}/blobs/{digest}", good)]) == 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["already_here"] == 1
