@@ -315,6 +315,14 @@ impl Daemon {
         let Ok(on) = agent::airgap_level(self.config.port, &self.cookie).await else { return };
         let actions = self.bridge.on_airgap(on, now_ms());
         self.carry_out(actions).await;
+        // A turn's thread put at `on` while it runs (§11): only a plain `on` stops it, as a missed
+        // poll does not; the next message to the thread asks again and fails closed.
+        if let Some(thread) = self.bridge.running_thread().map(str::to_string)
+            && agent::thread_airgap(self.config.port, &self.cookie, &thread).await == Ok(true)
+        {
+            let actions = self.bridge.on_agent(AgentEvent::ThreadSealed { thread, known: true }, now_ms());
+            self.carry_out(actions).await;
+        }
         if !self.airgap_known {
             self.airgap_known = true;
             for params in std::mem::take(&mut self.held) {
@@ -576,8 +584,25 @@ impl Daemon {
         }
     }
 
+    /// Carries out the bridge's actions. One that reaches a thread goes only if `ling web` says,
+    /// just before, that the thread is not air-gapped (§11): its level may have changed since
+    /// `/use`, and no answer counts as `on`. The rest of the batch for a sealed thread is skipped.
     async fn carry_out(&mut self, actions: Vec<Action>) {
+        let mut sealed: Option<String> = None;
         for action in actions {
+            if let Some(thread) = action.relays_to() {
+                if sealed.as_deref() == Some(thread) {
+                    continue;
+                }
+                let level = agent::thread_airgap(self.config.port, &self.cookie, thread).await;
+                if level != Ok(false) {
+                    let thread = thread.to_string();
+                    sealed = Some(thread.clone());
+                    let actions = self.bridge.on_agent(AgentEvent::ThreadSealed { thread, known: level.is_ok() }, now_ms());
+                    Box::pin(self.carry_out(actions)).await;
+                    continue;
+                }
+            }
             self.carry_out_one(action).await;
         }
     }
@@ -703,6 +728,11 @@ impl Daemon {
                 }
             }
             Action::Save => self.save_conversation(),
+            Action::CheckUse { thread, title } => {
+                let on = agent::thread_airgap(self.config.port, &self.cookie, &thread).await.ok();
+                let actions = self.bridge.on_agent(AgentEvent::UseChecked { thread, title, on }, now_ms());
+                Box::pin(self.carry_out(actions)).await;
+            }
         }
     }
 

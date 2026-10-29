@@ -157,6 +157,12 @@ pub enum AgentEvent {
     /// A tool call started (a command's text with it) or ended, for the answer's bounds (§19.3).
     ToolStarted { thread: String, item: String, command: Option<String> },
     ToolCompleted { thread: String, item: String },
+    /// The air-gap level of the thread `/use` asked for (§11): `Some(true)` at `on`, `None` when
+    /// `ling web` did not answer it.
+    UseChecked { thread: String, title: String, on: Option<bool> },
+    /// The thread an action was about to reach is at `/airgapped on` (`known`), or its level could
+    /// not be read: the action was not carried out (§11).
+    ThreadSealed { thread: String, known: bool },
 }
 
 /// One attachment after the driver handed it to `ling web` (or failed to).
@@ -287,6 +293,26 @@ pub enum Action {
     Save,
     /// The status line (linked mode only, §19.8).
     Status(StatusLine),
+    /// `/use`: ask `ling web` the thread's air-gap level and report [`AgentEvent::UseChecked`] (§11).
+    CheckUse { thread: String, title: String },
+}
+
+impl Action {
+    /// The thread this action sends something to or reads something from, for the driver's air-gap
+    /// check before it (§11): a thread at `/airgapped on` is not used from the phone, and its level
+    /// may change after `/use`. `Interrupt` and approvals' answers only stop work and need none.
+    pub fn relays_to(&self) -> Option<&str> {
+        match self {
+            Action::ResumeThread(thread)
+            | Action::StartTurn { thread, .. }
+            | Action::AddToTurn { thread, .. }
+            | Action::Steer { thread, .. }
+            | Action::Upload { thread, .. }
+            | Action::SendFile { thread, .. }
+            | Action::FindFiles { thread, .. } => Some(thread),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -468,6 +494,14 @@ impl Bridge {
         self.airgapped_since.is_some()
     }
 
+    /// The thread a turn is running in, for the driver's poll of its air-gap level (§11).
+    pub fn running_thread(&self) -> Option<&str> {
+        match &self.phase {
+            Phase::Running { thread, stopping: false, .. } => Some(thread),
+            _ => None,
+        }
+    }
+
     fn approval_pending(&self) -> bool {
         !self.approvals.is_empty()
     }
@@ -517,13 +551,9 @@ impl Bridge {
             }
             Input::Status => actions.push(Action::Notice(self.status(now))),
             Input::Threads => actions.push(Action::Notice(self.threads_text())),
+            // Switched to only once `ling web` says the thread is not air-gapped (§11).
             Input::Use(n) => match self.recent.get(n - 1).cloned() {
-                Some(thread) => {
-                    self.current = Some(thread.id.clone());
-                    self.last_activity_ms = Some(now);
-                    actions.push(Action::Notice(format!("Continuing: {}", thread.title)));
-                    actions.push(Action::Save);
-                }
+                Some(thread) => actions.push(Action::CheckUse { thread: thread.id, title: thread.title }),
                 None => actions.push(Action::Notice(format!("There is no thread {n}. /threads lists them."))),
             },
             Input::Help => actions.push(Action::Notice(command::HELP.to_string())),
@@ -731,6 +761,44 @@ impl Bridge {
         actions
     }
 
+    /// The thread an action was about to reach is air-gapped, or its level unknown (§11): the work
+    /// in hand on it stops, unanswered and unrelayed, and what waited for it is dropped. A thread
+    /// known to be at `on` is left, so the next question starts a new one; one whose level could
+    /// not be read stays current, to be asked again with the next message.
+    fn sealed(&mut self, thread: String, known: bool) -> Vec<Action> {
+        let mut actions = Vec::new();
+        let ours = match &self.phase {
+            Phase::Opening { fresh: false, .. } => self.current.as_deref() == Some(thread.as_str()),
+            Phase::Running { thread: running, .. } => *running == thread,
+            _ => false,
+        };
+        if ours {
+            if let Phase::Running { turn: Some(turn), stopping: false, .. } = &self.phase {
+                actions.push(Action::Interrupt { thread: thread.clone(), turn: turn.clone() });
+            }
+            self.phase = Phase::Idle;
+            self.queue.clear();
+            while let Some(approval) = self.approvals.pop_front() {
+                if approval.local.is_none() {
+                    actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "cancel" }) });
+                }
+            }
+            actions.push(Action::Typing(false));
+            self.close_status(&mut actions);
+        }
+        if known {
+            self.loaded.remove(&thread);
+            if self.current.as_deref() == Some(thread.as_str()) {
+                self.current = None;
+                actions.push(Action::Save);
+            }
+            actions.push(Action::Notice("This thread is air-gapped (/airgapped on in Mightling), so it isn't used from the phone; nothing was sent. Your next message starts a new thread.".to_string()));
+        } else {
+            actions.push(Action::Notice("Mightling's web server did not say whether this thread is air-gapped, so nothing was sent. Try again in a moment.".to_string()));
+        }
+        actions
+    }
+
     fn show_next_approval(&mut self, actions: &mut Vec<Action>) {
         if let Some(next) = self.approvals.front_mut()
             && !next.shown
@@ -899,6 +967,17 @@ impl Bridge {
                     actions.extend(self.next(now));
                 }
             }
+            AgentEvent::UseChecked { thread, title, on } => match on {
+                Some(false) => {
+                    self.current = Some(thread);
+                    self.last_activity_ms = Some(now);
+                    actions.push(Action::Notice(format!("Continuing: {title}")));
+                    actions.push(Action::Save);
+                }
+                Some(true) => actions.push(Action::Notice(format!("Not switched: “{title}” is air-gapped (/airgapped on in Mightling), so it isn't used from the phone."))),
+                None => actions.push(Action::Notice("Not switched: Mightling's web server did not say whether that thread is air-gapped. Try again in a moment.".to_string())),
+            },
+            AgentEvent::ThreadSealed { thread, known } => actions.extend(self.sealed(thread, known)),
             AgentEvent::NightRepos { task, repos } => {
                 if repos.is_empty() {
                     actions.push(Action::Notice(NO_NIGHT_REPOS.to_string()));
@@ -1362,9 +1441,92 @@ mod tests {
         let list = notices(&b.on_message(msg("/threads", 4), 0)).remove(0);
         assert!(list.contains("1. second ←") && list.contains("2. first question"), "{list}");
         let using = b.on_message(msg("/use 2", 5), 0);
-        assert_eq!(notices(&using), vec!["Continuing: first question"]);
+        assert!(using.contains(&Action::CheckUse { thread: "t1".to_string(), title: "first question".to_string() }), "{using:?}");
+        let used = b.on_agent(AgentEvent::UseChecked { thread: "t1".to_string(), title: "first question".to_string(), on: Some(false) }, 0);
+        assert_eq!(notices(&used), vec!["Continuing: first question"]);
+        assert!(used.contains(&Action::Save));
         assert_eq!(b.current.as_deref(), Some("t1"));
         assert_eq!(notices(&b.on_message(msg("/use 9", 6), 0)), vec!["There is no thread 9. /threads lists them."]);
+    }
+
+    /// §11: a thread at `/airgapped on` is not used from the phone; `/use` asks its level first and
+    /// switches only on a plain `off`, an unanswered question counting as `on`.
+    #[test]
+    fn use_refuses_a_thread_at_airgapped_on_and_one_whose_level_is_unknown() {
+        let mut b = connected();
+        answered(&mut b, "first question", "a", 1);
+        b.on_message(msg("/new", 2), 0);
+        b.on_message(msg("second", 3), 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t2".to_string() }, 0);
+        b.on_agent(AgentEvent::TurnCompleted { thread: "t2".to_string(), error: None }, 0);
+        let using = b.on_message(msg("/use 2", 5), 0);
+        assert!(notices(&using).is_empty(), "nothing is said before the level is known: {using:?}");
+        assert_eq!(b.current.as_deref(), Some("t2"));
+        let sealed = b.on_agent(AgentEvent::UseChecked { thread: "t1".to_string(), title: "first question".to_string(), on: Some(true) }, 0);
+        let said = notices(&sealed);
+        assert!(said.len() == 1 && said[0].contains("air-gapped") && said[0].contains("first question"), "{said:?}");
+        assert!(!sealed.contains(&Action::Save));
+        assert_eq!(b.current.as_deref(), Some("t2"));
+        let unknown = b.on_agent(AgentEvent::UseChecked { thread: "t1".to_string(), title: "first question".to_string(), on: None }, 0);
+        assert!(notices(&unknown)[0].starts_with("Not switched"), "{unknown:?}");
+        assert_eq!(b.current.as_deref(), Some("t2"));
+    }
+
+    /// §11: the level is asked again before each message goes to the thread, since it may have
+    /// changed after `/use`; a thread found at `on` is left, and nothing of the message is sent.
+    #[test]
+    fn a_thread_found_air_gapped_before_a_message_is_left_and_the_message_not_sent() {
+        let mut b = connected();
+        answered(&mut b, "first question", "a", 1);
+        let asked = b.on_message(msg("more", 2), 0);
+        assert!(asked.iter().any(|a| a.relays_to() == Some("t1")), "{asked:?}");
+        b.on_message(msg("and this", 3), 0);
+        let sealed = b.on_agent(AgentEvent::ThreadSealed { thread: "t1".to_string(), known: true }, 0);
+        assert!(sealed.contains(&Action::Typing(false)) && sealed.contains(&Action::Save), "{sealed:?}");
+        let said = notices(&sealed);
+        assert!(said.len() == 1 && said[0].contains("air-gapped") && said[0].contains("nothing was sent"), "{said:?}");
+        assert!(!b.is_busy());
+        assert!(b.current.is_none());
+        let next = b.on_message(msg("hello", 4), 0);
+        assert!(next.contains(&Action::StartThread), "the next question starts a new thread: {next:?}");
+    }
+
+    /// A level that cannot be read while a turn runs stops the turn, and its answer is not relayed;
+    /// the thread stays current, so the owner can try again once `ling web` answers.
+    #[test]
+    fn a_level_that_cannot_be_read_stops_the_turn_and_keeps_the_thread() {
+        let mut b = connected();
+        answered(&mut b, "first question", "a", 1);
+        b.on_message(msg("more", 2), 0);
+        b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u2".to_string() }, 0);
+        assert_eq!(b.running_thread(), Some("t1"));
+        let sealed = b.on_agent(AgentEvent::ThreadSealed { thread: "t1".to_string(), known: false }, 0);
+        assert!(sealed.contains(&Action::Interrupt { thread: "t1".to_string(), turn: "u2".to_string() }), "{sealed:?}");
+        assert!(notices(&sealed)[0].contains("nothing was sent"), "{sealed:?}");
+        assert_eq!(b.running_thread(), None);
+        assert_eq!(b.current.as_deref(), Some("t1"));
+        b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: "secret".to_string() }, 0);
+        let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 0);
+        assert!(replies(&done).is_empty() && notices(&done).is_empty(), "{done:?}");
+    }
+
+    #[test]
+    fn every_action_that_reaches_a_thread_names_it_for_the_air_gap_check() {
+        let t = || "t".to_string();
+        for action in [
+            Action::ResumeThread(t()),
+            Action::StartTurn { thread: t(), text: t(), images: Vec::new() },
+            Action::AddToTurn { thread: t(), turn: t(), text: t() },
+            Action::Steer { thread: t(), turn: t(), text: t() },
+            Action::Upload { thread: t(), attachments: Vec::new() },
+            Action::SendFile { thread: t(), name: t() },
+            Action::FindFiles { thread: t(), since_ms: 0, answer: t() },
+        ] {
+            assert_eq!(action.relays_to(), Some("t"), "{action:?}");
+        }
+        for action in [Action::StartThread, Action::StartAskThread, Action::Interrupt { thread: t(), turn: t() }, Action::Save] {
+            assert_eq!(action.relays_to(), None, "{action:?}");
+        }
     }
 
     #[test]
@@ -1385,6 +1547,7 @@ mod tests {
         b.on_agent(AgentEvent::TurnCompleted { thread: "t2".to_string(), error: None }, 19 * hour);
         // /use 2 goes back, and is not undone by the next question.
         b.on_message(msg("/use 2", 4), 19 * hour + 1);
+        b.on_agent(AgentEvent::UseChecked { thread: "t1".to_string(), title: "a song".to_string(), on: Some(false) }, 19 * hour + 1);
         assert_eq!(b.current.as_deref(), Some("t1"));
         let back = b.on_message(msg("more about the song", 5), 19 * hour + 2);
         assert!(notices(&back).is_empty() && back.iter().any(|a| matches!(a, Action::StartTurn { thread, .. } if thread == "t1")), "{back:?}");

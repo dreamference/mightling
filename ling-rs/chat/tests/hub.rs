@@ -21,6 +21,8 @@ type Script = Arc<dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync>;
 struct Log {
     requests: Arc<Mutex<Vec<(String, Value)>>>,
     responses: Arc<Mutex<Vec<(Value, Value)>>>,
+    /// The threads `ling web` says are at `/airgapped on`; "unreadable" makes every answer fail.
+    sealed: Arc<Mutex<Vec<String>>>,
 }
 
 impl Log {
@@ -82,6 +84,18 @@ fn rig_with(tag: &str, script: Script, airgap: Box<dyn Fn() -> bool + Send>, twe
                 // `ling web`'s Night Shift routes: one repository, a queue of one, one report after "".
                 AgentCommand::Web { path, body, reply } => {
                     agent_log.requests.lock().unwrap().push(("web".to_string(), json!({ "path": path, "body": body })));
+                    // One thread's air gap: `on` for a sealed one, named in the answer as `ling web` does.
+                    if let Some(thread) = path.strip_prefix("/api/airgapped?thread=") {
+                        let sealed = agent_log.sealed.lock().unwrap().clone();
+                        let answer = if sealed.iter().any(|s| s == "unreadable") {
+                            Err("ling web is not answering".to_string())
+                        } else {
+                            let level = if sealed.iter().any(|s| s == thread) { "on" } else { "off" };
+                            Ok(json!({ "level": level, "thread": thread }))
+                        };
+                        let _ = reply.send(answer);
+                        continue;
+                    }
                     if let Some(answer) = repo_web(&path, body.as_ref()) {
                         let _ = reply.send(answer);
                         continue;
@@ -1307,4 +1321,96 @@ async fn merge_cancel_sends_nothing_and_outcomes_are_said_in_fixed_words() {
         next_for(&mut rig.telegram, "telegram:73").await,
         Outbound::Notice { chat: "telegram:73".into(), text: "No repository is open in this chat; open the app.".into() }
     );
+}
+
+fn airgap_asks(rig: &Rig) -> Vec<String> {
+    rig.log.params("web").iter().filter_map(|p| p["path"].as_str()).filter(|p| p.starts_with("/api/airgapped?thread=")).map(String::from).collect()
+}
+
+async fn notice_containing(rx: &mut mpsc::UnboundedReceiver<Outbound>, words: &str) -> String {
+    loop {
+        if let Outbound::Notice { text, .. } = next(rx).await
+            && text.contains(words)
+        {
+            return text;
+        }
+    }
+}
+
+/// SIGNAL §11 for the off-node messengers: `/use` does not switch to a thread at `/airgapped on`,
+/// nor to one whose level `ling web` did not give.
+#[tokio::test]
+async fn use_refuses_a_thread_at_airgapped_on_and_one_whose_level_is_unknown() {
+    let mut rig = rig("use-sealed", default_script(), false, |_| {});
+    rig.inbound.send(text(CHAT, "first question")).unwrap();
+    settle().await;
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed" } }))).unwrap();
+    rig.inbound.send(text(CHAT, "/new")).unwrap();
+    rig.inbound.send(text(CHAT, "second question")).unwrap();
+    settle().await;
+    rig.events.send(event("turn/completed", json!({ "threadId": "th2", "turn": { "id": "tu1", "status": "completed" } }))).unwrap();
+    settle().await;
+    rig.log.sealed.lock().unwrap().push("th1".to_string());
+    rig.inbound.send(text(CHAT, "/use 2")).unwrap();
+    let refused = notice_containing(&mut rig.telegram, "Not switched").await;
+    assert!(refused.contains("\"first question\" is air-gapped"), "{refused}");
+    rig.log.sealed.lock().unwrap().clear();
+    rig.log.sealed.lock().unwrap().push("unreadable".to_string());
+    rig.inbound.send(text(CHAT, "/use 2")).unwrap();
+    let unknown = notice_containing(&mut rig.telegram, "Not switched").await;
+    assert!(unknown.contains("did not say"), "{unknown}");
+    // Still on the second thread.
+    rig.log.sealed.lock().unwrap().clear();
+    rig.inbound.send(text(CHAT, "and then")).unwrap();
+    settle().await;
+    assert_eq!(rig.log.params("turn/start").last().unwrap()["threadId"], "th2");
+    assert!(airgap_asks(&rig).contains(&"/api/airgapped?thread=th1".to_string()));
+}
+
+/// A message to the current thread asks its level first: at `on` nothing is sent, the thread is
+/// left and the next message starts a new one; with no answer nothing is sent and the thread kept.
+#[tokio::test]
+async fn a_message_or_a_photo_to_a_thread_at_airgapped_on_is_not_sent() {
+    let mut rig = rig("msg-sealed", default_script(), false, |_| {});
+    rig.inbound.send(text(CHAT, "first question")).unwrap();
+    settle().await;
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed" } }))).unwrap();
+    settle().await;
+    rig.log.sealed.lock().unwrap().push("th1".to_string());
+    rig.inbound.send(photo(CHAT, "look", "cat.jpg")).unwrap();
+    let refused = notice_containing(&mut rig.telegram, "nothing was sent").await;
+    assert!(refused.contains("air-gapped") && refused.contains("new thread"), "{refused}");
+    assert!(rig.log.params("upload").is_empty());
+    assert_eq!(rig.log.params("turn/start").len(), 1);
+    rig.inbound.send(text(CHAT, "follow up")).unwrap();
+    settle().await;
+    assert_eq!(rig.log.params("thread/start").len(), 2);
+    assert_eq!(rig.log.params("turn/start").last().unwrap()["threadId"], "th2");
+    rig.events.send(event("turn/completed", json!({ "threadId": "th2", "turn": { "id": "tu1", "status": "completed" } }))).unwrap();
+    settle().await;
+    rig.log.sealed.lock().unwrap().push("unreadable".to_string());
+    rig.inbound.send(text(CHAT, "one more")).unwrap();
+    let unknown = notice_containing(&mut rig.telegram, "nothing was sent").await;
+    assert!(unknown.contains("did not say"), "{unknown}");
+    assert_eq!(rig.log.params("turn/start").len(), 2);
+    rig.log.sealed.lock().unwrap().clear();
+    rig.inbound.send(text(CHAT, "once more")).unwrap();
+    settle().await;
+    assert_eq!(rig.log.params("turn/start").len(), 3);
+    assert_eq!(rig.log.params("turn/start").last().unwrap()["threadId"], "th2");
+}
+
+/// Matrix stays on this machine, as at the user's `/airgapped on`: its threads are not asked.
+#[tokio::test]
+async fn matrix_threads_are_not_held_to_the_phone_air_gap() {
+    let rig = rig("matrix-sealed", default_script(), false, |_| {});
+    rig.inbound.send(text("matrix:!r:x", "hello")).unwrap();
+    settle().await;
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed" } }))).unwrap();
+    settle().await;
+    rig.log.sealed.lock().unwrap().push("th1".to_string());
+    rig.inbound.send(text("matrix:!r:x", "more")).unwrap();
+    settle().await;
+    assert_eq!(rig.log.params("turn/start").len(), 2);
+    assert!(airgap_asks(&rig).is_empty());
 }

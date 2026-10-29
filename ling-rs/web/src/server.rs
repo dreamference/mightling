@@ -860,13 +860,24 @@ async fn websocket(State(server): State<Arc<Server>>, headers: HeaderMap, upgrad
         .on_upgrade(move |socket| crate::relay::run_tab_with_bridge(socket, server, device_token, bridge, watch))
 }
 
-/// The user-level air-gap level, for clients that cannot read the user's configuration: the Signal
-/// bridge runs as its own system account with no access to the home folder, and must send nothing
-/// at `on` (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §11). No session's level is consulted: a client
-/// asks about the machine, not about a thread.
-async fn airgapped(State(_server): State<Arc<Server>>) -> Response {
-    let resolved = user_airgap_level();
-    json_response(StatusCode::OK, json!({ "level": resolved.level.name(), "source": resolved.source.label() }))
+/// The air-gap level, for clients that cannot read the user's configuration: the Signal bridge runs
+/// as its own system account with no access to the home folder, and must send nothing at `on`
+/// (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §11). Without `?thread=` it is the user-level setting,
+/// with no session consulted. With `?thread=<id>` it is that one thread's level, the strictest of
+/// its own, its folder's `dreamference.toml` and the user's, and the answer names the thread, so a
+/// phone bridge can tell it from the user-level answer an older `ling web` gives and refuse a
+/// thread at `on`. A malformed id gets 400, never the user-level answer.
+async fn airgapped(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>) -> Response {
+    let Some(thread) = query.get("thread") else {
+        let resolved = user_airgap_level();
+        return json_response(StatusCode::OK, json!({ "level": resolved.level.name(), "source": resolved.source.label() }));
+    };
+    if !ask::valid_thread_id(thread) {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "not a thread id" }));
+    }
+    let folder = ask::folder_of(&server.ask_root(), thread).or_else(|| crate::chat_repos::repo_thread_cwd(&server.config.codex_home, thread).map(PathBuf::from));
+    let on = thread_airgapped_on(Some(thread), folder.as_deref()) || user_airgap_level().level == ling_airgapped::Level::On;
+    json_response(StatusCode::OK, json!({ "level": if on { "on" } else { "off" }, "thread": thread }))
 }
 
 /// How the phone bridges behave, from the `[chat]` table of the user's configuration

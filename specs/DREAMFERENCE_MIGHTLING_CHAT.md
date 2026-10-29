@@ -95,6 +95,7 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
   - **Approve means once.** "For this session" (`acceptForSession`) and policy amendments are not offered from a phone. A question marked `isSecret` is refused with a line telling the user to answer it at a computer, because a secret typed into a messenger stays in its history.
 - **Air gap.** The bridge reads the user-level air-gap level (`ling-airgapped`, the user's config file, not a repository's) every minute and at every message:
   - **At `on`,** the Telegram adapter stops relaying: incoming messages are answered with one line saying why, and nothing is sent to the agent. Matrix keeps working, because the whole path stays on the machine.
+  - **One thread at `on`** (SIGNAL §11, 2026-10-29): Telegram and Discord do not use a thread whose own level, its folder's or the user's is `on`, asked through `GET /api/airgapped?thread=<id>` before `/use N` switches to it and before every message or attachment goes to the current thread. `/use` answers "Not switched: …"; a message is not sent, the thread is left and the next message starts a new one. No answer naming the thread refuses too, keeping the thread. Matrix is not asked, as at the user's `on`. The check runs at each message, not during a turn.
   - **What the agent sees:** Ask threads follow the air gap as usual, so at `on` the agent has no web search, whichever messenger asked.
 
 ## 4. Telegram
