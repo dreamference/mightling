@@ -91,22 +91,24 @@ impl Settings {
         let config_path = config_file(repo_root);
         let in_repo = std::env::var_os("DREAMFERENCE_CONFIG_PATH").is_none()
             && config_path.as_deref() == Some(repo_root.join("dreamference.toml").as_path());
-        Settings::load_with(config_path, in_repo, |key| std::env::var(key).ok())
+        let user_config = in_repo.then(|| paths::home().join(USER_CONFIG));
+        Settings::load_with(config_path, user_config, |key| std::env::var(key).ok())
     }
 
     /// The settings from `config_path`, then the variables `env` gives, which win over the file
-    /// and apply without one.
+    /// and apply without one. `user_config` is the user's own file when `config_path` is the
+    /// repository's: the network keys come from there instead.
     fn load_with(
         config_path: Option<PathBuf>,
-        config_in_repo: bool,
+        user_config: Option<PathBuf>,
         env: impl Fn(&str) -> Option<String>,
     ) -> Settings {
         let mut settings = Settings {
             config_path,
-            config_in_repo,
+            config_in_repo: user_config.is_some(),
             ..Settings::default()
         };
-        settings.read_file();
+        settings.read_file(user_config.as_deref());
         if let Some(host) = env("DREAMFERENCE_VLLM_HOST") {
             settings.vllm_host = host.trim_end_matches('/').to_string();
         }
@@ -124,7 +126,7 @@ impl Settings {
         self.layers == Layers::Exact
     }
 
-    fn read_file(&mut self) {
+    fn read_file(&mut self, user_config: Option<&Path>) {
         let settings = self;
         let Some(table) = settings
             .config_path
@@ -141,13 +143,27 @@ impl Settings {
                 .filter(|v| *v >= 0)
                 .map(|v| v as u64)
         };
-        // The session probes this host outside the sandbox: from a file a clone ships, only one on
-        // this machine, as the launcher rules (never a host the repository's author picked).
-        if let Some(host) = table
-            .get("vllm_host")
-            .and_then(toml::Value::as_str)
-            .filter(|host| !settings.config_in_repo || host_is_local(host))
-        {
+        // The session probes this host outside the sandbox: a file a clone ships names none, not
+        // even one on this machine, as the launcher rules; the user's own file names it instead.
+        let host = if settings.config_in_repo {
+            if table.contains_key("vllm_host") {
+                ignored_once(settings.config_path.as_deref(), "vllm_host");
+            }
+            user_config
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .and_then(|t| t.parse::<toml::Table>().ok())
+                .and_then(|user| {
+                    user.get("vllm_host")
+                        .and_then(toml::Value::as_str)
+                        .map(str::to_string)
+                })
+        } else {
+            table
+                .get("vllm_host")
+                .and_then(toml::Value::as_str)
+                .map(str::to_string)
+        };
+        if let Some(host) = host {
             settings.vllm_host = host.trim_end_matches('/').to_string();
         }
         if let Some(v) = int("code_index_scan_max_files") {
@@ -199,6 +215,14 @@ impl Settings {
     }
 }
 
+/// The user's own settings file, under the home directory.
+const USER_CONFIG: &str = ".config/dreamference/config.toml";
+
+/// The keys of `dreamference.toml` that choose a host, port, URL or other network address: a
+/// repository's own file may set none of them (owner decision 2026-10-29). Kept equal to
+/// `NETWORK_KEYS` in `dreamference/config/dreamference_config.py` by a test there.
+pub const NETWORK_KEYS: &[&str] = &["vllm_host"];
+
 fn config_file(repo_root: &Path) -> Option<PathBuf> {
     if let Ok(path) = std::env::var("DREAMFERENCE_CONFIG_PATH") {
         return Some(PathBuf::from(path));
@@ -207,30 +231,21 @@ fn config_file(repo_root: &Path) -> Option<PathBuf> {
     if local.is_file() {
         return Some(local);
     }
-    let global = paths::home().join(".config/dreamference/config.toml");
+    let global = paths::home().join(USER_CONFIG);
     global.is_file().then_some(global)
 }
 
-/// Whether `host` (a URL or a bare name, with or without a port) names this machine: a loopback
-/// address, `localhost` or the any-address. The launcher's rule for a repository's settings file.
-fn host_is_local(host: &str) -> bool {
-    let host = host.trim();
-    let rest = ["http://", "https://"]
-        .iter()
-        .find(|scheme| {
-            host.get(..scheme.len())
-                .is_some_and(|start| start.eq_ignore_ascii_case(scheme))
-        })
-        .map_or(host, |scheme| &host[scheme.len()..]);
-    let name = if let Some(bracketed) = rest.strip_prefix('[') {
-        bracketed.split(']').next().unwrap_or_default()
-    } else {
-        rest.split(['/', ':']).next().unwrap_or_default()
-    };
-    name.eq_ignore_ascii_case("localhost")
-        || name
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified())
+/// Says once per run, on stderr, that a repository's file tried to set `key`. Names the file and
+/// the key, never the value: it is the repository's, and could hold terminal escapes.
+fn ignored_once(path: Option<&Path>, key: &str) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    let path = path.map(|p| p.display().to_string()).unwrap_or_default();
+    ONCE.call_once(|| {
+        eprintln!(
+            "Ignored {key} in {path}: a repository's own file may not choose a network address. Set it \
+             in ~/.config/dreamference/config.toml or DREAMFERENCE_VLLM_HOST instead."
+        )
+    });
 }
 
 /// Whether the user has marked `root` trusted in Codex's own per-project trust.
@@ -275,39 +290,48 @@ mod tests {
         let env = |key: &str| {
             (key == "DREAMFERENCE_VLLM_HOST").then(|| "http://gpu-node:8001/".to_string())
         };
-        let s = Settings::load_with(Some(file.clone()), false, env);
+        let s = Settings::load_with(Some(file.clone()), None, env);
         assert_eq!(s.vllm_host, "http://gpu-node:8001");
         std::fs::write(&file, "vllm_host = \"http://127.0.0.1:9000\"\n").unwrap();
         assert_eq!(
-            Settings::load_with(Some(file.clone()), false, env).vllm_host,
+            Settings::load_with(Some(file.clone()), None, env).vllm_host,
             "http://gpu-node:8001"
         );
         assert_eq!(
-            Settings::load_with(Some(file), false, |_| None).vllm_host,
+            Settings::load_with(Some(file), None, |_| None).vllm_host,
             "http://127.0.0.1:9000"
         );
     }
 
     #[test]
-    fn a_repository_settings_file_may_only_name_a_host_on_this_machine() {
+    fn a_repository_settings_file_names_no_host() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("dreamference.toml");
+        let user = dir.path().join("config.toml");
         let host = |text: &str, in_repo: bool, env: Option<&str>| {
             std::fs::write(&file, text).unwrap();
-            Settings::load_with(Some(file.clone()), in_repo, |key| {
+            Settings::load_with(Some(file.clone()), in_repo.then(|| user.clone()), |key| {
                 (key == "DREAMFERENCE_VLLM_HOST").then(|| env.map(str::to_string))?
             })
             .vllm_host
         };
+        // Any host there, even one on this machine (a port there is a server the repository may
+        // have started itself): the default, then the user's own file, decides.
+        for named in [
+            "http://collector.example:8000",
+            "http://127.0.0.1:9000/",
+            "http://[::1]:9000",
+            "localhost:18000",
+        ] {
+            let text = format!("vllm_host = \"{named}\"\nlayers = \"exact\"\n");
+            assert_eq!(host(&text, true, None), "http://localhost:8000", "{named}");
+        }
+        std::fs::write(&user, "vllm_host = \"http://gpu-node:9000/\"\n").unwrap();
         let remote = "vllm_host = \"http://collector.example:8000\"\n";
-        assert_eq!(host(remote, true, None), "http://localhost:8000");
+        assert_eq!(host(remote, true, None), "http://gpu-node:9000");
         assert_eq!(
-            host("vllm_host = \"http://127.0.0.1:9000/\"\n", true, None),
-            "http://127.0.0.1:9000"
-        );
-        assert_eq!(
-            host("vllm_host = \"http://[::1]:9000\"\n", true, None),
-            "http://[::1]:9000"
+            host("layers = \"exact\"\n", true, None),
+            "http://gpu-node:9000"
         );
         // The user's own file and variable stay trusted.
         assert_eq!(host(remote, false, None), "http://collector.example:8000");
@@ -315,16 +339,7 @@ mod tests {
             host(remote, true, Some("http://gpu-node:8001")),
             "http://gpu-node:8001"
         );
-        for name in ["localhost:8000", "0.0.0.0", "HTTP://LOCALHOST", "127.0.1.1"] {
-            assert!(host_is_local(name), "{name}");
-        }
-        for name in [
-            "http://localhost.example",
-            "http://10.0.0.1:8000",
-            "http://[fe80::1]",
-        ] {
-            assert!(!host_is_local(name), "{name}");
-        }
+        assert_eq!(NETWORK_KEYS, ["vllm_host"]);
     }
 
     #[test]
@@ -366,7 +381,7 @@ mightling_code_layers = "exact"
             config_path: Some(file.clone()),
             ..Settings::default()
         };
-        s.read_file();
+        s.read_file(None);
         assert_eq!(s.vllm_host, "http://127.0.0.1:9000");
         assert_eq!(s.scan_max_files, 500);
         assert_eq!(s.scan_max_bytes, 1_048_576);
@@ -390,7 +405,7 @@ mightling_code_layers = "exact"
             config_path: Some(file),
             ..Settings::default()
         };
-        s2.read_file();
+        s2.read_file(None);
         assert_eq!(s2.row_limit, 1, "clamped to 1");
         assert_eq!(
             s2.memory_ceiling_mb,
