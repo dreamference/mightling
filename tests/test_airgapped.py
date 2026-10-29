@@ -208,3 +208,11 @@ def test_the_mcp_web_tools_resolve_the_level_on_every_call(monkeypatch):
         page = WebTools.fetch("https://example.com")
     assert get.call_count == 1
     assert found["error"] == AIRGAPPED_ON_MESSAGE and page["error"] == AIRGAPPED_ON_MESSAGE
+
+
+def test_the_slash_command_sits_after_permissions_with_its_description():
+    # §6.4: both set what the agent may reach, so the popup lists them together.
+    patch = (REPO / "codex-patches" / "0019-airgapped.patch").read_text()
+    slash = patch.split("+++ b/codex-rs/tui/src/slash_command.rs\n", 1)[1].split("\ndiff --git ", 1)[0]
+    assert "     Permissions,\n+    Airgapped,\n" in slash
+    assert '+            SlashCommand::Airgapped => "set how much of the internet this session may use",' in slash
