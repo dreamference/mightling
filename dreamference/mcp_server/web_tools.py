@@ -145,7 +145,8 @@ class WebTools:
             url (str): URL to retrieve.
 
         Returns:
-            requests.Response: The response, with `_body` holding at most MAX_DOWNLOAD_BYTES.
+            requests.Response: The response, closed, with `_body` holding at most
+            MAX_DOWNLOAD_BYTES and `_cut` true when the body reached that ceiling.
         """
         response = requests.get(
             url,
@@ -153,15 +154,20 @@ class WebTools:
             timeout=REQUEST_TIMEOUT_S,
             stream=True,
         )
-        response.raise_for_status()
-        chunks: List[bytes] = []
-        total = 0
-        for chunk in response.iter_content(8192):
-            chunks.append(chunk)
-            total += len(chunk)
-            if total >= MAX_DOWNLOAD_BYTES:
-                break
-        response._body = b"".join(chunks)  # type: ignore[attr-defined]
+        # Closed whatever happens: a streamed body left unread holds its connection open.
+        try:
+            response.raise_for_status()
+            chunks: List[bytes] = []
+            total = 0
+            for chunk in response.iter_content(8192):
+                chunks.append(chunk)
+                total += len(chunk)
+                if total >= MAX_DOWNLOAD_BYTES:
+                    break
+        finally:
+            response.close()
+        response._body = b"".join(chunks)[:MAX_DOWNLOAD_BYTES]  # type: ignore[attr-defined]
+        response._cut = total >= MAX_DOWNLOAD_BYTES  # type: ignore[attr-defined]
         return response
 
     @classmethod
@@ -255,7 +261,8 @@ class WebTools:
             "content_type": content_type,
             "title": title,
             "text": text[:limit],
-            "truncated": len(text) > limit,
+            # A page cut at the download ceiling is not whole, however short its text.
+            "truncated": len(text) > limit or bool(getattr(response, "_cut", False)),
         }
 
     @classmethod

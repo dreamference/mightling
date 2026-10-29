@@ -21,9 +21,14 @@ class Page:
         self.url = "https://example.org/final"
         self.status_code = 200
         self.read = 0
+        self.closed = False
 
     def raise_for_status(self) -> None:
         """Answers like a 200."""
+
+    def close(self) -> None:
+        """Hands the connection back."""
+        self.closed = True
 
     def iter_content(self, size: int):
         """Yields the body in chunks of `size`, counting what was read."""
@@ -67,6 +72,23 @@ def test_fetch_stops_reading_a_body_at_the_download_ceiling(online):
     outcome = WebTools.fetch("https://example.org", max_chars=10)
     assert page.read == MAX_DOWNLOAD_BYTES
     assert outcome["text"] == "a" * 10 and outcome["truncated"] is True
+
+
+def test_a_page_cut_at_the_download_ceiling_is_reported_truncated(online):
+    # `truncated` only compared the extracted text with `max_chars`: a page that is mostly markup
+    # was cut at the ceiling, its short text fitted, and the model was told it had the whole page.
+    markup = b"<html><head><title>T</title></head><body><p>start</p>" + b"<div></div>" * MAX_DOWNLOAD_BYTES
+    page = Page(markup + b"<p>the end</p></body></html>")
+    online.return_value = page
+    outcome = WebTools.fetch("https://example.org")
+    assert "start" in outcome["text"] and "the end" not in outcome["text"]
+    assert outcome["truncated"] is True
+    assert page.closed  # the rest of the body is not left on an open connection
+
+    whole = Page(b"<html><body><p>all of it</p></body></html>")
+    online.return_value = whole
+    outcome = WebTools.fetch("https://example.org")
+    assert "all of it" in outcome["text"] and outcome["truncated"] is False and whole.closed
 
 
 def test_fetch_reduces_html_to_its_title_and_readable_text(online):
