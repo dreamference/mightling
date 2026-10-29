@@ -125,10 +125,15 @@ pub fn fetch(url: &str, max_chars: i64) -> Result<FetchedPage, String> {
     // already been buffered.
     response
         .into_reader()
-        .take(MAX_DOWNLOAD_BYTES)
+        .take(MAX_DOWNLOAD_BYTES + 1)
         .read_to_end(&mut body)
         .map_err(|error| format!("request failed: {error}"))?;
-    Ok(page(url, final_url, status, content_type, &body, max_chars))
+    // A page longer than the cap is read up to it, and says that it was cut.
+    let cut = body.len() as u64 > MAX_DOWNLOAD_BYTES;
+    body.truncate(MAX_DOWNLOAD_BYTES as usize);
+    let mut page = page(url, final_url, status, content_type, &body, max_chars);
+    page.truncated |= cut;
+    Ok(page)
 }
 
 /// What `ling-fetch --download` saved (one JSON line on stdout).
