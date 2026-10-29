@@ -1606,4 +1606,40 @@ mod tests {
         assert!(within(Path::new("/nowhere-b/repo"), &roots));
         assert!(!within(Path::new("/nowhere-c/repo"), &roots));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn every_daemon_socket_in_the_runtime_folder_is_found() {
+        // `ling web`'s app-server socket under `mightling` starts threads with any permissions.
+        let runtime =
+            std::env::temp_dir().join(format!("ling-airgapped-runtime-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&runtime);
+        let names = [
+            "bus",
+            "systemd",
+            "docker.sock",
+            "docker",
+            "podman",
+            "containerd",
+            "mightling",
+        ];
+        std::fs::create_dir_all(&runtime).unwrap();
+        let runtime = std::fs::canonicalize(&runtime).unwrap();
+        for name in names {
+            std::fs::write(runtime.join(name), "").unwrap();
+        }
+        let found = host_sockets_in(&runtime.join("none"), Some(&runtime));
+        let _ = std::fs::remove_dir_all(&runtime);
+        let mut expected: Vec<PathBuf> = names.iter().map(|name| runtime.join(name)).collect();
+        expected.sort();
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn a_seal_is_read_only_under_a_session_id() {
+        assert!(seal_file_name("0b6e5c1a-7f43-4d1e-9c2a-5d8e3f0a1b2c"));
+        for id in ["", "..", "../../etc/passwd", "a/b", "a.b"] {
+            assert!(!seal_file_name(id), "{id:?}");
+        }
+    }
 }
