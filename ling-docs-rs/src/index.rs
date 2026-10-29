@@ -1591,35 +1591,40 @@ pub fn index_worker_with(
     }
     writeln!(log, "{collection}: {written} documents written")?;
     reconcile(&mut conn, embedder, counter, log)?;
-    let todo: Vec<(i64, String, String, String)> = conn
-        .prepare("SELECT c.id, d.title, c.heading, c.text FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE c.vector IS NULL ORDER BY c.id")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
-        .collect::<rusqlite::Result<_>>()?;
     let started = Instant::now();
     let mut done = 0usize;
-    let mut tx = conn.transaction()?;
-    for (id, title, heading, text) in &todo {
-        let chunk = crate::chunk::Chunk {
-            loc: String::new(),
-            page_first: None,
-            page_last: None,
-            line_first: None,
-            line_last: None,
-            heading: heading.clone(),
-            text: text.clone(),
+    // 32 chunks at a time, each page committed: the chunks waiting for vectors can be the whole
+    // collection's text (a first run, a new model), never held at once under the worker's cap.
+    let mut after = 0i64;
+    loop {
+        let page: Vec<(i64, String, String, String)> = conn
+            .prepare("SELECT c.id, d.title, c.heading, c.text FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE c.vector IS NULL AND c.id > ? ORDER BY c.id LIMIT 32")?
+            .query_map([after], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let Some(last) = page.last() else {
+            break;
         };
-        let vector = embedder.embed(&crate::chunk::embed_text(title, &chunk))?;
-        tx.execute(
-            "UPDATE chunks SET vector = ? WHERE id = ?",
-            params![crate::embed::to_blob(&vector), id],
-        )?;
-        done += 1;
-        if done.is_multiple_of(32) {
-            tx.commit()?;
-            tx = conn.transaction()?;
+        after = last.0;
+        let tx = conn.transaction()?;
+        for (id, title, heading, text) in page {
+            let chunk = crate::chunk::Chunk {
+                loc: String::new(),
+                page_first: None,
+                page_last: None,
+                line_first: None,
+                line_last: None,
+                heading,
+                text,
+            };
+            let vector = embedder.embed(&crate::chunk::embed_text(&title, &chunk))?;
+            tx.execute(
+                "UPDATE chunks SET vector = ? WHERE id = ?",
+                params![crate::embed::to_blob(&vector), id],
+            )?;
+            done += 1;
         }
+        tx.commit()?;
     }
-    tx.commit()?;
     let seconds = started.elapsed().as_secs_f64();
     if done > 0 {
         store::set_meta(
