@@ -185,6 +185,8 @@ export function git(cwd: string, args: string[], input?: string, timeoutMs = 60_
         reject(new GitError(tooBig ? "the output is too large to show here" : String(stderr || error.message).trim()));
       } else resolve(stdout);
     });
+    // git may exit before it reads it all (a refused patch): its answer comes above; EPIPE here would crash the app.
+    child.stdin?.on("error", () => undefined);
     if (input !== undefined) child.stdin?.end(input);
   }));
 }
