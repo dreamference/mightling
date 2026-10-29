@@ -1590,4 +1590,20 @@ mod tests {
         // A multi-line string is no key, and no line starts with the key.
         assert_eq!(toml_value("'''mightling_airgapped''' = \"on\"\n"), None);
     }
+
+    #[test]
+    fn text_that_is_not_toml_is_read_only_up_to_its_first_table() {
+        // `= =` is not TOML; the key under `[other]` is that table's, not the top level's.
+        assert_eq!(
+            toml_value("note = = 1\n[other]\nmightling_airgapped = \"off\"\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_path_lies_within_any_of_the_roots() {
+        let roots = [PathBuf::from("/nowhere-a"), PathBuf::from("/nowhere-b")];
+        assert!(within(Path::new("/nowhere-b/repo"), &roots));
+        assert!(!within(Path::new("/nowhere-c/repo"), &roots));
+    }
 }
