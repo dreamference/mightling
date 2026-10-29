@@ -20,7 +20,7 @@ none is used: a skipped start is picked up by the next completion of either work
 This repository has no per-push test workflow: the suite runs in the pre-push hook before a merge,
 and the full build and test pass on main is the nightly **Release dry run** (02:07 UTC, started by
 gx10's timer). Green is therefore: no run on main's head commit failed, was cancelled or is still
-going (Release and Release on green runs excluded), **and** a Release dry run succeeded on that same
+going (Release, Release on green and Ragon rename rehearsal runs excluded), **and** a Release dry run succeeded on that same
 commit. Consequence: a merge reaches a release after the next dry run (nightly), or sooner after a
 hand-dispatched dry run on main. `release.yml` still runs the tests itself (`run_tests`).
 

@@ -7,7 +7,7 @@ Two leaf crates under `ling-rs/` back the two halves of the design:
 - **Part A (`ling-rs/delegate/`, `ling delegate …`)**: the Claude Code delegation plugin. Phase P1 builds the model-free classes `W1` (`watch`, turned on by the owner on 2026-10-27) and `L1` (`lookup`, and from 2026-10-28 the exact tools `run_test`, `git_log` and `diff_stat`), and, by the owner's decision of 2026-10-28 to move more work to the local model, `task` for T1 to T5, on probation. `ask` and `night` are not built.
 - **Part B (`ling-rs/monitor/`, `ling monitor …`)**: the deterministic session monitor over local transcripts (Phase M0).
 
-Both crates depend only on `chrono`, `serde`, `serde_json`, `toml` (and `regex-lite` in `ling-delegate`), so their unit tests run standalone in a copy of the crate folder (`cargo test`) without compiling the Codex workspace.
+Both crates depend only on the sibling `ling-safegit` (`../safegit`, the host-side git helper), `chrono`, `serde`, `serde_json`, `toml` (and `regex-lite` in `ling-delegate`), so their unit tests run standalone in a copy of the crate folder with `safegit/` beside it (`cargo test`) without compiling the Codex workspace.
 
 ## The `ling-delegate` binary
 

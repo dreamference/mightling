@@ -1,12 +1,12 @@
 # Self-hosted CI runners
 
-Two jobs of the release pipeline can run on our own machines instead of GitHub's hosted runners,
+Two kinds of job can run on our own machines instead of GitHub's hosted runners,
 each switched by a repository variable holding a JSON `runs-on` value, with a workflow input that
 forces GitHub's runner for one run:
 
 | Job | Variable | Input (`github` = hosted) | Hosted fallback |
 | --- | --- | --- | --- |
-| windows.yml, x86-64 `ling` and tools | `WINDOWS_X64_RUNNER` | `windows_x64_runner` | `windows-latest` |
+| windows.yml and windows-qa.yml, x86-64 `ling` and tools | `WINDOWS_X64_RUNNER` | `windows_x64_runner` | `windows-latest` |
 | build-clients.yml, `aarch64-apple-darwin` | `MACOS_RUNNER` | `macos_runner` | `macos-15` |
 
 Unset the variable when the machine is offline: a job waiting for a self-hosted runner queues for a
