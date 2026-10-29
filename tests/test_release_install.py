@@ -834,6 +834,15 @@ def test_help_from_the_file_prints_its_header(tmp_path):
     assert result.returncode == 0 and result.stdout.startswith("Installs Mightling from a release")
 
 
+def test_the_docker_group_note_names_sg_only_when_the_model_used_it(tmp_path, release_server):
+    # With --no-model nothing runs through `sg docker`, yet the note said this script had used it.
+    result = run_install(tmp_path, release_server(node_release()), "--role", "node", "--no-model",
+                         env_extra={"FAKE_GROUPS": "tester"})
+    out = result.stdout
+    assert result.returncode == 0, out + result.stderr
+    assert "docker group: tester added" in out and "sg docker" not in out
+    assert not logged(tmp_path, "sg.log")
+
 def test_the_node_role_needs_the_wheel(tmp_path, release_server):
     # The binaries are placed first; a release with no wheel then stops the node half by name.
     result = run_install(tmp_path, release_server(binaries()), "--role", "node")
