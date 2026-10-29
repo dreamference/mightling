@@ -1114,3 +1114,44 @@ def test_status_names_the_role_the_last_backup_the_mirror_and_the_storage(monkey
     assert "Forge of record: gx10-77c0" in lines and not any(
         "Last backup" in line for line in lines
     )
+
+
+def test_the_node_list_shows_each_nodes_forge_role(monkeypatch):
+    from dreamference.night_shift.night_shift_host import NightShiftHost
+    from dreamference.node.node_browser import NodeBrowser
+    from dreamference.node.node_identity import NodeIdentity
+    from dreamference.node.node_pairing import NodePairing
+    from dreamference.node.node_remote import NodeRemote
+
+    def node(name, node_id, last):
+        return {
+            "name": name,
+            "node": node_id,
+            "address": f"{LAN}.50.{last}",
+            "port": "8000",
+            "version": "1.3.0",
+            "state": "stopped",
+            "main": "1",
+        }
+
+    nodes = [node("gx10-1a2b", "n-1", 10), node("node-b", "n-2", 11), node("node-c", "n-3", 12)]
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: nodes))
+    forges = [{"node": "n-1", "role": "record"}, {"node": "n-2", "role": "mirror"}]
+    monkeypatch.setattr(
+        NodeBrowser,
+        "browse_service",
+        classmethod(
+            lambda cls, service_type, timeout=6: (
+                forges if service_type == "_mightling-forge._tcp" else []
+            )
+        ),
+    )
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: None))
+    monkeypatch.setattr(NodePairing, "paired", classmethod(lambda cls: []))
+    monkeypatch.setattr(
+        NightShiftHost, "served_model", classmethod(lambda cls, host, timeout=3.0: None)
+    )
+    lines = NodeRemote.list_lines()
+    assert lines[0].endswith("; forge record)")
+    assert lines[1].endswith("; forge mirror)")
+    assert "forge" not in lines[2], "a node without a forge says nothing about one"

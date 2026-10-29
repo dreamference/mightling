@@ -24,8 +24,9 @@ class NodeRemote:
             List[str]: One line per node on the network: name, address, the model it serves and
             its context, its load, its free memory (this machine's and paired nodes' only: memory
             is not on the open model port, so it is asked over the pairing), whether it is paired,
-            and which one is this machine.
+            which one is this machine, and its forge's role (its `_mightling-forge._tcp` record).
         """
+        from dreamference.forge.forge_settings import SERVICE_TYPE as FORGE_SERVICE_TYPE
         from dreamference.night_shift.night_shift_host import NightShiftHost
         nodes = NodeBrowser.browse()
         if not nodes:
@@ -33,6 +34,8 @@ class NodeRemote:
         mine = NodeIdentity.read()
         records = {record["node"]: record for record in NodePairing.paired()}
         paired = set(records)
+        forges = {entry["node"]: entry.get("role") for entry in NodeBrowser.browse_service(FORGE_SERVICE_TYPE)
+                  if entry.get("node")}
         lines = []
         for node in sorted(nodes, key=lambda entry: entry["name"]):
             host = f"http://{cls.url_host(node['address'])}:{node['port']}"
@@ -57,6 +60,8 @@ class NodeRemote:
                 tags.append("not paired: `ling-admin node add " + node["name"] + "` to manage it")
             if node.get("main") != "1":
                 tags.append("not a coding model")
+            if forges.get(node.get("node")):
+                tags.append(f"forge {forges[node['node']]}")
             lines.append(f"{node['name']}  {host}/v1  {detail}  Mightling {node.get('version', '?')}  ({'; '.join(tags)})")
         return lines
 
