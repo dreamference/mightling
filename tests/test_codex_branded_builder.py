@@ -710,3 +710,25 @@ def test_a_crate_edited_during_its_build_is_not_stamped_current(tmp_path, monkey
     )
     assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is True
     assert not CodexBrandedBuilder.crate_is_current(str(crate), "stamp", ("x",))
+
+
+def test_a_crate_install_leaves_another_installs_staging_file_alone(tmp_path, monkeypatch):
+    # Crate builds run outside the Codex build's lock: two `ling-admin` processes installing the
+    # same binary must not copy into, or rename away, each other's staging file.
+    crate = _fake_crate(tmp_path, monkeypatch)
+    bin_dir = tmp_path / "install" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / ".x.new").write_text("another install's copy")
+    assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is True
+    assert (bin_dir / ".x.new").read_text() == "another install's copy"
+    assert (bin_dir / "x").read_text() == "#!/bin/sh\n"
+
+
+def test_linking_leaves_another_links_staging_link_alone(tmp_path):
+    link = tmp_path / "bin" / "ling"
+    link.parent.mkdir()
+    staging = tmp_path / "bin" / "ling.new"
+    staging.symlink_to("/another/process")
+    CodexBrandedBuilder._link("/install/ling", str(link))
+    assert link.readlink() == Path("/install/ling")
+    assert staging.readlink() == Path("/another/process")
