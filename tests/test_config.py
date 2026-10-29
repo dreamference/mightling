@@ -217,3 +217,16 @@ def test_a_config_file_that_is_not_a_table_of_settings_is_ignored(tmp_path):
         path.write_text(text)
         assert ConfigFileStorageManager.load_config_dict(path) == {}, name
         assert DreamferenceConfig(config_file=str(path)).model
+
+
+def test_toml_strings_with_escaped_quotes_are_read_as_written(tmp_path):
+    # The `toml` package read `"\"\"no"` as `no` and a lone `"\""` as an empty string.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    path = tmp_path / "quotes.toml"
+    path.write_text('a = "\\"\\"no::,off1,"\nb = "\\""\n')
+    assert ConfigFileStorageManager.load_config_dict(path) == {"a": '""no::,off1,', "b": '"'}
+    config = DreamferenceConfig(config_file=str(path))
+    config.hf_token = '""token'
+    config.save_config()
+    assert DreamferenceConfig(config_file=str(path)).hf_token == '""token'

@@ -46,7 +46,8 @@ class ConfigFileStorageManager:
                 if path.suffix == ".toml":
                     # tomllib reads every valid TOML file, as the Rust readers do; the older `toml`
                     # package refuses some (a mixed-type array anywhere) and misreads others (an
-                    # escaped quoted key), so it is only the fallback for text tomllib refuses.
+                    # escaped quoted key, a string such as "\"\"x"), so it is only the fallback for
+                    # text tomllib refuses.
                     text = f.read()
                     try:
                         loaded = tomllib.loads(text)
