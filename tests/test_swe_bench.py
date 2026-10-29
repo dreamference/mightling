@@ -5591,6 +5591,17 @@ def test_shards_that_measured_different_things_or_overlap_are_not_merged(bench, 
     assert SweBenchRunStore("m").manifest() is None
 
 
+def test_a_merged_run_started_when_its_first_shard_did_whatever_its_time_zone(bench):
+    stores = [SweBenchRunStore("s1"), SweBenchRunStore("s2"), SweBenchRunStore("s3")]
+    manifests = [
+        {"started": "2026-10-29T01:30:00+00:00"},
+        {"started": "2026-10-29T02:00:00+02:00"},  # 00:00 UTC, the first, though its text sorts last
+        {},
+    ]
+    merged = SweBenchShardMerge.manifest("m", stores, manifests)
+    assert merged["started"] == "2026-10-29T02:00:00+02:00"
+
+
 def test_a_merge_of_some_shards_says_which_are_missing(bench, capsys):
     assert run(bench, name="s1", shard="1/3") == 0
     assert run(bench, name="s2", shard="2/3") == 0

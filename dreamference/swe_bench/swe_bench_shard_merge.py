@@ -19,6 +19,7 @@ directory first.
 import json
 import shutil
 from collections import Counter
+from datetime import datetime
 from typing import Any, Final
 
 from dreamference.swe_bench.swe_bench_evaluator import VARIANTS, SweBenchEvaluator
@@ -281,6 +282,24 @@ class SweBenchShardMerge:
         return merged
 
     @classmethod
+    def earliest(cls, times: list[Any]) -> str:
+        """The first of the shards' start times, by the instant, not the text.
+
+        Args:
+            times: Their `started` values: ISO times, each with its machine's offset, or None.
+
+        Returns:
+            str: The earliest as it was written; empty when none can be read.
+        """
+        read: list[tuple[datetime, str]] = []
+        for text in times:
+            try:
+                read.append((datetime.fromisoformat(str(text)).astimezone(), str(text)))
+            except ValueError:
+                continue
+        return min(read)[1] if read else ""
+
+    @classmethod
     def manifest(
         cls, name: str, stores: list[SweBenchRunStore], manifests: list[dict[str, Any]]
     ) -> dict[str, Any]:
@@ -292,7 +311,7 @@ class SweBenchShardMerge:
         """
         merged = dict(manifests[0])
         merged["name"] = name
-        merged["started"] = min(str(manifest.get("started") or "") for manifest in manifests)
+        merged["started"] = cls.earliest([manifest.get("started") for manifest in manifests])
         merged["instances"] = sorted(
             i for manifest in manifests for i in manifest.get("instances", [])
         )
