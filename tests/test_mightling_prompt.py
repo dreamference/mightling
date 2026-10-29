@@ -4,6 +4,7 @@ shipped `high-swe` text, and where Night Shift passes it. The launcher's own beh
 Rust (ling-rs/src/prompt.rs).
 """
 
+import argparse
 import re
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import pytest
 from dreamference.config import dreamference_config as cfg_mod
 from dreamference.config.dreamference_config import DreamferenceConfig
 from dreamference.night_shift import NightShiftHost, NightShiftSettings
+from dreamference.swe_bench import SweBenchCommand, SweBenchRunner
 
 REPO = Path(__file__).resolve().parent.parent
 PROMPT_RS = REPO / "ling-rs" / "src" / "prompt.rs"
@@ -94,3 +96,18 @@ def test_night_shift_reads_its_prompt_and_mightling_prompt_is_not_a_session():
     assert NightShiftSettings({"prompt": ""}).prompt is None
     assert NightShiftHost.is_interactive(["prompt", "list"]) is False
     assert NightShiftHost.is_interactive(["prompt", "use", "high-swe"]) is False
+
+
+# §7: `swe-bench run --prompt <name>` reaches the runner; without it the configured prompt applies.
+def test_swe_bench_run_passes_its_prompt_flag_to_the_runner(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0)
+    )
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["swe-bench", "run", "--prompt", "high-swe", "--name", "x"])
+    assert SweBenchCommand.dispatch(args) == 0
+    assert seen["prompt"] == "high-swe"
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["prompt"] is None
