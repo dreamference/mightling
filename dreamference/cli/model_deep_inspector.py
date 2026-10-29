@@ -28,7 +28,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 # Bytes per element for the KV cache dtypes this project serves.
-KV_DTYPE_BYTES: Dict[str, int] = {"auto": 2, "bfloat16": 2, "float16": 2, "fp8": 1, "fp8_e4m3": 1}
+KV_DTYPE_BYTES: Dict[str, int] = {"auto": 2, "bfloat16": 2, "float16": 2, "fp8": 1, "fp8_e4m3": 1, "fp8_e5m2": 1}
 
 # Probe suite for per-workload acceptance. Deliberately small and fixed: the point is a comparable
 # reading per class, not a benchmark. Categories match the split upstream measured DFlash against.
