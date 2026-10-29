@@ -2320,6 +2320,13 @@ async fn run_git_diff_capped(
         .stderr
         .take()
         .ok_or_else(|| format!("missing stderr from git {subcommand}"))?;
+    // stderr is read alongside stdout: git blocks on a full stderr pipe before it closes stdout.
+    let stderr_task = tokio::spawn(async move {
+        let mut kept = Vec::new();
+        let _ = (&mut stderr).take(65_536).read_to_end(&mut kept).await;
+        let _ = tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await;
+        kept
+    });
 
     let read_res = tokio::time::timeout(timeout_dur, async {
         let mut buf = Vec::new();
@@ -2350,13 +2357,12 @@ async fn run_git_diff_capped(
             text.push_str(DIFF_CUT_SUFFIX);
             return Ok(text);
         }
-        let mut err_buf = Vec::new();
-        let _ = (&mut stderr).take(65_536).read_to_end(&mut err_buf).await;
         let status = child
             .wait()
             .await
             .map_err(|e| format!("failed to wait for git {subcommand}: {e}"))?;
         if require_zero_exit && !status.success() {
+            let err_buf = stderr_task.await.unwrap_or_default();
             let stderr_s = String::from_utf8_lossy(&err_buf);
             let stdout_s = String::from_utf8_lossy(&buf);
             let detail = if !stderr_s.trim().is_empty() {
@@ -8732,6 +8738,34 @@ mod tests {
         let diff = run_git_diff_capped(&server, &s.dir, &["diff", "--no-index", "--", "/dev/null", "big.txt"], false).await.unwrap();
         assert!(diff.ends_with(DIFF_CUT_SUFFIX), "the diff was cut");
         assert!(diff.len() > MAX_DIFF_OUTPUT_BYTES - 8, "only the split character is dropped: {} bytes", diff.len());
+    }
+
+    #[tokio::test]
+    async fn a_diff_that_warns_more_than_a_pipe_holds_still_finishes() {
+        let s = scratch("diff-stderr-flood");
+        let (server, _probe) = test_server(&s.dir, None, false);
+        let repo = s.dir.join("crlf");
+        std::fs::create_dir_all(&repo).unwrap();
+        git_sync(&repo, &["init", "-q"]);
+        // Each changed file with LF endings under core.autocrlf costs a warning line on stderr:
+        // 400 long names make about 100 KiB, more than a pipe holds.
+        for i in 0..400 {
+            std::fs::write(repo.join(format!("f{i:0150}.txt")), "a\n").unwrap();
+        }
+        git_sync(&repo, &["add", "."]);
+        git_sync(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "seed"]);
+        git_sync(&repo, &["config", "core.autocrlf", "true"]);
+        for i in 0..400 {
+            std::fs::write(repo.join(format!("f{i:0150}.txt")), "a\nb\n").unwrap();
+        }
+        let diff = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            run_git_diff_capped(&server, &repo, &["diff", "HEAD"], true),
+        )
+        .await
+        .expect("the diff finished instead of waiting on a full stderr pipe")
+        .unwrap();
+        assert_eq!(diff.matches("+b").count(), 400, "every file's change is in the diff");
     }
 
     #[tokio::test]
