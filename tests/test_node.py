@@ -913,6 +913,38 @@ def test_pairing_checks_that_the_machine_that_answered_is_the_advertised_node(mo
     assert tried == ["spark-9"]
 
 
+def test_a_typed_address_is_matched_only_against_the_address_a_node_answers_at(monkeypatch):
+    from dreamference.node import NodePairing
+
+    # Another machine names its service after the real node's address: `node add` with that
+    # address must not send the node password there.
+    spoof = {"name": "192.168.50.106", "node": "6666-evil", "address": "192.168.50.66", "port": "8000"}
+    real = {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000"}
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [spoof, real]))
+    assert NodePairing.discover("192.168.50.106") == real
+    scoped = dict(real, address="fe80::1%wlP9s9")
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [scoped]))
+    assert NodePairing.discover("fe80::1") == scoped
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [spoof]))
+    assert NodePairing.discover("192.168.50.106") is None
+
+
+def test_a_txt_record_cannot_replace_where_a_node_answers():
+    line = (
+        "=;wlP9s9;IPv4;spark-2;_mightling-node._tcp;local;spark-2.local;192.168.50.66;8000;"
+        '"node=6666-evil" "address=192.168.50.106" "name=spark-1" "interface=lo" "host=x" "port=22"'
+    )
+    (node,) = NodeBrowser.parse(line)
+    assert (node["address"], node["name"], node["interface"], node["host"], node["port"]) == (
+        "192.168.50.66",
+        "spark-2",
+        "wlP9s9",
+        "spark-2.local",
+        "8000",
+    )
+    assert node["node"] == "6666-evil"
+
+
 def _ssh_stand_in(calls, ssh_g="", authorize=(0, "")):
     """Stand in for subprocess.run in pairing, recording every call.
 
