@@ -1290,7 +1290,6 @@ class GmailSearchService:
                     content_length = int(self.headers.get('Content-Length', 0))
                     post_data = self.rfile.read(content_length).decode('utf-8')
                     try:
-                        import json
                         data = json.loads(post_data)
                         email = data.get("email")
                         if email:
@@ -1357,7 +1356,6 @@ class GmailSearchService:
                     started = cls.take_state(state)
                     if started:
                         verifier = started["code_verifier"]
-                        import json
                         req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
                             "client_id": GOOGLE_OAUTH_CLIENT_ID,
                             "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,

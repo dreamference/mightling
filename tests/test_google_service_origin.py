@@ -182,17 +182,16 @@ def test_http_routes_cover_status_connect_and_oauth_flows(service_port, monkeypa
     )
     monkeypatch.setattr(svc_mod.urllib.request, "urlopen", fake_urlopen)
 
-    # Product bug at dreamference/chat/gmail_search_service.py:1216 & 1232: `import json` inside
-    # the `/disconnect` branch makes `json` a local variable in `do_POST`, so `/api/google/oauth/complete`
-    # raises UnboundLocalError at `json.loads(post_data)` and replies 400.
+    # A pasted redirect URL completes the consent like the browser's own callback does.
     comp_ok, comp_body = _req_status(
         service_port,
         "/api/google/oauth/complete",
         method="POST",
         body=json.dumps({"url": "http://localhost:8767/?code=c1&state=st-ok"}),
     )
-    assert comp_ok == HTTPStatus.BAD_REQUEST and "json" in comp_body
+    assert comp_ok == HTTPStatus.OK and json.loads(comp_body)["email"] == "u@x.com"
 
+    OAUTH_STATES["st-ok"] = {"code_verifier": "v", "time": time.time(), "app": "drive"}
     get_ok, html_ok = _req_status(service_port, "/?code=c1&state=st-ok")
     assert get_ok == HTTPStatus.OK and "Google Drive connected" in html_ok
     get_bad_st, html_bad = _req_status(service_port, "/?code=c1&state=missing")
