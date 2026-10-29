@@ -340,9 +340,13 @@ class ModelDownloader:
                     TimeElapsedColumn(),
                 ) as progress:
                     task = progress.add_task("Tensorizing model weights", total=None)
+                    # This runs on the host, outside any container: the repository's own modeling
+                    # code never runs and pickled weights are never loaded. A model that needs
+                    # either is serialized by the container attempt or not at all.
                     model = AutoModelForCausalLM.from_pretrained(
                         str(snapshot_dir),
-                        trust_remote_code=True,
+                        trust_remote_code=False,
+                        use_safetensors=True,
                         low_cpu_mem_usage=True,
                         torch_dtype="auto"
                     )
