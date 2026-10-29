@@ -159,6 +159,16 @@ def test_a_request_head_is_rewritten_to_one_request_per_connection():
     assert ModelGateService.parse_head(b"garbage\r\n\r\n") is None
 
 
+def test_a_url_in_the_query_does_not_make_a_path_read_only():
+    # The engine serves the origin-form path, so the gate must decide on it too: read as an
+    # absolute URL, this one was `/v1/models` and passed a closed gate from anywhere.
+    closed = {"state": "closed", "networks": ["172.30.0.0/16"]}
+    for target in (b"/health_generate?u=http://x/v1/models", b"/flush_cache?http://x/health"):
+        method, path, _ = ModelGateService.parse_head(b"GET " + target + b" HTTP/1.1\r\n\r\n")
+        assert path == target.decode().split("?", 1)[0]
+        assert not ModelGateService.allows(closed, "203.0.113.5", method, path)
+
+
 # -- the proxy, live on loopback ------------------------------------------------------------------
 
 

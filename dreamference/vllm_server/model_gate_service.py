@@ -309,7 +309,9 @@ class ModelGateService:
             return None
         method = parts[0].decode("latin-1")
         target = parts[1].decode("latin-1")
-        if "://" in target:  # absolute form
+        # Absolute form only: a `://` in an origin-form target's query
+        # (`/health_generate?u=http://x/v1/models`) must not make it a read-only path.
+        if not target.startswith("/") and "://" in target:
             target = "/" + target.split("://", 1)[1].partition("/")[2]
         path = target.split("?", 1)[0] or "/"
         headers = []
