@@ -2937,7 +2937,12 @@ class DreamferenceCLIController:
                 
                     # Print progress while server is initializing
                     last_status = None
-                    while not monitor.server_ready and vllm_mgr.process and vllm_mgr.process.poll() is None:
+                    while (
+                        not monitor.server_ready
+                        and not monitor.fatal
+                        and vllm_mgr.process
+                        and vllm_mgr.process.poll() is None
+                    ):
                         current_status = monitor.get_status()
                         # Only print if status changed to avoid spam
                         if current_status['stages_reached'] != last_status:
@@ -3013,6 +3018,11 @@ class DreamferenceCLIController:
                                 print(f"🌫️  Diffusion sidecar at {diffusion_mgr.host}/v1 — "
                                       f"still loading in background (state: {state})")
 
+                    elif monitor.fatal:
+                        # The log showed a load that cannot succeed: stop it rather than wait.
+                        print(f"\n❌ {monitor.fatal}")
+                        vllm_mgr.stop_server(port=args.port)
+                        sys.exit(1)
                     else:
                         # The container stopped before the server answered (`docker logs -f` ended).
                         print(f"\n❌ The model server stopped before it answered. Its log: "

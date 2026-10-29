@@ -45,6 +45,8 @@ class ModelLoadingMonitor:
         self.stages_reached: set = set()
         self.start_time: Optional[float] = None
         self.server_ready = False
+        # Why the load cannot succeed, once the log has shown it; the launch stops on it.
+        self.fatal: str | None = None
 
     def start(self) -> None:
         """Starts the monitoring thread."""
@@ -121,14 +123,19 @@ class ModelLoadingMonitor:
         line_lower = line.lower()
         
         # Check for unknown vLLM environment variables
-        unknown_env_match = re.search(r"unknown vllm environment variable[:\s']*([^'\s]+)", line_lower, re.IGNORECASE)
+        # vLLM's wording: "Unknown vLLM environment variable detected: %s".
+        unknown_env_match = re.search(r"unknown vllm environment variable(?: detected)?[:\s']*([^'\s]+)", line_lower, re.IGNORECASE)
         if unknown_env_match:
             var_name = unknown_env_match.group(1).upper()
             if var_name in self.recipe_env_keys:
-                print(f"\n[bold red]FATAL ERROR: vLLM rejected recipe-supplied environment variable '{var_name}'.[/bold red]")
-                print("[bold red]This usually indicates a typo or a change in vLLM version that breaks the required kernel pin.[/bold red]")
-                import sys
-                sys.exit(1)
+                # This runs in the monitor's thread, where sys.exit would end only the thread: the
+                # launch reads `fatal` and stops itself.
+                self.fatal = (
+                    f"vLLM rejected recipe-supplied environment variable '{var_name}'. This usually "
+                    "indicates a typo or a change in vLLM version that breaks the required kernel pin."
+                )
+                print(f"\nFATAL ERROR: {self.fatal}")
+                self.running = False
 
         for stage_name, pattern in self.LOADING_STAGES:
             if re.search(pattern, line_lower, re.IGNORECASE):
