@@ -731,9 +731,7 @@ pub fn list_json(inputs: &Inputs, adverts: &[Advert], models: &[Option<crate::Se
             })
         })
         .collect();
-    let away = in_use.filter(|used| {
-        !adverts.iter().any(|advert| (!used.node.is_empty() && advert.node.node == used.node) || advert.node.address == used.address)
-    });
+    let away = in_use.filter(|used| !adverts.iter().any(|advert| is_used(used, &advert.node)));
     serde_json::json!({
         "thisMachine": this_machine,
         "nodes": nodes,
@@ -777,9 +775,7 @@ pub fn list_lines(inputs: &Inputs, adverts: &[Advert], models: &[Option<crate::S
         }
     }
     if let Some(used) = in_use {
-        let seen = adverts.iter().any(|advert| {
-            (!used.node.is_empty() && advert.node.node == used.node) || advert.node.address == used.address
-        });
+        let seen = adverts.iter().any(|advert| is_used(used, &advert.node));
         if !seen && inputs.overlay && used.overlay_name_is_its_own() {
             lines.push(format!("* {}  {}/v1  over the overlay (remote access)", label(used), used.via_overlay().model_url()));
         } else if !seen {
@@ -910,10 +906,10 @@ pub fn usable_addresses(addresses: &[IpAddr]) -> Vec<IpAddr> {
 
 /// Adds a node to those found, or adds the addresses of this answer to one already there: answers
 /// arrive per interface and per address family, and one node must be one row, at its best address.
+/// One node is one instance name (its host name, on every interface) with one id: another name
+/// claiming the same id stays a row of its own, so that [`resolve`] sees two claimants.
 fn merge(found: &mut Vec<Advert>, advert: Advert) {
-    let same = |other: &Advert| {
-        if advert.node.node.is_empty() { other.node.name == advert.node.name } else { other.node.node == advert.node.node }
-    };
+    let same = |other: &Advert| other.node.name == advert.node.name && other.node.node == advert.node.node;
     match found.iter_mut().find(|other| same(other)) {
         None => found.push(advert),
         Some(existing) => {
@@ -1346,6 +1342,20 @@ mod tests {
     }
 
     #[test]
+    fn another_node_at_the_remembered_address_does_not_hide_that_the_remembered_one_is_away() {
+        // The remembered node has an id, so it is found by its id; another node that now has its
+        // old address is not it, in the list as in `resolve`.
+        let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
+        let other = advert("spark-2", "22222222-bbbb", "192.168.50.105");
+        let lines = list_lines(&inputs, std::slice::from_ref(&other), &[None]);
+        assert!(lines[0].starts_with("  spark-2"), "{lines:?}");
+        assert!(lines.last().is_some_and(|line| line.starts_with("* spark-1") && line.ends_with("did not answer this browse")), "{lines:?}");
+        let list = list_json(&inputs, &[other], &[None], None);
+        assert_eq!(list["nodes"][0]["inUse"], false);
+        assert_eq!(list["rememberedAway"]["name"], "spark-1");
+    }
+
+    #[test]
     fn the_json_list_names_the_nodes_and_never_an_address() {
         let model = crate::ServedModel { id: "RadixArk/Qwen3.8-27B-NVFP4".into(), max_model_len: 262_144, owned_by: "sglang".into() };
         let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
@@ -1425,6 +1435,19 @@ mod tests {
         assert_eq!(found.iter().map(|a| (a.node.name.as_str(), a.node.address.as_str())).collect::<Vec<_>>(),
                    vec![("spark-1", "192.168.50.105"), ("spark-2", "192.168.50.106")]);
         assert_eq!(found[0].addresses, vec!["192.168.50.105".to_string(), "fd00::2".to_string()]);
+    }
+
+    #[test]
+    fn two_instances_claiming_one_id_stay_two_rows_so_the_claim_is_questioned() {
+        // A node advertises one instance name, its host name, on every interface: another name with
+        // the same id is another machine. Merged into one row, `resolve` never saw two claimants
+        // and followed whichever address sorted first, here the impostor's.
+        let mut found = Vec::new();
+        merge(&mut found, advert("spark-1", "11111111-aaaa", "192.168.50.200"));
+        merge(&mut found, advert("impostor", "11111111-aaaa", "192.168.50.66"));
+        assert_eq!(found.len(), 2, "{found:?}");
+        let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
+        assert!(matches!(resolve(&inputs, &Fixed::new(found)), Resolution::Choose { .. }));
     }
 
     #[test]
