@@ -585,7 +585,7 @@ if [ "$ROLE" = "node" ]; then
         say "🐍 Creating $VENV_DIR ..."
         if ! python3 -m venv "$VENV_DIR" > "$WORK/venv.log" 2>&1; then
             # DGX OS ships python3 without venv's ensurepip (python3-venv): measured on a fresh
-            # GX10, 2026-10-08. It is installed here rather than left as a next step.
+            # GB10, 2026-10-08. It is installed here rather than left as a next step.
             rm -rf "$VENV_DIR"
             if [ "$NODE_ROOT" = 0 ] && [ "$(id -u)" != 0 ]; then
                 sudo -n true 2>/dev/null && SUDO="sudo -n" \
