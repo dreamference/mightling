@@ -519,4 +519,12 @@ mod tests {
         let args: Vec<String> = vec!["--kind".to_string(), "pid_exit".to_string(), "--bogus".to_string()];
         assert!(parse_watch_args(&args).is_err());
     }
+
+    #[test]
+    fn ask_and_night_are_refused_as_not_built() {
+        for sub in ["ask", "night"] {
+            assert_eq!(run(&[sub.to_string()]), 2, "{sub}");
+        }
+        assert_eq!(run(&[]), 2);
+    }
 }
