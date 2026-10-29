@@ -352,7 +352,14 @@ impl Live {
                 command.error = Some("the device did not say how it went".to_string());
                 changed = true;
             }
-            if command.state == "waiting" && now.duration_since(UNIX_EPOCH + Duration::from_secs(command.at)).unwrap_or_default() > QUEUE_FOR {
+            // A command handed to an online host that went away before taking it: an approval, a
+            // stop or a new thread is never kept for later, a message no longer than one waiting.
+            let age = now.duration_since(UNIX_EPOCH + Duration::from_secs(command.at)).unwrap_or_default();
+            if command.state == "queued" && age > if command.kind == "send" { QUEUE_FOR } else { ANSWER_WITHIN } {
+                command.state = "expired".to_string();
+                changed = true;
+            }
+            if command.state == "waiting" && age > QUEUE_FOR {
                 command.state = "expired".to_string();
                 changed = true;
             }
@@ -683,6 +690,21 @@ mod tests {
         answered.acks = vec![Ack { id: sent.id, ok: true, ..Ack::default() }];
         live.host_post(&laptop, answered, &owners, &title);
         assert_eq!(live.command_state(sent.id).unwrap().state, "done");
+    }
+
+    #[test]
+    fn an_approval_for_a_host_that_went_away_is_not_delivered_when_it_comes_back() {
+        let live = Live::new(scratch("vanished"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        live.host_post(&laptop, post(vec![json!({ "method": "turn/started", "params": { "threadId": T, "turn": { "id": "turn-1" } } }), approval(7)], &[T]), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        let ask = Ask { kind: "approve".to_string(), thread: Some(T.to_string()), request: Some(json!(7)), decision: Some("accept".to_string()), ..Ask::default() };
+        let sent = live.command(&phone, ask, "lap").unwrap();
+        assert_eq!(sent.state, "queued");
+        // The host never came for it; hours later it is back.
+        live.lock().commands.iter_mut().for_each(|command| command.at -= 3 * 60 * 60);
+        assert!(live.host_post(&laptop, post(vec![], &[T]), &owners, &title).is_empty());
+        assert_eq!(live.command_state(sent.id).unwrap().state, "expired");
     }
 
     #[test]
