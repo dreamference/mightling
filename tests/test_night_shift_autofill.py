@@ -307,12 +307,15 @@ def test_a_failing_test_whose_parameter_holds_a_space_is_not_cut_short(tmp_path:
         runs=[{"databaseId": 7, "workflowName": "CI", "event": "push"}],
         log="FAILED tests/test_a.py::test_b[x y] - boom\nFAILED tests/test_a.py::test_c[z] - boom\n",
     )
-    assert [c.key for c in NightShiftAutofill.ci_candidates(run)] == ["ci-test:tests/test_a.py::test_c[z]"]
+    assert [c.key for c in NightShiftAutofill.ci_candidates(run)] == [
+        "ci-test:tests/test_a.py::test_c[z]"
+    ]
 
 
 @pytest.mark.parametrize("value", ["0", "6", "-1"])
 def test_autofill_max_outside_one_to_five_is_refused_not_read_as_the_default(value: str) -> None:
     from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+
     parser = DreamferenceCLIController.build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["night", "autofill", "--max", value])

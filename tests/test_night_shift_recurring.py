@@ -380,9 +380,13 @@ def test_a_template_dropped_while_its_task_is_being_queued_stays_dropped(tmp_pat
     def dropped_meanwhile(args: list[str], **options: Any) -> "subprocess.CompletedProcess[str]":
         # `ling night repeat drop` runs while `ling night add` is still at work.
         assert NightShiftRecurring.drop(night, template["id"])
-        return subprocess.CompletedProcess(args, 0, stdout="Queued 20261023-2200 on branch x.", stderr="")
+        return subprocess.CompletedProcess(
+            args, 0, stdout="Queued 20261023-2200 on branch x.", stderr=""
+        )
 
-    said = NightShiftRecurring.queue_due(night, "/opt/ling", date(2026, 10, 23), run=dropped_meanwhile)
+    said = NightShiftRecurring.queue_due(
+        night, "/opt/ling", date(2026, 10, 23), run=dropped_meanwhile
+    )
     assert any("queued for tonight" in line for line in said)
     assert NightShiftRecurring.templates(night) == []
     assert not list(NightShiftRecurring.folder(night).glob("*.tmp"))

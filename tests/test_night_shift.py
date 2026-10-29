@@ -1404,6 +1404,7 @@ def test_the_node_refuses_a_malformed_task_and_answers_only_about_tasks_from_oth
 
 def test_a_task_sent_again_after_an_unanswered_submit_is_not_failed_by_its_own_first_copy(two_nodes, monkeypatch):
     import base64
+
     from dreamference.night_shift import NightShiftRemote
     task = queue(two_nodes["night"], two_nodes["repo"], task_id="20261001-0100-e10")
     path = two_nodes["night"] / "tasks" / f"{task['id']}.json"

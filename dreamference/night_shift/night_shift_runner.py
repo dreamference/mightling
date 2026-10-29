@@ -503,10 +503,12 @@ class NightShiftRunner:
             return [f"The audit could not run: {error}."]
 
     @classmethod
-    def _audit_only_report(cls, night_dir: Path, started: datetime, notes: List[str]) -> str:
+    def _audit_only_report(cls, night_dir: Path, started: datetime, notes: list[str]) -> str:
         """Writes a taskless report, when the compaction audit or the night's notes have something to say.
 
         Args:
+            night_dir: Night Shift's folder.
+            started: When the run started.
             notes: What repeating tasks and autofill said; a repeating task not queued is one.
 
         Returns:

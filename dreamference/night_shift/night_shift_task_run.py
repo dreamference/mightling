@@ -980,7 +980,12 @@ class NightShiftTaskRun:
 
     @classmethod
     def detect_test_command(
-        cls, worktree: Path, override: str | None, configured: str | None, repo: Path, base: str | None = None
+        cls,
+        worktree: Path,
+        override: str | None,
+        configured: str | None,
+        repo: Path,
+        base: str | None = None,
     ) -> tuple[str | None, str]:
         """Picks the command that decides pass or fail (§5.4); the first match wins.
 
@@ -997,8 +1002,11 @@ class NightShiftTaskRun:
         """
         if override:
             return override, "--test"
-        repo_table = cls._base_table(worktree, base) if base else NightShiftSettings.read_table(
-            worktree / "dreamference.toml")
+        repo_table = (
+            cls._base_table(worktree, base)
+            if base
+            else NightShiftSettings.read_table(worktree / "dreamference.toml")
+        )
         if repo_table.get("test"):
             return str(repo_table["test"]), "dreamference.toml [night] test"
         if configured:
