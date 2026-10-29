@@ -4,6 +4,7 @@ No network, ssh or rsync: the session is a stand-in holding the "remote" files a
 """
 
 import hashlib
+import re
 import subprocess
 from pathlib import Path
 from typing import ClassVar
@@ -36,6 +37,24 @@ def hub(tmp_path):
 
 def completed(code=0, out="", err=""):
     return subprocess.CompletedProcess([], code, out, err)
+
+
+# What the recipient reads when it looks up its way to the donor: `ip -4 -o route get` for the
+# address mDNS gave, then `ip -4 -o addr show`. The donor is on the same LAN, no router between.
+LAN_ROUTE = (
+    "192.168.50.11 dev enP7s7 src 192.168.50.12 uid 1000 \\    cache \n"
+    "2: enP7s7    inet 192.168.50.12/24 brd 192.168.50.255 scope global enP7s7\\       valid_lft forever\n"
+    "3: wlP9s9    inet 192.168.1.20/24 brd 192.168.1.255 scope global wlP9s9\\       valid_lft forever\n"
+)
+
+
+def lan_answer(script):
+    """Answer the LAN copy's two probes (the recipient's route, the donor's rrsync), or None."""
+    if "getent ahostsv4" in script:
+        return completed(0, LAN_ROUTE)
+    if "command -v rrsync" in script:
+        return completed(0, "/usr/bin/rrsync\n")
+    return None
 
 
 class RemoteSession:
@@ -152,12 +171,16 @@ def test_the_lan_copy_authorises_an_ephemeral_key_pins_the_host_key_and_always_c
 
     def recipient_run(script, input_text=None, timeout=None, **kwargs):
         recipient.commands.append(script)
+        if lan_answer(script):
+            return lan_answer(script)
         if "ssh-keygen" in script:
             return keygen(script)
         return completed(0)
 
     def donor_run(script, input_text=None, timeout=None, **kwargs):
         donor.commands.append(script)
+        if lan_answer(script):
+            return lan_answer(script)
         return (
             completed(0, "ssh-ed25519 AAAAhost root@x\n")
             if "ssh_host_ed25519" in script
@@ -173,7 +196,7 @@ def test_the_lan_copy_authorises_an_ephemeral_key_pins_the_host_key_and_always_c
     assert "date -d '+7 hours' +%Y%m%d%H%M" in authorise
     copy = next(c for c in recipient.commands if "rsync" in c)
     assert "spark-1a2b.local ssh-ed25519 AAAAhost" in copy and "StrictHostKeyChecking=yes" in copy
-    assert "owner@spark-1a2b.local:/donor/hub/models--org--m/" in copy
+    assert "owner@spark-1a2b.local:./" in copy
     # a link the donor sends that points outside the folder is not created here
     assert "--safe-links" in copy
     assert any("sed -i" in c and "mightling-lan-copy-" in c for c in donor.commands)
@@ -193,12 +216,16 @@ def test_a_donor_cannot_reach_the_recipients_shell_through_its_host_key(hub):
 
     def recipient_run(script, input_text=None, timeout=None, **kwargs):
         recipient.commands.append(script)
+        if lan_answer(script):
+            return lan_answer(script)
         if "ssh-keygen" in script:
             return keygen(script)
         return completed(0)
 
     def donor_run(script, input_text=None, timeout=None, **kwargs):
         donor.commands.append(script)
+        if lan_answer(script):
+            return lan_answer(script)
         if "ssh_host_ed25519" in script:
             return completed(0, "ssh-ed25519 AAAA;touch${IFS}/tmp/owned root@x\n")
         return completed(0)
@@ -216,11 +243,15 @@ def test_a_lan_copy_key_whose_removal_fails_is_named_in_a_warning(hub, caplog):
     recipient, donor = RemoteSession(), RemoteSession()
 
     def recipient_run(script, input_text=None, timeout=None, **kwargs):
+        if lan_answer(script):
+            return lan_answer(script)
         if "ssh-keygen" in script:
             return keygen(script)
         return completed(0)
 
     def donor_run(script, input_text=None, timeout=None, **kwargs):
+        if lan_answer(script):
+            return lan_answer(script)
         if "ssh_host_ed25519" in script:
             return completed(0, "ssh-ed25519 AAAAhost root@x\n")
         return completed(255) if "sed -i" in script else completed(0)
@@ -256,6 +287,123 @@ def test_a_lan_copy_authorises_only_a_key_the_removal_will_find(hub):
         fetch, _ = fetcher(hub, recipient)
         assert not fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
         assert not any("printf" in c and "authorized_keys" in c for c in donor.commands)
+
+
+def lan_sessions(hub, route=LAN_ROUTE, rrsync="/usr/bin/rrsync\n", home=None):
+    """A recipient and a donor that answer every LAN copy command, the probes as given.
+
+    With `home`, the donor's key commands run in a real shell whose home is that folder, and
+    `donor.keys` holds its authorized_keys as each command left it.
+    """
+    recipient, donor = RemoteSession(), RemoteSession()
+    donor.keys = []
+
+    def recipient_run(script, input_text=None, timeout=None, **kwargs):
+        recipient.commands.append(script)
+        if "getent ahostsv4" in script:
+            return completed(0 if route else 2, route)
+        if "ssh-keygen" in script:
+            token = script.split(" -C ", 1)[1].split()[0]
+            return completed(0, f"/tmp/work\nssh-ed25519 AAAAkey {token}\n")
+        return completed(0)
+
+    def donor_run(script, input_text=None, timeout=None, **kwargs):
+        donor.commands.append(script)
+        if "command -v rrsync" in script:
+            return completed(0 if rrsync else 1, rrsync)
+        if "ssh_host_ed25519" in script:
+            return completed(0, "ssh-ed25519 AAAAhost root@x\n")
+        if home is None:
+            return completed(0)
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(home)}
+        done = subprocess.run(["/bin/sh", "-c", script], env=env, capture_output=True, text=True)
+        donor.keys.append((home / ".ssh" / "authorized_keys").read_text())
+        return done
+
+    recipient.run, donor.run = recipient_run, donor_run
+    fetch, _ = fetcher(hub, recipient)
+    return fetch, recipient, donor
+
+
+def authorised_lines(donor):
+    return [c for c in donor.commands if "printf" in c and "authorized_keys" in c]
+
+
+def test_the_lan_copy_key_only_reads_the_folder_and_only_from_the_lan(hub, tmp_path):
+    fetch, recipient, donor = lan_sessions(hub, home=tmp_path)
+    assert fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
+    (line,) = donor.keys[0].splitlines()
+    options, public = line.rsplit(" ", 3)[0], " ".join(line.rsplit(" ", 3)[1:])
+    assert re.fullmatch(r"ssh-ed25519 AAAAkey mightling-lan-copy-[0-9a-f]+", public)
+    assert options.startswith('restrict,expiry-time="') and options.endswith(
+        # the key runs rrsync read-only on the one folder, whatever command its holder asks for,
+        # and is accepted only from the recipient's own LAN, looked up now by the donor's mDNS name
+        '",from="192.168.50.0/24",command="/usr/bin/rrsync -ro /donor/hub/models--org--m"'
+    )
+    assert donor.keys[-1] == ""
+    assert any("getent ahostsv4 spark-1a2b.local" in c for c in recipient.commands)
+    copy = next(c for c in recipient.commands if "rsync -aH" in c)
+    assert "ssh -4 " in copy and "owner@spark-1a2b.local:./" in copy and "/donor/hub" not in copy
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        "",
+        "192.168.50.11 via 192.168.1.1 dev wlP9s9 src 192.168.1.20 uid 1000\n"
+        "3: wlP9s9    inet 192.168.1.20/24 brd 192.168.1.255 scope global wlP9s9\n",
+        "192.168.50.11 dev enP7s7 src 192.168.50.12 uid 1000\n",
+    ],
+    ids=["not resolved", "through a router", "no address on the device"],
+)
+def test_a_donor_that_is_not_on_the_recipients_lan_gets_no_key(hub, route, caplog):
+    fetch, recipient, donor = lan_sessions(hub, route=route)
+    with caplog.at_level("WARNING"):
+        assert not fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
+    assert not authorised_lines(donor) and not any("ssh-keygen" in c for c in recipient.commands)
+    assert "spark-1a2b.local" in caplog.text and "192.168" not in caplog.text
+
+
+def test_a_donor_without_rrsync_gets_no_key(hub, caplog):
+    fetch, _, donor = lan_sessions(hub, rrsync="")
+    with caplog.at_level("WARNING"):
+        assert not fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
+    assert not authorised_lines(donor) and "rrsync" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("donor_hub", "folder"),
+    [
+        ("/donor/hub x", FOLDER),
+        ('/donor/hub"', FOLDER),
+        ("/donor/hub", "../.ssh"),
+        ("relative/hub", FOLDER),
+        ("/donor/../hub", FOLDER),
+        ("/donor/hub", ".."),
+    ],
+)
+def test_a_folder_that_is_not_a_plain_path_gets_no_key(hub, donor_hub, folder):
+    fetch, _, donor = lan_sessions(hub)
+    assert not fetch.lan_copy(folder, donor, "spark-1a2b.local", "owner", donor_hub)
+    assert not authorised_lines(donor)
+
+
+@pytest.mark.parametrize(
+    ("probe", "network"),
+    [
+        (LAN_ROUTE, "192.168.50.0/24"),
+        ("", None),
+        ("192.168.50.11 via 192.168.50.1 dev enP7s7 src 192.168.50.12\n" + LAN_ROUTE, None),
+        ("local 192.168.50.12 dev lo src 192.168.50.12 uid 1000\n", None),
+        (
+            "192.168.50.11 dev enP7s7 src 192.168.50.12\n2: enP7s7    inet 192.168.50.12/32 scope global\n",
+            None,
+        ),
+    ],
+    ids=["same LAN", "nothing", "router", "itself", "no subnet"],
+)
+def test_the_lan_is_read_from_the_route_to_the_donor(probe, network):
+    assert FleetHubFetch.lan_network(probe) == network
 
 
 # -- the provisioner -------------------------------------------------------------------------------
@@ -367,12 +515,16 @@ def test_the_lan_copy_leaves_the_donors_own_key_when_its_file_has_no_final_newli
     donor.host = "house-2"
 
     def recipient_run(script, input_text=None, timeout=None, **kwargs):
+        if lan_answer(script):
+            return lan_answer(script)
         if "ssh-keygen" in script:
             token = script.split(" -C ", 1)[1].split()[0]
             return completed(0, f"/tmp/work\nssh-ed25519 AAAAkey {token}\n")
         return completed(0)
 
     def donor_run(script, input_text=None, timeout=None, **kwargs):
+        if lan_answer(script):
+            return lan_answer(script)
         if "ssh_host_ed25519" in script:
             return completed(0, "ssh-ed25519 AAAAhost root@x\n")
         env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}

@@ -12,9 +12,14 @@ over that LAN (`lan_copy`).
 The main node's own weight files are trusted by name: a large file in the hub cache is stored under
 the SHA-256 of its content; the small files are hashed here. Nothing is stored about the machines but
 their names (the LAN copy uses the donor's `<hostname>.local`, resolved there, never an address).
+
+The LAN copy's key can do one thing on the donor: `rrsync -ro` on the one folder (`command=`), from
+the recipient's own LAN (`from=`, the subnet the recipient reaches the donor on, looked up by the
+donor's mDNS name when the copy starts, never written anywhere but that key line).
 """
 
 import hashlib
+import ipaddress
 import logging
 import re
 import secrets
@@ -69,6 +74,23 @@ except Exception as error:
 
 # rsync's exits that mean the connection went (FleetSession.RSYNC_DROPPED).
 LAN_RETRY_CODES: Final[str] = "10|12|30|35|255"
+
+# The LAN copy's rsync; its source is `./`, the folder the donor's `rrsync -ro` serves.
+LAN_RSYNC: Final[str] = "rsync -aH --safe-links --partial --append-verify --timeout=120 --mkpath"
+# What may go into the forced command: an absolute path of plain characters, and a folder name.
+# Neither may climb or stand still (`..`, `.`).
+PLAIN_PATH: Final[re.Pattern] = re.compile(r"(?:/(?!\.\.?(?:/|$))[A-Za-z0-9._+-]+)+")
+PLAIN_NAME: Final[re.Pattern] = re.compile(r"(?!\.\.?$)[A-Za-z0-9._+-]+")
+# `ip -4 -o route get` for a neighbour on the same link: no `via`, the device and source address.
+# A route through a router (`<to> via …`) or to the machine itself (`local <to> …`) does not match.
+ON_LINK_ROUTE: Final[re.Pattern] = re.compile(r"[0-9.]+ dev (\S+) (?:.* )?src ([0-9.]+)\b")
+# One line of `ip -4 -o addr show`: the device and its address with the prefix length.
+DEVICE_ADDRESS: Final[re.Pattern] = re.compile(r"[0-9]+: (\S+)\s+inet ([0-9./]+)")
+# The recipient's way to the donor: the first IPv4 address mDNS gives, the route to it, the addresses.
+LAN_PROBE: Final[str] = (
+    'a="$(getent ahostsv4 {name} | awk \'NR == 1 {{ print $1 }}\')" && [ -n "$a" ] && '
+    'ip -4 -o route get "$a" && ip -4 -o addr show'
+)
 
 
 class FleetHubFetch:
@@ -302,6 +324,84 @@ class FleetHubFetch:
 
     # -- the fallback: from a neighbour on the same LAN -------------------------------------------
 
+    @classmethod
+    def forced_command(cls, rrsync: str, donor_hub: str, folder: str) -> str | None:
+        """Return the LAN copy key's forced command on the donor, or None for a path that is not plain.
+
+        Args:
+            rrsync: Where `rrsync` is on the donor.
+            donor_hub: The donor's hub cache folder.
+            folder: A hub cache folder name.
+
+        Returns:
+            str | None: `rrsync -ro <donor_hub>/<folder>`, safe inside the key line's double quotes.
+        """
+        hub = donor_hub.rstrip("/")
+        if not (PLAIN_PATH.fullmatch(rrsync) and PLAIN_PATH.fullmatch(hub)):
+            return None
+        if not PLAIN_NAME.fullmatch(folder):
+            return None
+        return f"{rrsync} -ro {hub}/{folder}"
+
+    @classmethod
+    def lan_network(cls, probe: str) -> str | None:
+        """Return the subnet the recipient reaches the donor on, or None when it is not one LAN.
+
+        Args:
+            probe: `LAN_PROBE`'s output: the route to the donor, then the recipient's addresses.
+
+        Returns:
+            str | None: The network of the address the route leaves from (`192.168.50.0/24`), or
+            None when the route goes through a router, is the machine itself, or names no subnet.
+        """
+        lines = probe.splitlines()
+        route = ON_LINK_ROUTE.match(lines[0]) if lines else None
+        if route is None:
+            return None
+        device, source = route.groups()
+        for line in lines[1:]:
+            found = DEVICE_ADDRESS.match(line)
+            if found is None or found.group(1) != device:
+                continue
+            try:
+                address = ipaddress.IPv4Interface(found.group(2))
+            except ValueError:
+                continue
+            if str(address.ip) == source and address.network.prefixlen < address.max_prefixlen:
+                return str(address.network)
+        return None
+
+    def _lan_key_limits(
+        self, donor: FleetSession, donor_name: str, donor_hub: str, folder: str
+    ) -> tuple[str, str] | None:
+        """Return the LAN copy key's `from=` network and forced command, or None (said why).
+
+        Args:
+            donor: The donor's provisioning session.
+            donor_name: The donor's name on the LAN (`<hostname>.local`).
+            donor_hub: The donor's hub cache folder.
+            folder: A hub cache folder name.
+
+        Returns:
+            tuple[str, str] | None: The recipient's LAN and `rrsync -ro` on the folder, or None
+            when the donor has no rrsync, a path is not plain, or the donor is not on this LAN.
+        """
+        rrsync = donor.run("command -v rrsync")
+        forced = self.forced_command((rrsync.stdout or "").strip(), donor_hub, folder)
+        if rrsync.returncode != 0 or forced is None:
+            LOG.warning(
+                "%s has no rrsync (Ubuntu's rsync package) or no plain path to %s; no LAN copy.",
+                donor_name,
+                folder,
+            )
+            return None
+        probe = self.session.run(LAN_PROBE.format(name=shlex.quote(donor_name)))
+        network = self.lan_network(probe.stdout or "") if probe.returncode == 0 else None
+        if network is None:
+            LOG.warning("%s is not on this machine's own LAN; no LAN copy.", donor_name)
+            return None
+        return network, forced
+
     def lan_copy(
         self, folder: str, donor: FleetSession, donor_name: str, donor_user: str, donor_hub: str
     ) -> bool:
@@ -309,7 +409,8 @@ class FleetHubFetch:
 
         An ephemeral key made on this machine is authorised on the donor (restricted, removed at the
         end, whatever happens) and the donor's host key is pinned from its own session, so nothing
-        persistent is added and nothing is trusted on first use. The copy runs between the two
+        persistent is added and nothing is trusted on first use. The key can only run `rrsync -ro`
+        on the folder, and only from the recipient's own LAN. The copy runs between the two
         machines; nothing passes through here.
 
         Args:
@@ -322,6 +423,10 @@ class FleetHubFetch:
         Returns:
             bool: True when rsync succeeded between them.
         """
+        limits = self._lan_key_limits(donor, donor_name, donor_hub, folder)
+        if limits is None:
+            return False
+        network, forced = limits
         token = f"mightling-lan-copy-{secrets.token_hex(6)}"
         made = self.session.run(
             'd="$(mktemp -d)" && ssh-keygen -q -t ed25519 -N "" -C '
@@ -353,13 +458,14 @@ class FleetHubFetch:
             authorised = donor.run(
                 f"umask 077; mkdir -p ~/.ssh && {AUTHORIZED_KEYS_ENDS_IN_NEWLINE} && "
                 f"expires=\"$(date -d '+{KEY_EXPIRY_HOURS} hours' +%Y%m%d%H%M)\" && "
-                'printf \'restrict,expiry-time="%s" %s\\n\' "$expires" '
+                'printf \'restrict,expiry-time="%s",from="%s",command="%s" %s\\n\' "$expires" '
+                f"{shlex.quote(network)} {shlex.quote(forced)} "
                 f"{shlex.quote(public)} >> ~/.ssh/authorized_keys"
             )
             if authorised.returncode != 0:
                 return False
             transport = (
-                f"ssh -i {workdir}/k -o IdentitiesOnly=yes -o BatchMode=yes "
+                f"ssh -4 -i {workdir}/k -o IdentitiesOnly=yes -o BatchMode=yes "
                 f"-o UserKnownHostsFile={workdir}/kh -o StrictHostKeyChecking=yes "
                 "-o ServerAliveInterval=15 -o ServerAliveCountMax=4"
             )
@@ -367,9 +473,8 @@ class FleetHubFetch:
                 f"printf '%s %s %s\\n' {shlex.quote(donor_name)} {shlex.quote(fields[0])} "
                 f"{shlex.quote(fields[1])} "
                 f"> {workdir}/kh && for i in $(seq 1 20); do "
-                f"rsync -aH --safe-links --partial --append-verify --timeout=120 --mkpath "
-                f"-e {shlex.quote(transport)} "
-                f"{shlex.quote(f'{donor_user}@{donor_name}:{donor_hub}/{folder}/')} "
+                f"{LAN_RSYNC} -e {shlex.quote(transport)} "
+                f"{shlex.quote(f'{donor_user}@{donor_name}:./')} "
                 f"{shlex.quote(f'{self.remote_hub}/{folder}/')} && exit 0; s=$?; "
                 f'case "$s" in {LAN_RETRY_CODES}) sleep 10;; *) exit "$s";; esac; done; exit 1'
             )
