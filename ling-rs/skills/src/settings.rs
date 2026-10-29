@@ -114,7 +114,13 @@ impl Settings {
     }
 
     /// Replaces the file whole (write, then rename), like every other file the launcher keeps.
+    /// A file that is not TOML read as the defaults, so it is left for the user to fix.
     pub fn save(&self, codex_home: &Path) -> io::Result<()> {
+        if let Ok(text) = std::fs::read_to_string(Self::path(codex_home))
+            && let Err(error) = text.parse::<toml::Table>()
+        {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("it is not TOML, so it is left as it is: {error}")));
+        }
         std::fs::create_dir_all(codex_home)?;
         crate::write_atomically(&Self::path(codex_home), self.to_toml().as_bytes())
     }
