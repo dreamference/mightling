@@ -153,4 +153,15 @@ mod tests {
         assert!(settings.save(&home).is_ok());
         assert_eq!(Settings::load(&home), settings);
     }
+
+    #[test]
+    fn a_file_that_is_not_toml_is_not_written_over() {
+        // A typo makes the file read as the defaults; saving them would lose the user's lists.
+        let home = crate::testing::scratch("settings-typo");
+        let typo = "disabled = [\"terse-stats\"\n";
+        std::fs::write(Settings::path(&home), typo).unwrap();
+        let settings = Settings { announced: [("pdf".to_string(), "abc".to_string())].into(), ..Settings::load(&home) };
+        assert!(settings.save(&home).is_err());
+        assert_eq!(std::fs::read_to_string(Settings::path(&home)).unwrap(), typo);
+    }
 }
