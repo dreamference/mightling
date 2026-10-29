@@ -708,7 +708,7 @@ class NodeJob:
             record["note"] = f"job runner error: {error}"
             return 1
         finally:
-            cls._git(["--git-dir", str(repo), "worktree", "remove", "--force", str(tree)])
+            cls._remove_tree(repo, tree)
             current = cls.read(job_id) or {}
             if current.get("status") == "cancelled":
                 record["status"] = "cancelled"
@@ -716,6 +716,22 @@ class NodeJob:
                 record["status"] = "done" if code == 0 else "failed"
             record.update(finished=cls.now(), wall_s=int(time.time() - started))
             cls.write(record)
+
+    @classmethod
+    def _remove_tree(cls, repo: Path, tree: Path) -> None:
+        """Removes a finished job's worktree, also when the job replaced its `.git`.
+
+        Git refuses to remove a tree whose `.git` is not the link it wrote; the tree and the
+        job's own repository in it are then deleted here and the stale entry pruned.
+
+        Args:
+            repo: The job's bare repository.
+            tree: The job's worktree.
+        """
+        cls._git(["--git-dir", str(repo), "worktree", "remove", "--force", str(tree)])
+        if tree.exists():
+            shutil.rmtree(tree, ignore_errors=True)
+            cls._git(["--git-dir", str(repo), "worktree", "prune"])
 
     # -- the environment (§13.6) ------------------------------------------------------------------
 
