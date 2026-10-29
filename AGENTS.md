@@ -27,14 +27,14 @@ The venv is at `.venv/`. Use `.venv/bin/python` explicitly; there is no activati
 # Install (editable)
 .venv/bin/pip install -e .
 
-# Full test suite (~4 min, no GPU, Docker or model server: every hardware, subprocess and server call is mocked)
+# Full test suite (a few minutes, no GPU, Docker or model server: every hardware, subprocess and server call is mocked)
 .venv/bin/python -m pytest tests/ -q
 
 # Single file / single test
 .venv/bin/python -m pytest tests/test_vllm_server.py -q
 .venv/bin/python -m pytest tests/test_vllm_server.py::test_nvfp4_model_applies_registry_launch_recipe -q
 
-# Build and install ling, ling-search/ling-fetch, ling-code and ling-docs (stamped; --force rebuilds)
+# Build and install ling, ling-search/ling-fetch, ling-code, ling-docs and ling-delegate (stamped; --force rebuilds)
 ling-admin codex build
 
 # Docs (mkdocs-material; CI publishes to GitHub Pages on push to main)
@@ -54,7 +54,7 @@ ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev
 
 ## Gotchas: the hard rules
 
-- **Tests never touch the real machine.** `tests/conftest.py` gives every test its own `HOME`, re-points every `dreamference` module path computed at import under the real home into the test's home, fails any real `docker` command that changes something (reads like `docker info` stay allowed), fails any spawn of the installed `ling` (or anything under `~/.local/bin` and the install directory) and any connection to the model server's ports (8000, 18000), and stubs `GoogleService.start` and `RetiredWebChat.offer` (restore one from the `REAL_*` names in conftest to test it). A test needs a stand-in for the agent (`FAKE_MIGHTLING` in `test_night_shift.py`); only `test_mightling_slash_commands.py`, marked `installed_binary`, runs the built binary. A test needing a real path must opt in explicitly. Tests never write `/etc/avahi` or run sudo; `ling-docs` tests never use the real `HOME`. Details and history: [docs/dev/testing.md](docs/dev/testing.md).
+- **Tests never touch the real machine.** `tests/conftest.py` gives every test its own `HOME`, re-points every `dreamference` module path computed at import under the real home into the test's home, fails any real `docker` command that changes something (reads like `docker info` stay allowed), fails any spawn of the installed `ling` (or anything under `~/.local/bin` and the install directory) and any connection to the model server's ports (8000, 18000), and stubs `GoogleService.start` and `RetiredWebChat.offer` (restore one from the `REAL_*` names in conftest to test it). A test needs a stand-in for the agent (`FAKE_MIGHTLING` in `test_night_shift.py`); only tests marked `installed_binary` run the built binary. A test needing a real path must opt in explicitly. Tests never write `/etc/avahi` or run sudo; `ling-docs` tests never use the real `HOME`. Details and history: [docs/dev/testing.md](docs/dev/testing.md).
 - **`codex/` is never modified, and cargo never runs inside it**: even `cargo tree` rewrites the submodule's `Cargo.lock`. Changes to Codex are small numbered patches in `codex-patches/` under a size cap (`test_the_patches_stay_small`, raised only explicitly) or code in `ling-rs/`. No `--locked` for the Codex build. Details: [docs/dev/codex-build.md](docs/dev/codex-build.md).
 - **`ling` is never upstream `codex`.** `CodexInstaller` resolves the built path only; a fallback to a `codex` on PATH would silently bring back the unbranded agent.
 - **Host safety.** On unified memory a model load can freeze the whole host. Keep both layers, `check_host_safety()` before a load and the PSI watchdog during it, when touching `start_server()`; anything that runs beside a resident model server (indexing, sidecars) must bound its memory. Details: [docs/dev/host-safety.md](docs/dev/host-safety.md).
