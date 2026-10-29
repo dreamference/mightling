@@ -14,6 +14,7 @@ module's (`GoogleService.secret`).
 Nothing here prints: a failure is kept in `GoogleService.problem` for the CLI to say.
 """
 
+import contextlib
 import os
 import pathlib
 import shutil
@@ -84,12 +85,29 @@ class GoogleService:
         try:
             if os.path.exists(path):
                 with open(path) as handle:
-                    return handle.read().strip() or None
+                    value = handle.read().strip()
+                if value:
+                    return value
             os.makedirs(CREDENTIALS_DIR, mode=0o700, exist_ok=True)
             value = secrets_module.token_urlsafe(32)
-            with open(path, "w") as handle:
-                handle.write(value)
-            os.chmod(path, 0o600)
+            # Written whole and private under a name of its own, then linked into place. A link
+            # never replaces a file, so of two first starts at once the later keeps the earlier's.
+            temporary = f"{path}.{secrets_module.token_hex(8)}.tmp"
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with os.fdopen(descriptor, "w") as handle:
+                    handle.write(value)
+                try:
+                    os.link(temporary, path)
+                except FileExistsError:
+                    with open(path) as handle:
+                        existing = handle.read().strip()
+                    if existing:
+                        return existing
+                    os.replace(temporary, path)
+            finally:
+                with contextlib.suppress(OSError):
+                    os.unlink(temporary)
             return value
         except OSError as exc:
             cls.problem = f"Could not store the Google service's shared secret: {exc}"
