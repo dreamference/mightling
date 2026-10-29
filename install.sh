@@ -609,6 +609,9 @@ if [ "$ROLE" = "node" ]; then
         "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
     fi
     "$VENV_DIR/bin/python" -m pip install --quiet --upgrade ${pip_index[@]+"${pip_index[@]}"} "$WORK/$wheel"
+    # pip keeps an installed version it is given again, and a bundle of a checkout (node provision)
+    # carries the release's version number: the wheel itself is put in place, its dependencies not.
+    "$VENV_DIR/bin/python" -m pip install --quiet --force-reinstall --no-deps ${pip_index[@]+"${pip_index[@]}"} "$WORK/$wheel"
     link "$VENV_DIR/bin/ling-admin" ling-admin
     say "✅ Installed ling-admin $TAG in $VENV_DIR"
     step done "ling-admin $TAG installed in $VENV_DIR"

@@ -243,6 +243,7 @@ if [ "$1 $2" = "-m venv" ]; then
     mkdir -p "$3/bin"
     cat > "$3/bin/python" <<EOF
 #!/bin/sh
+echo "\$*" >> "\$HOME/pip.log"
 cat > "$3/bin/ling-admin" <<'ADMIN'
 #!/bin/sh
 echo "\$*" >> "\$HOME/admin.log"
@@ -770,6 +771,19 @@ def test_a_client_needs_no_root(tmp_path, release_server):
     result = run_install(tmp_path, release_server(binaries()), "--role", "client",
                          env_extra={"FAKE_SUDO": "password"})
     assert result.returncode == 0 and logged(tmp_path, "sudo.log") == "" and logged(tmp_path, "apt.log") == ""
+
+
+def test_a_node_reinstalls_a_wheel_of_the_same_version(tmp_path, release_server):
+    # `node provision` reinstalls whenever the bundle differs, and a bundle of a checkout carries
+    # setup.py's version, the one already installed: `pip install --upgrade` alone keeps the old
+    # code then ("is already installed with the same version"), so the wheel itself is forced.
+    result = run_install(tmp_path, release_server(node_release()), "--role", "node", "--no-advertise",
+                         "--no-host-setup", "--no-model")
+    assert result.returncode == 0, result.stdout + result.stderr
+    pip = [line.split() for line in logged(tmp_path, "pip.log").splitlines() if line.startswith("-m pip install")]
+    wheel = [args for args in pip if args[-1].endswith("/dreamference-9.9.9-py3-none-any.whl")]
+    assert any("--upgrade" in args and "--no-deps" not in args for args in wheel), pip
+    assert any("--force-reinstall" in args and "--no-deps" in args for args in wheel), pip
 
 
 def test_the_node_role_needs_the_wheel(tmp_path, release_server):
