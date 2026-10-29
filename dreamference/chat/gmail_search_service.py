@@ -1222,6 +1222,8 @@ class GmailSearchService:
                     return False
                 refused = cls.host_refusal(self.headers.get("Host"))
                 if refused:
+                    # The body stays unread, so the connection must not carry another request.
+                    self.close_connection = True
                     self._reply(403, {"error": refused})
                     return False
                 return True
