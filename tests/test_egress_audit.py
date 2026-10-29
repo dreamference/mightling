@@ -668,6 +668,22 @@ def test_the_chat_bridge_is_named_only_with_telegram_set_up(monkeypatch, tmp_pat
     assert "123:secret" not in lines[0], "the token is never printed"
 
 
+def test_the_chat_bridge_is_named_with_discord_set_up(monkeypatch, tmp_path):
+    discord = {"token": "MTIz.discord-secret", "application_id": "123", "users": {}}
+    _chat_files(monkeypatch, tmp_path, {"discord.json": discord})
+    _fake_units(monkeypatch, set())
+    assert EgressAudit.declared_exceptions() == [], "set up but not started: no bridge runs"
+    _fake_units(monkeypatch, {"mightling-chat.service"})
+    lines = EgressAudit.declared_exceptions()
+    assert len(lines) == 1 and "Discord bridge enabled" in lines[0]
+    assert "`ling chat discord off`" in lines[0]
+    assert "discord-secret" not in lines[0], "the token is never printed"
+    both = {"telegram.json": {"token": "t"}, "discord.json": {"token": "d"}}
+    _chat_files(monkeypatch, tmp_path / "both", both)
+    names = [line.split(" bridge enabled")[0] for line in EgressAudit.declared_exceptions()]
+    assert names == ["Telegram", "Discord"]
+
+
 def test_the_matrix_homeserver_is_named_with_its_push_setting(monkeypatch, tmp_path):
     _chat_files(monkeypatch, tmp_path, {"matrix-admin.json": {"server_name": "n.ts.net", "push": False}})
     _fake_units(monkeypatch, {"mightling-matrix-proxy.socket"})
