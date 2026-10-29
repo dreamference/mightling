@@ -947,6 +947,12 @@ mod tests {
     }
 
     #[test]
+    fn an_id_with_neither_a_result_nor_an_error_is_not_an_answer() {
+        assert_eq!(classify(r#"{"id":1,"error":{}}"#).0, Incoming::Response);
+        assert_eq!(classify(r#"{"id":1}"#).0, Incoming::NotProtocol);
+    }
+
+    #[test]
     fn the_busy_tracker_follows_turns() {
         let mut busy = BusyTracker::default();
         let t1 = serde_json::json!({"threadId": "t1"});
