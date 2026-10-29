@@ -301,6 +301,37 @@ impl Live {
         presence
     }
 
+    /// Commands nobody answered in time and those that waited too long, wherever a command is
+    /// looked at, so one handed to a host that went away does not read as delivered for ever.
+    /// Whether any changed; an expired waiting message also leaves `queue.json`.
+    fn expire(&self, inner: &mut Inner, now: SystemTime) -> bool {
+        let mut changed = false;
+        let mut unqueued = false;
+        for command in inner.commands.iter_mut() {
+            if command.state == "delivered" && command.delivered.as_ref().is_some_and(|(_, at)| now.duration_since(*at).unwrap_or_default() > ANSWER_WITHIN) {
+                command.state = "failed".to_string();
+                command.error = Some("the device did not say how it went".to_string());
+                changed = true;
+            }
+            // A command handed to an online host that went away before taking it: an approval, a
+            // stop or a new thread is never kept for later, a message no longer than one waiting.
+            let age = now.duration_since(UNIX_EPOCH + Duration::from_secs(command.at)).unwrap_or_default();
+            if command.state == "queued" && age > if command.kind == "send" { QUEUE_FOR } else { ANSWER_WITHIN } {
+                command.state = "expired".to_string();
+                changed = true;
+            }
+            if command.state == "waiting" && age > QUEUE_FOR {
+                command.state = "expired".to_string();
+                changed = true;
+                unqueued = true;
+            }
+        }
+        if unqueued {
+            self.save_queue(inner);
+        }
+        changed
+    }
+
     /// A host's post: its events and answers in, the commands meant for it out. `owner_of` names a
     /// thread's owner as the store has it (None for a thread not published yet).
     pub fn host_post(&self, caller: &Caller, post: HostPost, owner_of: &dyn Fn(&str) -> Option<String>, title_of: &dyn Fn(&str) -> Option<String>) -> Vec<Command> {
@@ -345,25 +376,7 @@ impl Live {
                 changed = true;
             }
         }
-        // Commands nobody answered in time.
-        for command in inner.commands.iter_mut() {
-            if command.state == "delivered" && command.delivered.as_ref().is_some_and(|(_, at)| now.duration_since(*at).unwrap_or_default() > ANSWER_WITHIN) {
-                command.state = "failed".to_string();
-                command.error = Some("the device did not say how it went".to_string());
-                changed = true;
-            }
-            // A command handed to an online host that went away before taking it: an approval, a
-            // stop or a new thread is never kept for later, a message no longer than one waiting.
-            let age = now.duration_since(UNIX_EPOCH + Duration::from_secs(command.at)).unwrap_or_default();
-            if command.state == "queued" && age > if command.kind == "send" { QUEUE_FOR } else { ANSWER_WITHIN } {
-                command.state = "expired".to_string();
-                changed = true;
-            }
-            if command.state == "waiting" && age > QUEUE_FOR {
-                command.state = "expired".to_string();
-                changed = true;
-            }
-        }
+        changed |= self.expire(&mut inner, now);
         // Commands for this host: its device's, for a thread it holds, or that no host of the
         // device holds (a host can resume a thread), oldest first.
         let held_elsewhere: BTreeSet<String> = Self::online_hosts(&inner, &caller.device, now)
@@ -467,7 +480,10 @@ impl Live {
 
     /// The events of a thread after `after`, and its state.
     pub fn follow(&self, thread: &str, after: u64) -> Following {
-        let inner = self.lock();
+        let mut inner = self.lock();
+        if self.expire(&mut inner, SystemTime::now()) {
+            self.bump(&mut inner);
+        }
         // Numbers start again with every run: a cursor past them was given out before a restart.
         let restarted = after > inner.seq;
         let after = if restarted { 0 } else { after };
@@ -497,6 +513,9 @@ impl Live {
         }
         let now = SystemTime::now();
         let mut inner = self.lock();
+        if self.expire(&mut inner, now) {
+            self.bump(&mut inner);
+        }
         let online = Self::online_hosts(&inner, owner, now).next().is_some();
         let text = ask.text.as_ref().map(|text| text.trim().to_string()).filter(|text| !text.is_empty());
         if text.as_ref().is_some_and(|text| text.len() > TEXT_CAP) {
@@ -573,7 +592,11 @@ impl Live {
     }
 
     pub fn command_state(&self, id: u64) -> Option<Command> {
-        self.lock().commands.iter().find(|command| command.id == id).cloned()
+        let mut inner = self.lock();
+        if self.expire(&mut inner, SystemTime::now()) {
+            self.bump(&mut inner);
+        }
+        inner.commands.iter().find(|command| command.id == id).cloned()
     }
 
     /// Notices after `after`, and the newest number.
@@ -690,6 +713,27 @@ mod tests {
         answered.acks = vec![Ack { id: sent.id, ok: true, ..Ack::default() }];
         live.host_post(&laptop, answered, &owners, &title);
         assert_eq!(live.command_state(sent.id).unwrap().state, "done");
+    }
+
+    #[test]
+    fn a_command_its_host_took_and_never_answered_fails_after_two_minutes_with_no_host_posting() {
+        let live = Live::new(scratch("unanswered"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        live.host_post(&laptop, post(vec![json!({ "method": "turn/started", "params": { "threadId": T, "turn": { "id": "turn-1" } } })], &[T]), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        let ask = Ask { kind: "send".to_string(), thread: Some(T.to_string()), text: Some("and the tests".to_string()), ..Ask::default() };
+        let sent = live.command(&phone, ask, "lap").unwrap();
+        assert_eq!(live.host_post(&laptop, post(vec![], &[T]), &owners, &title).len(), 1);
+        assert_eq!(live.command_state(sent.id).unwrap().state, "delivered");
+        // The laptop took it and was gone; no host posts again.
+        for command in live.lock().commands.iter_mut() {
+            if let Some((_, at)) = command.delivered.as_mut() {
+                *at -= ANSWER_WITHIN + Duration::from_secs(1);
+            }
+        }
+        let state = live.command_state(sent.id).unwrap();
+        assert_eq!((state.state.as_str(), state.error.as_deref()), ("failed", Some("the device did not say how it went")));
+        assert!(live.follow(T, 0).queued.is_empty(), "no longer shown as on its way");
     }
 
     #[test]
