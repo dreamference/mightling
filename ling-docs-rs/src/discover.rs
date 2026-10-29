@@ -286,6 +286,26 @@ pub fn walk_in(
                         .or_default() += 1;
                     continue;
                 }
+                // Judged by where it points as well: a link to a hidden file or folder, into a
+                // package folder or to a file named like a secret is skipped as that would be.
+                let inside: Vec<String> = target
+                    .strip_prefix(&root)
+                    .unwrap_or(Path::new(""))
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect();
+                if inside.iter().any(|c| c.starts_with('.')) {
+                    *out.skipped.entry("hidden").or_default() += 1;
+                    continue;
+                }
+                if inside.iter().any(|c| SKIP_DIRS.contains(&c.as_str())) {
+                    *out.skipped.entry("build or package folder").or_default() += 1;
+                    continue;
+                }
+                if inside.last().is_some_and(|c| secret_name(c)) {
+                    *out.skipped.entry("named like a secret").or_default() += 1;
+                    continue;
+                }
                 let Ok(meta) = std::fs::metadata(&target) else {
                     continue;
                 };
@@ -590,6 +610,36 @@ mod tests {
         // The alias is kept under its own name (the hash makes it a duplicate later); the escape
         // and the loop add nothing.
         assert_eq!(rels(&collection), ["alias.md", "in.md"]);
+    }
+
+    #[test]
+    fn a_followed_link_is_judged_by_where_it_points_too() {
+        // A link with a plain name to a hidden file, a hidden folder, a package folder or a file
+        // named like a secret: what it points to is skipped as it would be found directly.
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("in.md"), b"x");
+        write(&root.join(".env"), b"TOKEN=x");
+        write(&root.join(".git/notes.md"), b"x");
+        write(&root.join("node_modules/pkg/readme.md"), b"x");
+        write(&root.join("keys/credentials.txt"), b"x");
+        let link = |target: &str, name: &str| {
+            std::os::unix::fs::symlink(root.join(target), root.join(name)).unwrap()
+        };
+        link(".env", "a.txt");
+        link(".git", "notes");
+        link("node_modules", "deps");
+        link("node_modules/pkg/readme.md", "readme.md");
+        link("keys/credentials.txt", "plain.txt");
+        let mut collection = Collection::new("docs", root.clone());
+        collection.follow_symlinks = true;
+        let rels: Vec<_> = walk(&collection, &home, true)
+            .candidates
+            .iter()
+            .map(|c| c.rel.clone())
+            .collect();
+        assert_eq!(rels, ["in.md"]);
     }
 
     #[test]
