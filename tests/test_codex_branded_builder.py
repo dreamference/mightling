@@ -2,7 +2,6 @@
 
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,7 +14,7 @@ from dreamference.runner.codex_branded_builder import (
 )
 from dreamference.runner.codex_installer import CodexInstaller
 
-SUBMODULE_PRESENT = os.path.isdir(os.path.join(CODEX_SUBMODULE_DIR, "codex-rs"))
+SUBMODULE_PRESENT = Path(os.path.join(CODEX_SUBMODULE_DIR, "codex-rs")).is_dir()
 
 
 def test_the_patch_series_is_ordered_and_non_empty():
@@ -27,10 +26,14 @@ def test_the_patch_series_is_ordered_and_non_empty():
 @pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
 def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp_path):
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
-    session = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "history_cell" / "session.rs").read_text()
+    session = (
+        tmp_path / "src" / "codex-rs" / "tui" / "src" / "history_cell" / "session.rs"
+    ).read_text()
     assert '"OpenAI Codex"' not in session and '"Mightling"' in session
     # The plugin catalog's section label is what "<label> unavailable." shows when the section fails.
-    requests = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "app" / "background_requests.rs").read_text()
+    requests = (
+        tmp_path / "src" / "codex-rs" / "tui" / "src" / "app" / "background_requests.rs"
+    ).read_text()
     assert '"vertical",\n            "Curated",' in requests
     # The launcher crate is copied in from ling-rs/ and reached through one dependency line.
     assert (tmp_path / "src" / "codex-rs" / "ling" / "src" / "lib.rs").is_file()
@@ -57,8 +60,12 @@ def test_the_patches_apply_to_an_export_inside_another_git_repository(tmp_path, 
     # unpatched and prepare_source still said it succeeded (found 2026-10-29, exporting into a
     # worktree). Here a stand-in submodule and patch, the export inside an unrelated repository.
     def git(*args, cwd):
-        subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
-                       cwd=cwd, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+        )
 
     submodule = tmp_path / "codex"
     (submodule / "codex-rs").mkdir(parents=True)
@@ -66,10 +73,14 @@ def test_the_patches_apply_to_an_export_inside_another_git_repository(tmp_path, 
     git("init", "-q", cwd=submodule)
     git("add", "-A", cwd=submodule)
     git("commit", "-q", "-m", "pin", cwd=submodule)
-    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=submodule, capture_output=True, text=True).stdout.strip()
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=submodule, capture_output=True, text=True
+    ).stdout.strip()
     patch_file = tmp_path / "0001-brand.patch"
-    patch_file.write_text("diff --git a/codex-rs/main.rs b/codex-rs/main.rs\n--- a/codex-rs/main.rs\n"
-                          "+++ b/codex-rs/main.rs\n@@ -1 +1 @@\n-codex\n+ling\n")
+    patch_file.write_text(
+        "diff --git a/codex-rs/main.rs b/codex-rs/main.rs\n--- a/codex-rs/main.rs\n"
+        "+++ b/codex-rs/main.rs\n@@ -1 +1 @@\n-codex\n+ling\n"
+    )
     crate = tmp_path / "ling-rs"
     crate.mkdir()
     outer = tmp_path / "outer"
@@ -79,7 +90,9 @@ def test_the_patches_apply_to_an_export_inside_another_git_repository(tmp_path, 
     monkeypatch.setattr(builder_module, "MIGHTLING_CRATE_DIR", str(crate))
     monkeypatch.setattr(CodexBrandedBuilder, "source_commit", classmethod(lambda cls: commit))
     monkeypatch.setattr(CodexBrandedBuilder, "patches", classmethod(lambda cls: [str(patch_file)]))
-    monkeypatch.setattr(CodexBrandedBuilder, "stamp_version", classmethod(lambda cls, manifest, version: True))
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "stamp_version", classmethod(lambda cls, manifest, version: True)
+    )
 
     assert CodexBrandedBuilder.prepare_source(str(outer / "export"))
     assert (outer / "export" / "codex-rs" / "main.rs").read_text() == "ling\n"
@@ -90,7 +103,9 @@ def test_the_codex_submodule_is_committed_as_a_submodule():
     # once (release/1.7.1, 266ae50): the Windows build then found no codex/.github/actions and the
     # release run failed. The index must hold codex as a submodule (mode 160000), never a link.
     listed = subprocess.run(
-        ["git", "-C", builder_module.REPO_ROOT, "ls-files", "-s", "codex"], capture_output=True, text=True
+        ["git", "-C", builder_module.REPO_ROOT, "ls-files", "-s", "codex"],
+        capture_output=True,
+        text=True,
     )
     if listed.returncode != 0 or not listed.stdout:
         pytest.skip("not a git checkout")
@@ -188,7 +203,7 @@ def test_the_patches_stay_small():
     # Not raised on 2026-10-28 for 0035 (640 bytes: the code-mode host found beside the resolved
     # executable); 60,136 after. Down the same day when cave mode was removed: 0017 (2,834 bytes)
     # deleted and 0018, 0019, 0025 and 0028 re-cut; 57,571 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 64_000
+    assert sum(Path(p).stat().st_size for p in CodexBrandedBuilder.patches()) < 64_000
 
 
 def test_airgapped_treats_every_profile_without_a_sandbox_like_full_access():
@@ -204,7 +219,9 @@ def test_airgapped_treats_every_profile_without_a_sandbox_like_full_access():
     assert tui.count(no_sandbox + "self.config.permissions.permission_profile())") == 2
     # The question is asked in one place, Codex's sandboxing crate, with its own unit test there.
     assert "+pub fn runs_without_platform_sandbox(profile: &PermissionProfile) -> bool {" in tui
-    assert "+fn a_profile_writing_the_whole_disk_with_the_network_on_runs_without_a_sandbox() {" in tui
+    assert (
+        "+fn a_profile_writing_the_whole_disk_with_the_network_on_runs_without_a_sandbox() {" in tui
+    )
     app_server = texts["0023-airgapped-app-server.patch"]
     assert "permission_refusal(matches!(p, PermissionProfile::Disabled)" not in app_server
     assert "permission_refusal(" + no_sandbox + "p)" in app_server
@@ -215,7 +232,10 @@ def test_the_exit_summary_names_ling_in_every_command_it_prints():
     # remote server also `codex --remote <address> resume` and `codex agents`; the CLI prints it
     # (patch 0001) with each command renamed, so none of them sends the user to a missing binary.
     import re
-    cli = Path(next(p for p in CodexBrandedBuilder.patches() if Path(p).name.startswith("0001-"))).read_text()
+
+    cli = Path(
+        next(p for p in CodexBrandedBuilder.patches() if Path(p).name.startswith("0001-"))
+    ).read_text()
     line = next(
         line
         for line in cli.splitlines()
@@ -234,8 +254,10 @@ def test_the_build_key_changes_with_the_patches(tmp_path):
     patch_dir = tmp_path / "patches"
     patch_dir.mkdir()
     (patch_dir / "0001-a.patch").write_text("one")
-    with patch.object(builder_module, "CODEX_PATCH_DIR", str(patch_dir)), \
-            patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40):
+    with (
+        patch.object(builder_module, "CODEX_PATCH_DIR", str(patch_dir)),
+        patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40),
+    ):
         first = CodexBrandedBuilder.build_key()
         (patch_dir / "0001-a.patch").write_text("two")
         assert CodexBrandedBuilder.build_key() != first
@@ -245,8 +267,10 @@ def test_the_build_key_changes_with_the_launcher_source(tmp_path):
     crate = tmp_path / "ling-rs"
     (crate / "src").mkdir(parents=True)
     (crate / "src" / "lib.rs").write_text("// one")
-    with patch.object(builder_module, "MIGHTLING_CRATE_DIR", str(crate)), \
-            patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40):
+    with (
+        patch.object(builder_module, "MIGHTLING_CRATE_DIR", str(crate)),
+        patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40),
+    ):
         first = CodexBrandedBuilder.build_key()
         (crate / "src" / "lib.rs").write_text("// two")
         assert CodexBrandedBuilder.build_key() != first
@@ -258,8 +282,10 @@ def test_the_build_key_changes_with_the_ui_that_ling_web_embeds(tmp_path):
     (ui / "src" / "App.tsx").write_text("// one")
     (ui / "node_modules").mkdir()
     (ui / "dist").mkdir()
-    with patch.object(builder_module, "WEB_UI_DIR", str(ui)), \
-            patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40):
+    with (
+        patch.object(builder_module, "WEB_UI_DIR", str(ui)),
+        patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40),
+    ):
         first = CodexBrandedBuilder.build_key()
         # Installed packages and a previous build's output are not sources.
         (ui / "node_modules" / "x.js").write_text("x")
@@ -275,8 +301,10 @@ def test_ling_is_not_built_without_the_ui_it_serves(tmp_path, capsys):
     ui = tmp_path / "ui"
     ui.mkdir()
     (ui / "package.json").write_text("{}")
-    with patch.object(builder_module, "WEB_UI_DIR", str(ui)), \
-            patch.object(builder_module.shutil, "which", return_value=None):
+    with (
+        patch.object(builder_module, "WEB_UI_DIR", str(ui)),
+        patch.object(builder_module.shutil, "which", return_value=None),
+    ):
         assert CodexBrandedBuilder.build_web_ui() is None
     assert "npm is needed" in capsys.readouterr().out
 
@@ -289,20 +317,30 @@ def test_ling_is_not_built_without_the_ui_it_serves(tmp_path, capsys):
             (ui / "dist" / "index.html").write_text("<html>")
         return 0
 
-    with patch.object(builder_module, "WEB_UI_DIR", str(ui)), \
-            patch.object(builder_module, "WEB_UI_DIST", str(ui / "dist")), \
-            patch.object(builder_module.shutil, "which", return_value="/usr/bin/npm"), \
-            patch.object(builder_module.subprocess, "call", side_effect=fake_call):
+    with (
+        patch.object(builder_module, "WEB_UI_DIR", str(ui)),
+        patch.object(builder_module, "WEB_UI_DIST", str(ui / "dist")),
+        patch.object(builder_module.shutil, "which", return_value="/usr/bin/npm"),
+        patch.object(builder_module.subprocess, "call", side_effect=fake_call),
+    ):
         assert CodexBrandedBuilder.build_web_ui() == str(ui / "dist")
     assert calls == [["ci", "--no-audit", "--no-fund"], ["run", "build"]]
 
-    with patch.object(builder_module, "BUILD_CACHE_DIR", str(tmp_path / "cache")), \
-            patch.object(CodexBrandedBuilder, "build_key", return_value="k"), \
-            patch.object(CodexBrandedBuilder, "prepare_source", return_value=True), \
-            patch.object(CodexBrandedBuilder, "fetch_rusty_v8", return_value={"RUSTY_V8_ARCHIVE": "a", "RUSTY_V8_SRC_BINDING_PATH": "b"}), \
-            patch.object(builder_module.DesktopInstaller, "install_rust", return_value=True), \
-            patch.object(CodexBrandedBuilder, "build_web_ui", return_value=None), \
-            patch.object(builder_module.subprocess, "call", side_effect=AssertionError("cargo must not run")):
+    with (
+        patch.object(builder_module, "BUILD_CACHE_DIR", str(tmp_path / "cache")),
+        patch.object(CodexBrandedBuilder, "build_key", return_value="k"),
+        patch.object(CodexBrandedBuilder, "prepare_source", return_value=True),
+        patch.object(
+            CodexBrandedBuilder,
+            "fetch_rusty_v8",
+            return_value={"RUSTY_V8_ARCHIVE": "a", "RUSTY_V8_SRC_BINDING_PATH": "b"},
+        ),
+        patch.object(builder_module.DesktopInstaller, "install_rust", return_value=True),
+        patch.object(CodexBrandedBuilder, "build_web_ui", return_value=None),
+        patch.object(
+            builder_module.subprocess, "call", side_effect=AssertionError("cargo must not run")
+        ),
+    ):
         assert CodexBrandedBuilder._build_locked() is False
 
 
@@ -310,8 +348,10 @@ def test_the_export_reports_lings_version_not_the_upstream_tag(tmp_path, monkeyp
     # Every banner reads CARGO_PKG_VERSION, so the workspace version is what `ling --version`, the
     # session header and the status card show; it is stamped into the export, never the submodule.
     manifest = tmp_path / "Cargo.toml"
-    manifest.write_text('[workspace]\nmembers = ["cli"]\n\n[workspace.package]\nversion = "0.158.0"\n'
-                        'edition = "2024"\n\n[workspace.dependencies]\nfoo = { version = "1" }\n')
+    manifest.write_text(
+        '[workspace]\nmembers = ["cli"]\n\n[workspace.package]\nversion = "0.158.0"\n'
+        'edition = "2024"\n\n[workspace.dependencies]\nfoo = { version = "1" }\n'
+    )
     assert CodexBrandedBuilder.stamp_version(str(manifest), "1.4.1")
     text = manifest.read_text()
     assert '[workspace.package]\nversion = "1.4.1"\n' in text and 'foo = { version = "1" }' in text
@@ -321,6 +361,7 @@ def test_the_export_reports_lings_version_not_the_upstream_tag(tmp_path, monkeyp
     assert CodexBrandedBuilder.mightling_version() == "2.0.0-rc.1"
     monkeypatch.delenv("MIGHTLING_VERSION")
     from dreamference import __version__
+
     assert CodexBrandedBuilder.mightling_version() == __version__
 
 
@@ -339,20 +380,26 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
         calls.append((command, cwd, env))
         return 1
 
-    with patch.object(builder_module, "BUILD_CACHE_DIR", str(tmp_path)), \
-            patch.object(CodexBrandedBuilder, "is_current", return_value=False), \
-            patch.object(CodexBrandedBuilder, "build_key", return_value="k"), \
-            patch.object(CodexBrandedBuilder, "prepare_source", return_value=True), \
-            patch.object(CodexBrandedBuilder, "fetch_rusty_v8", return_value={"RUSTY_V8_ARCHIVE": "a", "RUSTY_V8_SRC_BINDING_PATH": "b"}), \
-            patch.object(builder_module.DesktopInstaller, "install_rust", return_value=True), \
-            patch.object(CodexBrandedBuilder, "build_web_tools", return_value=True), \
-            patch.object(CodexBrandedBuilder, "build_code_index", return_value=True), \
-            patch.object(CodexBrandedBuilder, "build_docs_index", return_value=True), \
-            patch.object(CodexBrandedBuilder, "build_web_ui", return_value="/ui/dist"), \
-            patch.object(builder_module.subprocess, "call", side_effect=fake_call):
+    with (
+        patch.object(builder_module, "BUILD_CACHE_DIR", str(tmp_path)),
+        patch.object(CodexBrandedBuilder, "is_current", return_value=False),
+        patch.object(CodexBrandedBuilder, "build_key", return_value="k"),
+        patch.object(CodexBrandedBuilder, "prepare_source", return_value=True),
+        patch.object(
+            CodexBrandedBuilder,
+            "fetch_rusty_v8",
+            return_value={"RUSTY_V8_ARCHIVE": "a", "RUSTY_V8_SRC_BINDING_PATH": "b"},
+        ),
+        patch.object(builder_module.DesktopInstaller, "install_rust", return_value=True),
+        patch.object(CodexBrandedBuilder, "build_web_tools", return_value=True),
+        patch.object(CodexBrandedBuilder, "build_code_index", return_value=True),
+        patch.object(CodexBrandedBuilder, "build_docs_index", return_value=True),
+        patch.object(CodexBrandedBuilder, "build_web_ui", return_value="/ui/dist"),
+        patch.object(builder_module.subprocess, "call", side_effect=fake_call),
+    ):
         assert CodexBrandedBuilder.build() is False
 
-    (command, cwd, env), = calls
+    ((command, cwd, env),) = calls
     # `ling web` embeds the UI built just before (ling-rs/web/build.rs).
     assert env["LING_WEB_UI_DIST"] == "/ui/dist"
     assert cwd == os.path.join(str(tmp_path), "src", "codex-rs")
@@ -425,8 +472,10 @@ def test_the_runner_never_falls_back_to_an_upstream_codex(tmp_path):
     upstream = tmp_path / "codex"
     upstream.write_text("#!/bin/sh\n")
     upstream.chmod(0o755)
-    with patch.object(builder_module, "INSTALL_DIR", str(tmp_path / "not-built")), \
-            patch.dict(os.environ, {"PATH": str(tmp_path)}):
+    with (
+        patch.object(builder_module, "INSTALL_DIR", str(tmp_path / "not-built")),
+        patch.dict(os.environ, {"PATH": str(tmp_path)}),
+    ):
         assert CodexInstaller.get_codex_executable() is None
 
 
@@ -439,16 +488,21 @@ def test_the_runner_resolves_the_branded_executable(tmp_path):
         assert CodexInstaller.get_codex_executable() == str(binary)
 
 
-def test_mightling_admin_and_the_web_commands_are_linked_onto_path_for_the_models_shell(tmp_path, monkeypatch):
+def test_mightling_admin_and_the_web_commands_are_linked_onto_path_for_the_models_shell(
+    tmp_path, monkeypatch
+):
     # Mightling's prompt tells the model to run `ling-search` and `ling-fetch` for web access,
     # but the commands lived only in the repository's virtualenv: every call from inside a session
     # ended in "command not found" (exit 127). conftest points the links into the test home.
     import os
+
     from dreamference.runner import codex_branded_builder as builder
 
     binary = tmp_path / "ling"
     binary.write_text("#!/bin/sh\n")
-    monkeypatch.setattr(builder.CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(binary)))
+    monkeypatch.setattr(
+        builder.CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(binary))
+    )
     monkeypatch.setattr(builder, "INSTALL_DIR", str(tmp_path / "install"))
     admin = builder.CodexBrandedBuilder.console_script_path("ling-admin")
     assert admin and admin.endswith("ling-admin")
@@ -457,7 +511,9 @@ def test_mightling_admin_and_the_web_commands_are_linked_onto_path_for_the_model
     builder.CodexBrandedBuilder.link_onto_path()
     assert os.readlink(builder.PATH_LINK) == str(binary)
     assert os.readlink(builder.ADMIN_PATH_LINK) == admin
-    assert not os.path.lexists(builder.SEARCH_PATH_LINK) and not os.path.lexists(builder.FETCH_PATH_LINK)
+    assert not os.path.lexists(builder.SEARCH_PATH_LINK) and not os.path.lexists(
+        builder.FETCH_PATH_LINK
+    )
 
     installed = {}
     for name in ("ling-search", "ling-fetch", "ling-delegate"):
@@ -473,10 +529,10 @@ def test_mightling_admin_and_the_web_commands_are_linked_onto_path_for_the_model
     assert str(Path(builder.DELEGATE_PATH_LINK).readlink()) == installed["ling-delegate"]
 
     # A real file of that name belongs to someone else and is left alone.
-    os.remove(builder.ADMIN_PATH_LINK)
-    open(builder.ADMIN_PATH_LINK, "w").write("mine")
+    Path(builder.ADMIN_PATH_LINK).unlink()
+    Path(builder.ADMIN_PATH_LINK).open("w").write("mine")
     builder.CodexBrandedBuilder.link_onto_path()
-    assert open(builder.ADMIN_PATH_LINK).read() == "mine"
+    assert Path(builder.ADMIN_PATH_LINK).open().read() == "mine"
 
 
 def test_ling_is_not_linked_onto_path_before_it_is_built(tmp_path, monkeypatch):
@@ -484,8 +540,11 @@ def test_ling_is_not_linked_onto_path_before_it_is_built(tmp_path, monkeypatch):
     # Codex build left ~/.local/bin/ling pointing at nothing.
     from dreamference.runner import codex_branded_builder as builder
 
-    monkeypatch.setattr(builder.CodexBrandedBuilder, "executable_path",
-                        classmethod(lambda cls: str(tmp_path / "install" / "bin" / "ling")))
+    monkeypatch.setattr(
+        builder.CodexBrandedBuilder,
+        "executable_path",
+        classmethod(lambda cls: str(tmp_path / "install" / "bin" / "ling")),
+    )
     monkeypatch.setattr(builder, "INSTALL_DIR", str(tmp_path / "install"))
     builder.CodexBrandedBuilder.link_onto_path()
     assert not os.path.lexists(builder.PATH_LINK)
@@ -505,16 +564,21 @@ def test_the_web_commands_build_from_their_own_crate_with_its_lockfile(tmp_path,
 
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(builder_module, "WEB_BUILD_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+    )
     monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
 
     assert not CodexBrandedBuilder.web_tools_are_current()
     assert CodexBrandedBuilder.build_web_tools() is True
-    (command, cwd, env), = calls
+    ((command, cwd, env),) = calls
     assert cwd == builder_module.WEB_CRATE_DIR
     assert command[:4] == ["cargo", "build", "--release", "--locked"]
-    assert [command[i + 1] for i, arg in enumerate(command) if arg == "--bin"] == ["ling-search", "ling-fetch"]
+    assert [command[i + 1] for i, arg in enumerate(command) if arg == "--bin"] == [
+        "ling-search",
+        "ling-fetch",
+    ]
     assert command[command.index("--target-dir") + 1] == str(tmp_path / "cache" / "target")
     assert "CARGO_TARGET_DIR" not in env
     for name in builder_module.WEB_BIN_NAMES:
@@ -543,13 +607,19 @@ def test_the_web_commands_are_built_even_when_codex_is_current(monkeypatch):
     monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: True))
     monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
     monkeypatch.setattr(
-        CodexBrandedBuilder, "build_web_tools", classmethod(lambda cls, force=False: built.append(("web", force)) or True)
+        CodexBrandedBuilder,
+        "build_web_tools",
+        classmethod(lambda cls, force=False: built.append(("web", force)) or True),
     )
     monkeypatch.setattr(
-        CodexBrandedBuilder, "build_code_index", classmethod(lambda cls, force=False: built.append(("code", force)) or True)
+        CodexBrandedBuilder,
+        "build_code_index",
+        classmethod(lambda cls, force=False: built.append(("code", force)) or True),
     )
     monkeypatch.setattr(
-        CodexBrandedBuilder, "build_docs_index", classmethod(lambda cls, force=False: built.append(("docs", force)) or True)
+        CodexBrandedBuilder,
+        "build_docs_index",
+        classmethod(lambda cls, force=False: built.append(("docs", force)) or True),
     )
     assert CodexBrandedBuilder.build() is True
     assert built == [("web", False), ("code", False), ("docs", False)]
@@ -570,15 +640,28 @@ def test_mightling_code_builds_from_its_own_crate_and_is_linked_onto_path(tmp_pa
 
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(builder_module, "CODE_BUILD_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+    )
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
-    monkeypatch.setattr(CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(tmp_path / "ling")))
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(tmp_path / "ling"))
+    )
 
     assert CodexBrandedBuilder.build_code_index() is True
-    (command, cwd, env), = calls
+    ((command, cwd, env),) = calls
     assert cwd == builder_module.CODE_CRATE_DIR
     target = str(tmp_path / "cache" / "target")
-    assert command == ["cargo", "build", "--release", "--locked", "--target-dir", target, "--bin", "ling-code"]
+    assert command == [
+        "cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--target-dir",
+        target,
+        "--bin",
+        "ling-code",
+    ]
     assert "CARGO_TARGET_DIR" not in env
     installed = tmp_path / "install" / "bin" / "ling-code"
     assert os.access(installed, os.X_OK)
@@ -588,7 +671,9 @@ def test_mightling_code_builds_from_its_own_crate_and_is_linked_onto_path(tmp_pa
     assert len(calls) == 1
 
 
-def test_ling_docs_builds_from_its_own_crate_installs_its_runtime_and_is_linked(tmp_path, monkeypatch):
+def test_ling_docs_builds_from_its_own_crate_installs_its_runtime_and_is_linked(
+    tmp_path, monkeypatch
+):
     calls, setups = [], []
 
     def fake_call(command, cwd=None, env=None):
@@ -600,18 +685,34 @@ def test_ling_docs_builds_from_its_own_crate_installs_its_runtime_and_is_linked(
         return 0
 
     from dreamference.runner.docs_index_setup import DocsIndexSetup
+
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(builder_module, "DOCS_BUILD_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+    )
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
-    monkeypatch.setattr(CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(tmp_path / "ling")))
-    monkeypatch.setattr(DocsIndexSetup, "install", classmethod(lambda cls, machine=None: setups.append(1) or True))
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(tmp_path / "ling"))
+    )
+    monkeypatch.setattr(
+        DocsIndexSetup, "install", classmethod(lambda cls, machine=None: setups.append(1) or True)
+    )
 
     assert CodexBrandedBuilder.build_docs_index() is True
-    (command, cwd, env), = calls
+    ((command, cwd, env),) = calls
     assert cwd == builder_module.DOCS_CRATE_DIR
     target = str(tmp_path / "cache" / "target")
-    assert command == ["cargo", "build", "--release", "--locked", "--target-dir", target, "--bin", "ling-docs"]
+    assert command == [
+        "cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--target-dir",
+        target,
+        "--bin",
+        "ling-docs",
+    ]
     installed = tmp_path / "install" / "bin" / "ling-docs"
     assert os.readlink(builder_module.DOCS_PATH_LINK) == str(installed)
     assert setups == [1], "the run-time files are installed after the build"
@@ -621,29 +722,34 @@ def test_ling_docs_builds_from_its_own_crate_installs_its_runtime_and_is_linked(
 
 
 def test_the_docs_index_crate_is_committed_with_its_lockfile():
-    assert os.path.isfile(os.path.join(builder_module.DOCS_CRATE_DIR, "Cargo.lock"))
-    assert os.path.isfile(os.path.join(builder_module.DOCS_CRATE_DIR, "rust-toolchain.toml"))
+    assert Path(os.path.join(builder_module.DOCS_CRATE_DIR, "Cargo.lock")).is_file()
+    assert Path(os.path.join(builder_module.DOCS_CRATE_DIR, "rust-toolchain.toml")).is_file()
 
 
 def test_the_code_index_crate_is_committed_with_its_lockfile():
-    assert os.path.isfile(os.path.join(builder_module.CODE_CRATE_DIR, "Cargo.lock"))
-    assert os.path.isfile(os.path.join(builder_module.CODE_CRATE_DIR, "rust-toolchain.toml"))
+    assert Path(os.path.join(builder_module.CODE_CRATE_DIR, "Cargo.lock")).is_file()
+    assert Path(os.path.join(builder_module.CODE_CRATE_DIR, "rust-toolchain.toml")).is_file()
 
 
 def test_the_web_crate_is_committed_with_its_lockfile():
     # `--locked` fails without it, and the release build must resolve exactly what was tested.
-    assert os.path.isfile(os.path.join(builder_module.WEB_CRATE_DIR, "Cargo.lock"))
-    assert os.path.isfile(os.path.join(builder_module.WEB_CRATE_DIR, "Cargo.toml"))
+    assert Path(os.path.join(builder_module.WEB_CRATE_DIR, "Cargo.lock")).is_file()
+    assert Path(os.path.join(builder_module.WEB_CRATE_DIR, "Cargo.toml")).is_file()
 
 
-@pytest.mark.parametrize("system, machine, target", [
-    ("Linux", "aarch64", "aarch64-unknown-linux-gnu"),
-    ("Linux", "x86_64", "x86_64-unknown-linux-gnu"),
-    # macOS says arm64 where Rust and the prebuilt V8 assets say aarch64.
-    ("Darwin", "arm64", "aarch64-apple-darwin"),
-    ("Darwin", "x86_64", "x86_64-apple-darwin"),
-])
-def test_the_target_names_the_v8_assets_and_release_assets_per_platform(monkeypatch, system, machine, target):
+@pytest.mark.parametrize(
+    "system, machine, target",
+    [
+        ("Linux", "aarch64", "aarch64-unknown-linux-gnu"),
+        ("Linux", "x86_64", "x86_64-unknown-linux-gnu"),
+        # macOS says arm64 where Rust and the prebuilt V8 assets say aarch64.
+        ("Darwin", "arm64", "aarch64-apple-darwin"),
+        ("Darwin", "x86_64", "x86_64-apple-darwin"),
+    ],
+)
+def test_the_target_names_the_v8_assets_and_release_assets_per_platform(
+    monkeypatch, system, machine, target
+):
     import platform
 
     monkeypatch.setattr(platform, "system", lambda: system)
@@ -668,7 +774,9 @@ def test_the_remaining_codex_names_on_screen_say_mightling(tmp_path):
     # The frame drawn while ling starts up has its own composer, built outside the one patch
     # 0001 renames; found on 2026-10-01 by Codex's own PTY test, which waits for that placeholder.
     startup = (rs / "tui" / "src" / "startup_draft.rs").read_text()
-    assert '"Ask Codex to do anything"' not in startup and '"Ask Mightling to do anything"' in startup
+    assert (
+        '"Ask Codex to do anything"' not in startup and '"Ask Mightling to do anything"' in startup
+    )
 
 
 def _sccache_on_path(tmp_path):
@@ -685,10 +793,14 @@ def _sccache_on_path(tmp_path):
 def real_compiler_cache(monkeypatch):
     from conftest import REAL_COMPILER_CACHE_ENVIRONMENT
 
-    monkeypatch.setattr(CodexBrandedBuilder, "compiler_cache_environment", REAL_COMPILER_CACHE_ENVIRONMENT)
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "compiler_cache_environment", REAL_COMPILER_CACHE_ENVIRONMENT
+    )
 
 
-def test_builds_compile_through_sccache_when_it_is_installed(tmp_path, monkeypatch, real_compiler_cache):
+def test_builds_compile_through_sccache_when_it_is_installed(
+    tmp_path, monkeypatch, real_compiler_cache
+):
     sccache, environment = _sccache_on_path(tmp_path)
     started = []
     monkeypatch.setattr(
@@ -713,26 +825,46 @@ def test_builds_compile_through_sccache_when_it_is_installed(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("value", ["0", "off", "false", "no", "OFF"])
-def test_sccache_is_switched_off_by_the_environment(tmp_path, monkeypatch, real_compiler_cache, value):
+def test_sccache_is_switched_off_by_the_environment(
+    tmp_path, monkeypatch, real_compiler_cache, value
+):
     _sccache, environment = _sccache_on_path(tmp_path)
-    monkeypatch.setattr(CodexBrandedBuilder, "sccache_server_ready", classmethod(lambda cls, p, e: True))
-    assert CodexBrandedBuilder.compiler_cache_environment({**environment, "DREAMFERENCE_SCCACHE": value}) == {}
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "sccache_server_ready", classmethod(lambda cls, p, e: True)
+    )
+    assert (
+        CodexBrandedBuilder.compiler_cache_environment(
+            {**environment, "DREAMFERENCE_SCCACHE": value}
+        )
+        == {}
+    )
 
 
-def test_without_sccache_or_with_a_wrapper_already_set_nothing_changes(tmp_path, monkeypatch, real_compiler_cache):
-    monkeypatch.setattr(CodexBrandedBuilder, "sccache_server_ready", classmethod(lambda cls, p, e: True))
+def test_without_sccache_or_with_a_wrapper_already_set_nothing_changes(
+    tmp_path, monkeypatch, real_compiler_cache
+):
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "sccache_server_ready", classmethod(lambda cls, p, e: True)
+    )
     # A release install or a CI runner: no sccache on PATH, the build as it always was.
     empty = tmp_path / "empty"
     empty.mkdir()
     assert CodexBrandedBuilder.compiler_cache_environment({"PATH": str(empty)}) == {}
     # A wrapper the caller chose is theirs.
     _sccache, environment = _sccache_on_path(tmp_path)
-    assert CodexBrandedBuilder.compiler_cache_environment({**environment, "RUSTC_WRAPPER": "mine"}) == {}
+    assert (
+        CodexBrandedBuilder.compiler_cache_environment({**environment, "RUSTC_WRAPPER": "mine"})
+        == {}
+    )
 
 
-def test_a_server_that_does_not_start_means_a_build_without_the_cache(tmp_path, monkeypatch, real_compiler_cache):
+def test_a_server_that_does_not_start_means_a_build_without_the_cache(
+    tmp_path, monkeypatch, real_compiler_cache
+):
     _sccache, environment = _sccache_on_path(tmp_path)
-    monkeypatch.setattr(CodexBrandedBuilder, "sccache_server_ready", classmethod(lambda cls, p, e: False))
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "sccache_server_ready", classmethod(lambda cls, p, e: False)
+    )
     assert CodexBrandedBuilder.compiler_cache_environment(environment) == {}
 
 
@@ -758,15 +890,22 @@ def test_the_codex_and_crate_builds_take_the_compile_cache(tmp_path, monkeypatch
         "compiler_cache_environment",
         classmethod(lambda cls, environment: {"RUSTC_WRAPPER": "/x/sccache"}),
     )
-    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+    )
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
-    assert CodexBrandedBuilder.build_crate(str(tmp_path), str(tmp_path / "cache"), "stamp", ("x",)) is False
-    with patch.object(builder_module, "BUILD_CACHE_DIR", str(tmp_path)), \
-            patch.object(CodexBrandedBuilder, "build_key", return_value="k"), \
-            patch.object(CodexBrandedBuilder, "prepare_source", return_value=True), \
-            patch.object(CodexBrandedBuilder, "fetch_rusty_v8", return_value={}), \
-            patch.object(CodexBrandedBuilder, "build_web_ui", return_value="/ui/dist"):
+    assert (
+        CodexBrandedBuilder.build_crate(str(tmp_path), str(tmp_path / "cache"), "stamp", ("x",))
+        is False
+    )
+    with (
+        patch.object(builder_module, "BUILD_CACHE_DIR", str(tmp_path)),
+        patch.object(CodexBrandedBuilder, "build_key", return_value="k"),
+        patch.object(CodexBrandedBuilder, "prepare_source", return_value=True),
+        patch.object(CodexBrandedBuilder, "fetch_rusty_v8", return_value={}),
+        patch.object(CodexBrandedBuilder, "build_web_ui", return_value="/ui/dist"),
+    ):
         assert CodexBrandedBuilder._build_locked() is False
     assert [env["RUSTC_WRAPPER"] for env in calls] == ["/x/sccache", "/x/sccache"]
 
@@ -787,7 +926,9 @@ def _fake_crate(tmp_path, monkeypatch, during_build=None):
         return 0
 
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
-    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+    )
     monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
     return crate
@@ -797,9 +938,14 @@ def test_a_crate_edited_during_its_build_is_not_stamped_current(tmp_path, monkey
     # The binary was compiled from the source as it was when cargo started; an edit made while it
     # ran must leave the next run rebuilding, not stamp the old binary with the new key.
     crate = _fake_crate(
-        tmp_path, monkeypatch, lambda crate: (crate / "src" / "main.rs").write_text("fn main() { 1; }\n")
+        tmp_path,
+        monkeypatch,
+        lambda crate: (crate / "src" / "main.rs").write_text("fn main() { 1; }\n"),
     )
-    assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is True
+    assert (
+        CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",))
+        is True
+    )
     assert not CodexBrandedBuilder.crate_is_current(str(crate), "stamp", ("x",))
 
 
@@ -810,7 +956,10 @@ def test_a_crate_install_leaves_another_installs_staging_file_alone(tmp_path, mo
     bin_dir = tmp_path / "install" / "bin"
     bin_dir.mkdir(parents=True)
     (bin_dir / ".x.new").write_text("another install's copy")
-    assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is True
+    assert (
+        CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",))
+        is True
+    )
     assert (bin_dir / ".x.new").read_text() == "another install's copy"
     assert (bin_dir / "x").read_text() == "#!/bin/sh\n"
 
@@ -823,3 +972,109 @@ def test_linking_leaves_another_links_staging_link_alone(tmp_path):
     CodexBrandedBuilder._link("/install/ling", str(link))
     assert link.readlink() == Path("/install/ling")
     assert staging.readlink() == Path("/another/process")
+
+
+def test_a_second_build_waits_for_the_lock_and_stops_if_the_first_one_built_ling(
+    tmp_path, monkeypatch
+):
+    # specs/DREAMFERENCE_MIGHTLING_CODEX.md §2 step 0: the build takes `.build.lock`, and re-checks
+    # after waiting, so a build that waited on another finishes at once.
+    current = iter([False, True])
+    locked = []
+    monkeypatch.setattr(builder_module, "BUILD_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: next(current)))
+    monkeypatch.setattr(
+        CodexBrandedBuilder,
+        "_lock_exclusive",
+        classmethod(lambda cls, handle: locked.append(handle.name)),
+    )
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "_build_locked", classmethod(lambda cls: pytest.fail("built twice"))
+    )
+    assert CodexBrandedBuilder._build_codex() is True
+    assert locked == [str(tmp_path / "cache" / ".build.lock")]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="flock is POSIX")
+def test_a_held_build_lock_is_waited_for_and_said_so(tmp_path, monkeypatch, capsys):
+    import fcntl
+
+    calls = []
+
+    def flock(handle, operation):
+        calls.append(operation)
+        if operation & fcntl.LOCK_NB:
+            raise BlockingIOError
+
+    monkeypatch.setattr(fcntl, "flock", flock)
+    with Path(tmp_path / ".build.lock").open("w") as lock:
+        CodexBrandedBuilder._lock_exclusive(lock)
+    assert calls == [fcntl.LOCK_EX | fcntl.LOCK_NB, fcntl.LOCK_EX]
+    assert "Another ling build is running" in capsys.readouterr().out
+
+
+def _stand_in_export(tmp_path, monkeypatch, patch_text):
+    """A stand-in submodule, launcher crate and one patch, wired into the builder."""
+
+    def git(*args, cwd):
+        subprocess.run(
+            ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+        )
+
+    submodule = tmp_path / "codex"
+    (submodule / "codex-rs").mkdir(parents=True)
+    (submodule / "codex-rs" / "main.rs").write_text("codex\n")
+    git("init", "-q", cwd=submodule)
+    git("add", "-A", cwd=submodule)
+    git("commit", "-q", "-m", "pin", cwd=submodule)
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=submodule, capture_output=True, text=True
+    ).stdout.strip()
+    patch_file = tmp_path / "0001-brand.patch"
+    patch_file.write_text(patch_text)
+    crate = tmp_path / "ling-rs"
+    (crate / "src").mkdir(parents=True)
+    (crate / "src" / "lib.rs").write_text("// launcher\n")
+    monkeypatch.setattr(builder_module, "CODEX_SUBMODULE_DIR", str(submodule))
+    monkeypatch.setattr(builder_module, "MIGHTLING_CRATE_DIR", str(crate))
+    monkeypatch.setattr(CodexBrandedBuilder, "source_commit", classmethod(lambda cls: commit))
+    monkeypatch.setattr(CodexBrandedBuilder, "patches", classmethod(lambda cls: [str(patch_file)]))
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "stamp_version", classmethod(lambda cls, manifest, version: True)
+    )
+    return crate
+
+
+def test_the_launcher_is_copied_into_the_export_with_fresh_mtimes(tmp_path, monkeypatch):
+    # §2 step 2: a plain copy, so Cargo never takes an edited launcher file as already compiled.
+    crate = _stand_in_export(
+        tmp_path,
+        monkeypatch,
+        "diff --git a/codex-rs/main.rs b/codex-rs/main.rs\n"
+        "--- a/codex-rs/main.rs\n+++ b/codex-rs/main.rs\n@@ -1 +1 @@\n-codex\n+ling\n",
+    )
+    os.utime(crate / "src" / "lib.rs", (1_000_000, 1_000_000))
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "export"))
+    copied = tmp_path / "export" / "codex-rs" / "ling" / "src" / "lib.rs"
+    assert copied.read_text() == "// launcher\n"
+    assert copied.stat().st_mtime > 1_000_000
+
+
+def test_a_patch_that_does_not_fit_stops_the_export_and_names_the_release_tag(
+    tmp_path, monkeypatch, capsys
+):
+    # §2 step 3: each patch is checked before it is applied; one that does not fit names the tag.
+    _stand_in_export(
+        tmp_path,
+        monkeypatch,
+        "diff --git a/codex-rs/main.rs b/codex-rs/main.rs\n"
+        "--- a/codex-rs/main.rs\n+++ b/codex-rs/main.rs\n@@ -1 +1 @@\n-upstream\n+ling\n",
+    )
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "export")) is False
+    out = capsys.readouterr().out
+    assert "0001-brand.patch does not apply" in out
+    assert builder_module.CODEX_RELEASE_TAG in out
+    assert (tmp_path / "export" / "codex-rs" / "main.rs").read_text() == "codex\n"
