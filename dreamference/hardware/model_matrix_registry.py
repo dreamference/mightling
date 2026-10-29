@@ -430,13 +430,13 @@ ENGINE_LING: Final[str] = "ling"
 # built under neutral paths (scripts/build_ling_serve_image.sh), its device code identical to the
 # first 8d112d0 build's (7c9098f1…, built under a home directory) and its greedy output identical
 # on agentlong.
-QWEN38_LING_ENGINE_COMMIT: Final[str] = "8d112d0d25393bca95e3e5c9227d0135eba6f2eb"
+QWEN38_LING_ENGINE_COMMIT: Final[str] = "02704d4a004067f377242d5e74bab37b16b5bdaf"
 
 # What the engine at that commit has that an asset or a launch may depend on, so the runtime asks
 # a list rather than git: "sparse-head" (the drafter's sparse head, read from a file beside the
 # drafter) from ling-engine ec9dce8 on. A checkout-only test keeps the list true to the commit's
 # ancestry. Empty at 8d112d0 (bdda3a2's features).
-QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ()
+QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ("kv-pages", "sparse-head")
 
 # The last commit of ling-engine's P4b (BATCHING §5.3: `--kv-pages` with the KV page pool, admission by
 # pages, reclaim of idle sessions, the last resort), which is what lets four sessions at 262,144 tokens
@@ -467,7 +467,7 @@ QWEN38_DEFAULT_ENGINE: Final[str] = ENGINE_LING
 # It replaces two images whose binaries carried the build machine's paths, deleted from the
 # registry: the first 8d112d0 build (sha256:9428996a…) and bdda3a2's (sha256:87807c50…).
 QWEN38_LING_IMAGE: Final[str] = (
-    "ghcr.io/dreamference/ling-serve@sha256:7bff4e37e731893a6248b0632897a2740e1842e0b19b28a68f0eee22d670caf8"
+    "ghcr.io/dreamference/ling-serve@sha256:f241d6475ac155497e44494943d699d81a596a74c521045658445cf1223a2b4d"
 )
 
 # The DFlash2 drafters ling-serve can run, pinned. Speculation is exact, so the drafter moves
