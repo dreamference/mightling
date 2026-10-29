@@ -206,6 +206,13 @@ fn status_paths(dir: &Path) -> BTreeSet<String> {
     paths
 }
 
+/// Whether `path` is `prefix` itself or lies under it, at a directory boundary (`src` holds
+/// `src/a.rs`, not `src2/a.rs`); an empty prefix holds everything.
+fn in_scope(path: &str, prefix: &str) -> bool {
+    let dir = prefix.trim_end_matches('/');
+    dir.is_empty() || path == dir || path.strip_prefix(dir).is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// One layer's changed set.
 ///
 /// Args:
@@ -239,7 +246,7 @@ pub fn layer_changes(
     let mut changed = BTreeSet::new();
     let mut deleted = BTreeSet::new();
     for path in candidates {
-        if scope.map(|prefix| !path.starts_with(prefix)).unwrap_or(false) || exclude(&path) {
+        if scope.map(|prefix| !in_scope(&path, prefix)).unwrap_or(false) || exclude(&path) {
             continue;
         }
         match std::fs::metadata(repo.abs(&path)) {
@@ -275,6 +282,24 @@ fn is_same(path: &Path, meta: &std::fs::Metadata, stamp: Option<&FileStamp>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_scope_without_a_trailing_slash_stops_at_the_directory_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = test_repo(dir.path(), false);
+        for rel in ["src/a.rs", "src2/b.rs"] {
+            std::fs::create_dir_all(dir.path().join(rel).parent().unwrap()).unwrap();
+            std::fs::write(dir.path().join(rel), "fn a() {}\n").unwrap();
+        }
+        let mut stamps = HashMap::new();
+        for rel in ["src/a.rs", "src2/b.rs"] {
+            stamps.insert(rel.to_string(), FileStamp::of(&repo.abs(rel)).unwrap());
+            std::fs::write(repo.abs(rel), "fn changed() { 1 }\n").unwrap();
+        }
+        let mut git = GitView::new(&repo);
+        let cs = layer_changes(&repo, &mut git, None, &[], &stamps, Some("src"), &|_| false);
+        assert_eq!(cs.changed, BTreeSet::from(["src/a.rs".to_string()]));
+    }
 
     fn test_repo(dir: &Path, is_git: bool) -> Repo {
         Repo {

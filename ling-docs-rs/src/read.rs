@@ -55,10 +55,14 @@ pub fn parse_locator(text: &str) -> Result<Locator> {
     }
     let page = t.strip_prefix("p.").or_else(|| t.strip_prefix("page")).or_else(|| t.strip_prefix('p'));
     if let Some(n) = page.and_then(|p| p.trim().parse::<u32>().ok()) {
-        return Ok(Locator::Page(n));
+        if n >= 1 {
+            return Ok(Locator::Page(n));
+        }
     }
     if let Ok(n) = t.parse::<u32>() {
-        return Ok(Locator::Page(n));
+        if n >= 1 {
+            return Ok(Locator::Page(n));
+        }
     }
     let words = ["lines", "line", "paragraphs", "paragraph", "para", "rows", "row"];
     let lines = words.iter().find_map(|w| t.strip_prefix(w)).unwrap_or(&t).trim().replace('l', "");
@@ -248,6 +252,14 @@ fn clip(text: &str, budget: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_zero_is_not_a_locator() {
+        for text in ["p.0", "page 0", "0", "p0"] {
+            assert!(parse_locator(text).is_err(), "{text}");
+        }
+        assert_eq!(parse_locator("p.1").unwrap(), Locator::Page(1));
+    }
 
     #[test]
     fn locators_parse_in_the_forms_people_and_models_write() {

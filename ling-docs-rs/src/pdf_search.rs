@@ -68,6 +68,9 @@ impl Source {
             return Ok(Source::Url(text.to_string()));
         }
         if let Some(id) = lower.strip_prefix("drive:").map(|_| text[6..].trim()) {
+            if id.is_empty() {
+                bail!("drive: needs a file id, as in drive:<file id>");
+            }
             return Ok(Source::Drive(id.to_string()));
         }
         if lower.contains("://") && !lower.starts_with("file://") {
@@ -544,6 +547,13 @@ pub fn render(name: &str, query: &str, k: usize, settings: &Settings, embedder: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_drive_source_needs_a_file_id() {
+        assert!(Source::parse("drive:").is_err());
+        assert!(Source::parse("drive:   ").is_err());
+        assert!(matches!(Source::parse("drive:abc"), Ok(Source::Drive(id)) if id == "abc"));
+    }
 
     #[test]
     fn sources_are_told_apart() {

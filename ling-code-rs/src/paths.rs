@@ -116,7 +116,8 @@ pub fn git_z(dir: &Path, args: &[&str]) -> Result<Vec<String>> {
 #[cfg(unix)]
 pub fn process_alive(pid: i32) -> bool {
     // SAFETY: signal 0 only checks that the process exists and may be signalled.
-    unsafe { libc::kill(pid, 0) == 0 }
+    // pid 0 and negative pids address a process group or every process, not one process.
+    pid > 0 && unsafe { libc::kill(pid, 0) == 0 }
 }
 
 #[cfg(not(unix))]
@@ -167,6 +168,15 @@ pub fn no_index_yet(indexing: bool, search: bool) -> String {
 #[cfg(test)]
 mod hint_tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn process_alive_is_false_for_pids_that_are_not_one_process() {
+        assert!(process_alive(std::process::id() as i32));
+        // kill(0) signals the caller's process group and kill(-1) every process: neither names a process.
+        assert!(!process_alive(0));
+        assert!(!process_alive(-1));
+    }
 
     #[test]
     fn where_indexing_runs_the_hints_name_the_command() {

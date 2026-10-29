@@ -66,7 +66,7 @@ fn starts_a_word(text: &str, word: &str) -> bool {
         if !text[..start].chars().next_back().is_some_and(char::is_alphanumeric) {
             return true;
         }
-        from = start + word.len();
+        from = start + text[start..].chars().next().map_or(1, char::len_utf8);
     }
     false
 }
@@ -1622,6 +1622,13 @@ fn defines_on_line(repo: &Repo, path: &str, line: u32, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::diff_ranges;
+
+    #[test]
+    fn a_word_start_is_found_after_a_rejected_overlapping_match() {
+        // "a_a" at 1 follows `x` (rejected); the match at 3 follows `_` and starts a word.
+        assert!(super::starts_a_word("xa_a_a", "a_a"));
+        assert!(!super::starts_a_word("xa_a", "a_a"));
+    }
 
     #[test]
     fn the_header_groups_stores_by_indexer_and_snapshot() {
