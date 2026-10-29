@@ -80,6 +80,34 @@ def test_the_connect_page_and_programs_still_reach_disconnect(service_port):
     assert _post(service_port, "/disconnect") in (200, 400)
 
 
+def _get(port: int, path: str, host=None) -> int:
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}", headers={"Host": host} if host else {}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def test_only_loopback_names_may_reach_the_service():
+    assert GmailSearchService.host_refusal(None) is None
+    for host in ("127.0.0.1:8767", "localhost:8767", "localhost", "[::1]:8767"):
+        assert GmailSearchService.host_refusal(host) is None, host
+    for host in ("evil.example:8767", "evil.example", "127.0.0.1.evil.example:8767", "[::1"):
+        assert GmailSearchService.host_refusal(host) is not None, host
+
+
+def test_a_rebinding_page_cannot_read_the_connected_accounts(service_port):
+    # A page whose name resolves to 127.0.0.1 sends a same-origin GET with no Origin header; only
+    # its Host gives it away. `/status` takes no secret and lists the connected accounts.
+    assert _get(service_port, "/status") == 200
+    assert _get(service_port, "/status", host="evil.example:8767") == 403
+    assert _get(service_port, "/connect", host="evil.example:8767") == 403
+    assert _post(service_port, "/disconnect") in (200, 400)
+
+
 def test_a_service_started_without_a_secret_serves_nothing(monkeypatch):
     # A container made before the rename hands the secret over as PUFFIN_GMAIL_SECRET, which the
     # service no longer reads; restarted with today's code it must refuse, not serve mail openly.

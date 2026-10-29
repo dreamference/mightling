@@ -1179,6 +1179,31 @@ class GmailSearchService:
         return f"requests from {origin} are not accepted"
 
     @classmethod
+    def host_refusal(cls, host: str | None) -> str | None:
+        """Decides whether a request may be answered, judged by the name it was sent to.
+
+        Every client reaches the service on loopback (`127.0.0.1:8767`, `localhost:8767`); a
+        DNS-rebinding page reaches it under its own site's name, which the `Origin` check does not
+        see on a GET. Its `/status` and connect pages take no shared secret, so without this check
+        such a page could read which Google accounts are connected.
+
+        Args:
+            host (str | None): The request's `Host` header.
+
+        Returns:
+            str | None: The reason to refuse, or None when the request may proceed.
+        """
+        if host is None:
+            return None
+        try:
+            name = urllib.parse.urlsplit("//" + host).hostname
+        except ValueError:
+            name = None
+        if name in {"localhost", "127.0.0.1", "::1"}:
+            return None
+        return f"requests for {host} are not accepted"
+
+    @classmethod
     def serve(cls, port: int = SERVICE_PORT, secret: Optional[str] = None) -> None:
         """
         Runs the HTTP service until killed.
@@ -1191,6 +1216,16 @@ class GmailSearchService:
         expected = secret or os.environ.get("MIGHTLING_GMAIL_SECRET", "")
 
         class Handler(BaseHTTPRequestHandler):
+            def parse_request(self) -> bool:
+                # Every method is judged by its Host first (`host_refusal`).
+                if not super().parse_request():
+                    return False
+                refused = cls.host_refusal(self.headers.get("Host"))
+                if refused:
+                    self._reply(403, {"error": refused})
+                    return False
+                return True
+
             def _reply(self, status: int, body: Dict[str, Any]) -> None:
                 encoded = json.dumps(body).encode()
                 self.send_response(status)
