@@ -850,8 +850,11 @@ def test_the_service_is_wired_from_the_environment(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def served(tmp_path, monkeypatch):
-    """Runs `serve` on a loopback port chosen by the OS, with the real handler class."""
+def served(tmp_path, monkeypatch, request):
+    """Runs `serve` on a loopback port chosen by the OS, with the real handler class.
+
+    The shared secret is `s3cret` unless the test parametrizes the fixture with another.
+    """
     import threading
     from http.server import ThreadingHTTPServer
 
@@ -880,7 +883,9 @@ def served(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "build_service", lambda: stub)
     monkeypatch.setattr(mod, "ThreadingHTTPServer", _Loopback)
     monkeypatch.setattr(mod.time, "sleep", lambda s: threading.Event().wait(60))
-    thread = threading.Thread(target=mod.serve, kwargs={"secret": "s3cret"}, daemon=True)
+    monkeypatch.delenv(mod.SECRET_ENV, raising=False)
+    secret = getattr(request, "param", "s3cret")
+    thread = threading.Thread(target=mod.serve, kwargs={"secret": secret}, daemon=True)
     thread.start()
     for _ in range(200):
         if holder:
@@ -946,6 +951,17 @@ def test_a_search_without_the_shared_secret_is_refused(served):
         )[0]
         == 403
     )
+    assert searched == []
+
+
+@pytest.mark.parametrize("served", [""], indirect=True)
+def test_a_service_started_without_a_secret_runs_no_search(served):
+    # An empty secret used to switch the check off: any local page could start a search.
+    port, _, searched = served
+    body = json.dumps({"queries": ["cat"]}).encode()
+    for token in ({}, {"X-Mightling-Image-Token": ""}):
+        headers = {**token, "Content-Length": str(len(body))}
+        assert _http(port, "POST", "/search", body=body, headers=headers)[0] == 403
     assert searched == []
 
 
