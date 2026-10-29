@@ -1253,6 +1253,55 @@ def test_the_sandbox_writes_only_the_worktree_hides_the_home_folder_and_the_gpu(
     )
 
 
+def bubblewrap_works() -> bool:
+    try:
+        return (
+            subprocess.run(
+                ["bwrap", "--ro-bind", "/", "/", "true"], capture_output=True, timeout=30
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def test_a_job_cannot_repoint_its_worktree_at_a_git_directory_whose_hooks_the_host_runs(tmp_path):
+    # The host commits in the tree after the job (`_commit`, Night Shift's runner). A job that
+    # rewrote the tree's `.git` pointer to a git directory of its own would have that commit run
+    # its hooks on the host, outside the sandbox.
+    from dreamference.node import NodeJob
+    from dreamference.runner.safe_git import SafeGit
+
+    repo, tree, escaped = tmp_path / "repo.git", tmp_path / "tree", tmp_path / "escaped"
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True)
+    subprocess.run(["git", "init", "-q", str(tmp_path / "src")], check=True)
+    subprocess.run([*git, "-C", str(tmp_path / "src"), "commit", "-q", "--allow-empty", "-m", "i"],
+                   check=True)
+    subprocess.run(["git", "-C", str(tmp_path / "src"), "push", "-q", str(repo), "HEAD:refs/heads/main"],
+                   check=True)
+    subprocess.run(["git", "--git-dir", str(repo), "worktree", "add", "-q", "--detach", str(tree), "main"],
+                   check=True)
+    pointer = (tree / ".git").read_text()
+
+    argv = NodeJob.sandbox_command(tree, ["true"], network=False, job_id="j")
+    at = argv.index("--ro-bind", argv.index("--bind"))
+    assert argv[at + 1 : at + 3] == [str(tree / ".git")] * 2
+    if not bubblewrap_works():
+        pytest.skip("bubblewrap cannot create a namespace here")
+    hook = f"#!/bin/sh\ntouch {escaped}\n"
+    script = (
+        "git init -q --bare .evil && git --git-dir=.evil config core.bare false"
+        f" && printf '%s' '{hook}' > .evil/hooks/pre-commit && chmod +x .evil/hooks/pre-commit"
+        ' ; echo "gitdir: $PWD/.evil" > .git ; echo change > f'
+    )
+    subprocess.run(NodeJob.sandbox_command(tree, ["sh", "-c", script], False, "j"), timeout=60)
+    assert (tree / ".git").read_text() == pointer and (tree / "f").exists()
+    SafeGit.run(["add", "-A"], tree)
+    assert SafeGit.run([*git[1:], "commit", "-q", "-m", "job"], tree).returncode == 0
+    assert not escaped.exists()
+
+
 def test_a_job_is_a_capped_unit_of_its_own_not_a_child_of_the_connection():
     from dreamference.node import NodeJob
 
