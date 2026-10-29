@@ -8,6 +8,7 @@
 // the most recent Ask questions, each a click away (DESKTOP §16 B24), learnt from the app-server's
 // messages as the main process routes them (`RecentQuestions`).
 
+import fs from "node:fs";
 import path from "node:path";
 
 import { BrowserWindow, app, screen } from "electron";
@@ -137,8 +138,16 @@ export class RecentQuestions {
   private inAsk(cwd: unknown): boolean {
     const root = this.askRoot();
     if (!root || typeof cwd !== "string" || !cwd) return false;
-    const folder = path.resolve(cwd);
-    return folder.startsWith(path.resolve(root) + path.sep);
+    // the server reports the folder by its real path, the Ask folder may be reached through a link
+    const fold = (p: string) => (process.platform === "win32" ? p.toLowerCase() : p);
+    const folder = fold(path.resolve(cwd));
+    let real = path.resolve(root);
+    try {
+      real = fs.realpathSync(root);
+    } catch {
+      // not made yet: nothing in it to list
+    }
+    return [path.resolve(root), real].some((r) => folder.startsWith(fold(r) + path.sep));
   }
 
   private learn(thread: unknown): void {

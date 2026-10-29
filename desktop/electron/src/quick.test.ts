@@ -1,4 +1,8 @@
 // Quick Entry (DESKTOP_PARITY_CLAUDE §4.2): which shortcuts may be system-wide, where they work, what the box sends.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_SHORTCUT, QUICK_MAX, QUICK_SIZE, RecentQuestions, accelerator, quickPrompt, quickSize, shortcutsWork } from "./quick";
@@ -68,6 +72,19 @@ describe("Quick Entry's recent questions (DESKTOP §16 B24)", () => {
     expect(recent.listed({ id: "b" })).toBe(false);
     recent.reset();
     expect(recent.list()).toEqual([]);
+  });
+
+  it("lists a question whose folder the server reports by its real path when the Ask folder is a link", () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "quick-"));
+    try {
+      fs.mkdirSync(path.join(base, "real", "ask"), { recursive: true });
+      fs.symlinkSync(path.join(base, "real"), path.join(base, "link"));
+      const recent = new RecentQuestions(() => path.join(base, "link", "ask"));
+      recent.observe({ id: 3, result: { data: [thread("a1", path.join(fs.realpathSync(base), "real", "ask", "q-1"), "Q", 10)] } });
+      expect(recent.list()).toEqual([{ id: "a1", title: "Q" }]);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   });
 
   it("grows the box by a line a question, up to five", () => {
