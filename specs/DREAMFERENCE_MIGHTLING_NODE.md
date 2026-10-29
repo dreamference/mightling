@@ -150,7 +150,7 @@ Nothing that changes from minute to minute is advertised. Which model is loaded 
 
 ### 5.3 The client side: `mdns-sd`
 
-One code path on all three systems: the pure-Rust `mdns-sd` crate browses `_mightling-node._tcp.local.` for up to 2 s and stops at the first answer when it is looking for one remembered node.
+One code path on all three systems: the pure-Rust `mdns-sd` crate browses `_mightling-node._tcp.local.` for up to 2 s (up to 4.5 s when it looks for a remembered or named node: `WANTED_TIMEOUT` in `ling-rs/src/node.rs`) and stops at the first answer when it is looking for one remembered node.
 
 - **Connect to the resolved address, never the `.local` name.** The browse answer carries the addresses. Resolving `gx10-1a2b.local` through the operating system depends on `nss-mdns` on Linux and is unreliable on Windows.
 - **IPv4 first**, then IPv6 with its scope id; link-local IPv6 without a scope is dropped.
@@ -224,7 +224,7 @@ Today the launcher prints dots for up to 600 s when the server does not answer. 
 | No node found, none remembered | `No Mightling node found on this network.` then: start one on a GB10 (`ling-admin server start`, `ling-admin node enable`), or `ling node use <address>` |
 | Node found, `state=stopped` | `Node gx10-1a2b found, but its model server is not running. On the node: ling-admin server start` and no wait |
 | Node found, `state=loading` | `Node gx10-1a2b: model loading` and today's dotted wait |
-| Node found, `state=ready`, port refuses | The advert is stale (the server died without `server stop`): the first message, plus `ling-admin status` on the node |
+| Node found, `state=ready`, port refuses | The advert is stale (the server died without `server stop`): `Node <name> is advertised as ready, but its model server at <url> does not answer. On the node: ling-admin status (it may still be loading after a restart)` |
 
 Added 2026-10-12: when a browse misses (no node found and none remembered; the remembered node did not answer and its last address is tried; `MIGHTLING_NODE` names a node that did not answer) and the client is Linux with a connected Wi-Fi connection that saves power, one more line follows: `Hint: Wi-Fi power saving is on for <interface> (<connection>), and it loses most of the multicast a node is found by. Turn it off: sudo nmcli connection modify <connection> 802-11-wireless.powersave 2 && sudo iw dev <interface> set power_save off`. A hint, never a failure; `ling` runs none of it. A remembered node that did not answer while other nodes did (the question of §6.2) gets no hint.
 
@@ -347,7 +347,7 @@ One entry point per system, and the machine decides the role:
 
 - **`install.sh`** (Linux and macOS) and **`install.ps1`** (Windows) download the release assets for the machine's target, verify them against the release's checksum file and place them in `~/.local/share/dreamference/mightling/bin` (or the platform's equivalent) with links on `PATH`. This is the path `ling update` already implements for linux-arm64; `asset_names()` grows `ling-code`, and the release workflow grows the matrix of §8.1.
 - **On a GB10** the script then does today's node install (the Python package, `ling-admin`, the model) and runs `node enable`, which is where `sudo` is asked for, once and visibly.
-- **`--role client|node|both`** overrides the detection, for a GB10 that should only be a client of another, and for tests.
+- **`--role client|node|both`** overrides the detection, for a GB10 that should only be a client of another, and for tests. `--role both` is accepted for older instructions and treated as `node`.
 - **A node without the client is not offered.** The node's own tools (`night run`, `swe-bench`, `audit egress`) run `ling`.
 - **Updating.** `ling update` on a client updates the client. On a node it updates the client binaries as now; the Python half is updated as it is today.
 
