@@ -342,7 +342,8 @@ impl Plan {
 
 /// A file name for a skill's link: its name, or its folder's when the name could not be one.
 fn link_name(skill: &Skill) -> String {
-    if !skill.name.is_empty() && !skill.name.starts_with('.') && !skill.name.contains(['/', '\\', '\0']) {
+    // ':' too: on Windows a drive prefix (`C:evil`) joined to the staging folder replaces it, so the junction would land outside it.
+    if !skill.name.is_empty() && !skill.name.starts_with('.') && !skill.name.contains(['/', '\\', '\0', ':']) {
         skill.name.clone()
     } else {
         skill.dir.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
@@ -876,13 +877,13 @@ mod tests {
     #[test]
     fn a_link_is_named_by_its_folder_when_the_frontmatter_name_is_not_a_plain_name() {
         let fixture = Fixture::new("catalog-link-names");
-        for (folder, name) in [("up", "../escape"), ("hid", ".hidden"), ("nest", "a/b"), ("back", "a\\b"), ("plain", "plain-name")] {
+        for (folder, name) in [("up", "../escape"), ("hid", ".hidden"), ("nest", "a/b"), ("back", "a\\b"), ("drive", "C:evil"), ("plain", "plain-name")] {
             fixture.skill(&format!(".claude/skills/{folder}"), name, "");
         }
         let sets = plan(&fixture.machine(), &Settings::default()).link_sets(&fixture.home);
         let claude = sets.iter().find(|set| set.agent == "claude").map(|set| set.links.clone()).unwrap_or_default();
         let names: Vec<&str> = claude.keys().map(String::as_str).collect();
-        assert_eq!(names, vec!["back", "hid", "nest", "plain-name", "up"]);
+        assert_eq!(names, vec!["back", "drive", "hid", "nest", "plain-name", "up"]);
         assert_eq!(claude.get("up"), Some(&fixture.home.join(".claude/skills/up")));
     }
 
