@@ -1204,6 +1204,16 @@ mod tests {
         assert_eq!(read_command(&[]), None);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn output_larger_than_a_pipe_buffer_is_read_whole() {
+        // A child blocks on a full pipe until someone reads it, so it must not wait for the exit.
+        let started = Instant::now();
+        let output = read_command(&["head", "-c", "200000", "/dev/zero"]);
+        assert_eq!(output.map(|text| text.len()), Some(200_000));
+        assert!(started.elapsed() < WIFI_READ_TIMEOUT);
+    }
+
     #[test]
     fn an_empty_id_file_does_not_make_a_node() {
         let dir = std::env::temp_dir().join(format!("ling-node-locator-{}", std::process::id()));
