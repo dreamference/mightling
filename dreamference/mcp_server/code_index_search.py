@@ -16,9 +16,6 @@ from typing import Any, Dict, Final, List, Optional
 
 from dreamference.runner.codex_branded_builder import INSTALL_DIR
 
-# `ling-code` exits with this when the workspace has no index (and prints what to run).
-NO_INDEX_EXIT: Final[int] = 3
-
 SEARCH_TIMEOUT_S: Final[int] = 20
 
 
