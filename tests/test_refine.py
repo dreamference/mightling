@@ -185,3 +185,18 @@ def test_the_spec_records_the_default_and_the_patch_bytes():
         pytest.skip("specs are not shipped")
     text = SPEC.read_text()
     assert "off by default" in text and "No Codex patch" in text and "Patch bytes: 0" in text
+
+
+def test_the_spec_quotes_the_v2_sections_and_rule_as_shipped():
+    # §10: the spec's v2 sections are the `study-sections-v2` piece, and its new rule is the third
+    # of the fix session's four.
+    if not SPEC.exists():
+        pytest.skip("specs are not shipped")
+    text = SPEC.read_text()
+
+    def quoted(after: str) -> str:
+        return re.search(re.escape(after) + r"\s*```text\n(.*?)\n```", text, re.S).group(1)
+
+    assert quoted("The v2 sections (`study-sections-v2`):") == VERSIONS["v2"]["sections"].strip("\n")
+    rules = ["- " + rule for rule in VERSIONS["v2"]["rules"].strip("\n").removeprefix("- ").split("\n- ")]
+    assert len(rules) == 4 and rules[2] == quoted("gains one rule, third of four:")
