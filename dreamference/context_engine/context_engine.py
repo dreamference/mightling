@@ -10,8 +10,9 @@ import os
 import subprocess
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional, Set, Tuple
+from typing import Any, Dict, Final, List, Optional, Set
 
 try:
     import numpy as np
@@ -46,6 +47,60 @@ IGNORE_EXTENSIONS: Final[Set[str]] = {
     ".pyc", ".pyo", ".so", ".o", ".a", ".exe", ".dll", ".dylib",
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".tar", ".gz"
 }
+
+def _is_ignored(workspace_root: Path, path: Path) -> bool:
+    """`ContextEngine.is_ignored` for a given workspace root."""
+    if path.is_absolute() and path.is_relative_to(workspace_root):
+        path = path.relative_to(workspace_root)
+    for part in path.parts:
+        if part in IGNORE_DIRS:
+            return True
+    if path.suffix in IGNORE_EXTENSIONS:
+        return True
+    return False
+
+
+def _index_one(workspace_root: Path, abs_path: Path) -> tuple[IndexedFile, str] | None:
+    """
+    Worker routine that reads file contents, tokenizes terms, and extracts AST symbols.
+
+    A module function, so a worker task pickles the root and one path, not the engine.
+
+    Args:
+        workspace_root (Path): Resolved workspace root.
+        abs_path (Path): Absolute filesystem path of target file.
+
+    Returns:
+        tuple[IndexedFile, str] | None: Tuple of (IndexedFile, content_string) or None if ignored/failed.
+    """
+    if _is_ignored(workspace_root, abs_path):
+        return None
+    rel_path = str(abs_path.relative_to(workspace_root))
+    try:
+        if abs_path.stat().st_size > MAX_FILE_BYTES:
+            return None
+        with open(abs_path, "rb") as f:
+            raw = f.read()
+        if b"\0" in raw[:BINARY_SNIFF_BYTES]:
+            return None
+        content = raw.decode("utf-8", errors="ignore")
+
+        tokens = TFIDFCalculator.tokenize(content)
+        file_symbols: List[CodeSymbol] = []
+        if abs_path.suffix == ".py":
+            file_symbols = ASTSymbolExtractor.extract_python_ast(abs_path, rel_path, content)
+
+        idx_file = IndexedFile(
+            rel_path=rel_path,
+            abs_path=str(abs_path),
+            size_bytes=len(content.encode("utf-8")),
+            symbols=file_symbols,
+            tokens=tokens
+        )
+        return idx_file, content
+    except Exception:
+        return None
+
 
 class ContextEngine:
     """
@@ -85,14 +140,7 @@ class ContextEngine:
         Returns:
             bool: True if path should be skipped during indexing.
         """
-        if path.is_absolute() and path.is_relative_to(self.workspace_root):
-            path = path.relative_to(self.workspace_root)
-        for part in path.parts:
-            if part in IGNORE_DIRS:
-                return True
-        if path.suffix in IGNORE_EXTENSIONS:
-            return True
-        return False
+        return _is_ignored(self.workspace_root, path)
 
     def collect_files(self) -> List[Path]:
         """
@@ -129,43 +177,9 @@ class ContextEngine:
         """Delegates AST parsing to ASTSymbolExtractor."""
         return ASTSymbolExtractor.extract_python_ast(file_path, rel_path, content)
 
-    def _process_single_file(self, abs_path: Path) -> Optional[Tuple[IndexedFile, str]]:
-        """
-        Worker thread routine that reads file contents, tokenizes terms, and extracts AST symbols.
-
-        Args:
-            abs_path (Path): Absolute filesystem path of target file.
-
-        Returns:
-            Optional[Tuple[IndexedFile, str]]: Tuple of (IndexedFile, content_string) or None if ignored/failed.
-        """
-        if self.is_ignored(abs_path):
-            return None
-        rel_path = str(abs_path.relative_to(self.workspace_root))
-        try:
-            if abs_path.stat().st_size > MAX_FILE_BYTES:
-                return None
-            with open(abs_path, "rb") as f:
-                raw = f.read()
-            if b"\0" in raw[:BINARY_SNIFF_BYTES]:
-                return None
-            content = raw.decode("utf-8", errors="ignore")
-
-            tokens = self.tokenize(content)
-            file_symbols: List[CodeSymbol] = []
-            if abs_path.suffix == ".py":
-                file_symbols = self.extract_python_ast(abs_path, rel_path, content)
-
-            idx_file = IndexedFile(
-                rel_path=rel_path,
-                abs_path=str(abs_path),
-                size_bytes=len(content.encode("utf-8")),
-                symbols=file_symbols,
-                tokens=tokens
-            )
-            return idx_file, content
-        except Exception:
-            return None
+    def _process_single_file(self, abs_path: Path) -> tuple[IndexedFile, str] | None:
+        """Reads, tokenizes and parses one file (see `_index_one`)."""
+        return _index_one(self.workspace_root, abs_path)
 
     def index_workspace(self, force_reindex: bool = False) -> Dict[str, Any]:
         """
@@ -212,7 +226,9 @@ class ContextEngine:
             # so results stream rather than all being buffered by the pool's shutdown first.
             # `results` is a one-shot iterator, so contents are kept here for the embedding step:
             # iterating it a second time yielded nothing, and no embedding was ever computed.
-            results = executor.map(self._process_single_file, files_to_index, chunksize=16)
+            # A module function and the root, not `self._process_single_file`: a bound method
+            # pickles the engine into every task, with every file indexed so far.
+            results = executor.map(partial(_index_one, self.workspace_root), files_to_index, chunksize=16)
             for item in results:
                 if item is None:
                     continue

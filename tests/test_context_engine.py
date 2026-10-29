@@ -204,3 +204,40 @@ def test_a_failed_index_save_leaves_the_previous_index_whole(tmp_path, monkeypat
         pass
     assert engine.index_file.read_bytes() == before
     assert sorted(p.name for p in engine.dreamference_dir.iterdir()) == ["context.db", "context_index.json"]
+
+
+def test_each_worker_task_carries_a_path_not_the_whole_engine(tmp_path, monkeypatch):
+    # The pool was mapped over a bound method, so every chunk pickled the engine with every file
+    # indexed so far (tokens included), while the loop was still adding to it: the parent's memory
+    # and the copying grew with the square of the workspace, beside a resident model server.
+    import pickle
+
+    from dreamference.context_engine import context_engine, embedding_calculator
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+    pickled = []
+
+    class InlinePool:
+        def __init__(self, max_workers=None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def map(self, fn, items, chunksize=1):
+            # As the real pool does: a task is pickled when a worker is free for it, by then the
+            # results before it have been consumed.
+            for item in items:
+                pickled.append(len(pickle.dumps(fn)))
+                yield fn(item)
+
+    monkeypatch.setattr(context_engine, "ProcessPoolExecutor", InlinePool)
+    for i in range(3):
+        (tmp_path / f"m{i}.py").write_text(f"def f{i}():\n    return {i}\n" + "word " * 5_000)
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_workspace(force_reindex=True)
+    assert set(engine.indexed_files) == {"m0.py", "m1.py", "m2.py"}
+    assert len(pickled) == 3 and max(pickled) < 4096
