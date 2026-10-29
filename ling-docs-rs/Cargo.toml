@@ -33,6 +33,8 @@ encoding_rs = "=0.8.42"
 globset = "0.4"
 ignore = "0.4"
 libc = "0.2"
+# The air-gap reader every component uses (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §6.5).
+ling-airgapped = { path = "../ling-rs/airgapped" }
 # E-mail (`.eml`, `.mbox`): headers, the text body, attachments (Phase 2, §7.1). Apache-2.0 OR MIT.
 mail-parser = { version = "=0.11.9", default-features = false, features = ["full_encoding"] }
 # Images for OCR (`.png .jpg .tif .webp .bmp .gif`), pure-Rust decoders only, decoded in the OCR

@@ -208,8 +208,10 @@ fn a_category_a_time_range_and_a_language_reach_searxng() {
 }
 
 #[test]
-fn the_removed_duckduckgo_level_searches_every_general_engine() {
-    // `duckduckgo` was a level until 2026-10-03; a value left in the environment is now ignored.
+fn the_removed_duckduckgo_level_counts_as_on() {
+    // `duckduckgo` was a level until 2026-10-03; since 1.8.1 a value that is not a level is `on`
+    // (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §6.5), so a value left in the environment sends
+    // nothing.
     let server =
         Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
     let output = search(
@@ -219,14 +221,9 @@ fn the_removed_duckduckgo_level_searches_every_general_engine() {
             ("DREAMFERENCE_MIGHTLING_AIRGAPPED", "duckduckgo"),
         ],
     );
-    assert!(output.status.success());
-    let request = &server.requests()[0];
-    assert!(
-        request.starts_with("GET /search?q=lisbon&format=json&categories=general&language=auto "),
-        "{request}"
-    );
     let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(printed["airgapped"], "off");
+    assert_eq!(printed["airgapped"], "on");
+    assert!(server.requests().is_empty(), "{:?}", server.requests());
 }
 
 #[test]

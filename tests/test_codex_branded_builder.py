@@ -683,6 +683,28 @@ def test_the_web_crate_key_changes_with_its_source(tmp_path):
     assert CodexBrandedBuilder.crate_key(str(crate)) != first
 
 
+def test_a_crate_key_changes_with_a_path_dependency_s_source(tmp_path):
+    # ling-web-rs and ling-docs-rs link the air-gap reader from ling-rs/airgapped as a path
+    # dependency (spec DREAMFERENCE_MIGHTLING_AIRGAPPED.md §6.5): a change there must rebuild them.
+    leaf = tmp_path / "ling-rs" / "airgapped"
+    (leaf / "src").mkdir(parents=True)
+    (leaf / "Cargo.toml").write_text('[package]\nname = "ling-airgapped"\n')
+    (leaf / "src" / "lib.rs").write_text("// one")
+    (leaf / "target").mkdir()
+    crate = tmp_path / "ling-web-rs"
+    (crate / "src").mkdir(parents=True)
+    (crate / "src" / "lib.rs").write_text("// web")
+    (crate / "Cargo.toml").write_text(
+        '[package]\nname = "ling-web"\n\n[dependencies]\nling-airgapped = { path = "../ling-rs/airgapped" }\n'
+        'serde = "1"\n\n[target.\'cfg(unix)\'.dependencies]\ngone = { path = "../nowhere" }\n'
+    )
+    first = CodexBrandedBuilder.crate_key(str(crate))
+    (leaf / "target" / "junk").write_text("build output is not source")
+    assert CodexBrandedBuilder.crate_key(str(crate)) == first
+    (leaf / "src" / "lib.rs").write_text("// two")
+    assert CodexBrandedBuilder.crate_key(str(crate)) != first
+
+
 def test_the_web_commands_are_built_even_when_codex_is_current(monkeypatch):
     built = []
     monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: True))

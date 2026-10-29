@@ -316,6 +316,18 @@ pub fn command<T: std::fmt::Display>(thread_id: Option<T>, args: &str) -> Vec<St
 /// Runs `ling airgapped …` from a shell: the status of the configured level, or `default
 /// <level>`. Returns the exit code.
 pub fn run_cli(args: &[String]) -> i32 {
+    if args.iter().any(|arg| arg == "--json") {
+        return match json_options(args) {
+            Some(options) => {
+                println!("{}", json_answer(&options.resolve()));
+                0
+            }
+            None => {
+                println!("{JSON_USAGE}");
+                2
+            }
+        };
+    }
     let lines = match args.first().map(String::as_str) {
         None => command(None::<String>, ""),
         Some("default") => command(None::<String>, &args.join(" ")),
@@ -324,6 +336,7 @@ pub fn run_cli(args: &[String]) -> i32 {
         Some("--thread") if args.len() == 2 => command(args.get(1), ""),
         Some(_) => vec![
             "Usage: ling airgapped [default <off|on>] [--thread <id>]".to_string(),
+            JSON_USAGE.to_string(),
             format!("For one run: {ENV_VAR}=on ling exec …; inside a session: /airgapped <level>."),
         ],
     };
@@ -332,6 +345,66 @@ pub fn run_cli(args: &[String]) -> i32 {
         println!("{line}");
     }
     i32::from(failed) * 2
+}
+
+const JSON_USAGE: &str = "       ling airgapped --json [--thread <id>] [--cwd <dir>] [--sealed-by <pid>]";
+
+/// What `ling airgapped --json` was asked about (spec §6.5).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct JsonOptions {
+    thread: Option<String>,
+    cwd: Option<std::path::PathBuf>,
+    sealed_by: Option<u32>,
+}
+
+impl JsonOptions {
+    /// The level in force, as the text form resolves it, judged from `cwd`'s repository and held
+    /// at `on` by a seal the process `sealed_by` wrote.
+    fn resolve(&self) -> Resolved {
+        let ids = [self.thread.as_deref().unwrap_or_default()];
+        let cwd = self.cwd.clone().or_else(|| std::env::current_dir().ok()).unwrap_or_default();
+        let resolved = ling_airgapped::resolve_in(&ids, std::env::var(ENV_VAR).ok(), &cwd);
+        match self.sealed_by {
+            Some(pid) => held_by_seal(resolved, ling_airgapped::sealed_by(pid)),
+            None => resolved,
+        }
+    }
+}
+
+/// Parses `--json`'s options; `None` for anything else, a repeated option or a bad pid.
+fn json_options(args: &[String]) -> Option<JsonOptions> {
+    let mut options = JsonOptions::default();
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--json" => {}
+            "--thread" if options.thread.is_none() => options.thread = Some(words.next()?.clone()),
+            "--cwd" if options.cwd.is_none() => options.cwd = Some(words.next()?.into()),
+            "--sealed-by" if options.sealed_by.is_none() => options.sealed_by = Some(words.next()?.parse().ok()?),
+            _ => return None,
+        }
+    }
+    Some(options)
+}
+
+/// `resolved`, or `on` from a seal when `sealed` holds and the files say less.
+fn held_by_seal(resolved: Resolved, sealed: bool) -> Resolved {
+    if !sealed || resolved.level == Level::On {
+        return resolved;
+    }
+    Resolved { level: Level::On, source: ling_airgapped::Source::Sealed, invalid: resolved.invalid }
+}
+
+/// The one line `ling airgapped --json` prints: `{"level","tier","source","invalid"}`.
+fn json_answer(resolved: &Resolved) -> String {
+    // In this order, which serde_json's map would sort.
+    format!(
+        "{{\"level\":{},\"tier\":{},\"source\":{},\"invalid\":{}}}",
+        json!(resolved.level.name()),
+        json!(resolved.source.tier()),
+        json!(resolved.source.label()),
+        json!(resolved.invalid),
+    )
 }
 
 /// What takes the network away from a sandboxed command at `on`.
@@ -978,6 +1051,46 @@ mod tests {
         // MIGHTLING_EGRESS: no text may call `off` air-gapped.
         assert!(ON_TEXT.contains("no network"));
         assert!(!OFF_TEXT.contains("no network"));
+    }
+
+    #[test]
+    fn the_json_answer_is_one_line_in_the_spec_s_order() {
+        let resolved = Resolved {
+            level: Level::On,
+            source: ling_airgapped::Source::ConfigFile("/repo/dreamference.toml".into()),
+            invalid: vec!["\"nope\" from x is not a level: taken as on".to_string()],
+        };
+        assert_eq!(
+            json_answer(&resolved),
+            r#"{"level":"on","tier":"config","source":"mightling_airgapped in /repo/dreamference.toml","invalid":["\"nope\" from x is not a level: taken as on"]}"#
+        );
+        let off = Resolved { level: Level::Off, source: ling_airgapped::Source::Default, invalid: vec![] };
+        let answer: Value = serde_json::from_str(&json_answer(&off)).unwrap_or_default();
+        assert_eq!(answer, json!({"level": "off", "tier": "default", "source": off.source.label(), "invalid": []}));
+    }
+
+    #[test]
+    fn the_json_options_parse_and_anything_else_is_refused() {
+        let args = |words: &str| words.split(' ').map(String::from).collect::<Vec<_>>();
+        assert_eq!(json_options(&args("--json")), Some(JsonOptions::default()));
+        assert_eq!(
+            json_options(&args("--json --thread t1 --cwd /w --sealed-by 42")),
+            Some(JsonOptions { thread: Some("t1".into()), cwd: Some("/w".into()), sealed_by: Some(42) })
+        );
+        assert_eq!(json_options(&args("--thread t1 --json")).map(|o| o.thread), Some(Some("t1".into())));
+        for bad in ["--json --thread", "--json --sealed-by me", "--json --cwd /a --cwd /b", "--json default on", "--json -v"] {
+            assert_eq!(json_options(&args(bad)), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_seal_by_the_parent_holds_on() {
+        let off = Resolved { level: Level::Off, source: ling_airgapped::Source::Default, invalid: vec!["n".into()] };
+        assert_eq!(held_by_seal(off.clone(), false), off);
+        let held = held_by_seal(off, true);
+        assert_eq!((held.level, held.source.tier(), held.invalid), (Level::On, "sealed", vec!["n".to_string()]));
+        let env = Resolved { level: Level::On, source: ling_airgapped::Source::Environment, invalid: vec![] };
+        assert_eq!(held_by_seal(env.clone(), true), env);
     }
 
     #[test]

@@ -168,75 +168,13 @@ pub fn resolve_local(
     Ok(resolved)
 }
 
-/// Whether the session this server serves may not use the network: the configured level
-/// (environment, then the configuration files, strictest wins), or a seal written by `parent`
-/// (AIRGAPPED §6; the same question `ling-rs/apps/src/lib.rs::air_gapped_for` asks).
+/// Whether the session this server serves may not use the network: the configured level, as the
+/// shared reader resolves it (environment, then the configuration files, strictest wins, and what
+/// cannot be read is `on`), or a seal written by `parent` (AIRGAPPED §6.5; the same question
+/// `ling-rs/apps/src/lib.rs::air_gapped_for` asks).
 pub fn air_gapped(parent: u32) -> bool {
-    configured_on(
-        std::env::var("DREAMFERENCE_MIGHTLING_AIRGAPPED").ok(),
-        &config_texts(),
-    ) || sealed_by(parent)
-}
-
-/// The environment's level if it names one, else whether any configuration file says `on` (or
-/// `true`, as ling-airgapped reads a boolean).
-pub fn configured_on(environment: Option<String>, configs: &[String]) -> bool {
-    if let Some(level) = environment
-        .map(|v| v.trim().to_ascii_lowercase())
-        .filter(|v| v == "on" || v == "off")
-    {
-        return level == "on";
-    }
-    configs.iter().any(|text| {
-        text.parse::<toml::Table>()
-            .ok()
-            .and_then(|t| match t.get("mightling_airgapped")? {
-                toml::Value::String(s) => Some(s.trim().eq_ignore_ascii_case("on")),
-                toml::Value::Boolean(b) => Some(*b),
-                _ => None,
-            })
-            .unwrap_or(false)
-    })
-}
-
-fn config_texts() -> Vec<String> {
-    let mut files = Vec::new();
-    match std::env::var_os("DREAMFERENCE_CONFIG_PATH").filter(|p| !p.is_empty()) {
-        Some(path) => files.push(PathBuf::from(path)),
-        None => files.push(PathBuf::from("dreamference.toml")),
-    }
-    files.push(config::user_home().join(".config/dreamference/config.toml"));
-    files
-        .iter()
-        .filter_map(|f| std::fs::read_to_string(f).ok())
-        .collect()
-}
-
-/// The seals' folder: `$XDG_RUNTIME_DIR/ling-airgapped`, or `/run/user/<uid>/ling-airgapped`.
-fn seal_dir() -> Option<PathBuf> {
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|d| d.is_absolute() && d.is_dir())
-        .or_else(|| {
-            let dir = PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() }));
-            dir.is_dir().then_some(dir)
-        })?;
-    Some(runtime.join("ling-airgapped"))
-}
-
-/// Whether a seal's content is `pid` (a seal holds its writer's pid).
-pub fn sealed_by(pid: u32) -> bool {
-    let Some(dir) = seal_dir() else { return false };
-    sealed_in(&dir, pid)
-}
-
-pub fn sealed_in(dir: &Path, pid: u32) -> bool {
-    let own = pid.to_string();
-    std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.trim() == own))
+    ling_airgapped::resolve(&[]).level == ling_airgapped::Level::On
+        || ling_airgapped::sealed_by(parent)
 }
 
 /// `ling-fetch`: `MIGHTLING_FETCH_BIN`, else beside this binary (both are installed in one `bin/`).
@@ -872,38 +810,37 @@ mod tests {
     }
 
     #[test]
-    fn the_air_gap_is_the_environment_then_the_files_or_the_parents_seal() {
-        let on = "mightling_airgapped = \"on\"\n".to_string();
-        let off = "mightling_airgapped = \"off\"\n".to_string();
-        assert!(
-            configured_on(None, &[off.clone(), on.clone()]),
+    fn the_air_gap_is_the_shared_reader_s() {
+        // The reader is ling-rs/airgapped, whose own tests and cases.json pin the rules; this
+        // checks the docs index takes its verdict, including fail-closed for an invalid value.
+        use ling_airgapped::{resolve_from, Level};
+        let file = |text: &str| (PathBuf::from("dreamference.toml"), text.to_string());
+        let on = file("mightling_airgapped = \"on\"\n");
+        let off = file("mightling_airgapped = \"off\"\n");
+        let level = |env: Option<&str>, configs: &[(PathBuf, String)]| {
+            resolve_from(None, env, configs).level
+        };
+        assert_eq!(
+            level(None, &[off.clone(), on.clone()]),
+            Level::On,
             "strictest file wins"
         );
-        assert!(!configured_on(None, std::slice::from_ref(&off)));
-        assert!(
-            !configured_on(Some("off".into()), std::slice::from_ref(&on)),
+        assert_eq!(level(None, std::slice::from_ref(&off)), Level::Off);
+        assert_eq!(
+            level(Some("off"), std::slice::from_ref(&on)),
+            Level::Off,
             "the environment wins"
         );
-        assert!(configured_on(Some("ON".into()), &[]));
-        assert!(
-            configured_on(Some("bogus".into()), &[on]),
-            "an invalid value is passed over"
+        assert_eq!(
+            level(Some("bogus"), std::slice::from_ref(&off)),
+            Level::On,
+            "an invalid value is on"
         );
-        // Read as ling-airgapped reads a file: past a byte order mark, `true` as `on`.
-        let bom = "\u{feff}mightling_airgapped = \"on\"\r\n".to_string();
-        assert!(configured_on(None, &[bom]), "a byte order mark");
-        assert!(configured_on(
-            None,
-            &["mightling_airgapped = true\n".into()]
-        ));
-        assert!(!configured_on(
-            None,
-            &["mightling_airgapped = false\n".into()]
-        ));
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("0b5c-thread"), "4242\n").unwrap();
-        assert!(sealed_in(dir.path(), 4242));
-        assert!(!sealed_in(dir.path(), 4243));
+        assert_eq!(
+            level(None, &[file("{\"mightling_airgapped\": \"off\"}")]),
+            Level::On,
+            "not TOML is on"
+        );
     }
 
     #[test]

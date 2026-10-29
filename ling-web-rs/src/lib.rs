@@ -15,7 +15,7 @@
 //! the same errors, including the one that names every failed search engine. Where this differs it
 //! says so at the function.
 
-pub mod airgapped;
+pub use ling_airgapped as airgapped;
 pub mod cache;
 pub mod fetch;
 pub mod html_text;

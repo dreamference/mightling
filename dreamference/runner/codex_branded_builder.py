@@ -35,6 +35,7 @@ import sys
 import shutil
 import subprocess
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Final, List, Optional
 
@@ -962,11 +963,49 @@ class CodexBrandedBuilder:
             str: A short key.
         """
         digest = hashlib.sha256()
-        for path in cls.crate_files(crate_dir):
+        files = cls.crate_files(crate_dir)
+        for dependency in cls.path_dependencies(crate_dir):
+            files.extend(cls.crate_files(dependency))
+        for path in files:
             digest.update(os.path.relpath(path, crate_dir).encode())
             with open(path, "rb") as handle:
                 digest.update(handle.read())
         return digest.hexdigest()[:12]
+
+    @classmethod
+    def path_dependencies(cls, crate_dir: str) -> List[str]:
+        """
+        Lists the crates a crate takes by `path =`, and theirs, so that its key covers their source.
+
+        Args:
+            crate_dir (str): The crate's directory.
+
+        Returns:
+            List[str]: The existing dependency directories, normalized and in a stable order;
+            empty when `Cargo.toml` is missing or not TOML.
+        """
+        root = os.path.normpath(crate_dir)
+        found: List[str] = []
+        pending = [root]
+        while pending:
+            current = pending.pop(0)
+            try:
+                with open(os.path.join(current, "Cargo.toml"), "rb") as handle:
+                    manifest = tomllib.load(handle)
+            except (OSError, tomllib.TOMLDecodeError):
+                continue
+            tables = [manifest.get(key, {}) for key in ("dependencies", "build-dependencies")]
+            for target in manifest.get("target", {}).values():
+                tables.extend(target.get(key, {}) for key in ("dependencies", "build-dependencies"))
+            for table in tables:
+                for spec in table.values():
+                    if not isinstance(spec, dict) or not isinstance(spec.get("path"), str):
+                        continue
+                    dependency = os.path.normpath(os.path.join(current, spec["path"]))
+                    if os.path.isdir(dependency) and dependency not in found and dependency != root:
+                        found.append(dependency)
+                        pending.append(dependency)
+        return sorted(found)
 
     @classmethod
     def crate_is_current(cls, crate_dir: str, stamp_name: str, bin_names: tuple) -> bool:
