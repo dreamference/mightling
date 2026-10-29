@@ -895,7 +895,6 @@ def test_a_crate_install_leaves_another_installs_staging_file_alone(tmp_path, mo
     assert (bin_dir / "x").read_text() == "#!/bin/sh\n"
 
 
-
 def test_a_directory_named_like_a_crate_binary_is_not_current(tmp_path, monkeypatch):
     # The stamped check took any path with the execute bit, a directory included; the unstamped
     # one (binaries_installed) asks for a file.
@@ -905,6 +904,21 @@ def test_a_directory_named_like_a_crate_binary_is_not_current(tmp_path, monkeypa
     binary.unlink()
     binary.mkdir()
     assert not CodexBrandedBuilder.crate_is_current(str(crate), "stamp", ("x",))
+
+
+def test_a_failed_crate_copy_leaves_no_staging_file(tmp_path, monkeypatch):
+    # Each install stages under a name of its own, so a copy that failed (a full disk) left one
+    # more partial binary in bin/ every time.
+    crate = _fake_crate(tmp_path, monkeypatch)
+
+    def full_disk(source, target):
+        Path(target).write_text("half a bin")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(builder_module.shutil, "copy2", full_disk)
+    with pytest.raises(OSError):
+        CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",))
+    assert list((tmp_path / "install" / "bin").iterdir()) == []
 
 
 def test_linking_leaves_another_links_staging_link_alone(tmp_path):

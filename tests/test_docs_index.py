@@ -142,6 +142,32 @@ def test_setup_installs_each_pinned_file_once(pinned):
     assert len(fetched) == 7, "nothing is fetched again"
 
 
+def test_a_failed_write_leaves_no_staging_file(tmp_path, monkeypatch):
+    # Each write stages under a new name, so one that failed (a full disk) left its partial file
+    # beside the target every time.
+    real_fdopen = os.fdopen
+
+    class FullDisk:
+        def __init__(self, fd, mode):
+            self.handle = real_fdopen(fd, mode)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.handle.close()
+
+        def write(self, data):
+            self.handle.write(data[:3])
+            raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(docs_index_setup.os, "fdopen", FullDisk)
+    target = tmp_path / "lib" / "libpdfium.so"
+    with pytest.raises(OSError):
+        DocsIndexSetup._install_bytes(b"a library", str(target))
+    assert list((tmp_path / "lib").iterdir()) == []
+
+
 def test_checking_the_pins_closes_every_stamp_it_reads(pinned):
     # A stamp opened and left to the collector is a ResourceWarning on every check, which
     # `missing_ocr()`, the same check for OCR's files, never had.
