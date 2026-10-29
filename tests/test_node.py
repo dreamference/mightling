@@ -2019,6 +2019,16 @@ def test_a_paired_node_serving_the_same_model_is_a_lane_and_every_other_is_named
     )
 
 
+def test_night_shift_and_swe_bench_use_every_paired_node_by_default():
+    from dreamference.node import NodeLanes
+    from dreamference.night_shift.night_shift_settings import NightShiftSettings
+    from dreamference.swe_bench.swe_bench_settings import SweBenchSettings
+
+    assert NightShiftSettings({}).nodes == "paired" and SweBenchSettings({}).nodes == "paired"
+    assert NodeLanes.wanted(NightShiftSettings({}).nodes) is None
+    assert NodeLanes.wanted(SweBenchSettings({"nodes": "none"}).nodes) == []
+
+
 def test_the_sender_always_sends_caps_and_reaches_the_node_through_the_pairing(
     tmp_path, monkeypatch
 ):
