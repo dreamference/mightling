@@ -561,7 +561,7 @@ class NodePairing:
             info = json.loads(check.stdout) if check.returncode == 0 else {}
         except ValueError:
             info = {}
-        if info.get("node") != record["node"]:
+        if not isinstance(info, dict) or info.get("node") != record["node"]:
             print(f"❌ {record['name']} did not answer through the new key; pairing removed.")
             cls.record_path(record["node"]).unlink(missing_ok=True)
             return None

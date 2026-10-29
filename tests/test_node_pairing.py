@@ -111,6 +111,14 @@ def test_pairing_over_a_session_pins_the_host_key_authorises_the_key_and_saves_t
     assert command.endswith("node authorize") and key == "ssh-ed25519 AAAAsender mightling-node\n"
 
 
+@pytest.mark.parametrize("reply", ["[]", '"node"', "7"])
+def test_an_info_reply_that_is_not_an_object_removes_the_pairing(pairing, reply, capsys):
+    pairing["info"] = answer(0, reply)
+    assert NodePairing.pair_over_session(Session(answer(0, f"{NODE}\nspark-1\n"))) is None
+    assert "did not answer through the new key" in capsys.readouterr().out
+    assert not NodePairing.record_path(NODE).exists()
+
+
 def test_a_machine_that_reports_no_node_id_is_not_paired(pairing, capsys):
     assert NodePairing.pair_over_session(Session(answer(127, "", "not found"))) is None
     assert "did not report a node id" in capsys.readouterr().out
