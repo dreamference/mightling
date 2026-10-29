@@ -1380,7 +1380,7 @@ def test_server_start_warms_up_before_reporting_ready():
     import inspect
     from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
 
-    source = inspect.getsource(DreamferenceCLIController.run_cli)
+    source = inspect.getsource(DreamferenceCLIController.dispatch_cli)
     assert source.index("vllm_mgr.warm_up()") < source.index("✅ Server Ready!")
 
 
