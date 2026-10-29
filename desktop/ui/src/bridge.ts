@@ -970,6 +970,7 @@ export interface BoardPost {
   channel: string;
   root: string;
   author: string;
+  /** Seconds since the epoch. */
   at: number;
   text: string;
 }

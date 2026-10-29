@@ -1,7 +1,7 @@
 // The agent message board (DESKTOP_PARITY Phase 3 item 10): its switches and its discussions.
 import { describe, expect, it } from "vitest";
 
-import { boardOn, discussions, sqliteHome } from "./board";
+import { boardOn, discussions, postTime, sqliteHome } from "./board";
 
 const post = (id: string, root: string, at: number, channel = "retry") => ({ id, root, at, channel, author: "/root/a", text: id });
 
@@ -11,6 +11,11 @@ describe("the agent message board", () => {
     expect(boardOn({ features: { agent_message_board: true } })).toBe(false);
     expect(boardOn(null)).toBe(false);
     expect(sqliteHome({ sqlite_home: "/data/sqlite" })).toBe("/data/sqlite");
+  });
+
+  it("shows a post's time from its seconds (desktop/electron/src/board.ts), not as milliseconds", () => {
+    expect(postTime(1_792_000_000)).toBe(new Date(1_792_000_000_000).toLocaleString());
+    expect(postTime(1_792_000_000)).not.toContain("1970");
   });
 
   it("groups posts into discussions, the latest active first", () => {

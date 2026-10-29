@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 
 import * as bridge from "./bridge";
-import { discussions } from "./board";
+import { discussions, postTime } from "./board";
 import { Icon } from "./icons";
 import { renderMarkdown } from "./markdown";
 import type { Thread } from "./protocol/v2/Thread";
@@ -49,7 +49,7 @@ export function MessageBoardView(props: { sqliteHome: string | null; threads: Re
                 <article key={entry.root.id} className="board-discussion">
                   {[entry.root, ...entry.replies].map((post) => (
                     <div key={post.id} className={`board-post${post === entry.root ? "" : " reply"}`}>
-                      <div className="board-meta"><strong>{post.author}</strong> in #{post.channel} · {new Date(post.at).toLocaleString()}</div>
+                      <div className="board-meta"><strong>{post.author}</strong> in #{post.channel} · {postTime(post.at)}</div>
                       <div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(post.text) }} />
                     </div>
                   ))}
