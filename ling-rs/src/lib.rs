@@ -994,7 +994,8 @@ fn parse_gmail_status(body: &serde_json::Value) -> Option<String> {
 
 fn vllm_host_from_toml(text: &str) -> Option<String> {
     let parsed: toml::Table = toml::from_str(text).ok()?;
-    parsed.get("vllm_host")?.as_str().map(str::to_string)
+    // A blank value is no host, as a blank DREAMFERENCE_VLLM_HOST is: the next tier decides.
+    parsed.get("vllm_host")?.as_str().filter(|host| !host.trim().is_empty()).map(str::to_string)
 }
 
 /// `DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then `~/.config/dreamference/config.toml`.
@@ -2211,5 +2212,7 @@ mod tests {
             Some("http://gb10:9000".into())
         );
         assert_eq!(vllm_host_from_toml("model = \"x\"\n"), None);
+        assert_eq!(vllm_host_from_toml("vllm_host = \"\"\n"), None);
+        assert_eq!(vllm_host_from_toml("vllm_host = \"  \"\n"), None);
     }
 }
