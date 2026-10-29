@@ -72,10 +72,7 @@ pub fn run(parent: Option<i32>) -> Result<()> {
     if flock(&lock, false).is_err() {
         return Ok(()); // another session keeps the index
     }
-    let mut docs = DocsToml::load()?;
-    if !docs.ensure_defaults(&config::user_home()).is_empty() {
-        docs.save()?;
-    }
+    DocsToml::update(|docs| Ok(docs.ensure_defaults(&config::user_home())))?;
     let exe = std::env::current_exe()?;
     let interval = Duration::from_secs(settings.scan_interval_min * 60);
     let mut pending = vec![Request::All];
