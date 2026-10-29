@@ -508,6 +508,11 @@ class ForgeCommand:
             lines.append(
                 f"Forge of record: {state.get('record_name') or state.get('record_node') or 'unknown'}"
             )
+            # A record turned off takes its advertisement away (§2.5).
+            if ForgeService.find_record() is None:
+                lines.append(
+                    "⚠️  The forge of record is off or not on the network: this mirror is not syncing."
+                )
         if ForgeMove.frozen_flag().exists():
             lines.append("⚠️  Frozen: pushes are refused while the role moves.")
         return lines

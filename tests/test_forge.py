@@ -1114,6 +1114,14 @@ def test_status_names_the_role_the_last_backup_the_mirror_and_the_storage(monkey
     assert "Forge of record: gx10-77c0" in lines and not any(
         "Last backup" in line for line in lines
     )
+    # The record's advertisement is gone once it is off, and the mirror says so (§2.5).
+    assert any("forge of record is off" in line for line in lines)
+    monkeypatch.setattr(
+        ForgeService,
+        "find_record",
+        classmethod(lambda cls: {"node": "n-1", "name": "gx10-77c0", "role": "record"}),
+    )
+    assert not any("is off" in line for line in ForgeCommand.status_lines())
 
 
 def test_the_node_list_shows_each_nodes_forge_role(monkeypatch):
