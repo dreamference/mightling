@@ -157,3 +157,63 @@ def test_web_search_sends_the_category_time_range_and_detected_language():
     assert first["categories"] == "social media" and first["time_range"] == "week"
     assert first["language"] == "auto"
     assert "time_range" not in second
+
+
+def _fresh_ide_state(monkeypatch):
+    from dreamference.mcp_server import mcp_server
+    from dreamference.mcp_server.ide_state import IDEState
+
+    state = IDEState()
+    monkeypatch.setattr(mcp_server, "global_ide_state", state)
+    return state
+
+
+def test_an_unknown_method_is_a_method_not_found_error_with_its_id():
+    resp = MCPServer().handle_request({"jsonrpc": "2.0", "id": 9, "method": "resources/list"})
+
+    assert resp["id"] == 9 and resp["error"]["code"] == -32601 and "resources/list" in resp["error"]["message"]
+    assert "result" not in resp
+
+
+def test_an_unknown_tool_is_answered_with_an_error_not_a_crash():
+    resp = MCPServer().handle_request({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                                       "params": {"name": "shell_exec", "arguments": {"cmd": "rm -rf /"}}})
+
+    assert json.loads(resp["result"]["content"][0]["text"]) == {"error": "Tool 'shell_exec' not implemented"}
+
+
+def test_the_ide_tools_report_the_editor_state(monkeypatch):
+    state = _fresh_ide_state(monkeypatch)
+    server = MCPServer()
+    assert server.execute_tool("ide_get_active_editor", {})["active_file"] == "No active file"
+
+    server.execute_tool("ide_open_file", {"file_path": "src/a.py", "line": "12", "column": 3})
+    server.execute_tool("ide_open_file", {"file_path": "src/b.py"})
+    server.execute_tool("ide_open_file", {"file_path": "src/a.py"})
+    state.diagnostics = [{"file": "src/a.py", "message": "unused"}, {"file": "src/b.py", "message": "typo"}]
+
+    assert server.execute_tool("ide_get_active_editor", {})["active_file"] == "src/a.py"
+    assert server.execute_tool("ide_get_open_files", {}) == {"open_files": ["src/a.py", "src/b.py"]}
+    assert server.execute_tool("ide_get_diagnostics", {"file_path": "src/b.py"}) == [state.diagnostics[1]]
+    assert server.execute_tool("ide_get_diagnostics", {}) == state.diagnostics
+
+
+def test_the_web_tools_get_their_arguments_coerced_and_defaulted(monkeypatch):
+    from dreamference.mcp_server.web_tools import WebTools
+
+    calls = []
+    monkeypatch.setattr(WebTools, "search", classmethod(lambda cls, *a: calls.append(("search", a)) or {}))
+    monkeypatch.setattr(WebTools, "fetch", classmethod(lambda cls, *a: calls.append(("fetch", a)) or {}))
+    server = MCPServer()
+
+    server.execute_tool("web_search", {"query": "asyncio", "max_results": "3", "category": "it", "time_range": "day"})
+    server.execute_tool("web_search", {"query": "asyncio", "category": None})
+    server.execute_tool("web_fetch", {"url": "https://example.com", "max_chars": "500"})
+    server.execute_tool("web_fetch", {})
+
+    assert calls == [
+        ("search", ("asyncio", 3, "it", "auto", "day")),
+        ("search", ("asyncio", 8, "general", "auto", "")),
+        ("fetch", ("https://example.com", 500)),
+        ("fetch", ("", 20000)),
+    ]
