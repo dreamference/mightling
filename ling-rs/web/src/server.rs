@@ -1123,17 +1123,14 @@ pub fn clean_file_name(name: &str) -> String {
     if cleaned.is_empty() { "attachment".to_string() } else { cleaned }
 }
 
-/// A path in `folder` for `name` that does not exist yet.
-fn unused_path(folder: &Path, name: &str) -> PathBuf {
-    let first = folder.join(name);
-    if first.symlink_metadata().is_err() {
-        return first;
-    }
+/// The paths in `folder` an upload of `name` may take, in order: `name`, then `stem-1.ext`, ...
+fn upload_paths(folder: &Path, name: &str) -> impl Iterator<Item = PathBuf> {
     let (stem, extension) = match name.rsplit_once('.') {
         Some((stem, extension)) if !stem.is_empty() => (stem.to_string(), format!(".{extension}")),
         _ => (name.to_string(), String::new()),
     };
-    (1..).map(|n| folder.join(format!("{stem}-{n}{extension}"))).find(|path| path.symlink_metadata().is_err()).unwrap_or(first)
+    let folder = folder.to_path_buf();
+    std::iter::once(folder.join(name)).chain((1..).map(move |n| folder.join(format!("{stem}-{n}{extension}"))))
 }
 
 /// An attachment into an Ask thread's folder: `?thread=<id>&name=<file>&kind=image|file`, the
@@ -1158,10 +1155,16 @@ async fn upload(State(server): State<Arc<Server>>, Query(query): Query<HashMap<S
     if declared.is_some_and(|length| length > cap) {
         return text(StatusCode::PAYLOAD_TOO_LARGE, &format!("The limit is {} MB.\n", cap >> 20));
     }
-    let path = unused_path(&folder, &clean_file_name(query.get("name").map(String::as_str).unwrap_or_default()));
-    let mut file = match tokio::fs::OpenOptions::new().write(true).create_new(true).open(&path).await {
-        Ok(file) => file,
-        Err(err) => return text(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not write the attachment: {err}\n")),
+    // The first name nothing holds: a check before the create would race another upload of the name.
+    let name = clean_file_name(query.get("name").map(String::as_str).unwrap_or_default());
+    let mut paths = upload_paths(&folder, &name);
+    let (path, mut file) = loop {
+        let path = paths.next().unwrap_or_default();
+        match tokio::fs::OpenOptions::new().write(true).create_new(true).open(&path).await {
+            Ok(file) => break (path, file),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return text(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not write the attachment: {err}\n")),
+        }
     };
     let mut stream = request.into_body().into_data_stream();
     let mut written: u64 = 0;

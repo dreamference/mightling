@@ -493,6 +493,36 @@ async fn uploads_go_to_an_ask_threads_folder_within_the_caps() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn uploads_of_one_name_at_once_each_get_their_own_file() {
+    let scratch = scratch("upload-race");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let cookie = sign_in(&server).await;
+    let root = server.ask_root();
+    let folder = ling_web_server::ask::new_folder(&root).unwrap();
+    ling_web_server::ask::link_thread(&root, "thr-1", &folder).unwrap();
+    let uploads: Vec<_> = (0..32)
+        .map(|n| {
+            let request = request("POST", "/api/upload?thread=thr-1&name=photo.jpg&kind=file")
+                .header(header::ORIGIN, ORIGIN)
+                .header(header::COOKIE, &cookie)
+                .body(Body::from(format!("photo {n}")))
+                .unwrap();
+            let server = server.clone();
+            tokio::spawn(async move { call(&server, request).await })
+        })
+        .collect();
+    let mut paths = Vec::new();
+    for upload in uploads {
+        let (status, _, body) = upload.await.unwrap();
+        assert_eq!(status, StatusCode::OK, "{body}");
+        paths.push(serde_json::from_str::<Value>(&body).unwrap()["path"].as_str().unwrap().to_string());
+    }
+    paths.sort();
+    paths.dedup();
+    assert_eq!(paths.len(), 32, "each upload has a file of its own: {paths:?}");
+}
+
 /// A phone bridge's image (`read=1`): its text is read by the offline reader, here a stand-in with
 /// Tesseract's command line, and the answer says whether the served model takes images, as the
 /// launcher's catalog records it; a plain upload's answer is unchanged.
