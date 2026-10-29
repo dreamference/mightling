@@ -857,3 +857,147 @@ def test_an_active_unit_prints_the_wait_line_only_when_something_old_is_left(
     assert LegacyNameMigration.run() == []
     assert (old_bin / "ling").is_file() and (links / "ling").is_symlink()
     assert "waits for ling-swe-night1.service" in capsys.readouterr().err
+
+
+def _write_units(units, files):
+    units.mkdir(parents=True, exist_ok=True)
+    for name, text in files.items():
+        (units / name).write_text(text)
+
+
+def test_puffin_units_move_to_ragon_names_with_a_socket_and_a_path_unit(monkeypatch, tmp_home):
+    units = LegacyNameMigration.user_unit_dir()
+    _write_units(
+        units,
+        {
+            "puffin-web.service": "[Service]\nExecStart=%h/.local/bin/puffin-admin web\n",
+            "puffin-web.socket": "[Socket]\nListenStream=3100\nService=puffin-web.service\n",
+            "puffin-watch.path": "[Path]\nPathChanged=%h/.puffin/x\nUnit=puffin-web.service\n",
+        },
+    )
+    monkeypatch.setattr(LegacyNameMigration, "user_systemctl", classmethod(lambda cls, *args: False))
+
+    moved, to_start = LegacyNameMigration.move_user_units()
+
+    assert moved == ["puffin-watch.path", "puffin-web.service", "puffin-web.socket"]
+    assert to_start == [], "none was running, so none starts again"
+    assert sorted(path.name for path in units.iterdir()) == [
+        "ragon-watch.path",
+        "ragon-web.service",
+        "ragon-web.socket",
+    ]
+    assert "ExecStart=%h/.local/bin/ragon-admin web" in (units / "ragon-web.service").read_text()
+    assert "Service=ragon-web.service" in (units / "ragon-web.socket").read_text()
+    assert "Unit=ragon-web.service" in (units / "ragon-watch.path").read_text()
+
+
+def test_a_unit_already_under_its_new_name_is_kept_and_a_unit_that_was_off_stays_off(
+    monkeypatch, tmp_home
+):
+    units = LegacyNameMigration.user_unit_dir()
+    wants = units / "default.target.wants"
+    wants.mkdir(parents=True)
+    _write_units(
+        units,
+        {
+            "mightling-web.service": "[Service]\nExecStart=old\n",
+            "ragon-web.service": "[Service]\nExecStart=new\n",
+        },
+    )
+    (wants / "mightling-web.service").symlink_to(units / "mightling-web.service")
+    (wants / "ragon-web.service").symlink_to(units / "ragon-web.service")
+    (wants / "mightling-gone.service").symlink_to(units / "mightling-gone.service")
+    calls = []
+
+    def systemctl(cls, *args):
+        calls.append(" ".join(args))
+        return args[0] != "is-active"
+
+    monkeypatch.setattr(LegacyNameMigration, "user_systemctl", classmethod(systemctl))
+
+    moved, to_start = LegacyNameMigration.move_user_units()
+
+    assert (units / "ragon-web.service").read_text() == "[Service]\nExecStart=new\n"
+    assert not (units / "mightling-web.service").exists()
+    assert not (wants / "mightling-web.service").is_symlink()
+    assert (wants / "ragon-web.service").resolve() == units / "ragon-web.service"
+    assert (wants / "mightling-gone.service").is_symlink(), "a link of a unit that is gone is not ours"
+    assert moved == ["mightling-web.service"] and to_start == []
+    assert not any(call.startswith(("stop", "start")) for call in calls)
+    assert "started" not in LegacyNameMigration.start_user_units(moved, to_start)
+
+
+@pytest.mark.parametrize(
+    ("enabled", "after"),
+    [
+        ((), "ragon signal setup --refresh"),
+        (("mightling-signal.service",), "ragon signal setup --refresh; ragon signal start"),
+        (
+            ("mightling-signal.service", "mightling-signal@work.service"),
+            "ragon signal setup --refresh; ragon signal start --name default; ragon signal start --name work",
+        ),
+    ],
+)
+def test_the_signal_line_starts_each_enabled_bridge_and_none_that_was_off(
+    monkeypatch, tmp_path, enabled, after
+):
+    (tmp_path / "var/lib/mightling-signal").mkdir(parents=True)
+    if len(enabled) > 1:
+        (tmp_path / "var/lib/mightling-signal-work").mkdir()
+    monkeypatch.setattr(
+        LegacyNameMigration, "system_unit_enabled", classmethod(lambda cls, unit: unit in enabled)
+    )
+
+    line = LegacyNameMigration.signal_line(tmp_path)
+
+    assert line.endswith(after)
+    assert line.count("ragon signal start") == len(enabled)
+
+
+def test_the_signal_line_guards_an_existing_runtime_and_a_state_folder(monkeypatch, tmp_path):
+    (tmp_path / "var/lib/mightling-signal").mkdir(parents=True)
+    (tmp_path / "opt/ragon").mkdir(parents=True)
+    monkeypatch.setattr(LegacyNameMigration, "system_unit_enabled", classmethod(lambda cls, unit: False))
+
+    line = LegacyNameMigration.signal_line(tmp_path)
+
+    assert "[ -e /opt/ragon ] || [ ! -d /opt/mightling ] || mv /opt/mightling /opt/ragon;" in line
+    assert "[ -e /var/lib/ragon-signal ] || mv /var/lib/mightling-signal /var/lib/ragon-signal;" in line
+
+
+def test_an_old_unit_file_alone_still_gets_a_line_without_accounts(monkeypatch, tmp_path):
+    units = tmp_path / "etc/systemd/system"
+    units.mkdir(parents=True)
+    (units / "mightling-signal.service").write_text("[Unit]\n")
+    asked = []
+    monkeypatch.setattr(
+        LegacyNameMigration, "system_unit_enabled", classmethod(lambda cls, unit: asked.append(unit))
+    )
+
+    line = LegacyNameMigration.signal_line(tmp_path)
+
+    assert line.startswith("sudo sh -c 'systemctl disable --now mightling-signal.service;")
+    assert "usermod" not in line and "groupmod" not in line
+    assert "ragon signal start" not in line and asked == []
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("ExecStart=%h/.local/bin/ling-admin night", "ExecStart=%h/.local/bin/ragon-admin night"),
+        ("ExecStart=%h/.local/bin/puffin-admin night", "ExecStart=%h/.local/bin/ragon-admin night"),
+        ("Slice=puffin-batch.slice", "Slice=ragon-batch.slice"),
+        ("Slice=mightling.slice", "Slice=ragon.slice"),
+        ("Environment=MIGHTLING_X=1", "Environment=RAGON_X=1"),
+        ("Description=Mightling web server", "Description=Ragon web server"),
+        (
+            "ExecStart=/usr/bin/ssh mightling-tunnel@relay.example.com",
+            "ExecStart=/usr/bin/ssh mightling-tunnel@relay.example.com",
+        ),
+        ("ExecStart=sh -c a=b", "ExecStart=sh -c a=b"),
+        ("WorkingDirectory=%h/.mightling", "WorkingDirectory=%h/.ragon"),
+        ("Environment=CODEX_HOME=%h/.mightling/x", "Environment=CODEX_HOME=%h/.ragon/x"),
+    ],
+)
+def test_rewrite_unit_text_table(old, new):
+    assert LegacyNameMigration.rewrite_unit_text(old + "\n") == new + "\n"

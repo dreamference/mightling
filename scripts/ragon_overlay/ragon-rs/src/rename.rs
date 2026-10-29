@@ -1766,6 +1766,76 @@ mod tests {
         assert_eq!(migrate(&home, &home, None), Report::default());
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    #[test]
+    fn puffin_units_with_a_socket_and_a_path_unit_move_and_a_client_link_follows() {
+        let home = scratch("puffin-units");
+        let dir = home.join(USER_UNIT_DIR);
+        write(&dir.join("puffin-web.service"), "[Service]\nExecStart=%h/.local/bin/ling web serve\n");
+        write(&dir.join("puffin-web.socket"), "[Socket]\nListenStream=3100\nService=puffin-web.service\n");
+        write(&dir.join("puffin-watch.path"), "[Path]\nPathChanged=%h/.mightling/x\nUnit=puffin-web.service\n");
+        ACTIVE_UNITS.with(|active| active.borrow_mut().clear());
+        SYSTEMCTL_CALLS.with(|calls| calls.borrow_mut().clear());
+
+        let report = migrate(&home, &home, None);
+
+        let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+        assert_eq!(read("ragon-web.service"), "[Service]\nExecStart=%h/.local/bin/ragon web serve\n", "a link of the wheel-free client");
+        assert_eq!(read("ragon-web.socket"), "[Socket]\nListenStream=3100\nService=ragon-web.service\n");
+        assert_eq!(read("ragon-watch.path"), "[Path]\nPathChanged=%h/.ragon/x\nUnit=ragon-web.service\n");
+        for old in ["puffin-web.service", "puffin-web.socket", "puffin-watch.path"] {
+            assert!(!dir.join(old).exists(), "{old}");
+        }
+        let calls = SYSTEMCTL_CALLS.with(|calls| calls.borrow().clone());
+        assert!(!calls.iter().any(|call| call.starts_with("start ") || call.starts_with("stop ")), "none ran: {calls:?}");
+        assert!(report.lines.iter().any(|line| line.starts_with("moved the user units puffin-watch.path, puffin-web.service, puffin-web.socket")));
+        assert_eq!(migrate(&home, &home, None), Report::default());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_unit_under_its_new_name_is_kept_and_its_link_stays() {
+        let home = scratch("units-new-exists");
+        let dir = home.join(USER_UNIT_DIR);
+        write(&dir.join("mightling-web.service"), "[Service]\nExecStart=old\n");
+        write(&dir.join("ragon-web.service"), "[Service]\nExecStart=new\n");
+        std::fs::create_dir_all(dir.join("default.target.wants")).unwrap();
+        make_symlink(dir.join("mightling-web.service"), dir.join("default.target.wants/mightling-web.service")).unwrap();
+        make_symlink(dir.join("ragon-web.service"), dir.join("default.target.wants/ragon-web.service")).unwrap();
+        make_symlink(dir.join("mightling-gone.service"), dir.join("default.target.wants/mightling-gone.service")).unwrap();
+        ACTIVE_UNITS.with(|active| active.borrow_mut().clear());
+        SYSTEMCTL_CALLS.with(|calls| calls.borrow_mut().clear());
+
+        migrate(&home, &home, None);
+
+        assert_eq!(std::fs::read_to_string(dir.join("ragon-web.service")).unwrap(), "[Service]\nExecStart=new\n");
+        assert!(!dir.join("mightling-web.service").exists());
+        let wants = dir.join("default.target.wants");
+        assert!(std::fs::symlink_metadata(wants.join("mightling-web.service")).is_err());
+        assert_eq!(std::fs::read_link(wants.join("ragon-web.service")).unwrap(), dir.join("ragon-web.service"));
+        assert!(std::fs::symlink_metadata(wants.join("mightling-gone.service")).is_ok(), "a dangling link of a unit not moved is left");
+        let calls = SYSTEMCTL_CALLS.with(|calls| calls.borrow().clone());
+        assert!(!calls.iter().any(|call| call.starts_with("start ") || call.starts_with("stop ")), "it was not active: {calls:?}");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn rewrite_unit_text_table() {
+        for (old, new) in [
+            ("ExecStart=%h/.local/bin/ling-admin night", "ExecStart=%h/.local/bin/ragon-admin night"),
+            ("ExecStart=%h/.local/bin/puffin-admin night", "ExecStart=%h/.local/bin/ragon-admin night"),
+            ("Slice=puffin-batch.slice", "Slice=ragon-batch.slice"),
+            ("Slice=mightling.slice", "Slice=ragon.slice"),
+            ("Environment=MIGHTLING_X=1", "Environment=RAGON_X=1"),
+            ("Description=Mightling web server", "Description=Ragon web server"),
+            ("ExecStart=/usr/bin/ssh mightling-tunnel@relay.example.com", "ExecStart=/usr/bin/ssh mightling-tunnel@relay.example.com"),
+            ("ExecStart=sh -c a=b", "ExecStart=sh -c a=b"),
+            ("WorkingDirectory=%h/.mightling", "WorkingDirectory=%h/.ragon"),
+            ("Environment=CODEX_HOME=%h/.mightling/x", "Environment=CODEX_HOME=%h/.ragon/x"),
+        ] {
+            assert_eq!(rewrite_unit_text(&format!("{old}\n")), format!("{new}\n"), "{old}");
+        }
+    }
 }
 
 /// A symbolic link at `link` to `target`. On Windows a file or directory link by what `target` is.
