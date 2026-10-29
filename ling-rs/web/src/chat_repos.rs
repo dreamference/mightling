@@ -4549,6 +4549,15 @@ async fn find_or_create_open_pr(
         .ok_or_else(|| "forge pull request response missing number".to_string())
 }
 
+/// A pull request from the base branch into itself cannot exist: refused before anything is pushed.
+fn base_branch_pr_response(server: &Server, record: &CheckoutRecord, action: RefusedAction) -> Response {
+    record_refused(server, record, action);
+    json_response(
+        StatusCode::BAD_REQUEST,
+        json!({ "error": format!("this checkout is on {}: a pull request needs a phone branch", record.base) }),
+    )
+}
+
 /// `POST /api/repos/pr {thread, confirm}` (§4.6): pushes if the local branch is ahead of the
 /// forge's, then finds or opens a pull request and answers `{number, url}` with the relative
 /// `/forge/<owner>/<repo>/pulls/<number>` proxy path.
@@ -4570,6 +4579,9 @@ async fn repo_pr(State(server): State<Arc<Server>>, headers: HeaderMap, body: By
     let Some(branch) = mreq.record.branch.clone() else {
         return read_only_response_for(&server, &mreq.record, RefusedAction::Pr);
     };
+    if branch == mreq.record.base {
+        return base_branch_pr_response(&server, &mreq.record, RefusedAction::Pr);
+    }
     let repo_lock = server.chat_repos.repo_mutex(&mreq.record.repo);
     let _repo_guard = repo_lock.lock().await;
     let target = match consume_bound_nonce(&server, &mreq, "pr").await {
@@ -4634,6 +4646,9 @@ async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body:
     let Some(branch) = mreq.record.branch.clone() else {
         return read_only_response_for(&server, &mreq.record, RefusedAction::Merge);
     };
+    if branch == mreq.record.base {
+        return base_branch_pr_response(&server, &mreq.record, RefusedAction::Merge);
+    }
     let repo_lock = server.chat_repos.repo_mutex(&mreq.record.repo);
     let _repo_guard = repo_lock.lock().await;
     let target = match consume_bound_nonce(&server, &mreq, "merge").await {
@@ -8918,6 +8933,50 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(again["branch"], "main");
         assert_eq!(git_stdout(&wt, &["rev-parse", "HEAD"]), head, "the unpushed commit is still main's tip");
+    }
+
+    #[tokio::test]
+    async fn pr_and_merge_on_the_base_branch_are_refused_before_anything_is_pushed() {
+        let s = scratch("pr-on-main");
+        let bare = make_bare_repo(&s.dir, "org/mainrepo");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/mainrepo",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(s.dir.join("user/.gitconfig"), "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n").unwrap();
+        std::fs::write(server.config.user_config.as_ref().unwrap(), "[chat_repos]\nallow_main = [\"org/mainrepo\"]\n").unwrap();
+        let cookie = owner_cookie(&server).await;
+        let (_, opened, _) =
+            post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/mainrepo", "bridge": "signal", "chat": "c1" })).await;
+        let thread = opened["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
+        let nonce = get_nonce(&server, &cookie, &thread, "main").await;
+        let (st, _, body) = post_json(&server, &cookie, "/api/repos/main", json!({ "thread": thread, "confirm": nonce })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        std::fs::write(wt.join("unpushed.txt"), "not on the forge yet\n").unwrap();
+        let nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, body) =
+            post_json(&server, &cookie, "/api/repos/commit", json!({ "thread": thread, "message": "unpushed", "confirm": nonce })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let forge_main = git_stdout(&bare, &["rev-parse", "main"]);
+
+        // A pull request from main into main cannot exist: /pr and /merge must not push main on the way.
+        for action in ["pr", "merge"] {
+            let nonce = get_nonce(&server, &cookie, &thread, action).await;
+            let (st, _, body) = post_json(&server, &cookie, &format!("/api/repos/{action}"), json!({ "thread": thread, "confirm": nonce })).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{action}: {body}");
+            assert_eq!(git_stdout(&bare, &["rev-parse", "main"]), forge_main, "{action} pushed main");
+        }
     }
 
     #[tokio::test]
