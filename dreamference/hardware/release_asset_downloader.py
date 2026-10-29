@@ -4,12 +4,14 @@ The registry names such a model's files, each with its release asset's URL and S
 (RELEASE_HOSTED_MODELS). They land as a download from the Hub would put them: the file in
 `blobs/<sha256>`, linked from `snapshots/<revision>/<name>`, so the launch builders' snapshot
 paths, the memory gates and `node sync-model`, which checks every blob against its name, need
-nothing of their own. A file is streamed to `<sha256>.incomplete` (which node sync never sends),
+nothing of their own. A file is streamed to `<sha256>.<id>.incomplete` (which node sync never sends),
 hashed on the way, and moved into place only when the hash matches its pin.
 """
 
 import hashlib
 import http.client
+import os
+import tempfile
 import urllib.request
 from pathlib import Path
 from typing import Any, Final
@@ -121,15 +123,23 @@ class ReleaseAssetDownloader:
         Returns:
             bool: True when the blob is in place.
         """
-        partial = blob.with_name(blob.name + ".incomplete")
         digest = hashlib.sha256()
         size = 0
         cls._say(f"📥 {pin['url']}")
         request = urllib.request.Request(pin["url"], headers={"User-Agent": USER_AGENT})
+        # A name of this fetch's own: two downloads of one model at once each stream to theirs.
+        try:
+            handle, name = tempfile.mkstemp(
+                dir=blob.parent, prefix=blob.name + ".", suffix=".incomplete"
+            )
+        except OSError as error:
+            cls._say(f"❌ Could not download {pin['url']}: {error}")
+            return False
+        partial = Path(name)
         try:
             with (
+                os.fdopen(handle, "wb") as out,
                 urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response,
-                Path(partial).open("wb") as out,
             ):
                 for chunk in iter(lambda: response.read(CHUNK_BYTES), b""):
                     digest.update(chunk)
@@ -146,7 +156,9 @@ class ReleaseAssetDownloader:
                 f"❌ {pin['url']} does not match its pinned SHA-256 ({size} bytes, got {digest.hexdigest()})."
             )
             return False
-        Path(partial).replace(blob)
+        # mkstemp makes it readable by its owner alone; a blob the Hub writes is readable by all.
+        partial.chmod(0o644)
+        partial.replace(blob)
         return True
 
     @classmethod

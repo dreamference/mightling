@@ -834,3 +834,54 @@ def test_the_sparse_head_comes_with_the_ling_engine_recipe_once_it_has_the_featu
     assets = registry.ModelMatrixRegistry.get_engine_assets(key, "ling")
     assert [asset["repo"] for asset in assets] == [head]
     assert registry.ModelMatrixRegistry.get_engine_assets(key, "sglang") == []
+
+
+def test_two_fetches_of_one_release_asset_at_once_both_land_it(monkeypatch):
+    # Both streamed into the one `<sha256>.incomplete`: the second truncated what the first was
+    # writing, moved it into place, and the first's own move then failed on a file that was gone.
+    import hashlib
+    import io
+    import stat
+    import urllib.request
+
+    from dreamference.hardware import ModelDownloader, ReleaseAssetDownloader
+
+    data = b"weights" * 1000
+    repo, payloads = _hosted_model(monkeypatch, {"model.safetensors": data})
+    _release_server(monkeypatch, payloads)
+    (url,) = payloads
+    pin = {"url": url, "sha256": hashlib.sha256(data).hexdigest()}
+    blob = ReleaseAssetDownloader.folder(repo) / "blobs" / pin["sha256"]
+    blob.parent.mkdir(parents=True)
+    nested = []
+
+    class Response(io.BytesIO):
+        def __init__(self, payload, first):
+            super().__init__(payload)
+            self.first = first
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, size=-1):
+            if self.first and not nested:
+                # Another download of the same model starts while this one is streaming.
+                nested.append(ReleaseAssetDownloader._fetch(pin, blob))
+            return super().read(size)
+
+    opened = []
+
+    def fake_urlopen(request, timeout=None):
+        opened.append(request.full_url)
+        return Response(payloads[request.full_url], first=len(opened) == 1)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert ReleaseAssetDownloader._fetch(pin, blob) is True
+    assert nested == [True]
+    assert hashlib.sha256(blob.read_bytes()).hexdigest() == pin["sha256"]
+    assert stat.S_IMODE(blob.stat().st_mode) == 0o644
+    assert not list(blob.parent.glob("*.incomplete"))
+    assert ModelDownloader.get_hf_cache_dir() in blob.parents
