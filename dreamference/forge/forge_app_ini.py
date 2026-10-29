@@ -260,5 +260,9 @@ class ForgeAppIni:
         descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "w") as handle:
             handle.write(cls.render(host, role, values))
+            # On disk before it replaces the old file: an empty one after a power cut reads as no
+            # secrets, and new ones would be made.
+            handle.flush()
+            os.fsync(handle.fileno())
         Path(staging).replace(path)
         return path
