@@ -1575,4 +1575,19 @@ mod tests {
         assert_eq!(writable_roots(&home, Some(Path::new(""))).len(), plain);
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    #[test]
+    fn a_string_or_a_statement_toml_refuses_does_not_lend_a_later_key_its_place() {
+        // A basic or a literal string may not span lines, and a statement ends its line: text
+        // that breaks either is not TOML, and its first key line is the one read.
+        for text in [
+            "note = \"x\nmightling_airgapped = 'on'\"\nmightling_airgapped = \"off\"\n",
+            "note = 'x\nmightling_airgapped = \"on\"'\nmightling_airgapped = \"off\"\n",
+            "note = 1 mightling_airgapped = \"off\"\nmightling_airgapped = \"on\"\n",
+        ] {
+            assert_eq!(toml_value(text).as_deref(), Some("on"), "{text:?}");
+        }
+        // A multi-line string is no key, and no line starts with the key.
+        assert_eq!(toml_value("'''mightling_airgapped''' = \"on\"\n"), None);
+    }
 }
