@@ -87,7 +87,11 @@ class WifiPowerSave:
             if len(fields) < 3 or fields[1] != "wifi" or not fields[2].startswith("connected"):
                 continue
             device = fields[0]
-            connection = cls._read(["nmcli", "-g", "GENERAL.CONNECTION", "device", "show", device])
+            # `-e no`: terse output would hand back a name with `:` or `\` escaped, and the
+            # escaped name is not the connection's.
+            connection = cls._read(
+                ["nmcli", "-e", "no", "-g", "GENERAL.CONNECTION", "device", "show", device]
+            )
             if not connection or not connection.strip():
                 continue
             connection = connection.strip()

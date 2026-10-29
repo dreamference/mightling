@@ -34,7 +34,11 @@ def network(monkeypatch):
         if argv[:2] == ["nmcli", "-t"]:
             return state["devices"]
         if "GENERAL.CONNECTION" in argv:
-            return state["connection"] + "\n"
+            # Terse output escapes `:` and `\` in a value unless asked not to (`-e no`).
+            name = state["connection"]
+            if argv[1:3] != ["-e", "no"]:
+                name = name.replace("\\", "\\\\").replace(":", "\\:")
+            return name + "\n"
         if "802-11-wireless.powersave" in argv:
             return state["setting"] + "\n"
         if program == "iw":
@@ -243,3 +247,10 @@ def test_node_prepare_refuses_every_other_network_command(command, monkeypatch, 
     assert NodePrepare.allowed(command) is False
     assert NodePrepare._execute(command) is False
     assert called == [] and "never runs" in capsys.readouterr().out
+
+
+def test_a_connection_named_with_a_colon_is_fixed_by_its_own_name(network):
+    network["connection"] = "Home:5G"
+    [problem] = WifiPowerSave.problems()
+    assert problem["connection"] == "Home:5G"
+    assert ["nmcli", "connection", "modify", "Home:5G", "802-11-wireless.powersave", "2"] in problem["commands"]
