@@ -33,14 +33,14 @@ import codecs
 import contextlib
 import os
 import re
-import socket
-import threading
-from typing import Any, Dict, Final, Iterator, List
+from collections.abc import Iterator
+from typing import Any, Dict, Final, List
 from urllib.parse import urlparse
 
 import requests
-import requests.adapters
-import urllib3
+
+from dreamference.mcp_server.request_deadline import RequestDeadline
+from dreamference.mcp_server.web_session import WebSession
 
 # Sent on every request. Some sites serve a stub or a challenge page to unknown agents, and the
 # point of a fetch tool is to return what a person would see.
@@ -99,163 +99,28 @@ _NON_CONTENT_TAGS: Final[tuple] = (
 )
 
 
-class _Deadline:
-    """
-    The end of one call's requests, REQUEST_DEADLINE_S after it starts.
-
-    REQUEST_TIMEOUT_S applies to each read, so a server sending a byte every few seconds, in the
-    TLS handshake, the headers or the body, would otherwise hold the call as long as it liked.
-    Every socket the call opens is registered here (a duplicate of it, which stays valid when
-    TLS takes the socket over); at the deadline each is shut down, which wakes a read blocked
-    on it, and one opened later is shut down at once. Connecting is not covered: it fails at
-    REQUEST_TIMEOUT_S for each of the host's addresses.
-    """
-
-    def __init__(self) -> None:
-        self.expired = threading.Event()
-        self._lock = threading.Lock()
-        self._sockets: List[socket.socket] = []
-        self._timer = threading.Timer(REQUEST_DEADLINE_S, self._expire)
-        self._timer.daemon = True
-        self._timer.start()
-
-    def attach(self, sock: socket.socket) -> None:
-        """Registers a socket the call opened, shutting it down if the deadline has passed."""
-        with self._lock:
-            handle = socket.socket(fileno=os.dup(sock.fileno()))
-            self._sockets.append(handle)
-            if self.expired.is_set():
-                self._shut(handle)
-
-    def close(self) -> None:
-        """Stops the clock and lets go of the duplicates; the sockets themselves stay open."""
-        self._timer.cancel()
-        with self._lock:
-            for handle in self._sockets:
-                handle.close()
-            self._sockets.clear()
-
-    def _expire(self) -> None:
-        with self._lock:
-            self.expired.set()
-            for handle in self._sockets:
-                self._shut(handle)
-
-    @staticmethod
-    def _shut(handle: socket.socket) -> None:
-        with contextlib.suppress(OSError):
-            handle.shutdown(socket.SHUT_RDWR)
-
-
-# The deadline of the call running on this thread, which its connections register with.
-_CALL = threading.local()
-
-
-class _DeadlineConnection:
-    """Mixed into a urllib3 connection class: registers each socket with the call's deadline."""
-
-    def _new_conn(self) -> socket.socket:
-        sock = super()._new_conn()  # type: ignore[misc]
-        deadline = getattr(_CALL, "deadline", None)
-        if deadline is not None:
-            deadline.attach(sock)
-        return sock
-
-
-# urllib3's pool classes (plain, TLS, SOCKS) and the same with _DeadlineConnection mixed in.
-_Pool = type[urllib3.HTTPConnectionPool]
-_DEADLINE_POOLS: Dict[_Pool, _Pool] = {}
-
-
-def _deadline_pools(pools: Dict[str, _Pool]) -> Dict[str, _Pool]:
-    """A pool manager's pool classes, each with its connections registering their sockets."""
-    for pool in pools.values():
-        if pool not in _DEADLINE_POOLS:
-            connection = type(
-                pool.ConnectionCls.__name__, (_DeadlineConnection, pool.ConnectionCls), {}
-            )
-            _DEADLINE_POOLS[pool] = type(pool.__name__, (pool,), {"ConnectionCls": connection})
-    return {scheme: _DEADLINE_POOLS[pool] for scheme, pool in pools.items()}
-
-
-class _DeadlineAdapter(requests.adapters.HTTPAdapter):
-    """requests' adapter, direct or through a proxy, with connections that obey _Deadline."""
-
-    def init_poolmanager(
-        self, connections: int, maxsize: int, block: bool = False, **pool_kwargs: object
-    ) -> None:
-        super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
-        self.poolmanager.pool_classes_by_scheme = _deadline_pools(
-            self.poolmanager.pool_classes_by_scheme
-        )
-
-    def proxy_manager_for(self, proxy: str, **proxy_kwargs: object) -> urllib3.PoolManager:
-        manager = super().proxy_manager_for(proxy, **proxy_kwargs)
-        manager.pool_classes_by_scheme = _deadline_pools(manager.pool_classes_by_scheme)
-        return manager
-
-
 @contextlib.contextmanager
-def _within_deadline() -> Iterator["_Session"]:
-    """
-    A session for one call, whose requests all end at REQUEST_DEADLINE_S (see _Deadline).
+def _within_deadline() -> Iterator[WebSession]:
+    """A session for one call, whose requests all end at REQUEST_DEADLINE_S (RequestDeadline).
 
     Yields:
-        _Session: The session, closed when the block ends.
+        WebSession: The session, closed when the block ends.
 
     Raises:
         requests.Timeout: The deadline passed before the block ended; whatever the shut-down
             socket made the block raise is its cause.
     """
-    deadline = _Deadline()
-    _CALL.deadline = deadline
+    deadline = RequestDeadline(REQUEST_DEADLINE_S)
     expired = requests.Timeout(f"the page took longer than {REQUEST_DEADLINE_S:.0f} s to arrive")
     try:
-        with _Session() as session:
+        with deadline, WebSession() as session:
             yield session
     except Exception as error:
         if deadline.expired.is_set():
             raise expired from error
         raise
-    finally:
-        _CALL.deadline = None
-        deadline.close()
     if deadline.expired.is_set():
         raise expired
-
-
-class _Session(requests.Session):
-    """
-    One call's session, which never sends the user's `~/.netrc` logins.
-
-    requests adds the .netrc login for the request's host and again for every redirect target,
-    so a page could send the agent to a host the user keeps a password for (over plain http
-    too) and have it read what that login sees. `ling-fetch` never reads .netrc. `trust_env`
-    stays on: it also brings the proxy and CA bundle settings, which both copies follow.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        adapter = _DeadlineAdapter()
-        self.mount("http://", adapter)
-        self.mount("https://", adapter)
-
-    def prepare_request(self, request: requests.Request) -> requests.PreparedRequest:
-        # Any auth set here skips the .netrc lookup. A login written in the URL itself is the
-        # caller's and is still sent; otherwise the auth is one that changes nothing.
-        if request.auth is None:
-            login = requests.utils.get_auth_from_url(str(request.url or ""))
-            request.auth = login if any(login) else (lambda prepared: prepared)
-        return super().prepare_request(request)
-
-    def rebuild_auth(
-        self, prepared_request: requests.PreparedRequest, response: requests.Response
-    ) -> None:
-        # requests' own, less the .netrc lookup for the new host.
-        if "Authorization" in prepared_request.headers and self.should_strip_auth(
-            response.request.url or "", prepared_request.url or ""
-        ):
-            del prepared_request.headers["Authorization"]
 
 
 class WebTools:

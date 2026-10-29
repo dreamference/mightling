@@ -37,7 +37,7 @@ def online(monkeypatch):
     """The air gap is off and every request's `get` is a mock."""
     monkeypatch.setattr(WebTools, "airgapped_level", classmethod(lambda cls: "off"))
     get = MagicMock()
-    monkeypatch.setattr(web_tools._Session, "get", get)
+    monkeypatch.setattr(web_tools.WebSession, "get", get)
     return get
 
 
@@ -146,8 +146,7 @@ def test_search_keeps_at_most_max_results(online):
 
 
 def drip(head: bytes) -> int:
-    """
-    Starts a stand-in on loopback that sends `head`, then a byte every 50 ms for at most 30 s.
+    """Starts a stand-in on loopback that sends `head`, then a byte every 50 ms for at most 30 s.
 
     Each read returns well within REQUEST_TIMEOUT_S, so only the total deadline ends a request.
 
@@ -253,13 +252,14 @@ def test_fetch_sends_no_netrc_credentials_to_a_page_or_where_it_redirects(loopba
         server.shutdown()
         server.server_close()
     assert seen == [
-        ("/start", None), ("/final", None), ("/final", None), ("/final", "Basic bWU6cHc=")
+        ("/start", None),
+        ("/final", None),
+        ("/final", None),
+        ("/final", "Basic bWU6cHc="),
     ]
 
 
-def test_a_page_sent_a_byte_at_a_time_through_a_proxy_ends_at_the_deadline(
-    monkeypatch, loopback
-):
+def test_a_page_sent_a_byte_at_a_time_through_a_proxy_ends_at_the_deadline(monkeypatch, loopback):
     # Through a proxy requests opens its connections from another pool manager; the stand-in is
     # the proxy, so the page's own host is never looked up.
     import time
@@ -275,12 +275,12 @@ def test_a_page_sent_a_byte_at_a_time_through_a_proxy_ends_at_the_deadline(
     assert time.monotonic() - started < 10
 
 
-def test_search_ends_at_the_deadline_when_searxng_answers_a_byte_at_a_time(
-    monkeypatch, loopback
-):
+def test_search_ends_at_the_deadline_when_searxng_answers_a_byte_at_a_time(monkeypatch, loopback):
     import time
 
-    port = drip(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 9000\r\n\r\n")
+    port = drip(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 9000\r\n\r\n"
+    )
     monkeypatch.setattr(web_tools, "SEARXNG_URL", f"http://127.0.0.1:{port}")
     monkeypatch.setattr(web_tools, "REQUEST_DEADLINE_S", 2.0)
     started = time.monotonic()
