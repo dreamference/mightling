@@ -106,8 +106,7 @@ pub fn caller(server: &Server, headers: &HeaderMap) -> Option<Caller> {
     if server.owner_session(headers) {
         return Some(Caller::owner_session());
     }
-    let cookie = auth::cookie(header_str(headers, header::COOKIE), auth::DEVICE_COOKIE)?;
-    let device = auth::device_for_token(state, cookie)?;
+    let device = auth::device_for_cookie(state, header_str(headers, header::COOKIE))?;
     Some(Caller { device: device.id, name: device.name, agent: false, scope: device.scope })
 }
 

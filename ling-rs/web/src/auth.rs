@@ -401,10 +401,26 @@ impl Addresses {
 
 /// The value of one cookie in a `Cookie` header.
 pub fn cookie<'a>(header: Option<&'a str>, name: &str) -> Option<&'a str> {
-    header?.split(';').map(str::trim).find_map(|pair| {
+    cookies(header, name).next()
+}
+
+/// Every value a `Cookie` header carries for `name`. Cookies ignore the port, so another service
+/// on this host can set one of ours ahead of the real one: a check tries each value, not the first.
+pub fn cookies<'a>(header: Option<&'a str>, name: &str) -> impl Iterator<Item = &'a str> {
+    header.unwrap_or("").split(';').map(str::trim).filter_map(move |pair| {
         let (key, value) = pair.split_once('=')?;
         (key.trim() == name).then_some(value.trim())
     })
+}
+
+/// The paired device whose token one of the request's device cookies carries.
+pub fn device_for_cookie(state: &Path, header: Option<&str>) -> Option<Device> {
+    device_cookie(state, header).map(|(_, device)| device)
+}
+
+/// The first of the request's device cookies that is a paired device's token, with that device.
+pub fn device_cookie<'a>(state: &Path, header: Option<&'a str>) -> Option<(&'a str, Device)> {
+    cookies(header, DEVICE_COOKIE).find_map(|token| Some((token, device_for_token(state, token)?)))
 }
 
 #[cfg(test)]

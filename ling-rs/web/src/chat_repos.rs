@@ -1810,14 +1810,11 @@ pub fn valid_worktree_rel_path(rel: &str) -> bool {
 /// Resolves `(device_label, nonce_caller_id)` and refuses any `watch`-scoped device with 403.
 fn require_control_caller_with_session(server: &Server, headers: &HeaderMap) -> Result<(String, String), Response> {
     if server.owner_session(headers) {
-        let session_tok = auth::cookie(header_str(headers, header::COOKIE), auth::SESSION_COOKIE).unwrap_or("");
+        let session_tok = server.session_token(headers).unwrap_or("");
         let session_id = format!("session:{}", auth::sha256_hex(session_tok));
         return Ok(("owner".to_string(), session_id));
     }
-    let Some(cookie) = auth::cookie(header_str(headers, header::COOKIE), auth::DEVICE_COOKIE) else {
-        return Err(json_response(StatusCode::UNAUTHORIZED, json!({ "error": "not signed in" })));
-    };
-    let Some(device) = auth::device_for_token(&server.config.state_dir, cookie) else {
+    let Some(device) = auth::device_for_cookie(&server.config.state_dir, header_str(headers, header::COOKIE)) else {
         return Err(json_response(StatusCode::UNAUTHORIZED, json!({ "error": "not signed in" })));
     };
     if device.scope == auth::Scope::Watch {
