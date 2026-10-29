@@ -367,13 +367,17 @@ class ForgeMove:
         root = ForgeBackup.received_dir()
         root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryFile(dir=root) as spool:
-            result = subprocess.run(
-                command,
-                stdout=spool,
-                stderr=subprocess.PIPE,
-                timeout=HAND_OVER_TIMEOUT_S,
-                check=False,
-            )
+            try:
+                result = subprocess.run(
+                    command,
+                    stdout=spool,
+                    stderr=subprocess.PIPE,
+                    timeout=HAND_OVER_TIMEOUT_S,
+                    check=False,
+                )
+            except (subprocess.TimeoutExpired, OSError) as error:
+                print(f"❌ The record did not hand a set over: {error}")
+                return None
             if result.returncode != 0:
                 print(
                     f"❌ The record did not hand a set over: {result.stderr.decode(errors='replace')[-300:]}"

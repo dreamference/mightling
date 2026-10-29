@@ -245,6 +245,21 @@ def test_a_hand_over_the_record_refuses_brings_nothing(monkeypatch, capsys):
     assert "did not hand a set over: this node is not the forge" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    "failure", [subprocess.TimeoutExpired(["ssh"], 7200), FileNotFoundError("ssh")]
+)
+def test_a_hand_over_that_never_finishes_brings_nothing(failure, monkeypatch, capsys):
+    # pull_here unfreezes the record only when this returns; an escaping error left it frozen.
+    hand_over_answer(monkeypatch, b"")
+
+    def ssh(command, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", ssh)
+    assert ForgeMove.receive_hand_over(TARGET) is None
+    assert "did not hand a set over" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("data", [b"not a tar stream" * 40, b""])
 def test_a_hand_over_answer_that_is_not_a_set_brings_nothing(data, monkeypatch, capsys):
     hand_over_answer(monkeypatch, data)
