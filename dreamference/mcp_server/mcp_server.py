@@ -17,6 +17,10 @@ from dreamference.mcp_server.mcp_tool_registry import MCPToolRegistry
 # Global IDE State instance
 global_ide_state: Final[IDEState] = IDEState()
 
+# The longest request line read from stdin. asyncio's default is 64 KiB, and a longer line (a diff
+# for `ide_apply_diff` easily is one) used to raise out of the loop and end the server.
+LINE_LIMIT: Final[int] = 16 * 1024 * 1024
+
 class MCPServer:
     """
     Model Context Protocol (MCP) Async Stdio Server handling JSON-RPC requests from IDE consumers.
@@ -195,18 +199,25 @@ class MCPServer:
         Runs non-blocking JSON-RPC stdio event loop reading stdin and writing responses to stdout.
         """
         loop = asyncio.get_running_loop()
-        reader = asyncio.StreamReader()
+        reader = asyncio.StreamReader(limit=LINE_LIMIT)
         protocol = asyncio.StreamReaderProtocol(reader)
         await loop.connect_read_pipe(lambda: protocol, sys.stdin)
 
         while True:
-            line_bytes = await reader.readline()
+            try:
+                line_bytes = await reader.readline()
+            except ValueError:
+                # Longer than LINE_LIMIT: the reader has dropped what it held of it.
+                self._write({"jsonrpc": "2.0", "id": None,
+                             "error": {"code": -32700, "message": "Parse error: line too long"}})
+                continue
             if not line_bytes:
                 break
-            line = line_bytes.decode("utf-8").strip()
-            if not line:
-                continue
             try:
+                # Inside the `try`: a line that is not UTF-8 used to raise out of the loop and end the server.
+                line = line_bytes.decode("utf-8").strip()
+                if not line:
+                    continue
                 req: Dict[str, Any] = json.loads(line)
             except ValueError as e:
                 self._write({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": f"Parse error: {e}"}})

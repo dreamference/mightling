@@ -25,7 +25,7 @@ import { auditPreview, type WorkTarget } from "./args";
 import { webUrl } from "./links";
 import { codexHome, findLing } from "./bridge";
 import { officePreview } from "./office";
-import { findEditors, openCommand, terminalCommand, type Editor } from "./editors";
+import { findEditors, openCommand, runsWhenOpened, terminalCommand, type Editor } from "./editors";
 import { environments, writeEnvironment } from "./environments";
 import * as git from "./git";
 import * as prs from "./prs";
@@ -914,7 +914,10 @@ export async function main(options: MainOptions): Promise<void> {
         // A citation of the user's documents: the id goes to `ling docs locate`, the file it names to the system.
         const ling = findLing(resourcesPath());
         if (!ling) throw new Error("ling is not installed");
-        const failed = await shell.openPath(await locate(ling, message.doc));
+        const doc = await locate(ling, message.doc);
+        const runs = await runsWhenOpened(doc);
+        if (runs) throw new Error(runs);
+        const failed = await shell.openPath(doc);
         if (failed) throw new Error(failed);
         return null;
       }
@@ -998,7 +1001,9 @@ export async function main(options: MainOptions): Promise<void> {
         const file = path.join(base, git.insidePath(base, message.path));
         const editor = (editors ?? (editors = findEditors())).find((entry) => entry.id === message.editor);
         if (!editor) {
-          // The system's choice for the file's type.
+          // The system's choice for the file's type, unless the system would run it (editors.ts).
+          const runs = await runsWhenOpened(file);
+          if (runs) throw new Error(runs);
           const failed = await shell.openPath(file);
           if (failed) throw new Error(failed);
           return null;

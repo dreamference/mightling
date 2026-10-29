@@ -370,6 +370,8 @@ class ForgeAnonymity:
             capture_output=True,
             text=True,
             check=False,
+            # A commit naming an encoding git cannot convert is printed raw.
+            errors="replace",
         )
         diff = subprocess.run(
             [

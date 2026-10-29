@@ -124,6 +124,42 @@ export function openCommand(editor: Editor, file: string, line: number | null): 
   return { command: editor.command, args: kind.at(file, at) };
 }
 
+/** What Windows runs when it is opened (ShellExecute), beside `PATHEXT`'s own list. */
+const WINDOWS_RUNS = new Set([
+  ".exe", ".com", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".msi", ".msp", ".msc", ".scr", ".pif",
+  ".cpl", ".lnk", ".url", ".reg", ".hta", ".jar", ".py", ".pyw", ".pyz", ".pyzw", ".sh", ".bash", ".inf", ".scf", ".appref-ms", ".application", ".appx", ".appxbundle", ".msix",
+  ".msixbundle", ".appinstaller", ".settingcontent-ms", ".library-ms", ".search-ms", ".diagcab", ".gadget", ".xll",
+]);
+/** What a Mac launches, installs or runs in Terminal when it is opened. */
+const MAC_RUNS = new Set([".app", ".command", ".jar", ".py", ".pyw", ".tool", ".terminal", ".pkg", ".mpkg", ".workflow", ".action", ".prefpane", ".saver", ".fileloc", ".inetloc", ".webloc"]);
+/** What a Linux desktop launches when it is opened. */
+const LINUX_RUNS = new Set([".desktop", ".appimage", ".jar"]);
+
+/**
+ * Why the system would run `file` rather than open it (null when it would open it): the system's
+ * choice for a file is `shell.openPath`, which on Windows starts a `.bat` or an `.exe`, on a Mac a
+ * `.app` or a `.command`, and on Linux a `.desktop` entry or an executable. A path the page names
+ * comes from an answer or a file the agent wrote, so the user's "open" must never become "run".
+ */
+export async function runsWhenOpened(file: string, platform: NodeJS.Platform = process.platform, pathext: string = process.env.PATHEXT ?? ""): Promise<string | null> {
+  const name = await fs.promises.realpath(file).catch(() => file);
+  const stat = await fs.promises.stat(name).catch(() => null);
+  const ext = (candidate: string) => path.extname(candidate).toLowerCase();
+  const names = [file, name].map((candidate) => (platform === "win32" ? path.win32.basename(candidate) : path.basename(candidate)));
+  const why = `${names[0]} would run, not open: choose an editor in the review pane to open it`;
+  if (platform === "win32") {
+    // Windows drops a name's trailing dots and spaces (`run.bat.` is `run.bat`); a stream (`a.txt:b`) is never a document.
+    if (names.some((candidate) => candidate.includes(":"))) return why;
+    const runs = new Set([...WINDOWS_RUNS, ...pathext.split(";").map((entry) => entry.trim().toLowerCase()).filter((entry) => entry.startsWith("."))]);
+    return names.some((candidate) => runs.has(ext(candidate.replace(/[. ]+$/, "")))) ? why : null;
+  }
+  const runs = platform === "darwin" ? MAC_RUNS : LINUX_RUNS;
+  if (names.some((candidate) => runs.has(ext(candidate)))) return why;
+  // An executable is run (a Mac opens it in Terminal; a file manager may launch it); a folder opens in the file manager.
+  if (stat?.isFile() && (stat.mode & 0o111) !== 0) return why;
+  return null;
+}
+
 /** Terminal emulators and how each is told where to start; the first found is used. */
 export const TERMINALS: { bin: string; args: (dir: string) => string[] }[] = [
   { bin: "ptyxis", args: (dir) => ["--new-window", "--working-directory", dir] },

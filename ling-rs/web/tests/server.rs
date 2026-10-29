@@ -765,6 +765,82 @@ impl OriginRequest for String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_watch_device_reads_and_follows_threads_and_changes_nothing() {
+    let scratch = scratch("ws-watch");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let config = config(&scratch.dir, port, Vec::new());
+    let mut app_server = fake_app_server(&config.socket).await;
+    let server = Server::new(config).unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = tokio::spawn(server::serve(server.clone(), vec![listener], async move {
+        let _ = stopped.await;
+    }));
+
+    let (_, token) = auth::add_device(&server.config.state_dir, "phone").unwrap();
+    assert_eq!(auth::set_scope(&server.config.state_dir, "phone", auth::Scope::Watch).unwrap().len(), 1);
+    let cookie = format!("{}={token}", auth::DEVICE_COOKIE);
+
+    // The routes that start or feed work answer 403 (SYNC §5.1, O4).
+    let folder = scratch.dir.display().to_string();
+    for (uri, body) in [
+        ("/api/night/add", json!({ "repo": folder, "task": "Fix the parser" })),
+        ("/api/docs/add", json!({ "collection": "notes", "folder": folder })),
+        ("/api/upload?kind=file&name=a.txt", json!("text")),
+    ] {
+        let post = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::HOST, format!("127.0.0.1:{port}"))
+            .header(header::ORIGIN, format!("http://127.0.0.1:{port}"))
+            .header(header::COOKIE, &cookie)
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        assert_eq!(call(&server, post).await.0, StatusCode::FORBIDDEN, "{uri}");
+    }
+
+    let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let mut upgrade = format!("ws://127.0.0.1:{port}/ws").into_client_request_with_origin(port);
+    upgrade.headers_mut().insert(header::COOKIE, cookie.parse().unwrap());
+    let (websocket, _) = tokio_tungstenite::client_async(upgrade, tcp).await.unwrap();
+    let (sink, stream) = websocket.split();
+    let mut browser = Browser { sink, stream, next: 0 };
+    let started = browser.call(json!({ "type": "work/start" })).await;
+    assert!(started.get("error").is_none(), "{started}");
+
+    // Reading passes; following a thread keeps only the thread, not the page's model or sandbox.
+    let listed = browser.call(json!({ "type": "work/send", "message": { "id": 1, "method": "thread/list", "params": {} } })).await;
+    assert_eq!(listed["result"], Value::Null, "{listed}");
+    assert_eq!(next_frame(&mut app_server).await.0["method"], "thread/list");
+    let resume = json!({ "type": "work/send", "message": { "id": 2, "method": "thread/resume", "params": {
+        "threadId": "thr-1", "model": "other", "sandbox": "danger-full-access", "approvalPolicy": "never" } } });
+    let resumed = browser.call(resume).await;
+    assert_eq!(resumed["result"], Value::Null, "{resumed}");
+    let (frame, _) = next_frame(&mut app_server).await;
+    assert_eq!(frame["params"]["threadId"], "thr-1", "{frame}");
+    for field in ["model", "sandbox", "approvalPolicy"] {
+        assert!(frame["params"].get(field).is_none(), "{field}: {frame}");
+    }
+
+    // Everything that starts, steers or changes work is refused and never reaches the server,
+    // and so is an answer to the server's approval request.
+    for (id, method) in ["turn/start", "turn/steer", "thread/start", "thread/fork", "command/exec", "thread/shellCommand", "config/value/write", "fs/readFile"]
+        .into_iter()
+        .enumerate()
+    {
+        let message = json!({ "id": 10 + id, "method": method, "params": { "threadId": "thr-1" } });
+        let refused = browser.call(json!({ "type": "work/send", "message": message })).await;
+        assert!(refused["error"].as_str().is_some_and(|e| e.contains("watch")), "{method}: {refused}");
+    }
+    let approval = browser.call(json!({ "type": "work/send", "message": { "id": 0, "result": { "decision": "accept" } } })).await;
+    assert!(approval["error"].as_str().is_some_and(|e| e.contains("watch")), "{approval}");
+    assert!(tokio::time::timeout(Duration::from_millis(500), app_server.recv()).await.is_err());
+
+    let _ = stop.send(());
+    serving.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn with_nothing_listening_the_server_starts_the_app_server_and_reports_why_it_failed() {
     let scratch = scratch("spawn");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
