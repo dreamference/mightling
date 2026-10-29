@@ -5610,6 +5610,19 @@ def test_the_shard_command_writes_the_lists_run_would_cover(bench, tmp_path, cap
     assert SweBenchCommand.shard(source, 0) == 1
 
 
+def test_two_balance_by_lists_with_one_name_are_refused_not_merged(bench, tmp_path, capsys):
+    source = tmp_path / "list.txt"
+    source.write_text("".join(f"{i}\n" for i in IDS))
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    first, second = tmp_path / "a" / "fresh.txt", tmp_path / "b" / "fresh.txt"
+    first.write_text("acme__widget-1\n")
+    second.write_text("acme__widget-2\n")
+    assert SweBenchCommand.shard(source, 2, balance_by=[first, second]) == 1
+    assert "fresh.txt" in capsys.readouterr().out
+    assert not (tmp_path / "list-1of2.txt").exists()
+
+
 def test_run_eval_shard_and_merge_take_their_options(monkeypatch):
     import argparse
     seen = []

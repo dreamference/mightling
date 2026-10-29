@@ -984,6 +984,12 @@ class SweBenchCommand:
                 print(f"❌ {path}: {error}")  # noqa: T201 — CLI output
                 return None
 
+        names = [path.name for path in balance_by or []]
+        shared = sorted({name for name in names if names.count(name) > 1})
+        if shared:
+            # The shards' headers and the run's groups know a list by its name alone.
+            print(f"❌ --balance-by {', '.join(shared)}: two lists have this name; rename one.")  # noqa: T201 — CLI output
+            return 1
         ids = read(source)
         others = {path.name: read(path) for path in balance_by or []}
         if ids is None or any(other is None for other in others.values()):
