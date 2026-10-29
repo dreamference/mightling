@@ -32,8 +32,8 @@ export async function listMemoryFiles(codexHome: string): Promise<{ name: Memory
       const handle = await fs.promises.open(full, "r");
       try {
         const buffer = Buffer.alloc(Math.min(stat.size, MEMORY_FILE_CAP));
-        await handle.read(buffer, 0, buffer.length, 0);
-        found.push({ name: file.name, about: file.about, text: buffer.toString("utf8"), modified: stat.mtimeMs, cut: stat.size > MEMORY_FILE_CAP });
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        found.push({ name: file.name, about: file.about, text: buffer.subarray(0, bytesRead).toString("utf8"), modified: stat.mtimeMs, cut: stat.size > MEMORY_FILE_CAP });
       } finally {
         await handle.close();
       }

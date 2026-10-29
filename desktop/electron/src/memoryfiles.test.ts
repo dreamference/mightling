@@ -3,11 +3,22 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { listMemoryFiles, writeMemoryFile } from "./memoryfiles";
 
 describe("the memory files", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("shows only what was read when a file shrinks while it is read", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-memories-shrink-"));
+    fs.mkdirSync(path.join(home, "memories"));
+    fs.writeFileSync(path.join(home, "memories", "memory_summary.md"), "short now");
+    const lstat = fs.promises.lstat.bind(fs.promises);
+    vi.spyOn(fs.promises, "lstat").mockImplementation(async (file) => Object.assign(await lstat(file), { size: 100 }));
+    expect((await listMemoryFiles(home))[0].text).toBe("short now");
+  });
+
   it("lists the summary and the index when they exist, and saves an edit of one", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-memories-"));
     expect(await listMemoryFiles(home)).toEqual([]);
