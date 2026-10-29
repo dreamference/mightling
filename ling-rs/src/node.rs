@@ -910,10 +910,10 @@ pub fn usable_addresses(addresses: &[IpAddr]) -> Vec<IpAddr> {
 
 /// Adds a node to those found, or adds the addresses of this answer to one already there: answers
 /// arrive per interface and per address family, and one node must be one row, at its best address.
+/// One node is one instance name (its host name, on every interface) with one id: another name
+/// claiming the same id stays a row of its own, so that [`resolve`] sees two claimants.
 fn merge(found: &mut Vec<Advert>, advert: Advert) {
-    let same = |other: &Advert| {
-        if advert.node.node.is_empty() { other.node.name == advert.node.name } else { other.node.node == advert.node.node }
-    };
+    let same = |other: &Advert| other.node.name == advert.node.name && other.node.node == advert.node.node;
     match found.iter_mut().find(|other| same(other)) {
         None => found.push(advert),
         Some(existing) => {
@@ -1425,6 +1425,19 @@ mod tests {
         assert_eq!(found.iter().map(|a| (a.node.name.as_str(), a.node.address.as_str())).collect::<Vec<_>>(),
                    vec![("spark-1", "192.168.50.105"), ("spark-2", "192.168.50.106")]);
         assert_eq!(found[0].addresses, vec!["192.168.50.105".to_string(), "fd00::2".to_string()]);
+    }
+
+    #[test]
+    fn two_instances_claiming_one_id_stay_two_rows_so_the_claim_is_questioned() {
+        // A node advertises one instance name, its host name, on every interface: another name with
+        // the same id is another machine. Merged into one row, `resolve` never saw two claimants
+        // and followed whichever address sorted first, here the impostor's.
+        let mut found = Vec::new();
+        merge(&mut found, advert("spark-1", "11111111-aaaa", "192.168.50.200"));
+        merge(&mut found, advert("impostor", "11111111-aaaa", "192.168.50.66"));
+        assert_eq!(found.len(), 2, "{found:?}");
+        let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
+        assert!(matches!(resolve(&inputs, &Fixed::new(found)), Resolution::Choose { .. }));
     }
 
     #[test]
