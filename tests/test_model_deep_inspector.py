@@ -39,3 +39,21 @@ def test_a_server_that_captured_no_cuda_graph_is_reported_not_a_crash():
     with patch.object(ModelDeepInspector, "_container_log", classmethod(lambda cls, c: log)):
         rows = ModelDeepInspector.graph_coverage("vllm", "8")
     assert "CUDA graphs" in rows
+
+
+def test_an_fp8_e5m2_kv_cache_is_counted_at_one_byte_a_value():
+    # Only fp8 and fp8_e4m3 were in the table: the other fp8 format the engines take fell back to
+    # two bytes and doubled the KV per token and the realised pool.
+    config = {
+        "text_config": {
+            "layer_types": ["full_attention"] * 4,
+            "num_key_value_heads": 2,
+            "head_dim": 128,
+        }
+    }
+    with (
+        patch.object(ModelDeepInspector, "_snapshot_config", classmethod(lambda cls, m: config)),
+        patch.object(ModelDeepInspector, "_container_log", classmethod(lambda cls, c: "")),
+    ):
+        rows = ModelDeepInspector.kv_geometry("m", "c", "fp8_e5m2")
+    assert rows["KV per token"].startswith("2.0 KiB") and "x 1B x" in rows["KV per token"]
