@@ -88,6 +88,15 @@ else if (args[1] === "create") console.log("https://github.example/acme/fetcher/
     expect(ran()).toEqual([]);
   });
 
+  it("answers Settings › Git's sign-in check with the refusal at /airgapped on, before gh runs", async () => {
+    // `gh auth status` asks GitHub whether the token is good: it is network too.
+    const { status } = await import("./prs");
+    const on = gate("on");
+    expect(await status(dir, on.offline)).toBe("airgapped is on (this session): the pull-request tab would reach the network");
+    expect(on.asked).toEqual(["the pull-request tab"]);
+    expect(ran()).toEqual([]);
+  });
+
   it("refuses both while the tab is off in Settings › Git, before asking anything", async () => {
     const off = gate("off", false);
     await expect(handle({ ...activity, root: dir } as Message, off)).rejects.toThrow("the pull-request tab is off");
@@ -129,15 +138,16 @@ else if (args[1] === "create") console.log("https://github.example/acme/fetcher/
     expect(await handle({ type: "pr/review", root: dir, number: 12, verdict: "comment", body: "Looks good", thread: "w1" }, off)).toBe("Submitted.");
 
     const { status } = await import("./prs");
-    expect(await status(dir)).toBe("Signed in.");
+    const offline = gate("off").offline;
+    expect(await status(dir, offline)).toBe("Signed in.");
     process.env.GH_AUTH_FAIL = "1";
     try {
-      expect(await status(dir)).toContain("not logged in");
+      expect(await status(dir, offline)).toContain("not logged in");
     } finally {
       delete process.env.GH_AUTH_FAIL;
     }
     process.env.MIGHTLING_GH = path.join(dir, "no-such-gh");
-    expect(await status(dir)).toContain("not installed");
+    expect(await status(dir, offline)).toContain("not installed");
   });
 });
 

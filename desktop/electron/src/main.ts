@@ -1108,7 +1108,8 @@ export async function main(options: MainOptions): Promise<void> {
       }
       case "pr/status": {
         if (prefs.read().pullRequests !== true) return "The pull-request tab is off.";
-        return prs.status(await git.checkRoot(message.root));
+        const root = await git.checkRoot(message.root);
+        return prs.status(root, (what) => offline(null, what, root));
       }
       case "dialog/open-image": {
         const chosen = await dialog.showOpenDialog(own, { title: "A picture for the pet", properties: ["openFile"], filters: [{ name: "Pictures", extensions: ["png", "gif", "webp", "svg", "jpg", "jpeg"] }] });

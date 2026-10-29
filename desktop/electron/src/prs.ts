@@ -142,9 +142,11 @@ export async function handle(message: Message, gate: Gate): Promise<unknown> {
   throw new PrError("not a pull-request message");
 }
 
-/** Whether `gh` is there and signed in, in its own words, for Settings › Git. */
-export async function status(root: string): Promise<string> {
+/** Whether `gh` is there and signed in, in its own words, for Settings › Git. `gh auth status` asks
+ * GitHub whether the token is good, so at `/airgapped on` the refusal is the answer and gh never runs. */
+export async function status(root: string, offline: Gate["offline"]): Promise<string> {
   try {
+    await offline("the pull-request tab");
     const out = await gh(root, ["auth", "status"], 20_000);
     return out.trim() || "Signed in.";
   } catch (error) {
