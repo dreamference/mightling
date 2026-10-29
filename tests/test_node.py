@@ -2353,6 +2353,26 @@ def test_every_node_command_reaches_its_handler(monkeypatch, capsys):
     ]
 
 
+def test_node_add_defaults_to_ssh_port_22_and_this_users_name(monkeypatch):
+    from dreamference.cli import main
+    from dreamference.node import NodePairing
+
+    calls = []
+    monkeypatch.setattr(
+        NodePairing,
+        "add",
+        classmethod(
+            lambda cls, name, user=None, ssh_port=None: calls.append((name, user, ssh_port)) or True
+        ),
+    )
+    for argv in (["add", "spark-2"], ["add", "spark-3", "--user", "owner", "--ssh-port", "2222"]):
+        monkeypatch.setattr("sys.argv", ["ling-admin", "node", *argv])
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+        assert exit_info.value.code == 0, argv
+    assert calls == [("spark-2", None, 22), ("spark-3", "owner", 2222)]
+
+
 # -- copying a model to another node (§12.2) -------------------------------------------------------
 
 SYNC_KEY = "qwen3.8-27b-nvfp4-dflash2"
