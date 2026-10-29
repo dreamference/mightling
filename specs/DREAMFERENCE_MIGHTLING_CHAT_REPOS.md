@@ -1,6 +1,6 @@
 # Mightling Chat Repos: Work mode on a forge repository from a phone
 
-**Status:** proposed and decided by the owner on 2026-10-27 (§0.1). The same day the owner ordered the Mini App's missing pieces built (§10), together with the `ling web` repository service they need (§4). Phase 1 (G1–G10, G12–G14) and Phase 3's Full Access, worktree pruning and `allow_main` forge branch protection were built and merged on 2026-10-27–2026-10-28 (`ling-rs/web/src/chat_repos.rs`, `repo_limits.rs`, `telegram_app.rs`, `ling-rs/src/chat.rs`, `ling-rs/chat/src/repo_notice.rs`, `desktop/ui/`, `dreamference/forge/forge_phone.py`). Phase 0's live measurements, Phase 2 (Signal and Matrix text commands) and G11 (Discord's front) remain (§13).
+**Status:** proposed and decided by the owner on 2026-10-27 (§0.1). The same day the owner ordered the Mini App's missing pieces built (§10), together with the `ling web` repository service they need (§4). Phase 1 (G1–G14) and Phase 3's Full Access, worktree pruning and `allow_main` forge branch protection were built and merged on 2026-10-27–2026-10-28 (`ling-rs/web/src/chat_repos.rs`, `repo_limits.rs`, `telegram_app.rs`, `ling-rs/src/chat.rs`, `ling-rs/chat/src/repo_notice.rs`, `desktop/ui/`, `dreamference/forge/forge_phone.py`). Phase 0's live measurements, Phase 2 (Signal and Matrix text commands) and G11 (Discord's front) remain (§13).
 
 **Spec owner:** the owner. **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`). Machines use the repository's placeholders: `gx10-1a2b` is the main node, `node-b` another node, and `<front>` is `ling web`'s HTTPS front on the owner's tailnet. Real names and addresses are never written here.
 
@@ -434,7 +434,7 @@ The Ask bounds of CHAT §16.3 (180 s, 25 tool calls) would cut an edit in half, 
 - `prs`;
 - the folder chooser.
 
-The owner ordered every gap built (R6). G1–G10 and G12–G14 are now built (2026-10-27–2026-10-28); G11 waits for the Discord adapter. Each row says what existed before the build and what was needed (and where it shipped):
+The owner ordered every gap built (R6). G1–G14 are now built (2026-10-27–2026-10-29; G11 with the Discord adapter on 2026-10-29). Each row says what existed before the build and what was needed (and where it shipped):
 
 | # | Capability | Existed before | Needed / Shipped |
 |---|---|---|---|
@@ -448,7 +448,7 @@ The owner ordered every gap built (R6). G1–G10 and G12–G14 are now built (20
 | G8 | **Command output** | The agent's commands and their streamed output show in the thread. The user's own terminal panel and tasks are Electron-only | **Built** (`desktop/ui/src/OutputView.tsx`, `output.test.ts`): A full-screen, read-only output view for one command item (long logs, search, copy). **No interactive terminal from a phone:** it would be an unsandboxed shell |
 | G9 | **Branch, commit, push, update, merge, PR** | Electron-only (`git.commit`, `git.push`, `git.pullRequest`, `prs`) | **Built** (`desktop/ui/src/GitBar.tsx`, `repos.ts`): A git bar for `chat-repos` threads: branch and ahead/behind, Commit (message), Push, Update, Merge, PR (forge link through `/forge/`), "Work on main" where allowed, each over §4.7 with its confirmation nonce |
 | G10 | **Live turns** | The page is an app-server client of the node, so node-owned phone threads stream directly. Threads owned by another device show through sync's live view (`sync.ts`, `/api/sync/live`) when sync is on | **Built** (`desktop/ui/src/resume.ts`, `resume.test.ts`): Resuming when the webview returns from the background: on `visibilitychange`, re-subscribe (`thread/resume`) and read back missed turns (`thread/turns/list`), as the bridges do (CHAT §2). Checked in Phase 0, built if it's missing |
-| G11 | **Discord's front** | Specified (DISCORD §3.11): `[chat] discord_web_url` served like the Mini App's address. Not built: `telegram_app::mini_app_url` reads only the Telegram setting | **Not built yet:** Read `discord_web_url`, add its host to `Config::public_names`, and use G3's deep links. Discord's launch carries nothing signed, so first pairing there is `ling web pair` or a code confirmed from Signal or Matrix |
+| G11 | **Discord's front** | Specified (DISCORD §3.11): `[chat] discord_web_url` served like the Mini App's address. Before: `telegram_app::mini_app_url` read only the Telegram setting | **Built (2026-10-29):** `telegram_app::front_url` reads `discord_web_url`; `front_authorities` adds its host to `Config::public_names`; `RepoNotice` and `RepoTypedRefusal` carry G3's deep links as link buttons (`discord.rs`). Discord's launch carries nothing signed, so `front_host_ok` never serves Telegram's launch pairing or `bridge.js` on its host, and first pairing there is `ling web pair` or a code confirmed from Signal or Matrix |
 | G12 | **The file viewer** | File tabs read through `fs/readFile` (works in the web host). "Open in editor" is Electron-only | **Built** (`desktop/ui/src/FileTree.tsx`, `FileView.tsx`, `phone.ts`): Nothing for reading. The narrow layout (G5) and the file tree in the drawer |
 | G13 | **The Work header** | `WorktreeHeader` shows a branch | **Built** (`desktop/ui/src/WorktreeControls.tsx`, `repos.ts`): The repository, `phone/<thread>`, 🔒, the "main" badge, the budget left, and the B9 warning of §8.1 |
 | G14 | **Bot notices and topics** | Topics as threads, `web_app` buttons and `/app` (MOONSHOT §14–§15) | **Built** (`ling-rs/chat/src/repo_notice.rs`, `hub.rs`, `telegram.rs`, `ling-rs/chat/tests/telegram.rs`): `RepoNotice` (§5.3) in the hub; a topic per repository; Open buttons with G3's links; the counts-only confirmations of §2; the bot's refusal to forward typed text in a repository's topic |
@@ -460,7 +460,7 @@ The owner ordered every gap built (R6). G1–G10 and G12–G14 are now built (20
 4. **G7**, **G8** and **G10** (approvals, long output, resuming).
 5. **G5** and **G12** (the phone layout over the working pieces).
 6. **G14** and the test of §12.2 (the notices).
-7. **G11** (with the Discord adapter, when DISCORD's build starts).
+7. **G11** (with the Discord adapter): built 2026-10-29.
 
 Until the forge exists (FORGEJO P0), G1 runs against `[chat_repos] forge_url` pointing at a stand-in in tests only. The feature stays off on a node whose forge doesn't answer.
 

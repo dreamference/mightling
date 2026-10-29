@@ -572,7 +572,8 @@ class EgressAudit:
           for each further bridge, `mightling-signal@<name>.service` (`ling signal setup --name`,
           SIGNAL §18); signal-cli connects to Signal's servers.
         - The chat bridge: the user unit `mightling-chat.service` (`ling chat start`) with a
-          Telegram bot set up (`ling chat telegram setup`) connects to Telegram's Bot API.
+          Telegram bot set up (`ling chat telegram setup`) connects to Telegram's Bot API; with a
+          Discord bot set up (`ling chat discord setup`), to Discord's Gateway and API.
         - The Matrix homeserver (`ling-admin matrix start`): its loopback proxy socket is enabled
           and `tailscale serve` offers it to the user's tailnet; with push on, push notifications
           can leave the machine.
@@ -597,6 +598,12 @@ class EgressAudit:
         if cls._unit_enabled(CHAT_UNIT, user=True) and cls._chat_file("telegram.json").get("token"):
             lines.append(f"Telegram bridge enabled ({CHAT_UNIT}): `ling chat serve` connects to Telegram's Bot API, outside this trace. "
                          "`ling chat telegram off` or `ling chat stop` turns it off.")
+        if cls._unit_enabled(CHAT_UNIT, user=True) and cls._chat_file("discord.json").get("token"):
+            lines.append(
+                f"Discord bridge enabled ({CHAT_UNIT}): `ling chat serve` connects to "
+                "Discord's Gateway and API, outside this trace. "
+                "`ling chat discord off` or `ling chat stop` turns it off."
+            )
         if cls._unit_enabled(MATRIX_PROXY_UNIT, user=True):
             push = bool(cls._chat_file("matrix-admin.json").get("push"))
             lines.append("Matrix homeserver enabled (`ling-admin matrix`): offered to your tailnet by `tailscale serve`"

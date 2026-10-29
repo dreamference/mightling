@@ -6,6 +6,8 @@
 //! - `telegram setup`: the privacy warning, a typed `yes`, and the bot token read with echo off.
 //! - `telegram pair`: an 8-digit code to send the bot as `/pair <code>`, ten minutes, one use.
 //! - `telegram users`, `telegram remove <id>`, `telegram off`.
+//! - `discord setup`, `discord pair`, `discord users`, `discord remove <id>`, `discord off`: the
+//!   same for Discord (MIGHTLING_DISCORD §4), the least private of the three.
 //!
 //! The Matrix homeserver is `ling-admin matrix …`'s, because containers are; it writes
 //! `matrix.json`, which `serve` reads.
@@ -21,19 +23,36 @@ use crate::agent::WebTarget;
 use crate::hub::Hub;
 use crate::hub::HubConfig;
 use crate::store;
+use crate::discord;
+use crate::store::DiscordConfig;
+use crate::store::DiscordState;
 use crate::store::MatrixConfig;
 use crate::store::TelegramConfig;
 use crate::telegram;
 
 pub const UNIT_NAME: &str = "mightling-chat.service";
 
-const USAGE: &str = "Usage: ling chat start | stop | status | serve | telegram setup | telegram pair | telegram users | telegram remove <id> | telegram off | repos full-access on | repos full-access off";
+const USAGE: &str = "Usage: ling chat start | stop | status | serve | telegram setup | telegram pair | telegram users | telegram remove <id> | telegram off | discord setup | discord pair | discord users | discord remove <id> | discord off | repos full-access on | repos full-access off";
 
 pub const TELEGRAM_WARNING: &str = "Telegram is the less private way to reach Mightling:\n\
 - everything you send the bot, and every answer, passes through Telegram's servers, unencrypted;\n\
 - answers can include what the agent reads for you: mail, files, code;\n\
 - Telegram keeps the chat's history until you delete it.\n\
 For a private chat, use Matrix instead (`ling-admin matrix start`).";
+
+pub const DISCORD_WARNING: &str = "Discord is the least private way to reach Mightling:\n\
+- everything you send the bot, and every answer, is stored on Discord's servers, readable by Discord; Discord does not encrypt text end to end;\n\
+- Discord scans messages and attachments, and may keep what you delete;\n\
+- answers can include what the agent reads for you: mail, files, code;\n\
+- anyone holding the bot's token can read the whole conversation, past messages included.\n\
+For a private chat, use Signal (`ling signal setup`) or Matrix (`ling-admin matrix start`) instead.";
+
+const DISCORD_PORTAL_STEPS: &str = "In Discord's Developer Portal (https://discord.com/developers/applications):\n\
+1. New Application; give it a name (it is the bot's name).\n\
+2. Bot: Reset Token, and copy it.\n\
+3. Bot: switch Public Bot off.\n\
+4. General Information: leave the Interactions Endpoint URL empty.\n\
+5. Installation: keep User Install, and the install link Discord Provided.";
 
 /// What the launcher tells `ling chat`.
 #[derive(Clone, Debug)]
@@ -99,6 +118,26 @@ pub fn chat_setting(text: &str, key: &str) -> Option<u64> {
             && name.trim() == key
         {
             return value.trim().parse().ok();
+        }
+    }
+    None
+}
+
+/// A text value (quoted or not) from the `[chat]` table of the user's config file.
+pub fn chat_text(text: &str, key: &str) -> Option<String> {
+    let mut in_chat = false;
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or_default().trim();
+        if line.starts_with('[') {
+            in_chat = line == "[chat]";
+            continue;
+        }
+        if in_chat
+            && let Some((name, value)) = line.split_once('=')
+            && name.trim() == key
+        {
+            let value = value.trim().trim_matches('"').trim();
+            return (!value.is_empty()).then(|| value.to_string());
         }
     }
     None
@@ -186,6 +225,23 @@ pub async fn run_cli(args: &[String], environment: Environment) -> i32 {
                 2
             }
         },
+        Some("discord") => match args.get(1).map(String::as_str) {
+            Some("setup") => discord_setup(&dir, &environment.user_config()).await,
+            Some("pair") => discord_pair(&dir),
+            Some("users") => discord_users(&dir),
+            Some("remove") => match args.get(2) {
+                Some(which) => discord_remove(&dir, which),
+                None => {
+                    eprintln!("{USAGE}");
+                    2
+                }
+            },
+            Some("off") => discord_off(&dir).await,
+            _ => {
+                eprintln!("{USAGE}");
+                2
+            }
+        },
         _ => {
             eprintln!("{USAGE}");
             2
@@ -197,8 +253,9 @@ async fn serve(environment: &Environment) -> i32 {
     let dir = environment.dir();
     let telegram_config = TelegramConfig::load(&dir);
     let matrix_config = MatrixConfig::load(&dir);
-    if telegram_config.is_none() && matrix_config.is_none() {
-        eprintln!("No messenger is set up: run `ling chat telegram setup`, or `ling-admin matrix start`.");
+    let discord_config = DiscordConfig::load(&dir);
+    if telegram_config.is_none() && matrix_config.is_none() && discord_config.is_none() {
+        eprintln!("No messenger is set up: run `ling chat telegram setup`, `ling chat discord setup`, or `ling-admin matrix start`.");
         return 1;
     }
     let (agent, commands) = AgentHandle::channel();
@@ -241,6 +298,24 @@ async fn serve(environment: &Environment) -> i32 {
             Err(err) => eprintln!("ling chat: the Matrix homeserver is not answering ({err}); is `ling-admin matrix start` done?"),
         }
     }
+    if let Some(config) = discord_config {
+        let (out_tx, out_rx) = mpsc::unbounded_channel();
+        let api = discord::DiscordApi::new(discord::API_ROOT, &config.token);
+        let text = std::fs::read_to_string(environment.user_config()).unwrap_or_default();
+        let options = discord_options(&text);
+        if options.front_url.is_none() && text.contains("discord_web_url") {
+            eprintln!("ling chat: Discord: `discord_web_url` is not a plain https:// address; no links are offered.");
+        }
+        match discord::start(api, dir.clone(), inbound_tx.clone(), out_rx, options).await {
+            Ok(username) => {
+                hub.add_adapter("discord", out_tx);
+                adapters += 1;
+                eprintln!("ling chat: Discord: answering as {username}");
+            }
+            Err(err) if err.status == 401 => eprintln!("ling chat: Discord refused the bot token ({err}); run `ling chat discord setup` again."),
+            Err(err) => eprintln!("ling chat: Discord is not answering ({err}); `ling chat start` tries again."),
+        }
+    }
     if adapters == 0 {
         return 1;
     }
@@ -256,8 +331,10 @@ async fn serve(environment: &Environment) -> i32 {
 
 fn start(environment: &Environment) -> i32 {
     let dir = environment.dir();
-    if TelegramConfig::load(&dir).is_none() && MatrixConfig::load(&dir).is_none() {
-        eprintln!("No messenger is set up yet: run `ling chat telegram setup` (less private) or `ling-admin matrix start` (private) first.");
+    if TelegramConfig::load(&dir).is_none() && MatrixConfig::load(&dir).is_none() && DiscordConfig::load(&dir).is_none() {
+        eprintln!(
+            "No messenger is set up yet: run `ling-admin matrix start` (private), `ling chat telegram setup` (less private) or `ling chat discord setup` (least private) first."
+        );
         return 1;
     }
     let unit = environment.home.join(".config/systemd/user").join(UNIT_NAME);
@@ -295,7 +372,27 @@ fn status(dir: &Path) -> i32 {
         Some(config) => println!("Matrix: on (private), as {}, {} allowed user(s)", config.user_id, config.allowed.len()),
         None => println!("Matrix: off (`ling-admin matrix start`)"),
     }
+    match DiscordConfig::load(dir) {
+        Some(config) => println!(
+            "Discord: on (least private), {} paired user(s), {} connection(s) in the last 24 hours{}",
+            config.users.len(),
+            DiscordState::load(dir).identifies_today(store::now_secs()),
+            if config.users.is_empty() { "; pair one with `ling chat discord pair`" } else { "" }
+        ),
+        None => println!("Discord: off"),
+    }
     0
+}
+
+/// The Discord adapter's settings from the user's config file (DISCORD §5).
+pub fn discord_options(text: &str) -> discord::Options {
+    let defaults = discord::Options::default();
+    discord::Options {
+        front_url: ling_web_server::telegram_app::discord_web_url(text),
+        status_interval: chat_setting(text, "discord_status_interval_s").map_or(defaults.status_interval, |s| Duration::from_secs(s.max(5))),
+        identify_limit: chat_setting(text, "discord_identify_limit").map_or(defaults.identify_limit, |n| n.clamp(1, 900) as usize),
+        home_server: chat_text(text, "discord_home_server").filter(|id| discord::is_snowflake(id)),
+    }
 }
 
 #[cfg(unix)]
@@ -451,6 +548,147 @@ fn telegram_off(dir: &Path) -> i32 {
     0
 }
 
+async fn discord_setup(dir: &Path, user_config: &Path) -> i32 {
+    if !stdin_is_terminal() {
+        eprintln!("`ling chat discord setup` asks for your consent and the bot token at a terminal; run it in one.");
+        return 1;
+    }
+    println!("{DISCORD_WARNING}\n");
+    if read_line("Type yes to turn Discord on: ", false).as_deref() != Some("yes") {
+        println!("Discord stays off.");
+        return 1;
+    }
+    println!("\n{DISCORD_PORTAL_STEPS}\n\nPaste the bot token here. It is not shown as you type.");
+    let Some(token) = read_line("Bot token: ", true).filter(|token| token.len() > 20 && !token.contains(char::is_whitespace)) else {
+        eprintln!("That does not look like a bot token.");
+        return 1;
+    };
+    let api = discord::DiscordApi::new(discord::API_ROOT, &token);
+    let me = match api.request(reqwest::Method::GET, "/users/@me", None).await {
+        Ok(me) => me,
+        Err(err) => {
+            eprintln!("Discord refused that token: {err}");
+            return 1;
+        }
+    };
+    let app = match api.request(reqwest::Method::GET, "/applications/@me", None).await {
+        Ok(app) => app,
+        Err(err) => {
+            eprintln!("Could not read the bot's application: {err}");
+            return 1;
+        }
+    };
+    match discord::check_application(&app) {
+        Ok(warnings) => warnings.iter().for_each(|warning| println!("⚠️  {warning}")),
+        Err(refusal) => {
+            eprintln!("❌ Not turned on: {refusal}.");
+            return 1;
+        }
+    }
+    let Some(application_id) = app.get("id").and_then(serde_json::Value::as_str).filter(|id| discord::is_snowflake(id)) else {
+        eprintln!("Discord named no application id.");
+        return 1;
+    };
+    // A new token (after a reset in the portal) keeps the paired users of the same application.
+    let mut config = DiscordConfig::new(token, application_id.to_string());
+    if let Some(previous) = DiscordConfig::load(dir).filter(|previous| previous.application_id == application_id) {
+        config.users = previous.users;
+    }
+    if let Err(err) = config.save(dir) {
+        eprintln!("Could not save the token: {err}");
+        return 1;
+    }
+    let front = std::fs::read_to_string(user_config).ok().and_then(|text| ling_web_server::telegram_app::discord_web_url(&text)).is_some();
+    if let Err(err) = api.request(reqwest::Method::PUT, &format!("/applications/{application_id}/commands"), Some(discord::commands(front))).await {
+        eprintln!("⚠️  The commands were not registered yet ({err}); the bridge registers them when it starts.");
+    }
+    let username = me.get("username").and_then(serde_json::Value::as_str).unwrap_or_default();
+    println!(
+        "Discord is on, as {username}. Add the bot to your own account with this link (Add to My Apps):\n\n    {}\n\nNext: `ling chat discord pair`, then `ling chat start`.",
+        discord::install_url(application_id)
+    );
+    0
+}
+
+fn discord_pair(dir: &Path) -> i32 {
+    if DiscordConfig::load(dir).is_none() {
+        eprintln!("Discord is off: run `ling chat discord setup` first.");
+        return 1;
+    }
+    match store::issue_discord_pairing_code(dir) {
+        Ok(code) => {
+            println!("Send this to your bot in a direct message in Discord within 10 minutes:\n\n    /pair {code}\n\nThe code works once.");
+            0
+        }
+        Err(err) => {
+            eprintln!("Could not write a pairing code: {err}");
+            1
+        }
+    }
+}
+
+fn discord_users(dir: &Path) -> i32 {
+    match DiscordConfig::load(dir) {
+        Some(config) if !config.users.is_empty() => {
+            for user in config.users.keys() {
+                println!("{user}");
+            }
+            0
+        }
+        Some(_) => {
+            println!("No paired users: `ling chat discord pair`.");
+            0
+        }
+        None => {
+            println!("Discord is off.");
+            0
+        }
+    }
+}
+
+fn discord_remove(dir: &Path, which: &str) -> i32 {
+    let Some(mut config) = DiscordConfig::load(dir) else {
+        eprintln!("Discord is off.");
+        return 1;
+    };
+    if !discord::is_snowflake(which) {
+        eprintln!("A Discord user id is a number, as `ling chat discord users` lists it.");
+        return 2;
+    }
+    if config.users.remove(which).is_none() {
+        eprintln!("{which} is not paired.");
+        return 1;
+    }
+    match config.save(dir) {
+        Ok(()) => {
+            println!("{which} can no longer use the bot.");
+            0
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            1
+        }
+    }
+}
+
+async fn discord_off(dir: &Path) -> i32 {
+    if let Some(config) = DiscordConfig::load(dir).filter(|config| discord::is_snowflake(&config.application_id)) {
+        let api = discord::DiscordApi::new(discord::API_ROOT, &config.token);
+        let path = format!("/applications/{}/commands", config.application_id);
+        if let Err(err) = api.request(reqwest::Method::PUT, &path, Some(serde_json::json!([]))).await {
+            eprintln!("⚠️  The bot's commands were not removed ({err}); deleting the application removes them.");
+        }
+    }
+    let _ = std::fs::remove_file(DiscordConfig::path(dir));
+    let _ = std::fs::remove_file(DiscordState::path(dir));
+    store::withdraw_discord_pairing_codes(dir);
+    println!(
+        "Discord is off: the token and the pairings are deleted. Delete the application in Discord's Developer Portal too, so the token is gone there.\n\
+         A running bridge answers no one on Discord from now on, and does not reconnect to it."
+    );
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,6 +705,21 @@ mod tests {
         let text = "approval_timeout_s = 5\n[chat]\napproval_timeout_s = 120 # two minutes\n[other]\nmax_threads_listed = 3\n";
         assert_eq!(chat_setting(text, "approval_timeout_s"), Some(120));
         assert_eq!(chat_setting(text, "max_threads_listed"), None);
+    }
+
+    #[test]
+    fn discords_settings_are_bounded_and_checked() {
+        let text = "[chat]\ndiscord_web_url = \"https://dc.example.ts.net/\"\ndiscord_status_interval_s = 1\ndiscord_identify_limit = 5000\ndiscord_home_server = \"123456789012345678\"\n";
+        let options = discord_options(text);
+        assert_eq!(options.front_url.as_deref(), Some("https://dc.example.ts.net/"));
+        assert_eq!(options.status_interval, Duration::from_secs(5));
+        assert_eq!(options.identify_limit, 900);
+        assert_eq!(options.home_server.as_deref(), Some("123456789012345678"));
+        let defaults = discord_options("[chat]\ndiscord_web_url = \"http://dc.example.ts.net/\"\ndiscord_home_server = \"my server\"\n");
+        assert_eq!(defaults.front_url, None);
+        assert_eq!(defaults.home_server, None);
+        assert_eq!(defaults.identify_limit, 100);
+        assert!(DISCORD_WARNING.contains("least private") && DISCORD_WARNING.contains("token"));
     }
 
     #[test]
