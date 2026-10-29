@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 // The preview session's request rules, as Electron would call them: one handler for every request.
-const rules = vi.hoisted(() => ({ beforeRequest: null as null | ((details: { url: string; webContentsId?: number }, callback: (answer: { cancel: boolean }) => void) => void) }));
+const rules = vi.hoisted(() => ({ beforeRequest: null as null | ((details: { url: string; webContentsId?: number; resourceType?: string; frame?: { origin: string } | null }, callback: (answer: { cancel: boolean }) => void) => void) }));
 
 vi.mock("electron", () => {
   const ses = {
@@ -65,5 +65,25 @@ describe("a preview and WebRTC", () => {
     const window = { contentView: { addChildView: (added: typeof view) => { view = added; } }, on: () => {} };
     await previews.open(window as never, "rtc", "http://localhost:5173/", "thread-1");
     expect(view!.webContents.policies).toEqual(["disable_non_proxied_udp"]);
+  });
+});
+
+describe("an internet page and this machine", () => {
+  it("refuses a page's own requests from the internet to this machine or the LAN, not the tab's navigations", async () => {
+    const previews = new Previews(() => {}, () => ({ sites: { "example.com": "allow" }, devTools: false }), async () => false);
+    const window = { contentView: { addChildView: () => {} }, on: () => {} };
+    await previews.open(window as never, "lna", "http://localhost:5173/", null);
+    const from = (url: string, resourceType: string, origin: string | null) =>
+      new Promise<boolean>((resolve) => rules.beforeRequest!({ url, webContentsId: 7, resourceType, frame: origin === null ? null : { origin } }, ({ cancel }) => resolve(cancel)));
+    expect(await from("http://127.0.0.1:8000/v1/models", "xhr", "https://example.com")).toBe(true);
+    expect(await from("ws://localhost:18000/", "webSocket", "https://example.com")).toBe(true);
+    expect(await from("http://192.168.1.1/admin", "subFrame", "https://example.com")).toBe(true);
+    // An opaque frame (sandboxed, data:) counts as the tab's page, here this machine's.
+    expect(await from("http://127.0.0.1:8000/v1/models", "xhr", "null")).toBe(false);
+    expect(await from("http://127.0.0.1:8000/v1/models", "xhr", "http://localhost:5173")).toBe(false);
+    expect(await from("http://127.0.0.1:8000/v1/models", "script", null)).toBe(false);
+    // The tab itself may still go there: a navigation the user sees.
+    expect(await from("http://localhost:5173/", "mainFrame", "https://example.com")).toBe(false);
+    expect(await from("https://example.com/api", "xhr", "https://example.com")).toBe(false);
   });
 });

@@ -78,6 +78,26 @@ export function decide(url: string, sites: Record<string, SiteChoice>, allowedOn
   return { verdict: "ask", site, reach, reason: `${site} is on the internet` };
 }
 
+/**
+ * Whether a page's own request (a fetch, a socket, a frame: not the tab's navigation) goes from the
+ * internet to this machine or the LAN, which no site's choice allows: Chromium's Local Network
+ * Access, kept here whatever the Chromium. `origin` is the requesting frame's; an opaque one (a
+ * sandboxed or data: frame) or none (a worker) counts as the tab's page, `page`.
+ */
+export function inward(target: Decision, resourceType: string, origin: string | null | undefined, page: string): boolean {
+  if (resourceType === "mainFrame" || (target.reach !== "loopback" && target.reach !== "lan")) return false;
+  const host = (url: string | null | undefined): string | null => {
+    try {
+      const parsed = new URL(url ?? "");
+      return ["http:", "https:", "ws:", "wss:"].includes(parsed.protocol) ? parsed.hostname.replace(/^\[|\]$/g, "") : null;
+    } catch {
+      return null;
+    }
+  };
+  const from = host(origin) ?? host(page);
+  return from !== null && reachOf(from) === "internet";
+}
+
 /** What the address bar's text means: a URL as typed, a local address without its scheme, or a file path. */
 export function addressOf(typed: string): string | null {
   const text = typed.trim();

@@ -10,7 +10,7 @@
 
 import { BrowserWindow, WebContentsView, session, type Session, type WebContents } from "electron";
 
-import { PICK_SCRIPT, consoleLine, decide, type Decision, type SiteChoice } from "./preview-rules";
+import { PICK_SCRIPT, consoleLine, decide, inward, type Decision, type SiteChoice } from "./preview-rules";
 
 export const PREVIEW_PARTITION = "persist:mightling-preview";
 
@@ -86,7 +86,10 @@ export class Previews {
       const found = this.byContents(details.webContentsId ?? -1);
       // A request from no preview of ours (a service worker, a stray) has nothing to answer to: refused.
       if (!found) return callback({ cancel: !details.url.startsWith("devtools:") });
-      const decision = this.decision(found[1], details.url);
+      let decision = this.decision(found[1], details.url);
+      if (decision.verdict === "allow" && inward(decision, details.resourceType, details.frame?.origin, found[1].view.webContents.getURL())) {
+        decision = { ...decision, verdict: "block", reason: "a page from the internet does not reach this machine or the local network" };
+      }
       if (decision.verdict !== "allow") this.refused(found[0], found[1], decision);
       callback({ cancel: decision.verdict !== "allow" });
     });
