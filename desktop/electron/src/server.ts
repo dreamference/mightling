@@ -71,10 +71,20 @@ export class AppServer {
     this.initialized = false;
     this.busy = new BusyTracker();
     this.marker = home && child.pid ? busyMarker(home, child.pid) : null;
-    readline.createInterface({ input: child.stdout }).on("line", (line) => this.incoming(line));
-    readline.createInterface({ input: child.stderr }).on("line", (line) => this.events.deliver({ channel: "work://stderr", payload: line }));
-    child.once("exit", (code) => this.exited(code));
+    // A child that Stop and a new start replaced still has lines in its pipes, and may still end:
+    // none of it is the running server's (a request it read, a window's approval, its exit).
+    const replaced = () => this.child !== null && this.child !== child;
+    readline.createInterface({ input: child.stdout }).on("line", (line) => {
+      if (!replaced()) this.incoming(line);
+    });
+    readline.createInterface({ input: child.stderr }).on("line", (line) => {
+      if (!replaced()) this.events.deliver({ channel: "work://stderr", payload: line });
+    });
+    child.once("exit", (code) => {
+      if (this.child === child) this.exited(code);
+    });
     child.once("error", (error) => {
+      if (this.child !== child) return;
       this.events.deliver({ channel: "work://stderr", payload: `could not start ${ling} app-server: ${error.message}` });
       this.exited(null);
     });
