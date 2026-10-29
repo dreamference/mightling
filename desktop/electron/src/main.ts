@@ -973,10 +973,10 @@ export async function main(options: MainOptions): Promise<void> {
         }
         const picked = pickedBundles.get(String(message.token));
         if (!picked) throw new Error("choose the bundle's file again");
-        const { summary } = await mcpb.readBundle(picked.file, home, places);
-        if (summary.fetches) await offline(null, `this bundle's command, ${summary.fetches},`);
         const values = typeof message.values === "object" && message.values !== null && !Array.isArray(message.values) ? message.values : {};
-        const installed = await mcpb.installBundle(picked.file, home, places, { expected: picked.name, values, replace: message.replace === true });
+        // Checked on the command installBundle fills in from the file as it reads it then, not on an earlier read.
+        const fetching = (command: string) => offline(null, `this bundle's command, ${command},`);
+        const installed = await mcpb.installBundle(picked.file, home, places, { expected: picked.name, values, replace: message.replace === true, fetching });
         pickedBundles.delete(String(message.token));
         return installed;
       }

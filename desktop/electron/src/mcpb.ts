@@ -455,9 +455,10 @@ export function settingValues(settings: BundleSetting[], given: Record<string, u
 /**
  * Unpacks a bundle read before (`expected` is the name shown) into `$CODEX_HOME/mcpb/<name>/` and
  * returns the server config.toml gets. A bundle of that name already there is replaced only when
- * `replace` says so; the old one is removed only once the new one is in place.
+ * `replace` says so; the old one is removed only once the new one is in place. `fetching` is asked,
+ * and throws to refuse, when the command with the settings filled in is a package runner.
  */
-export async function installBundle(file: string, codexHome: string, places: Places, options: { expected: string; values: Record<string, unknown>; replace: boolean; platform?: NodeJS.Platform }): Promise<{ name: string; dir: string; server: BundleServer }> {
+export async function installBundle(file: string, codexHome: string, places: Places, options: { expected: string; values: Record<string, unknown>; replace: boolean; platform?: NodeJS.Platform; fetching?: (command: string) => Promise<void> }): Promise<{ name: string; dir: string; server: BundleServer }> {
   const platform = options.platform ?? process.platform;
   const { archive, manifest, summary } = await readBundle(file, codexHome, places, platform);
   if (summary.name !== options.expected) throw new Error("the file changed since it was read: choose it again");
@@ -466,6 +467,9 @@ export async function installBundle(file: string, codexHome: string, places: Pla
   const root = bundlesFolder(codexHome);
   const dir = path.join(root, summary.name);
   if (summary.installed && !options.replace) throw new Error(`a bundle named ${summary.name} is installed already: remove it first, or replace it`);
+  // The command as it will run: a setting may name the runner (`${user_config.runner}`), which the summary leaves unfilled.
+  const fetches = fetchingCommand(bundleServer(manifest, dir, places, values, platform).command);
+  if (fetches && options.fetching) await options.fetching(fetches);
   await fs.mkdir(root, { recursive: true });
   const partial = path.join(root, `.${summary.name}.${randomUUID()}.partial`);
   await fs.mkdir(partial);
