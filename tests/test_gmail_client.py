@@ -696,3 +696,197 @@ def test_an_empty_environment_variable_leaves_the_file_to_decide_as_on_the_rust_
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_gmail is True
     cfg_file.write_text("mightling_gmail = false\n", encoding="utf-8")
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_gmail is False
+
+
+def test_the_client_asks_loopback_with_the_services_imap_timeout(tmp_path):
+    # §3.1: the service's own port on loopback, and a timeout as long as the service allows IMAP.
+    from dreamference.chat.gmail_search_service import IMAP_TIMEOUT_SECONDS
+    from dreamference.chat.google_service import GOOGLE_HOST_PORT
+
+    secret = tmp_path / "service-secret"
+    secret.write_text("s")
+    timeouts = []
+
+    def urlopen(request, timeout=None):
+        timeouts.append((request.full_url, timeout))
+        return _Response(b'{"messages": []}')
+
+    with (
+        patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)),
+        patch("urllib.request.urlopen", urlopen),
+    ):
+        GmailClient.search("x")
+        GmailClient.status()
+    for url, timeout in timeouts:
+        assert url.startswith(f"http://127.0.0.1:{GOOGLE_HOST_PORT}/")
+        assert timeout == IMAP_TIMEOUT_SECONDS
+
+
+def test_the_launcher_asks_the_same_loopback_address_as_the_client():
+    # The launcher cannot import the Python constant, so its copy is pinned to it here.
+    import pathlib
+    import re
+
+    source = (pathlib.Path(__file__).resolve().parent.parent / "ling-rs/src/lib.rs").read_text()
+    (url,) = re.findall(r'pub const GMAIL_SERVICE_URL: &str = "([^"]+)";', source)
+    assert url == client_module.GMAIL_SERVICE_URL
+
+
+def test_the_client_only_imports_its_constants_and_uses_the_standard_library():
+    # §3.1/§3.2: the constants come from the service modules, never re-declared, and the client is
+    # stdlib `urllib` only.
+    import ast
+    import pathlib
+    import sys
+
+    tree = ast.parse(pathlib.Path(client_module.__file__).read_text())
+    assigned = {
+        target.id
+        for node in tree.body
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+    shared = {
+        "GOOGLE_HOST_PORT", "GMAIL_AUTH_HEADER", "SECRET_FILE_NAME", "CREDENTIALS_DIR",
+        "IMAP_TIMEOUT_SECONDS", "MAX_RESULT_LIMIT",
+    }
+    assert not assigned & shared
+    imported = {
+        (node.module if isinstance(node, ast.ImportFrom) else alias.name).split(".")[0]
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+    assert {name for name in imported if name not in sys.stdlib_module_names} == {"dreamference"}
+
+
+def test_a_missing_secret_is_never_created_by_the_client(tmp_path):
+    absent = tmp_path / "service-secret"
+    with patch.object(client_module, "SERVICE_SECRET_PATH", str(absent)):
+        assert GmailClient.read("a@x.com|1") == NOT_SET_UP_ERROR
+    assert not absent.exists()
+
+
+def test_a_limit_below_one_asks_for_one(tmp_path):
+    secret = tmp_path / "service-secret"
+    secret.write_text("s")
+    seen = []
+    with (
+        patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)),
+        patch("urllib.request.urlopen", _serve({"messages": []}, seen)),
+    ):
+        GmailClient.search("x", limit=0)
+    assert "limit=1" in seen[0].full_url
+
+
+def test_an_http_error_and_a_body_that_is_not_json_become_errors(tmp_path):
+    secret = tmp_path / "service-secret"
+    secret.write_text("wrong")
+
+    def refused(request, timeout=None):
+        raise urllib.error.HTTPError(
+            request.full_url, 401, "Unauthorized", {}, io.BytesIO(b'{"error": "unauthorised"}')
+        )
+
+    def garbled(request, timeout=None):
+        return _Response(b"<html>")
+
+    with patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)):
+        with patch("urllib.request.urlopen", refused):
+            assert GmailClient.search("x") == {"error": "unauthorised"}
+        with patch("urllib.request.urlopen", garbled):
+            assert "not JSON" in GmailClient.search("x")["error"]
+
+
+def test_search_asks_for_ten_and_read_prints_eight_thousand_characters_by_default(capsys):
+    parser = DreamferenceCLIController.build_parser()
+    assert parser.parse_args(["gmail", "search", "x"]).max_results == 10
+    payload = {"from": "Alice", "body": "a" * 8000 + "TAIL"}
+    code, out = _gmail(["read", "a@x.com|1"], payload, capsys)
+    assert code == 0
+    assert "a" * 8000 in out and "TAIL" not in out and "[truncated at 8000 chars]" in out
+    _, out = _gmail(["read", "a@x.com|1", "--max-chars", "5000"], {"body": "short"}, capsys)
+    assert "short" in out and "truncated" not in out
+
+
+def test_read_prints_the_headers_in_order_then_a_blank_line_then_the_body(capsys):
+    payload = {"from": "Alice", "to": "Bob", "date": "Mon", "subject": "Hi", "body": "Hello"}
+    _, out = _gmail(["read", "a@x.com|1"], payload, capsys)
+    lines = out.splitlines()
+    assert lines[:5] == ["From: Alice", "To: Bob", "Date: Mon", "Subject: Hi", ""]
+    assert lines[5:8] == ["----- BEGIN EMAIL (untrusted) -----", "Hello", "----- END EMAIL -----"]
+
+
+@pytest.mark.parametrize("error", [NOT_SET_UP_ERROR, {"error": "Message not found"}])
+def test_read_errors_exit_non_zero(capsys, error):
+    code, out = _gmail(["read", "gone@x.com|1"], dict(error), capsys)
+    assert code == 1 and f"❌ {error['error']}" in out
+    assert ("💡 " + error["hint"] in out) if "hint" in error else "💡" not in out
+
+
+def test_status_lists_the_accounts_or_says_none_is_connected(capsys):
+    code, out = _gmail(["status"], {"connected": True, "email": "a@x.com, b@y.com"}, capsys)
+    assert code == 0 and out.strip() == "connected: a@x.com, b@y.com"
+    code, out = _gmail(["status"], {"connected": False, "email": None}, capsys)
+    assert code == 1 and out.startswith("❌ ") and "\n💡 " in out
+
+
+@pytest.mark.parametrize("command", [["search", "x"], ["read", "a@x.com|1"], ["status"]])
+def test_json_prints_the_service_answer_unchanged(capsys, command):
+    payload = {"connected": True, "email": "a@x.com", "messages": [], "body": "b"}
+    code, out = _gmail([*command, "--json"], payload, capsys)
+    assert code == 0 and json.loads(out) == payload
+
+
+def test_a_failed_account_beside_a_connected_one_with_no_match_is_not_an_error(capsys):
+    payload = {"messages": [], "errors": [{"account": "b@y.com", "error": "AUTHENTICATIONFAILED"}]}
+    status = {"connected": True, "email": "a@x.com, b@y.com"}
+    code, out = _gmail(["search", "hi"], payload, capsys, status=status)
+    assert code == 0 and "No messages matched." in out and "⚠️ b@y.com" in out
+
+
+def test_the_service_issues_only_read_only_imap_commands(monkeypatch):
+    # §1 and §5: no write verbs, every mailbox opened read-only, and every fetch a PEEK so that a
+    # search does not mark the user's mail as read.
+    from dreamference.chat import gmail_search_service as service_module
+    from dreamference.chat.gmail_search_service import GMAIL_SCOPE, GmailSearchService
+
+    raw = b"From: Alice <a@x.com>\r\nSubject: Hi\r\nDate: Wed, 28 Oct 2026 12:00:00 +0000\r\n\r\nbody"
+    selects, commands = [], []
+
+    class Conn:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def authenticate(self, mechanism, responder):
+            pass
+
+        def list(self):
+            return "OK", [b'(\\HasNoChildren \\All) "/" "[Gmail]/All Mail"']
+
+        def select(self, folder, readonly=False):
+            selects.append(readonly)
+            return "OK", [b"1"]
+
+        def uid(self, command, *args):
+            commands.append((command, args))
+            if command == "SEARCH":
+                return "OK", [b"7"]
+            return "OK", [(b"7 (X-GM-MSGID 555 BODY[] {4}", raw)]
+
+        def close(self):
+            pass
+
+        def logout(self):
+            pass
+
+    accounts = [{"email": "a@x.com", "access_token": "t", "scopes": [GMAIL_SCOPE]}]
+    monkeypatch.setattr(GmailSearchService, "credentials", classmethod(lambda cls, directory=None: accounts))
+    monkeypatch.setattr(service_module.imaplib, "IMAP4_SSL", Conn)
+    assert GmailSearchService.search("from:alice", 5)["messages"]
+    assert GmailSearchService.message("a@x.com|555")["body"] == "body"
+    assert selects and all(selects)
+    assert {command for command, _ in commands} == {"SEARCH", "FETCH"}
+    fetches = [args[-1] for command, args in commands if command == "FETCH"]
+    assert fetches and all("BODY.PEEK[" in item for item in fetches)
