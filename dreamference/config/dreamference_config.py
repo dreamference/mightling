@@ -85,6 +85,8 @@ CONFIG_KEYS: Final[frozenset] = frozenset({
     "mightling_gmail", "mightling_compaction_ledger", "mightling_airgapped", "mightling_prompt",
     "mightling_refine", "mightling_refine_version",
 })
+# Keys an earlier release wrote and this one no longer reads: removed on save like a default.
+RETIRED_KEYS: Final[frozenset] = frozenset({"cave_mode", "mightling_cave_mode"})
 
 class DreamferenceConfig:
     """
@@ -565,7 +567,7 @@ class DreamferenceConfig:
                 if key in self.file_data:
                     data[key] = self.file_data[key]
 
-        return ConfigFileStorageManager.save_config_dict(out_path, data, owned=CONFIG_KEYS)
+        return ConfigFileStorageManager.save_config_dict(out_path, data, owned=CONFIG_KEYS | RETIRED_KEYS)
 
     def resolve_tool_call_parser(self) -> str:
         """
