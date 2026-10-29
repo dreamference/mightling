@@ -354,8 +354,10 @@ class StraceParser:
                     end += 1
                 out.append(int(literal[index + 1 : end], 8) & 0xFF)
                 index = end
-            elif following == "x" and re.match(r"[0-9a-fA-F]{1,2}", literal[index + 2 : index + 4]):
-                digits = re.match(r"[0-9a-fA-F]{1,2}", literal[index + 2 : index + 4]).group(0)
+            elif following == "x" and (
+                hex_match := re.match(r"[0-9a-fA-F]{1,2}", literal[index + 2 : index + 4])
+            ):
+                digits = hex_match.group(0)
                 out.append(int(digits, 16))
                 index += 2 + len(digits)
             else:

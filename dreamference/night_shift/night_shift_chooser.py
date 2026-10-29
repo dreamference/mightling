@@ -133,7 +133,8 @@ class NightShiftChooser:
 
         if any(counts[i] < MIN_COMPARISONS for i in ids):
             order = sorted(ids, key=lambda i: (counts[i], rng.random()))
-            round_pairs, used = [], set()
+            round_pairs: list[tuple[str, str]] = []
+            used: set[str] = set()
             for a in order:
                 if a in used or counts[a] >= MIN_COMPARISONS:
                     continue

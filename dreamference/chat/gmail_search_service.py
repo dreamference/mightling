@@ -60,7 +60,7 @@ import urllib.parse
 import urllib.request
 from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Final
+from typing import Any, Final, Protocol, cast
 
 # Drive and Calendar for Mightling's apps. In the container this file runs as /config/service.py with
 # the reader staged beside it, so the plain import is the one that works there.
@@ -216,6 +216,12 @@ PAGE_STYLE: Final[str] = (
     "input[type=text]:focus{outline:2px solid #d1d5db;outline-offset:0;border-color:#d1d5db}"
     ".divider{margin-top:28px;border-top:1px solid #f3f4f6;padding-top:20px}"
 )
+
+
+class _LiteralSlot(Protocol):
+    """imaplib's `literal` attribute as it is used (bytes), which typeshed declares as `str | None`."""
+
+    literal: bytes | None
 
 
 class GmailSearchService:
@@ -571,7 +577,7 @@ class GmailSearchService:
             A callable suitable for `IMAP4.authenticate`.
         """
         payload = f"user={address}\x01auth=Bearer {token}\x01\x01".encode()
-        answered = []
+        answered: list[bool] = []
 
         def respond(_challenge: bytes) -> bytes:
             if answered:
@@ -808,7 +814,7 @@ class GmailSearchService:
             List[bytes]: Matching UIDs.
         """
         try:
-            connection.literal = query.encode("utf-8")
+            cast("_LiteralSlot", connection).literal = query.encode("utf-8")
             status, data = connection.uid("SEARCH", "CHARSET", "UTF-8", "X-GM-RAW")
         except (imaplib.IMAP4.error, OSError):
             status, data = "NO", None
@@ -1020,7 +1026,7 @@ class GmailSearchService:
         if email and email in connections:
             conn = connections[email]
             try:
-                status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
+                status, data = conn.uid("SEARCH", "X-GM-MSGID", real_id)
                 if status == "OK" and data[0]:
                     uid = data[0].split()[0].decode("ascii")
                     return cls._fetch_body(conn, uid)
@@ -1034,7 +1040,7 @@ class GmailSearchService:
 
         for conn in connections.values():
             try:
-                status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
+                status, data = conn.uid("SEARCH", "X-GM-MSGID", real_id)
                 if status == "OK" and data[0]:
                     uid = data[0].split()[0].decode("ascii")
                     res = cls._fetch_body(conn, uid)
@@ -1092,7 +1098,7 @@ class GmailSearchService:
 
         def decode(part: Message) -> str:
             payload = part.get_payload(decode=True)
-            if payload is None:
+            if not isinstance(payload, bytes):
                 return ""
             charset = part.get_content_charset() or "utf-8"
             try:
@@ -1410,7 +1416,7 @@ class GmailSearchService:
                         self._reply(400, {"error": "query is required"})
                         return
                     try:
-                        limit = int((query.get("limit") or [DEFAULT_RESULT_LIMIT])[0])
+                        limit = int((query.get("limit") or [str(DEFAULT_RESULT_LIMIT)])[0])
                     except ValueError:
                         limit = DEFAULT_RESULT_LIMIT
                     self._reply(200, cls.search(terms, limit))

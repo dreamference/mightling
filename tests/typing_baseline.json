@@ -1,24 +1,5 @@
 {
  "counts": {
-  "dreamference/audit/strace_parser.py": {
-   "union-attr": 1
-  },
-  "dreamference/chat/gmail_credentials.py": {
-   "return-value": 1
-  },
-  "dreamference/chat/gmail_search_service.py": {
-   "arg-type": 2,
-   "assignment": 1,
-   "list-item": 1,
-   "union-attr": 2,
-   "var-annotated": 1
-  },
-  "dreamference/chat/image_search_service.py": {
-   "arg-type": 1,
-   "assignment": 2,
-   "dict-item": 1,
-   "return-value": 1
-  },
   "dreamference/cli/code_index_setup.py": {
    "union-attr": 1
   },
@@ -31,25 +12,6 @@
   "dreamference/hardware/model_downloader.py": {
    "assignment": 1,
    "attr-defined": 1
-  },
-  "dreamference/night_shift/night_shift_best_of_n.py": {
-   "arg-type": 1
-  },
-  "dreamference/night_shift/night_shift_chooser.py": {
-   "var-annotated": 1
-  },
-  "dreamference/night_shift/night_shift_remote.py": {
-   "union-attr": 2
-  },
-  "dreamference/night_shift/night_shift_runner.py": {
-   "arg-type": 2
-  },
-  "dreamference/night_shift/night_shift_scheduler.py": {
-   "var-annotated": 1
-  },
-  "dreamference/night_shift/night_shift_task_run.py": {
-   "assignment": 1,
-   "var-annotated": 1
   },
   "dreamference/runner/cline_runner.py": {
    "list-item": 1
@@ -113,5 +75,5 @@
   }
  },
  "mypy": "2.4.0",
- "total": 116
+ "total": 93
 }

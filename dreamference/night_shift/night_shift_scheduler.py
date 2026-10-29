@@ -159,7 +159,7 @@ class NightShiftScheduler:
         if NightShiftQueue.runner_active():
             lines.append("A night run is in progress.")
         tasks = NightShiftQueue.tasks(NightShiftQueue.night_dir())
-        by_repo = {}
+        by_repo: dict[str, dict[str, int]] = {}
         for task in tasks:
             counts = by_repo.setdefault(task.get("repo", "?"), {})
             counts[task.get("status", "?")] = counts.get(task.get("status", "?"), 0) + 1

@@ -478,7 +478,8 @@ class NightShiftTaskRun:
         sandboxed = self.USE_SANDBOX and self.settings.test_sandbox
         if level == SEALED and not self.settings.test_sandbox:
             return {"command": test_command, "refused": True}
-        command, extra_env = ["bash", "-c", test_command], {}
+        command = ["bash", "-c", test_command]
+        extra_env: dict[str, str] = {}
         if sandboxed:
             command, extra_env = self.sandboxed_test_command(
                 self.mightling_bin, test_command, level, self.session
@@ -715,8 +716,9 @@ class NightShiftTaskRun:
         env[REFINE_ENV] = "off"
         if self.airgapped:
             env[AIRGAPPED_ENV] = self.airgapped
-        if getattr(self.settings, "prompt", None):
-            env[PROMPT_ENV] = self.settings.prompt
+        prompt = getattr(self.settings, "prompt", None)
+        if prompt:
+            env[PROMPT_ENV] = prompt
         env.update(extra_env or {})
         if self.remote:
             command = self.remote_sandbox(command, extra_env or {})

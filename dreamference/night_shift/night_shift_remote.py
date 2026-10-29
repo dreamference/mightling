@@ -411,7 +411,8 @@ class NightShiftRemote:
             raise ValueError(
                 f"a task {task_id} already exists on this node; queue it again for a new id"
             )
-        author = request.get("author") if isinstance(request.get("author"), dict) else {}
+        raw_author = request.get("author")
+        author = raw_author if isinstance(raw_author, dict) else {}
         now = NightShiftQueue.now()
         record = {
             "id": task_id,

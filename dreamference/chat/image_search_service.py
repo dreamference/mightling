@@ -42,12 +42,16 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import ModuleType
 from typing import Any, Final
 
+Image: ModuleType | None = None
 try:  # Pillow is the one third-party need; every use degrades without it.
-    from PIL import Image
+    from PIL import Image as _PillowImage
+
+    Image = _PillowImage
 except ImportError:  # pragma: no cover - exercised only in a bare container
-    Image = None
+    pass
 
 SERVICE_PORT: Final[int] = 8768
 
@@ -152,7 +156,7 @@ class HardenedFetcher:
             raise FetchRejected(f"DNS failure for {host}: {exc}") from exc
         if not infos:
             raise FetchRejected(f"{host} resolved to nothing")
-        pinned = None
+        pinned: str | None = None
         for info in infos:
             address = info[4][0]
             try:
@@ -169,6 +173,8 @@ class HardenedFetcher:
             ):
                 raise FetchRejected(f"{host} resolves to non-public address {address}")
             pinned = pinned or address
+        if pinned is None:
+            raise FetchRejected(f"{host} resolved to no usable address")
         return pinned
 
     @classmethod
@@ -238,7 +244,7 @@ class HardenedFetcher:
         import http.client
 
         parsed = urllib.parse.urlparse(url)
-        host = parsed.hostname
+        host = parsed.hostname or ""
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
         path = parsed.path or "/"
         if parsed.query:
@@ -247,7 +253,9 @@ class HardenedFetcher:
             raw = socket.create_connection((pinned_ip, port), timeout=timeout)
             context = ssl.create_default_context()
             sock = context.wrap_socket(raw, server_hostname=host)
-            conn = http.client.HTTPSConnection(host, port, timeout=timeout)
+            conn: http.client.HTTPConnection = http.client.HTTPSConnection(
+                host, port, timeout=timeout
+            )
             conn.sock = sock
         else:
             conn = http.client.HTTPConnection(pinned_ip, port, timeout=timeout)

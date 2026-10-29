@@ -41,12 +41,12 @@ class GmailCredentials:
         return True
 
     @classmethod
-    def load(cls) -> dict[str, str] | None:
-        """Reads the stored token.
+    def load(cls) -> list[dict[str, str]]:
+        """Reads the stored tokens.
 
         Returns:
-            Optional[Dict[str, str]]: The address and access token, or None if Gmail is not
-                connected or the stored token has expired.
+            One entry per connected account with its address and access token; empty if Gmail is
+                not connected or every stored token has expired.
         """
         return GmailSearchService.credentials(CREDENTIALS_DIR)
 

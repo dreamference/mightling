@@ -449,11 +449,12 @@ class NightShiftRunner:
                 # Compared without its numbers: the memory reason carries a free-memory figure that
                 # changes on every poll, and noting each one put the same wait in the report eight
                 # times a minute (live run, 2026-10-02).
-                if cls.reason_kind(reason) != paused_for:
+                reason_text = reason or ""
+                if cls.reason_kind(reason_text) != paused_for:
                     notes.append(
                         f"{datetime.now():%H:%M}: waiting to start the next task: {reason}."
                     )
-                    paused_for = cls.reason_kind(reason)
+                    paused_for = cls.reason_kind(reason_text)
             cls.sleep(POLL_S)
 
     @classmethod

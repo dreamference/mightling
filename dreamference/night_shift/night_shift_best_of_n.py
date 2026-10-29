@@ -156,7 +156,8 @@ class NightShiftBestOfN:
         if night_dir is not None and (night_dir / "worktrees" / str(task.get("id"))).is_dir():
             return 1
         try:
-            wanted = int(task.get("best_of") or getattr(settings, "best_of", 1))
+            default_attempts: int = getattr(settings, "best_of", 1)
+            wanted = int(task.get("best_of") or default_attempts)
         except (TypeError, ValueError):
             wanted = int(getattr(settings, "best_of", 1))
         return max(1, wanted)
