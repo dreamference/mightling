@@ -36,6 +36,10 @@ theme:
 exclude_docs: |
   dev/
 
+not_in_nav: |
+  # Redirect stub kept so old links to the web chat still land on the Web UI page.
+  web-chat.md
+
 validation:
   anchors: warn
 
