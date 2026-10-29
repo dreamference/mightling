@@ -78,3 +78,10 @@ describe("CSV and TSV tabs (DESKTOP §16 B27)", () => {
     expect(table.totalColumns).toBe(8);
   });
 });
+
+describe("a reference with a stray percent sign", () => {
+  it("is read as written instead of breaking the whole preview", () => {
+    expect(localReference("/d/a.html", "100%.png")).toBe("/d/100%.png");
+    expect(localReference("/d/a.html", "my%20chart.png")).toBe("/d/my chart.png");
+  });
+});
