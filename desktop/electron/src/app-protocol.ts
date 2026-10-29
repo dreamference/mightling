@@ -71,7 +71,14 @@ export function serve(root: string): void {
         headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=604800, immutable" },
       });
     }
-    const relative = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
+    // A path that does not decode (`%E0%A4%A`) names no file: 404, not a handler that throws.
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(url.pathname);
+    } catch {
+      return new Response("not found", { status: 404 });
+    }
+    const relative = decoded.replace(/^\/+/, "") || "index.html";
     const file = path.resolve(base, relative);
     if (file !== base && !file.startsWith(base + path.sep)) return new Response("not found", { status: 404 });
     try {
