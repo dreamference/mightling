@@ -74,7 +74,7 @@ fn main() -> ExitCode {
     ) {
         Ok(options) => options,
         Err(message) => {
-            println!("❌ {message}");
+            print_error(args.json, &message, None);
             return ExitCode::from(2);
         }
     };
@@ -98,10 +98,7 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(error) => {
-                println!("❌ {}", error.error);
-                if let Some(hint) = error.hint {
-                    println!("💡 {hint}");
-                }
+                print_error(args.json, &error.error, error.hint.as_deref());
                 ExitCode::FAILURE
             }
         };
@@ -126,11 +123,28 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            println!("❌ {}", error.error);
-            if let Some(hint) = error.hint {
-                println!("💡 {hint}");
-            }
+            print_error(args.json, &error.error, error.hint.as_deref());
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// A failure, as JSON (`error`, and `hint` when there is one) under `--json`, so a script reads
+/// every outcome the same way.
+fn print_error(json: bool, error: &str, hint: Option<&str>) {
+    if json {
+        let mut printed = serde_json::json!({"error": error});
+        if let Some(hint) = hint {
+            printed["hint"] = hint.into();
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&printed).unwrap_or_default()
+        );
+    } else {
+        println!("❌ {error}");
+        if let Some(hint) = hint {
+            println!("💡 {hint}");
         }
     }
 }
