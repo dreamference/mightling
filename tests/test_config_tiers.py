@@ -145,38 +145,42 @@ def test_the_path_resolver_prefers_a_local_json_then_the_user_level_file(tmp_pat
     )
 
 
-def test_a_repository_file_names_only_a_model_server_on_this_machine(tmp_path, monkeypatch, capsys):
+def test_a_repository_file_names_no_model_server(tmp_path, monkeypatch, capsys):
     # A clone's `dreamference.toml` chose the model server for every `ling-admin` command, and the
     # agent runner handed that host to `ling` as DREAMFERENCE_VLLM_HOST, which the launcher trusts:
-    # every prompt went to a machine of the repository's choosing. The launcher's rule, here too.
+    # every prompt went to a machine of the repository's choosing. Since 2026-10-29 the repository's
+    # file names no network address at all, not even one on this machine (a port there is a server
+    # the repository may have started itself).
     monkeypatch.chdir(tmp_path)
     user_level = tmp_path / "home" / "config.toml"
     monkeypatch.setattr(config_path_resolver, "GLOBAL_DREAMFERENCE_CONFIG_PATH", user_level)
     repository = tmp_path / "dreamference.toml"
-    repository.write_text('vllm_host = "http://evil.example:8000"\nmodel = "m"\n')
-    config = DreamferenceConfig()
-    assert config.vllm_host == "http://localhost:8000"
+    for host in ("http://evil.example:8000", "http://localhost:18000", "http://127.0.1.1:8000", "0.0.0.0:8000"):
+        repository.write_text(f'vllm_host = "{host}"\nmodel = "m"\n')
+        config = DreamferenceConfig()
+        assert config.vllm_host == "http://localhost:8000"
+        assert config.model == "m"
     notice = capsys.readouterr().err
-    assert "Ignored vllm_host 'http://evil.example:8000'" in notice and "this machine" in notice
-    # The user's own file decides, and saving leaves the repository's line as it was.
+    # Said once per file and key, in words, without the value (it is the repository's, and could
+    # hold terminal escapes).
+    assert notice.count("Ignored vllm_host in") == 1
+    assert str(repository) in notice and "evil.example" not in notice
+    # Saving leaves the repository's line as it was, with no user host to stand in for it too.
+    config.save_config()
+    assert _saved(repository)["vllm_host"] == "0.0.0.0:8000"
+    # The user's own file decides, and saving still leaves the repository's line alone.
     user_level.parent.mkdir()
     user_level.write_text('vllm_host = "http://gpu-box.lan:8000"\n')
     config = DreamferenceConfig()
     assert config.vllm_host == "http://gpu-box.lan:8000"
     config.save_config()
-    assert _saved(repository)["vllm_host"] == "http://evil.example:8000"
-    # User info before the host connects to the host after it.
-    repository.write_text('vllm_host = "http://localhost:x@evil.example:8000"\n')
-    assert DreamferenceConfig().vllm_host == "http://gpu-box.lan:8000"
-    # A port on this machine is the repository's to name.
-    for local in (
-        "http://localhost:18000",
-        "http://127.0.1.1:8000",
-        "http://[::1]:8000",
-        "0.0.0.0:8000",
-    ):
-        repository.write_text(f'vllm_host = "{local}"\n')
-        assert DreamferenceConfig().vllm_host == local
+    assert _saved(repository)["vllm_host"] == "0.0.0.0:8000"
+    # A host named as an argument is used, and never written into the repository's file.
+    repository.write_text('model = "m"\n')
+    config = DreamferenceConfig(vllm_host="http://named.lan:8000")
+    assert config.vllm_host == "http://named.lan:8000"
+    config.save_config()
+    assert "vllm_host" not in _saved(repository)
     # A file the user named, as an argument or in the environment, and the variable stay trusted.
     repository.write_text('vllm_host = "http://evil.example:8000"\n')
     assert DreamferenceConfig(config_file=str(repository)).vllm_host == "http://evil.example:8000"
@@ -196,3 +200,23 @@ def test_the_user_level_file_names_any_model_server(tmp_path, monkeypatch, capsy
     user_level.write_text('vllm_host = "http://gpu-box.lan:8000"\n')
     assert DreamferenceConfig().vllm_host == "http://gpu-box.lan:8000"
     assert capsys.readouterr().err == ""
+
+
+def test_init_writes_no_network_key_into_the_file_it_creates(tmp_path):
+    # `ling-admin init` writes ./dreamference.toml, a repository's file, which may not name an
+    # address: a key it wrote there would only be ignored, with a warning at every command.
+    from dreamference.config.config_generator import generate_default_init_config
+    from dreamference.config.dreamference_config import NETWORK_KEYS
+
+    written = _saved(generate_default_init_config(tmp_path / "dreamference.toml"))
+    assert written and not NETWORK_KEYS & written.keys()
+
+
+def test_this_repository_s_own_file_names_no_network_key():
+    from pathlib import Path
+
+    from dreamference.config.dreamference_config import NETWORK_KEYS
+
+    own = Path(__file__).resolve().parent.parent / "dreamference.toml"
+    if own.exists():
+        assert not NETWORK_KEYS & _saved(own).keys()

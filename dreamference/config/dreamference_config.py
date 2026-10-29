@@ -5,12 +5,11 @@ This module provides the DreamferenceConfig class which merges CLI parameters, e
 variables, the configuration file (`ConfigPathResolver`) and system defaults into one object.
 """
 
-import ipaddress
 import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple, Final
+from typing import Dict, Any, ClassVar, Optional, Tuple, Final
 
 from dreamference.hardware import MODEL_MATRIX, check_model_compatibility
 from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS, DEFAULT_DIFFUSION_MODEL_ALIAS
@@ -59,8 +58,12 @@ DEFAULT_MIGHTLING_AIRGAPPED: Final[str] = "off"
 MIGHTLING_AIRGAPPED_LEVELS: Final[tuple] = ("off", "on")
 # The model server named for this process; trusted over every file.
 VLLM_HOST_VARIABLE: Final[str] = "DREAMFERENCE_VLLM_HOST"
-# The one host name, besides loopback and any-addresses, that names this machine.
-LOCAL_HOST_NAME: Final[str] = "localhost"
+# The keys that choose a host, port, URL or other network address. A repository's own
+# `dreamference.toml` may set none of them (owner decision 2026-10-29): a clone ships that file and
+# the agent can write it, so it could send every prompt, and whatever the agent reads, to a machine
+# of its choosing. Only the user's own file, the environment and an argument may. A test keeps this
+# set equal to NETWORK_KEYS in ling-rs/src/lib.rs and ling-code-rs/src/config.rs.
+NETWORK_KEYS: Final[frozenset] = frozenset({"vllm_host"})
 # The system prompt new ling sessions start with (`ling prompt`, specs/DREAMFERENCE_MIGHTLING_PROMPT.md):
 # `default` (Codex's own), `high-swe`, or a custom prompt in `$CODEX_HOME/system-prompts/<name>.md`.
 # The Rust launcher reads it too (DREAMFERENCE_MIGHTLING_PROMPT, then `mightling_prompt` in the TOML file)
@@ -100,6 +103,9 @@ class DreamferenceConfig:
     CLI Parameters > Environment Variables > the configuration file (`dreamference.toml`, …) > System Defaults.
     """
 
+    # (file, key) pairs already reported as ignored in this process, so each is said once.
+    _warned: ClassVar[set[tuple[Path, str]]] = set()
+
     def __init__(
         self,
         config_file: Optional[str] = None,
@@ -130,6 +136,11 @@ class DreamferenceConfig:
         """
         self.config_file_path: Path = ConfigPathResolver.resolve_path(config_file)
         self.file_data: Dict[str, Any] = ConfigFileStorageManager.load_config_dict(self.config_file_path)
+        # A repository's network keys, ignored and kept aside so save_config() leaves them as they were.
+        self._repository_network: dict[str, Any] = {}
+        self._repository_file: bool = ConfigPathResolver.is_repository_file(self.config_file_path, config_file)
+        if self._repository_file:
+            self._take_network_keys_from_user_file()
 
         # The values another source supplied (the environment, or the user's own file in place of
         # a repository's host), which save_config() leaves as the file held them.
@@ -141,8 +152,7 @@ class DreamferenceConfig:
         elif VLLM_HOST_VARIABLE in os.environ:
             self.vllm_host = os.environ[VLLM_HOST_VARIABLE]
         else:
-            file_host = self._file_vllm_host(config_file)
-            self.vllm_host = str(file_host if file_host is not None else DEFAULT_VLLM_HOST)
+            self.vllm_host = str(self.file_data.get("vllm_host", DEFAULT_VLLM_HOST))
 
         # 2. Main target LLM model name served on vLLM.
         #
@@ -518,66 +528,35 @@ class DreamferenceConfig:
             return rest[1:].split("#", 1)[0].strip().strip("\"'")
         return None
 
-    def _file_vllm_host(self, config_file: str | None) -> object:
-        """`vllm_host` from the configuration file, a repository's only when it names this machine.
+    def _take_network_keys_from_user_file(self) -> None:
+        """Drop the repository's network keys from `file_data`, saying so, and take the user's own.
 
-        A repository's own `dreamference.toml` may name only a server on this machine, as the `ling`
-        launcher rules (`configured_vllm_host`): a clone could otherwise send every prompt, and
-        whatever the agent reads, to a machine of its choosing. Another host there is reported, and
-        the user's own file decides.
+        The repository's file shadows the user's whole, so without the user's values here a key the
+        repository may not set would fall to its default even when the user named one.
+        """
+        user_data = ConfigFileStorageManager.load_config_dict(ConfigPathResolver.user_path())
+        for key in sorted(NETWORK_KEYS):
+            if key in self.file_data:
+                self._repository_network[key] = self.file_data.pop(key)
+                self._warn_ignored(key)
+            if key in user_data:
+                self.file_data[key] = user_data[key]
+
+    def _warn_ignored(self, key: str) -> None:
+        """Say once per process, file and key that a repository's network key was not used.
 
         Args:
-            config_file (str | None): The explicit path the configuration was loaded from, if any.
-
-        Returns:
-            object: The host, or None when no file names one.
+            key (str): The key the repository's file set.
         """
-        host = self.file_data.get("vllm_host")
-        if host is None or self.host_is_local(str(host)):
-            return host
-        if not ConfigPathResolver.is_repository_file(self.config_file_path, config_file):
-            return host
-        # repr-quoted: the value is the repository's, and could hold terminal escapes.
+        notice = (self.config_file_path.resolve(), key)
+        if notice in DreamferenceConfig._warned:
+            return
+        DreamferenceConfig._warned.add(notice)
+        # The value is left out: it is the repository's, and could hold terminal escapes.
         sys.stderr.write(
-            f"Ignored vllm_host {str(host)!r} in {self.config_file_path}: a repository's file may name only "
-            "a model server on this machine. Name another in ~/.config/dreamference/config.toml or "
-            f"{VLLM_HOST_VARIABLE}.\n"
+            f"Ignored {key} in {self.config_file_path}: a repository's own file may not choose a network "
+            f"address. Set it in ~/.config/dreamference/config.toml or {VLLM_HOST_VARIABLE} instead.\n"
         )
-        user_host = ConfigFileStorageManager.load_config_dict(ConfigPathResolver.user_path()).get("vllm_host")
-        if user_host is not None:
-            self._from_environment["vllm_host"] = str(user_host)
-        return user_host
-
-    @classmethod
-    def host_is_local(cls, host: str) -> bool:
-        """Whether a model server URL names this machine, as the launcher's `host_is_local` decides.
-
-        `localhost`, a loopback address or the any-address, and never a URL with user info
-        (`http://localhost:x@other:8000` connects to `other`).
-
-        Args:
-            host (str): The URL; a bare `host:port` is accepted.
-
-        Returns:
-            bool: True when it names this machine.
-        """
-        text = host.strip()
-        for scheme in ("http://", "https://"):
-            if text[:len(scheme)].lower() == scheme:
-                text = text[len(scheme):]
-                break
-        authority = re.split(r"[/\\?#]", text, maxsplit=1)[0]
-        # User info before the host connects to the host after it.
-        if authority.partition("@")[1]:
-            return False
-        name = authority[1:].split("]", 1)[0] if authority.startswith("[") else authority.split(":", 1)[0]
-        if name.lower() == LOCAL_HOST_NAME:
-            return True
-        try:
-            address = ipaddress.ip_address(name)
-        except ValueError:
-            return False
-        return address.is_loopback or address.is_unspecified
 
     def save_config(self, target_path: Optional[Path] = None) -> Path:
         """
@@ -633,6 +612,17 @@ class DreamferenceConfig:
                 data.pop(key, None)
                 if key in self.file_data:
                     data[key] = self.file_data[key]
+
+        # A repository's file keeps its network keys as they were and is never given one: it may not
+        # choose an address, and one written there would only be ignored.
+        if self._repository_file and out_path == self.config_file_path:
+            for key in sorted(NETWORK_KEYS):
+                value = data.pop(key, None)
+                if key in self._repository_network:
+                    data[key] = self._repository_network[key]
+                elif value is not None and value != self.file_data.get(key):
+                    print(f"⚠️  {key} not saved in {out_path}: a repository's own file may not choose a network "
+                          "address. Set it in ~/.config/dreamference/config.toml.")
 
         return ConfigFileStorageManager.save_config_dict(out_path, data, owned=CONFIG_KEYS | RETIRED_KEYS)
 
