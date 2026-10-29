@@ -6,9 +6,9 @@
 //! `codex-code-mode-host`, the gzipped web commands `ling-search` and `ling-fetch`, the gzipped
 //! code index router `ling-code`, the gzipped local file index `ling-docs` (Linux), and a
 //! `sha256sums` file covering all of them; this downloads
-//! the latest published release's assets, checks the release's signature (from 1.5.0 on, the
-//! release-wide `SHA256SUMS` signed by Mightling's release key, which lists the per-target
-//! checksum file; src/release_signature.rs), verifies every archive against the checksum file, and
+//! the latest published release's assets, checks the release's signature (the release-wide
+//! `SHA256SUMS` signed by Mightling's release key, which lists the per-target checksum file;
+//! src/release_signature.rs), verifies every archive against the checksum file, and
 //! swaps the binaries in next to the running executable. The web commands and `ling-code` are
 //! optional, because earlier releases do not carry them (v1.3.0 has the web commands and no
 //! `ling-code`); the installed ones are then kept.
@@ -479,22 +479,12 @@ pub async fn run() -> anyhow::Result<()> {
     };
 
     let sums_bytes = download(sums_asset.clone()).await?;
-    let signed = signature_expected(
-        latest,
+    require_signature(
         assets.contains_key(release_signature::SUMS_ASSET),
         assets.contains_key(release_signature::SIGNATURE_ASSET),
     )
     .with_context(|| format!("release {tag}"))?;
-    let all_sums = if signed {
-        Some(verify_signed_sums(&assets, &download, tag, &sums_asset, &sums_bytes).await?)
-    } else {
-        println!(
-            "⚠️  release {tag} predates signed releases ({}); it is checked against its \
-             checksums only",
-            release_signature::SIGNED_SINCE
-        );
-        None
-    };
+    let all_sums = verify_signed_sums(&assets, &download, tag, &sums_asset, &sums_bytes).await?;
     let sums = parse_sums(&String::from_utf8(sums_bytes)?);
 
     // The desktop app, downloaded and checked against the signed SHA256SUMS with everything else,
@@ -504,14 +494,13 @@ pub async fn run() -> anyhow::Result<()> {
     let mut staged_app: Option<(PathBuf, PathBuf, AppRecord)> = None;
     if let Some((record_file, record)) = app {
         let asset = desktop_app_asset(assets.keys().copied(), std::env::consts::OS, std::env::consts::ARCH);
-        match (asset, &all_sums) {
-            (None, _) => println!("ℹ️  release {tag} carries no desktop app for this machine; keeping the installed one"),
-            (Some(_), None) => println!("ℹ️  release {tag} is not signed, so its desktop app is not installed"),
-            (Some(_), Some(_)) if app_is_running() => println!(
+        match asset {
+            None => println!("ℹ️  release {tag} carries no desktop app for this machine; keeping the installed one"),
+            Some(_) if app_is_running() => println!(
                 "⚠️  The desktop app is running, so it was not updated: quit Mightling, then run `ling update` again"
             ),
-            (Some(asset), Some(all_sums)) => {
-                let expected = parse_sums(&String::from_utf8_lossy(all_sums))
+            Some(asset) => {
+                let expected = parse_sums(&String::from_utf8_lossy(&all_sums))
                     .remove(&asset)
                     .with_context(|| format!("{} has no checksum for {asset}; nothing was installed", release_signature::SUMS_ASSET))?;
                 let bytes = download(asset.clone()).await?;
@@ -630,28 +619,22 @@ where
     Ok(())
 }
 
-/// Whether a release's signature is checked: always when it carries one. A release of
-/// `SIGNED_SINCE` or later without one is refused, since an unsigned one did not come from
-/// Mightling's release job; only an older release installs on its checksums alone.
-pub fn signature_expected(
-    version: &str,
-    has_sums: bool,
-    has_signature: bool,
-) -> anyhow::Result<bool> {
+/// Refuses a release without `SHA256SUMS` and its signature, whatever its tag. `ling update`
+/// installs only the latest release, and every release since `SIGNED_SINCE` is signed by
+/// Mightling's release job, so an unsigned latest did not come from it: going by the tag would
+/// let whoever can publish a release skip the signature by tagging it below `SIGNED_SINCE`.
+pub fn require_signature(has_sums: bool, has_signature: bool) -> anyhow::Result<()> {
     let missing = match (has_sums, has_signature) {
-        (true, true) => return Ok(true),
+        (true, true) => return Ok(()),
         (false, true) => release_signature::SUMS_ASSET,
         (_, false) => release_signature::SIGNATURE_ASSET,
     };
-    if has_signature || release_signature::signing_required(version) {
-        bail!(
-            "is not signed (it has no {missing}); nothing was installed. Every release from {} on \
-             is signed by Mightling's release key, so an unsigned one did not come from its \
-             release job",
-            release_signature::SIGNED_SINCE
-        );
-    }
-    Ok(false)
+    bail!(
+        "is not signed (it has no {missing}); nothing was installed. `ling update` installs only \
+         the latest release, and every release from {} on is signed by Mightling's release key, \
+         so an unsigned one did not come from its release job",
+        release_signature::SIGNED_SINCE
+    )
 }
 
 /// Downloads a release's `SHA256SUMS`, its signature and any key transition, and checks them with
@@ -944,15 +927,20 @@ mod tests {
     }
 
     #[test]
-    fn an_unsigned_release_from_the_cut_over_on_is_refused() {
-        assert!(signature_expected("1.5.0", true, true).unwrap());
-        assert!(signature_expected("1.4.1", true, true).unwrap());
-        assert!(!signature_expected("1.4.1", false, false).unwrap());
-        for (version, sums, signature) in
-            [("1.5.0", true, false), ("1.6.0", false, false), ("1.4.1", false, true)]
-        {
-            let error = signature_expected(version, sums, signature).unwrap_err();
-            assert!(format!("{error:#}").contains("is not signed"), "{version}");
+    fn an_unsigned_latest_release_is_refused_whatever_its_tag() {
+        // `ling update` only ever installs the latest release, and its tag is whatever the
+        // publisher chose, so no tag lets a release install on its checksums alone: the check
+        // takes no version.
+        require_signature(true, true).unwrap();
+        for (sums, signature, missing) in [
+            (true, false, release_signature::SIGNATURE_ASSET),
+            (false, false, release_signature::SIGNATURE_ASSET),
+            (false, true, release_signature::SUMS_ASSET),
+        ] {
+            let error = format!("{:#}", require_signature(sums, signature).unwrap_err());
+            assert!(error.contains("is not signed"), "{error}");
+            assert!(error.contains(missing), "{error}");
+            assert!(error.contains("nothing was installed"), "{error}");
         }
     }
 

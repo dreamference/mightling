@@ -176,8 +176,10 @@ can write the release. Nothing shipped later can change code that is already ins
 From then on:
 
 - The 1.5.0 `ling` that step installs has the key compiled in. Every later `ling update` verifies
-  the signature, and refuses an unsigned release of 1.5.0 or later with "release vX is not signed
-  … nothing was installed".
+  the signature, and refuses an unsigned release, whatever its tag, with "release vX is not signed
+  … nothing was installed". It only ever installs the latest release, so it has no pre-signing
+  branch at all (a source build, which has no version of its own, would otherwise have installed an
+  unsigned latest tagged v1.4.9; found 2026-10-29).
 - install.sh from 1.5.0 on verifies any release that carries a signature, refuses an unsigned
   release of 1.5.0 or later, and still installs `--version 1.4.x` with a warning that the release
   predates signing.
@@ -185,7 +187,7 @@ From then on:
   release by hand (§6) before running `puffin update`, or afterwards reinstall with 1.5.0's
   install.sh, which verifies.
 
-`SIGNED_SINCE = 1.5.0` is set in both clients. A release with a tag that does not parse as a
+`SIGNED_SINCE = 1.5.0` is set in both clients (in `ling update` only for its messages). A release with a tag that does not parse as a
 version is treated as new, so it must be signed. The latest release must be signed whatever its
 tag: install.sh and install.ps1 take the pre-signing branch only for a release named with
 `--version` / `-Version`, because whoever can mark a release latest without the key could tag it
@@ -208,6 +210,7 @@ because the secret was removed, the release job fails before publishing.
     unknown key, wrong namespace, garbage, transitions accepted and refused, and the cut-over
     version.
   - `update::tests`: signed sums tie the target sums, a swapped target sums file is refused,
-    another key is refused, rotation works, and the missing-signature decision.
+    another key is refused, rotation works, and an unsigned latest release is refused whatever its
+    tag.
 - actionlint was not run: it is not installed here and nothing was installed for this. The
   workflow was checked as YAML and its `run:` blocks with `bash -n`.
