@@ -125,6 +125,17 @@ fn server_file(state: &Path) -> PathBuf {
     state.join("server.json")
 }
 
+/// Removes `server.json` at exit, when this process (`pid`) wrote it.
+fn remove_server_file_if_ours(state: &Path, pid: u32) {
+    let writer = std::fs::read_to_string(server_file(state))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| value.get("pid")?.as_u64());
+    if writer == Some(u64::from(pid)) {
+        let _ = std::fs::remove_file(server_file(state));
+    }
+}
+
 /// The port of the running server, from what it wrote at start; the default otherwise.
 pub fn running_port(state: &Path) -> u16 {
     std::fs::read_to_string(server_file(state))
@@ -420,7 +431,7 @@ async fn serve_command(args: &[String], environment: &Environment) -> i32 {
         }
     };
     let result = server::serve(server, listeners, shutdown).await;
-    let _ = std::fs::remove_file(server_file(&state));
+    remove_server_file_if_ours(&state, std::process::id());
     match result {
         Ok(()) => 0,
         Err(err) => {
@@ -669,6 +680,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_server_leaves_the_server_file_another_server_wrote() {
+        let state = scratch("server-file");
+        std::fs::write(server_file(&state), r#"{"pid": 4242, "port": 8788}"#).unwrap();
+        remove_server_file_if_ours(&state, 4141);
+        assert_eq!(running_port(&state), 8788, "a server that exits leaves the file of the one still running");
+        remove_server_file_if_ours(&state, 4242);
+        assert!(!server_file(&state).exists());
     }
 
     #[test]
