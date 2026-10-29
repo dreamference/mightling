@@ -3235,7 +3235,10 @@ class DreamferenceCLIController:
                 print("✅ ling's app-server daemon started.")
             elif args.codex_command == "stop":
                 print("🛑 Stopping ling's app-server daemon...")
-                subprocess.call([codex_bin, "app-server", "daemon", "stop"])
+                returncode = subprocess.call([codex_bin, "app-server", "daemon", "stop"])
+                if returncode != 0:
+                    print(f"❌ ling's app-server daemon did not stop (exit code {returncode}).")
+                    sys.exit(returncode)
                 print("✅ ling's app-server daemon stopped.")
 
         elif args.command == "logs":

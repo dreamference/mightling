@@ -187,3 +187,21 @@ def test_server_start_exits_with_an_error_when_the_server_stopped_before_it_answ
         DreamferenceCLIController.run_cli(["server", "start", "--no-diffusion"])
     assert exit_info.value.code == 1 and stopped == [True]
     assert "The model server stopped before it answered" in capsys.readouterr().out
+
+
+def test_codex_stop_reports_a_daemon_that_did_not_stop(capsys):
+    # The stop command's exit code was ignored: "stopped" was printed and the command exited 0.
+    import subprocess
+
+    import pytest
+
+    from dreamference.runner import CodexInstaller
+
+    with patch.object(CodexInstaller, "install_if_missing", return_value=True), \
+            patch.object(CodexInstaller, "get_codex_executable", return_value="/opt/ling/bin/ling"), \
+            patch.object(subprocess, "call", return_value=3) as call:
+        with pytest.raises(SystemExit) as exit_info:
+            DreamferenceCLIController.run_cli(["codex", "stop"])
+    call.assert_called_once_with(["/opt/ling/bin/ling", "app-server", "daemon", "stop"])
+    assert exit_info.value.code == 3
+    assert "daemon stopped" not in capsys.readouterr().out
