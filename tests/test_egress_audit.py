@@ -1093,3 +1093,39 @@ def test_a_failed_execve_that_strace_split_is_not_a_program_that_ran():
     )
     assert trace.processes == {} and trace.networked_git == []
     assert EgressAudit.judge(trace, ALLOWED, replied=True).status == TRACE_FAILED
+
+
+TO_RESOLVER = (
+    '5 connect({fd}, {{sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}}, 16) = 0\n'
+)
+
+
+@pytest.mark.parametrize(
+    "fd, reconnect, destinations",
+    [
+        # A UDP socket connected again only looks up a route; the payload then reaches it.
+        ("7<UDP:[1234]>", '{sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("192.0.2.7")}',
+         {"192.0.2.7:443": 1}),
+        ("7", '{sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("192.0.2.7")}',
+         {"192.0.2.7:443": 1}),
+        ("7", '{sa_family=AF_UNIX, sun_path="/run/x.sock"}', {}),
+    ],
+)
+def test_a_socket_connected_away_from_the_resolver_sends_it_no_query(fd, reconnect, destinations):
+    sent = "7<UDP:[127.0.0.1:40000->192.0.2.7:443]>" if "UDP" in fd else "7"
+    trace = StraceParser.parse(
+        TO_RESOLVER.format(fd=fd)
+        + f"5 connect({fd}, {reconnect}, 16) = 0\n"
+        + f'5 sendto({sent}, "{QUERY}", 40, MSG_NOSIGNAL, NULL, 0) = 40\n'
+    )
+    assert trace.dns_servers == {"127.0.0.53:53": 1} and trace.dns_names == {}
+    assert trace.destinations == destinations
+
+
+def test_a_udp_connect_on_a_socket_already_connected_is_a_destination():
+    # Only a socket that is not connected yet (its label an inode) can be a route lookup.
+    trace = StraceParser.parse(
+        '5 connect(7<UDP:[127.0.0.1:40000->192.0.2.8:443]>, {sa_family=AF_INET, sin_port=htons(443), '
+        'sin_addr=inet_addr("192.0.2.7")}, 16) = 0\n'
+    )
+    assert trace.destinations == {"192.0.2.7:443": 1} and trace.route_lookups == {}
