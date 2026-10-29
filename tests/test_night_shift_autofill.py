@@ -98,6 +98,17 @@ def test_candidates_come_from_ci_qa_and_specs_in_that_order(tmp_path: Path) -> N
     assert found[2].key == "qa-windows:12"
 
 
+def test_a_todo_named_in_prose_is_not_an_open_item(tmp_path: Path) -> None:
+    repo = repo_with_specs(
+        tmp_path,
+        "| `autofill` | queues unchecked `- [ ]` / `TODO:` lines in `specs/*.md` as tasks |\n"
+        "- TODO: shorten the retry loop\n",
+    )
+    assert [c.title for c in NightShiftAutofill.spec_candidates(repo)] == [
+        "open item in X.md: shorten the retry loop"
+    ]
+
+
 def test_ci_reads_only_the_repositorys_own_runs_never_a_forks_pull_request() -> None:
     # A fork's branch named `main` lists under `--branch main`; its log and workflow name are the
     # fork author's words, so they must never become a task's prompt.
@@ -142,6 +153,21 @@ def test_the_windows_issue_is_only_the_workflows_own(tmp_path: Path) -> None:
     assert "author:app/github-actions" in query.split()
 
 
+def test_gh_asks_about_the_repository_it_fills(tmp_path: Path, monkeypatch: Any) -> None:
+    # The timer starts `night run` in the home folder, where `gh` finds no repository at all.
+    class Recording(FakeRun):
+        def __call__(self, args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if args[0] == "gh":
+                where.append(kwargs.get("cwd"))
+            return super().__call__(args, **kwargs)
+
+    where: list[Any] = []
+    repo = repo_with_specs(tmp_path, "nothing to do\n")
+    run = Recording(runs=[{"databaseId": 7, "workflowName": "CI", "event": "schedule"}])
+    fill_with(monkeypatch, tmp_path, repo, run, 5, dry_run=True)
+    assert len(where) == 3 and all(folder == repo for folder in where)
+
+
 def test_sensitive_findings_are_skipped(tmp_path: Path) -> None:
     night = tmp_path / "night"
     sensitive = [
@@ -157,6 +183,19 @@ def test_sensitive_findings_are_skipped(tmp_path: Path) -> None:
     )
     chosen, skipped = NightShiftAutofill.pick(night, [*sensitive, fine], 5, TODAY)
     assert chosen == [fine] and len(skipped) == 6
+
+
+def test_a_queued_parametrized_test_is_not_queued_again(tmp_path: Path) -> None:
+    night = tmp_path / "night"
+    (night / "tasks").mkdir(parents=True)
+    key = "ci-test:tests/test_a.py::test_b[x-1]"
+    candidate = AutofillCandidate(key, "ci", "t", "d", None, "a")
+    task = NightShiftAutofill.task_text(candidate)
+    (night / "tasks" / "t1.json").write_text(
+        json.dumps({"id": "t1", "status": "queued", "task": task})
+    )
+    assert NightShiftAutofill.queued_keys(night) == {key}
+    assert NightShiftAutofill.pick(night, [candidate], 5, TODAY) == ([], [])
 
 
 def test_dedupe_against_the_ledger_and_the_queue_and_cooldown_ends(tmp_path: Path) -> None:
