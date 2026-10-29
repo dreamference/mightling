@@ -673,6 +673,26 @@ def test_the_desktop_apps_bundled_ling_is_recognised_as_an_app_server(tmp_path):
             process.wait()
 
 
+def test_a_ling_web_that_is_not_the_installed_ling_keeps_its_marker(tmp_path):
+    # `ling web serve` writes the same marker while a browser tab's turn runs; a copy of the
+    # same name serving the web holds the run back as an app-server does.
+    import shutil
+    other_build = tmp_path / "build" / "ling"
+    other_build.parent.mkdir(parents=True)
+    shutil.copy("/bin/bash", other_build)
+    installed = str(tmp_path / "installed" / "ling")
+    busy = tmp_path / "home" / "night" / "busy"
+    busy.mkdir(parents=True)
+    server = subprocess.Popen([str(other_build), "-c", "sleep 30; true", "web", "serve"])
+    try:
+        (busy / str(server.pid)).write_text('{"threads": ["t1"]}')
+        _wait_for_exe(server, other_build)
+        assert NightShiftHost.busy_app_server_pids(installed, str(tmp_path / "home")) == [server.pid]
+    finally:
+        server.kill()
+        server.wait()
+
+
 def _wait_for_exe(process, path):
     for _ in range(50):  # until it has exec'd the program
         if os.path.realpath(f"/proc/{process.pid}/exe") == str(path):
