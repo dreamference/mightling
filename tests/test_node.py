@@ -2461,6 +2461,21 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
     assert len(list((checkpoint / "blobs").iterdir())) == 2
     assert not list(there.glob(".mightling-sync-*"))
     assert "Serve it there with: ling-admin node set spark-2" in capsys.readouterr().out
+    # A tar here that fails after the node took the stream: the node kept what arrived.
+    import dreamference.node.node_model_sync as node_model_sync
+
+    popen = node_model_sync.subprocess.Popen
+    monkeypatch.setattr(
+        node_model_sync.subprocess,
+        "Popen",
+        lambda argv, **kw: popen(
+            ["sh", "-c", 'tar "$@"; exit 2', *argv] if argv[0] == "tar" else argv, **kw
+        ),
+    )
+    assert NodeModelSync.sync("spark-2", SYNC_KEY) == 1
+    out = capsys.readouterr().out
+    assert "as it was" not in out and "kept what arrived" in out
+    monkeypatch.setattr(node_model_sync.subprocess, "Popen", popen)
     # A model this machine does not have is not sent.
     monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "empty"))
     assert NodeModelSync.sync("spark-2", SYNC_KEY) == 1

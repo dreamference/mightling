@@ -182,8 +182,10 @@ class NodeModelSync:
         code = ssh.wait()
         tar.wait()
         if code != 0 or tar.returncode not in (0, None):
+            # The node checks and merges whatever stream it was sent: with its exit 0 it kept that.
+            kept = " kept what arrived; run the copy again" if code == 0 else "'s cache is as it was"
             print(f"❌ The copy did not complete (node exit {code}, tar exit {tar.returncode}); "
-                  f"{record['name']}'s cache is as it was.")
+                  f"{record['name']}{kept}.")
             return 1
         seconds = max(1.0, time.time() - started)
         print(f"✅ {record['name']} has {model_key} ({size / GIB / seconds * 8:.1f} Gbit/s over {seconds:.0f} s). "
