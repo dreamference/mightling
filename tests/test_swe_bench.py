@@ -5759,3 +5759,41 @@ def test_the_report_counts_patches_that_weaken_an_existing_test_in_every_run(ben
             f"rewritten, a test deleted or skipped): {first['instance_id']}") in SweBenchReport.render(store)
     SweBenchEvaluator.grade(store, bench["settings"])
     assert re.search(r"weakened tests\s+1\s+1", SweBenchReport.against(store, store))
+
+
+def test_every_settings_default_is_the_one_the_spec_names():
+    """§12.2: the `[swe_bench]` defaults when `dreamference.toml` sets none."""
+    settings = SweBenchSettings({})
+    assert (settings.max_parallel, settings.task_timeout_s) == (3, 45 * 60)
+    assert settings.task_memory == "8G"
+    assert (settings.task_cpus, settings.nudges, settings.idle_minutes) == (4, 2, 10)
+    assert (settings.task_context, settings.eval_workers, settings.eval_memory) == (49152, 4, "4G")
+    assert (settings.eval_timeout_s, settings.disk_reserve) == (30 * 60, "100G")
+    assert settings.image_chunk == 25
+    assert (settings.image_cache_lists, settings.image_cache_floor) == ([], "")
+    assert (settings.build_memory, settings.build_cpus, settings.nodes) == ("24g", "0-11", "paired")
+
+
+def test_the_default_prompt_is_the_specs_word_for_word():
+    """§5.4: without the code index or task rules, the preamble and the issue, nothing else."""
+    assert SweBenchInstanceRun.compose_prompt("The widget is broken.") == (
+        "This is an unattended task in the repository at /testbed. Nobody will answer questions:\n"
+        "where something is unclear, make the reasonable choice.\n"
+        "\n"
+        "- Fix the issue below by changing the repository's source files.\n"
+        "- You may run the repository's tests. There is no network.\n"
+        "- Do not commit. Your changes are collected when you stop.\n"
+        "\n"
+        "Issue:\n"
+        "The widget is broken."
+    )
+
+
+def test_the_specs_turn_end_threshold_and_index_wait_figures():
+    """§16 and §5.5: the figures the spec gives for the default model and an index run.
+
+    13 for a 262,144-token window and the 49,152-token task context; an index run is waited for up
+    to 30 minutes, polled every 15 seconds.
+    """
+    assert SweBenchRunner.turn_end_percent("on", 262144, 49152) == 13
+    assert (SweBenchRunner.INDEX_WAIT_S, SweBenchRunner.INDEX_POLL_S) == (30 * 60, 15)
