@@ -187,12 +187,13 @@ pub fn resolve(inputs: &Inputs, browser: &dyn Browser) -> Resolution {
     }
     if let Some(name) = inputs.pinned.as_deref().filter(|name| !name.trim().is_empty()) {
         let found = browser.browse(Some(&named(name)));
-        return match found.iter().find(|advert| matches(advert, name)) {
-            Some(advert) => checked(advert.clone(), false, None),
-            None => Resolution::Refused(format!(
+        return match the_one(&found, name) {
+            Ok(Some(advert)) => checked(advert.clone(), false, None),
+            Ok(None) => Resolution::Refused(format!(
                 "{PIN_ENV}={name}: no such node on this network.{}",
                 listing(&found, None)
             )),
+            Err(message) => Resolution::Refused(format!("{PIN_ENV}={message}")),
         };
     }
     if inputs.is_node {
@@ -332,6 +333,20 @@ pub fn matches(advert: &Advert, name: &str) -> bool {
 
 fn label(node: &Node) -> &str {
     if node.name.is_empty() { &node.address } else { &node.name }
+}
+
+/// The one advert `name` picks out. Several nodes answering to one name, as a second instance
+/// claiming a node's id or name would, are listed with their ids rather than one taken at random.
+fn the_one<'a>(adverts: &'a [Advert], name: &str) -> Result<Option<&'a Advert>, String> {
+    let found: Vec<&Advert> = adverts.iter().filter(|advert| matches(advert, name)).collect();
+    if found.len() < 2 {
+        return Ok(found.first().copied());
+    }
+    let mut text = format!("{name}: {} nodes answer to this name. Name one by its id or its address:", found.len());
+    for advert in found {
+        text.push_str(&format!("\n  {:<16} {:<15} {}", label(&advert.node), advert.node.address, advert.node.node));
+    }
+    Err(text)
 }
 
 /// The nodes as lines, for a message. Empty when there are none.
@@ -655,20 +670,33 @@ async fn served(host: &str) -> Option<crate::ServedModel> {
 /// (`host` or `host:port`), a node at that address with nothing else known about it, so that a
 /// network without multicast still works.
 pub fn pick(adverts: &[Advert], name: &str) -> Result<Node, String> {
-    if let Some(advert) = adverts.iter().find(|advert| matches(advert, name)) {
+    if let Some(advert) = the_one(adverts, name)? {
         return match checked(advert.clone(), true, None) {
             Resolution::Refused(message) => Err(message),
             _ => Ok(advert.node.clone()),
         };
     }
-    let name = name.trim().trim_start_matches("http://").trim_end_matches('/');
-    let (address, port) = match name.rsplit_once(':') {
-        // `host:port`, but not a bare IPv6 address, whose colons are not a port separator.
-        Some((host, port)) if !host.contains(':') => match port.parse::<u16>() {
-            Ok(port) => (host, port),
-            Err(_) => return Err(format!("{name}: not a node name or an address{}", listing(adverts, None))),
-        },
-        _ => (name, locator::DEFAULT_MODEL_PORT),
+    let name = name.trim().trim_end_matches('/');
+    let scheme = name.split_once("://").map(|(scheme, _)| scheme.to_ascii_lowercase());
+    if scheme.as_deref().is_some_and(|scheme| scheme != "http") {
+        return Err(format!("{name}: a node's model port speaks http. Name it by its address: ling node use <address>"));
+    }
+    let name = name.split_once("://").map_or(name, |(_, rest)| rest);
+    let not_an_address = || format!("{name}: not a node name or an address{}", listing(adverts, None));
+    let (address, port) = if let Some(bracketed) = name.strip_prefix('[') {
+        // `[v6]` or `[v6]:port`, as in a URL.
+        let (host, after) = bracketed.split_once(']').ok_or_else(not_an_address)?;
+        match after.strip_prefix(':') {
+            Some(port) => (host, port.parse::<u16>().map_err(|_| not_an_address())?),
+            None if after.is_empty() => (host, locator::DEFAULT_MODEL_PORT),
+            None => return Err(not_an_address()),
+        }
+    } else {
+        match name.rsplit_once(':') {
+            // `host:port`, but not a bare IPv6 address, whose colons are not a port separator.
+            Some((host, port)) if !host.contains(':') => (host, port.parse::<u16>().map_err(|_| not_an_address())?),
+            _ => (name, locator::DEFAULT_MODEL_PORT),
+        }
     };
     let looks_like_address = address.parse::<IpAddr>().is_ok() || address.contains('.');
     if address.is_empty() || !looks_like_address {
@@ -1309,6 +1337,30 @@ mod tests {
         let unknown = pick(&adverts, "spark-9").unwrap_err();
         assert!(unknown.starts_with("No node named spark-9") && unknown.contains("spark-1"), "{unknown}");
         assert!(pick(&[], "10.0.0.7:http").is_err());
+    }
+
+    #[test]
+    fn use_takes_a_bracketed_address_with_a_port_and_any_scheme_case() {
+        assert_eq!(pick(&[], "[fd00::2]:9000").map(|node| node.model_url()), Ok("http://[fd00::2]:9000".to_string()));
+        assert_eq!(pick(&[], "http://[fd00::2]/").map(|node| node.model_url()), Ok("http://[fd00::2]:8000".to_string()));
+        assert_eq!(pick(&[], "HTTP://spark.lan:9000").map(|node| (node.address, node.model_port)), Ok(("spark.lan".to_string(), 9000)));
+        let https = pick(&[], "https://spark.lan:9000").unwrap_err();
+        assert!(https.contains("speaks http"), "{https}");
+        assert!(pick(&[], "[fd00::2]x").is_err());
+    }
+
+    #[test]
+    fn a_name_two_nodes_answer_to_is_refused_rather_than_guessed() {
+        let twin = advert("spark-1", "99999999-cccc", "192.168.50.199");
+        let adverts = [spark1(), twin.clone(), spark2()];
+        let refused = pick(&adverts, "spark-1").unwrap_err();
+        assert!(refused.contains("11111111") && refused.contains("99999999"), "{refused}");
+        assert_eq!(pick(&adverts, "1111"), Ok(spark1().node));
+        let pinned = Inputs { pinned: Some("spark-1".into()), ..Inputs::default() };
+        match resolve(&pinned, &Fixed::new(adverts.to_vec())) {
+            Resolution::Refused(message) => assert!(message.contains("99999999"), "{message}"),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
     }
 
     #[test]
