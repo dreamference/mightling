@@ -19,7 +19,7 @@ import * as userFs from "./userfs";
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, FAILED, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
-import { airgapped, setDefault } from "./airgapped";
+import { airgapped, countsAsOn, setDefault } from "./airgapped";
 import { serve } from "./app-protocol";
 import { auditPreview, type WorkTarget } from "./args";
 import { webUrl } from "./links";
@@ -551,11 +551,11 @@ export async function main(options: MainOptions): Promise<void> {
   });
   ipcMain.on(CHANNEL_CHUNK_ACK, () => {});
 
-  /** Refuses what would reach the network for a thread at `/airgapped on` (push, the forge's page). */
+  /** Refuses what would reach the network for a thread at `/airgapped on` (push, the forge's page), or when `ling airgapped` did not answer. */
   const offline = async (thread: string | null, what: string) => {
     const ling = findLing(resourcesPath());
-    const level = ling ? await airgapped(ling, thread) : { level: "off", source: "" };
-    if (level.level === "on") throw new Error(`airgapped is on (${level.source}): ${what} would reach the network`);
+    const level = ling ? await airgapped(ling, thread) : { level: "off" as const, source: "" };
+    if (countsAsOn(level)) throw new Error(`airgapped is on (${level.source}): ${what} would reach the network`);
   };
   /** Preview tabs (preview.ts): their rules read Settings › Browser and the thread's air-gap level. */
   const previews = new Previews(
@@ -567,7 +567,7 @@ export async function main(options: MainOptions): Promise<void> {
     },
     async (thread) => {
       const ling = findLing(resourcesPath());
-      return ling ? (await airgapped(ling, thread)).level === "on" : false;
+      return ling ? countsAsOn(await airgapped(ling, thread)) : false;
     },
   );
   let editors: Editor[] | null = null;

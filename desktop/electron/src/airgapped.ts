@@ -25,6 +25,15 @@ export function airgapped(ling: string, thread: string | null): Promise<Airgappe
   });
 }
 
+/**
+ * Whether a level refuses what would reach the network (a push, a link, a preview's site): `on`, or a
+ * `ling airgapped` that did not answer, whose "unknown" source is no level at all. Fails closed, as
+ * `airgappedOn` does; the launcher names no source of its own "unknown" (`Source::label`).
+ */
+export function countsAsOn(level: Airgapped): boolean {
+  return level.level === "on" || level.source.startsWith("unknown");
+}
+
 /** One `ling airgapped [--thread <id>]` run in `cwd` (null: this process's folder); null when it did not answer. */
 export type StatusRun = (ling: string, args: string[], cwd: string | null) => Promise<Airgapped | null>;
 

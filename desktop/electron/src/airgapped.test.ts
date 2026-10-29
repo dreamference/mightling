@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { airgapped, airgappedOn, parseStatus, setDefault, type StatusRun } from "./airgapped";
+import { airgapped, airgappedOn, countsAsOn, parseStatus, setDefault, type StatusRun } from "./airgapped";
 import { nodeScript } from "./test-ling";
 
 describe("the air-gap status line", () => {
@@ -12,6 +12,14 @@ describe("the air-gap status line", () => {
     expect(parseStatus("Airgapped: on (this session)\n  off  …\n")).toEqual({ level: "on", source: "this session" });
     expect(parseStatus("Airgapped: off (default)")).toEqual({ level: "off", source: "default" });
     expect(parseStatus("Usage: ling airgapped [default <off|on>]")).toBeNull();
+  });
+});
+
+describe("a level that refuses the network", () => {
+  it("is on, or a launcher that did not answer: what reaches the network fails closed", async () => {
+    expect(countsAsOn({ level: "on", source: "this session" })).toBe(true);
+    expect(countsAsOn({ level: "off", source: "default" })).toBe(false);
+    expect(countsAsOn(await airgapped(path.join(os.tmpdir(), "no-such-ling-here"), null))).toBe(true);
   });
 });
 
