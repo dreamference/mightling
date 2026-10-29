@@ -184,11 +184,15 @@ class ForgeSettings:
 
         Args:
             enabled: The new value.
+
+        Raises:
+            OSError: The config exists but cannot be read; it is left as it is.
         """
         path = cls.config_path()
+        # Only a missing config starts empty: one that cannot be read is never replaced.
         try:
             lines = path.read_text().splitlines()
-        except OSError:
+        except FileNotFoundError:
             lines = []
         value = "true" if enabled else "false"
         out, in_forge, written = [], False, False
