@@ -342,3 +342,22 @@ def test_a_dry_run_names_the_key_it_would_make_and_makes_none(role_fleet, tmp_pa
     assert provision(dry_run=True) == 0
     assert not (tmp_path / "id_ed25519").exists()
     assert "would: make id_ed25519.pub on this machine" in capsys.readouterr().out
+
+
+def test_the_key_is_appended_on_a_line_of_its_own_when_the_file_has_no_final_newline(
+    role_fleet, tmp_path
+):
+    machine = FakeSession.machines["new-node"] = StandIn()
+    assert provision() == 0
+    append = next(c for c in machine.commands if "cat >> ~/.ssh/authorized_keys" in c)
+    (tmp_path / ".ssh").mkdir(exist_ok=True)
+    keys = tmp_path / ".ssh" / "authorized_keys"
+    keys.write_text("ssh-ed25519 AAAAmine owner@laptop")
+    subprocess.run(
+        ["/bin/sh", "-c", append],
+        input=PUBLIC_KEY + "\n",
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        text=True,
+        check=True,
+    )
+    assert keys.read_text().splitlines() == ["ssh-ed25519 AAAAmine owner@laptop", PUBLIC_KEY]

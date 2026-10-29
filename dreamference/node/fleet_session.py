@@ -29,6 +29,14 @@ CONNECT_TIMEOUT: Final[int] = 15
 # on the PATH of a non-interactive SSH command).
 REMOTE_ADMIN: Final[str] = "$HOME/.local/share/dreamference/venv/bin/ling-admin"
 
+# Ends a remote `~/.ssh/authorized_keys` that lacks it with a newline, so that a key appended next
+# gets a line of its own instead of joining the owner's last key (and a later removal of the
+# appended key's line taking the owner's with it).
+AUTHORIZED_KEYS_ENDS_IN_NEWLINE: Final[str] = (
+    '{ [ ! -s ~/.ssh/authorized_keys ] || [ -z "$(tail -c 1 ~/.ssh/authorized_keys)" ] '
+    "|| echo >> ~/.ssh/authorized_keys; }"
+)
+
 
 class FleetSession:
     """One multiplexed SSH login to a machine being provisioned."""
