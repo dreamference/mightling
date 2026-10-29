@@ -16,7 +16,6 @@ def generate_default_init_config(target_path: Path) -> Path:
         Path: The path to the written configuration file.
     """
     default_content = (
-        'vllm_host = "http://localhost:8000"\n'
         'agent_runner = "codex"\n'
     )
     with open(target_path, "w", encoding="utf-8") as f:
