@@ -3,6 +3,8 @@
 import importlib.util
 import json
 import os
+import re
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -51,3 +53,69 @@ def test_the_command_line_runs_it(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(module.sys, "argv", ["context_budget_replay.py", "compactions", run + "/"])
     assert module.main() == 0
     assert "restart after 1: 1 task(s) would have restarted (1 resolved, 0 failed, 0 ungraded)" in capsys.readouterr().out
+
+
+def a_session(tmp_path):
+    """A run with one rollout: a test run, a file read, an index call and a short listing."""
+    calls = [
+        ("exec_command", {"cmd": "cd /testbed && python -m pytest tests/x.py"}, 4000),
+        ("exec_command", {"cmd": "sed -n 1,80p a.py"}, 3000),
+        ("code_show", {"name": "f"}, 1000),
+        ("exec_command", {"cmd": "ls"}, 1000),
+    ]
+    lines = []
+    for number, (name, arguments, size) in enumerate(calls):
+        call = {"type": "function_call", "name": name, "call_id": f"call_{number}", "arguments": json.dumps(arguments)}
+        output = {"type": "function_call_output", "call_id": f"call_{number}", "output": "x" * size}
+        usage = {"last_token_usage": {"input_tokens": 12000 + 3000 * number}}
+        lines.append({"type": "response_item", "payload": call})
+        lines.append({"type": "response_item", "payload": output})
+        lines.append({"type": "event_msg", "payload": {"type": "token_count", "info": usage}})
+    run = tmp_path / "run"
+    rollout = run / "scratch" / "a__1" / "codex-home" / "sessions" / "2026" / "10" / "02" / "rollout-x.jsonl"
+    rollout.parent.mkdir(parents=True)
+    rollout.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    return str(run)
+
+
+def test_kinds_sums_tool_output_per_kind_of_call(tmp_path, capsys):
+    module = load()
+    module.kinds(a_session(tmp_path))
+    out = capsys.readouterr().out
+    assert "4 calls, 9000 chars, 0 compactions" in out
+    assert "shell: tests" in out and "44.4%" in out
+    assert "shell: file reads" in out and "33.3%" in out
+    assert "index: code_show" in out and "shell: search and listing" in out
+
+
+def test_mask_replays_the_default_policy_unless_one_is_given(tmp_path, capsys, monkeypatch):
+    module = load()
+    run = a_session(tmp_path)
+    monkeypatch.setattr(module.sys, "argv", ["context_budget_replay.py", "mask", run])
+    assert module.main() == 0
+    out = capsys.readouterr().out
+    assert "masked 0.85/0.50/16K" in out and "masked 0.82/0.55/8K" in out
+    assert all(f"limit {limit:6d}" in out for limit in module.LIMITS)
+    argv = ["context_budget_replay.py", "mask", "--policy", "0.9,0.4,12000", run]
+    monkeypatch.setattr(module.sys, "argv", argv)
+    assert module.main() == 0
+    out = capsys.readouterr().out
+    assert "masked 0.90/0.40/12K" in out and "+ old commands 0.90/0.40/12K" in out
+    assert "masked 0.85" not in out
+
+
+def test_the_replay_masks_by_the_same_rule_as_the_crate():
+    """The replay's default policy and limits of §4.1 are the masking crate's constants."""
+    module = load()
+    source = (Path(ROOT) / "ling-rs" / "masking" / "src" / "lib.rs").read_text()
+    constants = re.findall(r"pub const (\w+): \w+ = ([\d_]+);", source)
+    number = {name: int(value.replace("_", "")) for name, value in constants}
+    high, low, step = module.POLICIES[0]
+    assert (number["HIGH_PERCENT"], number["LOW_PERCENT"], number["MIN_STEP_TOKENS"]) == (
+        round(high * 100),
+        round(low * 100),
+        step,
+    )
+    assert number["KEEP_RECENT"] == module.KEEP_RECENT
+    assert number["MIN_MASKABLE_CHARS"] == module.MIN_MASKABLE_CHARS
+    assert number["MAX_PLACEHOLDER_CHARS"] == module.PLACEHOLDER_CHARS
