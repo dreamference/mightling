@@ -226,3 +226,13 @@ def test_code_search_does_not_build_the_context_index_during_a_night_run(tmp_pat
     engine.index_file.exists.return_value = True
     engine.search_code.return_value = [{"rel_path": "x.py", "score": 1.0}]
     assert MCPServer().execute_tool("workspace_search_code", {"query": "x"}) == [{"rel_path": "x.py", "score": 1.0}]
+
+
+def test_null_params_and_arguments_are_read_as_empty():
+    # `"arguments": null` (or `"params": null`) reached `.get` on None and came back as -32603.
+    server = MCPServer()
+    reply = server.handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": {"name": "ide_get_open_files", "arguments": None}})
+    assert "open_files" in json.loads(reply["result"]["content"][0]["text"])
+    reply = server.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": None})
+    assert "not implemented" in json.loads(reply["result"]["content"][0]["text"])["error"]
