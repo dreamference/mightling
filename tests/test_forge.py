@@ -1155,3 +1155,29 @@ def test_the_node_list_shows_each_nodes_forge_role(monkeypatch):
     assert lines[0].endswith("; forge record)")
     assert lines[1].endswith("; forge mirror)")
     assert "forge" not in lines[2], "a node without a forge says nothing about one"
+
+
+def test_the_forge_is_published_again_when_the_advertised_addresses_change(monkeypatch, capsys):
+    monkeypatch.setattr(ForgeService, "housekeeping", classmethod(lambda cls: None))
+    monkeypatch.setattr(ForgeService, "host_name", classmethod(lambda cls: "gx10-1a2b"))
+    monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: True))
+    monkeypatch.setattr(ForgeRepositories, "remove_push_mirrors", classmethod(lambda cls: []))
+    monkeypatch.setattr(ForgeService, "record_address", classmethod(lambda cls: None))
+    restarts = []
+    monkeypatch.setattr(
+        ForgeService, "restart", classmethod(lambda cls: restarts.append(1) or True)
+    )
+    addresses = [f"{LAN}.50.10"]
+    monkeypatch.setattr(
+        ForgeBind, "lan_addresses", classmethod(lambda cls, *a, **k: list(addresses))
+    )
+    ForgeSettings.update_state(role="mirror", record_node="n-1")
+    ForgeService.tick()
+    assert restarts == [], "started before the addresses were kept: nothing to compare"
+    argv = ForgeService.run_arguments()
+    assert f"{LAN}.50.10:3200:3000" in argv
+    ForgeService.tick()
+    assert restarts == []
+    addresses[0] = f"{LAN}.1.20"
+    ForgeService.tick()
+    assert restarts == [1] and "addresses changed" in capsys.readouterr().out

@@ -238,7 +238,9 @@ class ForgeService:
         record_address = cls.record_address() if role == ROLE_MIRROR else None
         if role == ROLE_MIRROR:
             ForgeSettings.update_state(record_address_at_start=record_address or "")
-        return ForgeContainer.run_arguments(data, ForgeBind.lan_addresses(), record_address)
+        addresses = ForgeBind.lan_addresses()
+        ForgeSettings.update_state(addresses_at_start=addresses)
+        return ForgeContainer.run_arguments(data, addresses, record_address)
 
     @classmethod
     def run(cls) -> int:
@@ -416,6 +418,14 @@ class ForgeService:
                     print(line)
             except RuntimeError as error:
                 print(f"⚠️  Push mirrors not checked: {error}")
+            # The container is published on the addresses advertised when it started (§2.3).
+            published = ForgeSettings.state().get("addresses_at_start")
+            if published is not None and ForgeBind.lan_addresses() != published:
+                print(
+                    "💡 The node's advertised addresses changed; restarting the forge's container."
+                )
+                cls.restart()
+                return 0
         if role == ROLE_MIRROR:
             address = cls.record_address()
             if address and address != ForgeSettings.state().get("record_address_at_start"):
