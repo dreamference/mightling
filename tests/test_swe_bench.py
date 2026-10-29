@@ -3882,6 +3882,36 @@ def test_the_gate_runs_on_the_oldest_python_the_images_carry():
     )
 
 
+def test_the_gate_annotates_nothing_a_python_before_3_9_cannot_evaluate():
+    """A def's annotations are evaluated when the module loads, unlike a local variable's.
+
+    The syntax check above passes `list[bool]`, but on 3.6-3.8 `def f() -> list[bool]` raises
+    TypeError when the module loads, and the hook then fails open.
+    """
+    import ast
+
+    builtins = {"list", "dict", "tuple", "set", "frozenset", "type"}
+    tree = ast.parse(SweBenchHooks.gate_source().read_text())
+    annotations = [
+        annotation
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for annotation in [node.returns]
+        + [arg.annotation for arg in node.args.args + node.args.kwonlyargs]
+        if annotation is not None
+    ]
+    evaluated = [
+        ast.unparse(annotation)
+        for annotation in annotations
+        if any(
+            (isinstance(part, ast.Subscript) and getattr(part.value, "id", None) in builtins)
+            or (isinstance(part, ast.BinOp) and isinstance(part.op, ast.BitOr))
+            for part in ast.walk(annotation)
+        )
+    ]
+    assert evaluated == []
+
+
 ISSUE = """Calling `separability_matrix()` on nested models gives a wrong result; see
 astropy/modeling/separable.py and astropy.modeling.core, also `CompoundModel` and `Model.evaluate`
 and `render()` and `nothing_here()`.
