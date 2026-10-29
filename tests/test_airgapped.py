@@ -233,7 +233,8 @@ def test_a_config_path_that_is_not_a_file_is_passed_over_without_a_word(
     tmp_path, capsys, monkeypatch
 ):
     # The MCP server asks here and speaks JSON-RPC on stdout, so a warning printed for a directory
-    # would break its stream; a FIFO in that place would block the read for good.
+    # would break its stream; a FIFO in that place would block the read until the timeout (`on`).
+    # The crate reads a directory there as unreadable, so `on` (its `cases.rs`).
     cwd = _two_files(tmp_path, monkeypatch, None, 'mightling_airgapped = "on"\n')
     (cwd / "dreamference.toml").mkdir()
     assert DreamferenceConfig.resolve_airgapped_level(cwd) == "on"

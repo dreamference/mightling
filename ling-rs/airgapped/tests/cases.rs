@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use ling_airgapped::{FileRead, Level, Source, resolve_guarded_read};
+use ling_airgapped::{FileRead, Level, Source, read_file, resolve_guarded_read};
 use serde_json::Value;
 
 const CASES: &str = include_str!("../cases.json");
@@ -81,4 +81,16 @@ fn every_resolve_case_passes() {
             "{name}"
         );
     }
+}
+
+/// A config slot that is a directory is not an absent file: it reads as unreadable, and so as `on`
+/// (the "unreadable" cases above), never as passed over.
+#[test]
+fn a_directory_in_a_config_slot_is_unreadable_not_absent() {
+    let dir = std::env::temp_dir().join(format!("ling-airgapped-slot-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("dreamference.toml")).unwrap();
+    let read = read_file(&dir.join("dreamference.toml"));
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(matches!(read, Some(Err(_))), "{read:?}");
+    assert!(read_file(&dir.join("dreamference.toml")).is_none());
 }
