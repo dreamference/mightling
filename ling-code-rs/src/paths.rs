@@ -263,9 +263,62 @@ fn open_state_file(
     Ok(file)
 }
 
+/// Creates `path` afresh for writing. Whatever is there already (a stale file, or a symlink planted
+/// to make this process write elsewhere) is removed, and the exclusive create neither follows a
+/// symlink nor opens one put back in between.
+pub fn create_fresh(path: &Path) -> std::io::Result<std::fs::File> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+}
+
+/// [`create_fresh`] filled with a copy of `from`.
+pub fn copy_fresh(from: &Path, to: &Path) -> std::io::Result<u64> {
+    std::io::copy(&mut std::fs::File::open(from)?, &mut create_fresh(to)?)
+}
+
+/// The text of `path` when it is a regular file; None when it is missing, unreadable, or a
+/// symlink or anything else, whose target this process must not read.
+pub fn read_regular(path: &Path) -> Option<String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        libc::O_NOFOLLOW | libc::O_NONBLOCK,
+    );
+    let mut file = options.open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut file, &mut text).ok()?;
+    Some(text)
+}
+
 #[cfg(all(test, unix))]
 mod state_file_tests {
     use super::*;
+
+    #[test]
+    fn fresh_files_and_reads_never_go_through_a_planted_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "keep").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert_eq!(read_regular(&link), None);
+        let source = dir.path().join("source");
+        std::fs::write(&source, "copied").unwrap();
+        copy_fresh(&source, &link).unwrap();
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
+        assert_eq!(read_regular(&link).as_deref(), Some("copied"));
+    }
 
     #[test]
     fn a_planted_symlink_is_refused_and_its_target_left_alone() {

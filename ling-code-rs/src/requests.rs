@@ -35,10 +35,15 @@ pub fn path(state_dir: &Path) -> PathBuf {
 /// Appends a request line. Fails where the directory is read-only (the `read-only` sandbox).
 pub fn append(state_dir: &Path, request: Request) -> Result<()> {
     std::fs::create_dir_all(state_dir)?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path(state_dir))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    // Never through a planted symlink, and no blocking on a FIFO.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        libc::O_NOFOLLOW | libc::O_NONBLOCK,
+    );
+    let mut file = options.open(path(state_dir))?;
     writeln!(file, "{}", request.word())?;
     Ok(())
 }
