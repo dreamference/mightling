@@ -39,7 +39,17 @@ impl Server {
                 seen.lock().unwrap().push(line.clone());
                 // A client that stops reading at its size cap makes this write fail; that is the
                 // behaviour under test, not an error.
-                let _ = stream.write_all(&respond(&line));
+                // The stand-in never closes first with data in flight (on Windows that sends a
+                // reset): it half-closes after the write and drains until the client hangs up, on
+                // its own thread so a slow client holds up no other connection, with a bound.
+                let response = respond(&line);
+                std::thread::spawn(move || {
+                    let _ = stream.write_all(&response);
+                    let _ = stream.shutdown(std::net::Shutdown::Write);
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                    let mut sink = [0u8; 4096];
+                    while std::io::Read::read(&mut stream, &mut sink).is_ok_and(|n| n > 0) {}
+                });
             }
         });
         Server { base, requests }
