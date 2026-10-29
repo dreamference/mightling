@@ -46,6 +46,37 @@ export function command(file: string, args: string[], platform: NodeJS.Platform 
   return { file, args, shell: false };
 }
 
+/**
+ * Where a program named without a folder is on PATH, as an absolute path, or null. Node on Windows
+ * looks for such a name in the child's `cwd` before PATH (libuv's `search_path`), and a PATH entry
+ * that is empty or relative is read against that `cwd` on every platform: a repository that ships
+ * its own `git.exe` would be run by opening its review pane. Only absolute PATH entries count here,
+ * and on Windows the name, then `.com` and `.exe` appended, as libuv tries them (execFile cannot
+ * start a `.cmd` without a shell).
+ */
+export function programOnPath(name: string, platform: NodeJS.Platform = process.platform, pathEnv: string = process.env.PATH ?? ""): string | null {
+  const win = windows(platform);
+  const join = win ? path.win32.join : path.posix.join;
+  const absolute = win ? path.win32.isAbsolute : path.posix.isAbsolute;
+  if (absolute(name)) return name;
+  const names = win ? [...(path.win32.extname(name) ? [name] : []), `${name}.com`, `${name}.exe`] : [name];
+  for (const dir of pathEnv.split(win ? ";" : ":")) {
+    const folder = win ? dir.trim().replace(/^"(.*)"$/, "$1") : dir;
+    // A drive-relative `C:bin` is not absolute either.
+    if (!folder || !absolute(folder) || (win && /^[A-Za-z]:(?![\\/])/.test(folder))) continue;
+    for (const candidate of names.map((entry) => join(folder, entry))) {
+      try {
+        if (!fs.statSync(candidate).isFile()) continue;
+        if (!win) fs.accessSync(candidate, fs.constants.X_OK);
+        return candidate;
+      } catch {
+        // Not here.
+      }
+    }
+  }
+  return null;
+}
+
 /** The shell a project's task runs in, and how it is handed a script: the user's login shell, or cmd.exe on Windows. */
 export function taskShell(script: string, platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): { file: string; args: string[] } {
   if (windows(platform)) return { file: env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", script] };

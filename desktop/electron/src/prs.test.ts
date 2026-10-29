@@ -5,7 +5,8 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { branchName, ghEnv, handle, prNumber, review, type Gate, type Message } from "./prs";
+import { branchName, ghEnv, handle, list, prNumber, review, type Gate, type Message } from "./prs";
+import { nodeScript } from "./test-ling";
 
 describe("the pull-request tab's gh", () => {
   it("runs without prompts, pager or update check", () => {
@@ -137,5 +138,28 @@ else if (args[1] === "create") console.log("https://github.example/acme/fetcher/
     }
     process.env.MIGHTLING_GH = path.join(dir, "no-such-gh");
     expect(await status(dir)).toContain("not installed");
+  });
+});
+
+// A hostile repository opened in Work: a `gh` at its top level is not the GitHub CLI, whatever PATH says.
+describe("a gh a repository ships", () => {
+  it.skipIf(process.platform === "win32")("never runs", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ling-gh-root-"));
+    const marker = path.join(os.tmpdir(), `ran-${path.basename(root)}`);
+    nodeScript(root, "gh", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n`);
+    const saved = { PATH: process.env.PATH, MIGHTLING_GH: process.env.MIGHTLING_GH };
+    delete process.env.MIGHTLING_GH;
+    process.env.PATH = [".", "", saved.PATH].join(path.delimiter);
+    try {
+      await list(root, "open").catch(() => undefined);
+      expect(fs.existsSync(marker)).toBe(false);
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(marker, { force: true });
+    }
   });
 });

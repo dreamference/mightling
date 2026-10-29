@@ -10,6 +10,7 @@ import { execFile, execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { programOnPath } from "./platform";
 import * as userFs from "./userfs";
 
 /** The most a diff or log may weigh: the pane is for reading, and this machine's memory is shared with a model. */
@@ -99,10 +100,23 @@ export function driverOverridesFrom(listing: string): string[] {
   return [...out].sort();
 }
 
+/**
+ * The git to run, by its absolute place on PATH (`programOnPath`), never by its bare name: given a
+ * bare name and the repository as `cwd`, Node on Windows would first run a `git.exe` the repository
+ * ships. null when PATH has none.
+ */
+export function gitProgram(): string | null {
+  return programOnPath("git");
+}
+
+const NO_GIT = "git is not installed: install it, or put it on PATH";
+
 /** What the checkout's own config names as driver programs, as `-c` pairs; none when git cannot say. */
 export function driverOverrides(cwd: string): Promise<string[]> {
   return new Promise((resolve) => {
-    execFile("git", ["-C", cwd, "config", "--list", "--null", "--show-scope"], { env: gitEnv(), timeout: 10_000, maxBuffer: MAX_OUTPUT, encoding: "utf8" }, (error, stdout) => {
+    const program = gitProgram();
+    if (!program) return resolve([]);
+    execFile(program, ["-C", cwd, "config", "--list", "--null", "--show-scope"], { env: gitEnv(), timeout: 10_000, maxBuffer: MAX_OUTPUT, encoding: "utf8" }, (error, stdout) => {
       resolve(error ? [] : driverOverridesFrom(stdout));
     });
   });
@@ -179,7 +193,9 @@ export function git(cwd: string, args: string[], input?: string, timeoutMs = 60_
   const missing = gitToolsMissing();
   if (missing) return Promise.reject(new GitError(missing));
   return driverOverrides(cwd).then((drivers) => new Promise<string>((resolve, reject) => {
-    const child = execFile("git", hardenedArgs(args, drivers), { cwd, env: { ...gitEnv(), ...extraEnv }, maxBuffer: MAX_OUTPUT, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) => {
+    const program = gitProgram();
+    if (!program) return reject(new GitError(NO_GIT));
+    const child = execFile(program, hardenedArgs(args, drivers), { cwd, env: { ...gitEnv(), ...extraEnv }, maxBuffer: MAX_OUTPUT, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) => {
       if (error) {
         const tooBig = (error as { code?: string }).code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
         reject(new GitError(tooBig ? "the output is too large to show here" : String(stderr || error.message).trim()));
@@ -347,7 +363,9 @@ function diffNoIndex(root: string, file: string): Promise<string> {
   return new Promise((resolve) => {
     if (gitToolsMissing()) return resolve("");
     void driverOverrides(root).then((drivers) => {
-      execFile("git", hardenedArgs(["diff", ...DIFF_FLAGS, "--no-index", "--", "/dev/null", file], drivers), { cwd: root, env: gitEnv(), maxBuffer: MAX_OUTPUT, encoding: "utf8" },
+      const program = gitProgram();
+      if (!program) return resolve("");
+      execFile(program, hardenedArgs(["diff", ...DIFF_FLAGS, "--no-index", "--", "/dev/null", file], drivers), { cwd: root, env: gitEnv(), maxBuffer: MAX_OUTPUT, encoding: "utf8" },
         (_error, stdout) => resolve(stdout));
     });
   });

@@ -7,8 +7,11 @@
 import { execFile } from "node:child_process";
 
 import { MAX_OUTPUT } from "./git";
+import { programOnPath } from "./platform";
 
 export class PrError extends Error {}
+
+const NO_GH = "the GitHub CLI (gh) is not installed: install it and sign in with `gh auth login`";
 
 /** `gh`'s environment: no prompt, no pager, no colour, no update notice (that one reaches the network on its own). */
 export function ghEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -17,10 +20,13 @@ export function ghEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv 
 
 function gh(root: string, args: string[], timeoutMs = 60_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(process.env.MIGHTLING_GH ?? "gh", args, { cwd: root, env: ghEnv(), maxBuffer: MAX_OUTPUT, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) => {
+    // By its place on PATH, never its bare name: Node on Windows would first run a `gh.exe` the repository ships.
+    const program = programOnPath(process.env.MIGHTLING_GH ?? "gh");
+    if (!program) return reject(new PrError(NO_GH));
+    execFile(program, args, { cwd: root, env: ghEnv(), maxBuffer: MAX_OUTPUT, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) => {
       if (!error) return resolve(stdout);
       const code = (error as { code?: string | number }).code;
-      if (code === "ENOENT") return reject(new PrError("the GitHub CLI (gh) is not installed: install it and sign in with `gh auth login`"));
+      if (code === "ENOENT") return reject(new PrError(NO_GH));
       reject(new PrError((stderr || error.message).trim().split("\n").slice(-3).join(" ")));
     });
   });

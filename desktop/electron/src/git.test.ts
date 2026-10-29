@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { findEditors, execProgram, openCommand, runsWhenOpened, systemDataDirs } from "./editors";
 import * as git from "./git";
+import { programOnPath } from "./platform";
 import { nodeScript } from "./test-ling";
 
 const scratchHome = fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-home-"));
@@ -446,6 +447,66 @@ describe("git given input it does not read", () => {
       process.off("uncaughtException", record);
       process.env.PATH = savedPath;
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// A hostile repository opened in Work: git and gh run with its top level as `cwd`, and Node on
+// Windows looks for a bare program name there before PATH (an empty or relative PATH entry does the
+// same anywhere). They run by their absolute place on PATH, so a `git` the repository ships never runs.
+describe("git a repository ships", () => {
+  it("is found only in PATH's absolute folders", () => {
+    const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-path-")));
+    try {
+      const runner = path.join(dir, process.platform === "win32" ? "git.exe" : "git");
+      fs.writeFileSync(runner, "");
+      fs.chmodSync(runner, 0o755);
+      expect(programOnPath("git", process.platform, dir)).toBe(runner);
+      const relative = path.relative(process.cwd(), dir);
+      for (const entries of ["", ".", relative, ["", relative].join(path.delimiter)]) expect(programOnPath("git", process.platform, entries)).toBeNull();
+      if (process.platform !== "win32") {
+        fs.chmodSync(runner, 0o644);
+        expect(programOnPath("git", process.platform, dir)).toBeNull();
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("takes `.com` before `.exe` on Windows, and no drive-relative folder", () => {
+    expect(programOnPath("git", "win32", "C:git;bin;;.")).toBeNull();
+    expect(programOnPath("C:\\Git\\cmd\\git.exe", "win32", "")).toBe("C:\\Git\\cmd\\git.exe");
+  });
+
+  it.runIf(process.platform === "win32")("leaves a `git.exe` at the repository's top unrun", async () => {
+    const root = repo();
+    try {
+      // Not a program: started, it would fail the status below.
+      fs.writeFileSync(path.join(root, "git.exe"), "not a program");
+      expect((await git.status(root)).files.length).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("leaves a `git` at the repository's top unrun, whatever PATH says", async () => {
+    const root = repo();
+    const marker = path.join(scratchHome, `ran-${path.basename(root)}`);
+    nodeScript(root, "git", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n`);
+    const savedPath = process.env.PATH;
+    const hostile = [".", "", savedPath].join(path.delimiter);
+    try {
+      // The class itself: a bare name with this PATH runs the repository's own `git`.
+      execFileSync("git", ["status"], { cwd: root, env: { ...process.env, PATH: hostile } });
+      expect(fs.existsSync(marker)).toBe(true);
+      fs.rmSync(marker);
+      process.env.PATH = hostile;
+      await git.status(root);
+      await git.diff(root, "unstaged");
+      expect(fs.existsSync(marker)).toBe(false);
+    } finally {
+      process.env.PATH = savedPath;
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });

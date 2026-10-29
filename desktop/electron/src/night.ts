@@ -7,7 +7,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { command } from "./platform";
-import { driverOverrides, gitEnv, hardenedArgs } from "./git";
+import { driverOverrides, gitEnv, gitProgram, hardenedArgs } from "./git";
 import fs from "node:fs";
 import path from "node:path";
 import * as userFs from "./userfs";
@@ -259,7 +259,9 @@ export function transcriptOf(log: string): { text: string; session: string | nul
 function branchDiff(repo: string, base: string, branch: string): Promise<string | null> {
   return new Promise((resolve) => {
     void driverOverrides(repo).then((drivers) => {
-      execFile("git", hardenedArgs(["diff", "--no-color", `${base}..${branch}`], drivers), { cwd: repo, timeout: 15_000, maxBuffer: DETAIL_LIMIT * 2, env: gitEnv() }, (error, stdout) => {
+      const program = gitProgram();
+      if (!program) return resolve(null);
+      execFile(program, hardenedArgs(["diff", "--no-color", `${base}..${branch}`], drivers), { cwd: repo, timeout: 15_000, maxBuffer: DETAIL_LIMIT * 2, env: gitEnv() }, (error, stdout) => {
         resolve(error ? null : stdout.length > DETAIL_LIMIT ? `${stdout.slice(0, DETAIL_LIMIT)}\n[cut]` : stdout);
       });
     });
