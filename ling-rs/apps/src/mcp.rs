@@ -513,6 +513,29 @@ mod tests {
     }
 
     #[test]
+    fn each_app_has_its_own_tools() {
+        let names = |app: App| -> Vec<String> {
+            tools(app).iter().map(|tool| tool["name"].as_str().unwrap_or_default().to_string()).collect()
+        };
+        assert_eq!(names(App::Gmail), ["gmail_search", "gmail_read"]);
+        assert_eq!(names(App::Drive), ["drive_search", "drive_read"]);
+        assert_eq!(names(App::Calendar), ["calendar_events", "calendar_search"]);
+    }
+
+    #[test]
+    fn a_call_missing_its_required_argument_asks_nothing() {
+        let stub = Stub::new(200, json!({}));
+        assert!(text(&call(App::Gmail, &stub, "gmail_read", &json!({}))).contains("id is required"));
+        assert!(text(&call(App::Drive, &stub, "drive_read", &json!({}))).contains("id is required"));
+        let search = call(App::Calendar, &stub, "calendar_search", &json!({"from": "2026-10-04T00:00:00Z"}));
+        assert_eq!(search["isError"], true);
+        assert!(text(&search).contains("query is required"));
+        assert!(stub.asked.borrow().is_empty());
+        call(App::Calendar, &stub, "calendar_events", &json!({"limit": 99}));
+        assert_eq!(stub.asked.borrow()[0], "/calendar/events?limit=50");
+    }
+
+    #[test]
     fn an_empty_answer_says_so() {
         let stub = Stub::new(200, json!({"files": []}));
         let result = call(App::Drive, &stub, "drive_search", &json!({"query": "nothing"}));
