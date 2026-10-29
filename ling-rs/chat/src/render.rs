@@ -21,7 +21,8 @@ pub fn escape(text: &str) -> String {
 
 /// The info string of a fence line (```` ```rust ````), when the line is one.
 fn fence(line: &str) -> Option<&str> {
-    line.trim_start().strip_prefix("```").map(str::trim)
+    // A backtick in the info string makes it inline code (```ls```), not a fence.
+    line.trim_start().strip_prefix("```").map(|rest| rest.trim_start_matches('`')).filter(|info| !info.contains('`')).map(str::trim)
 }
 
 /// Markdown to the messenger HTML subset.
@@ -199,6 +200,13 @@ mod tests {
         assert_eq!(to_html("```\"><b\nx\n```"), "<pre>x</pre>");
         // An unclosed block is closed.
         assert_eq!(to_html("```\n**not bold**"), "<pre>**not bold**</pre>");
+    }
+
+    #[test]
+    fn backticks_around_code_on_one_line_are_not_a_fence() {
+        // The model writes ```ls -la``` inline: nothing after it may vanish into a block.
+        let html = to_html("```ls -la``` lists it\n**more**");
+        assert!(!html.contains("<pre>") && html.contains("ls -la") && html.ends_with("<b>more</b>"), "{html}");
     }
 
     #[test]

@@ -144,7 +144,8 @@ pub fn render(markdown: &str) -> Styled {
 }
 
 fn fence_of(line: &str) -> Option<&'static str> {
-    if line.starts_with("```") {
+    // A backtick in what follows the opening backticks makes it inline code (```ls```), not a fence.
+    if line.starts_with("```") && !line.trim_start_matches('`').contains('`') {
         Some("```")
     } else if line.starts_with("~~~") {
         Some("~~~")
@@ -517,6 +518,15 @@ mod tests {
         let s = render("```\ncode\nmore");
         assert_eq!(s.text, "code\nmore");
         assert_eq!(s.style_arguments(), vec!["0:9:MONOSPACE"]);
+    }
+
+    #[test]
+    fn backticks_around_code_on_one_line_are_not_a_fence() {
+        // The model writes ```ls -la``` inline: nothing after it may vanish into a block.
+        let s = render("```ls -la``` lists it\n**more**");
+        assert!(s.text.contains("ls -la"), "{:?}", s.text);
+        assert!(s.text.ends_with("\nmore"), "{:?}", s.text);
+        assert!(s.styles.iter().any(|st| st.kind == StyleKind::Bold && covered(&s, st) == "more"), "{:?}", s.styles);
     }
 
     #[test]
