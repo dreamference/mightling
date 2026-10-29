@@ -30,9 +30,6 @@ DEFAULT_ATTENTION_BACKEND: Final[str] = "auto"
 # the model — fp8 halves KV but is not accepted by every attention backend — so the config layer
 # stays silent unless the operator says otherwise.
 DEFAULT_KV_CACHE_DTYPE: Final[Optional[str]] = None
-DEFAULT_ENABLE_AUTO_TOOL_CHOICE: Final[bool] = True
-DEFAULT_TOOL_CALL_PARSER: Final[str] = "hermes"
-DEFAULT_MAX_NUM_BATCHED_TOKENS: Final[int] = 8192
 
 DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "xgrammar"
 # The engine `server start` serves the model with: None is the model's own default (SGLang for the
