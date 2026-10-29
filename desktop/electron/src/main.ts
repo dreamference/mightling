@@ -149,8 +149,10 @@ export async function main(options: MainOptions): Promise<void> {
       recentQuestions.observe(message.payload);
       terminals.observe(message.payload);
       const routed = hub.incoming(message.payload);
-      for (const target of windows()) {
-        if (routed.to === "all" || String(target.webContents.id) === routed.to) send(target, { channel: "work://message", payload: routed.payload });
+      for (const delivery of [routed, ...(routed.also ?? [])]) {
+        for (const target of windows()) {
+          if (delivery.to === "all" || String(target.webContents.id) === delivery.to) send(target, { channel: "work://message", payload: delivery.payload });
+        }
       }
       return;
     }
