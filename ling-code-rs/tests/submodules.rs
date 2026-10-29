@@ -989,3 +989,47 @@ fn a_gitmodules_path_that_climbs_out_of_the_repository_is_never_examined() {
         );
     }
 }
+
+/// A choice is recorded under a path; a submodule whose name happens to be another's path is not
+/// chosen with it.
+#[test]
+fn a_choice_for_one_path_never_reaches_a_submodule_named_like_it() {
+    let f = fixture();
+    let root = f.repo.root.clone();
+    let first = library(f.dir.path(), "first", "[email]", &[("a.py", "x = 1\n")], 1);
+    let second = library(f.dir.path(), "second", "[email]", &[("b.py", "y = 1\n")], 1);
+    for (name, source, path) in [("a", &first, "lib"), ("lib", &second, "other")] {
+        git(
+            &root,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                "--name",
+                name,
+                &source.to_string_lossy(),
+                path,
+            ],
+        );
+    }
+    git(&root, &["commit", "-qm", "two"]);
+    let all = submodules::evaluate_with(&f.repo, 5000, &[("lib".to_string(), Choice::Include)]);
+    let by_path = |path: &str| all.iter().find(|s| s.path == path).unwrap();
+    assert_eq!(by_path("lib").reason, Reason::IncludedByYou);
+    assert_eq!(
+        (by_path("other").indexed, by_path("other").reason.clone()),
+        (false, Reason::ThirdParty)
+    );
+
+    // Choosing for `other` keeps the choice recorded for `lib`.
+    f.run(&["submodules", "include", "lib"]);
+    f.run(&["submodules", "exclude", "other"]);
+    let (_, out) = f.run(&["submodules"]);
+    assert!(
+        out.contains("lib  indexed (included by you)")
+            && out.contains("other  not indexed (excluded by you)"),
+        "{out}"
+    );
+}
