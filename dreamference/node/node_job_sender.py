@@ -18,12 +18,15 @@ import subprocess
 import tarfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Final, List, Optional
 
 from dreamference.node.node_identity import NodeIdentity
 from dreamference.node.node_job import DEFAULT_MEMORY, DEFAULT_TIME, JOB_ID
 from dreamference.node.node_pairing import NodePairing
 from dreamference.runner.safe_git import SafeGit
+
+# ssh's exit when the connection, not the command, failed.
+SSH_LOST: Final[int] = 255
 
 
 class NodeJobSender:
@@ -198,14 +201,15 @@ class NodeJobSender:
         cls._remember(request["id"], record, repo, request["repo"])
         payload = base64.urlsafe_b64encode(json.dumps(request).encode()).decode()
         code = NodePairing.run(record, f"job-submit {payload}", capture=False).returncode
-        if code == 255:
+        if code == SSH_LOST:
             # The stream was lost, not the job: it carries on there.
             print(f"⚠️  The connection to {record['name']} ended; the job carries on there. "
                   f"`ling-admin node logs {request['id']}` shows it, `node fetch` brings it back.")
             return code
         cls._fetch_branch(request["id"], quiet_when_absent=True)
-        if out:
-            cls._fetch_out(request["id"], quiet_when_absent=True)
+        if out and cls._fetch_out(request["id"], quiet_when_absent=True) is None:
+            # The node keeps the job until a fetch brings everything back.
+            return code or 1
         # A refused job has no record there, so the node ignores this; a job that exited 2 has one.
         NodePairing.run(record, f"job-fetched {request['id']}")
         return code
@@ -303,10 +307,13 @@ class NodeJobSender:
             job_id: The job's id.
 
         Returns:
-            int: 0 when anything came back.
+            int: 0 when anything came back, 1 when nothing did or the `--out` files broke off.
         """
         branch = cls._fetch_branch(job_id, quiet_when_absent=False)
         files = cls._fetch_out(job_id, quiet_when_absent=True)
+        if files is None:
+            # The node keeps the job until a fetch brings everything back.
+            return 1
         sent = cls._sent(job_id)
         record = NodePairing.find(sent["node"], browse=False) if sent else None
         if record is not None and (branch or files):
@@ -349,8 +356,13 @@ class NodeJobSender:
         return True
 
     @classmethod
-    def _fetch_out(cls, job_id: str, quiet_when_absent: bool) -> bool:
-        """Copies the files a job kept under `--out` to `received_dir`, from the node's tar stream."""
+    def _fetch_out(cls, job_id: str, quiet_when_absent: bool) -> bool | None:
+        """Copies the files a job kept under `--out` to `received_dir`, from the node's tar stream.
+
+        Returns:
+            bool | None: True when files came back, False when the job kept none, None when the
+            stream broke off (the reason printed).
+        """
         sent = cls._sent(job_id)
         record = NodePairing.find(sent["node"], browse=False) if sent else None
         if record is None:
@@ -361,25 +373,29 @@ class NodeJobSender:
                                        stderr=subprocess.DEVNULL)
         except (OSError, LookupError):
             return False
-        count = 0
+        count, error, opened = 0, None, False
         try:
             with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
+                opened = True
                 target.mkdir(parents=True, exist_ok=True)
                 for member in archive:
                     # The node is paired, not trusted with this machine's files: nothing may land
                     # outside the job's folder, and no link may point out of it.
                     archive.extract(member, target, filter="data")
                     count += member.isfile()
-        except (tarfile.TarError, OSError):
-            pass
+        except (tarfile.TarError, OSError) as failure:
+            error = failure
         # A stream the reader stopped in would otherwise leave the node writing to a full pipe.
         if process.stdout is not None:
             process.stdout.close()
         process.wait()
-        if process.returncode != 0 or not count:
-            if not quiet_when_absent:
-                print(f"No --out files for {job_id}.")
-            return False
+        # The node answers 1 with nothing when the job kept no files; ssh's 255 is a lost connection.
+        broken = error is not None and (opened or process.returncode == SSH_LOST)
+        if broken or process.returncode != 0 or not count:
+            if broken or not quiet_when_absent:
+                print(f"⚠️  The --out files of {job_id} broke off after {count} file(s): {error}. "
+                      f"`ling-admin node fetch {job_id}` tries again." if broken else f"No --out files for {job_id}.")
+            return None if broken else False
         print(f"📥 {count} --out file(s) of {job_id} are in {target}")
         return True
 

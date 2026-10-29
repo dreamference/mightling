@@ -1839,6 +1839,39 @@ def test_an_unreadable_out_stream_does_not_leave_the_fetch_waiting_forever(
     assert results == [False]
 
 
+def test_an_out_stream_that_breaks_off_is_reported_and_the_node_keeps_the_job(
+    tmp_path, monkeypatch, capsys
+):
+    import io
+    import tarfile
+
+    from dreamference.node import NodeJobSender, NodePairing
+
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    NodeJobSender._remember("20261002-1200-abc", paired_record(), str(tmp_path), "calc-0123456789")
+    whole = io.BytesIO()
+    with tarfile.open(fileobj=whole, mode="w") as archive:
+        for name in ("a.bin", "b.bin"):
+            info = tarfile.TarInfo(name)
+            info.size = 4096
+            archive.addfile(info, io.BytesIO(b"x" * 4096))
+    stream = tmp_path / "stream.tar"
+    # The connection ends in the middle of the second file.
+    stream.write_bytes(whole.getvalue()[: 512 + 4096 + 512 + 1000])
+    monkeypatch.setattr(
+        NodePairing, "ssh_command", classmethod(lambda cls, record, request: ["cat", str(stream)])
+    )
+    requests = []
+    monkeypatch.setattr(NodePairing, "run", classmethod(
+        lambda cls, record, request, capture=True, input_text=None:
+        requests.append(request) or subprocess.CompletedProcess([], 0, "", "")))
+    monkeypatch.setattr(NodeJobSender, "_fetch_branch", classmethod(lambda cls, jid, **kw: True))
+    assert NodeJobSender.fetch("20261002-1200-abc") == 1
+    assert "broke off after 1 file(s)" in capsys.readouterr().out
+    # Told the job was fetched, the node would prune the files that never arrived.
+    assert not any(request.startswith("job-fetched") for request in requests)
+
+
 def test_only_paths_the_node_allows_are_bound_and_only_read_only(job_node, tmp_path, monkeypatch):
     from dreamference.node import NodeJob
 
