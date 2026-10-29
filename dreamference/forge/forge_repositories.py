@@ -464,20 +464,7 @@ class ForgeRepositories:
             if fetched.returncode != 0:
                 print(f"❌ Could not read {bundle.name}: {fetched.stderr.strip()[-300:]}")
                 return False
-        token = ForgeAccounts.admin_token() or ""
-        pushed = cls.git(
-            work,
-            [
-                *cls.forge_credential_arguments(),
-                "push",
-                "--quiet",
-                cls.forge_url(full_name),
-                *BRANCHES_AND_TAGS,
-            ],
-            cls.git_environment(token),
-        )
-        if pushed.returncode != 0:
-            print(f"❌ Could not push the archive into the forge: {pushed.stderr.strip()[-400:]}")
+        if not cls.push_private(work, full_name):
             return False
         cls.set_settings(full_name, scope=SCOPE_OFF, github=None)
         status, _ = ForgeContainer.api(
@@ -493,4 +480,36 @@ class ForgeRepositories:
             )
             return False
         print(f"✅ {len(bundles)} bundles are in {full_name} (private, archived, never mirrored).")
+        return True
+
+    @classmethod
+    def push_private(cls, work: Path, full_name: str) -> bool:
+        """Make a repository private, then push a work clone's branches and tags into it.
+
+        Args:
+            work: The bare work clone.
+            full_name: `owner/name`; it may have existed, and been public.
+
+        Returns:
+            bool: Whether it is private and holds every branch and tag.
+        """
+        token = ForgeAccounts.admin_token() or ""
+        status, _ = ForgeContainer.api("PATCH", f"/repos/{full_name}", token, {"private": True})
+        if status != HTTPStatus.OK:
+            print(f"❌ Forgejo did not make {full_name} private ({status}); nothing was pushed.")
+            return False
+        pushed = cls.git(
+            work,
+            [
+                *cls.forge_credential_arguments(),
+                "push",
+                "--quiet",
+                cls.forge_url(full_name),
+                *BRANCHES_AND_TAGS,
+            ],
+            cls.git_environment(token),
+        )
+        if pushed.returncode != 0:
+            print(f"❌ Could not push the archive into the forge: {pushed.stderr.strip()[-400:]}")
+            return False
         return True

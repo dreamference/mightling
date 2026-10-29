@@ -300,3 +300,24 @@ def test_a_private_repository_never_reaches_github(throwaway_forge, tmp_path, mo
     assert ForgeGithubMirror.run() == 2
     time.sleep(0.1)
     assert heads(stand_ins["mightling"]) == before
+
+
+def test_an_archive_is_private_before_its_history_is_pushed(tmp_path, monkeypatch):
+    # The repository may already exist and be public: the pre-rewrite history must not land there.
+    calls = []
+    monkeypatch.setattr(ForgeRepositories, "create", classmethod(lambda cls, *a, **k: True))
+    monkeypatch.setattr(ForgeAccounts, "admin_token", classmethod(lambda cls: "t"))
+
+    def git(cls, work, arguments, environment=None, timeout=0):
+        calls.append("push" if "push" in arguments else "fetch")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    def api(cls, method, path, token, body=None, timeout=30):
+        calls.append(f"{method} {sorted(body or {})}")
+        return 200, {}
+
+    monkeypatch.setattr(ForgeRepositories, "git", classmethod(git))
+    monkeypatch.setattr(ForgeRepositories, "set_settings", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(ForgeContainer, "api", classmethod(api))
+    assert ForgeRepositories.import_bundles([tmp_path / "old.bundle"], "owner/archive-pre-rewrite")
+    assert "PATCH ['private']" in calls[: calls.index("push")], calls
