@@ -1,6 +1,6 @@
 # Renaming Mightling to Ragon
 
-**Status:** Proposed (2026-10-28). The owner decided the rename on 2026-10-28 and answered most questions the same day (§0). Spec only: nothing is renamed yet. The rename is built now as a script on a branch (§9) and runs once 1.x is complete (target 2026-11-18). It ships as **1.9.0**, and 2.0 starts as Ragon.
+**Status:** Proposed (2026-10-28). The owner decided the rename on 2026-10-28 and answered most questions the same day (§0). Spec only: nothing is renamed yet. The rename is built now as a script on a branch (§9) and runs the day after 1.8.1 ships (decided 2026-10-29; 1.8.1 targets 2026-11-02, so about 2026-11-03; earlier plan: 2026-11-18). It ships as **1.9.0**, and 2.0 starts as Ragon.
 
 "Mightling by Dreamference" becomes **Ragon by Dreamference**. Dreamference stays the company: the `dreamference` Python package, the `DREAMFERENCE_` prefix of environment variables, `dreamference.toml`, `~/.config/dreamference/` and the `dreamference` GitHub organisation keep their names.
 
@@ -17,7 +17,7 @@ Two things are new this time. The rename covers three client operating systems, 
 
 | # | Decision |
 |---|---|
-| 1 | The rename ships as **1.9.0**, a release that does only the rename and the migration, after 1.x is complete (target 2026-11-18). 2.0 starts as Ragon. |
+| 1 | The rename ships as **1.9.0**, a release that does only the rename and the migration, the day after 1.8.1 ships, if 1.8.1 needs no hotfix in its first day (decided 2026-10-29; about 2026-11-03; it was 2026-11-18 before). 2.0 starts as Ragon. |
 | 2 | **Clean break plus a one-time migration**, as in the Puffin rename. There are no command aliases: `ling`, `ling-admin` and the other old commands disappear. |
 | 3 | **Both repositories are renamed**, relying on GitHub's redirects: `dreamference/mightling` → `dreamference/ragon` and `dreamference/ling-engine` → `dreamference/ragon-engine`. The `ling-serve` image becomes `ragon-serve`. |
 | 4 | The website moves to **`ragon.dreamference.ai`**, with a permanent redirect from `mightling.dreamference.ai`. |
@@ -318,7 +318,7 @@ The script's own checks are in §9.2. Before 1.9.0 is published, these must pass
 
 ## 8. Branches started before the rename
 
-The script is the rename itself, and it is re-runnable (decision 20). Branches still open on 2026-11-18, in this repository and in the engine repository, are either merged into `main` before the run, or brought across afterwards. The procedure of the Puffin spec's §8 carries over:
+The script is the rename itself, and it is re-runnable (decision 20). Branches still open on the freeze day, in this repository and in the engine repository, are either merged into `main` before the run, or brought across afterwards. The procedure of the Puffin spec's §8 carries over:
 
 ```bash
 git checkout <branch>
@@ -365,7 +365,7 @@ New `mightling_*` keys or `MIGHTLING_*` / `LING_*` variables that a branch adds 
 
 ### 9.3 Rehearsals
 
-The script runs weekly on a fresh `main` until 2026-11-18, in a worktree, with all of §9.2. A rehearsal failing is a rule to fix, not a reason to wait. The repository-rename rehearsal of §7 runs once, early.
+The script runs on every push to `main` in CI (the rehearsal workflow, excluded from release gating) and by hand on a fresh `main` in a worktree until the cut, about 2026-11-03, with all of §9.2. A rehearsal failing is a rule to fix, not a reason to wait. The repository-rename rehearsal of §7 runs once, early.
 
 ### 9.4 What the script cannot do
 
@@ -420,8 +420,8 @@ The last rename is the yardstick. It was decided on 2026-10-07, built and merged
 
 | Phase | When | What | Estimate |
 |---|---|---|---|
-| 0. Script and migration | now → 2026-11-18, on `rename/ragon-script` | the script and its rule tables (§9.1); the migration in `rename.rs` and `legacy_name_migration.py` with the Windows and macOS arms; the migration and mDNS tests (§9.2); the repository-rename rehearsal (§7); weekly rehearsals | **5 days** of work |
-| 1. Freeze | the day 1.x is complete (target 2026-11-18) | merge or park open branches in both repositories (§8); no merges to `main` while the script runs | 0.5 day |
+| 0. Script and migration | now → about 2026-11-03, on `rename/ragon-script` | the script and its rule tables (§9.1); the migration in `rename.rs` and `legacy_name_migration.py` with the Windows and macOS arms; the migration and mDNS tests (§9.2); the repository-rename rehearsal (§7); weekly rehearsals | **5 days** of work |
+| 1. Freeze | the day after 1.8.1 ships (about 2026-11-03) | merge or park open branches in both repositories (§8); no merges to `main` while the script runs | 0.5 day |
 | 2. Rename in code | day 1 | run the script on a fresh `main` in both repositories; read the ambiguous-line report; all of §9.2 and §7; client builds for Linux, macOS, Windows in CI | 1 day |
 | 3. Repositories and release | day 2 | rename both repositories (GitHub redirects); descriptions, topics, organisation README, release titles; publish `ragon-serve`; tag 1.9.0 with the three asset sets under the kept namespace | 0.5 day |
 | 4. Website, docs, paper | day 2–3, alongside phase 5 | `ragon.dreamference.ai` record and Cloudflare redirect from the old host; the Mightling-is-now-Ragon line and the tagline under the puffin; the docs site; `paper/ragon.tex` with "formerly Mightling", PDFs rebuilt | 1 day |
@@ -429,7 +429,7 @@ The last rename is the yardstick. It was decided on 2026-10-07, built and merged
 | 6. Desktop identity on real hardware | day 3–4 | a Windows test machine and a Mac: the automatic app switch, data moved, old app and shortcuts gone, pins, notifications, TCC prompts; the Linux `.deb` | 1 day |
 | 7. Aftercare | days 4–6 | fixes found in use (the last rename needed two), 1.9.1 if needed | 2 days (reserve) |
 
-**Total: about 12 days of work.** 5 of them fall before the freeze (building the script). 7 fall after it, and they take about 6 calendar days, because phases 4 and 6 run beside phase 5. 1.9.0 is published on day 2 after the freeze (about 2026-11-20). All machines are on Ragon by day 3, and the rename is settled by about day 6 (around 2026-11-24), all assuming 1.x completes on 2026-11-18. The first benchmark night after the rename runs with a system prompt that says Ragon. The pinned-series rule treats that as a new configuration, so a night that compares against an earlier one says so.
+**Total: about 12 days of work.** 5 of them fall before the freeze (building the script). 7 fall after it, and they take about 6 calendar days, because phases 4 and 6 run beside phase 5. 1.9.0 is published on the freeze day or day 2 after it (about 2026-11-03, the freeze day itself, when the runbook of `specs/DREAMFERENCE_RELEASE_1.9.0.md` holds). All machines are on Ragon by day 3, and the rename is settled by about day 6 (around 2026-11-09), all assuming 1.8.1 ships on 2026-11-02 and needs no hotfix. The first benchmark night after the rename runs with a system prompt that says Ragon. The pinned-series rule treats that as a new configuration, so a night that compares against an earlier one says so.
 
 ## 12. Open questions
 

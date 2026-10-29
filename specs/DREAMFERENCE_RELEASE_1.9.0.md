@@ -8,7 +8,7 @@ This file keeps its path and its old-name wording through the rename script on p
 
 ---
 
-{{TBD cut day: delete this line after the §7 checks passed and the 1.8.1 release is out.}}
+{{TBD cut day: delete this line (nothing replaces it) after runbook steps 1 to 9 passed and 1.8.1 has been out for a day without a hotfix; the facts that release it do not exist before then.}}
 
 ## Mightling is now Ragon
 
@@ -73,9 +73,44 @@ Signed release and adapter namespaces, the GPU and build lock files in your home
 
 ---
 
-## Cut-day checklist
+## Cut-day runbook
 
-The order is in `docs/dev/ragon-release/owner-checklist.md` and in the release report. In short: run the
-rename script on a fresh `main`, pass the §7 checks, rename the repositories, publish `ragon-serve` to GHCR,
-tag 1.9.0 (three asset sets: `ragon-*`, `ling-*`, `puffin-*`, one signed `SHA256SUMS`), then the website,
-DNS and the docs site, then the machines by day.
+**When.** Ragon 1.9.0 is cut the day after 1.8.1 ships (1.8.1 targets 2026-11-02, so the cut is about
+2026-11-03), if 1.8.1 needed no hotfix in its first day. A 1.8.1 hotfix moves the cut by a day each time.
+The rename script and its checks are rehearsed on every push to `main` by the CI workflow
+`ragon-rename-rehearsal.yml`, which never gates a release, so the cut is a replay of a rehearsal.
+Total: about 7 hours of work on the day, steps 1 to 9; step 10 runs beside the later steps and the
+machines take the rest of the day.
+
+Commands run from the checkout of `main`, in a worktree of its own, with the rename script and its overlay
+taken from `rename/ragon-script` and this branch's notes and test from `rename/ragon-release`. "Agent" is
+a background engineering agent; "Owner" needs the owner's account or hand.
+
+| # | Step | Command | Who | Time |
+|---|---|---|---|---|
+| 0 | Go/no-go: 1.8.1 out a day, no hotfix, CI green on `main`, the last rehearsal green | `gh run list --branch main -L 3`; `gh run list --workflow ragon-rename-rehearsal.yml -L 3` | Owner decides | 10 min |
+| 1 | Freeze `main`: merge or park open branches in both repositories; no merges until step 9 | `git fetch && git status` in a fresh worktree of `origin/main` | Owner (branches), Agent | 20 min |
+| 2 | Run the script on `main` (and, in the engine checkout, `--repo engine`) | `python scripts/rename_ragon.py --root . --report rename-report.txt` | Agent | 5 min |
+| 3 | Leftover check: 0 hits outside the exempt files; read the report's ambiguous lines | `python scripts/rename_ragon.py --root . --check` | Agent | 10 min |
+| 4 | Suite and builds: the Python suite, `cargo test --locked` per crate, `npm test`, `codex build` | `python scripts/rename_ragon.py --root . --verify` (runs the leftover check, pytest, ruff, the three crates, `npm test`, `codex build`, the audit) | Agent | 60 to 90 min |
+| 5 | Egress audit on the built `ragon` (loopback only, no DNS query leaving) | `ragon-admin audit egress` (step 4 runs it; run by hand after any rebuild) | Agent | 10 min |
+| 6 | Migration on a throwaway HOME: a 1.8.x tree migrated by the renamed launcher and by `ragon-admin`; a second run changes nothing | `python -m pytest tests/test_legacy_name_migration.py tests/test_release_transition.py -q`; `cargo test --release -p ragon-launcher` in the build export, not in `codex/` | Agent | 15 min |
+| 7 | Mixed-version mDNS: a 1.8.x client binary against a 1.9 node, each in a network namespace with its own Avahi daemon, both directions, and two 1.9 peers see each other once | the node-locator tests of the renamed tree (`cargo test` in `ragon-rs/node-locator`) plus the namespace test of §9.2 item 5 | Agent | 15 min |
+| 8 | Real `ling update` from 1.8.x against a throwaway repository, renamed, with a signed test release: the redirect is followed and `SHA256SUMS` verifies under `mightling-release` (§7) | the throwaway-repository procedure of §7 | Owner (creates and renames the repository), Agent | 45 min |
+| 9 | Commit the rename as dgxcoder, delete `{{TBD`, set version 1.9.0, check the notes print: `python scripts/release_notes.py 1.9.0` | `git commit`; `python scripts/release_notes.py 1.9.0` | Agent | 10 min |
+| 10 | Push to `main` (docs.yml deploys Pages on push: do step 13 first if the custom domain must already answer) | `git push origin main` | Owner | 5 min |
+| 11 | Rename the repositories (`mightling` to `ragon`, `ling-engine` to `ragon-engine`; update the submodule URL the same day); descriptions, topics, social preview, organisation README; the release-signing environment still bound | GitHub settings | Owner | 20 min |
+| 12 | Publish `ragon-serve` to GHCR at the pinned digest and pin it in the registry before the tag (keep `ling-serve` until 2.0) | `scripts/pin_ling_serve_image.py` in its renamed form, after the image build script | Owner (registry login), Agent | 40 min |
+| 13 | Website and docs: the `ragon` DNS record, Pages custom domain `ragon.dreamference.ai` with HTTPS, a 301 rule from `mightling.dreamference.ai`; the snippet, README story, logos, `website/CNAME`; check `/docs/` builds | Cloudflare, GitHub Pages; the prepared text is on `rename/ragon-assets` | Owner (DNS), Agent | 45 min |
+| 14 | Dry run of the release build on the renamed `main` | `gh workflow run release-dry-run.yml --ref main` | Agent | 40 min |
+| 15 | Tag 1.9.0: dispatch the release workflow with version `1.9.0` (the older-assets step runs only for exactly `1.9.0`). Title "Ragon 1.9.0" | `gh workflow run release.yml -f version=1.9.0` | Owner | 45 min |
+| 16 | Check the three asset sets: `ragon-*`, `ling-*` and the five `puffin-*` names (Linux), one signed `SHA256SUMS`, Windows, macOS and `.deb` under Ragon names | `gh release view v1.9.0 --json assets` | Agent | 10 min |
+| 17 | Smoke: `install.sh` from the new release URL on a clean box; `ling update` from a 1.8.x box lands on Ragon and prints the notice once; Windows, macOS and `.deb` updates | the clean box, then each machine | Agent, Owner (Windows, Mac) | 60 min |
+| 18 | The owner's machines, by day, no Night Shift that evening: the main node, then the second and third (`ling update`, then `ragon-admin`, one sudo line); pairing, forge, messengers, engine container, code index; the release dry-run timer unit moves with the unit migration, confirm | per node | Owner (sudo), Agent | 90 min |
+| 19 | Aftercare: Telegram bot names, Claude Code plugin reinstall, the paper PDF, delete the rehearsal workflow; 1.9.1 publishes only `ragon-*` | | Owner, Agent | days 2 to 4 |
+
+Steps 2 to 9 are one unbroken stretch on a frozen `main`; if one fails, fix the rule on
+`rename/ragon-script`, reset the worktree and run it again from step 2: nothing is pushed before step 10.
+Do not start step 10 with a failed step behind it. Step 15 cannot be undone, so steps 14 and 16 are there.
+Ragon-day order in short: freeze, script, checks, push, rename repositories, image, website, dry run, tag,
+smoke, machines.

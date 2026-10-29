@@ -537,3 +537,51 @@ def test_the_renamed_build_workflow_no_longer_adds_puffin_assets(tmp_path, monke
     text = target.read_text(encoding="utf-8")
     assert "dist/puffin" not in text and "puffin-$target" not in text
     assert "release.yml adds the older asset names" in text
+
+
+def _runbook_rows():
+    text = (REPO / "specs" / "DREAMFERENCE_RELEASE_1.9.0.md").read_text(encoding="utf-8")
+    section = text.split("## Cut-day runbook", 1)[1]
+    rows = [line for line in section.splitlines() if line.startswith("| ") and line[2].isdigit()]
+    return [[cell.strip() for cell in row.strip("|").split("|")] for row in rows]
+
+
+def test_the_cut_runbook_numbers_every_step_with_who_and_time():
+    rows = _runbook_rows()
+    assert [int(row[0]) for row in rows] == list(range(len(rows)))
+    for row in rows:
+        assert len(row) == 5, row
+        assert any(who in row[3] for who in ("Owner", "Agent")), row
+        assert "min" in row[4] or "day" in row[4], row
+
+
+def test_the_cut_runbook_keeps_the_irreversible_steps_in_order():
+    steps = [row[1] for row in _runbook_rows()]
+
+    def at(word):
+        return next(i for i, step in enumerate(steps) if word in step)
+
+    order = [
+        at("Freeze"),
+        at("Run the script"),
+        at("Leftover check"),
+        at("Suite and builds"),
+        at("Egress audit"),
+        at("Migration on a throwaway HOME"),
+        at("Mixed-version mDNS"),
+        at("Push to `main`"),
+        at("Rename the repositories"),
+        at("Dry run"),
+        at("Tag 1.9.0"),
+    ]
+    assert order == sorted(order)
+    # Nothing is pushed or tagged by an agent: those steps name the owner.
+    rows = _runbook_rows()
+    for word in ("Push to `main`", "Rename the repositories", "Tag 1.9.0"):
+        assert "Owner" in next(row for row in rows if word in row[1])[3]
+
+
+def test_the_release_notes_stay_held_back_by_exactly_one_placeholder_line():
+    text = (REPO / "specs" / "DREAMFERENCE_RELEASE_1.9.0.md").read_text(encoding="utf-8")
+    between_rules = text.split("\n---\n")[1]
+    assert between_rules.count("{{TBD") == 1
