@@ -5,6 +5,7 @@ This module provides the ModelMatrixRegistry class which acts as the single sour
 for supported LLMs, speculative decoding draft models, and short alias resolution.
 """
 
+import copy
 from typing import Any, Dict, Optional, Final
 from dreamference.hardware.model_spec import ModelSpec
 
@@ -890,14 +891,14 @@ class ModelMatrixRegistry:
         if not spec:
             return {}
         if not engine or engine.lower() == cls.engine_of(spec.launch_overrides):
-            return dict(spec.launch_overrides)
+            return copy.deepcopy(dict(spec.launch_overrides))
         recipe = spec.engine_recipes.get(engine.lower())
         if recipe is None:
             raise ValueError(
                 f"{model_key} has no recipe for the engine '{engine}'; its engines: "
                 f"{', '.join(cls.engines(model_key))}."
             )
-        return dict(recipe)
+        return copy.deepcopy(dict(recipe))
 
     @classmethod
     def engine_of(cls, recipe: dict[str, Any]) -> str:

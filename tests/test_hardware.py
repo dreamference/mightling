@@ -660,3 +660,16 @@ def test_a_cache_path_docker_cannot_mount_is_refused_by_name(tmp_path, monkeypat
     monkeypatch.setenv("HF_HOME", str(tmp_path / "a:b"))
     with pytest.raises(ValueError, match="cannot be mounted"):
         ModelDownloader.container_volume_args()
+
+
+def test_a_recipe_s_nested_values_are_isolated_per_call():
+    import copy
+
+    from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS, ModelMatrixRegistry
+
+    for engine in [None, *MODEL_MATRIX[DEFAULT_MODEL_ALIAS].engine_recipes]:
+        first = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, engine)
+        original = copy.deepcopy(first)
+        first["extra_args"].append("--mutated")
+        first["speculative_config"]["mutated"] = True
+        assert ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, engine) == original
