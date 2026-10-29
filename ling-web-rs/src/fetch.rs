@@ -7,7 +7,6 @@ use encoding_rs::Encoding;
 use regex::bytes::Regex;
 use serde::Serialize;
 
-use crate::agent;
 use crate::html_text::html_to_text;
 use crate::share_links::{self, Walked};
 use crate::take_chars;
@@ -92,27 +91,21 @@ pub fn request_error(error: ureq::Error) -> String {
 pub fn fetch(url: &str, max_chars: i64) -> Result<FetchedPage, String> {
     require_http_url(url)?;
     let proxy = crate::proxy_for(url, |name| std::env::var(name).ok());
-    let response = if share_links::is_share_link(url) {
-        match share_links::walk(
-            &crate::agent_with_redirects(proxy, 0),
-            url,
-            share_links::classify,
-        )? {
-            Walked::Target {
-                final_url,
-                status,
-                target,
-            } => {
-                return Ok(share_links::page(url, final_url, status, &target));
-            }
-            Walked::Response(response) => response,
-        }
+    // Redirects are followed by the walk, which refuses a `Location` ureq would panic on.
+    let classify: fn(&str) -> Option<share_links::Target> = if share_links::is_share_link(url) {
+        share_links::classify
     } else {
-        agent(proxy)
-            .get(url)
-            .set("Accept-Language", "en")
-            .call()
-            .map_err(request_error)?
+        |_: &str| None
+    };
+    let response = match share_links::walk(&crate::agent_with_redirects(proxy, 0), url, classify)? {
+        Walked::Target {
+            final_url,
+            status,
+            target,
+        } => {
+            return Ok(share_links::page(url, final_url, status, &target));
+        }
+        Walked::Response(response) => response,
     };
     let final_url = response.get_url().to_string();
     let status = response.status();
@@ -154,20 +147,14 @@ pub fn download_pdf(
 ) -> Result<Downloaded, String> {
     require_http_url(url)?;
     let proxy = crate::proxy_for(url, |name| std::env::var(name).ok());
-    let response = match agent(proxy)
-        .get(url)
-        .set("Accept", "application/pdf,*/*;q=0.8")
-        .call()
-    {
-        Ok(response) => response,
-        Err(ureq::Error::Status(status, response)) => {
-            return Err(format!(
-                "request failed: HTTP {status} {} for url: {}",
-                response.status_text(),
-                response.get_url()
-            ));
-        }
-        Err(error) => return Err(format!("request failed: {error}")),
+    let response = match share_links::walk_with(
+        &crate::agent_with_redirects(proxy, 0),
+        url,
+        &[("Accept", "application/pdf,*/*;q=0.8")],
+        |_| None,
+    )? {
+        Walked::Response(response) => response,
+        Walked::Target { .. } => unreachable!("nothing is classified as a target"),
     };
     let final_url = response.get_url().to_string();
     let status = response.status();

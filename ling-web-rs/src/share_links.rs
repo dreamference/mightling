@@ -197,8 +197,14 @@ pub fn classify(url: &str) -> Option<Target> {
 /// (`//host/…`), host-relative (`/…`) or relative to the base's directory.
 pub fn resolve_location(base: &str, location: &str) -> String {
     let location = location.trim();
-    let lower = location.to_ascii_lowercase();
-    if lower.starts_with("http://") || lower.starts_with("https://") {
+    // Any scheme makes it absolute (`file:///etc`, `mailto:`), so the walk sees what it names.
+    let has_scheme = location.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+    });
+    if has_scheme {
         return location.to_string();
     }
     let (scheme, rest) = base.split_once("://").unwrap_or(("http", base));
@@ -225,13 +231,25 @@ pub fn walk(
     start: &str,
     classify: impl Fn(&str) -> Option<Target>,
 ) -> Result<Walked, String> {
+    walk_with(agent, start, &[("Accept-Language", "en")], classify)
+}
+
+/// [`walk`], sending `headers` with every request. A `Location` that is not an http or https URL
+/// with a host is refused before it is requested: ureq's own redirects panic on one without a host.
+pub fn walk_with(
+    agent: &ureq::Agent,
+    start: &str,
+    headers: &[(&str, &str)],
+    classify: impl Fn(&str) -> Option<Target>,
+) -> Result<Walked, String> {
     let mut current = start.to_string();
     for _ in 0..=MAX_HOPS {
-        let response = agent
-            .get(&current)
-            .set("Accept-Language", "en")
-            .call()
-            .map_err(crate::fetch::request_error)?;
+        let request = headers
+            .iter()
+            .fold(agent.get(&current), |request, (name, value)| {
+                request.set(name, value)
+            });
+        let response = request.call().map_err(crate::fetch::request_error)?;
         let status = response.status();
         let location = response
             .header("Location")
@@ -246,6 +264,11 @@ pub fn walk(
                 status,
                 target,
             });
+        }
+        if let Err(error) = crate::fetch::require_http_url(&next) {
+            return Err(format!(
+                "request failed: redirect to {next} refused: {error}"
+            ));
         }
         current = next;
     }
@@ -397,6 +420,11 @@ mod tests {
             resolve_location(base, "/next?y=2"),
             "https://share.google/next?y=2"
         );
+        assert_eq!(
+            resolve_location(base, "file:///etc/passwd"),
+            "file:///etc/passwd"
+        );
+        assert_eq!(resolve_location(base, "mailto:a@b"), "mailto:a@b");
         assert_eq!(
             resolve_location(base, "other"),
             "https://share.google/dir/other"
