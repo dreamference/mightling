@@ -357,3 +357,15 @@ def test_concurrent_loads_of_different_adapters_keep_to_the_limit(tmp_path):
     assert asyncio.run(both()) == [None, None]
     # Each load made room against a count the other had not joined yet, and both stayed.
     assert len(held) <= 1 and len(adapters.loaded) <= 1
+
+
+def test_an_unload_the_engine_refuses_makes_the_gate_ask_again(tmp_path):
+    from dreamference.vllm_server.model_gate_adapters import ModelGateAdapters
+
+    adapters = ModelGateAdapters(str(tmp_path), ("127.0.0.1", 1))
+    _fake_engine(adapters, unload_status=500)
+    listing = _listing("a", "b")
+    asyncio.run(adapters.ensure_loaded("a", listing))
+    asyncio.run(adapters.ensure_loaded("b", listing))
+    # The gate forgot "a" while the engine still holds it; only a fresh look at the engine knows.
+    assert adapters.synced is False
