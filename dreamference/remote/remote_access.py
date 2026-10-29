@@ -1265,17 +1265,21 @@ class RemoteAccess:
             status = 1
         RemoteTunnel.remove()
         if purge:
-            RemoteControlPlane.stop()
+            left = [] if RemoteControlPlane.stop() else ["the control plane's container"]
             RemoteControlPlane.remove_proxy()
             RemotePublicCertificate.remove_timer()
-            if (record or {}).get("node_peer"):
-                RemoteNodePeer.leave(yes)
+            if (record or {}).get("node_peer") and not RemoteNodePeer.leave(yes):
+                left.append("the node's own peer on the overlay")
             import shutil
 
             shutil.rmtree(RemoteSettings.folder(), ignore_errors=True)
             cls._advertise(None)
-            print("✅ Remote access removed, CA and enrolments included.")
-        else:
+            if left:
+                print(f"❌ Not removed: {', '.join(left)}.")
+                status = 1
+            elif status == 0:
+                print("✅ Remote access removed, CA and enrolments included.")
+        elif status == 0:
             print(
                 "✅ The box and the tunnel are removed. The control plane, the CA and the enrolments are kept: "
                 "`ling-admin remote setup <name>` on a new box under the same name brings everyone back."

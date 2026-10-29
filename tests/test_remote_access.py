@@ -2070,6 +2070,22 @@ def test_remove_fails_when_the_box_cannot_be_cleaned_but_still_removes_the_tunne
     assert RemoteAccess.remove(yes=True) == 1 and calls == ["tunnel"]
 
 
+@pytest.mark.parametrize("failing", ["stop", "leave"])
+def test_a_purge_whose_control_plane_or_overlay_stays_is_not_reported_removed(
+    monkeypatch, capsys, failing
+):
+    _set_up()
+    monkeypatch.setattr(RemoteAccess, "_advertise", classmethod(lambda cls, name: None))
+    monkeypatch.setattr(RemoteBox, "remove", classmethod(lambda cls, d, ssh_to=None: True))
+    monkeypatch.setattr(RemoteTunnel, "remove", classmethod(lambda cls: None))
+    monkeypatch.setattr(RemoteControlPlane, "stop", classmethod(lambda cls: failing != "stop"))
+    monkeypatch.setattr(RemoteNodePeer, "leave", classmethod(lambda cls, yes: failing != "leave"))
+    monkeypatch.setattr(RemoteControlPlane, "remove_proxy", classmethod(lambda cls: None))
+    monkeypatch.setattr(RemotePublicCertificate, "remove_timer", classmethod(lambda cls: None))
+    assert RemoteAccess.remove(purge=True, yes=True) == 1
+    assert "✅" not in capsys.readouterr().out
+
+
 def test_a_summary_names_the_tunnel_only_when_set_up(monkeypatch):
     assert RemoteAccess.summary() == {"set_up": False}
     _set_up()
