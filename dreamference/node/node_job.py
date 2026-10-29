@@ -327,8 +327,11 @@ class NodeJob:
         """
         from dreamference.config import DreamferenceConfig
 
+        # The stricter of this instance's file and the launcher's two, as the sender's level.
         try:
-            return DreamferenceConfig().mightling_airgapped
+            return cls.stricter(
+                DreamferenceConfig().mightling_airgapped, DreamferenceConfig.resolve_airgapped_level()
+            )
         except Exception:
             return "on"
 
