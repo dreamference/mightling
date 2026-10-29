@@ -274,9 +274,18 @@ pub fn run_cli(args: &[String]) -> i32 {
     }
     let failed = matches!(request, Request::Usage(_));
     for line in run(&dir, request, &cwd) {
-        println!("{line}");
+        println!("{}", printable(&line));
     }
     i32::from(failed) * 2
+}
+
+/// `line` without control characters but tab and newline. The report and a task's record carry
+/// what the agent and the judge wrote, and an ESC printed to the terminal starts a sequence that can
+/// set the clipboard (OSC 52), hide text or retitle the window.
+fn printable(line: &str) -> String {
+    line.chars()
+        .filter(|c| !c.is_control() || matches!(c, '\t' | '\n'))
+        .collect()
 }
 
 /// Why a task cannot be queued on this machine, if it cannot: the runner is `ling-admin night
@@ -788,6 +797,12 @@ fn write_atomically(path: &Path, contents: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_printed_line_keeps_no_terminal_escape() {
+        let line = "done\u{1b}]52;c;aGk=\u{7} \u{1b}[8mhidden\u{9b}2J\r\tend";
+        assert_eq!(printable(line), "done]52;c;aGk= [8mhidden2J\tend");
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("mightling-night-{name}-{}", std::process::id()));
