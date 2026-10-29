@@ -56,5 +56,16 @@ class NodeIdentity:
         node_id = str(uuid.uuid4())
         staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         staging.write_text(node_id + "\n")
-        os.replace(staging, path)
+        try:
+            # A link fails where a file is already: two first uses at once keep the first id.
+            os.link(staging, path)
+        except FileExistsError:
+            existing = cls.read()
+            if existing:
+                staging.unlink()
+                return existing
+            # What is there is not an id.
+            os.replace(staging, path)
+            return node_id
+        staging.unlink()
         return node_id

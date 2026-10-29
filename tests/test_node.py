@@ -149,6 +149,28 @@ def test_the_node_id_is_written_once_and_kept():
     assert NodeIdentity.path().read_text() == first + "\n"
     NodeIdentity.path().write_text("not an id\n")
     assert NodeIdentity.read() is None
+    # A file that is not an id is replaced by one.
+    assert NodeIdentity.read() is None and str(uuid.UUID(NodeIdentity.ensure())) == NodeIdentity.read()
+
+
+def test_two_first_uses_at_once_agree_on_one_node_id(monkeypatch):
+    # The other process wrote its id between this one's look and its write.
+    other = str(uuid.uuid4())
+    looks = iter([None])
+    real_read = NodeIdentity.read.__func__
+
+    def read(cls):
+        found = next(looks, "unread")
+        if found != "unread":
+            NodeIdentity.path().parent.mkdir(parents=True, exist_ok=True)
+            NodeIdentity.path().write_text(other + "\n")
+            return found
+        return real_read(cls)
+
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(read))
+    assert NodeIdentity.ensure() == other
+    assert NodeIdentity.path().read_text() == other + "\n"
+    assert [p.name for p in NodeIdentity.path().parent.iterdir()] == ["node-id"]
 
 
 def test_settings_default_to_loopback_and_live_outside_the_working_directory(tmp_path, monkeypatch):
