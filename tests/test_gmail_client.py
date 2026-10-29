@@ -597,10 +597,19 @@ def test_search_across_accounts_returns_the_newest_messages_of_all_of_them(monke
 
     def headers(cls, conn, uids):
         address = next(name for name, open_conn in connections.items() if open_conn is conn)
-        return [{"id": str(n), "from": "x", "subject": "s", "date": d} for n, d in enumerate(dates[address])]
+        return [
+            {"id": str(n), "from": "x", "subject": "s", "date": d}
+            for n, d in enumerate(dates[address])
+        ]
 
-    monkeypatch.setattr(GmailSearchService, "_open_mailboxes", classmethod(lambda cls: (dict(connections), None, [])))
-    monkeypatch.setattr(GmailSearchService, "_search_uids", classmethod(lambda cls, conn, query: [b"1", b"2"]))
+    monkeypatch.setattr(
+        GmailSearchService,
+        "_open_mailboxes",
+        classmethod(lambda cls: (dict(connections), None, [])),
+    )
+    monkeypatch.setattr(
+        GmailSearchService, "_search_uids", classmethod(lambda cls, conn, query: [b"1", b"2"])
+    )
     monkeypatch.setattr(GmailSearchService, "_fetch_headers", classmethod(headers))
     found = GmailSearchService.search("invoice", 2)["messages"]
     assert [m["date"] for m in found] == dates["new@example.com"]
@@ -632,17 +641,23 @@ def test_gmail_opens_only_accounts_granted_gmail(monkeypatch):
         {"email": "mail@example.com", "access_token": "t1", "scopes": [GMAIL_SCOPE]},
         {"email": "files@example.com", "access_token": "t2", "scopes": [DRIVE_SCOPE]},
     ]
-    monkeypatch.setattr(GmailSearchService, "credentials", classmethod(lambda cls, directory=None: accounts))
+    monkeypatch.setattr(
+        GmailSearchService, "credentials", classmethod(lambda cls, directory=None: accounts)
+    )
     monkeypatch.setattr(service_module.imaplib, "IMAP4_SSL", Conn)
     connections, error, failures = GmailSearchService._open_mailboxes()
     assert list(connections) == ["mail@example.com"] and error is None and failures == []
     assert opened == [b"user=mail@example.com"]
 
-    monkeypatch.setattr(GmailSearchService, "credentials", classmethod(lambda cls, directory=None: accounts[1:]))
+    monkeypatch.setattr(
+        GmailSearchService, "credentials", classmethod(lambda cls, directory=None: accounts[1:])
+    )
     assert GmailSearchService._open_mailboxes() == ({}, service_module.NOT_CONNECTED_MESSAGE, [])
 
 
-def test_saving_a_token_never_shows_another_thread_a_half_written_credentials_file(tmp_path, monkeypatch):
+def test_saving_a_token_never_shows_another_thread_a_half_written_credentials_file(
+    tmp_path, monkeypatch
+):
     # The service answers each request on its own thread, and every request may refresh a token.
     # Rewriting the file in place let a concurrent reader find it empty, take that for "no
     # accounts", and write back its one account over all the others.
@@ -650,7 +665,9 @@ def test_saving_a_token_never_shows_another_thread_a_half_written_credentials_fi
     from dreamference.chat.gmail_search_service import GmailSearchService
 
     directory = str(tmp_path)
-    assert GmailSearchService.save_token("a@example.com", "token-a", 3600, directory, refresh_token="refresh-a")
+    assert GmailSearchService.save_token(
+        "a@example.com", "token-a", 3600, directory, refresh_token="refresh-a"
+    )
     seen = []
     real_dump = service_module.json.dump
 
@@ -664,7 +681,10 @@ def test_saving_a_token_never_shows_another_thread_a_half_written_credentials_fi
     assert seen == [["a@example.com"], ["a@example.com", "b@example.com"]]
     assert sorted(GmailSearchService._raw(directory)["accounts"]) == ["a@example.com"]
     assert (tmp_path / "credentials.json").stat().st_mode & 0o777 == 0o600
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["credentials.json", "credentials.key"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "credentials.json",
+        "credentials.key",
+    ]
 
 
 def test_an_oauth_state_is_taken_once_and_expires(monkeypatch):
@@ -676,7 +696,11 @@ def test_an_oauth_state_is_taken_once_and_expires(monkeypatch):
     clock = [1000.0]
     monkeypatch.setattr(service_module.time, "time", lambda: clock[0])
     fresh = GmailSearchService.new_state("drive", "verifier")
-    assert GmailSearchService.take_state(fresh) == {"code_verifier": "verifier", "time": 1000.0, "app": "drive"}
+    assert GmailSearchService.take_state(fresh) == {
+        "code_verifier": "verifier",
+        "time": 1000.0,
+        "app": "drive",
+    }
     assert GmailSearchService.take_state(fresh) is None
 
     stale = GmailSearchService.new_state("gmail", "old")
@@ -686,7 +710,9 @@ def test_an_oauth_state_is_taken_once_and_expires(monkeypatch):
     assert GmailSearchService.take_state(stale) is None
 
 
-def test_an_empty_environment_variable_leaves_the_file_to_decide_as_on_the_rust_side(tmp_path, monkeypatch):
+def test_an_empty_environment_variable_leaves_the_file_to_decide_as_on_the_rust_side(
+    tmp_path, monkeypatch
+):
     # `mightling_gmail_enabled` in ling-rs skips an empty DREAMFERENCE_MIGHTLING_GMAIL; Python took
     # it for "off", so the launcher advertised Gmail while the Python side turned it off.
     from dreamference.config import DreamferenceConfig
@@ -696,3 +722,43 @@ def test_an_empty_environment_variable_leaves_the_file_to_decide_as_on_the_rust_
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_gmail is True
     cfg_file.write_text("mightling_gmail = false\n", encoding="utf-8")
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_gmail is False
+
+
+def test_a_message_id_that_is_not_a_gmail_id_never_reaches_imap(monkeypatch):
+    # imaplib sends arguments unquoted: a CR/LF in the id would start a command of its own.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    sent = []
+
+    class Conn:
+        def uid(self, *args):
+            sent.append(args)
+            return "OK", [b""]
+
+        def logout(self):
+            pass
+
+    monkeypatch.setattr(
+        GmailSearchService,
+        "_open_mailboxes",
+        classmethod(lambda cls: ({"b@y.com": Conn()}, None, [])),
+    )
+    for bad in ("b@y.com|1\r\nA1 SELECT INBOX", "1\r\nA2 EXPUNGE", "b@y.com|1 OR ALL", "b@y.com|"):
+        assert GmailSearchService.message(bad) == {"error": "Message not found"}
+    assert sent == []
+
+
+def test_a_search_with_a_line_break_is_never_sent_as_a_quoted_string():
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    sent = []
+
+    class Conn:
+        literal = None
+
+        def uid(self, *args):
+            sent.append(args)
+            return "NO", [b"CHARSET unsupported"]
+
+    assert GmailSearchService._search_uids(Conn(), 'x"\r\nA1 EXPUNGE') == []
+    assert all("\n" not in arg and "\r" not in arg for args in sent for arg in args)

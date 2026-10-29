@@ -826,9 +826,10 @@ class GmailSearchService:
             status, data = connection.uid("SEARCH", "CHARSET", "UTF-8", "X-GM-RAW")
         except (imaplib.IMAP4.error, OSError):
             status, data = "NO", None
-        if status != "OK" and query.isascii():
+        if status != "OK" and query.isascii() and not ("\r" in query or "\n" in query):
             # Some servers reject CHARSET on a non-standard search key. An ASCII query can be sent
-            # the ordinary quoted way, so it is worth one retry before giving up.
+            # the ordinary quoted way, so it is worth one retry before giving up; not one with a
+            # line break, which would end the quoted string's line and start a command of its own.
             try:
                 escaped = query.replace("\\", "\\\\").replace('"', '\\"')
                 status, data = connection.uid("SEARCH", "X-GM-RAW", f'"{escaped}"')
@@ -1037,7 +1038,11 @@ class GmailSearchService:
             email, real_id = message_id.split("|", 1)
         else:
             email, real_id = None, message_id
-            
+        # imaplib sends arguments as they are: anything but digits could end the line and start
+        # a command of its own, behind a tool that promises to only read.
+        if not re.fullmatch(r"[0-9]+", real_id):
+            return {"error": "Message not found"}
+
         connections, error, _failures = cls._open_mailboxes()
         if not connections:
             return {"error": error}
