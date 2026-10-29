@@ -78,6 +78,27 @@ impl Repo {
         self.root.join(rel)
     }
 
+    /// A file an index names, to answer a query from: only a path that stays inside the
+    /// working tree, only a regular file, at most [`SOURCE_READ_CAP`] bytes. A store or graph
+    /// shipped in a clone can name `/dev/zero` or climb out with `..`.
+    pub fn source_bytes(&self, rel: &str) -> Option<Vec<u8>> {
+        let mut inside = PathBuf::new();
+        for part in Path::new(rel).components() {
+            match part {
+                std::path::Component::Normal(name) => inside.push(name),
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir if inside.pop() => {}
+                _ => return None,
+            }
+        }
+        read_capped(&self.root.join(inside), SOURCE_READ_CAP, true)
+    }
+
+    /// [`Repo::source_bytes`] as text, None when it is not UTF-8.
+    pub fn source_text(&self, rel: &str) -> Option<String> {
+        String::from_utf8(self.source_bytes(rel)?).ok()
+    }
+
     /// The submodule paths of the repository, relative to its root.
     pub fn submodules(&self) -> Vec<String> {
         if !self.is_git {
@@ -270,20 +291,23 @@ pub const STATE_READ_CAP: u64 = 256 << 20;
 /// The most ling-code reads of a repository's own small text file (`Cargo.toml`, `dreamference.toml`).
 pub const REPO_READ_CAP: u64 = 1 << 20;
 
+/// The most ling-code reads of one source file to answer a query.
+pub const SOURCE_READ_CAP: u64 = 32 << 20;
+
 /// A state file ling-code wrote itself, read as text: never through a symlink, never from a FIFO
 /// or a device, and None past `cap` bytes. A clone can commit its `.dreamference` with any of
 /// those in it, and these reads run outside the sandbox and outside any memory cap.
 pub fn read_state_file(path: &Path, cap: u64) -> Option<String> {
-    read_capped(path, cap, false)
+    String::from_utf8(read_capped(path, cap, false)?).ok()
 }
 
 /// A repository's file read as text: a symlink is followed (a checkout may link its own files),
 /// but only a regular file of at most `cap` bytes is read, never a FIFO, a device or more.
 pub fn read_repo_file(path: &Path, cap: u64) -> Option<String> {
-    read_capped(path, cap, true)
+    String::from_utf8(read_capped(path, cap, true)?).ok()
 }
 
-fn read_capped(path: &Path, cap: u64, follow: bool) -> Option<String> {
+fn read_capped(path: &Path, cap: u64, follow: bool) -> Option<Vec<u8>> {
     use std::io::Read;
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -303,12 +327,42 @@ fn read_capped(path: &Path, cap: u64, follow: bool) -> Option<String> {
     if bytes.len() as u64 > cap {
         return None;
     }
-    String::from_utf8(bytes).ok()
+    Some(bytes)
 }
 
 #[cfg(all(test, unix))]
 mod state_file_tests {
     use super::*;
+
+    #[test]
+    fn a_source_an_index_names_stays_in_the_working_tree_and_is_a_regular_file() {
+        // A store or graph shipped in a clone names the files a query then reads.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(dir.path().join("outside"), "secret").unwrap();
+        let repo = Repo {
+            root: root.clone(),
+            main_root: root.clone(),
+            is_git: false,
+        };
+        assert_eq!(
+            repo.source_text("src/lib.rs").as_deref(),
+            Some("fn main() {}\n")
+        );
+        assert!(repo.source_text("./src/../src/lib.rs").is_some());
+        assert_eq!(repo.source_text("../outside"), None);
+        assert_eq!(repo.source_text("src/../../outside"), None);
+        let outside = dir.path().join("outside");
+        assert_eq!(repo.source_text(outside.to_str().unwrap()), None);
+        std::os::unix::fs::symlink("/dev/zero", root.join("zero.rs")).unwrap();
+        assert_eq!(repo.source_bytes("zero.rs"), None);
+        let fifo =
+            std::ffi::CString::new(root.join("fifo.rs").as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        assert_eq!(repo.source_bytes("fifo.rs"), None);
+    }
 
     #[test]
     fn capped_reads_refuse_links_fifos_devices_and_oversized_files() {

@@ -1371,7 +1371,7 @@ impl Context {
         let Some(candidate) = self.resolve_one(query, &mut answer)? else {
             return Ok((answer, None));
         };
-        let text = std::fs::read_to_string(self.repo.abs(&candidate.path)).unwrap_or_default();
+        let text = self.repo.source_text(&candidate.path).unwrap_or_default();
         let (start, end) = candidate.span;
         let end = end.min(start + 400);
         let body: Vec<String> = text
@@ -1583,7 +1583,7 @@ impl Context {
         let mut found: Vec<(BTreeSet<usize>, Vec<(u32, Vec<usize>)>, String, u32, String)> =
             Vec::new();
         for file in &files {
-            let Ok(raw) = std::fs::read(self.repo.abs(file)) else {
+            let Some(raw) = self.repo.source_bytes(file) else {
                 continue;
             };
             let lower = String::from_utf8_lossy(&raw).to_lowercase();
@@ -1792,7 +1792,7 @@ impl Context {
         if let Some(line) = line {
             return vec![line];
         }
-        let Ok(text) = std::fs::read_to_string(self.repo.abs(&source.file_path)) else {
+        let Some(text) = self.repo.source_text(&source.file_path) else {
             return vec![source.start_line.max(1)];
         };
         let (start, end) = if source.start_line == 0 {
@@ -2263,7 +2263,7 @@ fn defines_on_line(repo: &Repo, path: &str, line: u32, name: &str) -> bool {
         "var",
         "impl",
     ];
-    let Ok(text) = std::fs::read_to_string(repo.abs(path)) else {
+    let Some(text) = repo.source_text(path) else {
         return false;
     };
     let Some(content) = text.lines().nth(line.saturating_sub(1) as usize) else {
