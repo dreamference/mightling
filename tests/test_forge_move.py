@@ -1,5 +1,8 @@
-"""Moving the forge of record off the happy path: what a paired node asks for is checked, and every
-failed move leaves the record in place and unfrozen. Systemd, ssh and the backups are mocked."""
+"""Moving the forge of record off the happy path.
+
+What a paired node asks for is checked, and every failed move leaves the record in place and
+unfrozen. Systemd, ssh and the backups are mocked.
+"""
 
 import io
 import json
@@ -42,7 +45,9 @@ def answered(stdout="", stderr="", returncode=0):
 
 @pytest.mark.parametrize("name", ["../forge-20261027-063000", "forge-1", NAME])
 def test_restoring_a_set_this_node_does_not_hold_is_refused(name, monkeypatch, capsys):
-    monkeypatch.setattr(ForgeMove, "restore_here", classmethod(lambda cls, *a: pytest.fail("restored")))
+    monkeypatch.setattr(
+        ForgeMove, "restore_here", classmethod(lambda cls, *a: pytest.fail("restored"))
+    )
     assert ForgeMove.serve_restore(name, None) == 2
     assert json.loads(capsys.readouterr().out)["error"] == "no such backup set here"
 
@@ -52,7 +57,9 @@ def test_restoring_with_a_previous_record_that_is_not_a_node_id_is_refused(
     previous, monkeypatch, capsys
 ):
     (ForgeBackup.received_dir() / NAME).mkdir(parents=True)
-    monkeypatch.setattr(ForgeMove, "restore_here", classmethod(lambda cls, *a: pytest.fail("restored")))
+    monkeypatch.setattr(
+        ForgeMove, "restore_here", classmethod(lambda cls, *a: pytest.fail("restored"))
+    )
     assert ForgeMove.serve_restore(NAME, previous) == 2
     assert json.loads(capsys.readouterr().out)["error"] == "not a node id"
 
@@ -66,7 +73,9 @@ def test_a_restore_that_fails_answers_one_with_its_reason(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == {"ok": False, "error": "x"}
 
 
-def test_a_set_that_does_not_restore_restarts_the_forge_and_keeps_the_role(monkeypatch, _no_systemd):
+def test_a_set_that_does_not_restore_restarts_the_forge_and_keeps_the_role(
+    monkeypatch, _no_systemd
+):
     ForgeSettings.update_state(role=ROLE_MIRROR)
     monkeypatch.setattr(ForgeBackup, "install_data", classmethod(lambda cls, f: (None, None)))
     result = ForgeMove.restore_here(Path("/nonexistent") / NAME, "node-a-9f8e")
@@ -140,8 +149,9 @@ def test_a_move_the_target_does_not_restore_unfreezes_and_keeps_the_role(
         NodePairing,
         "run",
         classmethod(
-            lambda cls, record, request, **k: requests.append(request)
-            or answered('{"ok": false, "error": "3 refs differ"}\n')
+            lambda cls, record, request, **k: (
+                requests.append(request) or answered('{"ok": false, "error": "3 refs differ"}\n')
+            )
         ),
     )
     assert ForgeMove.move("node-b") == 1
@@ -228,7 +238,9 @@ def hand_over_answer(monkeypatch, data: bytes, returncode: int = 0, stderr: byte
 
 
 def test_a_hand_over_the_record_refuses_brings_nothing(monkeypatch, capsys):
-    hand_over_answer(monkeypatch, b"", returncode=1, stderr=b"this node is not the forge of record\n")
+    hand_over_answer(
+        monkeypatch, b"", returncode=1, stderr=b"this node is not the forge of record\n"
+    )
     assert ForgeMove.receive_hand_over(TARGET) is None
     assert "did not hand a set over: this node is not the forge" in capsys.readouterr().out
 

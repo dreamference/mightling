@@ -1,5 +1,8 @@
-"""The relocated `ling` runtime off the happy path: a build that fails keeps the runtime there was,
-and a library `ldd` names that the runtime does not carry is refused. ldd and patchelf are mocked."""
+"""The relocated `ling` runtime off the happy path.
+
+A build that fails keeps the runtime there was, and a library `ldd` names that the runtime does not
+carry is refused. ldd and patchelf are mocked.
+"""
 
 import subprocess
 
@@ -27,7 +30,9 @@ def host(tmp_path, monkeypatch):
     ling = tmp_path / "bin" / "ling"
     ling.parent.mkdir()
     ling.write_bytes(b"\x7fELF ling")
-    monkeypatch.setattr(SweBenchRuntime, "directory", classmethod(lambda cls: tmp_path / "cache" / "runtime"))
+    monkeypatch.setattr(
+        SweBenchRuntime, "directory", classmethod(lambda cls: tmp_path / "cache" / "runtime")
+    )
     (tmp_path / "cache").mkdir()
     return {"ling": str(ling), "ldd": LDD.format(lib=lib), "root": tmp_path}
 
@@ -52,7 +57,9 @@ def test_a_runtime_made_from_the_installed_binaries_is_not_rebuilt(host, monkeyp
     target.mkdir()
     (target / STAMP_NAME).write_text(SweBenchRuntime.source_hash(host["ling"]) + "\n")
     monkeypatch.setattr(swe_bench_runtime.subprocess, "run", lambda *a, **k: pytest.fail("rebuilt"))
-    assert SweBenchRuntime.ensure(host["ling"], "patchelf") == SweBenchRuntime.source_hash(host["ling"])
+    assert SweBenchRuntime.ensure(host["ling"], "patchelf") == SweBenchRuntime.source_hash(
+        host["ling"]
+    )
 
 
 def test_a_build_points_the_copies_at_the_mounted_loader_and_libraries(host, monkeypatch):
@@ -61,13 +68,20 @@ def test_a_build_points_the_copies_at_the_mounted_loader_and_libraries(host, mon
     target = SweBenchRuntime.directory()
     assert wanted and (target / STAMP_NAME).read_text().strip() == wanted
     assert sorted(p.name for p in (target / "lib").iterdir()) == [
-        "ld-linux-aarch64.so.1", "libc.so.6", "libgcc_s.so.1", "libm.so.6"
+        "ld-linux-aarch64.so.1",
+        "libc.so.6",
+        "libgcc_s.so.1",
+        "libm.so.6",
     ]
     patchelf = calls[-1]
     assert patchelf[:3] == ["patchelf", "--set-interpreter", "/opt/ling/lib/ld-linux-aarch64.so.1"]
     assert patchelf[3:5] == ["--set-rpath", "/opt/ling/lib"] and patchelf[5].endswith("/bin/ling")
-    assert (target / "bin" / "ling").read_bytes() == b"\x7fELF ling", "the copy is patched, not the installed binary"
-    assert not list(host["root"].joinpath("cache").glob(".runtime.*")), "the staging folder is renamed"
+    assert (target / "bin" / "ling").read_bytes() == b"\x7fELF ling", (
+        "the copy is patched, not the installed binary"
+    )
+    assert not list(host["root"].joinpath("cache").glob(".runtime.*")), (
+        "the staging folder is renamed"
+    )
 
 
 def test_a_build_that_fails_keeps_the_runtime_there_was(host, monkeypatch, capsys):

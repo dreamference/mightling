@@ -128,7 +128,7 @@ class RemotePublicCertificate:
             return 0, {"errors": [{"message": type(error).__name__}]}
 
     @staticmethod
-    def _object(value: Any) -> dict[str, Any]:
+    def _object(value: object) -> dict[str, Any]:
         """A reply that is not a JSON object (a list, a string) is an empty one."""
         return value if isinstance(value, dict) else {}
 

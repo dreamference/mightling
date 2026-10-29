@@ -1,5 +1,8 @@
-"""The forge's anonymity check off the push path: the pattern files, the hooks it installs, and the
-GitHub mirror's second layer (`added_text` and `send_to_github`), with git run only in `tmp_path`."""
+"""The forge's anonymity check off the push path.
+
+The pattern files, the hooks it installs, and the GitHub mirror's second layer (`added_text` and
+`send_to_github`), with git run only in `tmp_path`.
+"""
 
 import os
 import shutil
@@ -9,8 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from dreamference.forge import ForgeAnonymity
-from dreamference.forge import forge_anonymity
+from dreamference.forge import ForgeAnonymity, forge_anonymity
 from dreamference.forge.forge_github_mirror import ForgeGithubMirror
 
 LAN = "192.168"
@@ -41,7 +43,9 @@ def commit(work: Path, name: str, text: str, message: str | bytes = "m") -> str:
     path.write_text(text)
     subprocess.run(["git", "-C", str(work), "add", "-A"], check=True)
     if isinstance(message, bytes):
-        subprocess.run(["git", "-C", str(work), "commit", "-q", "-F", "-"], input=message, check=True)
+        subprocess.run(
+            ["git", "-C", str(work), "commit", "-q", "-F", "-"], input=message, check=True
+        )
     else:
         subprocess.run(["git", "-C", str(work), "commit", "-qm", message], check=True)
     return subprocess.run(
@@ -73,7 +77,9 @@ def test_the_pattern_files_are_private_and_an_empty_scope_never_matches(tmp_path
     denylist = ForgeAnonymity.pattern_file(tmp_path, "denylist")
     for path in (full, denylist):
         assert stat.S_IMODE(path.stat().st_mode) == 0o600, path
-    assert denylist.read_text() == "(?!)\n", "no denylist: grep still gets a pattern, never matching"
+    assert denylist.read_text() == "(?!)\n", (
+        "no denylist: grep still gets a pattern, never matching"
+    )
     assert full.read_text().splitlines() == ForgeAnonymity.generic_patterns()
     assert not list(full.parent.glob(".*.tmp")), "the staging files are renamed into place"
 
@@ -117,7 +123,9 @@ def test_install_writes_executable_hooks_and_removes_a_trigger_no_longer_wanted(
 
 
 def test_an_exempt_path_with_shell_characters_never_reaches_the_hook():
-    hook = ForgeAnonymity.hook_script("full", ["tests/test_anonymity.py", "x'; touch pwned #"], True)
+    hook = ForgeAnonymity.hook_script(
+        "full", ["tests/test_anonymity.py", "x'; touch pwned #"], True
+    )
     assert "tests/test_anonymity.py" in hook and "pwned" not in hook
 
 
@@ -155,12 +163,16 @@ def crafted_commit(work: Path, message: bytes) -> str:
         f"tree {tree}\nauthor d <d@example.com> 1 +0000\ncommitter d <d@example.com> 1 +0000\n"
         "encoding not-an-encoding\n\n"
     ).encode() + message
-    return subprocess.run(
-        ["git", "-C", str(work), "hash-object", "-t", "commit", "-w", "--stdin"],
-        input=body,
-        capture_output=True,
-        check=True,
-    ).stdout.decode().strip()
+    return (
+        subprocess.run(
+            ["git", "-C", str(work), "hash-object", "-t", "commit", "-w", "--stdin"],
+            input=body,
+            capture_output=True,
+            check=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
 
 
 def test_the_mirror_recheck_reads_a_commit_message_that_is_not_utf8(work):
@@ -175,7 +187,9 @@ def test_a_commit_message_that_is_not_utf8_stops_the_mirror_cleanly(work, monkey
     monkeypatch.setattr(ForgeGithubMirror, "refs", classmethod(lambda cls, work, prefix: {}))
     pushed = []
     monkeypatch.setattr(
-        ForgeGithubMirror, "push_each", classmethod(lambda cls, *a: pushed.append(a) or {"ok": True})
+        ForgeGithubMirror,
+        "push_each",
+        classmethod(lambda cls, *a: pushed.append(a) or {"ok": True}),
     )
     result = ForgeGithubMirror.send_to_github(
         work, [f"{tip}:refs/heads/main"], "https://github.com/o/r.git", mirror_settings(), {}
@@ -192,7 +206,9 @@ def test_the_mirror_pushes_nothing_when_the_recheck_finds_an_identifier(work, mo
     monkeypatch.setattr(ForgeGithubMirror, "refs", classmethod(lambda cls, work, prefix: {}))
     pushed = []
     monkeypatch.setattr(
-        ForgeGithubMirror, "push_each", classmethod(lambda cls, *a: pushed.append(a) or {"ok": True})
+        ForgeGithubMirror,
+        "push_each",
+        classmethod(lambda cls, *a: pushed.append(a) or {"ok": True}),
     )
     result = ForgeGithubMirror.send_to_github(
         work, [f"{tip}:refs/heads/main"], "https://github.com/o/r.git", mirror_settings(), {}
@@ -207,7 +223,9 @@ def test_the_mirror_pushes_nothing_when_the_recheck_cannot_run(work, monkeypatch
     monkeypatch.setattr(ForgeGithubMirror, "refs", classmethod(lambda cls, work, prefix: {}))
     pushed = []
     monkeypatch.setattr(
-        ForgeGithubMirror, "push_each", classmethod(lambda cls, *a: pushed.append(a) or {"ok": True})
+        ForgeGithubMirror,
+        "push_each",
+        classmethod(lambda cls, *a: pushed.append(a) or {"ok": True}),
     )
     result = ForgeGithubMirror.send_to_github(
         work, [f"{'0' * 40}:refs/heads/main"], "https://github.com/o/r.git", mirror_settings(), {}

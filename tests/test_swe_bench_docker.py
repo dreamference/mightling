@@ -1,5 +1,7 @@
-"""The SWE-bench docker wrapper off the happy path: an instance only ever gets an internal network,
-and what docker prints is read without trusting it. Every docker command is mocked.
+"""The SWE-bench docker wrapper off the happy path.
+
+An instance only ever gets an internal network, and what docker prints is read without trusting it.
+Every docker command is mocked.
 """
 
 import json
@@ -29,7 +31,14 @@ def docker(monkeypatch, answers):
 
 
 def described(internal, gateway="172.30.0.1"):
-    return json.dumps([{"Internal": internal, "IPAM": {"Config": [{"Subnet": "172.30.0.0/16", "Gateway": gateway}]}}])
+    return json.dumps(
+        [
+            {
+                "Internal": internal,
+                "IPAM": {"Config": [{"Subnet": "172.30.0.0/16", "Gateway": gateway}]},
+            }
+        ]
+    )
 
 
 def test_a_network_that_is_not_internal_is_never_used(monkeypatch):
@@ -95,7 +104,10 @@ def test_an_image_without_a_readable_path_has_none(returncode, stdout, monkeypat
 
 
 def test_an_image_path_is_read_from_its_environment(monkeypatch):
-    docker(monkeypatch, [(["image", "inspect"], 0, json.dumps(["HOME=/root", "PATH=/opt/conda/bin:/usr/bin"]))])
+    docker(
+        monkeypatch,
+        [(["image", "inspect"], 0, json.dumps(["HOME=/root", "PATH=/opt/conda/bin:/usr/bin"]))],
+    )
     assert SweBenchDocker.image_path("img") == "/opt/conda/bin:/usr/bin"
 
 

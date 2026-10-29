@@ -1,5 +1,8 @@
-"""The forge's backups off the happy path: what a paired node sends is checked before it is kept,
-a set that does not restore never replaces the data, and sending is mocked (no ssh, no tar)."""
+"""The forge's backups off the happy path.
+
+What a paired node sends is checked before it is kept, a set that does not restore never replaces
+the data, and sending is mocked (no ssh, no tar).
+"""
 
 import io
 import json
@@ -9,12 +12,11 @@ import tarfile
 from pathlib import Path
 
 import pytest
+from test_forge import make_set, repositories  # noqa: F401  (a fixture)
 
 from dreamference.forge import ForgeBackup, ForgeSettings
 from dreamference.forge.forge_settings import BACKUP_COPIES, ROLE_MIRROR, ROLE_RECORD
 from dreamference.node.node_pairing import NodePairing
-
-from test_forge import make_set, repositories  # noqa: F401  (a fixture)
 
 NAME = "forge-20261027-063000"
 
@@ -78,7 +80,10 @@ def test_check_without_a_set_says_so(capsys):
 
 @pytest.mark.parametrize("manifest", ["[]", '{"set": "x"}', '{"refs": ["owner/demo"]}'])
 def test_a_set_whose_manifest_lists_no_refs_does_not_restore(
-    tmp_path, repositories, manifest, capsys  # noqa: F811
+    tmp_path,
+    repositories,  # noqa: F811
+    manifest,
+    capsys,
 ):
     folder = tmp_path / "sets" / NAME
     make_set(folder, repositories)

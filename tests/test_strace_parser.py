@@ -1,24 +1,31 @@
-"""The strace parser on input it should not trust: what counts as this machine, DNS payloads that are
-not queries, and calls that ran nothing. A wrong answer here hides a destination from the verdict."""
+"""The strace parser on input it should not trust.
+
+What counts as this machine, DNS payloads that are not queries, and calls that ran nothing. A wrong
+answer here hides a destination from the verdict.
+"""
 
 import pytest
 
 from dreamference.audit.strace_parser import StraceParser
 
 
-@pytest.mark.parametrize("address", ["127.0.0.1", "127.8.9.1", "::1", "::ffff:127.0.0.1", "0.0.0.0", "::"])
+@pytest.mark.parametrize(
+    "address", ["127.0.0.1", "127.8.9.1", "::1", "::ffff:127.0.0.1", "0.0.0.0", "::"]
+)
 def test_loopback_and_unspecified_addresses_are_this_machine(address):
     assert StraceParser.is_loopback(address)
 
 
-@pytest.mark.parametrize("address", ["203.0.113.7", "::ffff:203.0.113.7", "2001:4860:4860::8888", "localhost", ""])
+@pytest.mark.parametrize(
+    "address", ["203.0.113.7", "::ffff:203.0.113.7", "2001:4860:4860::8888", "localhost", ""]
+)
 def test_any_other_address_or_a_name_is_not_this_machine(address):
     assert not StraceParser.is_loopback(address)
 
 
 def test_a_connect_to_an_ipv4_mapped_public_address_is_a_destination():
     trace = StraceParser.parse(
-        '7 connect(5<TCPv6:[1]>, {sa_family=AF_INET6, sin6_port=htons(443), '
+        "7 connect(5<TCPv6:[1]>, {sa_family=AF_INET6, sin6_port=htons(443), "
         'sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "::ffff:203.0.113.7", &sin6_addr), '
         "sin6_scope_id=0}, 28) = -1 EINPROGRESS (Operation now in progress)\n"
     )
