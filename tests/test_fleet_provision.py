@@ -524,6 +524,19 @@ def test_a_failure_stops_that_machine_only_and_the_run_reports_it(fleet, capsys)
     assert "spark-1: node prepare" in capsys.readouterr().out
 
 
+def test_a_machine_claiming_a_paired_nodes_id_does_not_take_over_its_pairing(fleet, tmp_path, monkeypatch, capsys):
+    # The probe's node id is the machine's own word: another machine (or a clone) that reports a
+    # paired node's id must not be given that node's record and have its address rewritten.
+    monkeypatch.setattr(NodePairing, "known_hosts", classmethod(lambda cls: tmp_path / "known_hosts"))
+    paired = {"node": "feedface1234", "name": "spark-2", "address": "spark-2", "user": "owner"}
+    fleet["paired"]["feedface1234"] = paired
+    assert NodePairing.pin_host_keys("feedface1234", ["ssh-ed25519 AAAAreal"])
+    FakeSession.machines = {"spark-9": StandIn()}
+    assert provision(["spark-9"]) == 1
+    assert paired["address"] == "spark-2"
+    assert "differs" in capsys.readouterr().out
+
+
 def test_a_machine_that_is_not_a_gb10_is_left_untouched(fleet):
     FakeSession.machines = {"box": StandIn(gb10=False)}
     assert provision(["box"]) == 1

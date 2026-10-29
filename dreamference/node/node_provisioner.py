@@ -650,6 +650,14 @@ class NodeProvisioner:
     def _step_pair(self, host: str, session: FleetSession) -> bool:
         node_id = self._state(host).get("node_id", "")
         record = NodePairing.find(node_id, browse=False) if node_id else None
+        # The id is what the machine says; its host key must be the one that node's pairing pinned.
+        if record is not None and not NodePairing.pin_host_keys(node_id, session.host_key_lines()):
+            return self._fail(
+                host,
+                "pair",
+                "its host key is not the paired node's",
+                f"ling-admin node remove {record['name']}",
+            )
         if record is not None and NodePairing.run(record, "info").returncode == 0:
             self.results[host]["paired_record"] = record
         else:
