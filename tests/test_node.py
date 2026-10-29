@@ -2894,3 +2894,12 @@ def test_a_semicolon_inside_a_nodes_records_does_not_cut_them_short():
     (node,) = NodeBrowser.parse(line)
 
     assert (node["version"], node["remote"]) == ("1.0;beta", "a;b")
+
+
+def test_a_forced_command_ending_in_a_backslash_is_refused():
+    from dreamference.node import NodePairing
+
+    # sshd reads a backslash before the closing quote as an escaped quote, so the restrictions
+    # that follow would become part of the command.
+    with pytest.raises(ValueError):
+        NodePairing.authorized_line(PUBLIC_KEY, "/x node serve-job --key a\\")
