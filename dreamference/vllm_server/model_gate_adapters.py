@@ -221,7 +221,12 @@ class ModelGateAdapters:
         """
         while len(self.loaded) >= max(1, limit):
             oldest, _ = self.loaded.popitem(last=False)
-            await self.engine_call("POST", "/unload_lora_adapter", {"lora_name": oldest})
+            status, _ = await self.engine_call(
+                "POST", "/unload_lora_adapter", {"lora_name": oldest}
+            )
+            if status != HTTP_OK:
+                # The engine may still hold it: the next request asks the engine what it holds.
+                self.synced = False
 
     @classmethod
     def files_problem(cls, entry: object) -> str | None:
