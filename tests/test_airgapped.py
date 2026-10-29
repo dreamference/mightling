@@ -224,7 +224,7 @@ def test_the_mcp_web_tools_resolve_the_level_on_every_call(monkeypatch):
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "off")
     response = MagicMock()
     response.json.return_value = {"results": []}
-    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response) as get:
+    with patch("dreamference.mcp_server.web_session.WebSession.get", return_value=response) as get:
         WebTools.search("python asyncio")
         monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
         found = WebTools.search("python asyncio")
