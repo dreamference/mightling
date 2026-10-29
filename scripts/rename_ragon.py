@@ -20,6 +20,7 @@ names, a model called Ling-3.0, ...) are protected; the migration modules come f
 
 import argparse
 import hashlib
+import itertools
 import json
 import os
 import pathlib
@@ -397,7 +398,13 @@ LOC_NEW = (
     + "\n/// The type 1.5 to 1.8 nodes announce; a 1.9 client browses it beside the new one for one release.\n"
     + 'pub const LEGACY_SERVICE_TYPE: &str = "_mightling-node._tcp.local.";\n'
 )
-SLICE_ANCHOR = "        let Ok(entries) = std::fs::read_dir(slice_cgroup()) else { return Vec::new() };\n        entries\n            .flatten()\n"
+SLICE_ANCHOR = (
+    "        let Ok(entries) = std::fs::read_dir(slice_cgroup()) else {\n"
+    "            return Vec::new();\n"
+    "        };\n"
+    "        entries\n"
+    "            .flatten()\n"
+)
 SLICE_NEW = (
     "        // Runs started by a 1.8 binary are in the older slice; they count against the same budget.\n"
     "        let entries: Vec<std::fs::DirEntry> = [slice_cgroup(), legacy_slice_cgroup()]\n"
@@ -796,22 +803,73 @@ COMPAT_EDITS = [
 ]
 
 
+# Files a formatter owns (cargo fmt, ruff format): their anchors also match after a re-format.
+REFORMATTED_SUFFIXES = (".rs", ".py")
+
+
+def anchor_name(index, old):
+    """The constant an anchor is defined as (SLICE_ANCHOR), else its place in COMPAT_EDITS."""
+    for name, value in globals().items():
+        if name.isupper() and value is old:
+            return name
+    return f"COMPAT_EDITS[{index}]"
+
+
+def anchor_pattern(old):
+    """`old` as a regex that ignores layout: any whitespace between its tokens, none or a line break.
+
+    A re-format (cargo fmt, ruff format) moves line breaks and indentation but keeps the tokens, so
+    the anchor still matches; leading indentation and the final newline are part of the match, as
+    they are of `old`, so the replacement keeps its own.
+    """
+    tokens = re.findall(r"\w+|\S", old)
+    body = re.escape(tokens[0]) if tokens else ""
+    for previous, token in itertools.pairwise(tokens):
+        word_pair = re.match(r"\w", previous[-1]) and re.match(r"\w", token[0])
+        body += (r"\s+" if word_pair else r"\s*") + re.escape(token)
+    lead = r"[ \t]*" if old[:1] in (" ", "\t") else ""
+    tail = r"[ \t]*\n" if old.endswith("\n") else ""
+    return re.compile(lead + body + tail)
+
+
+def anchored_replacement(old, new, matched):
+    """`new` for a layout-tolerant match: an anchor kept inside `new` keeps the file's own layout."""
+    if new.endswith(old):
+        return new[: -len(old)] + matched
+    if new.startswith(old):
+        return matched + new[len(old) :]
+    return new
+
+
 def apply_compat(root, dry):
-    """Applies COMPAT_EDITS under `root`; aborts when an anchor is missing or ambiguous."""
+    """Applies COMPAT_EDITS under `root`; aborts when an anchor is missing or ambiguous.
+
+    An anchor in a formatter-owned file that no longer matches exactly is looked for again with its
+    whitespace relaxed (anchor_pattern), so a re-format of main does not break the rename; the abort
+    names the anchor that matched neither way.
+    """
     done = 0
-    for path, old, new, count in COMPAT_EDITS:
+    for index, (path, old, new, count) in enumerate(COMPAT_EDITS):
         full = pathlib.Path(root) / path
         if not full.exists():
             continue  # a partial tree (a rehearsal fixture); the real tree has every file
         text = full.read_text(encoding="utf-8")
         if old != new and new in text:
             continue  # applied already: a second run, or an edit whose new text holds the old
-        if text.count(old) != count:
-            sys.exit(
-                f"compat edit anchor not found {count}x in {path}: {old.strip()[:70]!r} ({text.count(old)}x)"
-            )
+        exact = text.count(old)
+        if exact == count:
+            text = text.replace(old, new)
+        else:
+            pattern = anchor_pattern(old) if path.endswith(REFORMATTED_SUFFIXES) else None
+            relaxed = len(pattern.findall(text)) if pattern else 0
+            if relaxed != count:
+                sys.exit(
+                    f"compat edit anchor {anchor_name(index, old)} not found {count}x in {path}: "
+                    f"{old.strip()[:70]!r} ({exact}x exact, {relaxed}x ignoring whitespace)"
+                )
+            text = pattern.sub(lambda match, old=old, new=new: anchored_replacement(old, new, match.group(0)), text)
         if not dry:
-            full.write_text(text.replace(old, new), encoding="utf-8")
+            full.write_text(text, encoding="utf-8")
         done += 1
     return done
 
