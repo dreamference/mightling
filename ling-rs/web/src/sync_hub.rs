@@ -313,7 +313,7 @@ async fn forget(State(server): State<Arc<Server>>, headers: HeaderMap) -> Respon
         return not_found();
     }
     match caller(&server, &headers) {
-        Some(caller) if caller.agent => match auth::revoke_device(&server.config.state_dir, &caller.device) {
+        Some(caller) if caller.agent => match auth::revoke_device_by_id(&server.config.state_dir, &caller.device) {
             Ok(_) => json_response(StatusCode::OK, json!({ "forgotten": caller.device })),
             Err(err) => refused(Refusal::Io(err.to_string())),
         },
