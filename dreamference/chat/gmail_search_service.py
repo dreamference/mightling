@@ -583,6 +583,7 @@ class GmailSearchService:
         connections = {}
         failures: List[Dict[str, str]] = []
         for cred in stored:
+            conn = None
             try:
                 conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT_SECONDS)
                 conn.authenticate("XOAUTH2", cls._xoauth2(cred["email"], cred["access_token"]))
@@ -590,6 +591,10 @@ class GmailSearchService:
                 connections[cred["email"]] = conn
             except Exception as error:
                 failures.append({"account": cred["email"], "error": cls._describe(error)})
+                if conn is not None:
+                    # Connected but refused: the socket is not left open until garbage collection.
+                    with contextlib.suppress(Exception):
+                        conn.logout()
         if not connections:
             return {}, "Could not connect to any Gmail accounts.", failures
         return connections, None, failures
@@ -1046,40 +1051,38 @@ class GmailSearchService:
         connections, error, _failures = cls._open_mailboxes()
         if not connections:
             return {"error": error}
-            
-        if email and email in connections:
-            conn = connections[email]
-            try:
-                status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
-                if status == "OK" and data[0]:
-                    uid = data[0].split()[0].decode("ascii")
-                    return cls._fetch_body(conn, uid)
-            except Exception as e:
-                return {"error": str(e)}
-            finally:
-                for c in connections.values():
-                    try:
-                        c.logout()
-                    except:
-                        pass
-            return {"error": "Message not found"}
 
-        for conn in connections.values():
-            try:
-                status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
-                if status == "OK" and data[0]:
-                    uid = data[0].split()[0].decode("ascii")
-                    res = cls._fetch_body(conn, uid)
-                    if res and "error" not in res:
-                        return res
-            except Exception:
-                pass
-            finally:
+        # Every account was logged in to find the one holding the message; all are logged out.
+        try:
+            if email and email in connections:
+                conn = connections[email]
+                try:
+                    status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
+                    if status == "OK" and data[0]:
+                        uid = data[0].split()[0].decode("ascii")
+                        return cls._fetch_body(conn, uid)
+                except Exception as e:
+                    return {"error": str(e)}
+                return {"error": "Message not found"}
+
+            for conn in connections.values():
+                try:
+                    status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
+                    if status == "OK" and data[0]:
+                        uid = data[0].split()[0].decode("ascii")
+                        res = cls._fetch_body(conn, uid)
+                        if res and "error" not in res:
+                            return res
+                except Exception:
+                    pass
+            return {"error": "Message not found"}
+        finally:
+            for conn in connections.values():
                 try:
                     conn.logout()
                 except Exception:
                     pass
-        return {"error": "Message not found"}
+
     @classmethod
     def _close(cls, connection: imaplib.IMAP4_SSL) -> None:
         """
