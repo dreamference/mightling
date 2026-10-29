@@ -628,6 +628,40 @@ mod tests {
     }
 
     #[test]
+    fn a_peak_within_ten_percent_of_the_cap_is_marked_cap_bounded() {
+        // A universal run gets the 4 GiB small ceiling here; 90% of it is 3686 MiB (§6.4).
+        for (peak_mb, bounded) in [(3700u64, true), (3600, false)] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut host = FakeHost::new(dir.path(), 100);
+            let plan = repo_and_plan(dir.path(), Kind::Universal, 0);
+            let peak_file = plan.runs[0].spec.scratch.join("peak");
+            host.stand_in = vec![
+                "sh".into(),
+                "-c".into(),
+                format!("echo {} > '{}'", peak_mb << 20, peak_file.display()),
+            ];
+            let out = execute(
+                &plan,
+                &host,
+                &FixedProbe(ModelState::Absent),
+                Duration::from_millis(1),
+            );
+            assert_eq!(out[0].1, Outcome::Ok, "{peak_mb}");
+            assert_eq!(host.started.lock().unwrap()[0].1, 4 << 30);
+            let repo = Repo {
+                root: plan.repo_root.clone(),
+                main_root: plan.main_root.clone(),
+                is_git: false,
+            };
+            let snapshot = GraphSnapshot::load(&repo.scip_dir()).unwrap();
+            assert_eq!(
+                (snapshot.peak_rss_mb, snapshot.peak_cap_bounded),
+                (peak_mb, bounded)
+            );
+        }
+    }
+
+    #[test]
     fn a_run_that_installs_no_index_records_its_failure() {
         // The last run's "ok" stays in the manifest only while it is the last run's outcome.
         let dir = tempfile::tempdir().unwrap();
