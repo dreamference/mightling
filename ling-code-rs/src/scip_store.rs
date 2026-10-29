@@ -454,7 +454,7 @@ impl ScipStore {
         let mut stmt = self.conn.prepare_cached(
             "SELECT r.start_line, r.end_line, g.symbol FROM defn_enclosing_ranges r
              JOIN documents d ON d.id = r.document_id JOIN global_symbols g ON g.id = r.symbol_id
-             WHERE d.relative_path = ?1 ORDER BY r.start_line, r.end_line DESC",
+             WHERE d.relative_path = ?1 ORDER BY r.start_line, r.end_line DESC, g.symbol",
         )?;
         let rows = stmt.query_map([doc], |r| {
             Ok((

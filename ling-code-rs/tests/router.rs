@@ -1004,3 +1004,31 @@ fn text_rows_for_a_graph_only_answer_keep_a_path_with_a_colon() {
     assert!(out.contains("changed since snapshot: 0 files"), "{out}");
     assert!(out.contains("heuristic (text) shapes/a:b.py:1"), "{out}");
 }
+
+#[test]
+fn an_exact_outline_lists_a_definition_once_when_its_duplicate_is_not_adjacent() {
+    // Two definitions over one range, one of them recorded twice: the rows of equal range come
+    // back in any order, so the duplicates need not be neighbours.
+    let f = fixture();
+    let db = rusqlite::Connection::open(f.repo.scip_dir().join("scip-python-shapes.db")).unwrap();
+    db.execute_batch(
+        "CREATE TEMP TABLE summary AS SELECT r.* FROM defn_enclosing_ranges r
+           JOIN global_symbols g ON g.id = r.symbol_id WHERE g.symbol LIKE '%report`/summary().';
+         INSERT INTO defn_enclosing_ranges (document_id, symbol_id, start_line, start_char, end_line, end_char)
+           SELECT document_id, (SELECT r.symbol_id FROM defn_enclosing_ranges r
+             JOIN global_symbols g ON g.id = r.symbol_id WHERE g.symbol LIKE '%report`/largest().'),
+             start_line, start_char, end_line, end_char FROM summary;
+         INSERT INTO defn_enclosing_ranges (document_id, symbol_id, start_line, start_char, end_line, end_char)
+           SELECT document_id, symbol_id, start_line, start_char, end_line, end_char FROM summary;",
+    )
+    .unwrap();
+    let (_, out) = f.run_env(
+        &["outline", "shapes/report.py"],
+        &[("MIGHTLING_CODE_LAYERS", "exact")],
+    );
+    assert_eq!(
+        out.matches("function shapes.report.summary (to 9)").count(),
+        1,
+        "{out}"
+    );
+}

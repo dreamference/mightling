@@ -1708,7 +1708,10 @@ impl Context {
                 ));
             }
         }
-        out.sort_by_key(|a| (a.0, std::cmp::Reverse(a.1)));
+        // By the whole row, so a duplicate is next to its twin for `dedup`.
+        out.sort_by(|a, b| {
+            (a.0, std::cmp::Reverse(a.1), &a.2).cmp(&(b.0, std::cmp::Reverse(b.1), &b.2))
+        });
         out.dedup();
         out
     }
