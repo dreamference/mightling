@@ -60,7 +60,8 @@ export async function transcribe(recording: Recording, fetcher: typeof fetch = f
   let response: Response;
   try {
     response = await fetcher(SPEECH_URL, { method: "POST", body: form, signal: AbortSignal.timeout(300_000) });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") throw new Error("Speech-to-text did not answer within 5 minutes; try a shorter recording.");
     throw new Error("Speech-to-text is not running on this machine: start it with `ling-admin voice start`.");
   }
   if (!response.ok) throw new Error(`Speech-to-text failed: HTTP ${response.status}`);

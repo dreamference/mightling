@@ -31,6 +31,11 @@ describe("dictation", () => {
       throw new TypeError("fetch failed");
     }) as unknown as typeof fetch;
     await expect(transcribe({ mime: "audio/webm", data: base64("x") }, refused)).rejects.toThrow("ling-admin voice start");
+    // A service that is running but slow is not reported as stopped.
+    const slow = (async () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    }) as unknown as typeof fetch;
+    await expect(transcribe({ mime: "audio/webm", data: base64("x") }, slow)).rejects.toThrow("did not answer within 5 minutes");
     const failing = (async () => new Response("no", { status: 500 })) as unknown as typeof fetch;
     await expect(transcribe({ mime: "audio/webm", data: base64("x") }, failing)).rejects.toThrow("HTTP 500");
   });
