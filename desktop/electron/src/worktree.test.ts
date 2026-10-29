@@ -113,6 +113,21 @@ describe("managed worktrees", () => {
     await expect(worktree.remove(source, path.join(root, "abcd", "app"), root, null)).rejects.toThrow("is not a worktree of");
   });
 
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("are kept when their snapshot fails, with the work in them", async () => {
+    const { source, root } = repo();
+    const created = await worktree.create({ sourceCwd: source, base: null, withChanges: false, worktreeRoot: root });
+    const unreadable = path.join(created.root, "src", "unreadable.py");
+    fs.writeFileSync(unreadable, "z = 3\n");
+    fs.chmodSync(unreadable, 0o000);
+    try {
+      await expect(worktree.remove(source, created.root, root, "thread-1")).rejects.toThrow();
+      expect(fs.existsSync(unreadable)).toBe(true);
+      expect(run(source, "worktree", "list", "--porcelain")).toContain(created.root);
+    } finally {
+      if (fs.existsSync(unreadable)) fs.chmodSync(unreadable, 0o644);
+    }
+  });
+
   it("hand a thread's work to the local checkout and back, with its branch", async () => {
     const { source, root } = repo();
     const created = await worktree.create({ sourceCwd: source, base: null, withChanges: false, worktreeRoot: root });

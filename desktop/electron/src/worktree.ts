@@ -268,7 +268,8 @@ export async function remove(sourceCwd: string, checkout: string, worktreeRoot: 
 
 async function removeChecked(sourceRoot: string, checkout: string, name: string | null): Promise<string | null> {
   let saved: string | null = null;
-  if (name && (await userFs.exists(checkout))) saved = await snapshot(checkout, name).catch(() => null);
+  // A snapshot that fails keeps the worktree: removing it then would lose the work it was to save.
+  if (name && (await userFs.exists(checkout))) saved = await snapshot(checkout, name);
   try {
     await git(sourceRoot, ["worktree", "remove", "--force", checkout]);
   } catch {
