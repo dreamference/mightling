@@ -1141,6 +1141,8 @@ export function App() {
       return;
     }
     if (dictation !== "idle") return;
+    // The words go into the draft they were spoken for, if the thread changes before they come back.
+    const key = draftKeyRef.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const media = new MediaRecorder(stream);
@@ -1156,7 +1158,7 @@ export function App() {
         setDictation("transcribing");
         bridge.transcribe(recording)
           .then((text) => {
-            if (text) setDraft((current) => (current.trim() ? `${current.replace(/\s+$/, "")} ${text}` : text));
+            if (text) setDraftFor(key, (current) => (current.trim() ? `${current.replace(/\s+$/, "")} ${text}` : text));
           })
           .catch(notice)
           .finally(() => setDictation("idle"));
