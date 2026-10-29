@@ -611,4 +611,302 @@ mod tests {
         table.events.push(Event { ts: now - 50, agent: "s".into(), kind: EventKind::PushRefused });
         assert!(run(&table, &config, now, &env()).iter().any(|f| f.kind == "push-refused" && f.alert));
     }
+
+    fn find<'a>(found: &'a [Finding], check: &str) -> Vec<&'a Finding> {
+        found.iter().filter(|f| f.check == check).collect()
+    }
+
+    fn pending(tool: &str, wait: WaitKind, since: i64) -> Pending {
+        Pending {
+            tool: tool.into(),
+            wait,
+            since,
+            test: false,
+            gh_run: false,
+            push: false,
+        }
+    }
+
+    #[test]
+    fn context_warns_at_250k_and_hands_off_at_300k_in_the_summary_only() {
+        let now = ts("2026-10-26T12:00:00Z");
+        let config = Config::defaults(Path::new("/home/u"));
+        let run_with = |context: u64, due: Option<i64>, subagent: bool| {
+            let mut table = Table::default();
+            table.agents.insert("s".into(), agent("s", false, now - 30));
+            let key = if subagent { "s/a1" } else { "s" };
+            let mut a = agent(key, subagent, now - 30);
+            a.context = context;
+            a.over_handoff_since = due;
+            table.agents.insert(key.into(), a);
+            run(&table, &config, now, &env())
+        };
+        assert!(find(&run_with(249_999, None, true), "C1").is_empty());
+        let warn = run_with(250_000, None, true);
+        assert!(
+            find(&warn, "C1")[0]
+                .text
+                .ends_with("at 250K context; hand-off due at 300K")
+        );
+        let due = run_with(300_000, Some(now - 3 * 3600), true);
+        let c1 = find(&due, "C1");
+        assert!(
+            c1[0].text.ends_with("hand-off due for 180 min"),
+            "{}",
+            c1[0].text
+        );
+        // Never an owner alert, for a subagent or for the coordinator.
+        assert!(
+            c1.iter()
+                .all(|f| !f.alert && !f.urgent && f.section == Section::Context)
+        );
+        assert!(
+            find(&run_with(320_000, Some(now - 7200), false), "C1")
+                .iter()
+                .all(|f| !f.alert)
+        );
+    }
+
+    #[test]
+    fn a_stall_is_one_and_a_half_times_the_wait_or_twenty_minutes_with_none_pending() {
+        let now = ts("2026-10-26T12:00:00Z");
+        let config = Config::defaults(Path::new("/home/u"));
+        let stalled = |wait: WaitKind, idle_min: i64, alive: bool| {
+            let mut table = Table::default();
+            let mut c = agent("s", false, now - idle_min * 60);
+            c.last = Last::Tool;
+            c.pending
+                .insert("t".into(), pending("Bash", wait, now - idle_min * 60));
+            table.agents.insert("s".into(), c);
+            let env = Env {
+                claude_alive: alive,
+                ..Env::default()
+            };
+            !find(&run(&table, &config, now, &env), "C2").is_empty()
+        };
+        // CI 30 min -> 45; shell 15 -> 22.5; subagent 60 -> 90.
+        assert!(!stalled(WaitKind::Ci, 44, true) && stalled(WaitKind::Ci, 46, true));
+        assert!(!stalled(WaitKind::Shell, 22, true) && stalled(WaitKind::Shell, 23, true));
+        assert!(!stalled(WaitKind::Subagent, 89, true) && stalled(WaitKind::Subagent, 91, true));
+        // With no Claude Code process running nothing can be stalled.
+        assert!(!stalled(WaitKind::Ci, 120, false));
+        let idle = |idle_min: i64| {
+            let mut table = Table::default();
+            let mut c = agent("s", false, now - idle_min * 60);
+            c.last = Last::Result;
+            table.agents.insert("s".into(), c);
+            find(&run(&table, &config, now, &env()), "C2").len()
+        };
+        assert_eq!((idle(19), idle(20)), (0, 1));
+    }
+
+    #[test]
+    fn a_night_window_stalls_half_an_hour_after_its_end() {
+        let config = Config::defaults(Path::new("/home/u"));
+        let since = ts("2026-10-26T01:00:00Z");
+        let p = pending("Bash", WaitKind::Night, since);
+        // The window ends at 07:00 UTC by default.
+        assert_eq!(overdue_at(&p, since, &config), ts("2026-10-26T07:30:00Z"));
+    }
+
+    #[test]
+    fn a_question_through_a_tool_is_c6_after_thirty_minutes_never_c2() {
+        let now = ts("2026-10-26T12:00:00Z");
+        let config = Config::defaults(Path::new("/home/u"));
+        for tool in ["AskUserQuestion", "ExitPlanMode"] {
+            for (minutes, c6) in [(29, 0), (31, 1)] {
+                let mut table = Table::default();
+                let mut c = agent("s", false, now - minutes * 60);
+                c.last = Last::Tool;
+                c.pending.insert(
+                    "t".into(),
+                    pending(tool, WaitKind::Tool, now - minutes * 60),
+                );
+                table.agents.insert("s".into(), c);
+                let found = run(&table, &config, now, &env());
+                assert!(find(&found, "C2").is_empty(), "{tool} {minutes}");
+                assert_eq!(find(&found, "C6").len(), c6, "{tool} {minutes}");
+            }
+        }
+    }
+
+    #[test]
+    fn loops_are_three_errors_five_commands_or_four_reads_with_no_edit_between() {
+        let now = ts("2026-10-26T12:00:00Z");
+        let config = Config::defaults(Path::new("/home/u"));
+        let loops = |streak: u32, calls: Vec<Call>| {
+            let mut a = agent("s", false, now - 30);
+            a.error_streak = streak;
+            a.error_tool = "Bash".into();
+            a.recent = calls.into_iter().collect();
+            let mut table = Table::default();
+            table.agents.insert("s".into(), a);
+            run(&table, &config, now, &env())
+                .into_iter()
+                .filter(|f| f.check == "C4")
+                .collect::<Vec<_>>()
+        };
+        let command = Call::Command {
+            hash: 7,
+            wait: false,
+        };
+        let read = Call::Read { hash: 9 };
+        assert_eq!(crate::agents::RECENT_CALLS, 20);
+        assert!(loops(2, vec![]).is_empty());
+        let streak = loops(3, vec![]);
+        // An alert only after two consecutive checks.
+        assert_eq!(
+            (streak.len(), streak[0].alert, streak[0].consecutive),
+            (1, true, 2)
+        );
+        assert!(loops(0, vec![command; 4]).is_empty());
+        assert_eq!(loops(0, vec![command; 5]).len(), 1);
+        assert!(loops(0, vec![read; 3]).is_empty());
+        assert_eq!(loops(0, vec![read; 4]).len(), 1);
+        // An edit between the calls resets the count.
+        let mut calls = vec![command; 5];
+        calls.push(Call::Edit);
+        calls.extend([command; 3]);
+        assert!(loops(0, calls).is_empty());
+    }
+
+    #[test]
+    fn a_subagent_waits_ten_minutes_and_a_coordinator_question_thirty() {
+        let now = ts("2026-10-26T12:00:00Z");
+        let config = Config::defaults(Path::new("/home/u"));
+        let reported = |minutes: i64| {
+            let mut table = Table::default();
+            table
+                .agents
+                .insert("s".into(), agent("s", false, now - 3 * 3600));
+            let mut a = agent("s/a1", true, now - minutes * 60);
+            a.last = Last::Text { question: false };
+            table.agents.insert("s/a1".into(), a);
+            find(&run(&table, &config, now, &env()), "C6")
+                .into_iter()
+                .map(|f| f.alert)
+                .collect::<Vec<_>>()
+        };
+        assert!(reported(9).is_empty());
+        assert_eq!(reported(11), vec![false]);
+        let asked = |minutes: i64, question: bool| {
+            let mut table = Table::default();
+            let mut c = agent("s", false, now - minutes * 60);
+            c.last = Last::Text { question };
+            table.agents.insert("s".into(), c);
+            find(&run(&table, &config, now, &env()), "C6").len()
+        };
+        assert_eq!(
+            (asked(29, true), asked(31, true), asked(31, false)),
+            (0, 1, 0)
+        );
+    }
+
+    #[test]
+    fn format_drift_needs_more_than_five_percent_unclassed_and_names_the_version() {
+        let now = ts("2026-10-26T12:00:00Z");
+        let config = Config::defaults(Path::new("/home/u"));
+        let drift = |used: u64, unclassed: u64| {
+            let mut table = Table::default();
+            table.counts.used = used;
+            table.counts.unclassed = unclassed;
+            table.counts.versions.insert("2.1.99".into());
+            run(&table, &config, now, &env())
+                .into_iter()
+                .filter(|f| f.kind == "format-drift")
+                .collect::<Vec<_>>()
+        };
+        assert!(drift(95, 5).is_empty());
+        let found = drift(94, 6);
+        assert_eq!(found.len(), 1);
+        assert!(
+            found[0].alert
+                && found[0].text.contains("6%")
+                && found[0].text.contains("Claude Code 2.1.99")
+        );
+    }
+
+    #[test]
+    fn an_unreadable_transcript_is_reported_in_the_summary_and_never_alerts() {
+        let now = ts("2026-10-26T12:00:00Z");
+        let config = Config::defaults(Path::new("/home/u"));
+        let mut table = Table::default();
+        table.counts.unreadable.push("/x/p/sess.jsonl".into());
+        let found = run(&table, &config, now, &env());
+        let unreadable: Vec<_> = found.iter().filter(|f| f.kind == "unreadable").collect();
+        assert_eq!(unreadable.len(), 1);
+        assert!(!unreadable[0].alert && unreadable[0].section == Section::Monitor);
+        assert_eq!(
+            unreadable[0].text,
+            "transcript sess.jsonl could not be read"
+        );
+    }
+
+    #[test]
+    fn a_monthly_spend_limit_names_the_weekly_reset_and_is_never_lifted() {
+        let seen = ts("2026-10-20T12:25:00Z");
+        let reset = ts("2026-10-21T10:00:00Z");
+        let limit = Limit {
+            kind: "monthly spend".into(),
+            reset: Some(reset),
+            reset_text: "11am".into(),
+            reset_of: Some("weekly".into()),
+            seen_day: String::new(),
+        };
+        let mut table = Table::default();
+        let mut a = agent("s", false, seen);
+        a.last = Last::Limit(limit.key());
+        table.agents.insert("s".into(), a);
+        table.events.push(Event {
+            ts: seen,
+            agent: "s".into(),
+            kind: EventKind::Limit(limit),
+        });
+        let config = Config::defaults(Path::new("/home/u"));
+        let open = run(&table, &config, seen + 60, &env());
+        let c3 = find(&open, "C3");
+        assert_eq!(
+            c3[0].text,
+            "usage limit (monthly spend) hit; 1 agent stopped; the weekly limit resets Oct 21 10:00 UTC"
+        );
+        assert!(c3[0].urgent);
+        // At and after the weekly reset: no "lifted" note for a spend limit.
+        for at in [reset + 60, reset + 1800] {
+            assert!(
+                run(&table, &config, at, &env())
+                    .iter()
+                    .all(|f| f.kind != "limit-lifted"),
+                "{at}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failed_release_is_urgent_and_a_published_one_is_not() {
+        let now = ts("2026-10-26T12:00:00Z");
+        let config = Config::defaults(Path::new("/home/u"));
+        let mut table = Table::default();
+        table.agents.insert("s".into(), agent("s", false, now - 30));
+        table.events.push(Event {
+            ts: now - 60,
+            agent: "s".into(),
+            kind: EventKind::Release { succeeded: false },
+        });
+        table.events.push(Event {
+            ts: now - 50,
+            agent: "s".into(),
+            kind: EventKind::Release { succeeded: true },
+        });
+        let found = run(&table, &config, now, &env());
+        let failed: Vec<_> = found
+            .iter()
+            .filter(|f| f.kind == "release-failed")
+            .collect();
+        let published: Vec<_> = found
+            .iter()
+            .filter(|f| f.kind == "release-published")
+            .collect();
+        assert!(failed[0].urgent && failed[0].alert);
+        assert!(!published[0].urgent);
+    }
 }

@@ -169,4 +169,40 @@ mod tests {
         assert!(config.is_quiet(23) && config.is_quiet(0) && config.is_quiet(6));
         assert!(!config.is_quiet(7) && !config.is_quiet(22) && !config.is_quiet(12));
     }
+
+    #[test]
+    fn the_defaults_are_those_of_the_spec_and_no_rules_are_set() {
+        let config = Config::defaults(Path::new("/home/u"));
+        assert_eq!(
+            (config.warn_context, config.handoff_context),
+            (250_000, 300_000)
+        );
+        assert_eq!(
+            (config.waits.ci, config.waits.shell, config.waits.subagent),
+            (30, 15, 60)
+        );
+        assert_eq!(
+            (
+                config.quiet_start,
+                config.quiet_end,
+                config.max_alerts_per_hour
+            ),
+            (23, 7, 6)
+        );
+        assert_eq!(
+            config.projects_dir,
+            PathBuf::from("/home/u/.claude/projects")
+        );
+        assert_eq!(
+            config.state_dir,
+            PathBuf::from("/home/u/.local/share/dreamference/monitor")
+        );
+        // No rules in the build: C5(a) is off until the user sets them.
+        assert!(
+            config.commit_author.is_none()
+                && config.forbidden_trailers.is_empty()
+                && config.repos.is_empty()
+        );
+        assert!(config.notify_command.is_none());
+    }
 }

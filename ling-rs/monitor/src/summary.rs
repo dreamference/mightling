@@ -137,3 +137,150 @@ pub fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
     std::fs::write(&tmp, text)?;
     std::fs::rename(&tmp, path)
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::Agent;
+    use crate::agents::Tokens;
+
+    fn ts(text: &str) -> i64 {
+        chrono::DateTime::parse_from_rfc3339(text)
+            .unwrap()
+            .timestamp()
+    }
+
+    fn finding(check: &'static str, kind: &'static str, section: Section, text: &str) -> Finding {
+        Finding {
+            check,
+            kind,
+            subject: kind.to_string(),
+            section,
+            text: text.to_string(),
+            alert: false,
+            urgent: false,
+            consecutive: 1,
+        }
+    }
+
+    #[test]
+    fn the_summary_lists_its_sections_in_the_order_of_the_spec() {
+        let now = ts("2026-10-26T12:00:00Z");
+        let table = Table::default();
+        let mut alerts = Alerts::default();
+        let mut open = finding("C5", "stall", Section::Stalled, "an open alert");
+        open.alert = true;
+        alerts.step(&[open], now, false, 6, false);
+        // Handed in out of order on purpose.
+        let findings = vec![
+            finding("C3", "usage-limit", Section::Limits, "limits text"),
+            finding("C1", "handoff", Section::Context, "context text"),
+            finding("C2", "stall", Section::Stalled, "stalled text"),
+            finding("C6", "awaiting", Section::Awaiting, "awaiting text"),
+        ];
+        let (md, json) = render(&table, &findings, &alerts, now);
+        let at = |needle: &str| {
+            md.find(needle)
+                .unwrap_or_else(|| panic!("{needle} missing in {md}"))
+        };
+        let order = [
+            "## Open alerts",
+            "## Waiting for an answer",
+            "## Stalled or looping",
+            "## Over the context",
+            "## Usage limits",
+            "(C7)",
+        ];
+        let positions: Vec<usize> = order.iter().map(|n| at(n)).collect();
+        assert!(positions.windows(2).all(|w| w[0] < w[1]), "{positions:?}");
+        assert!(md.contains("an open alert") && json["open_alerts"].as_array().unwrap().len() == 1);
+        assert_eq!(json["findings"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn open_alerts_come_newest_first() {
+        let table = Table::default();
+        let mut alerts = Alerts::default();
+        let mut first = finding("C2", "stall", Section::Stalled, "older alert");
+        first.alert = true;
+        let mut second = finding("C4", "loop", Section::Stalled, "newer alert");
+        second.alert = true;
+        alerts.step(&[first.clone()], 1000, false, 6, false);
+        alerts.step(&[first, second], 1300, false, 6, false);
+        let (md, _) = render(&table, &[], &alerts, 2000);
+        assert!(
+            md.find("newer alert").unwrap() < md.find("older alert").unwrap(),
+            "{md}"
+        );
+    }
+
+    #[test]
+    fn the_last_hour_names_the_top_five_by_weighted_tokens() {
+        let now = ts("2026-10-26T12:30:00Z");
+        let hour = now - now.rem_euclid(3600);
+        let mut table = Table::default();
+        for i in 0..7u32 {
+            let key = format!("s{i}");
+            let mut a = Agent {
+                key: key.clone(),
+                session: key.clone(),
+                last_ts: now - 60,
+                ..Agent::default()
+            };
+            a.hours.insert(
+                hour,
+                Tokens {
+                    responses: 1,
+                    weighted: 1000.0 * (i + 1) as f64,
+                    idle_wakes: u64::from(i == 6),
+                    idle_wake_weighted: if i == 6 { 7000.0 } else { 0.0 },
+                    ..Tokens::default()
+                },
+            );
+            table.agents.insert(key, a);
+        }
+        let last = last_hour(&table, now);
+        assert_eq!((last.active_10_min, last.responses), (7, 7));
+        assert_eq!(last.top.len(), 5);
+        assert_eq!(last.top[0].1, 7000.0);
+        assert!(last.top.iter().all(|t| t.1 >= 3000.0));
+        // The idle-wake rewrite share: 7000 of 28000 weighted.
+        let (md, _) = render(&table, &[], &Alerts::default(), now);
+        assert!(md.contains("idle-wake rewrites: 25%"), "{md}");
+    }
+
+    #[test]
+    fn the_summary_is_capped_and_written_whole_through_a_rename() {
+        let now = ts("2026-10-26T12:00:00Z");
+        let table = Table::default();
+        let findings: Vec<Finding> = (0..400)
+            .map(|i| {
+                finding(
+                    "C2",
+                    "stall",
+                    Section::Stalled,
+                    &format!("agent {i} stalled for a long time in a CI wait"),
+                )
+            })
+            .collect();
+        let (md, _) = render(&table, &findings, &Alerts::default(), now);
+        assert!(md.len() <= MAX_CHARS, "{}", md.len());
+        assert!(md.contains("cut at about 1,500 tokens"));
+        let dir = std::env::temp_dir().join(format!("ling-monitor-summary-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("nested/summary.md");
+        write_atomic(&file, "first").unwrap();
+        write_atomic(&file, "second").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "second");
+        let names: Vec<_> = std::fs::read_dir(dir.join("nested"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["summary.md".to_string()],
+            "no temporary file is left"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

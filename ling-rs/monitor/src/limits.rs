@@ -98,10 +98,9 @@ fn parse_clock(text: &str) -> Option<NaiveTime> {
     let text = text.trim().to_ascii_lowercase().replace(' ', "");
     let (digits, pm) = if let Some(rest) = text.strip_suffix("am") {
         (rest.to_string(), false)
-    } else if let Some(rest) = text.strip_suffix("pm") {
-        (rest.to_string(), true)
     } else {
-        return None;
+        let rest = text.strip_suffix("pm")?;
+        (rest.to_string(), true)
     };
     let (hour, minute) = match digits.split_once(':') {
         Some((h, m)) => (h.parse::<u32>().ok()?, m.parse::<u32>().ok()?),
