@@ -76,6 +76,18 @@ def test_check_without_a_set_says_so(capsys):
     assert "no backup set" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("manifest", ["[]", '{"set": "x"}', '{"refs": ["owner/demo"]}'])
+def test_a_set_whose_manifest_lists_no_refs_does_not_restore(
+    tmp_path, repositories, manifest, capsys  # noqa: F811
+):
+    folder = tmp_path / "sets" / NAME
+    make_set(folder, repositories)
+    (folder / "manifest.json").write_text(manifest)
+    assert ForgeBackup.check(folder) == 1
+    assert "does not restore" in capsys.readouterr().out
+    assert ForgeBackup.install_data(folder) == (None, None)
+
+
 def test_a_dump_without_a_database_does_not_restore(tmp_path, capsys):
     folder = tmp_path / "sets" / NAME
     folder.mkdir(parents=True)
