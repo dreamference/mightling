@@ -241,3 +241,13 @@ def test_each_worker_task_carries_a_path_not_the_whole_engine(tmp_path, monkeypa
     engine.index_workspace(force_reindex=True)
     assert set(engine.indexed_files) == {"m0.py", "m1.py", "m2.py"}
     assert len(pickled) == 3 and max(pickled) < 4096
+
+
+def test_snake_case_names_are_split_into_their_words():
+    # Only camelCase was split, so `get_user_name` was one token and a search for `user` missed it
+    # (spec §2 promises both).
+    from dreamference.context_engine.tfidf_calculator import TFIDFCalculator
+
+    tokens = TFIDFCalculator.tokenize("def get_user_name(): pass\nclass UserConfig_v2: pass")
+    assert {"get", "user", "name", "get_user_name"} <= set(tokens)
+    assert {"config", "v2", "userconfig_v2"} <= set(tokens)

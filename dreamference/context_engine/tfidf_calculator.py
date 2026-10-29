@@ -32,8 +32,8 @@ class TFIDFCalculator:
         words = re.findall(r'[a-zA-Z0-9_]+', text)
         tokens: List[str] = []
         for word in words:
-            # Convert CamelCase to spaced sub-words
-            sub_words = re.sub('([a-z0-9])([A-Z])', r'\1 \2', word).lower().split()
+            # Split snake_case at underscores and CamelCase at lower-to-upper changes
+            sub_words = re.sub('([a-z0-9])([A-Z])', r'\1 \2', word.replace("_", " ")).lower().split()
             tokens.extend(sub_words)
             tokens.append(word.lower())
         return [t for t in tokens if len(t) > 1]
