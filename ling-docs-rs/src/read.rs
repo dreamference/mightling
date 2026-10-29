@@ -335,7 +335,7 @@ fn render(
             ));
             break;
         }
-        out.text.push_str(line);
+        out.text.push_str(&clip(line, budget));
         out.text.push('\n');
         used += cost;
         shown = Some((shown.map(|s| s.0).unwrap_or(*n), *n));
@@ -354,19 +354,19 @@ fn render(
     Ok(out)
 }
 
-/// Cuts a text that alone exceeds the budget.
+/// Cuts a text that alone exceeds the budget (a page, or one long line).
 fn clip(text: &str, budget: usize) -> String {
     if estimate_tokens(text) <= budget {
         return text.to_string();
     }
     let mut out = String::new();
-    for c in text.chars() {
+    for (n, c) in text.chars().enumerate() {
         out.push(c);
-        if out.len().is_multiple_of(256) && estimate_tokens(&out) > budget {
+        if (n + 1).is_multiple_of(256) && estimate_tokens(&out) > budget {
             break;
         }
     }
-    out.push_str("\n[… page cut at the output limit]");
+    out.push_str("\n[… cut at the output limit]");
     out
 }
 
@@ -448,7 +448,7 @@ mod tests {
         assert_eq!(clip(short, 50), short);
         let long = "word ".repeat(500);
         let clipped = clip(&long, 50);
-        assert!(clipped.ends_with("[… page cut at the output limit]"));
+        assert!(clipped.ends_with("[… cut at the output limit]"));
         assert!(clipped.len() < long.len());
     }
 
@@ -495,5 +495,13 @@ mod tests {
         .unwrap();
         assert_eq!(out.text, "[p.2]\ntwo");
         assert_eq!(out.next.as_deref(), Some("p.5"));
+    }
+
+    #[test]
+    fn one_line_longer_than_the_budget_is_cut() {
+        let units = [(None, Some(1), "word ".repeat(20_000))];
+        let out = render(blank("json"), &units, None, None, "lines", 500).unwrap();
+        assert!(estimate_tokens(&out.text) < 600, "{}", out.text.len());
+        assert!(out.text.contains("cut at the output limit"));
     }
 }
