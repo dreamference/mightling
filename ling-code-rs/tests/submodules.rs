@@ -912,3 +912,23 @@ fn a_repository_without_submodules_costs_nothing_and_prints_nothing() {
     let (_, out) = f.run(&["submodules"]);
     assert!(out.contains("no submodules"), "{out}");
 }
+
+#[test]
+fn a_submodule_whose_path_has_a_space_is_left_out_of_the_superprojects_roots() {
+    let f = fixture();
+    let root = f.repo.root.clone();
+    let lib = library(
+        f.dir.path(),
+        "spaced",
+        "t@localhost",
+        &[(
+            "Cargo.toml",
+            "[package]\nname = \"spaced\"\nversion = \"0.1.0\"\n",
+        )],
+        1,
+    );
+    add_submodule(&root, &lib, "my lib", None);
+    assert_eq!(f.repo.submodules(), ["my lib"]);
+    let roots: Vec<String> = plan::detect(&f.repo).into_iter().map(|t| t.root).collect();
+    assert!(roots.iter().all(|r| !r.starts_with("my lib")), "{roots:?}");
+}

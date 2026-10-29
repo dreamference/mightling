@@ -84,11 +84,13 @@ impl Repo {
         if !self.is_git {
             return Vec::new();
         }
-        let Ok(out) = git(&self.root, &["submodule", "status"]) else {
-            return Vec::new();
-        };
-        out.lines()
-            .filter_map(|line| line.get(1..)?.split_whitespace().nth(1).map(str::to_string))
+        // The index's gitlinks (`160000 <sha> <stage>\t<path>`): a path may hold spaces, and
+        // `git submodule status` fails outright on one gitlink missing from `.gitmodules`.
+        git_z(&self.root, &["ls-files", "-s", "-z"])
+            .unwrap_or_default()
+            .iter()
+            .filter(|entry| entry.starts_with("160000 "))
+            .filter_map(|entry| entry.split_once('\t').map(|(_, path)| path.to_string()))
             .collect()
     }
 
