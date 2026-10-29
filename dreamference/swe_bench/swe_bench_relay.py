@@ -60,9 +60,12 @@ class SweBenchRelay:
                 self._server.close()
 
     def _accept(self) -> None:
+        server = self._server
+        if server is None:
+            return
         while not self._closed.is_set():
             try:
-                client, _ = self._server.accept()
+                client, _ = server.accept()
             except OSError:
                 return
             try:

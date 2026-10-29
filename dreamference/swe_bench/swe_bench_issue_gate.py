@@ -90,6 +90,19 @@ class SweBenchIssueGate:
         return "" if value is None else str(value)
 
     @classmethod
+    def command_of(cls, tool_input: object) -> str:
+        """The command a tool call ran.
+
+        Args:
+            tool_input: A hook payload's `tool_input`, of any shape.
+
+        Returns:
+            str: Its `command` when that is a string, else every string in it.
+        """
+        command = tool_input.get("command") if isinstance(tool_input, dict) else None
+        return command if isinstance(command, str) else cls.text_of(tool_input)
+
+    @classmethod
     def file_touched(cls, path: str, command: str, output: str) -> bool:
         """Whether a tool call touched a repository file.
 
@@ -442,11 +455,7 @@ class SweBenchIssueGate:
         seq = state["seq"]
         targets = conditions.get("targets", [])
         tool_input = payload.get("tool_input")
-        command = (
-            tool_input.get("command")
-            if isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str)
-            else cls.text_of(tool_input)
-        )
+        command = cls.command_of(tool_input)
         cwd = payload.get("cwd") or conditions.get("root", "/testbed")
         edit = cls.edit_of(
             payload.get("tool_name", ""), command, cwd, conditions.get("root", "/testbed")
@@ -509,11 +518,7 @@ class SweBenchIssueGate:
             payload: The hook's input.
         """
         tool_input = payload.get("tool_input")
-        command = (
-            tool_input.get("command")
-            if isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str)
-            else cls.text_of(tool_input)
-        )
+        command = cls.command_of(tool_input)
         seq = state.get("seq", 0)
         reads = state.setdefault("reads", {})
         for target in cls.reads(

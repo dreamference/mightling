@@ -421,8 +421,10 @@ class SweBenchReport:
         """
         if not manifest.get("refine"):
             return None
-        records = {i: (states.get(i) or {}).get("refine") for i in finished}
-        records = {i: record for i, record in records.items() if record}
+        refine_records = {i: (states.get(i) or {}).get("refine") for i in finished}
+        records: dict[str, dict[str, Any]] = {
+            i: record for i, record in refine_records.items() if record
+        }
         first = dict.fromkeys(("input_tokens", "cached_input_tokens", "output_tokens"), 0)
         for instance_id, record in records.items():
             stats = store.log_stats(instance_id, 0, record.get("log_offset"))

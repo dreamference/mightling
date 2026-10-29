@@ -498,6 +498,7 @@ class SweBenchInstanceRun:
         self.in_model = False
         self.current_unit: str | None = None
         self.stop_event = threading.Event()
+        self.lane_host: str | None = None
 
     @classmethod
     def container_name(cls, run: str, instance_id: str) -> str:
@@ -942,9 +943,9 @@ class SweBenchInstanceRun:
             lines = (self.scratch / "codex-home" / DROP_LOG).read_text().splitlines()
         except OSError:
             lines = []
-        for line in lines:
+        for drop_line in lines:
             try:
-                entry = json.loads(line)
+                entry = json.loads(drop_line)
             except ValueError:
                 continue
             if not isinstance(entry, dict):

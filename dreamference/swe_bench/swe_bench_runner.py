@@ -905,8 +905,8 @@ class SweBenchRunner:
                         return 1
                     # Which `ling-code` answered, beside the manifest, which is never edited: a
                     # resumed run may use another build, so each start appends its own line.
-                    with Path(store.directory / "ling-code.sha256").open("a") as record:
-                        record.write(f"{code_hash}  {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n")
+                    with Path(store.directory / "ling-code.sha256").open("a") as hash_log:
+                        hash_log.write(f"{code_hash}  {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n")
                     arm = manifest["code_index"]
                     layer = "SCIP stores only" if arm == "exact" else "universal layer"
                     print(
@@ -1392,11 +1392,12 @@ class SweBenchRunner:
                         waiting_for = None
                         continue
                     # Said once per kind of reason: the free-memory figure in it moves every poll.
-                    kind = re.sub(r"[\d.]+", "#", reason)
+                    reason_text = reason or ""
+                    kind = re.sub(r"[\d.]+", "#", reason_text)
                     if kind != waiting_for:
                         print(
                             f"⏳ {datetime.now():%H:%M} waiting to start the next instance: "
-                            f"{reason.replace('the night run', 'this run')}.",
+                            f"{reason_text.replace('the night run', 'this run')}.",
                             flush=True,
                         )
                         waiting_for = kind

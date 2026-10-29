@@ -75,14 +75,16 @@ class SweBenchArmSmoke:
         """True when an event shows an answer from the model: a model item, or a turn that completed with tokens."""
         for event in events:
             kind = event.get("type")
-            item = event.get("item") if isinstance(event.get("item"), dict) else {}
+            raw_item = event.get("item")
+            item = raw_item if isinstance(raw_item, dict) else {}
             if (
                 kind in ("item.started", "item.completed", "item.updated")
                 and item.get("type") in MODEL_ITEMS
             ):
                 return True
             if kind == "turn.completed":
-                usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+                raw_usage = event.get("usage")
+                usage = raw_usage if isinstance(raw_usage, dict) else {}
                 if (usage.get("input_tokens") or 0) > 0 or (usage.get("output_tokens") or 0) > 0:
                     return True
         return False
@@ -115,7 +117,8 @@ class SweBenchArmSmoke:
         events = cls.events(log_text)
         for index, event in enumerate(events):
             if event.get("type") == "turn.failed":
-                error = event.get("error") if isinstance(event.get("error"), dict) else {}
+                raw_error = event.get("error")
+                error = raw_error if isinstance(raw_error, dict) else {}
                 return f"a turn failed: {str(error.get('message') or event)[:QUOTE]}"
             # A stream error the agent retried is followed by a completed turn; one it was not is fatal.
             if event.get("type") == "error" and not any(
@@ -154,6 +157,7 @@ class SweBenchArmSmoke:
             print(f"❌ Smoke check of arm {arm} ({run}, {instance_id}): {reason}.")
             return 1
         stats = store.log_stats(instance_id)
+        assert state is not None  # `verdict` reports a missing state
         print(
             f"✅ Smoke check of arm {arm}: {instance_id} ran ({state.get('status')}, {state.get('wall_s')} s, "
             f"{stats['commands']} command(s), {stats['input_tokens']} input tokens); run {run}."

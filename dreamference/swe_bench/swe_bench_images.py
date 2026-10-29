@@ -15,7 +15,6 @@ import json
 import os
 import time
 import urllib.request
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +51,7 @@ class SweBenchImages:
             return list(json.load(response)["tags"])
 
     # Seam: tests replace it so nothing in the suite reaches the network.
-    fetch_tags: Callable[[], list[str]] = _fetch_tags
+    fetch_tags = _fetch_tags
 
     @classmethod
     def tags_path(cls) -> Path:

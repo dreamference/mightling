@@ -242,7 +242,7 @@ class SweBenchRunStore:
                         if stamp is None
                         else next((t for t in reversed(earlier) if stamp - t > 2), None)
                     )
-                    seconds.append(None if before is None else stamp - before)
+                    seconds.append(None if stamp is None or before is None else stamp - before)
                 if stamp is not None:
                     earlier.append(stamp)
         return {"count": len(seconds), "seconds": seconds}

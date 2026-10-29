@@ -26,37 +26,6 @@
   "dreamference/runner/continue_runner.py": {
    "list-item": 1
   },
-  "dreamference/swe_bench/swe_bench_arm_smoke.py": {
-   "union-attr": 4
-  },
-  "dreamference/swe_bench/swe_bench_images.py": {
-   "assignment": 1
-  },
-  "dreamference/swe_bench/swe_bench_instance_run.py": {
-   "assignment": 1
-  },
-  "dreamference/swe_bench/swe_bench_issue_gate.py": {
-   "arg-type": 4
-  },
-  "dreamference/swe_bench/swe_bench_relay.py": {
-   "union-attr": 1
-  },
-  "dreamference/swe_bench/swe_bench_report.py": {
-   "index": 1,
-   "misc": 3,
-   "operator": 1,
-   "union-attr": 5
-  },
-  "dreamference/swe_bench/swe_bench_run_store.py": {
-   "operator": 1
-  },
-  "dreamference/swe_bench/swe_bench_runner.py": {
-   "arg-type": 4,
-   "assignment": 1,
-   "attr-defined": 3,
-   "index": 3,
-   "union-attr": 1
-  },
   "dreamference/vllm_server/diffusion_openai_service.py": {
    "assignment": 1,
    "misc": 1
@@ -75,5 +44,5 @@
   }
  },
  "mypy": "2.4.0",
- "total": 93
+ "total": 59
 }

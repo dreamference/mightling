@@ -897,7 +897,9 @@ class NodeJob:
                     timespec="seconds"
                 )
             finished = record.get("finished") or record.get("submitted")
-            return (datetime.fromisoformat(str(finished)) + KEEP_UNFETCHED).isoformat(timespec="seconds")
+            return (datetime.fromisoformat(str(finished)) + KEEP_UNFETCHED).isoformat(
+                timespec="seconds"
+            )
         except (TypeError, ValueError):
             return None
 
