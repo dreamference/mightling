@@ -257,3 +257,17 @@ def test_an_os_update_probes_the_machine_again_after_the_reboot(provisioner, mon
     monkeypatch.setattr(NodeProvisioner, "_step_probe", lambda self, host, session: "probed")
     assert provisioner._step_os_update("node-b", Session()) == "probed"
     assert "OS and firmware updated" in provisioner.results["node-b"]["done"][-1]
+
+
+@pytest.mark.parametrize("body", [b"[1]", b'{"data": ["org/model"]}', b'{"data": {"id": "x"}}'])
+def test_a_model_list_of_the_wrong_shape_serves_nothing(provisioner, web, body):
+    # The node's server answers over the network: a shape other than OpenAI's used to raise out of
+    # the whole provisioning run.
+    web.answers[MODELS] = body
+    assert provisioner._served_model("node-b", 8000) is None
+
+
+@pytest.mark.parametrize("body", [b"[]", b'"ok"'])
+def test_a_completion_of_the_wrong_shape_is_not_verified(provisioner, web, body):
+    web.answers[CHAT] = body
+    assert provisioner._verify("node-b", 8000, "org/model") != "ok"
