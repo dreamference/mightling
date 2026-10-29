@@ -825,8 +825,9 @@ def test_serve_waits_for_engine_work_holding_the_gpu_lock_and_touches_nothing_wi
     run, calls, lock, ab_dir = remote
     with pathlib.Path(lock).open("w") as held:
         fcntl.flock(held, fcntl.LOCK_EX)
-        result = run("serve", "sglang")
-    assert result.returncode == 1 and "was not free within 3 s" in result.stderr
+        # The fixture's 3 s leaves the other tests room; refusing a held lock needs only 1 s.
+        result = run("serve", "sglang", GPU_LOCK_WAIT="1")
+    assert result.returncode == 1 and "was not free within 1 s" in result.stderr
     assert "m0-prod8000" not in (calls.read_text() if calls.exists() else "").replace(
         "ps -q -f name=^m0-prod8000$", ""
     )
