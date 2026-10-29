@@ -359,7 +359,7 @@ class MatrixHomeserver:
         token = config.get("access_token")
         if token:
             status, _ = cls._http("GET", f"{PROXY_URL}/_matrix/client/v3/account/whoami", token=token)
-            if status != 200:
+            if status == 401:  # only this says the token is gone; the bot's name stays taken
                 token = None
         if not token:
             answer = cls.register(BOT_LOCALPART, cls.password() + cls.password(), admin["registration_token"])
