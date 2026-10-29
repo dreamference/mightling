@@ -215,3 +215,39 @@ def test_a_global_hf_token_reaches_the_subcommands_that_also_take_one():
         assert parser.parse_args([*command, "--hf-token", "U"]).hf_token == "U", command
         assert parser.parse_args(command).hf_token is None, command
     assert parser.parse_args(["--hf-token", "T", "run", "hello"]).hf_token == "T"
+
+
+def _inspect_main_model(monkeypatch, capsys, model: str) -> tuple[str, list]:
+    """Runs `main-model inspect` with every probe failing and Hugging Face answering 404.
+
+    Returns what it printed and the commands it ran, none of them for real.
+    """
+    import subprocess
+    from unittest.mock import MagicMock
+
+    import pytest
+    import requests
+
+    session = MagicMock()
+    session.get.return_value.status_code = 200
+    session.get.return_value.json.return_value = {"data": [{"id": model}]}
+    session.post.side_effect = requests.ConnectionError("down")
+    monkeypatch.setattr(requests, "Session", lambda: session)
+    monkeypatch.setattr(requests, "get", lambda *a, **k: MagicMock(status_code=404))
+    runs: list = []
+
+    def run(cmd, **kwargs):
+        runs.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 1, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SystemExit):
+        DreamferenceCLIController.run_cli(["main-model", "inspect"])
+    return capsys.readouterr().out, runs
+
+
+def test_main_model_inspect_gives_nvidia_smi_a_timeout(monkeypatch, capsys):
+    # A wedged driver makes nvidia-smi hang; inspect waited with it for ever.
+    _, runs = _inspect_main_model(monkeypatch, capsys, "org/m")
+    smi = [kwargs for cmd, kwargs in runs if cmd[0] == "nvidia-smi"]
+    assert smi and all(kwargs.get("timeout") for kwargs in smi)

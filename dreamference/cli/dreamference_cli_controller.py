@@ -2494,7 +2494,7 @@ class DreamferenceCLIController:
                 hardware_gpus = []
                 try:
                     import subprocess
-                    smi_res = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True)
+                    smi_res = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True, timeout=10)
                     if smi_res.returncode == 0:
                         hardware_gpus = [g.strip() for g in smi_res.stdout.strip().split("\n") if g.strip()]
                 except Exception:
