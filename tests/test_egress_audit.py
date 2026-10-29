@@ -160,7 +160,8 @@ json.dump({{"args": args, "cwd": os.getcwd(), "CODEX_HOME": os.environ.get("CODE
            "config": open(os.environ["DREAMFERENCE_CONFIG_PATH"]).read(),
            "host": os.environ.get("DREAMFERENCE_VLLM_HOST"),
            "adapter": os.environ.get("DREAMFERENCE_MIGHTLING_ADAPTER"),
-           "docs": os.environ.get("DREAMFERENCE_MIGHTLING_DOCS")}}, open({str(calls)!r}, "w"))
+           "docs": os.environ.get("DREAMFERENCE_MIGHTLING_DOCS"),
+           "worktree": os.environ.get("DREAMFERENCE_MIGHTLING_WORKTREE")}}, open({str(calls)!r}, "w"))
 shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
 open(args[len(args) - 2], "w").write("pong")
 """)
@@ -171,6 +172,8 @@ open(args[len(args) - 2], "w").write("pong")
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_ADAPTER", "rust")
     # Even a caller that switched the file index on: the throwaway home never starts it.
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_DOCS", "1")
+    # And a caller in worktree mode: the audited session still works in the throwaway repository.
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_WORKTREE", "on")
     code = EgressAudit.run(write_json=True, mightling_bin="/opt/ling", vllm_host="http://localhost:8000")
     out = capsys.readouterr().out
     assert code == 0 and "✅ Egress audit: pass" in out
@@ -185,6 +188,8 @@ open(args[len(args) - 2], "w").write("pong")
     assert call["docs"] == "0"
     # The audited session is on the base, whatever adapter the user starts sessions with (adapters §10.4).
     assert call["adapter"] == ""
+    # In place, never moved into a worktree (WORKTREE §3.1).
+    assert call["worktree"] == "off"
     # The JSON result is written to the real CODEX_HOME, and says which build it was.
     (result_file,) = list((home / "audit").glob("*.json"))
     result = json.loads(result_file.read_text())
