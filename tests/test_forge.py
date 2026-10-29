@@ -1271,6 +1271,24 @@ def test_a_switch_written_halfway_leaves_the_nodes_config_as_it_was(monkeypatch)
     assert path.read_text() == '[night]\nwindow = "22-06"\n', "the node's config was truncated"
 
 
+def test_a_config_that_cannot_be_read_is_not_replaced_by_the_switch(monkeypatch):
+    path = ForgeSettings.config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('[night]\nwindow = "22-06"\n')
+    real = Path.read_text
+
+    def unreadable(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError("denied")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    with pytest.raises(OSError):
+        ForgeSettings.set_enabled(False)
+    monkeypatch.undo()
+    assert path.read_text() == '[night]\nwindow = "22-06"\n', "the node's config was replaced"
+
+
 def test_the_app_ini_is_on_disk_before_it_replaces_the_old_one(tmp_path, monkeypatch):
     import os
 
