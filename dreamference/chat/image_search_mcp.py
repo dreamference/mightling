@@ -241,7 +241,9 @@ class ImageSearchMcp:
             return None
         msg_id = message["id"]
         method = message.get("method")
-        params = message.get("params") or {}
+        params = message.get("params")
+        if not isinstance(params, dict):  # JSON-RPC also allows a list, which names nothing here
+            params = {}
         if method == "initialize":
             result: Dict[str, Any] = {
                 "protocolVersion": params.get("protocolVersion") or PROTOCOL_VERSION,
