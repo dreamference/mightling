@@ -211,4 +211,16 @@ describe("bottom-panel tasks", () => {
     } else expect(output).toBe(`${fs.realpathSync(scratchHome)}\ndone\n`);
     expect(events[events.length - 1]).toMatchObject({ kind: "exit", code: 0 });
   });
+
+  it.skipIf(process.platform === "win32")("keep a character the output splits between two writes", async () => {
+    const events: TaskEvent[] = [];
+    await new Promise<void>((resolve) => {
+      // "é" is two bytes in UTF-8: the first ends one write, the second starts the next.
+      new Tasks((event) => {
+        events.push(event);
+        if (event.kind === "exit") resolve();
+      }, "/bin/sh").run("Run", "printf 'caf\\303'; sleep 0.2; printf '\\251\\n'", scratchHome);
+    });
+    expect(events.filter((event) => event.kind === "output").map((event) => event.data).join("")).toBe("café\n");
+  });
 });
