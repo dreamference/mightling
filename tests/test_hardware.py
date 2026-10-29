@@ -435,7 +435,7 @@ def test_an_engine_asset_applies_only_to_its_engine_and_feature(monkeypatch):
     key, head = registry.DEFAULT_MODEL_ALIAS, registry.QWEN38_SPARSE_HEAD_ASSET["repo"]
     assert registry.ModelMatrixRegistry.get_engine_assets(key) == []
     assert head not in NodeModelSync.repos(key)
-    recipe = dict(registry.ModelMatrixRegistry.get_launch_overrides(key))
+    recipe = dict(registry.ModelMatrixRegistry.get_launch_overrides(key, "ling"))
     cases = (("ling", [], False), ("ling", ["sparse-head"], True), ("sglang", ["sparse-head"], False))
     for engine, features, applies in cases:
         overrides = {**recipe, "engine": engine, "engine_features": features}
@@ -822,3 +822,15 @@ def test_tensorize_on_the_host_runs_no_code_and_unpickles_nothing_from_the_repos
     assert len(loads) == 1
     assert loads[0]["trust_remote_code"] is False
     assert loads[0]["use_safetensors"] is True
+
+
+def test_the_sparse_head_comes_with_the_ling_engine_recipe_once_it_has_the_feature(monkeypatch):
+    # The asset sat in SGLang's recipe, which the engine filter always skips, so the ling-engine
+    # recipe, the only one it is for, never listed it whatever its engine_features said.
+    import dreamference.hardware.model_matrix_registry as registry
+
+    key, head = registry.DEFAULT_MODEL_ALIAS, registry.QWEN38_SPARSE_HEAD_ASSET["repo"]
+    monkeypatch.setitem(registry.QWEN38_LING_RECIPE, "engine_features", ["sparse-head"])
+    assets = registry.ModelMatrixRegistry.get_engine_assets(key, "ling")
+    assert [asset["repo"] for asset in assets] == [head]
+    assert registry.ModelMatrixRegistry.get_engine_assets(key, "sglang") == []
