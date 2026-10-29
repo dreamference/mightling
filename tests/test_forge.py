@@ -315,6 +315,14 @@ def test_added_lines_name_their_file_and_skip_exempt_ones():
     assert ForgeAnonymity.added_lines(patch, ["tests/test_anonymity.py"]) == "x\nx: hello\n"
 
 
+def test_the_mirror_scans_a_path_the_hook_cannot_exempt():
+    # The hook passes exempt paths to awk only when they are plain; one with a space is scanned
+    # there, so the GitHub mirror's own scan must not skip it either.
+    patch = "diff --git a/my notes b/my notes\n+++ b/my notes\n+secret\n"
+    assert ForgeAnonymity.added_lines(patch, ["my notes"]) == "my notes\nmy notes: secret\n"
+    assert "my notes" not in ForgeAnonymity.hook_script("full", ["my notes"])
+
+
 @pytest.fixture
 def hooked_repository(tmp_path):
     """A bare repository with the forge's hook as its pre-receive, the patterns beside it."""

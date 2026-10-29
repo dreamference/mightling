@@ -61,6 +61,8 @@ DENYLIST: Final[str] = "~/.config/dreamference/anonymity-denylist.txt"
 # Inside the container: the data folder's `mightling/` holds the patterns and the freeze flag.
 CONTAINER_DIR: Final[str] = "/var/lib/gitea/mightling"
 HOOK_NAME: Final[str] = "mightling-anonymity"
+# An exempt path the hook can hand to awk unquoted; any other is scanned, by the hook and the mirror.
+PLAIN_PATH: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_./-]+")
 TRIGGER_HOOK_NAME: Final[str] = "mightling-mirror-trigger"
 OCTET: Final[str] = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
 END: Final[str] = r"(?![\d.]*\d)"
@@ -236,7 +238,7 @@ class ForgeAnonymity:
         Returns:
             str: The `pre-receive.d` script.
         """
-        safe = [path for path in exempt if re.fullmatch(r"[A-Za-z0-9_./-]+", path)]
+        safe = cls.plain_paths(exempt)
         lines = [
             "#!/usr/bin/env bash",
             "# Written by `ling-admin forge`; rewritten at every start, edits are lost.",
@@ -410,6 +412,18 @@ class ForgeAnonymity:
         return meta.stdout + cls.added_lines(diff.stdout, exempt)
 
     @classmethod
+    def plain_paths(cls, exempt: list[str]) -> list[str]:
+        """The exempt paths both checks skip.
+
+        Args:
+            exempt: The repository's exempt paths.
+
+        Returns:
+            list[str]: Those the hook can pass to awk; the others are scanned.
+        """
+        return [path for path in exempt if PLAIN_PATH.fullmatch(path)]
+
+    @classmethod
     def added_lines(cls, patch: str, exempt: list[str]) -> str:
         """Pick the touched paths and added lines out of a patch, as the awk program does.
 
@@ -420,6 +434,7 @@ class ForgeAnonymity:
         Returns:
             str: The touched paths and the added lines, each prefixed with its file.
         """
+        skipped = cls.plain_paths(exempt)
         out: list[str] = []
         current, skipping = "", False
         for line in patch.splitlines():
@@ -431,7 +446,7 @@ class ForgeAnonymity:
                     current = ""
                     continue
                 current = path[2:] if path.startswith("b/") else path
-                skipping = current in exempt
+                skipping = current in skipped
                 if not skipping:
                     out.append(current)
             elif line.startswith("+") and current and not skipping:
