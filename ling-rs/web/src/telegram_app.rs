@@ -638,6 +638,32 @@ mod tests {
     }
 
     #[test]
+    fn an_approved_request_claimed_by_many_requests_at_once_mints_one_device() {
+        let state = std::env::temp_dir().join(format!("ling-web-tg-claim-race-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state);
+        auth::private_dir(&state).unwrap();
+        for round in 0..30 {
+            let init_data = format!("init-race-{round}");
+            let pending = create_pending_pair(&state, 42, &init_data, 1000).unwrap();
+            assert!(approve_pending_pair(&state, &pending.id, 1001).unwrap());
+            let barrier = std::sync::Barrier::new(8);
+            let approved = std::thread::scope(|scope| {
+                let tries: Vec<_> = (0..8)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            barrier.wait();
+                            claim_pending_pair(&state, &pending.id, 42, &init_data, 1002)
+                        })
+                    })
+                    .collect();
+                let outcomes = tries.into_iter().map(|attempt| attempt.join().unwrap());
+                outcomes.filter(|outcome| matches!(outcome, ClaimOutcome::Approved(_))).count()
+            });
+            assert_eq!(approved, 1);
+        }
+    }
+
+    #[test]
     fn requests_approved_at_once_are_all_approved() {
         // Each request is a read and a write of one file: approvals at the same moment must not
         // write back each other's request unapproved.
