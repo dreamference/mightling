@@ -52,6 +52,20 @@ FD_LABEL: Final[re.Pattern] = re.compile(r"^(\d+)(?:<([A-Za-z0-9]+):\[(.*)\]>)?$
 # The remote end of a connected socket's label: `->127.0.0.53:53` or `->[::1]:53`.
 LABEL_PEER: Final[re.Pattern] = re.compile(r"->\[?([0-9A-Fa-f:.]+?)\]?:(\d+)$")
 
+# The sockets of avahi and systemd-resolved: nss-mdns and nss-resolve ask them for a name, and
+# they resolve it on the network, so the lookup is as much egress as a DNS packet.
+LOCAL_RESOLVER_SOCKETS: Final[frozenset] = frozenset({
+    f"{run}/{path}"
+    for run in ("/run", "/var/run")
+    for path in ("avahi-daemon/socket", "systemd/resolve/io.systemd.Resolve")
+})
+
+# The bus names a lookup over the system D-Bus is addressed to.
+LOCAL_RESOLVER_BUS_NAMES: Final[tuple[str, ...]] = ("org.freedesktop.resolve1", "org.freedesktop.Avahi")
+
+# A unix socket's descriptor, as `-yy` prints it (`9<UNIX-STREAM:[600->601]>`), or a bare number.
+UNIX_FD: Final[re.Pattern] = re.compile(r"^\d+(?:<UNIX[A-Z-]*:\[.*\]>)?$")
+
 UDP_KINDS: Final[frozenset] = frozenset({"UDP", "UDPv6", "UDPLITE", "UDPLITEv6"})
 
 # `1234 <... execve resumed>) = 0`: the result of a call another process's line interrupted.
@@ -144,6 +158,7 @@ class StraceParser:
         udp_routes = {} if udp_routes is None else udp_routes
         fd, kind, inner = cls.fd_label(rest.split(",", 1)[0].strip())
         udp = kind in UDP_KINDS
+        cls._local_resolver(rest, trace)
         if syscall in ("write", "writev"):
             # Only a UDP socket's payload matters here: a stream's connect was already counted.
             if udp:
@@ -194,6 +209,20 @@ class StraceParser:
                 name = cls.dns_query_name(payload)
                 if name:
                     trace.dns_names[name] = trace.dns_names.get(name, 0) + 1
+
+    @classmethod
+    def _local_resolver(cls, rest: str, trace: EgressTrace) -> None:
+        """Counts a connect or send to avahi's or systemd-resolved's socket, or a D-Bus message to either."""
+        unix = UNIX.search(rest)
+        path = cls.unescape(unix.group(2)).decode("utf-8", "replace") if unix and not unix.group(1) else ""
+        if path in LOCAL_RESOLVER_SOCKETS:
+            trace.local_resolvers[path] = trace.local_resolvers.get(path, 0) + 1
+        elif UNIX_FD.match(rest.split(",", 1)[0].strip()):
+            # A file prints as `3</path>`, an IP socket with its kind: neither carries a bus message.
+            for name in LOCAL_RESOLVER_BUS_NAMES:
+                if name in rest:
+                    label = f"{name} on the D-Bus"
+                    trace.local_resolvers[label] = trace.local_resolvers.get(label, 0) + 1
 
     @classmethod
     def _udp_payload(cls, inner: str, trace: EgressTrace, udp_routes: Dict[str, str]) -> None:

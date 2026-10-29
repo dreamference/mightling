@@ -26,9 +26,19 @@ class EgressTrace:
     dns_names: Dict[str, int] = field(default_factory=dict)
     # Every unix socket path a process connected or sent to.
     unix_sockets: Dict[str, int] = field(default_factory=dict)
+    # Lookups through avahi's or systemd-resolved's unix socket, by its path, or through the
+    # system D-Bus, as `<bus name> on the D-Bus`: they resolve the name on the network.
+    local_resolvers: dict[str, int] = field(default_factory=dict)
     # Every program started, by its file name.
     processes: Dict[str, int] = field(default_factory=dict)
     # git commands that reach a network: `ls-remote`, `fetch`, `clone`, `pull`, `remote-https`.
     networked_git: List[str] = field(default_factory=list)
     # Lines of the trace that were read.
     lines: int = 0
+
+    def local_resolver_problems(self) -> list[str]:
+        """The failure line of every lookup through a local resolver's socket, which each audit judges as DNS."""
+        return [
+            f"asked a local resolver through {socket} ({count}x)"
+            for socket, count in sorted(self.local_resolvers.items())
+        ]
