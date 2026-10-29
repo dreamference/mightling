@@ -524,6 +524,8 @@ fn status_off_linux_names_no_command_that_is_not_there() {
         !elsewhere.contains("ling-admin code setup") && !elsewhere.contains("`ling-code index"),
         "{elsewhere}"
     );
+    // Nothing executes there, trusted or not: trusting the project would enable nothing.
+    assert!(!elsewhere.contains("trust the project"), "{elsewhere}");
     let on_linux = context.status_on(true).join("\n");
     assert!(
         on_linux.contains("universal: not built yet (`ling-code index`)"),
