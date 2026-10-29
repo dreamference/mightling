@@ -132,6 +132,8 @@ def test_a_file_the_toml_parser_refuses_still_names_its_level_as_on_the_rust_sid
         "mixed array": 'mightling_airgapped = "on"\nports = [1, "a"]\n',
         "syntax error": 'mightling_airgapped = "on"\nmodel = \n',
         "comment": 'mightling_airgapped = "On" # set by /airgapped default\n[night]\nbroken =\n',
+        # The parser skips a byte order mark itself; with a syntax error only the line reader is left.
+        "bom and syntax error": '﻿mightling_airgapped = "on"\nmodel = \n',
     }.items():
         cwd = _two_files(tmp_path / name, monkeypatch, None, user_text)
         assert resolve(cwd) == "on", name
