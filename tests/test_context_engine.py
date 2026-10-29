@@ -145,3 +145,20 @@ def test_the_embedding_model_runs_on_the_cpu_with_bounded_inputs(monkeypatch):
     model = embedding_calculator.EmbeddingCalculator._get_model()
     assert made == ["cpu"]
     assert model.max_seq_length == embedding_calculator.MAX_SEQUENCE_TOKENS
+
+
+def test_a_workspace_inside_a_directory_named_like_build_output_is_indexed(tmp_path, monkeypatch):
+    # The ignore list was matched against every part of the absolute path, so a checkout under a
+    # `build/`, `dist/` or `target/` directory indexed nothing at all.
+    from dreamference.context_engine import embedding_calculator
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+    workspace = tmp_path / "build" / "project"
+    (workspace / "target").mkdir(parents=True)
+    (workspace / "target" / "out.rs").write_text("fn main() {}\n")
+    (workspace / "lib.py").write_text("def alpha():\n    pass\n")
+    engine = ContextEngine(workspace_root=str(workspace))
+    assert [p.name for p in engine.collect_files()] == ["lib.py"]
+    engine.index_workspace(force_reindex=True)
+    assert set(engine.indexed_files) == {"lib.py"}
+
