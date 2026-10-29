@@ -396,8 +396,14 @@ pub fn walk_in(
                 *out.skipped.entry("exclude glob not valid").or_default() += 1;
                 continue;
             }
+            // A link is excluded by its own name or by where it points.
+            let target_rel = (path != walked)
+                .then(|| path.strip_prefix(&root).ok())
+                .flatten();
             if include.as_ref().is_some_and(|g| !g.is_match(&rel))
-                || exclude.as_ref().is_some_and(|g| g.is_match(&rel))
+                || exclude
+                    .as_ref()
+                    .is_some_and(|g| g.is_match(&rel) || target_rel.is_some_and(|t| g.is_match(t)))
             {
                 *out.skipped.entry("collection globs").or_default() += 1;
                 continue;
@@ -701,6 +707,25 @@ mod tests {
         let rels: Vec<_> = found.candidates.iter().map(|c| c.rel.clone()).collect();
         assert_eq!(rels, ["private/kept.md"]);
         assert_eq!(found.skipped.get(".lingignore"), Some(&3));
+    }
+
+    #[test]
+    fn an_exclude_glob_keeps_out_a_link_to_what_it_excludes() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("private/x.md"), b"x");
+        write(&root.join("pub/in.md"), b"x");
+        std::os::unix::fs::symlink(root.join("private/x.md"), root.join("pub/x.md")).unwrap();
+        let mut collection = Collection::new("docs", root.clone());
+        collection.follow_symlinks = true;
+        collection.exclude = vec!["private/**".into()];
+        let rels: Vec<_> = walk(&collection, &home, true)
+            .candidates
+            .iter()
+            .map(|c| c.rel.clone())
+            .collect();
+        assert_eq!(rels, ["pub/in.md"]);
     }
 
     #[test]
