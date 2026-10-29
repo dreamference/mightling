@@ -343,9 +343,9 @@ def test_attempts_out_of_time_or_unchanged_leave_no_worktree_and_no_branch(bon, 
     run = NightShiftBestOfN.task_run(
         bon["night"],
         record,
-        NightShiftSettings({"best_of": 3, "task_timeout": "3s"}),
+        NightShiftSettings({"best_of": 3, "task_timeout": "2s"}),
         bon["ling"],
-        time.time() + 3,
+        time.time() + 2,
         model_host="http://x",
     )
     assert run.run() == "no-change"
@@ -354,7 +354,7 @@ def test_attempts_out_of_time_or_unchanged_leave_no_worktree_and_no_branch(bon, 
 
 
 def test_the_window_closing_chooses_among_the_attempts_that_finished(bon, monkeypatch):
-    status, record, _ = run_best_of(bon, monkeypatch, ["good", "hang", "good"], window_s=6)
+    status, record, _ = run_best_of(bon, monkeypatch, ["good", "hang", "good"], window_s=3)
     assert status == "done"
     best = record["result"]["best_of"]
     assert (best["ran"], best["chosen"]) == (2, 1)
@@ -366,7 +366,7 @@ def test_the_window_closing_chooses_among_the_attempts_that_finished(bon, monkey
 
 
 def test_with_no_attempt_finished_the_task_is_interrupted_and_starts_over(bon, monkeypatch):
-    status, record, _ = run_best_of(bon, monkeypatch, ["hang", "good", "good"], window_s=4)
+    status, record, _ = run_best_of(bon, monkeypatch, ["hang", "good", "good"], window_s=3)
     assert status == "interrupted"
     assert record["session"] is None  # nothing to resume: it starts over
     assert branches(bon["repo"]) == []
