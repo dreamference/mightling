@@ -18,7 +18,9 @@ record. `promote <node>` restores the newest set that node holds and makes it th
 after that set are lost from the forge, not from the agents' worktrees, which push again.
 """
 
+import calendar
 import json
+import re
 import shutil
 import sys
 import time
@@ -515,7 +517,13 @@ class ForgeMove:
         """
         removed = []
         for folder in cls.old_data():
-            if time.time() - folder.stat().st_mtime > days * 86400:
+            # A rename keeps the folder's own time, so the stamp in its name says when it went aside.
+            stamp = re.search(r"(\d{8}-\d{6})$", folder.name)
+            try:
+                aside = calendar.timegm(time.strptime(stamp[1], "%Y%m%d-%H%M%S")) if stamp else None
+            except ValueError:
+                aside = None
+            if time.time() - (aside or folder.stat().st_mtime) > days * 86400:
                 shutil.rmtree(folder, ignore_errors=True)
                 removed.append(folder.name)
         return removed
