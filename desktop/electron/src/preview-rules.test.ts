@@ -50,6 +50,8 @@ describe("the preview tab's rules", () => {
     expect(addressOf("gx10-1a2b.local/docs")).toBe("http://gx10-1a2b.local/docs");
     expect(addressOf("example.com")).toBe("https://example.com");
     expect(addressOf("/home/u/site/index.html")).toBe("file:///home/u/site/index.html");
+    expect(addressOf("C:\\Users\\u\\site\\index.html")).toBe("file:///C:/Users/u/site/index.html");
+    expect(addressOf("d:/site/index.html")).toBe("file:///d:/site/index.html");
     expect(addressOf("https://example.com/x")).toBe("https://example.com/x");
     expect(addressOf("  ")).toBeNull();
   });
