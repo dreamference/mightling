@@ -164,3 +164,14 @@ def test_readiness_waiter_warms_the_model_the_server_runs_not_the_configured_one
     monkeypatch.setattr(waiter_module.urllib.request, "urlopen", fake_urlopen)
     assert waiter._pre_warm() is True
     assert asked == ["served/other-model"]
+
+
+def test_continue_keeps_a_config_it_cannot_read_before_writing_its_own(tmp_path, monkeypatch):
+    # Continue reads JSON with comments; json.load cannot, and the user's file was overwritten.
+    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
+    original = '{\n  // my cloud model\n  "allowAnonymousTelemetry": false\n}\n'
+    (tmp_path / ".continue").mkdir()
+    (tmp_path / ".continue" / "config.json").write_text(original, encoding="utf-8")
+
+    ContinueRunner(config=DreamferenceConfig()).ensure_continue_config()
+    assert (tmp_path / ".continue" / "config.json.bak").read_text(encoding="utf-8") == original
