@@ -693,7 +693,6 @@ def test_at_a_terminal_the_password_and_the_updates_are_asked_once_at_the_start(
     assert "terminal" not in logged(tmp_path, "admin.log")
 
 
-
 @pytest.mark.parametrize("failing, reboot", [(("apt-fail", "fwupd-fail"), False), (("apt-fail",), True)])
 def test_the_reboot_is_asked_for_only_when_an_update_went_in(tmp_path, release_server, failing, reboot):
     # Both updates failing used to end with "Reboot now to finish the updates" all the same.
@@ -706,6 +705,7 @@ def test_the_reboot_is_asked_for_only_when_an_update_went_in(tmp_path, release_s
     assert result.returncode == 1, out + result.stderr
     assert "❌ system packages" in out
     assert ("sudo reboot" in out) == reboot, out
+
 
 def test_the_update_question_defaults_to_no(tmp_path, release_server):
     env = {**fresh_gb10(tmp_path), "FAKE_SUDO": "password"}
@@ -811,11 +811,10 @@ def test_an_option_without_its_value_is_named(tmp_path, release_server):
         assert f"{option} needs a value" in result.stderr, result.stderr
 
 
-
 def test_help_under_a_pipe_says_where_the_help_is(tmp_path):
     # Under `curl … | bash -s -- --help` there is no file to read the header from: awk was given
     # `bash` and the script ended with awk's error and exit 2.
-    with open(INSTALL_SH, "rb") as script:
+    with INSTALL_SH.open("rb") as script:
         result = subprocess.run(["bash", "-s", "--", "--help"], stdin=script, cwd=tmp_path, capture_output=True,
                                 text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stderr
@@ -836,6 +835,7 @@ def test_the_docker_group_note_names_sg_only_when_the_model_used_it(tmp_path, re
     assert result.returncode == 0, out + result.stderr
     assert "docker group: tester added" in out and "sg docker" not in out
     assert not logged(tmp_path, "sg.log")
+
 
 def test_the_node_role_needs_the_wheel(tmp_path, release_server):
     # The binaries are placed first; a release with no wheel then stops the node half by name.
