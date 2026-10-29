@@ -97,6 +97,18 @@ pub fn adapter_of(chat: &str) -> &str {
     chat.split(':').next().unwrap_or_default()
 }
 
+/// Whether `adapter`'s messenger carries the conversation off this machine (Telegram, Discord): it
+/// is paused at `/airgapped on`, and typed text there is refused while a repository is current.
+pub fn off_node(adapter: &str) -> bool {
+    matches!(adapter, "telegram" | "discord")
+}
+
+/// The one line an off-node messenger gets at `/airgapped on` instead of an answer.
+pub fn airgap_pause(adapter: &str) -> String {
+    let name = if adapter == "discord" { "Discord" } else { "Telegram" };
+    format!("The air gap is on, so {name} is paused: it would carry this conversation off your machine. Use Matrix, or turn the air gap off on the machine.")
+}
+
 /// A Telegram topic's id in a chat key (`telegram:<chat id>/<topic id>`, MOONSHOT §3.1): each topic
 /// is its own conversation, with its own thread. Other keys have none.
 pub fn topic_of(chat: &str) -> Option<&str> {
@@ -526,18 +538,15 @@ impl Hub {
     pub async fn on_inbound(&mut self, message: Inbound) {
         match message {
             Inbound::Text { chat, text } => {
-                if adapter_of(&chat) == "telegram" && self.airgapped {
-                    self.notice(
-                        &chat,
-                        "The air gap is on, so Telegram is paused: it would carry this conversation off your machine. Use Matrix, or turn the air gap off on the machine.",
-                    );
+                if off_node(adapter_of(&chat)) && self.airgapped {
+                    self.notice(&chat, &airgap_pause(adapter_of(&chat)));
                     return;
                 }
                 let trimmed = text.trim();
-                if adapter_of(&chat) == "telegram"
+                if off_node(adapter_of(&chat))
                     && !trimmed.is_empty()
                     && !trimmed.starts_with('/')
-                    && let Some(repo) = self.active_repo_for_telegram_chat(&chat).await
+                    && let Some(repo) = self.active_repo_for_chat(&chat).await
                 {
                     self.send(Outbound::RepoTypedRefusal { chat, repo });
                     return;
@@ -552,15 +561,12 @@ impl Hub {
                 }
             }
             Inbound::Media { chat, text, attachments, dropped } => {
-                if adapter_of(&chat) == "telegram" && self.airgapped {
-                    self.notice(
-                        &chat,
-                        "The air gap is on, so Telegram is paused: it would carry this conversation off your machine. Use Matrix, or turn the air gap off on the machine.",
-                    );
+                if off_node(adapter_of(&chat)) && self.airgapped {
+                    self.notice(&chat, &airgap_pause(adapter_of(&chat)));
                     return;
                 }
-                if adapter_of(&chat) == "telegram"
-                    && let Some(repo) = self.active_repo_for_telegram_chat(&chat).await
+                if off_node(adapter_of(&chat))
+                    && let Some(repo) = self.active_repo_for_chat(&chat).await
                 {
                     self.send(Outbound::RepoTypedRefusal { chat, repo });
                     return;
@@ -1152,7 +1158,7 @@ impl Hub {
         for report in &reports {
             let (Some(name), Some(text)) = (report.get("name").and_then(Value::as_str), report.get("text").and_then(Value::as_str)) else { continue };
             for chat in &targets {
-                if adapter_of(chat) == "telegram" && self.airgapped {
+                if off_node(adapter_of(chat)) && self.airgapped {
                     continue;
                 }
                 self.send(Outbound::Message { chat: chat.clone(), markdown: format!("**Night Shift's report** ({})\n\n{text}", name.trim_end_matches(".md")) });
@@ -1189,7 +1195,7 @@ impl Hub {
         for notice in value.get("notices").and_then(Value::as_array).cloned().unwrap_or_default() {
             let (Some(seq), Some(text)) = (notice.get("seq").and_then(Value::as_u64), notice.get("text").and_then(Value::as_str)) else { continue };
             for chat in &targets {
-                if adapter_of(chat) == "telegram" && self.airgapped {
+                if off_node(adapter_of(chat)) && self.airgapped {
                     continue;
                 }
                 self.send(Outbound::Notice { chat: chat.clone(), text: format!("{text} (open Other devices in Mightling)") });
@@ -1241,7 +1247,7 @@ impl Hub {
                 }
                 _ => {}
             }
-            if adapter_of(&notice.chat_key) == "telegram" && self.airgapped {
+            if off_node(adapter_of(&notice.chat_key)) && self.airgapped {
                 continue;
             }
             let chat = notice.chat_key.clone();
@@ -1253,12 +1259,15 @@ impl Hub {
         }
     }
 
-    /// Returns the active `RepoName` for `chat` when typed text in Telegram must be refused
+    /// Returns the active `RepoName` for `chat` when typed text in Telegram or Discord must be refused
     /// (`Repo work happens in the app.`):
     /// - when the message is in a repository's topic (`repo-topics.json`), or
     /// - when `/api/repos/current` names a repository for `chat` (cached for 2 s and refreshed on
     ///   `Switched` / `RepoOff`). Ask in a non-repository topic works as before.
-    async fn active_repo_for_telegram_chat(&mut self, chat: &str) -> Option<RepoName> {
+    async fn active_repo_for_chat(&mut self, chat: &str) -> Option<RepoName> {
+        if adapter_of(chat) == "discord" {
+            return self.cached_current_repo(chat).await;
+        }
         let (chat_id, topic) = crate::telegram::target(chat)?;
         if let Some(topic_id) = topic {
             if let Some(repo_str) = crate::store::repo_for_topic(&self.config.dir, chat_id, topic_id)
@@ -1277,8 +1286,8 @@ impl Hub {
         {
             return cached.clone();
         }
-        let chat_param = chat_key.strip_prefix("telegram:")?;
-        let path = format!("/api/repos/current?bridge=telegram&chat={chat_param}");
+        let (bridge, chat_param) = chat_key.split_once(':').filter(|(bridge, _)| off_node(bridge))?;
+        let path = format!("/api/repos/current?bridge={bridge}&chat={chat_param}");
         let repo = self
             .agent
             .web(&path, None)

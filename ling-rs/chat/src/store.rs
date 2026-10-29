@@ -4,6 +4,10 @@
 //! - `matrix.json`: written by `ling-admin matrix` (the homeserver, the bot's account and
 //!   token, the allow-list); the bridge only reads it;
 //! - `matrix-state.json`: the bridge's own Matrix state (`next_batch`, the room per user);
+//! - `discord.json`: the Discord bot token, when the user consented, the application id, and the
+//!   paired Discord user ids with their DM channels (specs/DREAMFERENCE_MIGHTLING_DISCORD.md §5);
+//! - `discord-state.json`: the Gateway session to resume, and the identifies of the last day;
+//! - `discord/pairing/`: pending Discord pairing codes, apart from Telegram's;
 //! - `threads.json`: which thread each chat is on, and its recent threads;
 //! - `pairing/`: pending Telegram pairing codes, under their SHA-256 (the web crate's functions).
 //!
@@ -29,7 +33,7 @@ fn read_json(path: &Path) -> Value {
     std::fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or(Value::Null)
 }
 
-fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
@@ -145,6 +149,116 @@ impl MatrixState {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         write_private(&Self::path(dir), &json!({ "next_batch": self.next_batch, "rooms": self.rooms }).to_string())
     }
+}
+
+/// `discord.json` (DISCORD §5).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DiscordConfig {
+    pub token: String,
+    /// When the user typed `yes` to the privacy warning (seconds since the epoch).
+    pub consented: u64,
+    /// The bot's application id (`GET /applications/@me`): the commands and the interaction
+    /// follow-ups are under it.
+    pub application_id: String,
+    /// Paired Discord user ids (snowflakes, kept as text), each with the DM channel it paired in.
+    pub users: BTreeMap<String, String>,
+}
+
+impl DiscordConfig {
+    pub fn path(dir: &Path) -> PathBuf {
+        dir.join("discord.json")
+    }
+
+    /// The configuration, when Discord is set up.
+    pub fn load(dir: &Path) -> Option<DiscordConfig> {
+        let value = read_json(&Self::path(dir));
+        let token = value.get("token")?.as_str()?.to_string();
+        if token.is_empty() {
+            return None;
+        }
+        Some(DiscordConfig {
+            token,
+            consented: value.get("consented").and_then(Value::as_u64).unwrap_or(0),
+            application_id: value.get("application_id").and_then(Value::as_str).unwrap_or_default().to_string(),
+            users: value
+                .get("users")
+                .and_then(Value::as_object)
+                .map(|users| users.iter().filter_map(|(user, channel)| Some((user.clone(), channel.as_str()?.to_string()))).collect())
+                .unwrap_or_default(),
+        })
+    }
+
+    pub fn save(&self, dir: &Path) -> std::io::Result<()> {
+        let text = json!({ "token": self.token, "consented": self.consented, "application_id": self.application_id, "users": self.users });
+        write_private(&Self::path(dir), &serde_json::to_string_pretty(&text).unwrap_or_default())
+    }
+
+    pub fn new(token: String, application_id: String) -> DiscordConfig {
+        DiscordConfig { token, consented: now_secs(), application_id, users: BTreeMap::new() }
+    }
+
+    /// The paired user whose DM `channel` is, if any.
+    pub fn user_of_channel(&self, channel: &str) -> Option<&str> {
+        self.users.iter().find(|(_, dm)| dm.as_str() == channel).map(|(user, _)| user.as_str())
+    }
+}
+
+/// `discord-state.json`: the Gateway session to resume, and when the bridge identified (DISCORD
+/// §3.1: Discord allows 1,000 identifies a day; the bridge stops past `discord_identify_limit`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DiscordState {
+    pub session_id: Option<String>,
+    pub seq: Option<u64>,
+    pub resume_url: Option<String>,
+    /// Seconds since the epoch of each identify in the last 24 hours.
+    pub identifies: Vec<u64>,
+}
+
+impl DiscordState {
+    pub fn path(dir: &Path) -> PathBuf {
+        dir.join("discord-state.json")
+    }
+
+    pub fn load(dir: &Path) -> DiscordState {
+        let value = read_json(&Self::path(dir));
+        DiscordState {
+            session_id: value.get("session_id").and_then(Value::as_str).map(str::to_string),
+            seq: value.get("seq").and_then(Value::as_u64),
+            resume_url: value.get("resume_url").and_then(Value::as_str).map(str::to_string),
+            identifies: value.get("identifies").and_then(Value::as_array).map(|list| list.iter().filter_map(Value::as_u64).collect()).unwrap_or_default(),
+        }
+    }
+
+    pub fn save(&self, dir: &Path) -> std::io::Result<()> {
+        let text = json!({ "session_id": self.session_id, "seq": self.seq, "resume_url": self.resume_url, "identifies": self.identifies });
+        write_private(&Self::path(dir), &text.to_string())
+    }
+
+    /// Identifies in the 24 hours before `now`, dropping older ones.
+    pub fn identifies_today(&mut self, now: u64) -> usize {
+        self.identifies.retain(|at| now.saturating_sub(*at) < 24 * 60 * 60);
+        self.identifies.len()
+    }
+}
+
+/// Where pending Discord pairing codes live: their own folder, so a Telegram code cannot pair a
+/// Discord account, nor the other way round.
+pub fn discord_pairing_dir(dir: &Path) -> PathBuf {
+    dir.join("discord")
+}
+
+pub fn issue_discord_pairing_code(dir: &Path) -> std::io::Result<String> {
+    private_dir(dir)?;
+    private_dir(&discord_pairing_dir(dir))?;
+    ling_web_server::auth::issue_pairing_code(&discord_pairing_dir(dir))
+}
+
+pub fn take_discord_pairing_code(dir: &Path, code: &str) -> bool {
+    ling_web_server::auth::take_pairing_code(&discord_pairing_dir(dir), code)
+}
+
+pub fn withdraw_discord_pairing_codes(dir: &Path) {
+    ling_web_server::auth::withdraw_pairing_codes(&discord_pairing_dir(dir))
 }
 
 /// A thread a chat started.
@@ -403,6 +517,35 @@ mod tests {
             assert_eq!(std::fs::metadata(TelegramConfig::path(&dir)).unwrap().permissions().mode() & 0o777, 0o600);
             assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
         }
+    }
+
+    #[test]
+    fn discord_round_trips_privately_and_pairs_apart_from_telegram() {
+        let dir = scratch("discord");
+        assert_eq!(DiscordConfig::load(&dir), None);
+        let mut config = DiscordConfig::new("bot-token".to_string(), "1100".to_string());
+        config.users.insert("4242".to_string(), "7777".to_string());
+        config.save(&dir).unwrap();
+        let loaded = DiscordConfig::load(&dir).unwrap();
+        assert_eq!(loaded, config);
+        assert_eq!(loaded.user_of_channel("7777"), Some("4242"));
+        assert_eq!(loaded.user_of_channel("4242"), None);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(DiscordConfig::path(&dir)).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let telegram_code = issue_pairing_code(&dir).unwrap();
+        assert!(!take_discord_pairing_code(&dir, &telegram_code));
+        let code = issue_discord_pairing_code(&dir).unwrap();
+        assert!(!take_pairing_code(&dir, &code));
+        assert!(take_discord_pairing_code(&dir, &code));
+        assert!(!take_discord_pairing_code(&dir, &code));
+        let mut state = DiscordState { identifies: vec![10, 90_000, 100_000], ..DiscordState::default() };
+        assert_eq!(state.identifies_today(100_100), 2);
+        state.session_id = Some("s".to_string());
+        state.save(&dir).unwrap();
+        assert_eq!(DiscordState::load(&dir), state);
     }
 
     #[test]
