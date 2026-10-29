@@ -155,7 +155,12 @@ def test_a_repository_file_names_no_model_server(tmp_path, monkeypatch, capsys):
     user_level = tmp_path / "home" / "config.toml"
     monkeypatch.setattr(config_path_resolver, "GLOBAL_DREAMFERENCE_CONFIG_PATH", user_level)
     repository = tmp_path / "dreamference.toml"
-    for host in ("http://evil.example:8000", "http://localhost:18000", "http://127.0.1.1:8000", "0.0.0.0:8000"):
+    for host in (
+        "http://evil.example:8000",
+        "http://localhost:18000",
+        "http://127.0.1.1:8000",
+        "0.0.0.0:8000",
+    ):
         repository.write_text(f'vllm_host = "{host}"\nmodel = "m"\n')
         config = DreamferenceConfig()
         assert config.vllm_host == "http://localhost:8000"
@@ -220,3 +225,16 @@ def test_this_repository_s_own_file_names_no_network_key():
     own = Path(__file__).resolve().parent.parent / "dreamference.toml"
     if own.exists():
         assert not NETWORK_KEYS & _saved(own).keys()
+
+
+def test_every_reader_ignores_the_same_network_keys():
+    import re
+    from pathlib import Path
+
+    from dreamference.config.dreamference_config import NETWORK_KEYS
+
+    root = Path(__file__).resolve().parent.parent
+    for reader in ("ling-rs/src/lib.rs", "ling-code-rs/src/config.rs"):
+        found = re.search(r"NETWORK_KEYS: &\[&str\] = &\[([^\]]*)\]", (root / reader).read_text())
+        assert found, reader
+        assert set(re.findall(r'"([^"]+)"', found.group(1))) == NETWORK_KEYS, reader
