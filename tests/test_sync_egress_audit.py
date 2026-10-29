@@ -134,3 +134,17 @@ def test_the_cli_runs_it_and_refuses_a_prompt(capsys):
         assert exit_info.value.code == 2
         sync_run.assert_not_called()
     assert "--prompt has no effect with --sync" in capsys.readouterr().out
+
+
+def test_the_sync_and_docs_audits_fail_a_networked_git_command():
+    # Only the session audit judged networked git; a sync cycle or a ling-docs run that started
+    # `git fetch` (one that reached nothing, say) passed.
+    from dreamference.audit import DocsEgressAudit
+    from dreamference.audit.egress_trace import EgressTrace
+
+    trace = EgressTrace(processes={"ling": 1, "git": 1}, networked_git=["git fetch origin"])
+    sync = SyncEgressAudit.judge(trace, PORT, published=True, exec_held=True)
+    docs = DocsEgressAudit.judge(trace, indexed=True, found=True)
+    for verdict in (sync, docs):
+        assert verdict.status == FAIL
+        assert any("git fetch origin" in problem for problem in verdict.problems)

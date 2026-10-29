@@ -146,6 +146,9 @@ class DocsEgressAudit:
             f"asked a resolver for {name} ({count}x)"
             for name, count in sorted(trace.dns_names.items())
         ]
+        problems += [
+            f"ran a git command that reaches a network: {command}" for command in trace.networked_git
+        ]
         if problems:
             return EgressVerdict(FAIL, problems)
         if not trace.processes:
