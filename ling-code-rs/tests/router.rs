@@ -961,3 +961,20 @@ fn layers_exact_answers_from_scip_alone() {
     );
     assert!(!out.contains("layers = exact"), "{out}");
 }
+
+#[test]
+fn a_graph_node_that_ends_before_it_starts_does_not_break_a_location_query() {
+    // codebase-memory stores lines as signed integers; a negative end is read as 0.
+    let f = fixture();
+    rusqlite::Connection::open(&f.graph_db)
+        .unwrap()
+        .execute(
+            "INSERT INTO nodes (project, label, name, qualified_name, file_path, start_line, end_line, properties)
+             VALUES (?1, 'Function', 'odd', 'odd', 'shapes/geometry.py', 12, -1, '{}')",
+            rusqlite::params![f.project],
+        )
+        .unwrap();
+    let (code, out) = f.run(&["refs", "shapes/geometry.py:12"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("shapes/report.py:9"), "{out}");
+}
