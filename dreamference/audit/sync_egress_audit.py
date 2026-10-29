@@ -34,6 +34,8 @@ from dreamference.audit.strace_parser import StraceParser
 
 TRACED_SYSCALLS: Final[str] = "connect,sendto,sendmsg,sendmmsg,execve,write,writev"
 STEP_TIMEOUT_S: Final[int] = 120
+# How a step that ran past STEP_TIMEOUT_S reports itself.
+TIMED_OUT: Final[str] = "did not finish"
 WEB_START_TIMEOUT_S: Final[int] = 30
 # The session name in the result file's name and body, beside `exec`, `tui`, `app`, `web` and `docs`.
 SYNC_SESSION: Final[str] = "sync"
@@ -51,7 +53,12 @@ class SyncEgressAudit:
 
     @classmethod
     def judge(
-        cls, trace: EgressTrace, hub_port: int, published: bool, exec_held: bool
+        cls,
+        trace: EgressTrace,
+        hub_port: int,
+        published: bool,
+        exec_held: bool,
+        finished: bool = True,
     ) -> EgressVerdict:
         """Decides the verdict: the hub's port and nothing else, no DNS, and a cycle that did its work.
 
@@ -60,6 +67,7 @@ class SyncEgressAudit:
             hub_port (int): The throwaway hub's loopback port.
             published (bool): Whether the interactive thread reached the hub.
             exec_held (bool): Whether the `ling exec` session stayed off it.
+            finished (bool): Whether the traced cycle ended before the timeout.
 
         Returns:
             EgressVerdict: The verdict and its reasons.
@@ -87,6 +95,11 @@ class SyncEgressAudit:
             return EgressVerdict(FAIL, problems)
         if not trace.processes:
             return EgressVerdict(TRACE_FAILED, ["strace recorded no process: it could not attach"])
+        if not finished:
+            return EgressVerdict(
+                TRACE_FAILED,
+                [f"the agent cycle did not finish within {STEP_TIMEOUT_S} s, so the trace is cut off"],
+            )
         if not published:
             return EgressVerdict(
                 TRACE_FAILED, ["the agent published nothing, so the trace shows no sync"]
@@ -158,19 +171,32 @@ class SyncEgressAudit:
             str: What it printed, or why it could not run.
         """
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 [ling, *args],
                 cwd=env["HOME"],
                 env=env,
                 stdin=subprocess.DEVNULL,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=STEP_TIMEOUT_S,
-                check=False,
+                start_new_session=True,
             )
-        except (OSError, subprocess.SubprocessError) as error:
+        except OSError as error:
             return str(error)
-        return result.stdout + result.stderr
+        try:
+            stdout, stderr = process.communicate(timeout=STEP_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            # The whole group: killing strace alone left the agent it traced running, untraced.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            return f"{TIMED_OUT} within {STEP_TIMEOUT_S} s"
+        return stdout + stderr
 
     @classmethod
     def trace(cls, ling: str, work_dir: str) -> tuple[EgressTrace, int, bool, bool, dict[str, str]]:
@@ -354,7 +380,8 @@ class SyncEgressAudit:
             trace, port, published, exec_held, outputs = cls.trace(ling, work_dir)
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
-        verdict = cls.judge(trace, port, published, exec_held)
+        finished = not outputs.get("agent", "").startswith(TIMED_OUT)
+        verdict = cls.judge(trace, port, published, exec_held, finished)
         mark = {PASS: "✅", FAIL: "❌"}.get(verdict.status, "⚠️ ")
         CONSOLE.print(f"{mark} Sync egress audit: {verdict.status}")
         for problem in verdict.problems:
