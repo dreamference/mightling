@@ -74,6 +74,8 @@ export class AppServer {
     readline.createInterface({ input: child.stdout }).on("line", (line) => this.incoming(line));
     readline.createInterface({ input: child.stderr }).on("line", (line) => this.events.deliver({ channel: "work://stderr", payload: line }));
     child.once("exit", (code) => this.exited(code));
+    // A server going down closes its input before it exits: a write then fails with EPIPE, which unheard would crash the app (its exit is reported above).
+    child.stdin.on("error", () => undefined);
     child.once("error", (error) => {
       this.events.deliver({ channel: "work://stderr", payload: `could not start ${ling} app-server: ${error.message}` });
       this.exited(null);
