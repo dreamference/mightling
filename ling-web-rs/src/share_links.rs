@@ -201,6 +201,15 @@ pub fn resolve_location(base: &str, location: &str) -> String {
     if lower.starts_with("http://") || lower.starts_with("https://") {
         return location.to_string();
     }
+    // Only a query, or only a fragment, replaces that part of the same address.
+    if location.starts_with('?') || location.starts_with('#') {
+        let end = if location.starts_with('?') {
+            base.find(['?', '#'])
+        } else {
+            base.find('#')
+        };
+        return format!("{}{location}", &base[..end.unwrap_or(base.len())]);
+    }
     let (scheme, rest) = base.split_once("://").unwrap_or(("http", base));
     if let Some(after) = location.strip_prefix("//") {
         return format!("{scheme}://{after}");
