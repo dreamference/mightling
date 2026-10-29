@@ -1011,6 +1011,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ling-airgapped"
+version = "0.1.0"
+
+[[package]]
 name = "ling-docs"
 version = "0.1.0"
 dependencies = [
@@ -1024,6 +1028,7 @@ dependencies = [
  "ignore",
  "image",
  "libc",
+ "ling-airgapped",
  "mail-parser",
  "ort",
  "pdfium-render",

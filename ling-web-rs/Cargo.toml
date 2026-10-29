@@ -21,6 +21,8 @@ path = "src/bin/ling-fetch.rs"
 clap = { version = "4.6.7", features = ["derive"] }
 ego-tree = "0.11"
 encoding_rs = "0.8.42"
+# The air-gap reader, the one every component uses (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §6.5).
+ling-airgapped = { path = "../ling-rs/airgapped" }
 regex = "1.13.1"
 scraper = "0.27.0"
 serde = { version = "1.0.229", features = ["derive"] }
