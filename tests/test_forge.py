@@ -1281,3 +1281,16 @@ def test_a_phone_token_the_forge_does_not_know_is_replaced(
     assert ForgePhone.ensure_account("t")
     # A new account (a forge built afresh) or a refused token: the old file opens nothing.
     assert ForgePhone.token_path().read_text() == ("o" if kept else "n") * 40 + "\n"
+
+
+def test_a_secret_is_on_disk_before_it_replaces_the_old_one(monkeypatch):
+    import os
+
+    events = []
+    real_fsync, real_replace = os.fsync, Path.replace
+    monkeypatch.setattr(os, "fsync", lambda fd: events.append("fsync") or real_fsync(fd))
+    monkeypatch.setattr(
+        Path, "replace", lambda self, target: events.append("replace") or real_replace(self, target)
+    )
+    ForgeSettings.update_state(role="record")
+    assert events[:2] == ["fsync", "replace"], "an empty state.json after a power cut has no role"
