@@ -542,7 +542,10 @@ class DreamferenceCLIController:
             i = 0
             while i < len(argv):
                 token = argv[i]
-                if token.startswith("--"):
+                key, joined, value = token.partition("=")
+                if token.startswith("--") and joined:
+                    flags[key] = value
+                elif token.startswith("--"):
                     if i + 1 < len(argv) and not argv[i + 1].startswith("--"):
                         flags[token] = argv[i + 1]
                         i += 2
