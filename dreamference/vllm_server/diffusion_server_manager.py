@@ -171,7 +171,9 @@ class DiffusionServerManager:
             "-e", f"DREAMFERENCE_DIFFUSION_PORT={port}",
         ]
         if hf_token:
-            cmd.extend(["-e", f"HF_TOKEN={hf_token}"])
+            # By name only: Docker copies the value from the environment start_server gives the
+            # `docker run`, so the token never appears in the command or in `ps`.
+            cmd.extend(["-e", "HF_TOKEN"])
         cmd.extend(["--entrypoint", "python3", docker_image, CONTAINER_SERVICE_PATH])
         return cmd
 
@@ -207,7 +209,8 @@ class DiffusionServerManager:
         # but it is the same image the vLLM launch would pull anyway, so nothing is wasted,
         # merely early. Not worth an ensure_docker_image path.
         cmd = self.build_launch_command(model, main_model, port=port, hf_token=hf_token)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        env = {**os.environ, "HF_TOKEN": hf_token} if hf_token else None
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if result.returncode != 0:
             print(f"⚠️  Diffusion sidecar failed to start: {result.stderr.strip()}")
             return False
