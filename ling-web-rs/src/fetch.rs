@@ -305,8 +305,10 @@ pub fn decode(body: &[u8], content_type: &str, is_html: bool) -> String {
     let encoding = declared
         .and_then(known)
         .or_else(|| {
+            // A `<meta>` that could be read in ASCII is not UTF-16, so, as the HTML standard
+            // says, it means UTF-8 (`output_encoding`).
             if is_html {
-                sniffed().and_then(known)
+                sniffed().and_then(known).map(Encoding::output_encoding)
             } else {
                 None
             }
