@@ -115,7 +115,7 @@ A **prompt** has a name, a core text, and the list of launcher blocks appended t
 |---|---|
 | `ling prompt` or `ling prompt list` | Lists the prompts, one line each, marks the one new sessions get and says where that choice comes from |
 | `ling prompt show [<name>]` | Prints the composed text exactly as a session would receive it, blocks included, and its size |
-| `ling prompt use <name>` | Writes `mightling_prompt = "<name>"` to the configuration file, so new sessions start with it. Says so if `DREAMFERENCE_MIGHTLING_PROMPT` is set and still wins |
+| `ling prompt use <name>` | Writes `mightling_prompt = "<name>"` to the user's configuration file (`DREAMFERENCE_CONFIG_PATH`, else `~/.config/dreamference/config.toml`; never a repository's `./dreamference.toml`, since 2026-10-29), so new sessions start with it. Says so if `DREAMFERENCE_MIGHTLING_PROMPT` is set, or if the file read in this folder names a prompt of its own, and still wins |
 | `DREAMFERENCE_MIGHTLING_PROMPT=<name> ling …` | One launch under that prompt: `ling exec`, a script, a single interactive session |
 
 The launcher intercepts `prompt` as it does `night` and `node`, before Codex parses the command line; it never reaches Codex, and it needs no model server. The price is the one those two already pay: a session cannot be started with the single word `prompt` as its message.

@@ -572,11 +572,10 @@ async fn show(codex_home: &Path, prompt: &Prompt, composed: bool) -> i32 {
     0
 }
 
-/// Writes `mightling_prompt = "<name>"` to the configuration file. Returns the lines and the code.
+/// Writes `mightling_prompt = "<name>"` to the user's configuration file. Returns the lines and the code.
 fn use_prompt(name: &str) -> (Vec<String>, i32) {
-    let path = crate::config_file().or_else(|| {
-        Some(ling_node_locator::home_dir()?.join(".config").join("dreamference").join("config.toml"))
-    });
+    let named = std::env::var("DREAMFERENCE_CONFIG_PATH").ok();
+    let path = choice_file(named.as_deref(), ling_node_locator::home_dir().as_deref());
     let Some(path) = path else {
         return (vec!["Could not find a configuration file to write: HOME is not set.".to_string()], 1);
     };
@@ -600,7 +599,38 @@ fn use_prompt(name: &str) -> (Vec<String>, i32) {
     if std::env::var(ENV_VAR).is_ok_and(|value| !value.trim().is_empty()) {
         lines.push(format!("{ENV_VAR} is set, and it still wins for new sessions."));
     }
+    if let Some(read) = crate::config_file().filter(|read| !crate::compat::same_file(read, &path)) {
+        lines.push(read_here(&read, std::fs::read_to_string(&read).ok().as_deref()));
+    }
     (lines, 0)
+}
+
+/// Where `ling prompt use` writes: the file `DREAMFERENCE_CONFIG_PATH` names, else the user's own
+/// `~/.config/dreamference/config.toml`. Never `./dreamference.toml`, which belongs to the
+/// repository: a user's choice is not the repository's to carry.
+fn choice_file(named: Option<&str>, home: Option<&Path>) -> Option<PathBuf> {
+    match named.filter(|path| !path.is_empty()) {
+        Some(path) => Some(PathBuf::from(path)),
+        None => Some(home?.join(".config").join("dreamference").join("config.toml")),
+    }
+}
+
+/// The notice when `path`, the file sessions started in this folder read, is not the one written:
+/// it shadows the user's file whole, so its own prompt, or the default, is what they get.
+fn read_here(path: &Path, text: Option<&str>) -> String {
+    let value = text
+        .and_then(|text| toml::from_str::<toml::Table>(text).ok())
+        .and_then(|table| table.get(TOML_KEY)?.as_str().map(str::to_string));
+    match value {
+        Some(value) => format!(
+            "{} sets {TOML_KEY} = {value:?}, and it still wins for sessions started in this folder.",
+            path.display()
+        ),
+        None => format!(
+            "Sessions started in this folder read {}, which does not set {TOML_KEY}: they get the default.",
+            path.display()
+        ),
+    }
 }
 
 /// The TOML text with `mightling_prompt` set to `name`, everything else kept as written.
@@ -837,5 +867,26 @@ mod tests {
         assert_eq!(parsed["night"]["prompt"].as_str(), Some("x"));
         let again = with_choice(&updated, "default").unwrap();
         assert_eq!(again.matches(TOML_KEY).count(), 1);
+    }
+
+    #[test]
+    fn use_writes_the_users_own_file_and_never_the_repositorys() {
+        // `ling prompt use` run in a clone wrote the user's choice into the clone's
+        // `./dreamference.toml`, where a commit could carry it to everyone else.
+        let home = Path::new("/tmp/u");
+        let own = home.join(".config").join("dreamference").join("config.toml");
+        assert_eq!(choice_file(None, Some(home)), Some(own.clone()));
+        assert_eq!(choice_file(Some(""), Some(home)), Some(own));
+        assert_eq!(choice_file(Some("/etc/named.toml"), Some(home)), Some(PathBuf::from("/etc/named.toml")));
+        assert_eq!(choice_file(None, None), None);
+        // The repository's file still decides for sessions started in it, and the user is told.
+        let here = Path::new("dreamference.toml");
+        let line = read_here(here, Some("mightling_prompt = \"offline\"\n"));
+        assert!(line.contains("dreamference.toml") && line.contains("\"offline\"") && line.contains("still wins"), "{line}");
+        // Without the key it still shadows the user's file: sessions there get the default.
+        for text in [Some("model = \"m\"\n"), Some("not toml ["), None] {
+            let line = read_here(here, text);
+            assert!(line.contains("dreamference.toml") && line.contains("the default"), "{line}");
+        }
     }
 }
