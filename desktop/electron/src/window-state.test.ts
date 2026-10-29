@@ -16,6 +16,8 @@ describe("restored bounds", () => {
     // Bigger than the display: shrunk to it; smaller than the minimum: grown to it.
     expect(clamped({ x: 0, y: 0, width: 4000, height: 100 }, area, { width: 480, height: 600 })).toEqual({ x: 0, y: 0, width: 1920, height: 600 });
     expect(clamped(undefined, area, { width: 480, height: 600 })).toBeUndefined();
+    // A display smaller than the minimum: the window starts at its corner, its title bar on it.
+    expect(clamped({ x: 900, y: 700, width: 800, height: 700 }, { x: 1920, y: 0, width: 1024, height: 500 }, { width: 480, height: 600 })).toEqual({ x: 1920, y: 0, width: 800, height: 600 });
   });
 });
 

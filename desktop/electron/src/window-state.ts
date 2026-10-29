@@ -28,8 +28,9 @@ export function clamped(bounds: Rectangle | undefined, workArea: Rectangle, min:
   if (!bounds) return undefined;
   const width = Math.max(min.width, Math.min(bounds.width, workArea.width));
   const height = Math.max(min.height, Math.min(bounds.height, workArea.height));
-  const x = Math.min(Math.max(bounds.x, workArea.x), workArea.x + workArea.width - width);
-  const y = Math.min(Math.max(bounds.y, workArea.y), workArea.y + workArea.height - height);
+  // Never left of or above the work area, even when the minimum is bigger than it: the title bar stays reachable.
+  const x = Math.max(workArea.x, Math.min(bounds.x, workArea.x + workArea.width - width));
+  const y = Math.max(workArea.y, Math.min(bounds.y, workArea.y + workArea.height - height));
   return { x, y, width, height };
 }
 
