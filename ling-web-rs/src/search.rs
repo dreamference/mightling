@@ -485,7 +485,11 @@ pub fn from_searxng(
     // An infobox comes first: it is the encyclopedia's summary of the subject, and the one thing a
     // search that only Wikipedia answered has. A web result for the same page is not repeated.
     let infoboxes = infobox_results(payload);
-    let boxed: Vec<String> = infoboxes.iter().map(|result| result.url.clone()).collect();
+    let boxed: Vec<String> = infoboxes
+        .iter()
+        .take(1)
+        .map(|result| result.url.clone())
+        .collect();
     let web = payload["results"]
         .as_array()
         .into_iter()
