@@ -214,3 +214,21 @@ def test_continue_keeps_a_config_it_cannot_read_before_writing_its_own(tmp_path,
 
     ContinueRunner(config=DreamferenceConfig()).ensure_continue_config()
     assert (tmp_path / ".continue" / "config.json.bak").read_text(encoding="utf-8") == original
+
+
+def test_openhands_refuses_a_workspace_whose_path_docker_would_misread(tmp_path, monkeypatch, capsys):
+    # `-v source:target` splits on ':', so docker refused the mount with an error about its mode.
+    from dreamference.runner.openhands_installer import OpenHandsInstaller
+
+    workspace = tmp_path / "a:b"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runner = OpenHandsRunner(config=DreamferenceConfig())
+    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
+    monkeypatch.setattr(OpenHandsInstaller, "is_docker_available", classmethod(lambda cls: True))
+    monkeypatch.setattr(OpenHandsInstaller, "pull_image_if_missing", classmethod(lambda cls: True))
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("no container may start"))
+    monkeypatch.setattr("subprocess.call", lambda *a, **k: pytest.fail("no container may start"))
+
+    assert runner.run_session() == 1
+    assert "':'" in capsys.readouterr().out

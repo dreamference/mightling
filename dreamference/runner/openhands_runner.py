@@ -19,6 +19,9 @@ from dreamference.runner.vllm_readiness_waiter import VLLMReadinessWaiter
 # Where the OpenHands web UI is published on the host: 3001, as since the retired Onyx web UI owned 3000.
 OPENHANDS_HOST_PORT: Final[int] = 3001
 
+# `docker run -v source:target` splits on this, so a workspace path holding it cannot be mounted.
+DOCKER_VOLUME_SEPARATOR: Final[str] = ":"
+
 class OpenHandsRunner:
     """
     Runner class orchestrating OpenHands docker container agent sessions on local GB10 vLLM endpoints.
@@ -34,6 +37,21 @@ class OpenHandsRunner:
         self.config: DreamferenceConfig = config or DreamferenceConfig()
         self.vllm_manager: VLLMServerManager = VLLMServerManager(host=self.config.vllm_host)
 
+    @staticmethod
+    def _refuse(problem: str, hint: str) -> int:
+        """Says why the session cannot start and what to do about it.
+
+        Args:
+            problem (str): What is wrong.
+            hint (str): How to fix it.
+
+        Returns:
+            int: 1, the session's exit code.
+        """
+        print(f"❌ {problem}")
+        print(f"💡 {hint}")
+        return 1
+
     def run_session(self, prompt: Optional[str] = None, debug: bool = False) -> int:
         """
         Ensures local vLLM server is running, checks Docker daemon, pulls OpenHands image,
@@ -46,6 +64,14 @@ class OpenHandsRunner:
         Returns:
             int: Subprocess exit code (0 for success).
         """
+        # Docker would refuse the mount with an error about its mode rather than the path.
+        cwd = os.getcwd()
+        if DOCKER_VOLUME_SEPARATOR in cwd:
+            return self._refuse(
+                f"OpenHands cannot mount {cwd}: Docker reads a ':' in it as a separator.",
+                "Run it from a directory whose path has no ':'.",
+            )
+
         # Step 1: Ensure local vLLM endpoint is online
         waiter = VLLMReadinessWaiter(config=self.config)
         if not self.vllm_manager.check_health() and not waiter.wait_for_vllm():
@@ -53,15 +79,15 @@ class OpenHandsRunner:
 
         # Step 2: Ensure Docker is running
         if not OpenHandsInstaller.is_docker_available():
-            print("❌ Docker daemon is not running or accessible.")
-            print("💡 Start Docker to run OpenHands autonomous agent sessions.")
-            return 1
+            return self._refuse(
+                "Docker daemon is not running or accessible.",
+                "Start Docker to run OpenHands autonomous agent sessions.",
+            )
 
         # Step 3: Pull OpenHands image
         OpenHandsInstaller.pull_image_if_missing()
 
         hf_model = VLLMReadinessWaiter.served_model(self.vllm_manager, self.config.model)
-        cwd = os.getcwd()
         container_name = "dreamference-openhands"
 
         # Remove stale container if present
