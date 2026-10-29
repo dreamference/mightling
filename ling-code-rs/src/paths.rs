@@ -65,8 +65,7 @@ impl Repo {
     /// session runs outside: a symlink planted for the file, or for `.dreamference` itself, would
     /// have it write where the symlink points. Both are refused.
     pub fn state_file(&self, name: &str) -> std::io::Result<std::fs::File> {
-        let named = std::env::var_os("MIGHTLING_CODE_STATE_DIR").is_some();
-        open_state_file(&self.state_dir(), name, !named)
+        state_file_in(&self.state_dir(), name)
     }
 
     /// Where the SCIP stores and their manifest live.
@@ -217,6 +216,12 @@ pub fn no_index_yet(indexing: bool, search: bool) -> String {
         "no code index for this repository yet; {}{meanwhile}",
         run_index_command(indexing, "ling-code index")
     )
+}
+
+/// [`Repo::state_file`] for a state directory already resolved (a plan's).
+pub fn state_file_in(dir: &Path, name: &str) -> std::io::Result<std::fs::File> {
+    let named = std::env::var_os("MIGHTLING_CODE_STATE_DIR").is_some();
+    open_state_file(dir, name, !named)
 }
 
 /// [`Repo::state_file`], for a directory that is refused as a symlink when `refuse_linked_dir`.
