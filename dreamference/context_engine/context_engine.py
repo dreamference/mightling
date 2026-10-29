@@ -126,6 +126,8 @@ class ContextEngine:
         self.tf_idf_index: Dict[str, Dict[str, float]] = {}
         self.idf_table: Dict[str, float] = {}
         self.file_embeddings: Dict[str, np.ndarray] = {}
+        # (mtime_ns, size, inode) of the index file whose contents are held above, else None.
+        self._loaded_stamp: tuple[int, int, int] | None = None
 
     def is_ignored(self, path: Path) -> bool:
         """
@@ -195,6 +197,7 @@ class ContextEngine:
         if not force_reindex and self.load_index():
             return self.get_summary()
 
+        self._loaded_stamp = None  # cleared below: a rebuild that fails leaves them partial
         self.indexed_files.clear()
         self.symbols.clear()
         self.tf_idf_index.clear()
@@ -335,16 +338,32 @@ class ContextEngine:
             with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
             tmp_file.replace(self.index_file)
+            self._loaded_stamp = self._stamp(self.index_file.stat())
         except BaseException:
             tmp_file.unlink(missing_ok=True)
             raise
 
+    @staticmethod
+    def _stamp(stat: os.stat_result) -> tuple[int, int, int]:
+        """What tells one version of the index file from another: `save_index` renames a new file over it."""
+        return stat.st_mtime_ns, stat.st_size, stat.st_ino
+
     def load_index(self) -> bool:
-        """Loads cached index from disk if available."""
-        if not self.index_file.exists():
+        """Loads cached index from disk if available.
+
+        An index already loaded from the same file is not read again: each code search calls this
+        through `index_workspace`, and reading the JSON and every embedding took seconds per query
+        on a large workspace.
+        """
+        try:
+            if self._loaded_stamp == self._stamp(self.index_file.stat()):
+                return True
+        except OSError:
             return False
+        self._loaded_stamp = None  # a load that fails partway leaves the tables partial
         try:
             with open(self.index_file, "r", encoding="utf-8") as f:
+                stamp = self._stamp(os.fstat(f.fileno()))  # the file read, if it is replaced meanwhile
                 data = json.load(f)
             if "tf_idf_index" not in data:
                 return False  # written before the TF-IDF tables were saved: rebuild once
@@ -365,6 +384,7 @@ class ContextEngine:
             self.file_embeddings = self.sqlite_storage.load_embeddings()
             self.idf_table = data.get("idf_table", {})
             self.tf_idf_index = data.get("tf_idf_index", {})
+            self._loaded_stamp = stamp
             return True
         except Exception:
             return False

@@ -97,7 +97,7 @@ Nomic was trained with those task prefixes and retrieves noticeably worse withou
 
 ## 4. Cache Behavior
 
-- **Without `--force`:** if `context_index.json` exists, `load_index()` restores the symbols, the file metadata and the TF-IDF tables, reads the file vectors back from `embeddings`, and returns the summary immediately. No files are re-read.
+- **Without `--force`:** if `context_index.json` exists, `load_index()` restores the symbols, the file metadata and the TF-IDF tables, reads the file vectors back from `embeddings`, and returns the summary immediately. No files are re-read. An engine that already holds what that `context_index.json` contains (same modification time, size and inode) does not read it again, so each code search does not re-read the index.
 - **A JSON without `tf_idf_index`** was written before the tables were saved, and is treated as absent: it is rebuilt once.
 - **With `--force`**, or when there is no JSON: a full re-index.
 - **Locations:**

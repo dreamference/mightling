@@ -356,3 +356,33 @@ def test_an_index_run_that_fails_midway_leaves_the_previous_database_whole(tmp_p
     finally:
         conn.close()
     assert engine.index_file.read_bytes() == before
+
+
+def test_a_loaded_index_is_not_read_again_until_its_file_changes(tmp_path, monkeypatch):
+    # Every code search runs `index_workspace()`, which re-read the whole JSON and every stored
+    # embedding: seconds per query on a large workspace for an index that had not changed.
+    import json
+
+    from dreamference.context_engine import context_engine, embedding_calculator
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+    (tmp_path / "a.py").write_text("def alpha():\n    pass\n")
+    builder = ContextEngine(workspace_root=str(tmp_path))
+    builder.index_workspace(force_reindex=True)
+
+    reads = []
+    real_load = json.load
+    monkeypatch.setattr(context_engine.json, "load", lambda f: reads.append(1) or real_load(f))
+    builder.index_workspace()
+    assert reads == []  # the engine that wrote the file already holds what is in it
+
+    searcher = ContextEngine(workspace_root=str(tmp_path))
+    for _ in range(2):
+        searcher.index_workspace()
+        assert searcher.search_code("alpha")[0]["rel_path"] == "a.py"
+    assert len(reads) == 1
+
+    (tmp_path / "b.py").write_text("def beta():\n    pass\n")
+    builder.index_workspace(force_reindex=True)  # another process re-indexed
+    searcher.index_workspace()
+    assert len(reads) == 2 and searcher.search_code("beta")[0]["rel_path"] == "b.py"
