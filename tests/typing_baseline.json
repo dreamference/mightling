@@ -9,9 +9,6 @@
    "attr-defined": 4,
    "list-item": 2
   },
-  "dreamference/hardware/model_downloader.py": {
-   "assignment": 1
-  },
   "dreamference/runner/cline_runner.py": {
    "list-item": 1
   },
@@ -43,5 +40,5 @@
   }
  },
  "mypy": "2.4.0",
- "total": 58
+ "total": 57
 }
