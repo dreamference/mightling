@@ -481,10 +481,11 @@ pub fn validate(dir: &Path) -> Result<Staged, String> {
         ));
     }
     let files = files_of(dir);
-    // Codex searches a skills folder to any depth, so a `SKILL.md` deeper down would be offered as
-    // a skill of its own that ling skill list, disable and the catalogue budget never see.
+    // Codex searches a skills folder to any depth, so a `SKILL.md` deeper down is offered as a skill
+    // of its own that ling skill list, disable and the catalogue budget never see. One in a hidden
+    // folder, which Codex skips today, is refused as well.
     if let Some((nested, _)) = files.iter().find(|(file, _)| file.rsplit('/').next() == Some("SKILL.md") && file != "SKILL.md") {
-        return Err(format!("refused: {nested} would be offered as a skill of its own"));
+        return Err(format!("refused: {nested} is a second skill inside this one"));
     }
     Ok(Staged { dir: dir.to_path_buf(), name, frontmatter, files })
 }
@@ -1003,7 +1004,7 @@ mod tests {
             std::fs::write(folder.join("SKILL.md"), SKILL).unwrap_or_default();
             std::fs::write(folder.join(nested).join("SKILL.md"), SKILL).unwrap_or_default();
             let result = validate(&folder);
-            assert!(result.as_ref().is_err_and(|error| error.contains(&format!("{nested}/SKILL.md would be offered"))), "{result:?}");
+            assert!(result.as_ref().is_err_and(|error| error.contains(&format!("{nested}/SKILL.md is a second skill"))), "{result:?}");
         }
     }
 
