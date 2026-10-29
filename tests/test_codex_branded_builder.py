@@ -29,6 +29,9 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
     session = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "history_cell" / "session.rs").read_text()
     assert '"OpenAI Codex"' not in session and '"Mightling"' in session
+    # The plugin catalog's section label is what "<label> unavailable." shows when the section fails.
+    requests = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "app" / "background_requests.rs").read_text()
+    assert '"vertical",\n            "Curated",' in requests
     # The launcher crate is copied in from ling-rs/ and reached through one dependency line.
     assert (tmp_path / "src" / "codex-rs" / "ling" / "src" / "lib.rs").is_file()
     cli_manifest = (tmp_path / "src" / "codex-rs" / "cli" / "Cargo.toml").read_text()
@@ -37,12 +40,49 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert "ling_launcher::parse::<MultitoolCli>().await?" in cli_main
     # The exit summary's "To continue this session, run: codex resume <id>" names ling (1.7.1:
     # found by a capture of a session's end); `codex/` itself is never changed.
-    assert 'println!("{}", line.replace("codex resume", "ling resume"));' in cli_main
+    assert (
+        'println!("{}", line.replace("codex resume", "ling resume")'
+        '.replace("codex --remote", "ling --remote").replace("codex agents", "ling agents"));'
+    ) in cli_main
     assert 'println!("{line}");\n        }\n    }\n    if is_fatal' not in cli_main
     status = subprocess.run(
         ["git", "-C", CODEX_SUBMODULE_DIR, "status", "--porcelain"], capture_output=True, text=True
     )
     assert status.stdout == ""
+
+
+def test_the_patches_apply_to_an_export_inside_another_git_repository(tmp_path, monkeypatch):
+    # Run from a folder inside a repository, `git apply` resolves the patch's paths from that
+    # repository's top and silently skips every hunk outside the folder: the export came out
+    # unpatched and prepare_source still said it succeeded (found 2026-10-29, exporting into a
+    # worktree). Here a stand-in submodule and patch, the export inside an unrelated repository.
+    def git(*args, cwd):
+        subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+                       cwd=cwd, check=True, capture_output=True)
+
+    submodule = tmp_path / "codex"
+    (submodule / "codex-rs").mkdir(parents=True)
+    (submodule / "codex-rs" / "main.rs").write_text("codex\n")
+    git("init", "-q", cwd=submodule)
+    git("add", "-A", cwd=submodule)
+    git("commit", "-q", "-m", "pin", cwd=submodule)
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=submodule, capture_output=True, text=True).stdout.strip()
+    patch_file = tmp_path / "0001-brand.patch"
+    patch_file.write_text("diff --git a/codex-rs/main.rs b/codex-rs/main.rs\n--- a/codex-rs/main.rs\n"
+                          "+++ b/codex-rs/main.rs\n@@ -1 +1 @@\n-codex\n+ling\n")
+    crate = tmp_path / "ling-rs"
+    crate.mkdir()
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    git("init", "-q", cwd=outer)
+    monkeypatch.setattr(builder_module, "CODEX_SUBMODULE_DIR", str(submodule))
+    monkeypatch.setattr(builder_module, "MIGHTLING_CRATE_DIR", str(crate))
+    monkeypatch.setattr(CodexBrandedBuilder, "source_commit", classmethod(lambda cls: commit))
+    monkeypatch.setattr(CodexBrandedBuilder, "patches", classmethod(lambda cls: [str(patch_file)]))
+    monkeypatch.setattr(CodexBrandedBuilder, "stamp_version", classmethod(lambda cls, manifest, version: True))
+
+    assert CodexBrandedBuilder.prepare_source(str(outer / "export"))
+    assert (outer / "export" / "codex-rs" / "main.rs").read_text() == "ling\n"
 
 
 def test_the_codex_submodule_is_committed_as_a_submodule():
@@ -168,6 +208,26 @@ def test_airgapped_treats_every_profile_without_a_sandbox_like_full_access():
     app_server = texts["0023-airgapped-app-server.patch"]
     assert "permission_refusal(matches!(p, PermissionProfile::Disabled)" not in app_server
     assert "permission_refusal(" + no_sandbox + "p)" in app_server
+
+
+def test_the_exit_summary_names_ling_in_every_command_it_prints():
+    # Codex's exit summary prints `codex resume`, and for a task left running on a daemon or a
+    # remote server also `codex --remote <address> resume` and `codex agents`; the CLI prints it
+    # (patch 0001) with each command renamed, so none of them sends the user to a missing binary.
+    import re
+    cli = Path(next(p for p in CodexBrandedBuilder.patches() if Path(p).name.startswith("0001-"))).read_text()
+    line = next(
+        line
+        for line in cli.splitlines()
+        if line.startswith("+") and "format_exit_messages" not in line and "line.replace(" in line
+    )
+    printed = (
+        "Reconnect: codex --remote ws://server:80/ resume 1. Stop the current turn: run codex agents. "
+        "Or run codex resume."
+    )
+    for old, new in re.findall(r'replace\("([^"]*)", "([^"]*)"\)', line):
+        printed = printed.replace(old, new)
+    assert "codex" not in printed
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

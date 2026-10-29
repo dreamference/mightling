@@ -12,7 +12,7 @@ diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
 @@ -757,3 +758,3 @@
          for line in exit_info.format_exit_messages(color_enabled) {
 -            println!("{line}");
-+            println!("{}", line.replace("codex resume", "ling resume"));
++            println!("{}", line.replace("codex resume", "ling resume").replace("codex --remote", "ling --remote").replace("codex agents", "ling agents"));
          }
 @@ -2693,3 +2694,3 @@
      let mut app = MultitoolCli::command();
@@ -144,3 +144,27 @@ diff --git a/codex-rs/tui/src/startup_draft.rs b/codex-rs/tui/src/startup_draft.
 -            placeholder_text: "Ask Codex to do anything".to_string(),
 +            placeholder_text: "Ask Mightling to do anything".to_string(),
              disable_paste_burst: false,
+diff --git a/codex-rs/tui/src/app/agents_overview.rs b/codex-rs/tui/src/app/agents_overview.rs
+--- a/codex-rs/tui/src/app/agents_overview.rs
++++ b/codex-rs/tui/src/app/agents_overview.rs
+@@ -99,3 +99,3 @@
+                         description: Some(
+-                            "Open `codex agents` in another terminal afterward".to_string(),
++                            "Open `ling agents` in another terminal afterward".to_string(),
+                         ),
+diff --git a/codex-rs/tui/src/app/event_dispatch.rs b/codex-rs/tui/src/app/event_dispatch.rs
+--- a/codex-rs/tui/src/app/event_dispatch.rs
++++ b/codex-rs/tui/src/app/event_dispatch.rs
+@@ -2731,3 +2731,3 @@
+                 Ok(()) => self.chat_widget.add_info_message(
+-                    "Background server started. Run `codex agents` in another terminal; this session remains unchanged."
++                    "Background server started. Run `ling agents` in another terminal; this session remains unchanged."
+                         .to_string(),
+diff --git a/codex-rs/tui/src/app/thread_goal_actions.rs b/codex-rs/tui/src/app/thread_goal_actions.rs
+--- a/codex-rs/tui/src/app/thread_goal_actions.rs
++++ b/codex-rs/tui/src/app/thread_goal_actions.rs
+@@ -19,3 +19,3 @@
+     "Goals need a saved session. This session is temporary.\n",
+-    "Run `codex` to start a saved session, or `codex resume` / `/resume` to reopen one.",
++    "Run `ling` to start a saved session, or `ling resume` / `/resume` to reopen one.",
+ );
