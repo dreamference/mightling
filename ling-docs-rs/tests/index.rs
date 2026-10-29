@@ -1852,3 +1852,27 @@ fn an_extractor_change_reads_only_its_kind_again_and_embeds_only_changed_chunks(
     index::run(&env, &docs, None, false).unwrap();
     assert!(host.started.lock().unwrap().is_empty());
 }
+
+#[test]
+fn indexing_one_disabled_collection_says_it_is_disabled() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    std::fs::create_dir_all(home.join("Documents")).unwrap();
+    let mut docs = DocsToml::default();
+    docs.ensure_defaults(&home);
+    docs.collections[0].enabled = false;
+    let host = LocalHost {
+        dir: home.join("locks"),
+        started: Mutex::new(Vec::new()),
+    };
+    let env = env(&host, &home, exe());
+    let error = index::run(&env, &docs, Some("documents"), false)
+        .expect_err("a disabled collection is not indexed in silence")
+        .to_string();
+    assert!(error.contains("`documents` is disabled"), "{error}");
+    let error = index::run(&env, &docs, Some("nothing"), false)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("no collection named `nothing`"), "{error}");
+    assert!(host.started.lock().unwrap().is_empty());
+}

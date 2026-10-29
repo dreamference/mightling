@@ -140,8 +140,12 @@ pub fn run(
         out.push((collection.name.clone(), outcome));
     }
     if let Some(name) = only {
-        if docs.get(name).is_none() {
-            bail!("no collection named `{name}`");
+        match docs.get(name) {
+            None => bail!("no collection named `{name}`"),
+            Some(c) if !c.enabled => {
+                bail!("the collection `{name}` is disabled (enabled = false in docs.toml)")
+            }
+            Some(_) => {}
         }
     }
     Ok(out)
