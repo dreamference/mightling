@@ -33,6 +33,14 @@ describe("a project's knowledge files", () => {
     expect((await removeKnowledge(home, "p-1", "style.md")).map((file) => file.name)).toEqual(["style (2).md"]);
   });
 
+  it("number a name taken while they are copied, as when two adds run at once", async () => {
+    const home = folder();
+    const source = folder();
+    fs.writeFileSync(path.join(source, "style.md"), "# Style\n");
+    await Promise.all([addKnowledge(home, "p-1", [path.join(source, "style.md")]), addKnowledge(home, "p-1", [path.join(source, "style.md")])]);
+    expect((await listKnowledge(home, "p-1")).map((file) => file.name)).toEqual(["style (2).md", "style.md"]);
+  });
+
   it("refuse a folder, a link, a name with a folder in it and a project id that is not one", async () => {
     const home = folder();
     const source = folder();

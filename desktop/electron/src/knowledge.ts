@@ -67,10 +67,18 @@ export async function addKnowledge(codexHome: string, projectId: string, sources
     if (stats.size > KNOWLEDGE_FILE_LIMIT) throw new Error(`${path.basename(source)} is larger than ${KNOWLEDGE_FILE_LIMIT / (1024 * 1024)} MB`);
     const extension = path.extname(source);
     const stem = path.basename(source, extension).replace(/^\.+/, "") || "file";
-    let name = `${stem}${extension}`;
-    for (let count = 2; taken.has(name); count++) name = `${stem} (${count})${extension}`;
-    taken.add(name);
-    await userFs.copyFile(source, path.join(folder, name));
+    // a name can be taken after the folder was listed (another add at once): the copy never replaces, so number on
+    for (let count = 1; ; count++) {
+      const name = count === 1 ? `${stem}${extension}` : `${stem} (${count})${extension}`;
+      if (taken.has(name)) continue;
+      taken.add(name);
+      try {
+        await userFs.copyFile(source, path.join(folder, name));
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    }
   }
   return listKnowledge(codexHome, projectId);
 }
