@@ -308,8 +308,16 @@ class ContextEngine:
             "idf_table": self.idf_table,
             "tf_idf_index": self.tf_idf_index,
         }
-        with open(self.index_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        # Written beside it and renamed over it: rewritten in place, a reader (`ling-admin mcp`,
+        # the web canvas) could find it half-written, and `load_index` failing means a re-index.
+        tmp_file = self.index_file.with_name(f".{self.index_file.name}.{os.getpid()}.tmp")
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp_file, self.index_file)
+        except BaseException:
+            tmp_file.unlink(missing_ok=True)
+            raise
 
     def load_index(self) -> bool:
         """Loads cached index from disk if available."""

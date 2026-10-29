@@ -179,3 +179,28 @@ def test_the_full_text_score_is_highest_for_the_strongest_match(tmp_path):
     conn.close()
     scores = storage.search_fts(["alpha"], top_k=5)
     assert scores["strong.py"] > scores["weak.py"] > 0
+
+
+def test_a_failed_index_save_leaves_the_previous_index_whole(tmp_path, monkeypatch):
+    # `context_index.json` was rewritten in place: a reader (`ling-admin mcp`, the web canvas's
+    # status) catching it half-written, or a kill mid-write, found unreadable JSON, and `load_index`
+    # failing means a full re-index beside the model server.
+    from dreamference.context_engine import context_engine, embedding_calculator
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+    (tmp_path / "a.py").write_text("def alpha():\n    pass\n")
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_workspace(force_reindex=True)
+    before = engine.index_file.read_bytes()
+
+    def dump_then_die(data, handle, **kwargs):
+        handle.write('{"workspace_root": ')
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(context_engine.json, "dump", dump_then_die)
+    try:
+        engine.save_index()
+    except OSError:
+        pass
+    assert engine.index_file.read_bytes() == before
+    assert sorted(p.name for p in engine.dreamference_dir.iterdir()) == ["context.db", "context_index.json"]
