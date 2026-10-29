@@ -220,20 +220,22 @@ class MCPServer:
         """Synchronous wrapper around execute_tool_async."""
         return asyncio.run(self.execute_tool_async(tool_name, args))
 
-    async def run_stdio_async(self) -> None:
+    async def run_stdio_async(self, reader: asyncio.StreamReader | None = None) -> None:
         """
         Runs non-blocking JSON-RPC stdio event loop reading stdin and writing responses to stdout.
+
+        Args:
+            reader (asyncio.StreamReader | None): Where requests come from; stdin by default.
         """
-        loop = asyncio.get_running_loop()
-        reader = asyncio.StreamReader(limit=LINE_LIMIT)
-        protocol = asyncio.StreamReaderProtocol(reader)
-        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+        if reader is None:
+            loop = asyncio.get_running_loop()
+            reader = asyncio.StreamReader(limit=LINE_LIMIT)
+            protocol = asyncio.StreamReaderProtocol(reader)
+            await loop.connect_read_pipe(lambda: protocol, sys.stdin)
 
         while True:
-            try:
-                line_bytes = await reader.readline()
-            except ValueError:
-                # Longer than LINE_LIMIT: the reader has dropped what it held of it.
+            line_bytes = await self._read_line(reader)
+            if line_bytes is None:
                 self._write({"jsonrpc": "2.0", "id": None,
                              "error": {"code": -32700, "message": "Parse error: line too long"}})
                 continue
@@ -260,6 +262,30 @@ class MCPServer:
                         "error": {"code": -32603, "message": f"Internal error: {e}"}}
             if not is_notification:
                 self._write(resp)
+
+    @staticmethod
+    async def _read_line(reader: asyncio.StreamReader) -> bytes | None:
+        """Reads one line, skipping a line longer than the reader's limit whole.
+
+        `readline()` drops an over-long line whole only when its newline is already buffered;
+        otherwise it drops what it holds, and each later piece of that line came back as a line
+        of its own, each one a parse error with no id.
+
+        Returns:
+            bytes | None: The line; b"" at the end of the input; None for a line over the limit.
+        """
+        too_long = False
+        while True:
+            try:
+                line = await reader.readuntil(b"\n")
+            except asyncio.IncompleteReadError as e:
+                line = e.partial  # the input ended: its last line without a newline, or b""
+            except asyncio.LimitOverrunError as e:
+                # Left in the buffer by `readuntil`: dropped, and the reading goes on to the line's end.
+                await reader.readexactly(e.consumed)
+                too_long = True
+                continue
+            return None if too_long else line
 
     @staticmethod
     def _write(message: Dict[str, Any]) -> None:

@@ -248,3 +248,33 @@ def test_null_params_and_arguments_are_read_as_empty():
     assert "open_files" in json.loads(reply["result"]["content"][0]["text"])
     reply = server.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": None})
     assert "not implemented" in json.loads(reply["result"]["content"][0]["text"])["error"]
+
+
+def test_a_line_over_the_limit_is_one_parse_error_whether_or_not_its_end_has_arrived():
+    # `readline()` drops an over-long line whole only when its newline is already buffered; when it
+    # is not, it drops what it holds, and each later piece of the same line came back as a line of
+    # its own: one request, several parse errors with no id.
+    import asyncio
+
+    replies: list = []
+    server = MCPServer()
+    server._write = replies.append  # type: ignore[method-assign]
+    long = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {"pad": "x" * 300}}).encode()
+    ping = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}).encode()
+
+    async def drive(chunks: list) -> None:
+        reader = asyncio.StreamReader(limit=64)
+        task = asyncio.create_task(server.run_stdio_async(reader))
+        for chunk in chunks:
+            reader.feed_data(chunk)
+            for _ in range(5):
+                await asyncio.sleep(0)
+        reader.feed_eof()
+        await task
+
+    for chunks in ([long[:100], long[100:200], long[200:] + b"\n" + ping + b"\n"],  # end not yet there
+                   [long + b"\n" + ping + b"\n"]):  # all of it at once
+        replies.clear()
+        asyncio.run(drive(chunks))
+        assert [r.get("id") for r in replies] == [None, 2]
+        assert replies[0]["error"]["code"] == -32700 and replies[1]["result"] == {}
