@@ -182,6 +182,12 @@ describe("the policy", () => {
     expect(() => vet({})).toThrow(/must list its migrationItems/);
   });
 
+  it("refuses window tools not given as a list of names", () => {
+    const start = (tools: unknown) => vetOutgoing({ id: 1, method: "thread/start", params: { [POLICY.windowToolsField]: tools } }, new Set(), PLAIN);
+    expect(() => start("x")).toThrow(/must list tool names/);
+    expect(() => start([5])).toThrow(/must list tool names/);
+  });
+
   it("refuses a reason for a request not refused at on", () => {
     const file = JSON.parse(fs.readFileSync(path.join(WEB, "policy.json"), "utf8"));
     expect(() => parsePolicy({ ...file, airgappedRefusalReasons: { "thread/list": "no" } })).toThrow();
