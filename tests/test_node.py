@@ -826,7 +826,10 @@ def test_pairing_checks_that_the_machine_that_answered_is_the_advertised_node(mo
     monkeypatch.setattr(
         NodePairing,
         "authorize_on_node",
-        classmethod(lambda cls, record, public_key: sent.append(public_key) or True),
+        classmethod(lambda cls, record, public_key, identity=None: sent.append(public_key) or True),
+    )
+    monkeypatch.setattr(
+        NodePairing, "ssh_config", classmethod(lambda cls, host: (None, NodePairing.key_path()))
     )
     answers = {"info": json.dumps({"node": "2222-bbbb", "linger": False})}
     monkeypatch.setattr(
@@ -907,11 +910,12 @@ def test_node_add_takes_the_user_from_ssh_config_before_the_local_user(monkeypat
     monkeypatch.setattr(subprocess, "run", _ssh_stand_in(calls))
     assert NodePairing.add("spark-2") is True
     assert NodePairing.paired()[0]["user"] == getpass.getuser()
-    # --user wins over both, and ssh -G is not asked for a user.
+    # --user wins over both; ssh -G is still asked for the name's key, never for the address's.
     calls.clear()
     monkeypatch.setattr(subprocess, "run", _ssh_stand_in(calls, ssh_g="user remote-acct\n"))
     assert NodePairing.add("spark-2", user="given") is True
-    assert NodePairing.paired()[0]["user"] == "given" and ["ssh", "-G", "spark-2"] not in calls
+    assert NodePairing.paired()[0]["user"] == "given"
+    assert [call for call in calls if call[:2] == ["ssh", "-G"]] == [["ssh", "-G", "spark-2"]]
 
 
 def test_node_add_names_the_user_tried_when_the_login_is_refused(monkeypatch, capsys):

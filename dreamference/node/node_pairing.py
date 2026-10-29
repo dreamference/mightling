@@ -425,8 +425,10 @@ class NodePairing:
             # Not advertised, or its multicast does not reach this machine: pair by address,
             # reading the node's id over one login (specs/DREAMFERENCE_MIGHTLING_FLEET.md §7.6).
             return cls.add_by_login(name, user, ssh_port)
-        # The user `~/.ssh/config` gives the name typed, before this machine's own user name.
-        user = user or cls.ssh_config(name)[0] or getpass.getuser()
+        # The user and the key `~/.ssh/config` gives the name typed (the browse answers with an
+        # address, which the config does not name), before this machine's own user name.
+        configured_user, identity = cls.ssh_config(name)
+        user = user or configured_user or getpass.getuser()
         public_key = cls.ensure_key()
         if public_key is None:
             print("❌ ssh-keygen could not create the pairing key.")
@@ -442,7 +444,7 @@ class NodePairing:
         print(
             f"🔑 Pairing with {record['name']} ({record['address']}). Its password is asked once, by ssh."
         )
-        if not cls.authorize_on_node(record, public_key):
+        if not cls.authorize_on_node(record, public_key, identity):
             print("❌ The node did not authorise the key.")
             return False
         cls._save(record)
@@ -599,20 +601,24 @@ class NodePairing:
         return True
 
     @classmethod
-    def authorize_on_node(cls, record: dict[str, Any], public_key: str) -> bool:
+    def authorize_on_node(
+        cls, record: dict[str, Any], public_key: str, identity: Path | None = None
+    ) -> bool:
         """Sends the public key to the node's `ling-admin node authorize`, over an ordinary SSH
         login (password or the user's own key), which writes the restricted line.
 
         Args:
             record: The node's record.
             public_key: The key to authorise.
+            identity: The key to log in with; by default the one `~/.ssh/config` gives the
+                record's address.
 
         Returns:
             bool: True if the node reported success.
         """
         command = [
             "ssh",
-            *cls.identity_options(cls.ssh_config(record["address"])[1]),
+            *cls.identity_options(identity or cls.ssh_config(record["address"])[1]),
             "-p",
             str(record.get("ssh_port") or 22),
             "-o",
