@@ -10,6 +10,7 @@ test's own HOME, because the argv is the thing worth testing there.
 
 import base64
 import contextlib
+import datetime
 import hashlib
 import io
 import json
@@ -27,7 +28,7 @@ import urllib.request
 
 import pytest
 
-from dreamference.node import NodeServiceFile
+from dreamference.node import NodeAdvertiser, NodeServiceFile
 from dreamference.remote import (
     RemoteAccess,
     RemoteBox,
@@ -2139,3 +2140,124 @@ def test_a_value_that_holds_another_placeholder_stays_inside_its_quotes(tmp_path
 
     assert not (tmp_path / "PWN").exists()
     assert done.stdout.splitlines() == ["k@PEER@", "p@SSH_USER@", "u; touch PWN #"]
+
+
+def test_the_box_opens_exactly_the_four_public_ports_in_either_firewall():
+    text = RemoteBox.install_script("amd64", "apt")
+    ports = ["443/tcp", "33080/tcp", "33080/udp", "3478/udp"]
+    ufw = [line.split()[2] for line in text.splitlines() if line.startswith("  ufw allow ")]
+    firewalld = [
+        line.split("--add-port=")[1]
+        for line in text.splitlines()
+        if line.startswith("  firewall-cmd --quiet --permanent --add-port=")
+    ]
+    assert ufw == ports and firewalld == ports
+    assert "9090" not in text, "management's metrics are never opened on the box"
+
+
+def test_the_renewal_runs_with_a_random_delay_at_low_priority():
+    units = RemotePublicCertificate.timer_units()
+    assert "Nice=10" in units["mightling-remote-certificate.service"]
+    assert "RandomizedDelaySec=45min" in units["mightling-remote-certificate.timer"]
+
+
+def test_status_warns_when_a_certificate_has_under_30_days_left(monkeypatch, capsys):
+    _public_set_up()
+    monkeypatch.setattr(
+        RemoteBox,
+        "unit_states",
+        classmethod(lambda cls, d, ssh_to=None: {"haproxy": "active", "relay": "active"}),
+    )
+    monkeypatch.setattr(RemoteTunnel, "state", classmethod(lambda cls: "active"))
+    monkeypatch.setattr(RemoteControlPlane, "running", classmethod(lambda cls: True))
+    monkeypatch.setattr(RemoteControlPlane, "peers", classmethod(lambda cls, d, t: PEERS))
+    monkeypatch.setattr(
+        RemoteBox,
+        "check_public_port",
+        classmethod(lambda cls, d, ca: {"own": "verified", "other": "closed"}),
+    )
+    monkeypatch.setattr(RemotePublicCertificate, "timer_state", classmethod(lambda cls: "active"))
+    days = [10]
+    monkeypatch.setattr(
+        RemoteCertificateAuthority,
+        "expiry",
+        classmethod(
+            lambda cls, c: datetime.datetime.fromtimestamp(time.time() + days[0] * 86400 + 3600)
+        ),
+    )
+    monkeypatch.setattr(
+        RemotePublicCertificate,
+        "describe",
+        classmethod(lambda cls, c: {"issuer": "Let's Encrypt E8", "days": days[0]}),
+    )
+    RemoteAccess.status()
+    out = capsys.readouterr().out
+    assert "valid 10 more days  ⚠️ run `ling-admin remote setup` to reissue" in out
+    assert "valid 10 more days  ⚠️ due: ling-admin remote certificate renew" in out
+    days[0] = 30
+    RemoteAccess.status()
+    assert "⚠️" not in capsys.readouterr().out
+
+
+def test_revoke_takes_a_peers_full_overlay_name(monkeypatch):
+    _set_up()
+    deleted = []
+    monkeypatch.setattr(RemoteControlPlane, "peers", classmethod(lambda cls, d, t: PEERS))
+    monkeypatch.setattr(
+        RemoteControlPlane,
+        "delete_peer",
+        classmethod(lambda cls, d, t, p: deleted.append(p) or True),
+    )
+    assert RemoteAccess.revoke("laptop-2.netbird.selfhosted") == 0 and deleted == ["p2"]
+    assert RemoteAccess.revoke(f"mightling-{NODE_ID}.netbird.selfhosted") == 1
+    assert deleted == ["p2"], "the node itself is not revoked by its overlay name either"
+
+
+def test_the_advert_names_the_overlay_only_once_remote_access_is_set_up():
+    assert NodeAdvertiser.remote_name() is None
+    _set_up()
+    assert NodeAdvertiser.remote_name() == f"mightling-{NODE_ID}.netbird.selfhosted"
+
+
+@pytest.mark.parametrize(
+    "argv, action",
+    [
+        (["issue"], ("issue", False)),
+        (["issue", "--staging"], ("issue", True)),
+        (["renew"], ("renew",)),
+        (["off"], ("off",)),
+        (
+            ["relay", "--staging", "--name", "relay.example.net"],
+            ("relay", True, "relay.example.net"),
+        ),
+        (["relay-off"], ("relay-off",)),
+    ],
+)
+def test_the_cli_routes_each_certificate_command(monkeypatch, argv, action):
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+
+    calls = []
+    monkeypatch.setattr(
+        RemoteAccess,
+        "certificate_issue",
+        classmethod(lambda cls, staging: calls.append(("issue", staging)) or 0),
+    )
+    monkeypatch.setattr(
+        RemoteAccess, "certificate_renew", classmethod(lambda cls: calls.append(("renew",)) or 0)
+    )
+    monkeypatch.setattr(
+        RemoteAccess, "certificate_off", classmethod(lambda cls: calls.append(("off",)) or 0)
+    )
+    monkeypatch.setattr(
+        RemoteAccess,
+        "certificate_relay",
+        classmethod(lambda cls, staging, name: calls.append(("relay", staging, name)) or 0),
+    )
+    monkeypatch.setattr(
+        RemoteAccess,
+        "certificate_relay_off",
+        classmethod(lambda cls: calls.append(("relay-off",)) or 0),
+    )
+    args = DreamferenceCLIController.build_parser().parse_args(["remote", "certificate", *argv])
+    assert DreamferenceCLIController._remote_certificate(args) == 0
+    assert calls == [action]
