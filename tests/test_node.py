@@ -1684,6 +1684,11 @@ def test_job_requests_through_serve_job(job_node, monkeypatch, capsys):
         "job-logs 20261002-1200-abc --follow",
         "job-exec 20261002-1200-abc",
         "job-list all",
+        "job-logs 20261002-1200-abc \u00b2",  # a digit to str.isdigit, not to int()
+        "job-logs 20261002-1200-abc " + "1" * 5000,  # past int()'s digit limit
+        f"model-receive qwen3.8-27b-nvfp4-dflash2 {chr(0xb2)}",
+        "model-receive qwen3.8-27b-nvfp4-dflash2 " + "1" * 5000,
+        f"adapter-receive helper org/helper {'0' * 40} {chr(0xb2)}",
     ):
         assert NodeServe.serve(request) == 2, request
     assert NodeServe.serve("job-cancel 20261002-1200-abc") == 1  # already finished
