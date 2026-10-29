@@ -1815,8 +1815,10 @@ class VLLMServerManager:
                 f"({gpu_memory_utilization:.2f} x {actual_total_gb:.2f} GB total)\n"
                 f"   Host left:   {actual_total_gb - arena_gb:.2f} GB\n"
                 f"   Reserve:     {HOST_MEMORY_RESERVE_GB:.2f} GB\n\n"
+                # Rounded down, so the printed figure itself passes this check.
                 f"Lower gpu_memory_utilization to at most "
-                f"{(actual_total_gb - HOST_MEMORY_RESERVE_GB) / actual_total_gb:.2f} for this machine.",
+                f"{(actual_total_gb - HOST_MEMORY_RESERVE_GB) / actual_total_gb * 100 // 1 / 100:.2f}"
+                f" for this machine.",
             )
 
         # Hand the loader free memory rather than memory it has to reclaim out from under itself.
