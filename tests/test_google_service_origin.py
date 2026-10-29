@@ -265,3 +265,20 @@ def test_http_routes_cover_authenticated_search_workspace_and_message(service_po
     m_code, m_body = _req_status(service_port, "/message/a%40x.com%7C42", headers=auth)
     assert m_code == HTTPStatus.OK and json.loads(m_body)["mid"] == "a@x.com|42"
     assert _req_status(service_port, "/unknown-get", headers=auth)[0] == HTTPStatus.NOT_FOUND
+
+
+def test_the_connect_page_offers_the_paste_box_and_the_way_back_to_ling(service_port):
+    # §5.2: the page ends by sending the user back to `/apps`, and offers the paste-back box for a
+    # browser on another machine; Drive and Calendar say Google calls their scope full access.
+    code, calendar = _req_status(service_port, "/connect?app=calendar")
+    assert code == 200 and "Connect Google Calendar" in calendar
+    assert "I've connected it" in calendar
+    assert 'id="pasted"' in calendar and "/api/google/oauth/complete" in calendar
+    assert "full access" in calendar
+    _, gmail = _req_status(service_port, "/connect?app=gmail")
+    assert "I've connected it" in gmail and "full access" not in gmail
+    done = GmailSearchService.grant_page("drive", None)
+    assert "Google Drive connected" in done and "I've connected it" in done
+    assert "ling resume" in done
+    refused = GmailSearchService.grant_page("calendar", "Tick <the> box")
+    assert "not granted" in refused and "&lt;the&gt;" in refused
