@@ -1844,6 +1844,18 @@ def test_an_unreadable_out_stream_does_not_leave_the_fetch_waiting_forever(
     assert results == [False]
 
 
+def test_a_new_job_id_is_never_one_already_sent(tmp_path, monkeypatch):
+    from dreamference.node import node_job_sender
+    from dreamference.node import NodeJobSender
+
+    draws = iter([0xABC, 0xABC, 0xDEF])
+    monkeypatch.setattr(node_job_sender.random, "randrange", lambda limit: next(draws))
+    first = NodeJobSender.new_id()
+    NodeJobSender._remember(first, paired_record(), str(tmp_path), "calc-0123456789")
+    second = NodeJobSender.new_id()
+    assert first.endswith("-abc") and second.endswith("-def")
+
+
 def test_an_out_stream_that_breaks_off_is_reported_and_the_node_keeps_the_job(
     tmp_path, monkeypatch, capsys
 ):

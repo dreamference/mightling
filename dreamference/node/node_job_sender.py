@@ -71,9 +71,13 @@ class NodeJobSender:
     def new_id(cls) -> str:
         """
         Returns:
-            str: A job id, `<date>-<time>-<3 hex>`, the shape of a Night Shift task id.
+            str: A job id, `<date>-<time>-<3 hex>`, the shape of a Night Shift task id, and none
+            this machine has sent: another job of the same minute would overwrite its record.
         """
-        return f"{datetime.now():%Y%m%d-%H%M}-{random.randrange(0x1000):03x}"
+        while True:
+            job_id = f"{datetime.now():%Y%m%d-%H%M}-{random.randrange(0x1000):03x}"
+            if not (cls.sent_dir() / f"{job_id}.json").exists():
+                return job_id
 
     @classmethod
     def git_url(cls, record: Dict[str, Any], slug: str) -> str:
