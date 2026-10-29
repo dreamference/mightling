@@ -498,7 +498,10 @@ class DesktopRunner:
                 os.path.join(ICON_DIR, f"{legacy}.png"),
             ):
                 if os.path.exists(stale):
-                    os.remove(stale)
+                    try:
+                        os.remove(stale)
+                    except OSError as exc:
+                        print(f"⚠️  Could not remove the old launcher {stale}: {exc}")
 
         subprocess.run(
             ["update-desktop-database", DESKTOP_ENTRY_DIR],

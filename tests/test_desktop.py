@@ -872,3 +872,21 @@ def test_no_two_modules_differ_only_in_case():
                 stems.setdefault((path.parent, stem.lower()), set()).add(stem)
     clashes = {str(folder / key): names for (folder, key), names in stems.items() if len(names) > 1}
     assert not clashes
+
+
+def test_a_launcher_left_by_an_earlier_name_that_cannot_be_removed_does_not_fail_registration(tmp_path):
+    # An entry an install under sudo left root-owned must not undo the registration just written.
+    from dreamference.chat import desktop_runner
+
+    entries, icons = tmp_path / "applications", tmp_path / "icons"
+    entries.mkdir()
+    icons.mkdir()
+    (entries / "puffin-app.desktop").write_text("[Desktop Entry]\n")
+    with (
+        patch.object(desktop_runner, "DESKTOP_ENTRY_DIR", str(entries)),
+        patch.object(desktop_runner, "ICON_DIR", str(icons)),
+        patch.object(DesktopRunner, "binary_path", return_value="/opt/Mightling"),
+        patch("subprocess.run"),
+        patch.object(desktop_runner.os, "remove", side_effect=PermissionError(13, "denied")),
+    ):
+        assert DesktopRunner.install_desktop_entry() is True
