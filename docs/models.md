@@ -11,7 +11,7 @@ How well the default model solves real coding tasks, release by release, is on t
 
 | Alias | Model | Parameters | Precision | Memory needed | Images |
 |---|---|---|---|---|---|
-| **`qwen3.8-27b-nvfp4-dflash2`** (default) | Qwen3.8-27B, NVFP4, with DFlash2 speculative decoding, served by ling-serve (SGLang with `--engine sglang`) | 27B | NVFP4 | 20 – 70 GB | with `--engine sglang` (ling-serve from 1.8.1) |
+| **`qwen3.8-27b-nvfp4-dflash2`** (default) | Qwen3.8-27B, NVFP4, with DFlash2 speculative decoding, served by ling-serve (SGLang with `--engine sglang`) | 27B | NVFP4 | 20 – 70 GB | yes (ling-serve from 1.8.1; SGLang too) |
 | `qwen3.8-27b-dflash2-draft` | DFlash2 drafter for Qwen3.8-27B (not served on its own) | ~1B | NVFP4 | 1 – 2 GB | no |
 | `qwen3.8-27b-minima-nvfp4-dflash2` (candidate, under evaluation) | Qwen3.8-27B with every layer in NVFP4 ("Minima"), same server settings and drafter as the default | 27B | NVFP4 | 19 – 70 GB | no |
 | `qwen3.8-flash-next-nvfp4-mtp` (trial candidate) | Qwen3.8-Flash-Next (125B with 6B active, 51B n-gram table, 4B MTP head), QAD NVFP4 with MTP speculative decoding, served by vLLM | 180B | NVFP4 | 100 – 115 GB | yes |
@@ -57,9 +57,6 @@ What changes for you:
 
 What 1.8.0 leaves to 1.8.1, served by SGLang meanwhile:
 
-- **No images on ling-serve.** It starts with image input off (`--vision off`); an image arrives as
-  the text `[image]`, and `ling`, the desktop app and the phone bridges learn this from the server and
-  send text. For images, `ling-admin server start --engine sglang`.
 - **No LoRA adapters on ling-serve.** While an adapter is installed, `server start` serves the model
   with SGLang and says so; an explicit `--engine ling` is refused.
 - **No API key**: `server start --api-key` is refused unless `--engine sglang` is given.

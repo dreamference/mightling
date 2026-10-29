@@ -28,9 +28,13 @@ KV_PAGES_FLAG: Final[str] = "--kv-pages"
 
 # ling-serve's switch for image input (`--vision on|off`, on by default), parsed since ling-engine
 # 689690c, an ancestor of LING_ENGINE_KV_PAGES_SINCE: an engine with the "kv-pages" feature takes it,
-# an older one exits 2 on it. A recipe with `vision: False` turns the tower off (1.8.0), so
-# /model_info reports no image understanding and the launcher declares text input only.
+# an older one exits 2 on it. A recipe with `vision: True` says `--vision on` (1.8.1), so the start
+# never depends on the engine's default, /model_info reports image understanding and the launcher
+# declares image input; `vision: False` turns the tower off (1.8.0), so the launcher declares text
+# input only. Either way the plan-only check is asked with the same flag, so the tower's scratch and
+# its embedding cache are in the plan exactly when the launch has them.
 VISION_FLAG: Final[str] = "--vision"
+VISION_ON: Final[str] = "on"
 VISION_OFF: Final[str] = "off"
 
 # What `owned_by` says in ling-serve's /v1/models.
@@ -115,8 +119,8 @@ class LingServeLaunchBuilder:
                 args.extend(["--batch", str(recipe["batch"])])
             if recipe.get("kv_pages"):
                 args.append(KV_PAGES_FLAG)
-            if recipe.get("vision") is False:
-                args.extend([VISION_FLAG, VISION_OFF])
+            if isinstance(recipe.get("vision"), bool):
+                args.extend([VISION_FLAG, VISION_ON if recipe["vision"] else VISION_OFF])
         args.extend(str(a) for a in recipe.get("extra_args") or [])
         return args
 
@@ -169,6 +173,7 @@ class LingServeLaunchBuilder:
                 else {}
             ),
             **({"KV cache": "Paged"} if KV_PAGES_FLAG in args else {}),
+            **({"Image input": "On"} if value(VISION_FLAG) == VISION_ON else {}),
             **(
                 {"Image input": "Off (--engine sglang reads images)"}
                 if value(VISION_FLAG) == VISION_OFF
