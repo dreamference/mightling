@@ -431,7 +431,19 @@ pub fn walk_in(
             });
         }
     }
-    out.candidates.sort_by(|a, b| a.rel.cmp(&b.rel));
+    // Names that are not UTF-8 can read alike once made text: one of them, the same each scan, is
+    // kept, as the index knows a file by that text.
+    use std::os::unix::ffi::OsStrExt;
+    out.candidates.sort_by(|a, b| {
+        (a.rel.as_str(), a.abs.as_os_str().as_bytes())
+            .cmp(&(b.rel.as_str(), b.abs.as_os_str().as_bytes()))
+    });
+    let before = out.candidates.len();
+    out.candidates
+        .dedup_by(|later, first| later.rel == first.rel);
+    if out.candidates.len() < before {
+        *out.skipped.entry("name not UTF-8").or_default() += (before - out.candidates.len()) as u64;
+    }
     out
 }
 
@@ -726,6 +738,32 @@ mod tests {
             .map(|c| c.rel.clone())
             .collect();
         assert_eq!(rels, ["pub/in.md"]);
+    }
+
+    #[test]
+    fn names_that_read_alike_once_made_text_keep_one_file() {
+        use std::os::unix::ffi::OsStrExt;
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("in.md"), b"x");
+        for name in [&b"a\xff.md"[..], &b"a\xfe.md"[..]] {
+            write(&root.join(std::ffi::OsStr::from_bytes(name)), b"x");
+        }
+        let collection = Collection::new("docs", root.clone());
+        for _ in 0..2 {
+            let found = walk(&collection, &home, true);
+            let abs: Vec<_> = found.candidates.iter().map(|c| c.abs.clone()).collect();
+            assert_eq!(
+                abs,
+                [
+                    root.join(std::ffi::OsStr::from_bytes(b"a\xfe.md")),
+                    root.join("in.md")
+                ],
+                "one of the two, the same one every scan"
+            );
+            assert_eq!(found.skipped.get("name not UTF-8"), Some(&1));
+        }
     }
 
     #[test]
