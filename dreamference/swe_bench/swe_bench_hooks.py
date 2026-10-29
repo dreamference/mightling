@@ -141,7 +141,7 @@ class SweBenchHooks:
             `invocations`, `targets` (labels), `dropped`, `examples`, `edit_hold`,
             `stop_hold`, `first_edit` (`read` of `targets`), `edits`,
             `example_run_after_last_edit` (at the last stop; None without an example or an
-            edit), `errors`.
+            edit), `errors`. A record the container malformed reads as no record, with an error.
         """
         def load(name: str) -> Dict[str, Any]:
             try:
@@ -151,6 +151,26 @@ class SweBenchHooks:
             return record if isinstance(record, dict) else {}
 
         conditions, state = load(swe_bench_issue_gate.CONDITIONS_FILE), load(swe_bench_issue_gate.STATE_FILE)
+        # Runs on the host after the instance's guard: a malformed record must not end the run.
+        try:
+            return cls.summarize(conditions, state)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return dict(cls.summarize({}, {}), errors=["the gate's records are malformed"])
+
+    @classmethod
+    def summarize(cls, conditions: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+        """Summarizes the gate's records.
+
+        Args:
+            conditions: The gate's conditions.
+            state: The gate's state.
+
+        Returns:
+            dict[str, Any]: The outcome (`outcome`).
+
+        Raises:
+            AttributeError, KeyError, TypeError, ValueError: For a malformed record.
+        """
         invocations = state.get("invocations", {})
         targets = conditions.get("targets", [])
         labels = {target["id"]: target["label"] for target in targets}

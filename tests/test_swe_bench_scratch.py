@@ -97,3 +97,20 @@ def test_compactions_never_read_a_rollout_outside_the_scratch(tmp_path):
     (sessions / "elsewhere").symlink_to(tmp_path)
     result = store.compactions("acme__widget-1")
     assert not result or not result.get("count")
+
+
+def test_a_malformed_gate_record_does_not_raise_on_the_host(tmp_path):
+    """The outcome is read after the instance's own error guard; the container writes the records."""
+    gate = tmp_path / GATE_DIRECTORY
+    gate.mkdir()
+    for conditions, state in (
+        ({"targets": [{"label": "no id"}]}, {}),
+        ({"targets": "abc"}, {"invocations": 7}),
+        ({}, {"edit_hold": {"unread": 3}, "stops": [1]}),
+        ({"targets": [{"id": [], "label": "x"}]}, {"edits": "many"}),
+    ):
+        (gate / "conditions.json").write_text(json.dumps(conditions))
+        (gate / "state.json").write_text(json.dumps(state))
+        outcome = SweBenchHooks.outcome(tmp_path)
+        assert outcome["errors"] == ["the gate's records are malformed"]
+        assert outcome["ran"] is False
