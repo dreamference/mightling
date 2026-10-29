@@ -1451,8 +1451,13 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
     Ok(doc.to_string())
 }
 
+/// The table `key` of `parent`, made when absent. `key = { … }` is the same table written inline:
+/// it is kept, as a `[key]` table, with everything the user set in it.
 fn table<'a>(parent: &'a mut Table, key: &str) -> &'a mut Table {
-    if !parent.get(key).is_some_and(Item::is_table) {
+    if let Some(inline) = parent.get(key).and_then(Item::as_inline_table) {
+        let kept = inline.clone().into_table();
+        parent.insert(key, Item::Table(kept));
+    } else if !parent.get(key).is_some_and(Item::is_table) {
         parent.insert(key, Item::Table(Table::new()));
     }
     parent[key]
@@ -2002,6 +2007,33 @@ mod tests {
         assert!(STREAM_IDLE_TIMEOUT_MS > 3 * 185_000);
         let own = format!("[model_providers.{PROVIDER}]\nstream_idle_timeout_ms = 120000\n");
         assert_eq!(timeout(&own), Some(120_000));
+    }
+
+    #[test]
+    fn a_table_written_inline_keeps_what_the_user_set_in_it() {
+        // `key = { … }` is the same table as `[key]`. Replaced by an empty one, the user's
+        // `network_access = false` was turned back on and their provider settings were lost.
+        let existing = format!(
+            "sandbox_workspace_write = {{ network_access = false, writable_roots = [\"/data\"] }}\n\
+             features = {{ code_mode = false }}\n\
+             [model_providers]\n\
+             {PROVIDER} = {{ stream_idle_timeout_ms = 120000, env_key = \"MINE\" }}\n"
+        );
+        let text = updated_config(&existing, Path::new("/h/c.json"), "http://x:8000").unwrap_or_default();
+        let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+        let sandbox = &parsed["sandbox_workspace_write"];
+        assert_eq!(sandbox.get("network_access").and_then(toml::Value::as_bool), Some(false), "{text}");
+        assert_eq!(sandbox.get("writable_roots"), Some(&toml::Value::Array(vec!["/data".into()])));
+        assert_eq!(parsed["features"].get("code_mode").and_then(toml::Value::as_bool), Some(false));
+        let provider = &parsed["model_providers"][PROVIDER];
+        assert_eq!(provider.get("stream_idle_timeout_ms").and_then(toml::Value::as_integer), Some(120_000));
+        assert_eq!(provider.get("env_key").and_then(toml::Value::as_str), Some("MINE"));
+        assert_eq!(provider.get("base_url").and_then(toml::Value::as_str), Some("http://x:8000/v1"));
+        // The whole providers table inline, and the provider inside it.
+        let existing = format!("model_providers = {{ {PROVIDER} = {{ env_key = \"MINE\" }} }}\n");
+        let text = updated_config(&existing, Path::new("/h/c.json"), "http://x:8000").unwrap_or_default();
+        let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+        assert_eq!(parsed["model_providers"][PROVIDER].get("env_key").and_then(toml::Value::as_str), Some("MINE"), "{text}");
     }
 
     #[test]
