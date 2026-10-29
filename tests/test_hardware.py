@@ -758,3 +758,8 @@ def test_the_container_writes_the_tensors_under_another_name_and_the_host_rename
     tdir, _, written, _ = _tensorize_in_docker(tmp_path, monkeypatch)
     assert [path.name for path in written] == ["model.tensors.partial"]
     assert (tdir / "model.tensors").exists() and not (tdir / "model.tensors.partial").exists()
+
+
+def test_tensorize_does_not_run_a_container_whose_image_is_missing(tmp_path, monkeypatch):
+    _, docker_runs, _, _ = _tensorize_in_docker(tmp_path, monkeypatch, image_ready=False)
+    assert docker_runs == []
