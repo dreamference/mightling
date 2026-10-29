@@ -6,11 +6,13 @@
 
 import type { WorktreeLink } from "./prefs";
 
+import { insideFolder } from "./ask";
+
 /** Where a path sits relative to `from`, carried over to `to`: a worktree's folder in the local checkout and back. */
 export function carry(path: string, from: string, to: string): string {
   const base = from.replace(/[\\/]+$/, "");
   if (path === base) return to;
-  return path.startsWith(`${base}/`) ? `${to.replace(/[\\/]+$/, "")}/${path.slice(base.length + 1)}` : path;
+  return insideFolder(path, base) ? `${to.replace(/[\\/]+$/, "")}${path.slice(base.length)}` : path;
 }
 
 /** The folder a thread's next turn runs in: its worktree folder, or the same folder in the local checkout after a hand-off. */

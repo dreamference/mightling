@@ -20,6 +20,9 @@ describe("worktree threads", () => {
     expect(turnCwd(undefined)).toBeNull();
     expect(carry("/a/b", "/a/b", "/c")).toBe("/c");
     expect(carry("/a/bc/d", "/a/b", "/c")).toBe("/a/bc/d");
+    // Windows folders: a hand-off moves a turn in a subfolder to the same subfolder of the local checkout.
+    expect(carry("C:\\wt\\ab12\\app\\src", "C:\\wt\\ab12\\app", "C:\\src\\app")).toBe("C:\\src\\app\\src");
+    expect(carry("C:\\wt\\ab12\\app2\\src", "C:\\wt\\ab12\\app", "C:\\src\\app")).toBe("C:\\wt\\ab12\\app2\\src");
   });
 
   it("are listed under the project they were started for", () => {

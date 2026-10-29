@@ -7,6 +7,8 @@ import type { Thread } from "./protocol/v2/Thread";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { Turn } from "./protocol/v2/Turn";
 
+import { insideFolder } from "./ask";
+
 export type ActivityKind = "command" | "files" | "tool" | "web" | "agents";
 
 export interface ActivityEntry {
@@ -77,7 +79,7 @@ export function activityOf(thread: Thread, turns: Turn[]): ActivityEntry[] {
 
 /** Every thread's timeline merged, newest first (within a turn, the item order kept), with the filters applied. */
 export function merged(lists: ActivityEntry[][], kinds: ReadonlySet<ActivityKind>, project: string | null): ActivityEntry[] {
-  const all = lists.flat().filter((entry) => kinds.has(entry.kind) && (!project || entry.cwd === project || entry.cwd.startsWith(`${project}/`)));
+  const all = lists.flat().filter((entry) => kinds.has(entry.kind) && (!project || entry.cwd === project || insideFolder(entry.cwd, project)));
   const order = new Map(all.map((entry, index) => [entry.key, index]));
   return all.sort((a, b) => b.at - a.at || (order.get(b.key) ?? 0) - (order.get(a.key) ?? 0));
 }
