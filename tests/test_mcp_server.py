@@ -121,7 +121,18 @@ def test_code_search_is_answered_by_the_code_index_when_the_workspace_has_one(tm
         {"rel_path": "pkg/a.py", "line": 40, "kind": "method", "symbol": "pkg.a.Loader.load", "source": "ling-code"},
     ]
     # The words are separate arguments: no shell, and nothing the query says is interpreted.
-    assert calls.read_text().strip() == "search loader load --json"
+    assert calls.read_text().strip() == "search --json -- loader load"
+
+
+def test_code_search_passes_words_that_look_like_options_as_words(tmp_path, monkeypatch):
+    # The words came before `--json` with no `--`: a query word such as `--path` was read by
+    # `ling-code` as its option (and `-x` failed the call, sending the search to the slow engine).
+    from dreamference.mcp_server import CodeIndexSearch
+
+    calls = tmp_path / "calls"
+    _fake_mightling_code(tmp_path, monkeypatch, f"echo \"$@\" >> {calls}\necho '{{\"rows\": []}}'\n")
+    assert CodeIndexSearch.search("--path vendor -x") == []
+    assert calls.read_text().strip() == "search --json -- --path vendor -x"
 
 
 def test_code_search_falls_back_to_the_context_engine(tmp_path, monkeypatch):
