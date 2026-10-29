@@ -917,6 +917,24 @@ mod tests {
     }
 
     #[test]
+    fn a_policy_that_breaks_one_of_its_own_rules_is_rejected() {
+        let policy: Value = serde_json::from_str(POLICY_JSON).unwrap();
+        let mut refused = policy["airgappedRefusedRequests"].clone();
+        refused.as_array_mut().unwrap().push(Value::String("not/allowed".to_string()));
+        for (field, broken, rule) in [
+            ("airgappedRefusedRequests", refused, "a request refused at on that is not allowed at off"),
+            ("repoPrompts", serde_json::json!(["unnamed"]), "a repo prompt that is not a named prompt"),
+            ("repoPrompts", serde_json::json!(["ask"]), "a prompt that is both a repo and a scratch prompt"),
+            ("promptOpeners", serde_json::json!(["turn/start"]), "a prompt opener that opens no thread"),
+            ("windowTools", serde_json::json!({"x": {"name": "y"}}), "a window tool under another name"),
+        ] {
+            let mut value = policy.clone();
+            value[field] = broken;
+            assert!(Policy::parse(&value.to_string()).is_err(), "{rule}");
+        }
+    }
+
+    #[test]
     fn classify_reads_what_the_server_sends() {
         assert_eq!(classify(r#"{"id":1,"result":{}}"#).0, Incoming::Response);
         assert_eq!(
