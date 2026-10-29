@@ -12,3 +12,7 @@ publish = false
 [lib]
 name = "ling_airgapped"
 path = "src/lib.rs"
+
+# The conformance cases (cases.json) are JSON; only the tests read them.
+[dev-dependencies]
+serde_json = "1"

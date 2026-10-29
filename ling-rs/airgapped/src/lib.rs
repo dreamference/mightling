@@ -99,7 +99,22 @@ impl Source {
             Source::Default => "default".to_string(),
         }
     }
+
+    /// The tier's name in `ling airgapped --json`: `session`, `sealed`, `environment`, `config`
+    /// or `default`.
+    pub fn tier(&self) -> &'static str {
+        match self {
+            Source::Session => "session",
+            Source::Sealed => "sealed",
+            Source::Environment => "environment",
+            Source::ConfigFile(_) => "config",
+            Source::Default => "default",
+        }
+    }
 }
+
+/// A file as read: its text, or why it exists and could not be read.
+pub type FileRead = Result<String, String>;
 
 /// The level in force, where it came from, and any invalid values passed over on the way.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,6 +122,14 @@ pub struct Resolved {
     pub level: Level,
     pub source: Source,
     pub invalid: Vec<String>,
+}
+
+/// The configuration file's value of the key, as [`resolve_read`] takes it: `Some(None)` when the top
+/// level does not set it, `None` when the text is not TOML the resolver can follow up to the key or
+/// the first table header (AIRGAPPED §6.5: it then counts as `on`). [`toml_value`] reads such text
+/// line by line instead.
+pub fn config_value(text: &str) -> Option<Option<String>> {
+    top_level_value(text.trim_start_matches('\u{feff}'))
 }
 
 /// The value of the top-level `mightling_airgapped` key in TOML text, before the first table
@@ -381,37 +404,85 @@ fn skip_value(text: &str) -> Option<&str> {
 }
 
 /// Resolves the level from already-read tiers; [`resolve`] supplies the real ones. `configs` are
-/// the configuration files that exist, as (path, text); the strictest valid level among them wins.
+/// the configuration files that exist, as (path, text); the strictest level among them wins.
 pub fn resolve_from(
     session: Option<&str>,
     environment: Option<&str>,
     configs: &[(PathBuf, String)],
 ) -> Resolved {
-    let mut invalid = Vec::new();
-    let mut tier = |value: Option<&str>, source: Source| -> Option<(Level, Source)> {
-        let value = value?.trim();
-        if value.is_empty() {
-            return None;
-        }
+    let session = session.map(|text| Ok(text.to_string()));
+    let configs: Vec<(PathBuf, FileRead)> = configs
+        .iter()
+        .map(|(path, text)| (path.clone(), Ok(text.clone())))
+        .collect();
+    resolve_read(session.as_ref(), environment, &configs)
+}
+
+/// [`resolve_from`] with files that may have failed to read. First match wins, and what cannot be
+/// read counts as `on`, named in `invalid` (AIRGAPPED §6.5): a value that is not a level, an empty
+/// session file or value, a file that exists and could not be read, and a configuration file that
+/// is not TOML the resolver can follow. An empty environment variable is not a tier, and the files
+/// of a tier that is not reached are not judged.
+pub fn resolve_read(
+    session: Option<&FileRead>,
+    environment: Option<&str>,
+    configs: &[(PathBuf, FileRead)],
+) -> Resolved {
+    fn level_of(value: &str, source: Source, invalid: &mut Vec<String>) -> (Level, Source) {
+        let value = value.trim();
         match Level::parse(value) {
-            Some(level) => Some((level, source)),
+            Some(level) => (level, source),
             None => {
-                invalid.push(format!("ignored \"{value}\" from {}", source.label()));
-                None
+                invalid.push(format!(
+                    "\"{value}\" from {} is not a level: taken as on",
+                    source.label()
+                ));
+                (Level::On, source)
             }
         }
+    }
+    let mut invalid = Vec::new();
+    let mut found = match session {
+        Some(Ok(text)) => Some(level_of(text, Source::Session, &mut invalid)),
+        Some(Err(why)) => {
+            invalid.push(format!(
+                "could not read this session's level file ({why}): taken as on"
+            ));
+            Some((Level::On, Source::Session))
+        }
+        None => None,
     };
-    let mut found =
-        tier(session, Source::Session).or_else(|| tier(environment, Source::Environment));
+    if found.is_none()
+        && let Some(value) = environment.filter(|value| !value.trim().is_empty())
+    {
+        found = Some(level_of(value, Source::Environment, &mut invalid));
+    }
     if found.is_none() {
         for (path, text) in configs {
-            let value = toml_value(text);
-            if let Some((level, source)) = tier(value.as_deref(), Source::ConfigFile(path.clone()))
-                && found
-                    .as_ref()
-                    .is_none_or(|(strictest, _)| level > *strictest)
+            let source = Source::ConfigFile(path.clone());
+            let level = match text.as_deref().map(config_value) {
+                Ok(Some(None)) => continue,
+                Ok(Some(Some(value))) => level_of(&value, source, &mut invalid),
+                Ok(None) => {
+                    invalid.push(format!(
+                        "could not read {} as TOML up to {TOML_KEY}: taken as on",
+                        path.display()
+                    ));
+                    (Level::On, source)
+                }
+                Err(why) => {
+                    invalid.push(format!(
+                        "could not read {} ({why}): taken as on",
+                        path.display()
+                    ));
+                    (Level::On, source)
+                }
+            };
+            if found
+                .as_ref()
+                .is_none_or(|(strictest, _)| level.0 > *strictest)
             {
-                found = Some((level, source));
+                found = Some(level);
             }
         }
     }
@@ -641,6 +712,25 @@ pub fn sealed(ids: &[&str]) -> bool {
         .any(|id| seals.join(id).is_file())
 }
 
+/// Whether a seal written by process `pid` holds a session at `on`. A seal's content is its
+/// writer's pid (the launcher's airgapped module), so the process that runs a session, and an MCP
+/// server whose parent is that process, can find it without knowing the thread id. Read wherever
+/// seals may be, as [`sealed`] reads them.
+pub fn sealed_by(pid: u32) -> bool {
+    runtime_dir().is_some_and(|dir| sealed_in(&dir.join(SEAL_DIR), pid))
+}
+
+/// [`sealed_by`] for the seals in `dir`.
+pub fn sealed_in(dir: &Path, pid: u32) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let own = pid.to_string();
+    entries
+        .flatten()
+        .any(|entry| std::fs::read_to_string(entry.path()).is_ok_and(|text| text.trim() == own))
+}
+
 /// Whether `id` may name a seal: ids are UUIDs, as for [`session_file`].
 fn seal_file_name(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
@@ -656,7 +746,23 @@ pub fn resolve_guarded(
     sealed: bool,
     exposed: bool,
 ) -> Resolved {
-    let mut resolved = resolve_from(session, environment, configs);
+    let session = session.map(|text| Ok(text.to_string()));
+    let configs: Vec<(PathBuf, FileRead)> = configs
+        .iter()
+        .map(|(path, text)| (path.clone(), Ok(text.clone())))
+        .collect();
+    resolve_guarded_read(session.as_ref(), environment, &configs, sealed, exposed)
+}
+
+/// [`resolve_guarded`] with files that may have failed to read, as [`resolve_read`] takes them.
+pub fn resolve_guarded_read(
+    session: Option<&FileRead>,
+    environment: Option<&str>,
+    configs: &[(PathBuf, FileRead)],
+    sealed: bool,
+    exposed: bool,
+) -> Resolved {
+    let mut resolved = resolve_read(session, environment, configs);
     if sealed {
         if resolved.level != Level::On {
             resolved.invalid.push(format!(
@@ -668,7 +774,7 @@ pub fn resolve_guarded(
         resolved.level = Level::On;
         resolved.source = Source::Sealed;
     } else if exposed && resolved.source == Source::Session {
-        let configured = resolve_from(None, environment, configs);
+        let configured = resolve_read(None, environment, configs);
         if resolved.level < configured.level {
             let note = format!(
                 "ignored \"{}\" from this session: commands can write the level file here, so it may not loosen {}",
@@ -680,6 +786,15 @@ pub fn resolve_guarded(
         }
     }
     resolved
+}
+
+/// Reads a tier's file: `None` when it does not exist, its text, or why it could not be read.
+pub fn read_file(path: &Path) -> Option<FileRead> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Some(Ok(text)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => Some(Err(err.to_string())),
+    }
 }
 
 /// Resolves the level for the first of `ids` that has a session file, reading every tier and the
@@ -702,14 +817,14 @@ pub fn resolve_in(ids: &[&str], environment: Option<String>, cwd: &Path) -> Reso
     let session = ids
         .iter()
         .filter_map(|id| session_file(id))
-        .find_map(|path| std::fs::read_to_string(path).ok());
-    let configs: Vec<(PathBuf, String)> = config_files(cwd)
+        .find_map(|path| read_file(&path));
+    let configs: Vec<(PathBuf, FileRead)> = config_files(cwd)
         .into_iter()
-        .filter_map(|path| std::fs::read_to_string(&path).ok().map(|text| (path, text)))
+        .filter_map(|path| read_file(&path).map(|text| (path, text)))
         .collect();
     let exposed = seal_dir().is_none() && level_files_exposed();
-    resolve_guarded(
-        session.as_deref(),
+    resolve_guarded_read(
+        session.as_ref(),
         environment.as_deref(),
         &configs,
         sealed(ids),
@@ -1120,49 +1235,27 @@ mod tests {
     }
 
     #[test]
-    fn an_invalid_value_in_one_file_does_not_hide_the_other() {
-        let user_on = config(
+    fn an_invalid_value_in_one_file_counts_as_on() {
+        let user_off = config(
             "/home/u/.config/dreamference/config.toml",
-            "mightling_airgapped = \"on\"\n",
+            "mightling_airgapped = \"off\"\n",
         );
-        // The agent writes a value no level has into the repository's file.
+        // The agent writes a value no level has into the repository's file: it cannot loosen.
         let repo_bad = config(
             "/repo/dreamference.toml",
             "mightling_airgapped = \"none\"\n",
         );
-        let resolved = resolve_from(None, None, &[repo_bad, user_on.clone()]);
+        let resolved = resolve_from(None, None, &[repo_bad.clone(), user_off]);
         assert_eq!(
             (resolved.level, resolved.source),
-            (Level::On, Source::ConfigFile(user_on.0))
+            (Level::On, Source::ConfigFile(repo_bad.0))
         );
         assert_eq!(
             resolved.invalid,
             vec![
-                "ignored \"none\" from mightling_airgapped in /repo/dreamference.toml".to_string()
+                "\"none\" from mightling_airgapped in /repo/dreamference.toml is not a level: taken as on"
+                    .to_string()
             ]
-        );
-        // The other way round: the repository's `on` holds over a user file that does not parse.
-        let repo_on = config("/repo/dreamference.toml", "mightling_airgapped = \"on\"\n");
-        let user_bad = config(
-            "/home/u/.config/dreamference/config.toml",
-            "mightling_airgapped = \"yes\"\n",
-        );
-        assert_eq!(
-            resolve_from(None, None, &[repo_on, user_bad]).level,
-            Level::On
-        );
-        // An empty value is no value: it is neither a level nor named as invalid.
-        let resolved = resolve_from(
-            None,
-            None,
-            &[config(
-                "/repo/dreamference.toml",
-                "mightling_airgapped = \"\"\n",
-            )],
-        );
-        assert_eq!(
-            (resolved.level, resolved.source, resolved.invalid.len()),
-            (Level::Off, Source::Default, 0)
         );
     }
 
@@ -1234,29 +1327,57 @@ mod tests {
     }
 
     #[test]
-    fn an_invalid_value_is_named_and_skipped() {
-        let resolved = resolve_from(Some("sealed"), Some("on"), &[]);
-        assert_eq!(resolved.level, Level::On);
+    fn an_invalid_value_is_named_and_counts_as_on() {
+        let resolved = resolve_from(Some("sealed"), Some("off"), &[]);
+        assert_eq!(
+            (resolved.level, resolved.source),
+            (Level::On, Source::Session)
+        );
         assert_eq!(
             resolved.invalid,
-            vec!["ignored \"sealed\" from this session".to_string()]
+            vec!["\"sealed\" from this session is not a level: taken as on".to_string()]
         );
-        // A session or a file still set to the removed `duckduckgo` level falls through the same way.
-        let user_on = config(
-            "/home/u/.config/dreamference/config.toml",
-            "mightling_airgapped = \"on\"\n",
-        );
-        let resolved = resolve_from(Some("duckduckgo"), None, &[user_on]);
-        assert_eq!(resolved.level, Level::On);
+        // A session, the environment or a file still set to the removed `duckduckgo` level too.
+        let resolved = resolve_from(None, Some("duckduckgo"), &[]);
         assert_eq!(
-            resolved.invalid,
-            vec!["ignored \"duckduckgo\" from this session".to_string()]
+            (resolved.level, resolved.source),
+            (Level::On, Source::Environment)
         );
         let repo_ddg = config(
             "/repo/dreamference.toml",
             "mightling_airgapped = \"duckduckgo\"\n",
         );
-        assert_eq!(resolve_from(None, None, &[repo_ddg]).level, Level::Off);
+        assert_eq!(resolve_from(None, None, &[repo_ddg]).level, Level::On);
+    }
+
+    #[test]
+    fn a_seal_is_found_by_its_writers_pid() {
+        let dir = std::env::temp_dir().join(format!("ling-airgapped-seal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("0c4f-thread"), "4242\n").unwrap();
+        assert!(sealed_in(&dir, 4242));
+        assert!(!sealed_in(&dir, 4243));
+        assert!(!sealed_in(&dir.join("missing"), 4242));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_counts_as_on_and_one_that_is_missing_does_not() {
+        let dir = std::env::temp_dir().join(format!("ling-airgapped-read-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("missing.toml");
+        assert_eq!(read_file(&missing), None);
+        let binary = dir.join("binary.toml");
+        std::fs::write(&binary, [0xff, 0xfe, 0x00, 0x41]).unwrap();
+        let read = read_file(&binary).expect("the file exists");
+        assert!(read.is_err(), "{read:?}");
+        let resolved = resolve_read(None, None, &[(binary.clone(), read)]);
+        assert_eq!(
+            (resolved.level, resolved.source),
+            (Level::On, Source::ConfigFile(binary))
+        );
+        assert_eq!(resolved.invalid.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
