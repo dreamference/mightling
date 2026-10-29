@@ -1083,6 +1083,18 @@ def test_enable_writes_absolute_paths_and_the_window(tmp_path, monkeypatch):
     assert not (NightShiftScheduler.unit_dir() / "mightling-night.timer").exists()
 
 
+def test_the_service_quotes_a_path_with_a_space(monkeypatch):
+    # systemd splits ExecStart= and Environment= on whitespace unless quoted, and expands `%`.
+    import shlex
+    _, service = NightShiftScheduler.render_units("01:00-07:00", "/opt/my tools/100%/ling-admin")
+    exec_start = next(line for line in service.splitlines() if line.startswith("ExecStart="))
+    words = shlex.split(exec_start.split("=", 1)[1].replace("%%", "%"))
+    assert words == ["/opt/my tools/100%/ling-admin", "night", "run", "--until", "07:00"]
+    environment = next(line for line in service.splitlines() if line.startswith("Environment="))
+    assert len(shlex.split(environment.split("=", 1)[1])) == 1
+    assert ":/opt/my tools/100%%/:" not in environment and ":/opt/my tools/100%%:" in environment
+
+
 def test_settings_parse_durations_and_windows():
     settings = NightShiftSettings({"task_timeout": "2h", "test_timeout": 15, "window": "23:00-05:00"})
     assert settings.task_timeout_s == 7200 and settings.test_timeout_s == 900
