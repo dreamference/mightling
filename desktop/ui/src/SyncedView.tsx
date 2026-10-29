@@ -357,7 +357,11 @@ export function SyncedView(props: { status: SyncStatus; onClose: () => void; onC
   const open = useCallback((thread: string, toggle = true) => {
     if (toggle && openedId.current === thread) return setOpened(null);
     setOpened({ thread, items: null });
-    api.read(thread).then((answer) => setOpened((current) => (current?.thread === thread ? { thread, items: answer.items } : current))).catch(notice);
+    api.read(thread).then((answer) => setOpened((current) => (current?.thread === thread ? { thread, items: answer.items } : current))).catch((error) => {
+      // A read that failed closes the thread again rather than leaving it reading.
+      setOpened((current) => (current?.thread === thread && current.items === null ? null : current));
+      notice(error);
+    });
   }, [notice]);
 
   // A thread started from here opens once its device has published it.
