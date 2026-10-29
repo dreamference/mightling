@@ -65,9 +65,16 @@ pub fn refusal_now() -> Option<&'static str> {
 pub const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) \
      Chrome/140.0 Safari/537.36";
 
-/// Applied to connecting and to each read, as `requests` applies its `timeout`: a slow but live
-/// download is not cut off at a fixed total.
+/// Applied to connecting, as `requests` applies its `timeout`; [`REQUEST_DEADLINE`] bounds the rest.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
+
+/// The most one request may take, from connecting to the last byte of the body, redirects
+/// included. A per-read timeout alone let a server that sends a byte every few seconds hold a
+/// command for as long as it liked: a page is up to 5 MiB, and its headers up to 100 KB, at a byte
+/// per 24 s. ureq's deadline replaces the per-read timeout once the request is under way, so a
+/// response that stalls part-way ends here rather than after [`REQUEST_TIMEOUT`]. It is
+/// `pdf_search`'s limit for a whole `ling-fetch --download` too. `web_tools.py` has the same.
+pub const REQUEST_DEADLINE: Duration = Duration::from_secs(120);
 
 /// An HTTP agent with Mightling's user agent and timeouts, sending through `proxy` when given.
 ///
@@ -86,10 +93,16 @@ pub fn agent(proxy: Option<ureq::Proxy>) -> ureq::Agent {
 /// [`agent`], following at most `redirects` redirects; with 0 a redirect is returned as the
 /// response it is, which is how `share_links` reads each `Location` before requesting it.
 pub fn agent_with_redirects(proxy: Option<ureq::Proxy>, redirects: u32) -> ureq::Agent {
+    agent_within(proxy, redirects, REQUEST_DEADLINE)
+}
+
+/// [`agent_with_redirects`] with each request ended after `deadline`.
+fn agent_within(proxy: Option<ureq::Proxy>, redirects: u32, deadline: Duration) -> ureq::Agent {
     let builder = ureq::AgentBuilder::new()
         .user_agent(USER_AGENT)
         .timeout_connect(REQUEST_TIMEOUT)
         .timeout_read(REQUEST_TIMEOUT)
+        .timeout(deadline)
         .redirects(redirects);
     match proxy {
         Some(proxy) => builder.proxy(proxy),
@@ -209,6 +222,72 @@ mod tests {
         assert_eq!(refusal(Level::Off, true), Some(NO_NETWORK_SANDBOX_MESSAGE));
         assert_eq!(refusal(Level::Off, false), None);
         assert!(!NO_NETWORK_SANDBOX_MESSAGE.contains("airgapped"));
+    }
+
+    /// A stand-in on loopback that answers once with `head`, then sends one more byte of `drip`
+    /// every 50 ms for at most 30 s. Never joined: the client gives up first.
+    fn dripping_server(head: &'static [u8], drip: u8) -> String {
+        use std::io::{BufRead, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                line.clear();
+            }
+            if stream.write_all(head).is_err() {
+                return;
+            }
+            for _ in 0..600 {
+                std::thread::sleep(Duration::from_millis(50));
+                if stream.write_all(&[drip]).is_err() {
+                    return;
+                }
+            }
+        });
+        base
+    }
+
+    /// The deadline under test is 2 s; without it each of these ran for the stand-in's 30 s.
+    const SHORT: Duration = Duration::from_secs(2);
+
+    #[test]
+    fn a_body_sent_a_byte_at_a_time_ends_at_the_deadline() {
+        use std::io::Read;
+        let url = dripping_server(b"HTTP/1.1 200 OK\r\nContent-Length: 5000000\r\n\r\n", b'a');
+        let started = std::time::Instant::now();
+        let response = agent_within(None, 10, SHORT).get(&url).call().unwrap();
+        let mut body = Vec::new();
+        let read = response
+            .into_reader()
+            .take(5 * 1024 * 1024)
+            .read_to_end(&mut body);
+        assert!(
+            read.is_err(),
+            "the body was read whole: {} bytes",
+            body.len()
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn headers_sent_a_byte_at_a_time_end_at_the_deadline() {
+        let url = dripping_server(b"HTTP/1.1 200 OK\r\nX-Slow: ", b'a');
+        let started = std::time::Instant::now();
+        assert!(agent_within(None, 10, SHORT).get(&url).call().is_err());
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
