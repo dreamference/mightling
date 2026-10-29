@@ -334,6 +334,32 @@ def test_disable_without_root_still_stops_the_advertisement(machine, capsys):
     assert "emptied" in capsys.readouterr().out
 
 
+def test_disable_puts_a_lan_web_unit_back_on_loopback_and_leaves_others_alone(
+    machine, monkeypatch, ling_web, tmp_path
+):
+    """ASK §17: `node disable` runs `ling web start` (loopback) only when the unit was on the LAN."""
+    unit = tmp_path / "mightling-web.service"
+    monkeypatch.setattr("dreamference.node.node_advertiser.WEB_UNIT", str(unit))
+    NodeSettings.save(advertise=True)
+
+    # A machine that never ran `ling web`: nothing is started.
+    assert NodeAdvertiser.serve_web(False) is False
+    NodeAdvertiser.disable()
+    assert ling_web() == []
+
+    # A unit already on loopback is left as it is.
+    unit.write_text("[Service]\nExecStart=/x/ling web serve\n")
+    NodeAdvertiser.disable()
+    assert ling_web() == []
+
+    # A unit on the network goes back to loopback.
+    unit.write_text("[Service]\nExecStart=/x/ling web serve --lan\n")
+    NodeSettings.save(advertise=True)
+    NodeAdvertiser.disable()
+    assert ling_web() == ["web start"]
+    assert NodeSettings.load()["advertise"] is False
+
+
 def test_status_says_what_clients_see(machine, monkeypatch):
     text = NodeAdvertiser.status()
     assert "Advertised: no" in text and "none at" in text and "no node" in text
