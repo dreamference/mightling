@@ -376,12 +376,16 @@ impl CheckoutRecord {
 
     /// Canonical `<bridge>:<chat>` key for daily token budgets and pending notices.
     pub fn chat_key(&self) -> String {
-        let prefix = format!("{}:", self.bridge);
-        if self.chat.starts_with(&prefix) {
-            self.chat.clone()
-        } else {
-            format!("{}:{}", self.bridge, self.chat)
-        }
+        chat_key_of(&self.bridge, &self.chat)
+    }
+}
+
+/// The `<bridge>:<chat>` key of a chat, without doubling a prefix the chat id already has.
+fn chat_key_of(bridge: &str, chat: &str) -> String {
+    if chat.strip_prefix(bridge).is_some_and(|rest| rest.starts_with(':')) {
+        chat.to_string()
+    } else {
+        format!("{bridge}:{chat}")
     }
 }
 
@@ -2738,7 +2742,7 @@ async fn repo_off(State(server): State<Arc<Server>>, headers: HeaderMap, body: B
     if !KNOWN_BRIDGES.contains(&bridge) || chat.is_empty() || chat.len() > 200 {
         return json_response(StatusCode::BAD_REQUEST, json!({ "error": "valid bridge and chat are required" }));
     }
-    let chat_key = format!("{bridge}:{chat}");
+    let chat_key = chat_key_of(bridge, chat);
     let prev_repo = server
         .chat_repos
         .clear_current_repo(&server.config.codex_home, &chat_key);
@@ -2855,7 +2859,7 @@ async fn repo_current(
             json!({ "error": "bridge and chat query parameters are required" }),
         );
     }
-    let chat_key = format!("{bridge}:{chat}");
+    let chat_key = chat_key_of(bridge, chat);
     let current = server
         .chat_repos
         .current_repo(&server.config.codex_home, &chat_key);
@@ -8581,6 +8585,36 @@ mod tests {
         let diff = run_git_diff_capped(&server, &s.dir, &["diff", "--no-index", "--", "/dev/null", "big.txt"], false).await.unwrap();
         assert!(diff.ends_with(DIFF_CUT_SUFFIX), "the diff was cut");
         assert!(diff.len() > MAX_DIFF_OUTPUT_BYTES - 8, "only the split character is dropped: {} bytes", diff.len());
+    }
+
+    #[tokio::test]
+    async fn off_and_current_find_the_repo_open_set_for_a_chat_id_that_names_its_bridge() {
+        let s = scratch("chat-key");
+        let bare = make_bare_repo(&s.dir, "org/keyrepo");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/keyrepo",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+        let (st, _, body) =
+            post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/keyrepo", "bridge": "signal", "chat": "signal:+1555" })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let bridge = bridge_session_cookie(&server).await;
+        let (_, current, body) = get_json(&server, &bridge, "/api/repos/current?bridge=signal&chat=signal:%2B1555").await;
+        assert_eq!(current["repo"], "org/keyrepo", "{body}");
+        let (st, _, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(server.chat_repos.current_repo(&server.config.codex_home, "signal:+1555"), None, "/off cleared what /open set");
     }
 
     #[tokio::test]
