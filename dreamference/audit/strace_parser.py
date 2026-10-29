@@ -116,7 +116,9 @@ class StraceParser:
             if udp:
                 cls._udp_payload(inner, trace, udp_routes)
             return
-        destination = cls.destination_in(rest)
+        # A sendmmsg carries several messages, each naming its own destination.
+        messages = rest.split("{msg_hdr=")[1:] if syscall == "sendmmsg" else []
+        destination = cls.destination_in(messages[0] if messages else rest)
         if destination is not None:
             address, port = destination
             target = cls.format_destination(address, port)
@@ -138,6 +140,14 @@ class StraceParser:
         elif udp:
             # A payload on a connected UDP socket, which names no destination of its own.
             cls._udp_payload(inner, trace, udp_routes)
+        to_resolver = destination is not None and destination[1] == DNS_PORT
+        for message in messages[1:]:
+            other = cls.destination_in(message)
+            if other is not None:
+                counts = trace.dns_servers if other[1] == DNS_PORT else trace.destinations
+                target = cls.format_destination(*other)
+                counts[target] = counts.get(target, 0) + 1
+                to_resolver = to_resolver or other[1] == DNS_PORT
         unix = UNIX.search(rest)
         if unix:
             path = ("@" if unix.group(1) else "") + cls.unescape(unix.group(2)).decode("utf-8", "replace")
@@ -145,7 +155,7 @@ class StraceParser:
         if syscall == "connect":
             return
         # A payload sent to a resolver, named in the call or connected earlier, is a DNS query.
-        to_resolver = (destination is not None and destination[1] == DNS_PORT) or (pid, fd) in resolver_sockets
+        to_resolver = to_resolver or (pid, fd) in resolver_sockets
         if to_resolver:
             for payload in cls.strings_in(rest):
                 name = cls.dns_query_name(payload)
