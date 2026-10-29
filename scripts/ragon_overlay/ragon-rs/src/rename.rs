@@ -165,6 +165,9 @@ const WORKTREE_FOLDERS: &[&str] = &["worktrees", "chat-repos", "night", "session
 const CHAT_REPOS_INDEX: &str = "chat-repos/index.json";
 const SESSION_WORKTREES: &str = "session-worktrees";
 const SESSION_RECORD: &str = "session.json";
+/// Night Shift's task records (`<id>.json`, beside `<id>.lock`), which keep the absolute paths of
+/// each attempt's log, test log and diff under the home.
+const NIGHT_TASKS: &str = "night/tasks";
 /// User units of a SWE-bench run, a Night Shift run or a node job: nothing moves under them
 /// (specs/DREAMFERENCE_RENAME_RAGON.md §7). `ragon-admin` waits for the same units.
 #[cfg(target_os = "linux")]
@@ -825,6 +828,14 @@ fn fix_home(home: &Path, new: &Path, report: &mut Report) {
     if let Ok(entries) = std::fs::read_dir(new.join(SESSION_WORKTREES)) {
         for entry in entries.flatten() {
             rewrite_recorded_paths(&entry.path().join(SESSION_RECORD), &moves);
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir(new.join(NIGHT_TASKS)) {
+        for entry in entries.flatten() {
+            let record = entry.path();
+            if record.extension().is_some_and(|ext| ext == "json") {
+                rewrite_recorded_paths(&record, &moves);
+            }
         }
     }
     for folder in WORKTREE_FOLDERS {
@@ -1655,6 +1666,31 @@ mod tests {
             let line = format!("repaired the worktree {}", new.join(worktree).display());
             assert!(report.lines.contains(&line), "{line} in {:?}", report.lines);
         }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn night_shift_task_records_name_the_logs_and_diffs_in_the_new_home() {
+        let home = scratch("night-tasks");
+        let old = home.join(MIGHTLING_HOME_DIR);
+        let new = home.join(crate::home::RAGON_HOME_DIR);
+        let (o, n, h) = (old.display().to_string(), new.display().to_string(), home.display().to_string());
+        let record = |base: &str| {
+            format!(
+                "{{\"repo\":\"{h}/proj\",\"result\":{{\"log\":\"{base}/night/logs/t1.log\",\
+                 \"diff\":\"{base}/night/diffs/t1.diff\",\"attempts\":[{{\"paths\":[\"{base}/night/worktrees/t1-2\"]}}]}}}}"
+            )
+        };
+        write(&old.join("night/tasks/t1.json"), &record(&o));
+        write(&old.join("night/tasks/t1.lock"), &format!("{o}/night/tasks/t1.json"));
+
+        let mut report = Report::default();
+        move_home(&home, &mut report);
+
+        let read = |path: PathBuf| std::fs::read_to_string(path).unwrap();
+        assert_eq!(read(new.join("night/tasks/t1.json")), record(&n));
+        // Only the records: anything else in the folder is left as it is.
+        assert_eq!(read(new.join("night/tasks/t1.lock")), format!("{o}/night/tasks/t1.json"));
         let _ = std::fs::remove_dir_all(&home);
     }
 
