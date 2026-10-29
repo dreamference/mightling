@@ -4,6 +4,36 @@
 to the next release. Every paragraph between the two rules is a `{{TBD` placeholder until its work has
 landed and passed its own test night, which keeps `scripts/release_notes.py` from publishing it.
 
+## Plan (not part of the notes)
+
+Target 2026-11-02, after 1.8.0 (~11-01). Ragon 1.9.0 is cut the day after 1.8.1 if 1.8.1 needs no hotfix in its
+first day. The checklist that makes the cut take minutes is [release-1.8.1.md](../docs/dev/release-1.8.1.md).
+
+**What 1.8.1 adds on top of 1.8.0**
+
+- **Image input on ling-serve.** The recipe's `"vision"` goes from `False` to `True`; the launch passes
+  `--vision on` and the launcher declares image input. Memory-checked with four sessions before it merged.
+- **Two per-launch switches, off in the recipe:** `"paging"` (the KV page pool: `--kv-pages`, or `--no-kv-pages`
+  and the engine's own flat sessions) and `"fair_pairing"` (`--fair-pairing 1|0`). A night arm overrides either from
+  the environment of the launch (`DREAMFERENCE_LING_PAGING=0|1`, `DREAMFERENCE_LING_FAIR_PAIRING=0|1`) without a
+  new image; the flags are always given explicitly, so `docker inspect` and `server status` name the arm. They act
+  only on an engine whose recipe lists the features `paging-switch` and `fair-pairing` (the candidate image's
+  commit has both).
+- **LoRA adapters on ling-serve: 1.8.1 if ready by the cut, otherwise 1.8.2.** It never holds 1.8.1: if it is not
+  merged and tested by 2026-11-02 the paragraph below is deleted and the work goes to 1.8.2.
+
+**What the 2026-10-31 night decides.** The night runs every arm on one candidate image (image input on, paging and
+fair pairing switched per arm), on all three machines. Two defaults come out of it:
+
+1. *Paging default.* Paging on only if its arm shows greedy output identical to flat and no loss on the SWE arm; the
+   paged-vs-flat speed read is information, not a gate. Otherwise `"paging"` stays `False`.
+2. *Fair pairing default.* On only if the fair gate exits 0 at the paging default that ships and the SWE fair arm
+   shows no loss (greedy output identical, the slowest of four streams no slower, the pooled rate not materially
+   lower). Otherwise `"fair_pairing"` stays `False` and the paragraph below says it is available, off.
+
+The verdict is written into `reports/` by the bar-night agent; the cut flips only the recipe lines it names.
+
+
 ---
 
 **ling-serve reads images.** {{TBD: 1.8.0 starts ling-serve with `--vision off`; 1.8.1 serves image input

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Moves Mightling's pin of ling-serve's image: the engine commit, the image digest and the features.
 
-    scripts/pin_ling_serve_image.py COMMIT DIGEST [--features kv-pages,sparse-head] [--check]
+    scripts/pin_ling_serve_image.py COMMIT DIGEST [--features kv-pages,sparse-head,paging-switch,fair-pairing] [--check]
 
 COMMIT is the full ling-engine commit `scripts/build_ling_serve_image.sh` built the image from; DIGEST
 is the `sha256:...` digest GHCR gave `docker push`. The script rewrites QWEN38_LING_ENGINE_COMMIT,
@@ -24,7 +24,7 @@ REGISTRY = (
     / "hardware"
     / "model_matrix_registry.py"
 )
-KNOWN_FEATURES = ("kv-pages", "sparse-head")
+KNOWN_FEATURES = ("kv-pages", "sparse-head", "paging-switch", "fair-pairing")
 
 
 def repin(text: str, commit: str, digest: str, features: list[str]) -> str:
