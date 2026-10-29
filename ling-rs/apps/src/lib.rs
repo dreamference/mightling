@@ -225,7 +225,11 @@ pub fn offered() -> bool {
 /// writer's pid (the launcher's airgapped module), so the process that runs a session, and an MCP
 /// server whose parent is that process, can find it without knowing the thread id.
 pub fn sealed_by(pid: u32) -> bool {
-    let Some(dir) = ling_airgapped::seal_dir() else { return false };
+    ling_airgapped::seal_dir().is_some_and(|dir| sealed_in(&dir, pid))
+}
+
+/// [`sealed_by`] for the seals in `dir`.
+fn sealed_in(dir: &std::path::Path, pid: u32) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else { return false };
     let own = pid.to_string();
     entries
@@ -363,5 +367,25 @@ mod tests {
         for key in ["id", "name", "description", "installUrl", "isAccessible", "distributionChannel"] {
             assert!(keys.contains(&key), "{key}");
         }
+    }
+
+    #[test]
+    fn a_seal_counts_only_for_the_process_that_wrote_it() {
+        let dir = std::env::temp_dir().join(format!("ling-apps-seals-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!sealed_in(&dir, 4242), "no folder, no seal");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!sealed_in(&dir, 4242), "an empty folder holds no seal");
+        // The launcher writes its pid and a newline; another session's seal is not this one's.
+        std::fs::write(dir.join("0199a1b2-thread"), "4242\n").unwrap();
+        std::fs::write(dir.join("0199a1b3-other"), "77\n").unwrap();
+        let ours = sealed_in(&dir, 4242);
+        let other = sealed_in(&dir, 77);
+        // A pid that only shares digits with a seal's is not its writer.
+        let prefix = sealed_in(&dir, 424);
+        let longer = sealed_in(&dir, 42420);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(ours && other);
+        assert!(!prefix && !longer);
     }
 }

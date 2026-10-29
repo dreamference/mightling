@@ -383,9 +383,19 @@ pub fn output_text(value: &Value) -> String {
     }
 }
 
-/// A `call_id` as a file name: anything but ASCII letters, digits, `-` and `_` becomes `_`.
+/// A `call_id` as a file name: anything but ASCII letters, digits, `-` and `_` becomes `_`. An id
+/// that changed also gets `~` and a hash of the whole id, so `call.1` and `call_1` do not share
+/// a copy (a copy is written once, and the second would name the first's output); a safe id is
+/// its own name, and never holds a `~`.
 fn file_name(id: &str) -> String {
-    id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
+    let safe = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    let name: String = id.chars().map(|c| if safe(c) { c } else { '_' }).collect();
+    if !id.is_empty() && id.chars().all(safe) {
+        return name;
+    }
+    // FNV-1a: stable across builds and platforms, unlike the standard library's hasher.
+    let hash = id.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3));
+    format!("{name}~{hash:016x}")
 }
 
 fn clip(text: &str, limit: usize) -> String {
@@ -643,5 +653,99 @@ mod tests {
         let before = items.clone();
         apply(&mut items, 1_000_000, |e| &mut e.item);
         assert_eq!(items, before);
+    }
+
+    #[test]
+    fn ids_that_differ_only_in_unsafe_characters_keep_their_own_copies() {
+        let scratch = Scratch::new("unsafe");
+        let (dotted, plain) = (exec_output("call.1", 20), exec_output("call_1", 30));
+        save_copy(&scratch.0, &dotted).unwrap_or_default();
+        save_copy(&scratch.0, &plain).unwrap_or_default();
+        assert_ne!(copy_path(&scratch.0, "call.1"), copy_path(&scratch.0, "call_1"));
+        assert_ne!(copy_path(&scratch.0, "call.1"), copy_path(&scratch.0, "call:1"));
+        for (id, output) in [("call.1", &dotted), ("call_1", &plain)] {
+            assert_eq!(std::fs::read_to_string(copy_path(&scratch.0, id)).unwrap_or_default(), output_text(output), "{id}");
+        }
+        // The segment files too: two segments whose first ids differ so are two files.
+        State { masked: ["call.1".to_string()].into(), after_last_move: Some(1) }.save(&scratch.0, "call.1").unwrap_or_default();
+        assert_eq!(State::load(&scratch.0, "call_1"), State::default());
+        // An id that is already a safe name is the name, as the spec's paths show.
+        assert!(copy_path(&scratch.0, "call_ca1c38ae56a14f70ae27cdc6").ends_with("outputs/call_ca1c38ae56a14f70ae27cdc6.txt"));
+    }
+
+    #[test]
+    fn a_call_id_cannot_name_a_file_outside_the_outputs_folder() {
+        let dir = Path::new("/home/user/.mightling/masking");
+        for id in ["../../../.bashrc", "/etc/passwd", "a/../../b", "..", "", "c:\\x", "call\u{0}1", "звонок"] {
+            let path = copy_path(dir, id);
+            assert_eq!(path.parent(), Some(dir.join("outputs").as_path()), "{id:?}");
+            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+            assert!(name.ends_with(".txt") && !name.contains('/') && !name.contains('\\') && name != "..", "{id:?} gave {name:?}");
+            assert_eq!(State::path(dir, id).parent(), Some(dir), "{id:?}");
+        }
+    }
+
+    #[test]
+    fn clip_counts_characters_and_marks_a_cut() {
+        assert_eq!(clip("short", 5), "short");
+        assert_eq!(clip("longer", 5), "long…");
+        assert_eq!(clip("ééééé€", 4), "ééé…");
+        assert_eq!(clip("ééééé€", 4).chars().count(), 4);
+    }
+
+    #[test]
+    fn the_placeholder_of_a_long_unicode_output_stays_within_its_characters() {
+        let path = Path::new("/home/user/.mightling/masking/outputs/call_ca1c38ae56a14f70ae27cdc6.txt");
+        let line = "ж".repeat(300);
+        let text = format!("Process exited with code 1\nOutput:\n{line}\n{line}");
+        let out = placeholder(&text, path);
+        assert!(out.chars().count() <= MAX_PLACEHOLDER_CHARS, "{}", out.chars().count());
+        assert_eq!(out.lines().nth(1), Some("Process exited with code 1"));
+        // No exit line and a single body line: the line once, not twice.
+        let lone = placeholder("only line", path);
+        assert_eq!(lone.lines().count(), 2, "{lone}");
+    }
+
+    #[test]
+    fn the_marks_are_shares_of_the_limit() {
+        let policy = Policy::with_shares(200_000, 90, 40, 8_000);
+        assert_eq!((policy.high, policy.low, policy.min_step), (180_000, 80_000, 8_000));
+        assert_eq!((policy.keep_recent, policy.min_chars), (KEEP_RECENT, MIN_MASKABLE_CHARS));
+        assert_eq!(Policy::for_limit(0), Policy { high: 0, low: 0, min_step: MIN_STEP_TOKENS, keep_recent: KEEP_RECENT, min_chars: MIN_MASKABLE_CHARS });
+    }
+
+    #[test]
+    fn a_move_with_fewer_outputs_than_are_kept_masks_nothing_and_still_counts_as_a_move() {
+        let values: Vec<Value> = history(KEEP_RECENT, 60).into_iter().map(|e| e.item).collect();
+        let scratch = Scratch::new("few");
+        assert_eq!(plan_move(&policy(), &values, &State::default(), 1_000_000, &scratch.0), Some(vec![]));
+        assert_eq!(plan_move(&policy(), &values, &State::default(), policy().high, &scratch.0), None);
+    }
+
+    #[test]
+    fn masked_indices_are_the_outputs_of_the_masked_ids_only() {
+        let values: Vec<Value> = history(3, 20).into_iter().map(|e| e.item).collect();
+        let state = State { masked: ["call_001".to_string(), "call_404".to_string()].into(), after_last_move: None };
+        assert_eq!(masked_indices(&values, &state), HashMap::from([(4, "call_001".to_string())]));
+    }
+
+    #[test]
+    fn pruning_keeps_recent_segments_and_the_copies_they_name() {
+        let scratch = Scratch::new("prune-keep");
+        let home = scratch.0.clone();
+        let dir = home.join("masking");
+        State { masked: ["call_1".to_string()].into(), after_last_move: Some(1) }.save(&dir, "call_first").unwrap_or_default();
+        save_copy(&dir, &exec_output("call_1", 20)).unwrap_or_default();
+        save_copy(&dir, &exec_output("call_2", 20)).unwrap_or_default();
+        std::fs::write(dir.join("notes.txt"), "not a segment").unwrap_or_default();
+        let later = SystemTime::now() + Duration::from_secs((KEEP_DAYS + 1) * 86_400);
+        let edge = SystemTime::now() + Duration::from_secs(KEEP_DAYS * 86_400 - 60);
+        assert_eq!(prune(&home, edge), 0, "not yet past the days kept");
+        assert!(copy_path(&dir, "call_1").exists());
+        assert_eq!(prune(&home, later), 1);
+        assert!(!copy_path(&dir, "call_1").exists());
+        assert!(copy_path(&dir, "call_2").exists(), "a copy no old segment names stays");
+        assert!(dir.join("notes.txt").exists(), "only segment files are pruned");
+        assert_eq!(prune(&scratch.0.join("missing"), later), 0);
     }
 }
