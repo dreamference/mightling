@@ -400,6 +400,18 @@ def test_mightling_admin_and_the_web_commands_are_linked_onto_path_for_the_model
     assert open(builder.ADMIN_PATH_LINK).read() == "mine"
 
 
+def test_ling_is_not_linked_onto_path_before_it_is_built(tmp_path, monkeypatch):
+    # build() runs the crate builds, which link, before the Codex build: a failed or skipped
+    # Codex build left ~/.local/bin/ling pointing at nothing.
+    from dreamference.runner import codex_branded_builder as builder
+
+    monkeypatch.setattr(builder.CodexBrandedBuilder, "executable_path",
+                        classmethod(lambda cls: str(tmp_path / "install" / "bin" / "ling")))
+    monkeypatch.setattr(builder, "INSTALL_DIR", str(tmp_path / "install"))
+    builder.CodexBrandedBuilder.link_onto_path()
+    assert not os.path.lexists(builder.PATH_LINK)
+
+
 def test_the_web_commands_build_from_their_own_crate_with_its_lockfile(tmp_path, monkeypatch):
     calls = []
 

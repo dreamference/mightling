@@ -1104,13 +1104,14 @@ class CodexBrandedBuilder:
         `ling-docs` at their executables.
 
         `ling` so it works from any shell; the others so the model can run the web and mail
-        commands its prompt names from the shell `ling` gives it. A web command is linked only
-        once its binary is installed, so a link never dangles. Nothing on Windows, where the
-        install directory itself is on PATH.
+        commands its prompt names from the shell `ling` gives it. A command is linked only once
+        its binary is installed, so a link never dangles. Nothing on Windows, where the install
+        directory itself is on PATH.
         """
         if IS_WINDOWS:
             return
-        cls._link(cls.executable_path(), PATH_LINK)
+        if Path(cls.executable_path()).is_file():
+            cls._link(cls.executable_path(), PATH_LINK)
         script = cls.console_script_path("ling-admin")
         if script:
             cls._link(script, ADMIN_PATH_LINK)
