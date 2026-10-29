@@ -129,7 +129,10 @@ fn take_code(dir: &Path, code: &str) -> bool {
     }
     let path = dir.join(sha256_hex(code));
     let Ok(text) = std::fs::read_to_string(&path) else { return false };
-    let _ = std::fs::remove_file(&path);
+    // Removing the file is what takes the code: of requests that read it at once, one removes it.
+    if std::fs::remove_file(&path).is_err() {
+        return false;
+    }
     serde_json::from_str::<Value>(&text)
         .ok()
         .and_then(|value| value.get("expires").and_then(Value::as_u64))
@@ -457,6 +460,28 @@ mod tests {
         let other = issue_pairing_code(&state).unwrap();
         withdraw_pairing_codes(&state);
         assert!(!take_pairing_code(&state, &other));
+    }
+
+    #[test]
+    fn a_code_sent_by_many_requests_at_once_works_for_one() {
+        // Whoever read a code over the owner's shoulder must not pair beside them unnoticed.
+        let state = scratch("race");
+        for _ in 0..50 {
+            let code = issue_pairing_code(&state).unwrap();
+            let barrier = std::sync::Barrier::new(8);
+            let taken = std::thread::scope(|scope| {
+                let tries: Vec<_> = (0..8)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            barrier.wait();
+                            take_pairing_code(&state, &code)
+                        })
+                    })
+                    .collect();
+                tries.into_iter().map(|attempt| attempt.join().unwrap()).filter(|taken| *taken).count()
+            });
+            assert_eq!(taken, 1);
+        }
     }
 
     #[test]
