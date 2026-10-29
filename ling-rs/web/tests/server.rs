@@ -841,6 +841,45 @@ async fn a_watch_device_reads_and_follows_threads_and_changes_nothing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_closed_tab_lets_go_of_the_server() {
+    let scratch = scratch("ws-closed");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let config = config(&scratch.dir, port, Vec::new());
+    let _app_server = fake_app_server(&config.socket).await;
+    let server = Server::new(config).unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = tokio::spawn(server::serve(server.clone(), vec![listener], async move {
+        let _ = stopped.await;
+    }));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let before = Arc::strong_count(&server);
+
+    let (_, token) = auth::add_device(&server.config.state_dir, "phone").unwrap();
+    let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let mut upgrade = format!("ws://127.0.0.1:{port}/ws").into_client_request_with_origin(port);
+    upgrade.headers_mut().insert(header::COOKIE, format!("{}={token}", auth::DEVICE_COOKIE).parse().unwrap());
+    let (websocket, _) = tokio_tungstenite::client_async(upgrade, tcp).await.unwrap();
+    let (mut sink, stream) = websocket.split();
+    sink.send(Message::Close(None)).await.unwrap();
+    drop((sink, stream));
+
+    // The tab's task ends with its socket: nothing of it is left holding the server.
+    let mut left = Arc::strong_count(&server);
+    for _ in 0..100 {
+        if left == before {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        left = Arc::strong_count(&server);
+    }
+    assert_eq!(left, before);
+
+    let _ = stop.send(());
+    serving.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn with_nothing_listening_the_server_starts_the_app_server_and_reports_why_it_failed() {
     let scratch = scratch("spawn");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

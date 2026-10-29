@@ -208,6 +208,8 @@ pub async fn run_tab_with_bridge(
     }
     tab.close(false).await;
     stderr_task.abort();
+    // The writer ends when the last sender is gone, and the tab holds one.
+    drop(tab);
     drop(out);
     let _ = writer.await;
 }
