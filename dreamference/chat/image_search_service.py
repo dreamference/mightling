@@ -26,6 +26,7 @@ therefore stay a single self-contained file.
 
 import base64
 import hashlib
+import hmac
 import io
 import ipaddress
 import json
@@ -1085,7 +1086,7 @@ def serve(port: int = SERVICE_PORT, secret: Optional[str] = None) -> None:
             if parsed.path != "/search":
                 self._reply(404, {"error": "not found"})
                 return
-            if expected and self.headers.get(AUTH_HEADER, "") != expected:
+            if expected and not hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode(), expected.encode()):
                 self._reply(403, {"error": "bad token"})
                 return
             try:

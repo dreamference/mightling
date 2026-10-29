@@ -237,3 +237,25 @@ def test_http_routes_cover_authenticated_search_workspace_and_message(service_po
     m_code, m_body = _req_status(service_port, "/message/a%40x.com%7C42", headers=auth)
     assert m_code == HTTPStatus.OK and json.loads(m_body)["mid"] == "a@x.com|42"
     assert _req_status(service_port, "/unknown-get", headers=auth)[0] == HTTPStatus.NOT_FOUND
+
+
+def test_the_shared_secret_is_compared_in_constant_time(service_port, monkeypatch):
+    import hmac
+
+    from dreamference.chat.gmail_search_service import AUTH_HEADER
+
+    compared = []
+    real = hmac.compare_digest
+
+    def recording(a, b):
+        compared.append(True)
+        return real(a, b)
+
+    monkeypatch.setattr(hmac, "compare_digest", recording)
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{service_port}/search?query=x", headers={AUTH_HEADER: "s3crex"}
+    )
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=5)
+    assert refused.value.code == 401
+    assert compared
