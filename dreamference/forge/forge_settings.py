@@ -146,6 +146,9 @@ class ForgeSettings:
         descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "w") as handle:
             handle.write(value + "\n")
+            # On disk before it replaces the old one: a power cut must not leave it empty.
+            handle.flush()
+            os.fsync(handle.fileno())
         Path(staging).replace(path)
         return path
 
