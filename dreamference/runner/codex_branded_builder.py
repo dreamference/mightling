@@ -935,9 +935,7 @@ class CodexBrandedBuilder:
         with open(stamp) as handle:
             if handle.read().strip() != cls.crate_key(crate_dir):
                 return False
-        return all(
-            os.access(os.path.join(INSTALL_DIR, "bin", name + EXE_SUFFIX), os.X_OK) for name in bin_names
-        )
+        return cls.binaries_installed(bin_names)
 
     @classmethod
     def build_crate(
