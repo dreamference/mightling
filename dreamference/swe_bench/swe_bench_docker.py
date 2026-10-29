@@ -36,7 +36,11 @@ class SweBenchDocker:
             return subprocess.run(["docker", *args], capture_output=True, text=True, timeout=timeout,
                                   input=input_text, stdin=None if input_text is not None else subprocess.DEVNULL)
         except subprocess.TimeoutExpired as error:
-            return subprocess.CompletedProcess(["docker", *args], 124, error.stdout or "", "timed out")
+            # On POSIX the output read before the timeout is bytes even in text mode.
+            partial = error.stdout or ""
+            if isinstance(partial, bytes):
+                partial = partial.decode("utf-8", "replace")
+            return subprocess.CompletedProcess(["docker", *args], 124, partial, "timed out")
         except OSError as error:
             return subprocess.CompletedProcess(["docker", *args], 127, "", str(error))
 
