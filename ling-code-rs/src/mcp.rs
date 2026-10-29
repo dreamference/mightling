@@ -186,4 +186,12 @@ mod tests {
             .unwrap()
             .contains("before grep"));
     }
+
+    #[test]
+    fn the_descriptions_stay_within_the_context_budget() {
+        // Every request carries them: CONTEXT_BUDGET §4.3 cut them from 964 to 543 characters,
+        // and a tool added since (`status`) fit in the same total.
+        let total: usize = super::TOOLS.iter().map(|(_, _, about)| about.len()).sum();
+        assert!(total <= 543, "{total} characters of tool descriptions");
+    }
 }

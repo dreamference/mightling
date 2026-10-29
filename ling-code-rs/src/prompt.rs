@@ -141,4 +141,13 @@ mod tests {
         assert!(super::BUILDING.contains("is being built"));
         assert!(super::BUILDING.len() / 4 < 250);
     }
+
+    #[test]
+    fn both_blocks_say_to_outline_a_file_before_reading_it() {
+        // CONTEXT_BUDGET §4.3: a file not yet seen is outlined, and the one definition needed
+        // shown, instead of read whole.
+        assert!(super::READY.contains("`outline <file>` before reading a file you have not seen"));
+        assert!(super::READY_TOOLS
+            .contains("Before reading a file you have not seen, `code_outline` it"));
+    }
 }
