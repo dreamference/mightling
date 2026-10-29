@@ -82,6 +82,14 @@ pub fn switched_off(app: App, codex_config: Option<&str>, gmail_setting: bool) -
         .is_some_and(|enabled| !enabled)
 }
 
+/// Whether Gmail may still be offered as `ling-admin gmail` commands when no app's tools are
+/// declared: the Gmail setting is on and `/apps` has not switched Gmail off, whose prompt section
+/// is then left out as its tools are (§3).
+pub fn gmail_commands_offered(codex_home: &Path, gmail_setting: bool) -> bool {
+    let config = std::fs::read_to_string(codex_home.join("config.toml")).ok();
+    gmail_setting && !switched_off(App::Gmail, config.as_deref(), gmail_setting)
+}
+
 /// The apps whose tools this session gets, each with its connected addresses.
 ///
 /// None at a configured `on` (a session switched to `on` later still has its servers, and each
@@ -207,6 +215,17 @@ mod tests {
         assert!(!switched_off(App::Calendar, Some(config), true));
         assert!(switched_off(App::Gmail, None, false));
         assert!(!switched_off(App::Gmail, Some("model = \"x\"\n"), true));
+    }
+
+    #[test]
+    fn gmail_switched_off_in_apps_gets_no_shell_commands_either() {
+        let home = std::env::temp_dir().join(format!("mightling-apps-gmail-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        assert!(gmail_commands_offered(&home, true));
+        assert!(!gmail_commands_offered(&home, false));
+        std::fs::write(home.join("config.toml"), "[apps.mightling_gmail]\nenabled = false\n").unwrap();
+        assert!(!gmail_commands_offered(&home, true));
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]

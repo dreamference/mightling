@@ -529,7 +529,7 @@ pub async fn current_parts(codex_home: &Path, prompt: &Prompt, dir: &Path) -> Pa
         let declared = crate::apps::declared(!offers_gmail, local, codex_home, crate::mightling_gmail_enabled()).await;
         if !declared.is_empty() {
             crate::apps::instructions(&declared)
-        } else if offers_gmail && crate::mightling_gmail_enabled() && local {
+        } else if offers_gmail && crate::apps::gmail_commands_offered(codex_home, crate::mightling_gmail_enabled()) && local {
             crate::connected_gmail_accounts()
                 .await
                 .map(|accounts| crate::gmail_access_instructions(&accounts))

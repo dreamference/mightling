@@ -657,7 +657,10 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     .await;
     let email = if !declared_apps.is_empty() {
         apps::instructions(&declared_apps)
-    } else if airgapped::offers_gmail(configured.level) && mightling_gmail_enabled() && host_is_local(&host) {
+    } else if airgapped::offers_gmail(configured.level)
+        && apps::gmail_commands_offered(&codex_home, mightling_gmail_enabled())
+        && host_is_local(&host)
+    {
         connected_gmail_accounts()
             .await
             .map(|accounts| gmail_access_instructions(&accounts))
