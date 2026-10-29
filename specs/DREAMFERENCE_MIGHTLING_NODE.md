@@ -383,6 +383,8 @@ Stated so the trade is visible, not to reopen it:
 - **mDNS can be spoofed.** A device on the LAN that advertises `_mightling-node._tcp` would be offered as a node, and a client that chose it would send it prompts and code. The guard is the rule of §6.3: a node is remembered by id, and a different one is never adopted without the user choosing it. That is protection against accidents, not against an attacker on the LAN, who by the trusted-LAN assumption is not there.
 - **Nothing new reaches the internet.** Discovery is multicast on the local link, and a client's traffic goes to the node's LAN address. The egress audit runs only on a node and names the model server to `ling` itself (`DREAMFERENCE_VLLM_HOST`, tier 1), so the launcher never browses during it and its allow-list does not change. That matters: a browse is a multicast DNS query, which the audit would count as a failure. The check that matters is that it still passes with `node enable` on (§16). If the audit is ever run from a client, the node's address and its three ports join the allow-list.
 - **A node that should not be shared is not advertised.** Without `node enable` every bind stays as it is today.
+- **Paired clients are not isolated from one another.** Every paired key reaches the same queue: any paired client can list, read, cancel and fetch the output of another client's night tasks (`night_shift_remote.py`, which records `sender` and never compares it) and jobs (`job-list`, `job-out`, `job-cancel` and `job-logs` check no key; a job's `sender` is what the client declares, `node_job.py`). Pairing is for the owner's own machines, so this is the trust model, not a slip; isolation is planned for 1.9 (§15.3). Found by the node security read of 2026-10-29 (F6).
+- **Any paired client can switch a configured power plug off.** The forced command's `power-plug <plug name> off` (`node_power_cycle.py`, what `node power-cycle` sends to the node that reaches the plug) has no precondition: no check that the model server is stopped or that no job runs, and no owner-only key. It reaches only a plug the owner configured on that node, and switching it off is the point of the command, so it is kept as it is (owner decision, 2026-10-29, finding F7).
 
 ---
 
@@ -600,6 +602,16 @@ These settle the corresponding questions below; where an earlier section says ot
 8. *(Decided, §15.1.)* **GPU jobs beside a resident model** (§13.4). The default refuses them unless the node's model server is stopped. Is there a case, such as a small fine-tune beside the 27B, worth an override?
 9. **Sending jobs from a laptop** (§13.3). Wanted soon enough to put the sender in the Rust launcher in Part 3, or after it?
 10. **Should a non-GB10 Linux machine with a capable GPU be allowed as a node** behind `--role node`? Host safety and every recipe are written for the GB10.
+
+### 15.3 Planned for 1.9: isolation between paired clients
+
+Decided by the owner on 2026-10-29: planned for 1.9, not built yet. Today every paired key sees every night task and job (§11). The design options from the node security read:
+
+1. **Own the record by key.** The forced command already knows which key connected (`--key <tag>` in the `authorized_keys` line). Pass it into the night and job handlers, store it on every record as the owner, and let `list`, `out`, `logs` and `cancel` act only on the caller's own records. `sender` stays as a label and stops being trusted. This is the smallest change and the one the read recommends.
+2. **An owner key besides client keys.** As 1, plus a pairing flag (`node add --owner`) for a key that sees and cancels everything, for the owner's main machine. Needs the flag recorded in the key line, not in a file the node user can write.
+3. **One Unix account per client.** Each pairing gets its own account on the node and its jobs run as it, so the kernel separates them. Strongest, but it multiplies accounts, home directories and sandbox scopes, and the shared model server stays shared.
+
+Records made before the change have no owner; they would be visible only to an owner key (option 2) or expire with the queue.
 
 ---
 
