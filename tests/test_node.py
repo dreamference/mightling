@@ -114,6 +114,24 @@ def test_a_node_that_was_never_enabled_is_never_advertised_by_a_side_effect():
     assert NodeIdentity.read() is not None
 
 
+def test_building_ling_or_the_window_makes_the_machine_a_node(monkeypatch):
+    from dreamference.chat import DesktopRunner
+    from dreamference.cli import main
+    from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+
+    monkeypatch.setattr(DesktopRunner, "install", classmethod(lambda cls: 0))
+    monkeypatch.setattr(DesktopRunner, "build", classmethod(lambda cls: 0))
+    monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexBrandedBuilder, "build", classmethod(lambda cls, force=False: True))
+    for argv in (["desktop", "install"], ["desktop", "build"], ["codex", "build"]):
+        NodeIdentity.path().unlink(missing_ok=True)
+        monkeypatch.setattr("sys.argv", ["ling-admin", *argv])
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+        assert exit_info.value.code == 0, argv
+        assert NodeIdentity.read() is not None, argv
+
+
 def test_server_start_and_stop_move_the_advertised_state(capsys):
     NodeServiceFile.service_path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.0.0"))
     NodeAdvertiser.on_server_starting("qwen3.8-27b-nvfp4-dflash2", 8001)
