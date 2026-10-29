@@ -808,6 +808,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // Git over OpenSSL in a sandboxed Windows session: Schannel cannot reach https under the
     // sandbox's restricted token (windows_tls.rs; WINDOWS_ARM §23.4 W3).
     let args = windows_tls::with_git_openssl(args, &user_args, airgapped::full_access_selected(&user_args));
+    // The vendor's channels stay shut whatever a project's `.codex/config.toml` says (plugins.rs).
+    let args = compat_tui::with_settings(args, &plugins::vendor_settings());
     Ok(if app_server { with_configured_model(args, &session_model) } else { args })
 }
 
