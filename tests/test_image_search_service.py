@@ -838,6 +838,10 @@ def served(tmp_path, monkeypatch):
             super().__init__(("127.0.0.1", 0), handler)
             holder.append(self)
 
+        def serve_forever(self, poll_interval=0.02):
+            # `serve` calls it with the default 0.5 s, which every teardown's shutdown waited out.
+            super().serve_forever(poll_interval)
+
     searched = []
 
     class _Stub:

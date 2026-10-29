@@ -373,7 +373,9 @@ class Engine(BaseHTTPRequestHandler):
 def gate(tmp_path):
     Engine.seen, Engine.loaded = [], []
     engine = ThreadingHTTPServer(("127.0.0.1", 0), Engine)
-    threading.Thread(target=engine.serve_forever, daemon=True).start()
+    threading.Thread(
+        target=engine.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True
+    ).start()
     state = tmp_path / "gate"
     state.mkdir()
     folders = {}

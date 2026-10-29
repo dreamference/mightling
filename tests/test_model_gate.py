@@ -214,7 +214,9 @@ def live(tmp_path):
     StandIn.seen = []
     StandIn.second_chunk = threading.Event()
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), StandIn)
-    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    threading.Thread(
+        target=upstream.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True
+    ).start()
     state_dir = tmp_path / "gate"
     state_dir.mkdir()
     loop = asyncio.new_event_loop()

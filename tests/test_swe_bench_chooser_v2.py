@@ -92,7 +92,7 @@ def server():
             self.reply({"choices": [{"message": {"content": f"RATING_A: {rate(a)}\nRATING_B: {rate(b)}"}}]})
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
     yield {"url": f"http://127.0.0.1:{httpd.server_address[1]}", "seen": seen}
     httpd.shutdown()
 

@@ -485,7 +485,9 @@ def test_server_judge_asks_the_server_without_a_proxy_and_survives_a_refusal(mon
             )
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True
+    ).start()
     monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")  # a leftover proxy is never used
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
     try:

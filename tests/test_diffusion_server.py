@@ -130,7 +130,7 @@ def _serve(runner):
     from dreamference.vllm_server.diffusion_openai_service import build_handler
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(runner))
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_address[1]}"
 
 
