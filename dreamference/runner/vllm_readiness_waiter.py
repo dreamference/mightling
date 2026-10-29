@@ -42,7 +42,7 @@ class VLLMReadinessWaiter:
             bool: True once the server is healthy and answers a completion, False on timeout or
                 cancellation.
         """
-        start_time = time.time()
+        start_time = time.monotonic()
         print(f"⏳ Waiting for local vLLM server at {self.config.vllm_host} to become available...")
 
         while True:
@@ -62,7 +62,7 @@ class VLLMReadinessWaiter:
                 print(f"\n⛔ {gate.get('message')}")
                 return False
 
-            if max_wait is not None and (time.time() - start_time) > max_wait:
+            if max_wait is not None and (time.monotonic() - start_time) > max_wait:
                 print(f"\n❌ Timed out waiting for vLLM server after {max_wait} seconds.")
                 print("💡 Start vLLM in another terminal via: `ling-admin server start`")
                 return False

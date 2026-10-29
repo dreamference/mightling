@@ -158,6 +158,29 @@ def test_readiness_waiter_needs_health_and_a_completion(monkeypatch):
     assert waiter.wait_for_vllm(max_wait=0) is False
 
 
+def test_readiness_waiter_keeps_its_limit_when_the_wall_clock_steps_back(monkeypatch):
+    # The limit was measured on the wall clock, so a clock step (NTP, a resume from suspend)
+    # lengthened or shortened the wait.
+    from types import SimpleNamespace
+
+    from dreamference.runner import VLLMReadinessWaiter
+    from dreamference.runner import vllm_readiness_waiter as waiter_module
+
+    waiter = VLLMReadinessWaiter(config=DreamferenceConfig())
+    monkeypatch.setattr(waiter.vllm_manager, "check_health", lambda timeout=None: False)
+    elapsed, wall = [0.0], [1_000_000.0]
+
+    def sleep(seconds):
+        elapsed[0] += seconds
+        wall[0] -= 3600.0  # the wall clock steps back an hour on every poll
+        assert elapsed[0] <= 100, "still waiting after 100 s on a 10 s limit"
+
+    monkeypatch.setattr(waiter_module, "time", SimpleNamespace(
+        sleep=sleep, time=lambda: wall[0], monotonic=lambda: elapsed[0]))
+    assert waiter.wait_for_vllm(max_wait=10) is False
+    assert elapsed[0] <= 12
+
+
 def test_readiness_waiter_warms_the_model_the_server_runs_not_the_configured_one(monkeypatch):
     # The server may run another model than the config names (AGENTS: ask the server); a completion
     # for the configured one answers 404, and the waiter would wait out its whole timeout.
