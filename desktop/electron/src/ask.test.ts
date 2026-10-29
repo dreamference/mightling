@@ -75,6 +75,9 @@ describe("Ask folders", () => {
     const root = path.join(home, "ask");
     const folder = newFolder(root);
     expect(path.basename(folder)).toMatch(/^q-[0-9a-f]{16}$/);
+    // A chat thread's folder is named as `ling web` names it (ask.rs folder_prefix).
+    expect(path.basename(newFolder(root, "chat"))).toMatch(/^chat-[0-9a-f]{16}$/);
+    expect(path.basename(newFolder(root, "ask"))).toMatch(/^q-[0-9a-f]{16}$/);
     // Windows has no POSIX modes; the folder is private there by the profile's own ACLs.
     if (process.platform !== "win32") expect(fs.statSync(folder).mode & 0o777).toBe(0o700);
     expect(isFolder(root, folder)).toBe(true);

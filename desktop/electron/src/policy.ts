@@ -25,7 +25,7 @@ export interface PromptSource {
   /** The system prompt a session under `name` receives, exactly as `ling prompt show <name> --composed` prints it. */
   composed(name: string): string;
   /** Creates a new, empty scratch folder for one Ask thread and returns its path. */
-  newScratchFolder(): string;
+  newScratchFolder(prompt: string): string;
   /** The scratch folder of an existing Ask thread, or null for any other thread. */
   scratchFolderOf(threadId: string): string | null;
   /**
@@ -343,7 +343,7 @@ function vetThreadParams(policy: Policy, method: string, original: JsonObject, p
   // `default` is what the launcher's catalog already carries: setting it again would only freeze
   // today's text into the thread.
   if (name !== "default") params.baseInstructions = prompts.composed(name);
-  if (policy.scratchPrompts.has(name)) confine(policy, params, prompts.newScratchFolder());
+  if (policy.scratchPrompts.has(name)) confine(policy, params, prompts.newScratchFolder(name as string));
   return params;
 }
 

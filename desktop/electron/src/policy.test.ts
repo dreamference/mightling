@@ -89,6 +89,27 @@ describe("the policy", () => {
     }
   });
 
+  // A new Ask thread's folder is named after its prompt, as `ling web` names it (ask.rs folder_prefix): a resumed
+  // chat thread gets its prompt's config back from that name.
+  it("asks for a scratch folder for the prompt the thread starts with", () => {
+    const asked: string[] = [];
+    const prompts: PromptSource = {
+      composed: (name) => name,
+      newScratchFolder: (prompt) => {
+        asked.push(prompt);
+        return "SCRATCH/1";
+      },
+      scratchFolderOf: () => null,
+      airgappedOn: () => false,
+      repoCheckout: () => null,
+      repoThreadCwd: () => null,
+      repoThreadFullAccess: () => false,
+      isBridge: () => false,
+    };
+    for (const prompt of ["chat", "ask"]) vetOutgoing({ id: 1, method: "thread/start", params: { prompt } }, new Set(), prompts);
+    expect(asked).toEqual(["chat", "ask"]);
+  });
+
   it("lets only an Ask thread's fork leave its folder, only for a Work folder (DESKTOP §16 B33)", () => {
     expect(POLICY.forkRequest).toBe("thread/fork");
     const source = (workFolder?: (cwd: string) => boolean): PromptSource => ({

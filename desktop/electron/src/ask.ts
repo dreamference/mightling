@@ -45,10 +45,10 @@ export function canonicalRoot(root: string): string {
   return fs.realpathSync(root);
 }
 
-/** Creates a new, empty folder for one Ask thread. */
-export function newFolder(root: string): string {
+/** Creates a new, empty folder for one Ask thread started with `prompt`, named as `ling web` names it (ask.rs `folder_prefix`). */
+export function newFolder(root: string, prompt = "ask"): string {
   privateDir(root);
-  const folder = path.join(root, `q-${randomBytes(8).toString("hex")}`);
+  const folder = path.join(root, `${prompt === "chat" ? "chat-" : "q-"}${randomBytes(8).toString("hex")}`);
   fs.mkdirSync(folder, { mode: 0o700 });
   if (process.platform !== "win32") fs.chmodSync(folder, 0o700);
   return fs.realpathSync(folder);
@@ -125,9 +125,9 @@ export class MessagePrompts implements PromptSource {
     throw new Error(`the prompt ${name} could not be composed`);
   }
 
-  newScratchFolder(): string {
+  newScratchFolder(prompt: string): string {
     try {
-      this.created = newFolder(this.root);
+      this.created = newFolder(this.root, prompt);
     } catch (error) {
       throw new Error(`could not create an Ask folder: ${error instanceof Error ? error.message : String(error)}`);
     }
