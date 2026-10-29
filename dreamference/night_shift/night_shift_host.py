@@ -124,6 +124,9 @@ DELETED_SUFFIX: Final[str] = " (deleted)"
 # (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.3); `desktop/electron/src/server.ts` writes it.
 BUSY_DIR_NAME: Final[str] = "busy"
 
+# The `ling` subcommands that write busy markers: the desktop's app-server and `ling web`.
+MARKER_SUBCOMMANDS: Final[frozenset] = frozenset({b"app-server", b"web"})
+
 GIB: Final[int] = 1024**3
 
 # The part of the KV pool a night run divides between its tasks. Codex compacts after the turn that
@@ -436,7 +439,7 @@ class NightShiftHost:
             args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
         except OSError:
             return False
-        return b"app-server" in args or b"web" in args
+        return not MARKER_SUBCOMMANDS.isdisjoint(args)
 
     @classmethod
     def executable_of(cls, pid: str) -> str:
