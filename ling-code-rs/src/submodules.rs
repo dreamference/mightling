@@ -462,16 +462,18 @@ fn declared(dir: &Path) -> Vec<(String, String)> {
             "config",
             "-f",
             ".gitmodules",
+            "--null",
             "--get-regexp",
             r"^submodule\..*\.path$",
         ],
     ) else {
         return Vec::new();
     };
+    // `--null` ends the key with a newline and the entry with a NUL: a name may hold a space.
     listing
-        .lines()
-        .filter_map(|line| {
-            let (key, value) = line.split_once(' ')?;
+        .split('\0')
+        .filter_map(|entry| {
+            let (key, value) = entry.split_once('\n')?;
             let name = key.strip_prefix("submodule.")?.strip_suffix(".path")?;
             Some((name.to_string(), value.trim_end_matches('/').to_string()))
         })
