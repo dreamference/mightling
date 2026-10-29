@@ -379,6 +379,12 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
   if (!isObject(message)) throw new Error("a message must be a JSON object");
   const object: JsonObject = { ...message };
   delete object.jsonrpc;
+  // The app-server also reads a list of params, field by field in declaration order, so a list
+  // would carry `sandbox` or `baseInstructions` past every rule below, which read only an object's
+  // fields. Absent or null is left to the app-server, which refuses what needs params.
+  if (object.params !== undefined && object.params !== null && !isObject(object.params)) {
+    throw new Error("a message's params must be a JSON object");
+  }
   const method = typeof object.method === "string" ? object.method : undefined;
   const key = "id" in object ? JSON.stringify(object.id) : undefined;
   if (method !== undefined && key !== undefined) {
