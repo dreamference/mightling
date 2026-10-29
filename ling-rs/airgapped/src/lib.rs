@@ -620,11 +620,23 @@ pub fn seal_file(id: &str) -> Option<PathBuf> {
     Some(seal_dir()?.join(id))
 }
 
-/// Whether any of `ids` is held at `on` by a seal.
+/// Whether any of `ids` is held at `on` by a seal. Seals are read in the runtime directory
+/// wherever this process works: [`seal_dir`] judges by the working directory where seals may be
+/// written, and Codex's sandbox helper runs in each command's own folder, which the model
+/// chooses, so a command started in `/` would not have seen the seal `ling` wrote. A seal only
+/// ever tightens the level, so one is honoured wherever it could have come from.
 pub fn sealed(ids: &[&str]) -> bool {
+    let Some(seals) = runtime_dir().map(|dir| dir.join(SEAL_DIR)) else {
+        return false;
+    };
     ids.iter()
-        .filter_map(|id| seal_file(id))
-        .any(|path| path.is_file())
+        .filter(|id| seal_file_name(id))
+        .any(|id| seals.join(id).is_file())
+}
+
+/// Whether `id` may name a seal: ids are UUIDs, as for [`session_file`].
+fn seal_file_name(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// What the files say, corrected for what a command could have done to them. `sealed`: a seal
@@ -1320,7 +1332,10 @@ mod tests {
         let from_runtime = sealed_from(&runtime);
         let _ = std::fs::remove_dir_all(&runtime);
         assert!(from_root, "a command working in / must see the seal");
-        assert!(from_runtime, "a command working in the runtime directory must see the seal");
+        assert!(
+            from_runtime,
+            "a command working in the runtime directory must see the seal"
+        );
     }
 
     #[test]
