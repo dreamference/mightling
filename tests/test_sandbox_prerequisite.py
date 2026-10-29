@@ -107,12 +107,18 @@ def test_turning_it_off_removes_the_night_timer_and_is_not_asked_again(machine, 
     assert machine["root"] == []
 
 
-def test_once_the_sandbox_works_the_off_answer_is_forgotten(machine):
+def test_once_the_sandbox_works_the_off_answer_is_forgotten(machine, capsys):
     machine["answers"] = ["2"]
     SandboxPrerequisite.gate("status", None)
+    capsys.readouterr()
     machine["works"] = True
     assert SandboxPrerequisite.gate("night", "run") is True
     assert not SandboxPrerequisite.decision_path().exists()
+    # The timer it removed stays off until the user puts it back, so the user is told how
+    # (specs/DREAMFERENCE_SETUP.md §3.3).
+    assert "`ling-admin night enable` puts the timer back" in capsys.readouterr().err
+    SandboxPrerequisite.gate("status", None)
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.parametrize("answer", ["", "3"])
