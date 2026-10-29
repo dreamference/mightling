@@ -1105,11 +1105,11 @@ impl ChatRepos {
     }
 
     /// Sets `current_repo[chat_key] = repo` in `$CODEX_HOME/chat-repos/current.json`.
-    pub fn set_current_repo(&self, codex_home: &Path, chat_key: &str, repo: &str) {
+    pub fn set_current_repo(&self, codex_home: &Path, chat_key: &str, repo: &str) -> std::io::Result<()> {
         let _io_guard = self.index_io_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut current = load_current_repos(codex_home);
         current.insert(chat_key.to_string(), repo.to_string());
-        let _ = save_current_repos(codex_home, &current);
+        save_current_repos(codex_home, &current)
     }
 
     /// Clears `current_repo[chat_key]` in `$CODEX_HOME/chat-repos/current.json` and returns the previous repo.
@@ -2732,9 +2732,15 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
     };
 
     let chat_key = record.chat_key();
-    server
+    if let Err(e) = server
         .chat_repos
-        .set_current_repo(&server.config.codex_home, &chat_key, &record.repo);
+        .set_current_repo(&server.config.codex_home, &chat_key, &record.repo)
+    {
+        return json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({ "error": format!("could not save the chat's current repository: {e}") }),
+        );
+    }
     let switched_branch = record.branch.clone().unwrap_or_else(|| record.base.clone());
     server.chat_repos.record_event_for_record(
         &record,
@@ -8711,6 +8717,32 @@ mod tests {
         let (st, again, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(again["repo"], Value::Null, "{body}");
+    }
+
+    #[tokio::test]
+    async fn open_fails_when_the_chat_s_current_repository_cannot_be_saved() {
+        let s = scratch("current-unsaved");
+        let bare = make_bare_repo(&s.dir, "org/unsaved");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/unsaved",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+        // A directory where current.json belongs: the write cannot land.
+        std::fs::create_dir_all(current_repos_path(&server.config.codex_home)).unwrap();
+        let (st, _, body) =
+            post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/unsaved", "bridge": "signal", "chat": "signal:+1555" })).await;
+        assert_eq!(st, StatusCode::INTERNAL_SERVER_ERROR, "an /open the chat will not remember must not report success: {body}");
     }
 
     #[tokio::test]
