@@ -121,7 +121,7 @@ def test_code_search_is_answered_by_the_code_index_when_the_workspace_has_one(tm
         {"rel_path": "pkg/a.py", "line": 40, "kind": "method", "symbol": "pkg.a.Loader.load", "source": "ling-code"},
     ]
     # The words are separate arguments: no shell, and nothing the query says is interpreted.
-    assert calls.read_text().strip() == "search --json -- loader load"
+    assert calls.read_text().strip() == "search --json --limit 2 -- loader load"
 
 
 def test_code_search_passes_words_that_look_like_options_as_words(tmp_path, monkeypatch):
@@ -132,7 +132,7 @@ def test_code_search_passes_words_that_look_like_options_as_words(tmp_path, monk
     calls = tmp_path / "calls"
     _fake_mightling_code(tmp_path, monkeypatch, f"echo \"$@\" >> {calls}\necho '{{\"rows\": []}}'\n")
     assert CodeIndexSearch.search("--path vendor -x") == []
-    assert calls.read_text().strip() == "search --json -- --path vendor -x"
+    assert calls.read_text().strip() == "search --json --limit 5 -- --path vendor -x"
 
 
 def test_code_search_falls_back_to_the_context_engine(tmp_path, monkeypatch):
@@ -213,3 +213,17 @@ def test_a_tool_call_whose_params_or_arguments_are_null_is_answered():
         req = {"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": params}
         resp = MCPServer().handle_request(req)
         assert "result" in resp, resp
+
+
+def test_code_search_asks_the_router_for_as_many_rows_as_top_k(tmp_path, monkeypatch):
+    # Without `--limit` the router answered its default 40 rows, so a `top_k` of 60 got 40; it
+    # takes at most 200.
+    from dreamference.mcp_server import CodeIndexSearch
+
+    calls = tmp_path / "calls"
+    _fake_mightling_code(tmp_path, monkeypatch, f"echo \"$@\" >> {calls}\necho '{{\"rows\": []}}'\n")
+    CodeIndexSearch.search("loader", top_k=60)
+    CodeIndexSearch.search("loader", top_k=500)
+    assert calls.read_text().splitlines() == [
+        "search --json --limit 60 -- loader", "search --json --limit 200 -- loader"
+    ]

@@ -59,8 +59,9 @@ class CodeIndexSearch:
             return None
         try:
             result = subprocess.run(
-                # `--` before the words: a word such as `--path` is a word, not an option.
-                [binary, "search", "--json", "--", *query.split()],
+                # `--` before the words: a word such as `--path` is a word, not an option. The
+                # router answers 40 rows unless told otherwise, and at most 200.
+                [binary, "search", "--json", "--limit", str(min(max(top_k, 1), 200)), "--", *query.split()],
                 cwd=cwd or os.getcwd(), capture_output=True, text=True,
                 stdin=subprocess.DEVNULL, timeout=SEARCH_TIMEOUT_S,
             )
