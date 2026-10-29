@@ -21,6 +21,7 @@ import signal
 import subprocess
 import threading
 import time
+import tomllib
 from pathlib import Path
 from typing import Any, Final
 
@@ -221,6 +222,7 @@ class NightShiftTaskRun:
             self.test_override,
             None if self.remote else self.settings.test,
             self.repo,
+            self.base,
         )
         if self._cancelled():
             return self._cleanup_and_finish("cancelled")
@@ -975,7 +977,7 @@ class NightShiftTaskRun:
 
     @classmethod
     def detect_test_command(
-        cls, worktree: Path, override: str | None, configured: str | None, repo: Path
+        cls, worktree: Path, override: str | None, configured: str | None, repo: Path, base: str | None = None
     ) -> tuple[str | None, str]:
         """Picks the command that decides pass or fail (§5.4); the first match wins.
 
@@ -984,13 +986,16 @@ class NightShiftTaskRun:
             override: The task's `--test`.
             configured: `[night] test` from the user's config.
             repo: The main checkout, whose `.venv` serves a worktree that has none.
+            base: The task's base commit; `dreamference.toml` is read from it, since a resumed
+                task's worktree holds the agent's edits.
 
         Returns:
             Tuple[Optional[str], str]: The command (None if nothing matched) and where it came from.
         """
         if override:
             return override, "--test"
-        repo_table = NightShiftSettings.read_table(worktree / "dreamference.toml")
+        repo_table = cls._base_table(worktree, base) if base else NightShiftSettings.read_table(
+            worktree / "dreamference.toml")
         if repo_table.get("test"):
             return str(repo_table["test"]), "dreamference.toml [night] test"
         if configured:
@@ -1021,3 +1026,13 @@ class NightShiftTaskRun:
             if isinstance(scripts, dict) and scripts.get("test"):
                 return "npm test", "package.json"
         return None, "none found"
+
+    @classmethod
+    def _base_table(cls, worktree: Path, base: str) -> dict[str, Any]:
+        """Reads `[night]` from `dreamference.toml` as committed at the base (empty if absent)."""
+        shown = SafeGit.run(["show", f"{base}:dreamference.toml"], worktree)
+        try:
+            table = tomllib.loads(shown.stdout).get("night", {}) if shown.returncode == 0 else {}
+        except tomllib.TOMLDecodeError:
+            return {}
+        return table if isinstance(table, dict) else {}
