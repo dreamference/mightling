@@ -940,6 +940,19 @@ async fn night_add_confirms_first_and_carries_the_threads_context() {
     assert!(status.contains("• 20261021-1300-abc — queued [app] Fix the parser"), "{status}");
 }
 
+/// In a Telegram group a command carries the bot's name: `/night@Bot status` is `/night status`.
+#[tokio::test]
+async fn night_with_the_bots_name_reads_its_verb() {
+    let mut rig = rig("night-bot", default_script(), false, |_| {});
+    rig.inbound.send(text(CHAT, "/night@MightlingBot status")).unwrap();
+    let status = loop {
+        if let Outbound::Notice { text, .. } = next_settled(&mut rig.telegram).await {
+            break text;
+        }
+    };
+    assert!(status.starts_with("Night Shift:"), "{status}");
+}
+
 /// The morning report is pushed to Signal and Matrix chats by default, never twice, and the first
 /// look after a fresh start sends nothing old.
 #[tokio::test]

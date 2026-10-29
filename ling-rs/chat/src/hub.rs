@@ -693,7 +693,8 @@ impl Hub {
             "/push" => self.repo_confirm(chat, RefusedAction::Push).await,
             "/merge" => self.repo_confirm(chat, RefusedAction::Merge).await,
             "/night" => {
-                let rest = text.trim()["/night".len()..].trim().to_string();
+                // After the command word, which may carry the bot's name in a group (`/night@Bot`).
+                let rest = text.trim().split_once(char::is_whitespace).map_or("", |(_, rest)| rest).trim().to_string();
                 self.night(chat, &rest).await;
             }
             "/help" | "/start" => self.notice(chat, HELP),
