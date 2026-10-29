@@ -32,13 +32,13 @@ UNIT_PLAIN = re.compile(r"[A-Za-z0-9_@+=:,./-]+")
 
 
 def unit_word(word: str) -> str:
-    """One argument of an `ExecStart=` line, written so that systemd reads it back as given.
+    r"""One argument of an `ExecStart=` line, written so that systemd reads it back as given.
 
     Args:
         word: The argument.
 
     Returns:
-        str: The word, in double quotes with `\\`, `"`, `$` and `%` escaped unless it is plain.
+        str: The word, in double quotes with `\`, `"`, `$` and `%` escaped unless it is plain.
     """
     if UNIT_PLAIN.fullmatch(word):
         return word

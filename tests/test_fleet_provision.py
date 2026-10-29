@@ -243,8 +243,13 @@ def test_a_folder_or_image_name_with_shell_characters_is_only_a_name(tmp_path):
     body = FleetProbe.script([folder], [image])
     lines = [ln for ln in body.splitlines() if ln.startswith(("[ -d", "( docker"))]
     script = "\n".join(
-        ["v() { printf '%s=%s\\n' \"$1\" \"$2\"; }", f"hub={tmp_path}"]
-        + ["docker() { return 1; }", "sg() { return 1; }"] + lines
+        [
+            "v() { printf '%s=%s\\n' \"$1\" \"$2\"; }",
+            f"hub={tmp_path}",
+            "docker() { return 1; }",
+            "sg() { return 1; }",
+            *lines,
+        ]
     )
 
     done = subprocess.run(["sh", "-c", script], cwd=tmp_path, capture_output=True, text=True)

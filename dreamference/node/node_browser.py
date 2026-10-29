@@ -53,7 +53,7 @@ class NodeBrowser:
             interface = fields[1]
             if interface == "lo" or interface.startswith(("docker", "br-", "veth")):
                 continue
-            entry: Dict[str, str] = {}
+            entry: dict[str, str] = {}
             for record in fields[9].split('" "'):
                 key, _, value = record.strip('"').partition("=")
                 if key:

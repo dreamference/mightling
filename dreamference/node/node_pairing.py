@@ -90,7 +90,7 @@ class NodePairing:
             or not fields[0].startswith(("ssh-", "ecdsa-", "sk-"))
         ):
             raise ValueError("not a public key")
-        if '"' in serve_command or "\\" in serve_command or "\n" in serve_command:
+        if any(char in serve_command for char in '"\\\n'):
             raise ValueError("the forced command cannot be quoted")
         return f'command="{serve_command}",{KEY_RESTRICTIONS} {fields[0]} {fields[1]} {KEY_COMMENT}'
 

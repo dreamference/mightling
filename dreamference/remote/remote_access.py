@@ -34,7 +34,11 @@ from dreamference.remote.remote_enrolment import RemoteEnrolment
 from dreamference.remote.remote_join_script import RemoteJoinScript
 from dreamference.remote.remote_node_peer import RemoteNodePeer
 from dreamference.remote.remote_public_certificate import RemotePublicCertificate
-from dreamference.remote.remote_relay_certificate import DNS_LABEL, RECORD_KEYS, RemoteRelayCertificate
+from dreamference.remote.remote_relay_certificate import (
+    DNS_LABEL,
+    RECORD_KEYS,
+    RemoteRelayCertificate,
+)
 from dreamference.remote.remote_settings import (
     BOX_PUBLIC_PORT,
     CODE_MINUTES,

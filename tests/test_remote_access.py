@@ -2105,9 +2105,7 @@ def test_a_value_that_holds_another_placeholder_stays_inside_its_quotes(tmp_path
         "ca": "",
     }
     script = RemoteJoinScript.script(bundle, peer="p@SSH_USER@", ssh_user="u; touch PWN #")
-    assignments = [
-        line for line in script.splitlines() if re.match(r"(KEY|PEER|SSH_USER)=", line)
-    ]
+    assignments = [line for line in script.splitlines() if re.match(r"(KEY|PEER|SSH_USER)=", line)]
     probe = "\n".join([*assignments, 'printf "%s\\n" "$KEY" "$PEER" "$SSH_USER"'])
 
     done = subprocess.run(

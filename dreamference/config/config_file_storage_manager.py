@@ -44,29 +44,33 @@ class ConfigFileStorageManager:
             # silently ignored, and make JSON refuse the whole file.
             with open(path, "r", encoding="utf-8-sig") as f:
                 if path.suffix == ".toml":
-                    # tomllib reads every valid TOML file, as the Rust readers do; the older `toml`
-                    # package refuses some (a mixed-type array anywhere) and misreads others (an
-                    # escaped quoted key, a string such as "\"\"x"), so it is only the fallback for
-                    # text tomllib refuses.
-                    text = f.read()
-                    try:
-                        loaded = tomllib.loads(text)
-                    except tomllib.TOMLDecodeError:
-                        if toml is None:
-                            raise
-                        loaded = toml.loads(text)
+                    loaded = cls._load_toml(f.read())
                 elif yaml and path.suffix in (".yaml", ".yml"):
                     loaded = yaml.safe_load(f) or {}
                 else:
                     loaded = json.load(f) or {}
             if not isinstance(loaded, dict):
                 # A file that is only a list or a word has no settings; every caller reads a mapping.
-                print(f"⚠️ Mightling config file ({path}) is not a table of settings; ignoring it.")
-                return {}
+                raise ValueError("not a table of settings; ignoring it")
             return loaded
         except Exception as e:
             print(f"⚠️ Error reading Mightling config file ({path}): {e}")
             return {}
+
+    @staticmethod
+    def _load_toml(text: str) -> dict[str, Any]:
+        """Reads TOML text: with tomllib, and with the older `toml` package only for text it refuses.
+
+        tomllib reads every valid TOML file, as the Rust readers do; the older `toml` package refuses
+        some (a mixed-type array anywhere) and misreads others (an escaped quoted key, a string that
+        starts with escaped quotes), so it is only the fallback.
+        """
+        try:
+            return tomllib.loads(text)
+        except tomllib.TOMLDecodeError:
+            if toml is None:
+                raise
+            return toml.loads(text)
 
     @classmethod
     def save_config_dict(cls, path: Path, data: Dict[str, Any]) -> Path:
