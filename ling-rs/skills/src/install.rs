@@ -251,12 +251,8 @@ pub fn unpack(tarball: impl Read, paths: &[String], destination: &Path) -> Resul
         if !kind.is_file() {
             return Err(format!("refused: {} is neither a file, a folder nor a link", relative.display()));
         }
-        total += entry.header().size().unwrap_or(0);
-        if total > MAX_BUNDLE_BYTES {
-            return Err(too_large());
-        }
-        let mut contents = Vec::new();
-        (&mut entry).take(MAX_BUNDLE_BYTES + 1).read_to_end(&mut contents).map_err(|error| error.to_string())?;
+        // What is read counts, not the header's size: a pax record overrides that.
+        let contents = read_within(&mut entry, &mut total)?;
         std::fs::write(&target, &contents).map_err(|error| error.to_string())?;
         set_mode(&target, entry.header().mode().unwrap_or(0o644));
     }
@@ -291,12 +287,8 @@ pub fn unzip(bytes: &[u8], destination: &Path) -> Result<(), String> {
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        total += entry.size();
-        if total > MAX_BUNDLE_BYTES {
-            return Err(too_large());
-        }
-        let mut contents = Vec::new();
-        (&mut entry).take(MAX_BUNDLE_BYTES + 1).read_to_end(&mut contents).map_err(|error| error.to_string())?;
+        // What is read counts, not the size the zip states: nothing holds an entry to it.
+        let contents = read_within(&mut entry, &mut total)?;
         if entry.is_symlink() {
             let link = PathBuf::from(String::from_utf8_lossy(&contents).into_owned());
             if !link_stays_inside(&relative, &link) {
@@ -375,6 +367,18 @@ impl Found {
         let text = format!("{} {} {}", self.source, self.name, self.description).to_lowercase();
         words.iter().all(|word| text.contains(word.as_str()))
     }
+}
+
+/// Reads one entry, adding its bytes to `total`; more than [`MAX_BUNDLE_BYTES`] in all is refused
+/// before more than one byte past it is read.
+fn read_within(entry: &mut impl Read, total: &mut u64) -> Result<Vec<u8>, String> {
+    let mut contents = Vec::new();
+    entry.take(MAX_BUNDLE_BYTES - *total + 1).read_to_end(&mut contents).map_err(|error| error.to_string())?;
+    *total += contents.len() as u64;
+    if *total > MAX_BUNDLE_BYTES {
+        return Err(too_large());
+    }
+    Ok(contents)
 }
 
 fn too_large() -> String {
@@ -883,6 +887,49 @@ mod tests {
         let big = vec![b'x'; (MAX_BUNDLE_BYTES + 1) as usize];
         let huge = crate::testing::tarball_raw(&[("r-1/skill/big.bin", big.as_slice(), false)]);
         let refused = unpack(huge.as_slice(), &["skill".into()], &root.join("e"));
+        assert!(refused.as_ref().is_err_and(|error| error.contains("larger than 50 MB")), "{refused:?}");
+    }
+
+    /// A pax record `size=<n>` overrides the size in the tar header; a zip's size is only what its
+    /// directory says. Neither may lift the limit: each bundle below states 0 and holds more.
+    #[test]
+    fn a_size_the_archive_misstates_does_not_lift_the_limit() {
+        let root = scratch("misstated-size");
+        let big = vec![0u8; (MAX_BUNDLE_BYTES + 1) as usize];
+
+        let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        // A record's length counts its own digits.
+        let body = format!(" size={}\n", big.len());
+        let mut record = format!("{}{body}", body.len());
+        while record.len() != record.split(' ').next().and_then(|n| n.parse().ok()).unwrap_or(0) {
+            record = format!("{}{body}", record.len());
+        }
+        let mut pax = tar::Header::new_ustar();
+        let _ = pax.set_path("r-1/skill/pax");
+        pax.set_size(record.len() as u64);
+        pax.set_entry_type(tar::EntryType::XHeader);
+        pax.set_cksum();
+        let _ = builder.append(&pax, record.as_bytes());
+        let mut header = tar::Header::new_ustar();
+        let _ = header.set_path("r-1/skill/big.bin");
+        header.set_size(0);
+        header.set_mode(0o644);
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_cksum();
+        let _ = builder.append(&header, big.as_slice());
+        let tarball = builder.into_inner().and_then(|encoder| encoder.finish()).unwrap_or_default();
+        let refused = unpack(tarball.as_slice(), &["skill".into()], &root.join("tar"));
+        assert!(refused.as_ref().is_err_and(|error| error.contains("larger than 50 MB")), "{refused:?}");
+
+        let mut bytes = zip_of(&[("big.bin", big.as_slice(), None)]);
+        // The uncompressed size: at 22 in the local header, at 24 in the central directory's.
+        let central = bytes.windows(4).position(|window| window == b"PK\x01\x02").unwrap_or_default();
+        for at in [22, central + 24] {
+            if let Some(field) = bytes.get_mut(at..at + 4) {
+                field.copy_from_slice(&0u32.to_le_bytes());
+            }
+        }
+        let refused = unzip(&bytes, &root.join("zip"));
         assert!(refused.as_ref().is_err_and(|error| error.contains("larger than 50 MB")), "{refused:?}");
     }
 
