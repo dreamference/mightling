@@ -19,9 +19,13 @@ pub struct FileStamp {
 }
 
 impl FileStamp {
-    /// Stamps a file on disk.
+    /// Stamps a file on disk; None for anything but a regular file (a tracked link to
+    /// `/dev/zero` or a FIFO would be hashed forever).
     pub fn of(path: &Path) -> Option<FileStamp> {
         let meta = std::fs::metadata(path).ok()?;
+        if !meta.is_file() {
+            return None;
+        }
         Some(FileStamp {
             sha256: sha256_file(path)?,
             mtime_ns: mtime_ns(&meta),
@@ -226,6 +230,21 @@ mod tests {
         }
         assert!(Manifest::load(&scip).runs.is_empty());
         assert!(GraphSnapshot::load(&scip).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_tracked_link_to_a_device_or_a_fifo_is_not_stamped() {
+        // The supervisor stamps every file git knows before a run, outside the sandbox: a clone
+        // that tracks `zero -> /dev/zero` had it hash forever.
+        let dir = tempfile::tempdir().unwrap();
+        let zero = dir.path().join("zero");
+        std::os::unix::fs::symlink("/dev/zero", &zero).unwrap();
+        assert!(FileStamp::of(&zero).is_none());
+        let fifo = dir.path().join("fifo");
+        let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        assert!(FileStamp::of(&fifo).is_none());
     }
 
     #[test]
