@@ -120,9 +120,14 @@ class RemoteRelayCertificate:
             ):
                 continue
             for record in current:
-                RemotePublicCertificate._cloudflare(
+                status, _ = RemotePublicCertificate._cloudflare(
                     "DELETE", f"/zones/{zone}/dns_records/{record.get('id')}"
                 )
+                if status != HTTP_OK:
+                    LOG.error(
+                        f"❌ Cloudflare kept an old {kind} record of {relay_name} ({status})."
+                    )
+                    return False
             for content in wanted:
                 status, body = RemotePublicCertificate._cloudflare(
                     "POST",

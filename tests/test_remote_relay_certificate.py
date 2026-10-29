@@ -71,7 +71,7 @@ def test_the_relay_name_must_differ_from_the_control_planes(name, ok):
 # -- DNS --------------------------------------------------------------------------------------------
 
 
-def _cloudflare(monkeypatch, records):
+def _cloudflare(monkeypatch, records, delete_status=200):
     calls = []
 
     def call(cls, method, path, body=None):
@@ -84,6 +84,8 @@ def _cloudflare(monkeypatch, records):
                 r for r in records if r["name"] == query["name"] and r["type"] == query["type"]
             ]
             return 200, {"result": found}
+        if method == "DELETE":
+            return delete_status, {"result": {}}
         return 200, {"result": {}}
 
     monkeypatch.setattr(RemotePublicCertificate, "_cloudflare", classmethod(call))
@@ -116,6 +118,19 @@ def test_addresses_already_right_are_left_alone(monkeypatch):
     )
     assert RemoteRelayCertificate.ensure_addresses(RELAY, BOX)
     assert all(m == "GET" for m, _, _ in calls)
+
+
+def test_an_old_address_cloudflare_would_not_delete_is_not_reported_in_place(monkeypatch):
+    calls = _cloudflare(
+        monkeypatch,
+        [
+            {"id": "a", "name": BOX, "type": "A", "content": "192.0.2.7"},
+            {"id": "c", "name": RELAY, "type": "A", "content": "192.0.2.1", "proxied": False},
+        ],
+        delete_status=403,
+    )
+    assert RemoteRelayCertificate.ensure_addresses(RELAY, BOX) is False
+    assert "POST" not in [m for m, _, _ in calls]
 
 
 # -- the ACME account and the CAA record ------------------------------------------------------------
