@@ -299,6 +299,21 @@ def test_the_drift_check_compares_ling_serve_with_its_own_recipe():
     assert "  drift --max-context" in rows
 
 
+def test_the_drift_check_reads_a_flag_given_as_one_token_with_its_value():
+    # A server launched by hand with `--max-context=262144` was reported as two drifts: no
+    # `--max-context`, and an unknown flag `--max-context=262144`.
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController as Cli
+
+    running = VLLMServerManager().build_launch_command(
+        model=DEFAULT_MODEL_ALIAS, gate=True, engine=ENGINE_LING
+    )
+    at = running.index("--max-context")
+    joined = [*running[:at], f"--max-context={running[at + 1]}", *running[at + 2 :]]
+    assert Cli._detect_recipe_drift(DEFAULT_MODEL_ALIAS, 8000, joined) == {
+        "Recipe Match": "Running flags match the registry recipe"
+    }
+
+
 def _stub_start(monkeypatch, mgr, calls):
     """Stubs every step of start_server that would touch the machine."""
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
