@@ -461,7 +461,7 @@ function AppearancePage({ prefs, onChange, notice }: SettingsProps) {
         <legend>Fonts</legend>
         <label><input type="checkbox" checked={prefs.appearance.fontUi === READABLE_FONT} onChange={(event) => set({ fontUi: event.target.checked ? READABLE_FONT : undefined })} /> A font made for reading: Atkinson Hyperlegible, its letters hard to mistake for each other</label>
         <label className="field">Interface font <input key={prefs.appearance.fontUi ?? ""} defaultValue={prefs.appearance.fontUi ?? ""} placeholder="Inter, sans-serif" aria-label="Interface font" onBlur={(event) => set({ fontUi: event.target.value.trim() || undefined })} /></label>
-        <label className="field">Code font <input defaultValue={prefs.appearance.fontCode ?? ""} placeholder='"JetBrains Mono", monospace' aria-label="Code font" onBlur={(event) => set({ fontCode: event.target.value.trim() || undefined })} /></label>
+        <label className="field">Code font <input key={prefs.appearance.fontCode ?? ""} defaultValue={prefs.appearance.fontCode ?? ""} placeholder='"JetBrains Mono", monospace' aria-label="Code font" onBlur={(event) => set({ fontCode: event.target.value.trim() || undefined })} /></label>
       </fieldset>
       <div className="buttons dialog-buttons">
         <button onClick={exportTheme}>Save the theme to a file</button>
