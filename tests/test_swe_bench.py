@@ -2795,6 +2795,11 @@ def test_every_git_apply_refusal_of_the_test_patch_counts_and_nothing_else_does(
     assert SweBenchHarness.test_patch_rejected(
         "error: patch failed: a.py:3\n"
     )  # the phrases still count
+    # A test of git's own patch code may print them as output; that is not the test patch's apply.
+    printed = APPLIED_AFTER_PATHSPEC_ERROR.replace(
+        "error: the test's own output may say error:", "error: patch failed: x.py:1 / patch does not apply"
+    )
+    assert not SweBenchHarness.test_patch_rejected(printed)
     # Read from where the harness writes it.
     model = "mightling-x/test-model"
     for instance_id, text in (

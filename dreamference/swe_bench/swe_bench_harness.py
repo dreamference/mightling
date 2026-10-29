@@ -399,7 +399,8 @@ class SweBenchHarness:
 
         Returns:
             bool: True when an `error:` line falls between the test patch's `git apply` and the
-            start of the test output, or the output has one of `git apply`'s failure phrases.
+            start of the test output, or the output before the tests' own has one of `git apply`'s
+            failure phrases.
         """
         applying = False
         for line in text.splitlines():
@@ -409,4 +410,5 @@ class SweBenchHarness:
                 applying = False
             elif applying and line.startswith("error:"):
                 return True
-        return "error: patch failed" in text or "patch does not apply" in text
+        setup = text.split(TEST_OUTPUT_START, 1)[0]
+        return "error: patch failed" in setup or "patch does not apply" in setup
