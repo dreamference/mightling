@@ -585,7 +585,7 @@ def test_full_images_are_prefetched_before_the_verdict_and_the_rest_cancelled(tm
     for i, cand in enumerate(fresh):
         table[cand["thumb_url"]] = _blocky_jpeg(200 + i)
         table[cand["image_url"]] = _blocky_jpeg(200 + i, size=128)
-    service, _ = _service(tmp_path, {"q": fresh + [cached]}, table, ranker=_FirstOnly())
+    service, _ = _service(tmp_path, {"q": [*fresh, cached]}, table, ranker=_FirstOnly())
     service.store.persist(cached["image_url"], _blocky_jpeg(300), "cached one", 1)
     pool = service._pool = _RecordingPool(events)
 
