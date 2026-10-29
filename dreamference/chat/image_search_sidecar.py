@@ -147,11 +147,13 @@ class ImageSearchSidecar:
             return fallback
 
     @classmethod
-    def run_command(cls, secret: str, vision_url: str, vision_model: str, siglip: bool) -> List[str]:
+    def run_command(cls, vision_url: str, vision_model: str, siglip: bool) -> List[str]:
         """Builds the `docker run` command for the service.
 
+        The shared secret `/search` requires is named, not given: `docker run` reads it from its own
+        environment (`start`), so it never appears in an argv other local users can read in `/proc`.
+
         Args:
-            secret (str): The shared secret `/search` requires.
             vision_url (str): The model server as the container reaches it, with `/v1`.
             vision_model (str): The served model's id, for the vision re-rank.
             siglip (bool): Whether the SigLIP pre-filter runs; without it the service skips it.
@@ -165,7 +167,7 @@ class ImageSearchSidecar:
             "--user", f"{os.getuid()}:{os.getgid()}",
             "-v", f"{IMAGE_SEARCH_DATA_DIR}:/config",
             "-p", f"127.0.0.1:{IMAGE_SEARCH_HOST_PORT}:8768",
-            "-e", f"MIGHTLING_IMAGE_SECRET={secret}",
+            "-e", "MIGHTLING_IMAGE_SECRET",
             "-e", f"MIGHTLING_SEARXNG_URL={SEARXNG_CONTAINER_URL}",
             "-e", f"MIGHTLING_SIGLIP_URL={SIGLIP_CONTAINER_URL if siglip else ''}",
             "-e", f"MIGHTLING_VISION_URL={vision_url}",
@@ -287,8 +289,9 @@ class ImageSearchSidecar:
         subprocess.run(["docker", "rm", "-f", IMAGE_SEARCH_CONTAINER_NAME],
                        capture_output=True, timeout=60, check=False)
         command = cls.run_command(
-            secret, DockerBridge.container_vllm_url(vllm_host), cls.vision_model(vllm_host, model), with_siglip)
-        result = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+            DockerBridge.container_vllm_url(vllm_host), cls.vision_model(vllm_host, model), with_siglip)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False,
+                                env={**os.environ, "MIGHTLING_IMAGE_SECRET": secret})
         if result.returncode != 0:
             cls.problem = f"Could not start the image search service: {result.stderr.strip()[:200]}"
             return False

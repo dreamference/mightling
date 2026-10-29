@@ -26,10 +26,12 @@ class FakeDocker:
         self.states = dict(states or {})
         self.networks = dict(networks or {})
         self.commands = []
+        self.environments = []
 
     def __call__(self, argv, **kwargs):
         argv = list(argv)
         self.commands.append(argv)
+        self.environments.append(kwargs.get("env"))
         if argv[:2] == ["docker", "inspect"]:
             name, fmt = argv[2], argv[4]
             value = self.states.get(name, "") if "State" in fmt else self.networks.get(name, "")
@@ -83,7 +85,11 @@ def test_image_search_starts_on_the_sidecar_network_with_its_store_and_secret(mo
     assert "MIGHTLING_VISION_MODEL=served/model" in env
     assert "MIGHTLING_SIGLIP_URL=http://dreamference-siglip:9100" in env
     secret = (store / "secret").read_text()
-    assert f"MIGHTLING_IMAGE_SECRET={secret}" in env
+    # The secret reaches the container through docker's environment, never its argv: any local
+    # user can read a process's argv in /proc.
+    assert "MIGHTLING_IMAGE_SECRET" in env
+    assert not [arg for command in fake.commands for arg in command if secret in arg]
+    assert fake.environments[fake.commands.index(run)]["MIGHTLING_IMAGE_SECRET"] == secret
     assert (store / "secret").stat().st_mode & 0o777 == 0o600
     assert (store / "service.py").is_file() and (store / "data" / "images").is_dir()
     # A second start keeps the secret: the MCP server and a running session read the same file.

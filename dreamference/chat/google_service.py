@@ -150,13 +150,15 @@ class GoogleService:
         return f"{SECRET_ENV}={secret}" in result.stdout.splitlines()
 
     @classmethod
-    def run_command(cls, directory: str, secret: str) -> list[str]:
+    def run_command(cls, directory: str) -> list[str]:
         """Builds the `docker run` command.
+
+        The shared secret is named, not given: `docker run` reads it from its own environment
+        (`_create`), so it never appears in an argv other local users can read in `/proc`.
 
         Args:
             directory (str): The credentials folder, mounted read-write: the service stores the
                 token itself when a connection completes in the browser.
-            secret (str): The shared secret every request but `/status` and the connect pages needs.
 
         Returns:
             list[str]: The argv: as the invoking user (files it writes stay the user's), on the
@@ -168,7 +170,7 @@ class GoogleService:
             "--user", f"{os.getuid()}:{os.getgid()}",
             "-v", f"{directory}:/config",
             "-p", f"127.0.0.1:{GOOGLE_HOST_PORT}:8000",
-            "-e", f"{SECRET_ENV}={secret}",
+            "-e", SECRET_ENV,
             GOOGLE_SERVICE_IMAGE, "python3", f"/config/{STAGED_SERVICE}",
         ]  # fmt: skip
 
@@ -190,11 +192,12 @@ class GoogleService:
             cls.problem = f"Could not create the Docker network {SIDECAR_NETWORK}."
             return False
         result = subprocess.run(
-            cls.run_command(directory, secret),
+            cls.run_command(directory),
             capture_output=True,
             text=True,
             timeout=600,
             check=False,
+            env={**os.environ, SECRET_ENV: secret},
         )
         if result.returncode != 0:
             cls.problem = f"Could not start the Google service: {result.stderr.strip()[:200]}"

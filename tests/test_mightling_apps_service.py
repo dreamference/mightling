@@ -367,11 +367,11 @@ def test_the_paths_the_mcp_server_asks_for_are_the_ones_served():
 
 
 def test_the_container_is_on_the_sidecar_network_published_on_loopback():
-    command = GoogleService.run_command("/home/u/.config/dreamference/gmail", "s3cret")
+    command = GoogleService.run_command("/home/u/.config/dreamference/gmail")
     joined = " ".join(command)
     assert "--network dreamference-sidecars" in joined
     assert "-p 127.0.0.1:8767:8000" in joined
-    assert "--user" in command and "MIGHTLING_GMAIL_SECRET=s3cret" in command
+    assert "--user" in command and command[command.index("-e") + 1] == "MIGHTLING_GMAIL_SECRET"
     assert command[-2:] == ["python3", "/config/service.py"]
 
 
@@ -382,9 +382,11 @@ class FakeDocker:
         self.state = state
         self.env = env
         self.commands: list[list[str]] = []
+        self.environments: list[dict[str, str] | None] = []
 
     def __call__(self, argv, **kwargs):
         self.commands.append(list(argv))
+        self.environments.append(kwargs.get("env"))
         if argv[:2] == ["docker", "rm"]:
             self.state = ""
         if argv[:2] == ["docker", "inspect"]:
@@ -428,6 +430,16 @@ def test_start_adopts_an_existing_container_and_creates_one_otherwise(
         assert ["docker", "start", GOOGLE_CONTAINER_NAME] in fake.commands
 
 
+def test_the_shared_secret_reaches_the_container_outside_the_argv(monkeypatch, staging):
+    # `docker run -e NAME=value` left the secret in an argv any local user reads in /proc.
+    fake = _docker(monkeypatch, "")
+    assert GoogleService.start() is True
+    (run,) = [c for c in fake.commands if c[:2] == ["docker", "run"]]
+    assert "MIGHTLING_GMAIL_SECRET" in run
+    assert not [arg for command in fake.commands for arg in command if "s3cret" in arg]
+    assert fake.environments[fake.commands.index(run)]["MIGHTLING_GMAIL_SECRET"] == "s3cret"
+
+
 def test_a_running_service_restarts_only_when_its_staged_code_changed(monkeypatch, staging):
     # Staging used to leave a running container on its old code until something restarted it:
     # one served a service from before Drive and Calendar for weeks.
@@ -448,7 +460,7 @@ def test_a_container_without_todays_secret_is_replaced(monkeypatch, staging, env
     removed = fake.commands.index(["docker", "rm", "-f", GOOGLE_CONTAINER_NAME])
     created = next(i for i, c in enumerate(fake.commands) if c[:2] == ["docker", "run"])
     assert removed < created
-    assert "MIGHTLING_GMAIL_SECRET=s3cret" in fake.commands[created]
+    assert fake.environments[created]["MIGHTLING_GMAIL_SECRET"] == "s3cret"
 
 
 def test_server_start_starts_it_only_on_a_node_without_one(monkeypatch):
