@@ -169,7 +169,8 @@ pub fn split(markdown: &str, limit: usize) -> Vec<String> {
         match open {
             Some(language) if !rest.is_empty() => {
                 text.push_str("\n```");
-                reopen = format!("```{language}\n");
+                // A label that would leave no room in the next part is dropped, or nothing moves.
+                reopen = if language.chars().count() <= limit / 2 { format!("```{language}\n") } else { "```\n".to_string() };
             }
             _ => reopen.clear(),
         }
@@ -248,5 +249,18 @@ mod tests {
         let parts = split(&"x".repeat(1000), 100);
         assert!(parts.iter().all(|part| part.chars().count() <= 100));
         assert_eq!(parts.concat().len(), 1000);
+    }
+
+    #[test]
+    fn a_fence_label_about_as_long_as_the_limit_still_splits() {
+        let code: String = (0..20).map(|n| format!("let x{n} = {n};\n")).collect();
+        let text = format!("```{}\n{code}```", "x".repeat(60));
+        let (done, parts) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(split(&text, 64));
+        });
+        let parts = parts.recv_timeout(std::time::Duration::from_secs(5)).expect("split never ends");
+        assert!(parts.iter().all(|part| part.chars().count() <= 64), "{parts:?}");
+        assert!(parts.concat().contains("let x19 = 19;"), "{parts:?}");
     }
 }
