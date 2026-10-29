@@ -115,7 +115,7 @@ Outside the package:
 
 ## Architecture in brief
 
-**Config precedence** (`config/dreamference_config.py`): constructor kwarg → `DREAMFERENCE_*` env var → `dreamference.toml` (local, then `~/.config/dreamference/config.toml`) → module-level `DEFAULT_*` constant, all in `DreamferenceConfig.__init__`. `save_config()` writes only values that differ from the defaults, so a round-trip does not fossilize defaults into the TOML.
+**Config precedence** (`config/dreamference_config.py`): constructor kwarg → `DREAMFERENCE_*` env var → `dreamference.toml` (local, then `~/.config/dreamference/config.toml`) → module-level `DEFAULT_*` constant, all in `DreamferenceConfig.__init__`. `save_config()` writes only values that differ from the defaults, so a round-trip does not fossilize defaults into the TOML. A repository's own `dreamference.toml` may set no network key (`NETWORK_KEYS`, today `vllm_host`).
 
 **Runner dispatch is a strategy switch on `config.agent_runner`** in `cli/dreamference_cli_controller.py` (`run_cli`). Each agent has a matching `<agent>_installer.py` / `<agent>_runner.py` pair, and every runner checks vLLM health → provisions the agent CLI if missing → translates Dreamference config into the agent's own CLI flags → `subprocess.call`. Adding an agent means adding the pair, exporting both from `runner/__init__.py`, and extending the dispatch chain. Runners other than Codex wait for the server with `VLLMReadinessWaiter`; the `ling` launcher does its own waiting.
 

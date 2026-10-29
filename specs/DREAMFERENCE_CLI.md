@@ -600,12 +600,12 @@ Every field resolves in `DreamferenceConfig.__init__`, highest priority first:
    3. `./dreamference.toml` or `./dreamference.json`;
    4. `~/.config/dreamference/config.toml`.
 
-   `vllm_host` from `./dreamference.toml` or `./dreamference.json` counts only when it names this machine (`localhost`, a loopback address or the any-address, no user info), the launcher's rule (MIGHTLING_CODEX §4): another host there is ignored with one line on stderr and `vllm_host` in the user's file decides (since 2026-10-29). Without it, a clone chose the model server for every `ling-admin` command, and the agent runner passed that host to `ling` as `DREAMFERENCE_VLLM_HOST`, which the launcher trusts.
+   A repository's own `./dreamference.toml` or `./dreamference.json` may set no key that chooses a host, port, URL or other network address (`NETWORK_KEYS`, today only `vllm_host`), not even one on this machine (owner decision 2026-10-29; MIGHTLING_CODEX §4): the key is ignored with one line on stderr naming the file and the key, and the user's file, the environment or an argument decides. `save_config()` leaves the repository's line as it was and writes no such key there; `init` writes none. A file named by `--config` or `DREAMFERENCE_CONFIG_PATH` is the user's choice and may set them. Without it, a clone chose the model server for every `ling-admin` command, and the agent runner passed that host to `ling` as `DREAMFERENCE_VLLM_HOST`, which the launcher trusts.
 4. **Built-in defaults**: the module-level `DEFAULT_*` constants.
 
 ### 5.1. Config File Example
 
-The file is TOML:
+The file is TOML; this one is the user's own (`~/.config/dreamference/config.toml`), since a repository's file may not set `vllm_host`:
 
 ```toml
 vllm_host = "http://localhost:8000"
