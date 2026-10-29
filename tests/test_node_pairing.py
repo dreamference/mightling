@@ -55,6 +55,43 @@ def pairing(monkeypatch):
 # -- what the other machine reports --------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("reported", ["../../../escaped", "a/b", ".hidden", "-oProxyCommand=x"])
+def test_a_node_id_reported_over_a_login_that_is_not_an_id_is_refused_and_nothing_is_written(
+    pairing, reported, tmp_path, capsys
+):
+    pairing["info"] = answer(0, json.dumps({"node": reported}))  # the machine keeps up the story
+    session = Session(answer(0, f"{reported}\nspark-1\n"))
+    assert NodePairing.pair_over_session(session) is None
+    assert "did not report a node id" in capsys.readouterr().out
+    assert not NodePairing.known_hosts().exists()
+    assert list(tmp_path.rglob("*.json")) == []
+    assert not any("authorize" in command for command, _ in session.commands)
+
+
+def test_a_node_advertising_something_that_is_not_a_node_id_is_not_found_by_a_browse(monkeypatch):
+    # The id is a TXT record anyone on the LAN can send, under any node's name.
+    from dreamference.node.node_browser import NodeBrowser
+
+    monkeypatch.setattr(
+        NodeBrowser,
+        "browse",
+        classmethod(
+            lambda cls, timeout=6: [
+                {"node": "../../escaped", "name": "spark-1", "address": "192.0.2.7"},
+                {"node": NODE, "name": "spark-2", "address": "192.0.2.8"},
+            ]
+        ),
+    )
+    assert NodePairing.discover("spark-1") is None
+    assert NodePairing.discover("spark-2")["node"] == NODE
+
+
+def test_a_record_is_never_named_by_something_that_is_not_a_node_id():
+    with pytest.raises(ValueError):
+        NodePairing.record_path("../x")
+    assert NodePairing.record_path(NODE).name == f"{NODE}.json"
+
+
 def test_pairing_over_a_session_pins_the_host_key_authorises_the_key_and_saves_the_node(pairing):
     session = Session(answer(0, f"{NODE}\nspark-1\n"))
     record = NodePairing.pair_over_session(session)
