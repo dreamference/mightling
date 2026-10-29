@@ -389,17 +389,20 @@ pub fn overlay_up() -> bool {
 /// JSON library: the management object holds no nested object, and the peers' own `connected`
 /// (a count) is outside it.
 pub fn management_connected(status: &str) -> bool {
-    let Some(start) = status.find("\"management\"") else {
+    // The key is the `"management"` a colon follows, and its value must be the object itself:
+    // `"management": null` followed by another object must not lend that object's `connected`.
+    let Some(rest) = status
+        .match_indices("\"management\"")
+        .find_map(|(start, key)| status[start + key.len()..].trim_start().strip_prefix(':'))
+        .map(str::trim_start)
+        .filter(|rest| rest.starts_with('{'))
+    else {
         return false;
     };
-    let rest = &status[start..];
-    let (Some(open), Some(close)) = (rest.find('{'), rest.find('}')) else {
+    let Some(close) = rest.find('}') else {
         return false;
     };
-    if close < open {
-        return false;
-    }
-    let object = &rest[open..close];
+    let object = &rest[..close];
     let Some(key) = object.find("\"connected\"") else {
         return false;
     };
@@ -799,6 +802,19 @@ mod tests {
         // Pretty-printed, as `netbird status --json` prints it.
         assert!(management_connected(
             "{\n  \"management\": {\n    \"url\": \"https://b:443\",\n    \"connected\" :  true\n  }\n}"
+        ));
+        // A management that is not an object does not borrow another object's `connected`.
+        for status in [
+            r#"{"management": null, "signal": {"connected": true}}"#,
+            r#"{"management": "down", "signal": {"connected": true}}"#,
+            r#"{"management": {}, "signal": {"connected": true}}"#,
+            r#"{"management": {"connected": "true"}}"#,
+        ] {
+            assert!(!management_connected(status), "{status}");
+        }
+        // The word as a value before the key is not the key.
+        assert!(management_connected(
+            r#"{"kind": "management", "management": {"connected": true}}"#
         ));
     }
 
