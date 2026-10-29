@@ -4,6 +4,7 @@
 // clipboard copy, and Close (also on Escape). Monospace, wraps long lines, and never writes to stdin.
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { occurrences } from "./find";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 
 export interface OutputMatch {
@@ -26,20 +27,7 @@ export interface ClipboardWriter {
  * An empty query (`query.length === 0`) or empty text returns no matches.
  */
 export function findMatches(text: string, query: string): OutputMatch[] {
-  if (!text || query.length === 0) return [];
-  const haystack = text.toLowerCase();
-  const needle = query.toLowerCase();
-  const step = needle.length;
-  if (step === 0) return [];
-  const matches: OutputMatch[] = [];
-  let from = 0;
-  while (from <= haystack.length - step) {
-    const idx = haystack.indexOf(needle, from);
-    if (idx === -1) break;
-    matches.push({ start: idx, end: idx + step });
-    from = idx + step;
-  }
-  return matches;
+  return occurrences(text, query).map((start) => ({ start, end: start + query.length }));
 }
 
 /** Step the active match index forward (`+1`) or backward (`-1`), wrapping at the ends. */

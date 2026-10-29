@@ -5,12 +5,12 @@
 
 /** The offsets of every case-insensitive occurrence of `query` in `text`. */
 export function occurrences(text: string, query: string): number[] {
-  const found: number[] = [];
-  const needle = query.toLowerCase();
-  if (!needle) return found;
-  const hay = text.toLowerCase();
-  for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + needle.length)) found.push(at);
-  return found;
+  if (!query) return [];
+  // The text itself is searched, not a lowered copy: lower case can change a length ("İ" becomes two
+  // code units), which would move every offset after it. Without the `u` flag, case is compared per
+  // code unit, so a match is always `query.length` long.
+  const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+  return Array.from(text.matchAll(pattern), (match) => match.index);
 }
 
 /** Every match of `query` under `root`, as ranges, in document order. */
