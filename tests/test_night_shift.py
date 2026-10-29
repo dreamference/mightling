@@ -785,7 +785,7 @@ def fake_host(monkeypatch):
                         ("heavy", []), ("sessions", []), ("samples", [])):
         monkeypatch.setattr(FakeHost, name, value)
     monkeypatch.setattr(NightShiftRunner, "host", FakeHost)
-    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(lambda seconds: None))
+    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(lambda seconds: time.sleep(0.01)))
     return FakeHost
 
 
