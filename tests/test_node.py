@@ -346,6 +346,7 @@ def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(
 def test_disable_without_root_still_stops_the_advertisement(machine, monkeypatch, capsys):
     # The real sudo wrapper with no way to root: it prints the command and runs nothing.
     from conftest import REAL_RUN_PRIVILEGED
+
     from dreamference.vllm_server.host_safety_setup import HostSafetySetup
 
     monkeypatch.setattr(NodeAdvertiser, "run_privileged", REAL_RUN_PRIVILEGED)
@@ -1896,7 +1897,7 @@ def test_a_job_binds_at_most_sixteen_paths(job_node, tmp_path, monkeypatch):
     root = tmp_path / "datasets"
     paths = [str(root / f"set{i}") for i in range(17)]
     for path in paths:
-        os.makedirs(path)
+        Path(path).mkdir(parents=True)
     config = tmp_path / "home-config.toml"
     config.write_text(f'[node]\nbindable = ["{root}"]\n')
     monkeypatch.setattr(
@@ -2045,8 +2046,8 @@ def test_a_paired_node_serving_the_same_model_is_a_lane_and_every_other_is_named
 
 
 def test_night_shift_and_swe_bench_use_every_paired_node_by_default():
-    from dreamference.node import NodeLanes
     from dreamference.night_shift.night_shift_settings import NightShiftSettings
+    from dreamference.node import NodeLanes
     from dreamference.swe_bench.swe_bench_settings import SweBenchSettings
 
     assert NightShiftSettings({}).nodes == "paired" and SweBenchSettings({}).nodes == "paired"
