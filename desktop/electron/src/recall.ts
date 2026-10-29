@@ -8,6 +8,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 import { validThreadId } from "./ask";
 
@@ -82,7 +83,7 @@ export function writeRecall(home: string, thread: unknown, updatedAt: unknown, m
   if (!recallOn(home)) throw new Error("searching earlier questions is off (Settings › Memories)");
   if (typeof thread !== "string" || !validThreadId(thread)) throw new Error("not a thread id");
   if (typeof markdown !== "string") throw new Error("the copy is text");
-  const text = Buffer.byteLength(markdown) > MAX_BYTES ? `${Buffer.from(markdown).subarray(0, MAX_BYTES).toString("utf8")}\n\n(The rest of this question is not kept.)\n` : markdown;
+  const text = Buffer.byteLength(markdown) > MAX_BYTES ? `${new StringDecoder("utf8").write(Buffer.from(markdown).subarray(0, MAX_BYTES))}\n\n(The rest of this question is not kept.)\n` : markdown;
   fs.writeFileSync(path.join(historyDir(home), `${thread}.md`), text, { mode: 0o600 });
   writeIndex(home, { ...recallIndex(home), [thread]: typeof updatedAt === "number" && Number.isFinite(updatedAt) ? updatedAt : 0 });
 }
