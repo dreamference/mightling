@@ -121,6 +121,15 @@ def test_the_egress_switches_are_always_applied():
         assert switch in egress, switch
     bootstrap = (ELECTRON / "src" / "early-bootstrap.ts").read_text(encoding="utf-8")
     assert "applySwitches()" in bootstrap
+    # No crash reporter and no auto-updater: nothing phones home on its own.
+    with Path(ELECTRON / "package.json").open() as handle:
+        package = json.load(handle)
+    packages = {**package.get("dependencies", {}), **package.get("devDependencies", {})}
+    assert not [name for name in packages if "updat" in name or "sentry" in name or "crash" in name]
+    for path in (ELECTRON / "src").glob("*.ts"):
+        if not path.name.endswith(".test.ts"):
+            source = path.read_text(encoding="utf-8")
+            assert "crashReporter" not in source and "autoUpdater" not in source, path.name
 
 
 def test_the_fuses_are_the_codex_apps():

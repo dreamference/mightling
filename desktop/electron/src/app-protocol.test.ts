@@ -25,7 +25,6 @@ function served(): string {
   fs.writeFileSync(path.join(root, "index.html"), "<!doctype html>");
   fs.writeFileSync(path.join(root, "a.js"), "export {};");
   fs.mkdirSync(path.join(root, "assets"));
-  fs.writeFileSync(path.join(path.dirname(root), "mightling-app-protocol-outside.txt"), "outside");
   serve(root);
   return root;
 }
@@ -67,6 +66,7 @@ describe("the app's own files", () => {
 
   it("answer anything else with not found: another host, a missing file, a folder, a way out of the folder", async () => {
     const root = served();
+    fs.writeFileSync(path.join(path.dirname(root), "mightling-app-protocol-outside.txt"), "outside");
     try {
       for (const url of ["app://other/index.html", "app://-/missing.js", "app://-/assets", "app://-/..%2Fmightling-app-protocol-outside.txt", "app://-/%2E%2E/mightling-app-protocol-outside.txt"]) {
         expect((await handlers.get(SCHEME)!(new Request(url))).status, url).toBe(404);
