@@ -115,3 +115,15 @@ def test_the_tunnels_state_is_what_systemd_says_or_unknown(monkeypatch):
     assert RemoteTunnel.state() == "failed"
     _commands(monkeypatch, out="", code=127)
     assert RemoteTunnel.state() == "unknown"
+
+
+def test_the_tunnel_unit_quotes_a_path_with_a_space_or_a_percent_sign(monkeypatch, tmp_path):
+    home = tmp_path / "a b" / "100%"
+    monkeypatch.setattr(RemoteTunnel, "key", classmethod(lambda cls: home / "tunnel key"))
+    monkeypatch.setattr(RemoteTunnel, "known_hosts", classmethod(lambda cls: home / "known_hosts"))
+
+    unit = RemoteTunnel.render_unit("remote.example.org")
+
+    line = next(ln for ln in unit.splitlines() if ln.startswith("ExecStart="))
+    assert f'"{home}/tunnel key"'.replace("%", "%%") in line
+    assert f'"UserKnownHostsFile={home}/known_hosts"'.replace("%", "%%") in line

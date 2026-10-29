@@ -109,12 +109,44 @@ pub struct Resolved {
     pub invalid: Vec<String>,
 }
 
-/// The value of the top-level `mightling_airgapped` key in TOML text: a line `mightling_airgapped =
-/// "<value>"` before the first table header. Enough for a key this crate writes itself, and it
-/// keeps a TOML parser out of the sandbox helper. A leading byte order mark is skipped: Windows
-/// PowerShell's `-Encoding UTF8` writes one, and the key must not be missed behind it.
+/// The value of the top-level `mightling_airgapped` key in TOML text, before the first table
+/// header, as a TOML parser reads it: the key bare or quoted, the value a string of any of the
+/// four kinds with its escapes read, or a boolean, read as Python's configuration reads it (`true`
+/// is `on`). What comes before the key is followed as TOML, so a string or an array spanning
+/// lines neither hides the key nor lends it a line of its own. Text this cannot follow is not
+/// TOML, and a plain `mightling_airgapped = <value>` line is then still read. This keeps a TOML
+/// parser out of the sandbox helper. A leading byte order mark is skipped: Windows PowerShell's
+/// `-Encoding UTF8` writes one, and the key must not be missed behind it.
 pub fn toml_value(text: &str) -> Option<String> {
-    for line in text.trim_start_matches('\u{feff}').lines() {
+    let text = text.trim_start_matches('\u{feff}');
+    top_level_value(text).unwrap_or_else(|| line_value(text))
+}
+
+/// The key's value, `Some(None)` when the top level does not set it, `None` when the text is not
+/// TOML this follows.
+fn top_level_value(text: &str) -> Option<Option<String>> {
+    let mut rest = text;
+    loop {
+        rest = skip_blank(rest);
+        if rest.is_empty() || rest.starts_with('[') {
+            return Some(None);
+        }
+        let (key, after) = toml_key(rest)?;
+        let after = skip_space(skip_space(after).strip_prefix('=')?);
+        if key == [TOML_KEY] {
+            return Some(Some(match toml_string(after) {
+                Some((value, _)) => value,
+                None => bare_value(after),
+            }));
+        }
+        rest = end_of_statement(skip_value(after)?)?;
+    }
+}
+
+/// The first line `mightling_airgapped = <value>` before a line starting with `[`, for text that
+/// is not TOML.
+fn line_value(text: &str) -> Option<String> {
+    for line in text.lines() {
         let line = line.trim();
         if line.starts_with('[') {
             return None;
@@ -125,11 +157,227 @@ pub fn toml_value(text: &str) -> Option<String> {
         let Some(value) = rest.trim_start().strip_prefix('=') else {
             continue;
         };
-        let value = value.split('#').next().unwrap_or("").trim();
-        let value = value.trim_matches(|quote| quote == '"' || quote == '\'');
-        return Some(value.to_string());
+        return Some(bare_value(value));
     }
     None
+}
+
+/// A value that is not a string, read up to its comment, quotes trimmed; a boolean as a level.
+fn bare_value(value: &str) -> String {
+    let value = value
+        .lines()
+        .next()
+        .unwrap_or("")
+        .split('#')
+        .next()
+        .unwrap_or("")
+        .trim();
+    let value = value.trim_matches(|quote| quote == '"' || quote == '\'');
+    match value {
+        "true" => Level::On.name().to_string(),
+        "false" => Level::Off.name().to_string(),
+        _ => value.to_string(),
+    }
+}
+
+fn skip_space(text: &str) -> &str {
+    text.trim_start_matches([' ', '\t'])
+}
+
+/// Past whitespace, line ends and comments.
+fn skip_blank(mut text: &str) -> &str {
+    loop {
+        text = text.trim_start_matches([' ', '\t', '\r', '\n']);
+        match text.strip_prefix('#') {
+            Some(comment) => text = comment.find('\n').map_or("", |end| &comment[end..]),
+            None => return text,
+        }
+    }
+}
+
+/// Past the end of a key-value line: spaces, a comment, the line end.
+fn end_of_statement(text: &str) -> Option<&str> {
+    let text = skip_space(text);
+    let text = match text.strip_prefix('#') {
+        Some(comment) => comment.find('\n').map_or("", |end| &comment[end..]),
+        None => text,
+    };
+    if text.is_empty() {
+        return Some(text);
+    }
+    text.strip_prefix('\n')
+        .or_else(|| text.strip_prefix("\r\n"))
+}
+
+/// A key, dotted or not, its parts bare or quoted, and the text after it.
+fn toml_key(mut text: &str) -> Option<(Vec<String>, &str)> {
+    let mut parts = Vec::new();
+    loop {
+        let (part, after) = if text.starts_with("\"\"\"") || text.starts_with("'''") {
+            return None;
+        } else if text.starts_with(['"', '\'']) {
+            toml_string(text)?
+        } else {
+            let end = text
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+                .unwrap_or(text.len());
+            if end == 0 {
+                return None;
+            }
+            (text[..end].to_string(), &text[end..])
+        };
+        parts.push(part);
+        match skip_space(after).strip_prefix('.') {
+            Some(next) => text = skip_space(next),
+            None => return Some((parts, after)),
+        }
+    }
+}
+
+/// A string of any of the four kinds, read, and the text after it.
+fn toml_string(text: &str) -> Option<(String, &str)> {
+    if let Some(body) = text.strip_prefix("\"\"\"") {
+        basic_string(first_line_end(body), true)
+    } else if let Some(body) = text.strip_prefix("'''") {
+        let body = first_line_end(body);
+        let end = body.find("'''")?;
+        // Up to two more quotes end the string's content, not the string.
+        let extra = body[end + 3..]
+            .chars()
+            .take_while(|&c| c == '\'')
+            .count()
+            .min(2);
+        Some((body[..end + extra].to_string(), &body[end + 3 + extra..]))
+    } else if let Some(body) = text.strip_prefix('"') {
+        basic_string(body, false)
+    } else {
+        let body = text.strip_prefix('\'')?;
+        let end = body.find(['\'', '\n'])?;
+        body[end..]
+            .starts_with('\'')
+            .then(|| (body[..end].to_string(), &body[end + 1..]))
+    }
+}
+
+/// A multi-line string's content: a line end right after the opening quotes is not part of it.
+fn first_line_end(body: &str) -> &str {
+    body.strip_prefix('\n')
+        .or_else(|| body.strip_prefix("\r\n"))
+        .unwrap_or(body)
+}
+
+/// A basic string's content after its opening quotes, read up to its closing ones.
+fn basic_string(body: &str, multi_line: bool) -> Option<(String, &str)> {
+    let mut out = String::new();
+    let mut at = 0;
+    while let Some(c) = body[at..].chars().next() {
+        let next = at + c.len_utf8();
+        match c {
+            '"' if !multi_line => return Some((out, &body[next..])),
+            '"' if body[at..].starts_with("\"\"\"") => {
+                let extra = body[at + 3..]
+                    .chars()
+                    .take_while(|&c| c == '"')
+                    .count()
+                    .min(2);
+                out.extend(std::iter::repeat_n('"', extra));
+                return Some((out, &body[at + 3 + extra..]));
+            }
+            '\n' if !multi_line => return None,
+            '\\' => {
+                let escape = body[next..].chars().next()?;
+                at = next + escape.len_utf8();
+                match escape {
+                    'b' => out.push('\u{8}'),
+                    't' => out.push('\t'),
+                    'n' => out.push('\n'),
+                    'f' => out.push('\u{c}'),
+                    'r' => out.push('\r'),
+                    '"' => out.push('"'),
+                    '\\' => out.push('\\'),
+                    'u' | 'U' => {
+                        let digits = if escape == 'u' { 4 } else { 8 };
+                        let hex = body.get(at..at + digits)?;
+                        if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                            return None;
+                        }
+                        out.push(char::from_u32(u32::from_str_radix(hex, 16).ok()?)?);
+                        at += digits;
+                    }
+                    // A backslash ending a line drops the line end and the whitespace after it.
+                    ' ' | '\t' | '\r' | '\n' if multi_line => {
+                        let tail = &body[next..];
+                        let kept = tail.trim_start_matches([' ', '\t', '\r', '\n']);
+                        if !tail[..tail.len() - kept.len()].contains('\n') {
+                            return None;
+                        }
+                        at = body.len() - kept.len();
+                    }
+                    _ => return None,
+                }
+                continue;
+            }
+            c => out.push(c),
+        }
+        at = next;
+    }
+    None
+}
+
+/// Past a value: a string, an array or an inline table, nested, or a number, boolean or date.
+fn skip_value(text: &str) -> Option<&str> {
+    if text.starts_with(['"', '\'']) {
+        return toml_string(text).map(|(_, rest)| rest);
+    }
+    if let Some(mut rest) = text.strip_prefix('[') {
+        loop {
+            rest = skip_blank(rest);
+            if let Some(after) = rest.strip_prefix(']') {
+                return Some(after);
+            }
+            rest = skip_blank(skip_value(rest)?);
+            match rest.strip_prefix(',') {
+                Some(after) => rest = after,
+                None => return rest.strip_prefix(']'),
+            }
+        }
+    }
+    if let Some(mut rest) = text.strip_prefix('{') {
+        loop {
+            rest = skip_blank(rest);
+            if let Some(after) = rest.strip_prefix('}') {
+                return Some(after);
+            }
+            let (_, after) = toml_key(rest)?;
+            rest = skip_blank(skip_value(skip_space(
+                skip_space(after).strip_prefix('=')?,
+            ))?);
+            match rest.strip_prefix(',') {
+                Some(after) => rest = after,
+                None => return rest.strip_prefix('}'),
+            }
+        }
+    }
+    let scalar = |text: &str| {
+        text.find(|c: char| !(c.is_ascii_alphanumeric() || "_+-.:".contains(c)))
+            .unwrap_or(text.len())
+    };
+    let end = scalar(text);
+    if end == 0 {
+        return None;
+    }
+    let (token, rest) = text.split_at(end);
+    // A date and a time may be parted by a space: `1979-05-27 07:32:00`.
+    let bytes = token.as_bytes();
+    if bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && let Some(time) = rest.strip_prefix(' ')
+        && time.starts_with(|c: char| c.is_ascii_digit())
+    {
+        return Some(&time[scalar(time)..]);
+    }
+    Some(rest)
 }
 
 /// Resolves the level from already-read tiers; [`resolve`] supplies the real ones. `configs` are
@@ -372,11 +620,23 @@ pub fn seal_file(id: &str) -> Option<PathBuf> {
     Some(seal_dir()?.join(id))
 }
 
-/// Whether any of `ids` is held at `on` by a seal.
+/// Whether any of `ids` is held at `on` by a seal. Seals are read in the runtime directory
+/// wherever this process works: [`seal_dir`] judges by the working directory where seals may be
+/// written, and Codex's sandbox helper runs in each command's own folder, which the model
+/// chooses, so a command started in `/` would not have seen the seal `ling` wrote. A seal only
+/// ever tightens the level, so one is honoured wherever it could have come from.
 pub fn sealed(ids: &[&str]) -> bool {
+    let Some(seals) = runtime_dir().map(|dir| dir.join(SEAL_DIR)) else {
+        return false;
+    };
     ids.iter()
-        .filter_map(|id| seal_file(id))
-        .any(|path| path.is_file())
+        .filter(|id| seal_file_name(id))
+        .any(|id| seals.join(id).is_file())
+}
+
+/// Whether `id` may name a seal: ids are UUIDs, as for [`session_file`].
+fn seal_file_name(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// What the files say, corrected for what a command could have done to them. `sealed`: a seal
@@ -753,6 +1013,73 @@ mod tests {
     }
 
     #[test]
+    fn what_comes_before_the_key_is_read_as_toml_not_as_lines() {
+        // Each of these is `on` to a TOML parser, and was missed or read as something else.
+        for text in [
+            // A string or an array spanning lines, with a line that looks like a header.
+            "note = \"\"\"\n[draft]\n\"\"\"\nmightling_airgapped = \"on\"\n",
+            "note = '''\n[x]\n'''\nmightling_airgapped = 'on'\n",
+            "x = [\n  [1, 2],\n]\nmightling_airgapped = \"on\"\n",
+            // A string spanning lines, with a line that looks like the key.
+            "note = \"\"\"\nmightling_airgapped = \"off\"\n\"\"\"\nmightling_airgapped = \"on\"\n",
+            // The key quoted, and the value escaped or spanning lines.
+            "\"mightling_airgapped\" = \"on\"\n",
+            "'mightling_airgapped' = \"on\"\n",
+            "mightling_airgapped = \"\\u006fn\"\n",
+            "mightling_airgapped = \"\"\"\non\"\"\"\n",
+        ] {
+            assert_eq!(toml_value(text).as_deref(), Some("on"), "{text:?}");
+        }
+        // Under another key, or after a header, it is still not the top-level key.
+        for text in [
+            "night.mightling_airgapped = \"on\"\n",
+            "t = { mightling_airgapped = \"on\" }\n",
+            "\"mightling_airgapped \" = \"on\"\n",
+            "x = [\n  1,\n]\n[night]\nmightling_airgapped = \"on\"\n",
+        ] {
+            assert_eq!(toml_value(text), None, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn text_that_is_not_toml_is_still_read_line_by_line() {
+        assert_eq!(
+            toml_value("mightling_airgapped = on\n").as_deref(),
+            Some("on")
+        );
+        assert_eq!(
+            toml_value("x = [\nmightling_airgapped = \"on\"\n").as_deref(),
+            Some("on")
+        );
+        assert_eq!(
+            toml_value("mightling_airgapped = \"on\n").as_deref(),
+            Some("on")
+        );
+    }
+
+    #[test]
+    fn a_boolean_is_read_as_pythons_configuration_reads_it() {
+        // Python takes `true` for `on`; the launcher took it for no level and stayed off.
+        assert_eq!(
+            toml_value("mightling_airgapped = true\n").as_deref(),
+            Some("on")
+        );
+        assert_eq!(
+            toml_value("mightling_airgapped = false # x\n").as_deref(),
+            Some("off")
+        );
+        let resolved = resolve_from(
+            None,
+            None,
+            &[config(
+                "/repo/dreamference.toml",
+                "mightling_airgapped = true\n",
+            )],
+        );
+        assert_eq!(resolved.level, Level::On);
+    }
+
+    #[test]
     fn a_byte_order_mark_does_not_hide_the_key() {
         // Windows PowerShell 5's `Out-File -Encoding UTF8` starts the file with one.
         let bom = "\u{feff}mightling_airgapped = \"on\"\r\n";
@@ -963,6 +1290,52 @@ mod tests {
         assert_eq!(seal_file("../../etc/passwd"), None);
         assert_eq!(seal_file(""), None);
         assert!(!sealed(&["", "../x"]));
+    }
+
+    /// Run by [`a_seal_is_seen_from_a_command_working_in_any_folder`] in a child process, whose
+    /// working directory and runtime directory it sets; does nothing in a normal run.
+    #[test]
+    fn sealed_probe() {
+        if let Some(id) = std::env::var_os("LING_AIRGAPPED_SEAL_PROBE") {
+            let id = id.to_string_lossy().into_owned();
+            println!("sealed={}", sealed(&[id.as_str()]));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_seal_is_seen_from_a_command_working_in_any_folder() {
+        // Codex's sandbox helper runs in the command's own folder, which the model chooses. From
+        // `/` (or any folder above the runtime directory) the runtime directory lies in the working
+        // directory, and the seal `ling` wrote there must still hold the session at `on`.
+        let runtime =
+            std::env::temp_dir().join(format!("ling-airgapped-probe-{}", std::process::id()));
+        let id = "0199a7c2-probe";
+        std::fs::create_dir_all(runtime.join(SEAL_DIR)).unwrap();
+        std::fs::write(runtime.join(SEAL_DIR).join(id), "").unwrap();
+        let test = module_path!()
+            .split_once("::")
+            .map_or("sealed_probe".to_string(), |(_, path)| {
+                format!("{path}::sealed_probe")
+            });
+        let sealed_from = |cwd: &Path| {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([test.as_str(), "--exact", "--nocapture", "--test-threads=1"])
+                .current_dir(cwd)
+                .env("XDG_RUNTIME_DIR", &runtime)
+                .env("LING_AIRGAPPED_SEAL_PROBE", id)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).contains("sealed=true")
+        };
+        let from_root = sealed_from(Path::new("/"));
+        let from_runtime = sealed_from(&runtime);
+        let _ = std::fs::remove_dir_all(&runtime);
+        assert!(from_root, "a command working in / must see the seal");
+        assert!(
+            from_runtime,
+            "a command working in the runtime directory must see the seal"
+        );
     }
 
     #[test]

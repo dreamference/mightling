@@ -37,9 +37,10 @@ export class Tasks {
     const child = spawn(shell.file, shell.args, { cwd, env: { ...process.env, TERM: "dumb", NO_COLOR: "1" }, detached: true, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     this.running.set(id, child);
     this.emit({ id, kind: "started", label: name, cwd });
-    const out = (chunk: Buffer) => this.emit({ id, kind: "output", data: chunk.toString("utf8") });
-    child.stdout?.on("data", out);
-    child.stderr?.on("data", out);
+    // Each stream decoded as a stream: a character split between two reads stays whole.
+    const out = (chunk: string) => this.emit({ id, kind: "output", data: chunk });
+    child.stdout?.setEncoding("utf8").on("data", out);
+    child.stderr?.setEncoding("utf8").on("data", out);
     child.on("error", (error) => {
       this.emit({ id, kind: "output", data: `${error.message}\n` });
     });

@@ -29,6 +29,9 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
     session = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "history_cell" / "session.rs").read_text()
     assert '"OpenAI Codex"' not in session and '"Mightling"' in session
+    # The plugin catalog's section label is what "<label> unavailable." shows when the section fails.
+    requests = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "app" / "background_requests.rs").read_text()
+    assert '"vertical",\n            "Curated",' in requests
     # The launcher crate is copied in from ling-rs/ and reached through one dependency line.
     assert (tmp_path / "src" / "codex-rs" / "ling" / "src" / "lib.rs").is_file()
     cli_manifest = (tmp_path / "src" / "codex-rs" / "cli" / "Cargo.toml").read_text()
@@ -37,12 +40,49 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert "ling_launcher::parse::<MultitoolCli>().await?" in cli_main
     # The exit summary's "To continue this session, run: codex resume <id>" names ling (1.7.1:
     # found by a capture of a session's end); `codex/` itself is never changed.
-    assert 'println!("{}", line.replace("codex resume", "ling resume"));' in cli_main
+    assert (
+        'println!("{}", line.replace("codex resume", "ling resume")'
+        '.replace("codex --remote", "ling --remote").replace("codex agents", "ling agents"));'
+    ) in cli_main
     assert 'println!("{line}");\n        }\n    }\n    if is_fatal' not in cli_main
     status = subprocess.run(
         ["git", "-C", CODEX_SUBMODULE_DIR, "status", "--porcelain"], capture_output=True, text=True
     )
     assert status.stdout == ""
+
+
+def test_the_patches_apply_to_an_export_inside_another_git_repository(tmp_path, monkeypatch):
+    # Run from a folder inside a repository, `git apply` resolves the patch's paths from that
+    # repository's top and silently skips every hunk outside the folder: the export came out
+    # unpatched and prepare_source still said it succeeded (found 2026-10-29, exporting into a
+    # worktree). Here a stand-in submodule and patch, the export inside an unrelated repository.
+    def git(*args, cwd):
+        subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+                       cwd=cwd, check=True, capture_output=True)
+
+    submodule = tmp_path / "codex"
+    (submodule / "codex-rs").mkdir(parents=True)
+    (submodule / "codex-rs" / "main.rs").write_text("codex\n")
+    git("init", "-q", cwd=submodule)
+    git("add", "-A", cwd=submodule)
+    git("commit", "-q", "-m", "pin", cwd=submodule)
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=submodule, capture_output=True, text=True).stdout.strip()
+    patch_file = tmp_path / "0001-brand.patch"
+    patch_file.write_text("diff --git a/codex-rs/main.rs b/codex-rs/main.rs\n--- a/codex-rs/main.rs\n"
+                          "+++ b/codex-rs/main.rs\n@@ -1 +1 @@\n-codex\n+ling\n")
+    crate = tmp_path / "ling-rs"
+    crate.mkdir()
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    git("init", "-q", cwd=outer)
+    monkeypatch.setattr(builder_module, "CODEX_SUBMODULE_DIR", str(submodule))
+    monkeypatch.setattr(builder_module, "MIGHTLING_CRATE_DIR", str(crate))
+    monkeypatch.setattr(CodexBrandedBuilder, "source_commit", classmethod(lambda cls: commit))
+    monkeypatch.setattr(CodexBrandedBuilder, "patches", classmethod(lambda cls: [str(patch_file)]))
+    monkeypatch.setattr(CodexBrandedBuilder, "stamp_version", classmethod(lambda cls, manifest, version: True))
+
+    assert CodexBrandedBuilder.prepare_source(str(outer / "export"))
+    assert (outer / "export" / "codex-rs" / "main.rs").read_text() == "ling\n"
 
 
 def test_the_codex_submodule_is_committed_as_a_submodule():
@@ -149,6 +189,45 @@ def test_the_patches_stay_small():
     # executable); 60,136 after. Down the same day when cave mode was removed: 0017 (2,834 bytes)
     # deleted and 0018, 0019, 0025 and 0028 re-cut; 57,571 after.
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 64_000
+
+
+def test_airgapped_treats_every_profile_without_a_sandbox_like_full_access():
+    # The air gap is enforced by the sandbox helper, and Codex runs no helper for any profile whose
+    # network is on and whose file system is fully writable: Full Access, but also a
+    # `[permissions]` profile with `":root" = "write"`. Asking only "is it Full Access?" let such a
+    # profile take `/airgapped on`, and a configured `on`, with commands that kept the network.
+    # Both checks now ask Codex's own question: does this profile get a sandbox?
+    texts = {Path(p).name: Path(p).read_text() for p in CodexBrandedBuilder.patches()}
+    no_sandbox = "codex_sandboxing::policy_transforms::runs_without_platform_sandbox("
+    tui = texts["0019-airgapped.patch"]
+    assert "PermissionProfile::Disabled)).into_iter()" not in tui
+    assert tui.count(no_sandbox + "self.config.permissions.permission_profile())") == 2
+    # The question is asked in one place, Codex's sandboxing crate, with its own unit test there.
+    assert "+pub fn runs_without_platform_sandbox(profile: &PermissionProfile) -> bool {" in tui
+    assert "+fn a_profile_writing_the_whole_disk_with_the_network_on_runs_without_a_sandbox() {" in tui
+    app_server = texts["0023-airgapped-app-server.patch"]
+    assert "permission_refusal(matches!(p, PermissionProfile::Disabled)" not in app_server
+    assert "permission_refusal(" + no_sandbox + "p)" in app_server
+
+
+def test_the_exit_summary_names_ling_in_every_command_it_prints():
+    # Codex's exit summary prints `codex resume`, and for a task left running on a daemon or a
+    # remote server also `codex --remote <address> resume` and `codex agents`; the CLI prints it
+    # (patch 0001) with each command renamed, so none of them sends the user to a missing binary.
+    import re
+    cli = Path(next(p for p in CodexBrandedBuilder.patches() if Path(p).name.startswith("0001-"))).read_text()
+    line = next(
+        line
+        for line in cli.splitlines()
+        if line.startswith("+") and "format_exit_messages" not in line and "line.replace(" in line
+    )
+    printed = (
+        "Reconnect: codex --remote ws://server:80/ resume 1. Stop the current turn: run codex agents. "
+        "Or run codex resume."
+    )
+    for old, new in re.findall(r'replace\("([^"]*)", "([^"]*)"\)', line):
+        printed = printed.replace(old, new)
+    assert "codex" not in printed
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
@@ -678,3 +757,57 @@ def test_the_codex_and_crate_builds_take_the_compile_cache(tmp_path, monkeypatch
             patch.object(CodexBrandedBuilder, "build_web_ui", return_value="/ui/dist"):
         assert CodexBrandedBuilder._build_locked() is False
     assert [env["RUSTC_WRAPPER"] for env in calls] == ["/x/sccache", "/x/sccache"]
+
+
+def _fake_crate(tmp_path, monkeypatch, during_build=None):
+    """A one-binary crate whose cargo build is faked; `during_build` runs while it compiles."""
+    crate = tmp_path / "crate"
+    (crate / "src").mkdir(parents=True)
+    (crate / "src" / "main.rs").write_text("fn main() {}\n")
+
+    def fake_call(command, cwd=None, env=None):
+        if during_build:
+            during_build(crate)
+        release = tmp_path / "cache" / "target" / "release"
+        release.mkdir(parents=True, exist_ok=True)
+        (release / "x").write_text("#!/bin/sh\n")
+        (release / "x").chmod(0o755)
+        return 0
+
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
+    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
+    monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
+    return crate
+
+
+def test_a_crate_edited_during_its_build_is_not_stamped_current(tmp_path, monkeypatch):
+    # The binary was compiled from the source as it was when cargo started; an edit made while it
+    # ran must leave the next run rebuilding, not stamp the old binary with the new key.
+    crate = _fake_crate(
+        tmp_path, monkeypatch, lambda crate: (crate / "src" / "main.rs").write_text("fn main() { 1; }\n")
+    )
+    assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is True
+    assert not CodexBrandedBuilder.crate_is_current(str(crate), "stamp", ("x",))
+
+
+def test_a_crate_install_leaves_another_installs_staging_file_alone(tmp_path, monkeypatch):
+    # Crate builds run outside the Codex build's lock: two `ling-admin` processes installing the
+    # same binary must not copy into, or rename away, each other's staging file.
+    crate = _fake_crate(tmp_path, monkeypatch)
+    bin_dir = tmp_path / "install" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / ".x.new").write_text("another install's copy")
+    assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is True
+    assert (bin_dir / ".x.new").read_text() == "another install's copy"
+    assert (bin_dir / "x").read_text() == "#!/bin/sh\n"
+
+
+def test_linking_leaves_another_links_staging_link_alone(tmp_path):
+    link = tmp_path / "bin" / "ling"
+    link.parent.mkdir()
+    staging = tmp_path / "bin" / "ling.new"
+    staging.symlink_to("/another/process")
+    CodexBrandedBuilder._link("/install/ling", str(link))
+    assert link.readlink() == Path("/install/ling")
+    assert staging.readlink() == Path("/another/process")

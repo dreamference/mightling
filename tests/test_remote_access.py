@@ -77,6 +77,19 @@ def test_private_files_are_0600_in_a_0700_folder_and_remote_json_needs_a_box():
     assert RemoteSettings.read()["dns_name"] == BOX
 
 
+def test_a_private_write_that_fails_leaves_the_old_file_whole():
+    """remote.json was truncated before the new text was written: a failed write lost the record."""
+    RemoteSettings.write({"dns_name": BOX, "overlay_name": "x"})
+    before = RemoteSettings.path("remote.json").read_text()
+    with pytest.raises(UnicodeEncodeError):
+        RemoteSettings.write_private("remote.json", "\udc80")
+    assert RemoteSettings.path("remote.json").read_text() == before
+    assert RemoteSettings.read()["dns_name"] == BOX
+    assert sorted(p.name for p in RemoteSettings.folder().iterdir()) == ["remote.json"], (
+        "no temporary file is left behind"
+    )
+
+
 def test_everything_from_netbird_is_pinned_by_digest():
     assert (
         "@sha256:" in remote_settings.SERVER_IMAGE
@@ -880,8 +893,9 @@ def test_setup_again_keeps_the_secret_and_does_not_rejoin(seams, monkeypatch):
 
 @pytest.mark.parametrize(
     "name",
-    ["", "relay", "http://relay.example.org", "relay.example.org:443", "user@relay.example.org"],
-)
+    ["", "relay", "http://relay.example.org", "relay.example.org:443", "user@relay.example.org",
+     "a.example.org\tb", "*.example.org", "a,b.example.org", "rélay.example.org", "-a.example.org"],
+)  # fmt: skip
 def test_setup_wants_a_dns_name(seams, name):
     assert RemoteAccess.setup(name, yes=True) == 2
     assert seams == []
@@ -964,6 +978,18 @@ def test_box_only_on_a_finished_setup_keeps_its_record(seams):
     assert [entry[0] for entry in seams] == ["probe", "ca", "issue", "issue", "deploy"]
     record = RemoteSettings.read()
     assert record["node_peer"] is True and "box_only" not in record
+
+
+def test_box_only_under_another_name_records_the_new_box(seams, monkeypatch, capsys):
+    """The finished record was kept whole, so it went on naming the old box."""
+    assert RemoteAccess.setup(BOX, yes=True) == 0
+    monkeypatch.setattr(RemoteCertificateAuthority, "permits", classmethod(lambda cls, d: True))
+    other = "relay2.example.org"
+    capsys.readouterr()
+    assert RemoteAccess.setup(other, yes=True, box_only=True) == 0
+    record = RemoteSettings.read()
+    assert record["dns_name"] == other and record["box_only"] is True
+    assert f"ling-admin remote setup {other}" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -1594,9 +1620,9 @@ def test_caa_is_written_once_and_left_alone_when_right(monkeypatch):
     assert RemotePublicCertificate.ensure_caa("remote.example.org", [ACCOUNT])
     writes = [(m, p) for m, p, _ in calls if m != "GET"]
     assert writes == [
+        ("POST", "/zones/z1/dns_records"),
+        ("POST", "/zones/z1/dns_records"),
         ("DELETE", "/zones/z1/dns_records/old"),
-        ("POST", "/zones/z1/dns_records"),
-        ("POST", "/zones/z1/dns_records"),
     ]
     assert all(
         b["name"] == "remote.example.org" and b["type"] == "CAA" for m, _, b in calls if m == "POST"
@@ -2094,3 +2120,22 @@ def test_a_code_ends_with_a_status_and_a_word_for_every_outcome(
     _code_ready(monkeypatch, outcome)
     assert RemoteAccess.code() == status
     assert words in capsys.readouterr().out
+
+
+def test_a_value_that_holds_another_placeholder_stays_inside_its_quotes(tmp_path):
+    bundle = {
+        "management_url": "https://remote.example.org:443",
+        "setup_key": "k@PEER@",
+        "overlay_name": "mightling-ab.netbird.selfhosted",
+        "ca": "",
+    }
+    script = RemoteJoinScript.script(bundle, peer="p@SSH_USER@", ssh_user="u; touch PWN #")
+    assignments = [line for line in script.splitlines() if re.match(r"(KEY|PEER|SSH_USER)=", line)]
+    probe = "\n".join([*assignments, 'printf "%s\\n" "$KEY" "$PEER" "$SSH_USER"'])
+
+    done = subprocess.run(
+        ["bash", "-c", probe], cwd=tmp_path, capture_output=True, text=True, check=False
+    )
+
+    assert not (tmp_path / "PWN").exists()
+    assert done.stdout.splitlines() == ["k@PEER@", "p@SSH_USER@", "u; touch PWN #"]

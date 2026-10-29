@@ -359,6 +359,9 @@ def build_handler(runner: "DiffusionModelRunner") -> type:
             except (ValueError, json.JSONDecodeError):
                 self._json(400, {"error": {"message": "invalid JSON body"}})
                 return
+            if not isinstance(request, dict):
+                self._json(400, {"error": {"message": "the JSON body must be an object"}})
+                return
 
             max_tokens = _clamp_max_tokens(request.get("max_tokens", DEFAULT_MAX_NEW_TOKENS))
             try:

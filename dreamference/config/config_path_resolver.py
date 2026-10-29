@@ -2,7 +2,7 @@
 Configuration Path Resolver for Dreamference.
 
 This module provides the ConfigPathResolver class which enforces the resolution order for
-locating `.dreamference/config.toml` or custom configuration paths.
+locating `dreamference.toml`, `~/.config/dreamference/config.toml` or a custom configuration path.
 """
 
 import os

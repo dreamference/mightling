@@ -75,7 +75,11 @@ fn seconds(table: &toml::Table, key: &str, unit: f64) -> Option<Option<Duration>
     if !number.is_finite() || number < 0.0 {
         return None;
     }
-    Some((number > 0.0).then(|| Duration::from_secs_f64(number * unit)))
+    if number == 0.0 {
+        return Some(None);
+    }
+    // A time no Duration holds is a value of the wrong kind: the default.
+    Duration::try_from_secs_f64(number * unit).ok().map(Some)
 }
 
 impl ChatSettings {
@@ -186,6 +190,13 @@ mod tests {
         assert_eq!(ChatSettings::from_toml("[chat]\nsync_notices_to = [\"Telegram\"]\n").sync_notices_to, ["telegram"]);
         let settings = ChatSettings::from_toml("[chat]\nsync_notices_to = []\n");
         assert!(ChatSettings::from_json(&settings.to_json()).sync_notices_to.is_empty());
+    }
+
+    #[test]
+    fn a_time_too_long_for_a_duration_is_the_default() {
+        assert_eq!(ChatSettings::from_toml("[chat]\nnew_thread_after_hours = 1e16\n"), ChatSettings::default());
+        assert_eq!(ChatSettings::from_toml("[chat]\nanswer_seconds = 1e300\n"), ChatSettings::default());
+        assert_eq!(ChatSettings::from_toml("[chat]\ncommand_seconds = 1e20\n"), ChatSettings::default());
     }
 
     #[test]

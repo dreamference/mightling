@@ -64,6 +64,17 @@ pub fn sheets(bytes: &[u8]) -> Result<Vec<Unit>> {
     for (number, name) in names.into_iter().enumerate() {
         let group = number as u32 + 1;
         let Ok(range) = workbook.worksheet_range(&name) else {
+            // Said in the index, not left out unseen while the other sheets are read.
+            units.push(Unit {
+                loc: format!("sheet {name}"),
+                page: None,
+                line_first: Some(line),
+                line_last: Some(line),
+                heading: name.clone(),
+                group: Some(group),
+                text: format!("[sheet {name} could not be read, so it is not indexed]"),
+            });
+            line += 1;
             continue;
         };
         let Some((first_row, _)) = range.start() else {
@@ -165,6 +176,11 @@ pub mod tests {
     /// A small XLSX: two sheets, shared strings, a number, a date (style 1 is a date format) and
     /// an empty row in the middle.
     pub fn sample_xlsx() -> Vec<u8> {
+        xlsx_with(None)
+    }
+
+    /// [`sample_xlsx`], its second sheet's XML replaced when `staff` is given (left out when empty).
+    fn xlsx_with(staff: Option<&str>) -> Vec<u8> {
         let workbook = r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Budget" sheetId="1" r:id="rId1"/><sheet name="Staff" sheetId="2" r:id="rId2"/></sheets></workbook>"#;
         let rels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>"#;
         let strings = r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>Item</t></si><si><t>Cost</t></si><si><t>Due</t></si><si><t>Servo batch</t></si><si><t>Name</t></si><si><t>Ingrid Berg</t></si></sst>"#;
@@ -177,7 +193,7 @@ pub mod tests {
         let sheet2 = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>4</v></c></row><row r="2"><c r="A2" t="s"><v>5</v></c></row></sheetData></worksheet>"#;
         let types = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>"#;
         let root_rels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#;
-        zip_of(&[
+        let parts = [
             ("[Content_Types].xml", types),
             ("_rels/.rels", root_rels),
             ("xl/workbook.xml", workbook),
@@ -185,8 +201,32 @@ pub mod tests {
             ("xl/sharedStrings.xml", strings),
             ("xl/styles.xml", styles),
             ("xl/worksheets/sheet1.xml", sheet1),
-            ("xl/worksheets/sheet2.xml", sheet2),
-        ])
+            ("xl/worksheets/sheet2.xml", staff.unwrap_or(sheet2)),
+        ];
+        // An empty part is left out of the archive.
+        let parts: Vec<_> = parts
+            .into_iter()
+            .filter(|(_, xml)| !xml.is_empty())
+            .collect();
+        zip_of(&parts)
+    }
+
+    #[test]
+    fn a_sheet_that_cannot_be_read_is_said_so() {
+        // The workbook names a sheet whose part is missing from the archive.
+        let staff = "";
+        let units = sheets(&xlsx_with(Some(staff))).unwrap();
+        assert_eq!(units.len(), 2, "{units:#?}");
+        assert_eq!(units[1].loc, "sheet Staff");
+        assert!(
+            units[1].text.starts_with("[sheet Staff could not be read"),
+            "{}",
+            units[1].text
+        );
+        assert_eq!(
+            (units[1].line_first, units[1].line_last),
+            (Some(5), Some(5))
+        );
     }
 
     #[test]

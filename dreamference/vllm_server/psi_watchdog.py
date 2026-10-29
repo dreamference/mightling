@@ -28,6 +28,7 @@ Two things are load-bearing about the timing, both learned from the 14:11 reset 
     healthy, so that tripping is a read of one small file and a loop of kill(2).
 """
 
+import contextlib
 import os
 import signal
 import socket
@@ -377,6 +378,11 @@ class MemoryPressureWatchdog:
         successful *read* as a successful *kill*. Since EPERM was caught alongside "process already
         gone", an unprivileged watchdog killed nothing, reported a kill, and left the host to freeze.
 
+        After path 1, dockerd has seen the processes die, not a stop, so `--restart unless-stopped`
+        would start the container again and reload the model on the host that just ran out of
+        memory, with this watchdog already tripped. The memory is free by then, so turning the
+        restart policy off may cost a fork.
+
         Returns:
             bool: True if one of the paths reports having killed the container.
         """
@@ -396,6 +402,7 @@ class MemoryPressureWatchdog:
                 except OSError:
                     continue
             if signalled:
+                self._keep_down()
                 return True
 
         if self._kill_via_docker_socket():
@@ -412,17 +419,45 @@ class MemoryPressureWatchdog:
             return False
         return getattr(result, "returncode", 1) == 0
 
+    def _keep_down(self) -> None:
+        """Turns off the container's restart policy after its processes were killed behind dockerd.
+
+        Over the control socket first, then through the `docker` CLI. A failure is not reported:
+        the kill itself already succeeded, and nothing more can be done for the host here.
+        """
+        if self._docker_api("update", b'{"RestartPolicy": {"Name": "no"}}'):
+            return
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(
+                ["docker", "update", "--restart=no", self.container_name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+            )
+
     def _kill_via_docker_socket(self) -> bool:
         """
         Asks dockerd to SIGKILL the container over its unix socket, without forking.
+
+        Returns:
+            bool: True if dockerd acknowledged the kill (204, or 2xx generally).
+        """
+        return self._docker_api("kill?signal=SIGKILL")
+
+    def _docker_api(self, action: str, body: bytes = b"") -> bool:
+        """Sends one POST about the container to dockerd over its unix socket, without forking.
 
         Addressed by container ID when one was resolved and by name otherwise; the Engine API
         accepts either. Everything here is deliberately hand-rolled rather than routed through an
         HTTP client library, because the point is to make exactly one connect and one write while
         the machine is stalling.
 
+        Args:
+            action: The path after `/containers/<target>/`, with its query.
+            body: A JSON body, or none.
+
         Returns:
-            bool: True if dockerd acknowledged the kill (204, or 2xx generally).
+            bool: True if dockerd answered 2xx.
         """
         docker_host = os.getenv("DOCKER_HOST", "")
         if docker_host.startswith("unix://"):
@@ -434,12 +469,10 @@ class MemoryPressureWatchdog:
             sock_path = DEFAULT_DOCKER_SOCKET
 
         target = self._container_id or self.container_name
-        request = (
-            f"POST /containers/{target}/kill?signal=SIGKILL HTTP/1.1\r\n"
-            f"Host: docker\r\n"
-            f"Connection: close\r\n"
-            f"\r\n"
-        ).encode()
+        headers = f"POST /containers/{target}/{action} HTTP/1.1\r\nHost: docker\r\n"
+        if body:
+            headers += f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n"
+        request = f"{headers}Connection: close\r\n\r\n".encode() + body
 
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
@@ -450,7 +483,7 @@ class MemoryPressureWatchdog:
         except (OSError, socket.timeout):
             return False
 
-        # b'HTTP/1.1 204 No Content' on success; 404 if it already exited, which is not a failure
+        # b'HTTP/1.1 204 No Content' on a kill; 404 if it already exited, which is not a failure
         # of this watchdog but is not a kill either.
         parts = status.split(b" ", 2)
         if len(parts) < 2 or not parts[1].isdigit():

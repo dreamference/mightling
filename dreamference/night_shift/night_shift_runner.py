@@ -476,10 +476,13 @@ class NightShiftRunner:
         else:
             _, end = NightShiftSettings.parse_window(window)
             hour, minute = end.hour, end.minute
-        candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if candidate <= now:
+        # A wall-clock time: `now`'s fixed offset is not the end's on a night the clocks change, so
+        # the offset comes from the local zone's rules for the end's own date.
+        wall = now.astimezone().replace(tzinfo=None)
+        candidate = wall.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate.astimezone() <= now:
             candidate += timedelta(days=1)
-        return candidate
+        return candidate.astimezone()
 
     @classmethod
     def audit_compactions(cls, night_dir: Path, settings: NightShiftSettings) -> list[str]:

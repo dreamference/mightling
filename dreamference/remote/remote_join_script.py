@@ -17,6 +17,7 @@ part of the script, so the line is secret until its key is spent or expires.
 """
 
 import base64
+import re
 import shlex
 from typing import Any, Final
 
@@ -136,10 +137,11 @@ class RemoteJoinScript:
             "@SHA_ARM64@": shlex.quote(CLIENT_ARCHIVES["arm64"]),
             "@URL@": CLIENT_URL.format(version=NETBIRD_VERSION, arch="@ARCH@"),
         }
-        text = SCRIPT.replace("@CA@", ca_block)
-        for placeholder, value in values.items():
-            text = text.replace(placeholder, value)
-        return text
+        values["@CA@"] = ca_block
+        # One pass, so that a value which holds another placeholder's text (a setup key, a peer
+        # name) is not itself substituted into, which would end its quotes early.
+        pattern = re.compile("|".join(re.escape(placeholder) for placeholder in values))
+        return pattern.sub(lambda found: values[found.group(0)], SCRIPT)
 
     @classmethod
     def one_line(cls, script: str) -> str:

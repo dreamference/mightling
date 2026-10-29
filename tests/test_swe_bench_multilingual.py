@@ -418,6 +418,20 @@ def test_the_agent_check_applies_the_test_patch_and_the_fix_before_the_tests(mac
     assert all(execs[i][execs[i].index("-u") + 1] != "0" for i in applies)
 
 
+def test_the_agent_check_notes_a_patch_that_does_not_apply_instead_of_testing_the_old_tree(machine):
+    docker, _ = machine
+    docker.present.add(f"{BUILT}:redis-redis-1")
+    plain_exec = docker._exec
+    docker._exec = lambda args: (
+        (1, "error: patch failed: t:1\n") if "apply" in args else plain_exec(args)
+    )
+    checked = dict(ROWS[0], test_patch="diff --git a/t b/t\n", patch="diff --git a/s b/s\n")
+    note = SweBenchImageBuilder.agent_check(checked, f"{BUILT}:redis-redis-1", "/usr/bin")
+    assert note is not None and "test patch" in note and "patch failed" in note
+    assert not [c for c in docker.calls if c[0] == "exec" and "bash" in c]
+    assert docker.calls[-1][:2] == ["rm", "-f"], "the container is still thrown away"
+
+
 def test_a_maven_image_runs_one_existing_test_of_the_graded_module_at_build():
     script = (
         "git apply -v - <<'EOF_1'\ndiff\nEOF_1\n"

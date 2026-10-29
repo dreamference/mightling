@@ -7,6 +7,8 @@ Claude Code's files, so every path of the mode that reads them runs inside the t
 start in the mode, which is when `ling-admin codex build` traces it after a build.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import signal

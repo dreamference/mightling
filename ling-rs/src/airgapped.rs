@@ -424,7 +424,8 @@ fn set_default(thread_id: Option<&str>, level: Level) -> Vec<String> {
     let written = path
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&path, updated));
+        .map_err(anyhow::Error::from)
+        .and_then(|()| crate::write_through(&path, updated.as_bytes()));
     if let Err(err) = written {
         return vec![format!("Could not write {}: {err}", path.display())];
     }
@@ -856,7 +857,8 @@ pub fn full_access_refusal<T: std::fmt::Display>(thread_id: Option<T>, preset: &
     (resolve(thread_id.as_deref()).level == Level::On).then(|| FULL_ACCESS_DISABLED.to_string())
 }
 
-/// [`command`] inside a TUI session, which knows whether it runs in Full Access (`full_access`).
+/// [`command`] inside a TUI session, which knows whether it runs with no sandbox (`full_access`):
+/// Full Access, or a profile of its own that has none.
 /// There `/airgapped on` is refused, not claimed: the sandbox is what enforces it, and Full Access
 /// has none.
 pub fn session_command<T: std::fmt::Display>(thread_id: Option<T>, args: &str, full_access: bool) -> Vec<String> {
@@ -871,11 +873,11 @@ pub fn session_command<T: std::fmt::Display>(thread_id: Option<T>, args: &str, f
         _ => None,
     };
     if wanted == Some(Level::On) {
-        return full_access_lines("Airgapped not changed: this session runs in Full Access.");
+        return full_access_lines("Airgapped not changed: this session runs with no sandbox, like Full Access.");
     }
     let mut lines = command(thread_id.as_deref(), args);
     if words.is_empty() && resolve(thread_id.as_deref()).level == Level::On {
-        lines.extend(full_access_lines("NOT ENFORCED in this session: it runs in Full Access."));
+        lines.extend(full_access_lines("NOT ENFORCED in this session: it runs with no sandbox, like Full Access."));
     }
     lines
 }
@@ -1246,13 +1248,25 @@ mod tests {
         // In Full Access, `on` is refused for the session and as the default, with the reason.
         for args in ["on", "ON", "default on"] {
             let lines = session_command(None::<String>, args, true);
-            assert!(lines[0].starts_with("Airgapped not changed: this session runs in Full Access."), "{args}");
+            assert!(lines[0].starts_with("Airgapped not changed: this session runs with no sandbox, like Full Access."), "{args}");
             assert!(lines[0].contains("incompatible") && lines[1].contains("/permissions"), "{args}");
         }
         // Everything else is the ordinary command.
         assert_eq!(session_command(None::<String>, "loud", true), vec![USAGE.to_string()]);
         assert!(session_command(None::<String>, "off", true)[0].starts_with("No session yet"));
         assert!(session_command(None::<String>, "on", false)[0].starts_with(&first_line_of_on_without_a_session()));
+    }
+
+    #[test]
+    fn a_custom_profile_writing_the_whole_disk_with_the_network_on_is_refused_at_on() {
+        use codex_protocol::permissions::{FileSystemAccessMode, FileSystemPath, FileSystemSandboxEntry, FileSystemSandboxPolicy, FileSystemSpecialPath, NetworkSandboxPolicy};
+        // `[permissions]` with `":root" = "write"` and the network on: Codex runs its commands with no
+        // sandbox, so no seal could cut their network, and `/airgapped on` must refuse it as it does Full Access.
+        let root_write = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry { path: FileSystemPath::Special { value: FileSystemSpecialPath::Root }, access: FileSystemAccessMode::Write, missing_path_behavior: None }]);
+        let profile = codex_protocol::models::PermissionProfile::from_runtime_permissions(&root_write, NetworkSandboxPolicy::Enabled);
+        let unsandboxed = codex_sandboxing::policy_transforms::runs_without_platform_sandbox(&profile);
+        assert!(unsandboxed);
+        assert!(session_command(None::<String>, "on", unsandboxed)[0].starts_with("Airgapped not changed"));
     }
 
     /// What `/airgapped on` says first with no session yet. On Windows, without the elevated

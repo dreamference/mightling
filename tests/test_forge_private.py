@@ -109,6 +109,38 @@ def test_the_tick_removes_any_push_mirror_and_names_a_private_one(monkeypatch):
     assert "PRIVATE" in lines[0]
 
 
+def test_a_push_mirror_forgejo_would_not_remove_is_not_reported_removed(monkeypatch):
+    monkeypatch.setattr(ForgeRepositories, "all", classmethod(lambda cls, token=None: [PRIVATE]))
+
+    def api(cls, method, path, token, body=None, timeout=30):
+        return (500, None) if method == "DELETE" else (200, [{"remote_name": "remote_mirror_x"}])
+
+    monkeypatch.setattr(ForgeContainer, "api", classmethod(api))
+    lines = ForgeRepositories.remove_push_mirrors()
+    assert len(lines) == 1 and "Could not remove" in lines[0] and "PRIVATE" in lines[0]
+    assert "(500)" in lines[0]
+
+
+def test_an_archive_forgejo_would_not_make_private_is_not_reported_private(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(ForgeRepositories, "create", classmethod(lambda cls, *a, **k: True))
+    monkeypatch.setattr(ForgeAccounts, "admin_token", classmethod(lambda cls: "t"))
+    monkeypatch.setattr(
+        ForgeRepositories,
+        "git",
+        classmethod(lambda cls, *a, **k: subprocess.CompletedProcess(a, 0, "", "")),
+    )
+    monkeypatch.setattr(ForgeRepositories, "set_settings", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(
+        ForgeContainer, "api", classmethod(lambda cls, method, *a, **k: (500, None))
+    )
+    bundle = tmp_path / "old.bundle"
+    assert ForgeRepositories.import_bundles([bundle], "owner/archive-pre-rewrite") is False
+    out = capsys.readouterr().out
+    assert "private, archived" not in out and "(500)" in out
+
+
 # -- a throwaway Forgejo -----------------------------------------------------------------------------
 
 

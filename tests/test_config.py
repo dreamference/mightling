@@ -173,3 +173,181 @@ def test_a_default_host_and_agent_are_not_fossilised_into_the_config(tmp_path):
     config.save_config()
     assert ConfigFileStorageManager.load_config_dict(cfg_file) == {
         "vllm_host": "http://spark-2.local:8000", "agent_runner": "cline"}
+
+
+def test_a_valid_toml_file_the_old_reader_refused_still_turns_the_air_gap_on(tmp_path, monkeypatch):
+    # Valid TOML that the `toml` package refused (a mixed-type array), misread (an escaped
+    # quoted key) or missed (a byte order mark): each read as `off`, the Rust resolver as `on`.
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    for text in (
+        'x = [1, "a"]\nmightling_airgapped = "on"\n',
+        '"\\u006dightling_airgapped" = "on"\n',
+        '\ufeffmightling_airgapped = "on"\n',
+    ):
+        path = tmp_path / "dreamference.toml"
+        path.write_text(text, encoding="utf-8")
+        monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(path))
+        assert DreamferenceConfig.resolve_airgapped_level() == "on", text
+
+
+def test_a_config_file_saved_with_a_byte_order_mark_is_read_whole(tmp_path):
+    # Windows editors put U+FEFF first. TOML then read the first key as "\ufeffmightling_airgapped",
+    # so the level the file sets was ignored (the air gap silently off), and JSON refused the file.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    texts = {
+        "marked.toml": 'mightling_airgapped = "on"\nmodel = "m"\n',
+        "marked.json": '{"mightling_airgapped": "on", "model": "m"}',
+        "marked.yaml": "mightling_airgapped: 'on'\nmodel: m\n",
+    }
+    for name, text in texts.items():
+        path = tmp_path / name
+        path.write_bytes(b"\xef\xbb\xbf" + text.encode())
+        assert ConfigFileStorageManager.load_config_dict(path) == {"mightling_airgapped": "on", "model": "m"}, name
+    assert DreamferenceConfig(config_file=str(tmp_path / "marked.toml")).mightling_airgapped == "on"
+
+
+def test_a_config_file_that_is_not_a_table_of_settings_is_ignored(tmp_path):
+    # A YAML file holding one word or a JSON list came back as a str or a list, and the first
+    # `.get` on it raised AttributeError out of DreamferenceConfig().
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    for name, text in {"word.yaml": "just a word\n", "list.yml": "- a\n- b\n", "list.json": "[1, 2]"}.items():
+        path = tmp_path / name
+        path.write_text(text)
+        assert ConfigFileStorageManager.load_config_dict(path) == {}, name
+        assert DreamferenceConfig(config_file=str(path)).model
+
+
+def test_toml_strings_with_escaped_quotes_are_read_as_written(tmp_path):
+    # The `toml` package read `"\"\"no"` as `no` and a lone `"\""` as an empty string.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    path = tmp_path / "quotes.toml"
+    path.write_text('a = "\\"\\"no::,off1,"\nb = "\\""\n')
+    assert ConfigFileStorageManager.load_config_dict(path) == {"a": '""no::,off1,', "b": '"'}
+    DreamferenceConfig(config_file=str(path), hf_token='""token').save_config()
+    assert DreamferenceConfig(config_file=str(path)).hf_token == '""token'
+
+
+def test_a_toml_file_the_launcher_reads_is_read_here_too(tmp_path):
+    # The toml 0.10 parser (TOML 0.5) refused a byte order mark and a mixed array, both of which
+    # the Rust launcher and tomllib read, and the whole file then counted as empty.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    path = tmp_path / "dreamference.toml"
+    path.write_text('﻿model = "x"\n', encoding="utf-8")
+    assert ConfigFileStorageManager.load_config_dict(path) == {"model": "x"}
+    path.write_text('model = "x"\nports = [1, "a"]\n', encoding="utf-8")
+    assert ConfigFileStorageManager.load_config_dict(path) == {"model": "x", "ports": [1, "a"]}
+
+
+def test_saving_never_overwrites_a_file_it_could_not_read(tmp_path):
+    # Reading a broken file gives {}, so saving into it kept none of its tables and keys.
+    import pytest
+
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    path = tmp_path / "dreamference.toml"
+    text = 'model = "x"\n[night]\nwindow = \n'
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match=r"dreamference\.toml"):
+        ConfigFileStorageManager.save_config_dict(path, {"model": "y"})
+    assert path.read_text(encoding="utf-8") == text
+
+
+def test_saving_keeps_the_keys_only_the_launcher_reads(tmp_path, monkeypatch):
+    # `main-model set` rewrote the file from the keys DreamferenceConfig knows plus its tables, so a
+    # `mightling_context_window` or `mightling_turn_end_compaction` the Rust launcher reads, and any
+    # array of tables, was deleted. A key this class owns still goes when it is back at its default.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    for name in ("DREAMFERENCE_MODEL", "DREAMFERENCE_CONFIG_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    path = tmp_path / "dreamference.toml"
+    path.write_text('mightling_context_window = 65536\nmightling_turn_end_compaction = false\n'
+                    'kv_cache_dtype = "fp8"\n[[repos]]\nname = "a"\n', encoding="utf-8")
+    config = DreamferenceConfig(config_file=str(path))
+    config.kv_cache_dtype = None
+    config.model = "qwen3.8-27b-nvfp4-dflash2"
+    config.save_config()
+    assert ConfigFileStorageManager.load_config_dict(path) == {
+        "mightling_context_window": 65536, "mightling_turn_end_compaction": False,
+        "model": "qwen3.8-27b-nvfp4-dflash2", "repos": [{"name": "a"}]}
+
+
+def test_every_key_save_config_writes_is_one_it_owns(tmp_path):
+    # A key written but not in CONFIG_KEYS would never be removed again once back at its default.
+    import dreamference.config.dreamference_config as cfg_mod
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    path = tmp_path / "all.json"
+    # The token is saved only as an argument names it (an assigned one is not).
+    config = DreamferenceConfig(config_file=str(path), hf_token="x")
+    for key in sorted(set(cfg_mod.CONFIG_KEYS) - {"hf_token"}):
+        value = getattr(config, key)
+        changed = (not value) if isinstance(value, bool) else (value + 1) if isinstance(value, int) else "x"
+        setattr(config, key, {"server_engine": "ling", "mightling_airgapped": "on",
+                              "mightling_refine_version": "v2"}.get(key, changed))
+    config.save_config()
+    assert set(ConfigFileStorageManager.load_config_dict(path)) == set(cfg_mod.CONFIG_KEYS)
+
+
+def test_saving_writes_no_token_and_no_level_that_came_from_the_environment(tmp_path, monkeypatch):
+    # `main-model set` saved every resolved field, so a shell's HF_TOKEN went into the file (with
+    # no file yet, `./dreamference.toml` in the working directory), and a session's
+    # DREAMFERENCE_MIGHTLING_AIRGAPPED=off removed the file's `on`. The file keeps what it held.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    for name in ("DREAMFERENCE_CONFIG_PATH", "DREAMFERENCE_MODEL", "DREAMFERENCE_HF_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HF_TOKEN", "hf_from_the_shell")
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "off")
+    monkeypatch.chdir(tmp_path)
+    config = DreamferenceConfig()
+    assert config.hf_token == "hf_from_the_shell"
+    config.model = "qwen3.8-27b-nvfp4-dflash2"
+    saved = config.save_config()
+    assert saved == tmp_path / "dreamference.toml"
+    assert "hf_from_the_shell" not in saved.read_text(encoding="utf-8")
+
+    saved.write_text('hf_token = "hf_in_the_file"\nmightling_airgapped = "on"\n', encoding="utf-8")
+    config = DreamferenceConfig()
+    assert (config.hf_token, config.mightling_airgapped) == ("hf_from_the_shell", "off")
+    config.model = "qwen3.8-27b-nvfp4-dflash2"
+    config.save_config()
+    assert ConfigFileStorageManager.load_config_dict(saved) == {
+        "hf_token": "hf_in_the_file", "mightling_airgapped": "on", "model": "qwen3.8-27b-nvfp4-dflash2"}
+    # A token given on the command line is still the caller's choice to save.
+    config = DreamferenceConfig(hf_token="hf_on_the_command_line")
+    config.save_config()
+    assert ConfigFileStorageManager.load_config_dict(saved)["hf_token"] == "hf_on_the_command_line"
+
+
+def test_saving_replaces_the_file_whole_through_a_link_and_keeps_its_mode(tmp_path, monkeypatch):
+    # The file was truncated and rewritten in place: a launcher reading it meanwhile, or a save
+    # that failed half-way, saw an empty or partial file (the Rust side writes atomically). A
+    # config kept as a link into a dotfiles folder must stay a link, and a 0600 file 0600.
+    import pytest
+
+    from dreamference.config import config_file_storage_manager as storage
+
+    real = tmp_path / "dotfiles" / "config.toml"
+    real.parent.mkdir()
+    real.write_text('model = "x"\n', encoding="utf-8")
+    real.chmod(0o600)
+    link = tmp_path / "config.toml"
+    link.symlink_to(real)
+    storage.ConfigFileStorageManager.save_config_dict(link, {"model": "y"})
+    assert link.is_symlink() and storage.ConfigFileStorageManager.load_config_dict(real) == {"model": "y"}
+    assert real.stat().st_mode & 0o777 == 0o600
+    assert sorted(entry.name for entry in real.parent.iterdir()) == ["config.toml"]
+
+    def broken(data, handle):
+        handle.write("model = ")
+        raise RuntimeError("disk full")
+    monkeypatch.setattr(storage.optional_module("toml"), "dump", broken)
+    with pytest.raises(RuntimeError):
+        storage.ConfigFileStorageManager.save_config_dict(link, {"model": "z"})
+    assert real.read_text(encoding="utf-8") == 'model = "y"\n'
+    assert sorted(entry.name for entry in real.parent.iterdir()) == ["config.toml"]

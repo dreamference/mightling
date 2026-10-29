@@ -67,7 +67,8 @@ export function decide(url: string, sites: Record<string, SiteChoice>, allowedOn
   if (!["http:", "https:", "ws:", "wss:"].includes(scheme)) {
     return { verdict: "block", site: "", reach: "refused", reason: `${scheme} addresses do not open in the preview` };
   }
-  const site = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  // `example.com.` (the root's dot) is `example.com`: the site its choice is kept under.
+  const site = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.+$/, "");
   const reach = reachOf(site);
   if (reach === "loopback") return { verdict: "allow", site, reach, reason: "this machine" };
   if (airgapOn) return { verdict: "block", site, reach, reason: "airgapped is on: only this machine is reachable" };

@@ -17,7 +17,7 @@ import { command } from "./platform";
 import path from "node:path";
 import readline from "node:readline";
 
-import { airgapped, airgappedOn } from "./airgapped";
+import { airgapped, airgappedOn, countsAsOn } from "./airgapped";
 import { MessagePrompts, askRoot, canonicalRoot, composePrompt, forgetIncognito, isFolder, linkThread, markIncognito, sweepIncognito, writeUpload, type Upload } from "./ask";
 import { BusyTracker, busyMarker, classify, codexHome, findLing, servedModel } from "./bridge";
 import { POLICY, airgapThread, levelMatters, namedPrompt, threadPlace, vetOutgoing } from "./policy";
@@ -74,6 +74,8 @@ export class AppServer {
     readline.createInterface({ input: child.stdout }).on("line", (line) => this.incoming(line));
     readline.createInterface({ input: child.stderr }).on("line", (line) => this.events.deliver({ channel: "work://stderr", payload: line }));
     child.once("exit", (code) => this.exited(code));
+    // A server going down closes its input before it exits: a write then fails with EPIPE, which unheard would crash the app (its exit is reported above).
+    child.stdin.on("error", () => undefined);
     child.once("error", (error) => {
       this.events.deliver({ channel: "work://stderr", payload: `could not start ${ling} app-server: ${error.message}` });
       this.exited(null);
@@ -192,7 +194,7 @@ export class AppServer {
     const level = thread === null && levelMatters(message) ? await airgapped(launch.ling, null) : null;
     const on = thread !== null
       ? await airgappedOn(launch.ling, thread, this.places.get(thread) ?? null)
-      : level !== null && (level.level === "on" || level.source.startsWith("unknown"));
+      : level !== null && countsAsOn(level);
     const prompts = new MessagePrompts(root, prompt, on);
     const vetted = vetOutgoing(message, this.pending, prompts);
     const child = this.child;

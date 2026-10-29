@@ -362,7 +362,7 @@ async fn follow(State(server): State<Arc<Server>>, Path(thread): Path<String>, Q
     let Some((owner, owner_name, _)) = owners(&store).get(&thread).cloned() else { return refused(Refusal::NotFound) };
     let seen = live.seq();
     let mut following = live.follow(&thread, after);
-    if following.events.is_empty() && !wait.is_zero() {
+    if following.events.is_empty() && !following.reset && !wait.is_zero() {
         live.wait_past(seen.max(after), wait).await;
         following = live.follow(&thread, after);
     }

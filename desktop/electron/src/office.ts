@@ -57,7 +57,8 @@ export function conversionCommand(bwrap: string, soffice: string, file: string, 
     command: bwrap,
     args: [
       // LibreOffice writes under /tmp whatever TMPDIR says: a tmpfs of its own, then the scratch folder, the file and the command.
-      "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+      // An empty /run too: a read-only root still lets it connect to the sockets there (the session bus, docker).
+      "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/run",
       "--bind", scratch, scratch, "--ro-bind", file, file, "--ro-bind", soffice, soffice,
       "--unshare-net", "--unshare-ipc", "--unshare-pid", "--die-with-parent", "--new-session",
       "--setenv", "TMPDIR", tmp, "--setenv", "HOME", scratch,

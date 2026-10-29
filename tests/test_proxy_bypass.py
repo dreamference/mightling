@@ -58,3 +58,11 @@ def test_every_ling_admin_command_starts_with_local_traffic_exempt(monkeypatch):
     with pytest.raises(SystemExit):
         controller.DreamferenceCLIController.run_cli(["mcp"])
     assert os.environ["NO_PROXY"] == os.environ["no_proxy"] == "corp.example,localhost,127.0.0.1,::1,10.4.5.6"
+
+
+def test_a_host_with_a_comma_or_a_space_is_no_entry():
+    # `http://10.0.0.1,evil:8000` gave the host `10.0.0.1,evil`, which NO_PROXY readers split in two.
+    assert ProxyBypass.host_name("http://10.0.0.1,evil:8000") is None
+    assert ProxyBypass.host_name("http://a b:8000") is None
+    merged = ProxyBypass.merged(None, None, ("http://10.0.0.1,evil:8000",))
+    assert merged == "localhost,127.0.0.1,::1"

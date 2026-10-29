@@ -7,6 +7,7 @@ container, writes the two files it reads (a SWE-bench run's record, and a pause)
 running gate what it is doing. The proxy itself is `model_gate_service.py`.
 """
 
+import http.client
 import json
 import os
 import shutil
@@ -208,7 +209,8 @@ class ModelGate:
                 f"{host.rstrip('/')}{PROBE_PATH}", timeout=timeout
             ) as response:
                 record = json.load(response)
-        except (OSError, ValueError, urllib.error.URLError):
+        except (OSError, ValueError, urllib.error.URLError, http.client.HTTPException):
+            # HTTPException: whatever holds the port does not speak HTTP, or its answer broke off.
             return None
         return record if isinstance(record, dict) and record.get("gate") == "mightling" else None
 

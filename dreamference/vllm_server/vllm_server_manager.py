@@ -6,13 +6,13 @@ This module provides the VLLMServerManager class which handles building vLLM ser
 polling HTTP health checks, and capturing logs.
 """
 
+import contextlib
 import os
 import re
 import sys
 import shutil
 import subprocess
 import time
-import requests
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Final
 
@@ -193,6 +193,8 @@ class VLLMServerManager:
         Returns:
             bool: True if server returns HTTP status 200 OK.
         """
+        # Not at the top: `ling-admin` imports this for every command (tests/test_cli_startup.py).
+        import requests
         try:
             url = f"{self.host}/v1/models"
             resp = requests.get(url, timeout=timeout)
@@ -225,6 +227,7 @@ class VLLMServerManager:
         Returns:
             List[str]: List of model ID strings served on endpoint.
         """
+        import requests
         try:
             url = f"{self.host}/v1/models"
             resp = requests.get(url, timeout=timeout)
@@ -252,6 +255,7 @@ class VLLMServerManager:
         if not models:
             return None
         start = time.monotonic()
+        import requests
         try:
             response = requests.post(
                 f"{self.host}/v1/chat/completions",
@@ -945,7 +949,9 @@ class VLLMServerManager:
             "-v", f"{dgx_cache}:/root/.cache/dreamference",
         ]
         if token_env:
-            cmd.extend(["-e", f"HF_TOKEN={token_env}"])
+            # By name only: Docker copies the value from the environment start_server gives the
+            # `docker run`, so the token never appears in the command it prints or in `ps`.
+            cmd.extend(["-e", "HF_TOKEN"])
         # vLLM reports hardware, model architecture, quantisation and settings to stats.vllm.ai at
         # start and every ten minutes after (no prompts). Found running on 2026-09-29; these turn
         # it off, and DO_NOT_TRACK covers the other libraries in either engine's image that honour
@@ -1847,7 +1853,11 @@ class VLLMServerManager:
         if not engine_plans and actual_free_gb < required_gb:
             # The arena is a fraction of total memory, so the fix is expressed as the fraction
             # that would fit — otherwise the operator is left to work backwards from four numbers.
-            max_utilization = max(0.0, (actual_free_gb - transient_gb) / actual_total_gb)
+            # Rounded down, so the printed figure itself passes this check.
+            max_utilization = max(
+                0.0, (actual_free_gb - transient_gb - side_gb) / actual_total_gb * 100 // 1 / 100
+            )
+            fits_alone = arena_gb <= actual_free_gb
             _abort(
                 "Not enough memory to start vLLM.",
                 f"   Arena:       {arena_gb:.2f} GB "
@@ -1858,7 +1868,12 @@ class VLLMServerManager:
                 + f"   Required:    {required_gb:.2f} GB\n"
                 f"   Available:   {actual_free_gb:.2f} GB\n"
                 f"   Missing:     {required_gb - actual_free_gb:.2f} GB\n\n"
-                f"The arena alone would fit; the load peak is what does not. Either free memory on\n"
+                + (
+                    "The arena alone would fit; the load peak is what does not."
+                    if fits_alone
+                    else "The arena alone does not fit."
+                )
+                + " Either free memory on\n"
                 f"the host (closing the desktop session recovers the most), or lower this model's\n"
                 f"gpu_memory_utilization to at most {max_utilization:.2f}.",
             )
@@ -2045,7 +2060,11 @@ class VLLMServerManager:
         if background:
             if cmd and cmd[0] == "docker":
                 cmd.insert(2, "-d")
-                subprocess.run(cmd, check=True, env=env)
+                try:
+                    subprocess.run(cmd, check=True, env=env)
+                except BaseException:
+                    self._abandon_launch(port)
+                    raise
                 self.process = subprocess.Popen(
                     ["docker", "logs", "-f", container_name],
                     stdout=subprocess.PIPE,
@@ -2068,10 +2087,31 @@ class VLLMServerManager:
         else:
             try:
                 subprocess.run(cmd, check=True, env=env)
+            except BaseException:
+                self._abandon_launch(port)
+                raise
             finally:
                 if self.watchdog is not None:
                     self.watchdog.stop()
             return None
+
+    def _abandon_launch(self, port: int) -> None:
+        """Takes down what start_server set up around an engine that did not start.
+
+        That is the watchdog, and the gate, which alone would hold the public port and answer
+        every request 502.
+
+        Args:
+            port: The public port of the launch.
+        """
+        if self.watchdog is not None:
+            self.watchdog.stop()
+            self.watchdog = None
+        from dreamference.vllm_server.model_gate import ModelGate
+
+        # No docker means no gate; the launch's own error is the one to report.
+        with contextlib.suppress(OSError):
+            ModelGate.stop(port)
 
     def stop_server(self, port: int = 8000) -> None:
         """

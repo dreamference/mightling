@@ -408,7 +408,10 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
       const threadId = typeof params.threadId === "string" ? params.threadId : null;
       const repoCwd = threadId !== null ? prompts.repoThreadCwd(threadId) : null;
       const isRepo = repoCwd !== null;
-      if (prompts.isBridge() || isRepo) {
+      // An Ask thread keeps the folder and sandbox it was started with: a turn's `sandboxPolicy`
+      // would hold for the turns after it.
+      const isAsk = threadId !== null && prompts.scratchFolderOf(threadId) !== null;
+      if (prompts.isBridge() || isRepo || isAsk) {
         for (const field of policy.pinnedTurnFields) delete params[field];
       }
       // A repository turn's sandbox is written on every turn, never left to the thread: a turn's

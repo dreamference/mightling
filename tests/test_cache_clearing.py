@@ -54,3 +54,56 @@ def test_paths_resolved_from_home_at_import_are_redirected_in_tests():
     for path in (vllm_server_manager.VLLM_CACHE_HOME, codex_branded_builder.INSTALL_DIR, codex_branded_builder.PATH_LINK):
         assert not str(path).startswith(REAL_HOME + os.sep), path
         assert str(path).startswith(os.environ["HOME"]), path
+
+
+def test_a_hub_kept_on_another_disk_through_a_link_is_emptied_and_stays_linked(tmp_path, monkeypatch):
+    # `rmtree` refuses a link, and with ignore_errors said nothing: nothing was cleared, and the
+    # message blamed root-owned files and suggested `sudo rm -rf`.
+    hf, _dream = _layout(tmp_path, monkeypatch)
+    disk = tmp_path / "big-disk" / "hub"
+    disk.parent.mkdir()
+    (hf / "hub").rename(disk)
+    (hf / "hub").symlink_to(disk)
+    assert ModelDownloader.clear_cache() is True
+    assert (hf / "hub").is_symlink() and disk.is_dir() and list(disk.iterdir()) == []
+    assert (hf / "token").read_text() == "hf_secret"
+
+
+def test_the_hub_cli_fallback_gets_the_token_in_its_environment_not_its_argv(monkeypatch):
+    # An argument is readable by every user of the machine through `ps` and /proc.
+    import subprocess
+
+    import huggingface_hub
+
+    def no_library(**kwargs):
+        raise RuntimeError("offline")
+
+    calls = []
+    monkeypatch.setattr(ModelDownloader, "is_model_downloaded", classmethod(lambda cls, *a: False))
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", no_library)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
+    def run(cmd, **kw):
+        calls.append((cmd, kw))
+        return subprocess.CompletedProcess(cmd, 1)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    ModelDownloader.download_model("org/model", hf_token="hf_argv_secret")
+    ((cmd, kw),) = calls
+    assert "hf_argv_secret" not in " ".join(cmd)
+    assert kw["env"]["HF_TOKEN"] == "hf_argv_secret"
+
+
+def test_a_linked_cache_that_cannot_be_emptied_is_told_how_to_empty_it_not_unlink_it(
+    tmp_path, monkeypatch, capsys
+):
+    # `sudo rm -rf <link>` removes the link alone: the root-owned files stay on the other disk.
+    disk = tmp_path / "big-disk" / "tensorizer"
+    disk.mkdir(parents=True)
+    (disk / "model.tensors").write_bytes(b"\0")
+    link = tmp_path / "tensorizer"
+    link.symlink_to(disk)
+    monkeypatch.setattr(ModelDownloader, "_empty_dir", classmethod(lambda cls, path: False))
+    assert ModelDownloader._remove_cache_dir(link) is False
+    advice = capsys.readouterr().out
+    assert f"rm -rf {link}\n" not in advice
+    assert f"sudo find {link}/ -mindepth 1 -delete" in advice

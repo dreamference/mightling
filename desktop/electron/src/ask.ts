@@ -183,8 +183,11 @@ export function composePrompt(ling: string, name: string, cwd: string, env: Node
       child.kill("SIGKILL");
       reject(new Error(`composing the ${name} prompt took too long`));
     }, timeoutMs);
-    child.stdout.on("data", (chunk) => (stdout += String(chunk)));
-    child.stderr.on("data", (chunk) => (stderr += String(chunk)));
+    // Decoded as a stream: a character split between two reads stays whole.
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => (stdout += chunk));
+    child.stderr.on("data", (chunk: string) => (stderr += chunk));
     child.once("error", (error) => {
       clearTimeout(timer);
       reject(new Error(`could not run ${ling}: ${error.message}`));

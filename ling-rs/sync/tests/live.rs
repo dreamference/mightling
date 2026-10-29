@@ -325,3 +325,20 @@ async fn the_host_refuses_what_concerns_a_thread_kept_on_this_device_and_answers
     }
     assert!(heard_so_far(&mut heard_rx).iter().all(|v| v["method"] != "thread/start"));
 }
+
+#[tokio::test]
+async fn a_folder_excluded_while_its_thread_is_followed_is_let_go() {
+    let scratch = scratch("let-go");
+    let socket = scratch.0.join("s.sock");
+    let (_heard, _say) = fake_app_server(&socket).await;
+    let (events, _asked) = mpsc::unbounded_channel();
+    let connection = Connection::open(&socket, events).await.unwrap();
+    let followed: Vec<String> = connection.attach_loaded(&Settings::default()).await.into_iter().collect();
+    assert_eq!(followed, vec![T.to_string(), HIDDEN.to_string()]);
+    // `ling sync exclude /home/user/secret` while the thread is loaded: the next look lets it go.
+    let settings = Settings { exclude: vec![PathBuf::from("/home/user/secret")], ..Settings::default() };
+    assert_eq!(connection.attach_loaded(&settings).await.into_iter().collect::<Vec<_>>(), vec![T.to_string()]);
+    assert!(!connection.holds(HIDDEN), "its events no longer reach the hub");
+    let refused = connection.carry_out(&Policy::embedded(), &scratch.0.join("home"), &json!({ "kind": "send", "thread": HIDDEN, "text": "hi" })).await;
+    assert_eq!(refused, Err("this thread is kept on this device".to_string()));
+}

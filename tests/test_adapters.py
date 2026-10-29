@@ -13,12 +13,14 @@ import shutil
 import struct
 import subprocess
 import tarfile
+import urllib.error
 from pathlib import Path
 
 import pytest
 
 from dreamference.cli.adapter_command import AdapterCommand
 from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+from dreamference.hardware import adapter_signature, adapter_verifier
 from dreamference.hardware.adapter_base_digest import AdapterBaseDigest
 from dreamference.hardware.adapter_catalog import AdapterCatalog
 from dreamference.hardware.adapter_installer import AdapterInstaller
@@ -492,6 +494,19 @@ def test_the_base_digest_reads_weight_hashes_from_their_blobs_and_changes_with_a
     assert AdapterBaseDigest.compute(snapshot) != before
 
 
+def test_a_digest_cached_while_the_base_was_still_downloading_is_not_kept_once_it_is_complete():
+    # A digest taken over a snapshot that lacked a file was cached for the revision forever, so
+    # the complete base read as a permanent base mismatch.
+    snapshot = base_snapshot()
+    shard = snapshot / "model.safetensors"
+    target = shard.readlink()
+    shard.unlink()
+    partial = AdapterBaseDigest.of(BASE_REPO, BASE_REVISION, snapshot)
+    shard.symlink_to(target)
+    complete = AdapterBaseDigest.compute(snapshot)
+    assert AdapterBaseDigest.of(BASE_REPO, BASE_REVISION, snapshot) == complete != partial
+
+
 def test_an_adapter_id_names_its_base_entry():
     assert ModelMatrixRegistry.key_for_served_id(f"{BASE_REPO}+rust") == DEFAULT_MODEL_ALIAS
 
@@ -499,6 +514,42 @@ def test_an_adapter_id_names_its_base_entry():
 def test_only_the_default_model_serves_adapters_never_minima():
     assert ModelMatrixRegistry.get_lora_recipe(DEFAULT_MODEL_ALIAS)["max_lora_rank"] == 16
     assert ModelMatrixRegistry.get_lora_recipe("qwen3.8-27b-minima-nvfp4-dflash2") is None
+
+
+def test_the_base_is_what_the_server_lists_not_the_configuration(monkeypatch):
+    listing = {
+        "data": [
+            {"id": "rust", "parent": BASE_REPO},
+            {"id": "minima-ai/mnma_qwen3.8_27b_nvfp4+rust"},
+            {"id": BASE_REPO},
+        ]
+    }
+    monkeypatch.setattr(
+        adapter_verifier.urllib.request,
+        "urlopen",
+        lambda url, timeout: io.BytesIO(json.dumps(listing).encode()),
+    )
+    assert AdapterVerifier.served_id("http://localhost:8000/") == "minima-ai/mnma_qwen3.8_27b_nvfp4"
+    served = AdapterVerifier.served_base("http://localhost:8000", DEFAULT_MODEL_ALIAS)
+    assert served["key"] == "qwen3.8-27b-minima-nvfp4-dflash2"
+    assert served["source"] == "server"
+
+
+def test_with_no_server_answering_the_base_is_the_configured_model_and_says_so(monkeypatch):
+    def refuse(url, timeout):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(adapter_verifier.urllib.request, "urlopen", refuse)
+    served = AdapterVerifier.served_base("http://localhost:8000", DEFAULT_MODEL_ALIAS)
+    assert served["key"] == DEFAULT_MODEL_ALIAS
+    assert served["source"] == "configuration"
+
+
+def test_without_ssh_keygen_the_check_names_the_package_to_install(monkeypatch):
+    monkeypatch.setattr(adapter_signature.shutil, "which", lambda name: None)
+    problem = AdapterSignature.problem(b"{}", b"signature")
+    assert problem == adapter_signature.MISSING_TOOL
+    assert "openssh-client" in problem
 
 
 # -- the command -------------------------------------------------------------------------------------
@@ -529,6 +580,45 @@ def test_on_a_client_the_command_names_the_node(capsys):
 
     assert AdapterCommand.run(args, Config()) == 1
     assert "installed on the node" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("argv", "env", "expected"),
+    [
+        ([], {"DREAMFERENCE_HF_TOKEN": "from-dreamference-env"}, "from-dreamference-env"),
+        ([], {"HF_TOKEN": "from-hf-env", "DREAMFERENCE_HF_TOKEN": "x"}, "from-hf-env"),
+        (["--hf-token", "from-flag"], {"HF_TOKEN": "from-hf-env"}, "from-flag"),
+        ([], {}, "from-config-file"),
+    ],
+)
+def test_install_takes_the_hub_token_in_the_model_downloads_order(
+    tmp_path, monkeypatch, argv, env, expected
+):
+    from dreamference.config import DreamferenceConfig
+    from dreamference.node.node_identity import NodeIdentity
+
+    config_file = tmp_path / "dreamference.toml"
+    config_file.write_text('hf_token = "from-config-file"\n')
+    monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(config_file))
+    for name in ("HF_TOKEN", "DREAMFERENCE_HF_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: object()))
+    monkeypatch.setattr(AdapterVerifier, "served_base", classmethod(lambda cls, host, model: None))
+    tokens = []
+
+    def install(cls, name, repo, base, confirm=None, token=None):
+        tokens.append(token)
+        raise ValueError("stopped by the test")
+
+    monkeypatch.setattr(AdapterInstaller, "install", classmethod(install))
+    args = DreamferenceCLIController.build_parser().parse_args(
+        ["adapter", "install", "rust", *argv]
+    )
+    config = DreamferenceConfig(hf_token=getattr(args, "hf_token", None))
+    assert AdapterCommand.run(args, config) == 1
+    assert tokens == [expected]
 
 
 # -- the copy to a paired node -----------------------------------------------------------------------
@@ -621,3 +711,114 @@ def test_the_sender_copies_signed_adapters_of_the_model_only(monkeypatch):
     assert code == 0 and len(lines) == 1
     assert [c[-1] for c in sent if c[0] == "ssh"] == [f"adapter-receive rust x/rust {COMMIT} 0"]
     assert NodeAdapterSync.after(1, "second", DEFAULT_MODEL_ALIAS, None) == (1, [])
+
+
+def test_an_installed_set_that_cannot_be_read_is_not_replaced_by_one_entry():
+    # Read as empty, the file used to be rewritten with the new entry alone: every adapter installed
+    # before it was forgotten (and its snapshot left behind, unremovable by `adapter remove`).
+    path = AdapterStore.path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = '{"schema": 1, "adapters": {"rust": {"name": "rust"}},\n'
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match=r"installed\.json"):
+        AdapterStore.put({"name": "go", "repo": "x/go", "commit": COMMIT})
+    with pytest.raises(ValueError, match=r"installed\.json"):
+        AdapterStore.drop("rust")
+    assert path.read_text(encoding="utf-8") == text
+    assert AdapterStore.entries() == {}
+
+
+def test_an_entry_that_cannot_be_written_leaves_the_installed_set_and_no_staging_file():
+    AdapterStore.put({"name": "rust", "repo": "x/rust", "commit": COMMIT})
+    before = AdapterStore.path().read_text(encoding="utf-8")
+    with pytest.raises(TypeError):
+        AdapterStore.put({"name": "go", "repo": object()})
+    assert AdapterStore.path().read_text(encoding="utf-8") == before
+    assert sorted(
+        p.name for p in AdapterStore.folder().iterdir() if not p.name.endswith(".lock")
+    ) == ["installed.json"]
+
+
+def test_two_concurrent_changes_to_the_installed_set_both_land(monkeypatch):
+    # `ling-admin adapter install` and a node's adapter sync both read, change and rewrite the
+    # file; unlocked, the one that wrote last dropped the other's entry.
+    import threading
+    import time
+
+    write = AdapterStore._write.__func__
+    first_reached, go = threading.Event(), threading.Event()
+
+    def held_write(cls, entries):
+        if not first_reached.is_set():
+            first_reached.set()
+            go.wait(5)
+        write(cls, entries)
+
+    monkeypatch.setattr(AdapterStore, "_write", classmethod(held_write))
+    first = threading.Thread(target=AdapterStore.put, args=({"name": "rust", "commit": COMMIT},))
+    first.start()
+    assert first_reached.wait(5)
+    second = threading.Thread(target=AdapterStore.put, args=({"name": "go", "commit": COMMIT},))
+    second.start()
+    time.sleep(0.3)
+    go.set()
+    first.join(5)
+    second.join(5)
+    assert sorted(AdapterStore.entries()) == ["go", "rust"]
+
+
+@pytest.mark.parametrize("header", [[], ["q_proj"], "text", 7, None])
+def test_a_safetensors_header_that_is_not_an_object_is_refused_as_not_safetensors(tmp_path, header):
+    text = json.dumps(header).encode()
+    weights = tmp_path / "adapter_model.safetensors"
+    weights.write_bytes(struct.pack("<Q", len(text)) + text)
+    with pytest.raises(ValueError, match="is not a safetensors file"):
+        AdapterVerifier.check_tensors(weights, {"q_proj"})
+
+
+def test_an_install_by_repository_checks_the_disk_before_fetching(keys, remote, monkeypatch):
+    import types
+
+    source, fetched = remote
+    make_adapter(source, keys)
+    monkeypatch.setattr(
+        "dreamference.hardware.adapter_installer.shutil.disk_usage",
+        lambda path: types.SimpleNamespace(total=4 << 40, used=4 << 40, free=1 << 30),
+    )
+    with pytest.raises(ValueError, match=r"the disk has 1\.0 GiB free"):
+        AdapterInstaller.install(None, f"{ADAPTER_REPO}@{COMMIT}", served(base_snapshot()))
+    assert fetched == []
+    assert AdapterStore.entries() == {}
+
+
+def test_the_third_party_confirmation_needs_a_terminal(monkeypatch, capsys):
+    # The name was read from stdin wherever it came from, so `printf 'rust\n' | ling-admin adapter
+    # install --third-party …` installed an unsigned adapter with nobody at the terminal.
+    import io
+
+    from dreamference.cli.adapter_command import AdapterCommand
+    from dreamference.hardware.adapter_manifest import AdapterManifest
+
+    manifest = AdapterManifest(
+        name="rust",
+        display_name="Rust",
+        version="1",
+        description="d",
+        base_repo=BASE_REPO,
+        base_revision="r",
+        base_digest="d",
+        rank=8,
+        target_modules=("q_proj",),
+    )
+    piped = io.StringIO("rust\n")
+    monkeypatch.setattr("sys.stdin", piped)
+    assert AdapterCommand._confirm(manifest) is False
+    assert piped.read() == "rust\n", "nothing was read"
+    assert "terminal" in capsys.readouterr().out
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr("sys.stdin", Terminal("rust\n"))
+    assert AdapterCommand._confirm(manifest) is True

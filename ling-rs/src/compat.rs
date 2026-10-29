@@ -355,7 +355,7 @@ fn use_mode(value: &str) -> (Vec<String>, i32) {
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
         .map_err(anyhow::Error::from)
-        .and_then(|()| crate::write_atomically(&path, updated.as_bytes()));
+        .and_then(|()| crate::write_through(&path, updated.as_bytes()));
     if let Err(err) = written {
         return (vec![format!("Could not write {}: {err}", path.display())], 1);
     }

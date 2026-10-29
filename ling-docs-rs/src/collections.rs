@@ -93,22 +93,64 @@ impl DocsToml {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let staging = path.with_extension("toml.new");
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&staging)?;
-        file.write_all(HEADER.as_bytes())?;
-        file.write_all(toml::to_string_pretty(self)?.as_bytes())?;
-        file.sync_all()?;
-        std::fs::rename(&staging, path)?;
-        Ok(())
+        // A staging file of this save's own: two writers (`ling docs add` beside the session) never
+        // share one, and one left behind with another mode is not reused.
+        static SAVES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = SAVES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let staging = path.with_extension(format!("toml.{}-{n}.new", std::process::id()));
+        let written = (|| -> Result<()> {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&staging)?;
+            file.write_all(HEADER.as_bytes())?;
+            file.write_all(toml::to_string_pretty(self)?.as_bytes())?;
+            file.sync_all()?;
+            std::fs::rename(&staging, path)?;
+            Ok(())
+        })();
+        if written.is_err() {
+            let _ = std::fs::remove_file(&staging);
+        }
+        written
     }
 
     pub fn save(&self) -> Result<()> {
         self.save_to(&config::docs_toml())
+    }
+
+    /// Changes `docs.toml` under its lock (`docs.toml.lock`): read afresh, changed by `change`,
+    /// written back when it changed. Two writers at once (`ling docs add` beside the session adding
+    /// the defaults) never lose one another's change. Returns the file as left and what `change`
+    /// returned.
+    pub fn update_at<T>(
+        path: &Path,
+        change: impl FnOnce(&mut DocsToml) -> Result<T>,
+    ) -> Result<(DocsToml, T)> {
+        use std::os::unix::fs::OpenOptionsExt;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let lock = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(path.with_extension("toml.lock"))?;
+        crate::host::flock(&lock, true)?;
+        let mut docs = DocsToml::load_from(path)?;
+        let before = docs.clone();
+        let out = change(&mut docs)?;
+        if docs != before {
+            docs.save_to(path)?;
+        }
+        Ok((docs, out))
+    }
+
+    /// [`DocsToml::update_at`] on the agent home's `docs.toml`.
+    pub fn update<T>(change: impl FnOnce(&mut DocsToml) -> Result<T>) -> Result<(DocsToml, T)> {
+        DocsToml::update_at(&config::docs_toml(), change)
     }
 
     pub fn get(&self, name: &str) -> Option<&Collection> {
@@ -323,6 +365,24 @@ pub fn is_project_knowledge(root: &Path, codex_home: &Path) -> bool {
         && id_ok
 }
 
+/// Every secret folder under `home`, as named and, when it is a link (`~/.ssh` kept in a dotfiles
+/// folder), as resolved: the folder a link points to is as secret as the link.
+pub fn secret_paths(home: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for dir in SECRET_DIRS {
+        let named = home.join(dir);
+        if let Ok(resolved) = named.canonicalize() {
+            if resolved != named && !out.contains(&resolved) {
+                out.push(resolved);
+            }
+        }
+        if !out.contains(&named) {
+            out.push(named);
+        }
+    }
+    out
+}
+
 /// The secret folders a walk of `root` skips: all of them, except the one holding a project's knowledge folder when `root` is one.
 pub fn secret_dirs(root: &Path, home: &Path) -> Vec<PathBuf> {
     secret_dirs_in(root, home, &config::home())
@@ -331,9 +391,8 @@ pub fn secret_dirs(root: &Path, home: &Path) -> Vec<PathBuf> {
 /// [`secret_dirs`] with the agent's home named.
 pub fn secret_dirs_in(root: &Path, home: &Path, codex_home: &Path) -> Vec<PathBuf> {
     let knowledge = is_project_knowledge(root, codex_home);
-    SECRET_DIRS
-        .iter()
-        .map(|d| home.join(d))
+    secret_paths(home)
+        .into_iter()
         .filter(|s| !(knowledge && root.starts_with(s)))
         .collect()
 }
@@ -357,8 +416,7 @@ pub fn validate_root_in(root: &Path, user_home: &Path, codex_home: &Path) -> Res
     if is_project_knowledge(root, codex_home) {
         return Ok(());
     }
-    for secret in SECRET_DIRS {
-        let secret = home.join(secret);
+    for secret in secret_paths(&home) {
         if root.starts_with(&secret) {
             bail!(
                 "{} is inside {}, which is never indexed",
@@ -484,6 +542,89 @@ mod tests {
         assert!(docs
             .add(&home.join("notes"), Some("Bad Name"), &home)
             .is_err());
+    }
+
+    #[test]
+    fn two_writers_at_once_keep_both_changes() {
+        // One writer holds the lock while it saves; the other, started first, waits and then
+        // reads the file afresh, so neither change is lost.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("docs.toml");
+        let lock = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path.with_extension("toml.lock"))
+            .unwrap();
+        crate::host::flock(&lock, true).unwrap();
+        let other = {
+            let path = path.clone();
+            let root = dir.path().join("b");
+            std::thread::spawn(move || {
+                DocsToml::update_at(&path, |docs| {
+                    docs.collections.push(Collection::new("b", root));
+                    Ok(())
+                })
+                .unwrap()
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!path.exists(), "the other writer waits for the lock");
+        let mut first = DocsToml::default();
+        first
+            .collections
+            .push(Collection::new("a", dir.path().join("a")));
+        first.save_to(&path).unwrap();
+        drop(lock);
+        let (left, ()) = other.join().unwrap();
+        let names: Vec<_> = left.collections.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(names, ["a", "b"]);
+        assert_eq!(DocsToml::load_from(&path).unwrap(), left);
+    }
+
+    #[test]
+    fn a_save_writes_its_own_staging_file_mode_600() {
+        // Another writer's staging file, left behind or half written, mode 644: not reused.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("docs.toml");
+        let stale = dir.path().join("docs.toml.new");
+        std::fs::write(&stale, "half written").unwrap();
+        std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let mut docs = DocsToml::default();
+        docs.collections
+            .push(Collection::new("notes", dir.path().join("notes")));
+        docs.save_to(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(DocsToml::load_from(&path).unwrap().collections.len(), 1);
+        assert_eq!(std::fs::read_to_string(&stale).unwrap(), "half written");
+        let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().collect();
+        assert_eq!(left.len(), 2, "no staging file of its own is left");
+    }
+
+    #[test]
+    fn a_secret_folder_kept_elsewhere_through_a_link_is_still_secret() {
+        // `~/.ssh` and `~/.config` as links into a dotfiles folder: the folders they point to are
+        // as secret as the links, and are neither a collection nor walked.
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        for dir in ["dotfiles/ssh", "dotfiles/config/app", "Documents"] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+        std::os::unix::fs::symlink(home.join("dotfiles/ssh"), home.join(".ssh")).unwrap();
+        std::os::unix::fs::symlink(home.join("dotfiles/config"), home.join(".config")).unwrap();
+        let codex = home.join(".mightling");
+        let mut docs = DocsToml::default();
+        assert!(validate_root_in(&home.join("dotfiles/ssh"), &home, &codex).is_err());
+        assert!(docs
+            .add(&home.join("dotfiles/config/app"), None, &home)
+            .is_err());
+        assert!(docs.add(&home.join(".ssh"), None, &home).is_err());
+        let skipped = secret_dirs_in(&home.join("dotfiles"), &home, &codex);
+        assert!(skipped.contains(&home.join("dotfiles/ssh")));
+        assert!(skipped.contains(&home.join("dotfiles/config")));
+        assert!(docs.add(&home.join("Documents"), None, &home).is_ok());
     }
 
     #[test]

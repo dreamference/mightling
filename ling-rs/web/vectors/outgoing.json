@@ -633,6 +633,12 @@
       "out": {"id": 121, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "hi"}], "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": [], "networkAccess": false, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false}}}
     },
     {
+      "name": "a page turn/start on an Ask thread cannot pick its own sandbox, approvals, folder or permissions profile: the thread keeps the ones it was started with",
+      "message": {"id": 348, "method": "turn/start", "params": {"threadId": "ask-7", "input": [{"type": "text", "text": "hi"}], "sandboxPolicy": {"type": "dangerFullAccess"}, "approvalPolicy": "never", "cwd": "/", "permissions": ":danger-full-access", "runtimeWorkspaceRoots": ["/"], "approvalsReviewer": "auto_review"}},
+      "accept": true,
+      "out": {"id": 348, "method": "turn/start", "params": {"threadId": "ask-7", "input": [{"type": "text", "text": "hi"}]}}
+    },
+    {
       "name": "a page turn/start on an ordinary thread keeps its overrides",
       "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
       "message": {"id": 122, "method": "turn/start", "params": {"threadId": "work-t2", "input": [{"type": "text", "text": "hi"}], "approvalPolicy": "never", "cwd": "/work/repo"}},

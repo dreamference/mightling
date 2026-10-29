@@ -67,7 +67,7 @@ The token is the first of:
 2. `HF_TOKEN`, then `DREAMFERENCE_HF_TOKEN`;
 3. the `hf_token` config key.
 
-It is passed to the container as `-e HF_TOKEN=…`. When none is set, `huggingface_hub` falls back to its own stored login (`~/.cache/huggingface/token`) on the host side.
+It is passed to the container by name, `-e HF_TOKEN`, with the value in the environment of the `docker run`, so the printed command and the process list never carry it. When none is set, `huggingface_hub` falls back to its own stored login (`~/.cache/huggingface/token`) on the host side.
 
 ---
 

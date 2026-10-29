@@ -113,6 +113,42 @@ describe("managed worktrees", () => {
     await expect(worktree.remove(source, path.join(root, "abcd", "app"), root, null)).rejects.toThrow("is not a worktree of");
   });
 
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("are not left behind when a file .worktreeinclude names cannot be copied", async () => {
+    const { source, root } = repo();
+    fs.chmodSync(path.join(source, ".env"), 0o000);
+    try {
+      await expect(worktree.create({ sourceCwd: source, base: null, withChanges: false, worktreeRoot: root })).rejects.toThrow();
+    } finally {
+      fs.chmodSync(path.join(source, ".env"), 0o644);
+    }
+    expect(run(source, "worktree", "list", "--porcelain").match(/^worktree /gm)).toHaveLength(1);
+  });
+
+  it("are bound to one thread when two ask at once, and the other is told", async () => {
+    const { source, root } = repo();
+    const created = await worktree.create({ sourceCwd: source, base: null, withChanges: false, worktreeRoot: root });
+    const threads = Array.from({ length: 6 }, (_, index) => `thread-${index}`);
+    const results = await Promise.allSettled(threads.map((thread) => worktree.bindThread(created.root, thread)));
+    const bound = threads.filter((_, index) => results[index].status === "fulfilled");
+    expect(bound).toHaveLength(1);
+    expect(await worktree.owner(created.root)).toBe(bound[0]);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("are kept when their snapshot fails, with the work in them", async () => {
+    const { source, root } = repo();
+    const created = await worktree.create({ sourceCwd: source, base: null, withChanges: false, worktreeRoot: root });
+    const unreadable = path.join(created.root, "src", "unreadable.py");
+    fs.writeFileSync(unreadable, "z = 3\n");
+    fs.chmodSync(unreadable, 0o000);
+    try {
+      await expect(worktree.remove(source, created.root, root, "thread-1")).rejects.toThrow();
+      expect(fs.existsSync(unreadable)).toBe(true);
+      expect(run(source, "worktree", "list", "--porcelain")).toContain(created.root);
+    } finally {
+      if (fs.existsSync(unreadable)) fs.chmodSync(unreadable, 0o644);
+    }
+  });
+
   it("hand a thread's work to the local checkout and back, with its branch", async () => {
     const { source, root } = repo();
     const created = await worktree.create({ sourceCwd: source, base: null, withChanges: false, worktreeRoot: root });
@@ -184,6 +220,24 @@ describe("local environments", () => {
     fs.writeFileSync(path.join(source, ".mightling", "environment.toml"), "not = [toml");
     expect((await environments(source, "linux")).problems[0]).toMatch(/^\.mightling\/environment\.toml: /);
   });
+
+  // A cloned project chooses what its files are: a link there is not written through to the user's own files.
+  it("write the environment into the project, not through a link it holds", async () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), "ling-env-link-"));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "ling-env-outside-"));
+    fs.writeFileSync(path.join(outside, "bashrc"), "export KEEP=1\n");
+    fs.mkdirSync(path.join(project, ".mightling", "environments"), { recursive: true });
+    fs.symlinkSync(path.join(outside, "bashrc"), path.join(project, WRITE_FILE));
+    await writeEnvironment(project, { name: "Mine", setup: "uv sync", actions: [] });
+    expect(fs.readFileSync(path.join(outside, "bashrc"), "utf8")).toBe("export KEEP=1\n");
+    expect(fs.lstatSync(path.join(project, WRITE_FILE)).isFile()).toBe(true);
+    expect(fs.readFileSync(path.join(project, WRITE_FILE), "utf8")).toContain('name = "Mine"');
+
+    const linked = fs.mkdtempSync(path.join(os.tmpdir(), "ling-env-dir-"));
+    fs.symlinkSync(outside, path.join(linked, ".mightling"));
+    await expect(writeEnvironment(linked, { name: "Mine", setup: "", actions: [] })).rejects.toThrow(/is a link, not a folder of the project/);
+    expect(fs.readdirSync(outside)).toEqual(["bashrc"]);
+  });
 });
 
 describe("bottom-panel tasks", () => {
@@ -210,5 +264,17 @@ describe("bottom-panel tasks", () => {
       expect(rest.join("\n")).toBe("done\n");
     } else expect(output).toBe(`${fs.realpathSync(scratchHome)}\ndone\n`);
     expect(events[events.length - 1]).toMatchObject({ kind: "exit", code: 0 });
+  });
+
+  it.skipIf(process.platform === "win32")("keep a character the output splits between two writes", async () => {
+    const events: TaskEvent[] = [];
+    await new Promise<void>((resolve) => {
+      // "é" is two bytes in UTF-8: the first ends one write, the second starts the next.
+      new Tasks((event) => {
+        events.push(event);
+        if (event.kind === "exit") resolve();
+      }, "/bin/sh").run("Run", "printf 'caf\\303'; sleep 0.2; printf '\\251\\n'", scratchHome);
+    });
+    expect(events.filter((event) => event.kind === "output").map((event) => event.data).join("")).toBe("café\n");
   });
 });

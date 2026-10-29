@@ -563,6 +563,8 @@ impl Hub {
     }
 
     pub async fn on_inbound(&mut self, message: Inbound) {
+        // CHAT §3: read every minute and at every message. `airgap_read` stays the tick's clock.
+        self.airgapped = (self.airgap)();
         match message {
             Inbound::Text { chat, text } => {
                 if off_node(adapter_of(&chat)) && self.airgapped {
@@ -691,7 +693,8 @@ impl Hub {
             "/push" => self.repo_confirm(chat, RefusedAction::Push).await,
             "/merge" => self.repo_confirm(chat, RefusedAction::Merge).await,
             "/night" => {
-                let rest = text.trim()["/night".len()..].trim().to_string();
+                // After the command word, which may carry the bot's name in a group (`/night@Bot`).
+                let rest = text.trim().split_once(char::is_whitespace).map_or("", |(_, rest)| rest).trim().to_string();
                 self.night(chat, &rest).await;
             }
             "/help" | "/start" => self.notice(chat, HELP),
@@ -1166,9 +1169,8 @@ impl Hub {
         let Ok(value) = self.agent.web(&format!("/api/night/reports?after={after}"), None).await else { return };
         let latest = value.get("latest").and_then(Value::as_str).map(str::to_string);
         if seen.is_none() {
-            if let Some(latest) = latest {
-                let _ = crate::store::write_private(&seen_file, &latest);
-            }
+            // No report yet is noted too ("" is before any), or the first one would only be noted.
+            let _ = crate::store::write_private(&seen_file, latest.as_deref().unwrap_or_default());
             return;
         }
         let reports = value.get("reports").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -1737,6 +1739,9 @@ impl Hub {
         let Some(pending) = self.approvals.remove(approval) else { return };
         if let Some(local) = pending.local.clone() {
             let outcome = match (&local, &reply) {
+                (Local::SendFile { .. }, Reply::Approve) if off_node(adapter_of(&pending.chat)) && self.airgapped => {
+                    "Not sent: the air gap is on."
+                }
                 (Local::SendFile { thread, name }, Reply::Approve) => {
                     self.send_file(&pending.chat, thread, name);
                     "Sending it."

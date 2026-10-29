@@ -108,16 +108,31 @@ pub fn status(night: &Path, now: SystemTime) -> Vec<Value> {
     shown.into_iter().take(STATUS_LIMIT).map(|(_, entry)| entry).collect()
 }
 
-/// The morning reports named after `after` (`YYYY-MM-DD.md`, so names sort by date), oldest first,
-/// each cut at [`REPORT_CHARS`]; and the newest name there is, for a bridge starting fresh.
+/// Where a report's name falls among the others: `YYYY-MM-DD.md` is a night's first run, and a later
+/// run the same day is `YYYY-MM-DD-2.md`, `-3.md` … (night_shift_report.py), which plain string order
+/// would put before the first and `-10` before `-2`.
+fn report_order(name: &str) -> (&str, u64, &str) {
+    let stem = name.strip_suffix(".md").unwrap_or(name);
+    let (date, rest) = stem.split_at(stem.char_indices().nth(10).map_or(stem.len(), |(at, _)| at));
+    match rest.strip_prefix('-').and_then(|run| run.parse::<u64>().ok()) {
+        Some(run) => (date, run, ""),
+        None if rest.is_empty() => (date, 1, ""),
+        None => (date, 0, rest),
+    }
+}
+
+/// The morning reports named after `after` (by date, then by run, as [`report_order`] puts them),
+/// oldest first, each cut at [`REPORT_CHARS`]; and the newest name there is, for a bridge starting
+/// fresh.
 pub fn reports_after(night: &Path, after: &str) -> (Vec<Value>, Option<String>) {
     let Ok(entries) = std::fs::read_dir(night.join("reports")) else { return (Vec::new(), None) };
     let mut names: Vec<String> = entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".md") && !n.starts_with('.')).collect();
-    names.sort();
+    names.sort_by(|a, b| report_order(a).cmp(&report_order(b)).then_with(|| a.cmp(b)));
     let latest = names.last().cloned();
+    let after = report_order(after);
     let reports = names
         .into_iter()
-        .filter(|name| name.as_str() > after)
+        .filter(|name| report_order(name) > after)
         .filter_map(|name| {
             let text = std::fs::read_to_string(night.join("reports").join(&name)).ok()?;
             let mut cut: String = text.chars().take(REPORT_CHARS).collect();
@@ -210,6 +225,26 @@ mod tests {
         assert_eq!(reports, vec![json!({ "name": "2026-10-21.md", "text": "# Night of the 21st" })]);
         assert_eq!(reports_after(&night, "").0.len(), 2);
         assert_eq!(task_argument("--test rm -rf"), "Task: --test rm -rf");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_second_run_on_the_same_night_comes_after_the_first() {
+        let dir = scratch("same-night");
+        let night = dir.join("night");
+        // night_shift_report.py: `<date>.md`, then `<date>-2.md`, `<date>-3.md` … the same day.
+        for name in ["2026-10-21.md", "2026-10-21-2.md", "2026-10-21-10.md", "2026-10-22.md"] {
+            std::fs::write(night.join("reports").join(name), name).unwrap();
+        }
+        let names = |after: &str| -> Vec<String> {
+            reports_after(&night, after).0.iter().map(|r| r["name"].as_str().unwrap().to_string()).collect()
+        };
+        assert_eq!(names(""), ["2026-10-21.md", "2026-10-21-2.md", "2026-10-21-10.md", "2026-10-22.md"]);
+        assert_eq!(names("2026-10-21.md"), ["2026-10-21-2.md", "2026-10-21-10.md", "2026-10-22.md"]);
+        assert_eq!(names("2026-10-21-2.md"), ["2026-10-21-10.md", "2026-10-22.md"]);
+        assert_eq!(names("2026-10-22.md"), Vec::<String>::new());
+        std::fs::remove_file(night.join("reports/2026-10-22.md")).unwrap();
+        assert_eq!(reports_after(&night, "").1.as_deref(), Some("2026-10-21-10.md"), "the newest is the last run");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

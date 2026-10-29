@@ -96,6 +96,23 @@ def test_fetch_reads_a_page_that_names_an_unknown_charset_as_utf8(online, conten
     assert WebTools.fetch("https://example.org")["text"] == "café"
 
 
+@pytest.mark.parametrize(
+    "body, content_type",
+    [
+        ("<p>café</p>".encode(), "text/html"),
+        ("<meta charset='iso-8859-1'><p>café</p>".encode("latin-1"), "text/html"),
+        ("café".encode(), "text/plain"),
+    ],
+)
+def test_fetch_decodes_a_page_whose_server_names_no_charset_by_its_content(
+    online, body, content_type
+):
+    # requests answers ISO-8859-1 for any text/* reply without a charset (`response.encoding`),
+    # which turned every such UTF-8 page into mojibake ("cafÃ©").
+    online.return_value = Page(body, content_type=content_type, encoding="ISO-8859-1")
+    assert WebTools.fetch("https://example.org")["text"] == "café"
+
+
 def test_search_at_air_gap_on_or_with_an_empty_query_makes_no_request(monkeypatch, online):
     assert WebTools.search("   ")["error"] == "empty query"
     monkeypatch.setattr(WebTools, "airgapped_level", classmethod(lambda cls: "on"))

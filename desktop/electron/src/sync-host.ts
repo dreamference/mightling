@@ -8,9 +8,11 @@
 //
 // It runs only while the device is paired (`$CODEX_HOME/sync/device.toml`) and the sync agent has
 // found the hub (`agent-status.json` names it); both are read again every 30 s, since the agent
-// finds the node anew and an address is never kept here. Never in the egress audit's session
+// finds the node anew. A hub given by name is looked up once a session and posted to at that address
+// (under its own name, as `Host`), which must be on the user's own network: a rebind of the name
+// cannot send the device's secret anywhere else. Never in the egress audit's session
 // (`MIGHTLING_APP_AUDIT`), which must connect to nothing. It talks to the hub and nothing else, with
-// Node's own fetch: no proxy, no redirect. Threads that stay on this device stay here too: a
+// Node's own http: no proxy, no redirect. Threads that stay on this device stay here too: a
 // throwaway thread (`ephemeral`), and a thread under a folder in `[sync] exclude` of the user's own
 // `~/.config/dreamference/config.toml` (§17.3), whose events, holding and folder are never posted.
 //
@@ -19,7 +21,9 @@
 // runs it against the real `AppServer` with a scripted `ling` and a stand-in hub on loopback.
 
 import { randomBytes } from "node:crypto";
+import dns from "node:dns";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { parse } from "smol-toml";
@@ -94,6 +98,31 @@ export interface HostOptions {
   requestMs?: number;
   /** How often a host with no configuration or no ready server looks again. */
   idleMs?: number;
+  /** Looks up a hub's name: the system's resolver unless a test gives one. */
+  lookup?: (name: string) => Promise<Address>;
+}
+
+interface Address {
+  address: string;
+  family: number;
+}
+
+/** A POST of `body` to `url` at `at` (its name still the `Host`): the status and the answer's text. */
+function postTo(url: URL, at: Address, headers: Record<string, string>, body: string, signal: AbortSignal): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const lookup = ((_name: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
+      if (options.all) callback(null, [at]);
+      else callback(null, at.address, at.family);
+    }) as unknown as net.LookupFunction;
+    const request = http.request(url, { method: "POST", headers: { ...headers, "Content-Length": String(Buffer.byteLength(body)) }, signal, lookup, agent: false }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => resolve({ status: response.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") }));
+      response.on("error", reject);
+    });
+    request.on("error", reject);
+    request.end(body);
+  });
 }
 
 /** A command from the hub (`sync_live::Command`). */
@@ -203,9 +232,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): HostConfig | n
 }
 
 /** Whether `folder` is `root` or inside it. */
-function within(folder: string, root: string): boolean {
+export function within(folder: string, root: string): boolean {
   const relative = path.relative(root, folder);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  // `..notes` is a folder inside; only `..` itself, or a path through it, leaves.
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 export class SyncHost {
@@ -224,6 +254,9 @@ export class SyncHost {
 
   private running = false;
   private config: HostConfig | null = null;
+  private readonly lookup: (name: string) => Promise<Address>;
+  /** The address of the hub this session posts to, looked up once. */
+  private pinned: { hub: string; at: Promise<Address> } | null = null;
   private configAt = 0;
   private refreshedAt = 0;
   private backoff = 0;
@@ -262,6 +295,7 @@ export class SyncHost {
     this.backoffMaxMs = options.backoffMaxMs ?? 60_000;
     this.requestMs = options.requestMs ?? 30_000;
     this.idleMs = options.idleMs ?? 1_000;
+    this.lookup = options.lookup ?? ((name) => dns.promises.lookup(name));
   }
 
   /** Starts following the server and posting, once its app-server runs; again while running does nothing. */
@@ -304,6 +338,7 @@ export class SyncHost {
     this.ephemeral.clear();
     this.config = null;
     this.configAt = 0;
+    this.pinned = null;
     this.refreshedAt = 0;
     this.backoff = 0;
     this.backoffUntil = 0;
@@ -381,7 +416,8 @@ export class SyncHost {
       let count = 0;
       while (count < this.events.length && (count === 0 || bytes + this.events[count].bytes <= BATCH_CAP)) bytes += this.events[count++].bytes;
       const events = this.events.splice(0, count);
-      if (!(await this.post(config, events, acks, 0))) {
+      // A post that stop() cut off is not kept: what it carried was the stopped server's.
+      if (!(await this.post(config, events, acks, 0)) && this.running) {
         // Kept for the next post, in order; the oldest events give way first.
         this.acks = [...acks, ...this.acks];
         this.events = [...events, ...this.events].slice(-QUEUE_CAP);
@@ -415,15 +451,12 @@ export class SyncHost {
     this.aborts.add(controller);
     const timer = setTimeout(() => controller.abort(), (wait + 15) * 1000);
     try {
-      const response = await fetch(`${config.hub}/api/sync/host?wait=${wait}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${config.secret}`, Origin: config.hub, "Content-Type": "application/json" },
-        body,
-        signal: controller.signal,
-        redirect: "error",
-      });
-      if (!response.ok) throw new Error(`the hub answered ${response.status}`);
-      const answer = (await response.json()) as unknown;
+      const at = await this.hubAddress(config.hub);
+      if (!this.running) return false;
+      const headers = { Authorization: `Bearer ${config.secret}`, Origin: config.hub, "Content-Type": "application/json" };
+      const response = await postTo(new URL(`${config.hub}/api/sync/host?wait=${wait}`), at, headers, body, controller.signal);
+      if (response.status < 200 || response.status > 299) throw new Error(`the hub answered ${response.status}`);
+      const answer = JSON.parse(response.text) as unknown;
       this.backoff = 0;
       this.backoffUntil = 0;
       const commands = isObject(answer) && Array.isArray(answer.commands) ? answer.commands : [];
@@ -440,6 +473,23 @@ export class SyncHost {
       clearTimeout(timer);
       this.aborts.delete(controller);
     }
+  }
+
+  /** Where the hub is: its address as written, or its name looked up once this session; only on the user's own network. */
+  private hubAddress(hub: string): Promise<Address> {
+    if (this.pinned?.hub === hub) return this.pinned.at;
+    const host = new URL(hub).hostname.replace(/^\[|\]$/g, "");
+    const at = (net.isIP(host) ? Promise.resolve({ address: host, family: net.isIP(host) }) : this.lookup(host)).then((found) => {
+      if (!privateIp(found.address)) throw new Error(`the hub's name ${host} is not on this network`);
+      return found;
+    });
+    const pin = { hub, at };
+    // Both loops post: they share one lookup. One that failed is tried again on the next post.
+    if (this.running) this.pinned = pin;
+    at.catch(() => {
+      if (this.pinned === pin) this.pinned = null;
+    });
+    return at;
   }
 
   /** The back-off now, for the tests: 0 after an answer, then `backoffMs` doubling up to `backoffMaxMs`. */

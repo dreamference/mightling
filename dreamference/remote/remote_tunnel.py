@@ -11,6 +11,7 @@ a listener that could not be set up a failure, not a silent half-tunnel.
 `systemctl` and `ssh-keygen` go through `_run`, the seam the tests replace.
 """
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -24,6 +25,26 @@ from dreamference.remote.remote_settings import (
 )
 
 KEY_COMMENT = "mightling-remote-tunnel"
+
+# What an `ExecStart=` word may hold without quoting. systemd splits the line at spaces, expands
+# `$` and reads `%` as a specifier, so a path with any of these has to be quoted and escaped.
+UNIT_PLAIN = re.compile(r"[A-Za-z0-9_@+=:,./-]+")
+
+
+def unit_word(word: str) -> str:
+    r"""One argument of an `ExecStart=` line, written so that systemd reads it back as given.
+
+    Args:
+        word: The argument.
+
+    Returns:
+        str: The word, in double quotes with `\`, `"`, `$` and `%` escaped unless it is plain.
+    """
+    if UNIT_PLAIN.fullmatch(word):
+        return word
+    escaped = word.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    escaped = escaped.replace("$", "$$").replace("%", "%%")
+    return f'"{escaped}"'
 
 
 class RemoteTunnel:
@@ -132,7 +153,8 @@ class RemoteTunnel:
         """
         ssh = shutil.which("ssh") or "/usr/bin/ssh"
         command = " ".join(
-            [
+            unit_word(word)
+            for word in [
                 ssh,
                 "-N",
                 "-i",

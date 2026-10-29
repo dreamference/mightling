@@ -2,7 +2,7 @@
 Main Dreamference Configuration Class.
 
 This module provides the DreamferenceConfig class which merges CLI parameters, environment
-variables, `.dreamference/config.yaml`, and system defaults into a unified settings object.
+variables, the configuration file (`ConfigPathResolver`) and system defaults into one object.
 """
 
 import os
@@ -76,10 +76,22 @@ DEFAULT_MIGHTLING_REFINE: Final[bool] = False
 DEFAULT_MIGHTLING_REFINE_VERSION: Final[str] = "v1"
 MIGHTLING_REFINE_VERSIONS: Final[tuple] = ("v1", "v2")
 
+# The keys save_config() writes when they differ from their default and removes when they do not;
+# every other key in the file belongs to another reader and is kept.
+CONFIG_KEYS: Final[frozenset] = frozenset({
+    "vllm_host", "agent_runner", "model", "diffusion_model", "draft_model", "num_speculative_tokens",
+    "hf_token", "enable_prefix_caching", "enable_chunked_prefill", "num_scheduler_steps",
+    "attention_backend", "kv_cache_dtype", "guided_decoding_backend", "use_tensorizer", "server_engine",
+    "mightling_gmail", "mightling_compaction_ledger", "mightling_airgapped", "mightling_prompt",
+    "mightling_refine", "mightling_refine_version",
+})
+# Keys an earlier release wrote and this one no longer reads: removed on save like a default.
+RETIRED_KEYS: Final[frozenset] = frozenset({"cave_mode", "mightling_cave_mode"})
+
 class DreamferenceConfig:
     """
     Unified configuration manager implementing the 4-tier precedence hierarchy:
-    CLI Parameters > Environment Variables > `.dreamference/config.yaml` > System Defaults.
+    CLI Parameters > Environment Variables > the configuration file (`dreamference.toml`, …) > System Defaults.
     """
 
     def __init__(
@@ -218,6 +230,10 @@ class DreamferenceConfig:
             )
         )
 
+        # The values the environment supplied, which save_config() leaves out of the file (the
+        # token is kept out by `_hf_token_to_save` above).
+        self._from_environment: dict[str, Any] = {}
+
         # 8. Blackwell GB10 Performance Tuning Flags
         self.enable_prefix_caching: bool = bool(
             enable_prefix_caching
@@ -276,7 +292,7 @@ class DreamferenceConfig:
         env_tensorizer = os.getenv("DREAMFERENCE_USE_TENSORIZER")
         if use_tensorizer is not None:
             self.use_tensorizer: bool = use_tensorizer
-        elif env_tensorizer is not None:
+        elif env_tensorizer:  # empty is unset, as for the other switches
             self.use_tensorizer = env_tensorizer.lower() in ("1", "true", "yes")
         else:
             self.use_tensorizer = bool(self.file_data.get("use_tensorizer", DEFAULT_USE_TENSORIZER))
@@ -284,7 +300,7 @@ class DreamferenceConfig:
         env_mightling_gmail = os.getenv("DREAMFERENCE_MIGHTLING_GMAIL")
         if mightling_gmail is not None:
             self.mightling_gmail: bool = mightling_gmail
-        elif env_mightling_gmail is not None:
+        elif env_mightling_gmail:  # empty is unset, as in the Rust launcher
             self.mightling_gmail = env_mightling_gmail.lower() in ("1", "true", "yes")
         else:
             self.mightling_gmail = bool(self.file_data.get("mightling_gmail", DEFAULT_MIGHTLING_GMAIL))
@@ -303,10 +319,13 @@ class DreamferenceConfig:
         # configuration file this object resolved: the launcher also reads the user-level file and
         # takes the stricter of the two, because the agent can write the repository's.
         self.mightling_airgapped: str = DEFAULT_MIGHTLING_AIRGAPPED
-        for candidate in (mightling_airgapped, os.getenv("DREAMFERENCE_MIGHTLING_AIRGAPPED"), self.file_data.get("mightling_airgapped")):
+        for tier, candidate in enumerate((mightling_airgapped, os.getenv("DREAMFERENCE_MIGHTLING_AIRGAPPED"),
+                                          self.file_data.get("mightling_airgapped"))):
             level = self.parse_airgapped_level(candidate)
             if level is not None:
                 self.mightling_airgapped = level
+                if tier == 1:
+                    self._from_environment["mightling_airgapped"] = level
                 break
 
         # The prompt's name, through the same tiers. Only its form is checked here: which prompts
@@ -454,16 +473,48 @@ class DreamferenceConfig:
         for path in files:
             if not path.is_file():
                 continue
-            level = cls.parse_airgapped_level(
-                ConfigFileStorageManager.load_config_dict(path).get("mightling_airgapped"))
-            if level is not None and (strictest is None or MIGHTLING_AIRGAPPED_LEVELS.index(level)
-                                      > MIGHTLING_AIRGAPPED_LEVELS.index(strictest)):
-                strictest = level
+            # The line the launcher reads, and the parsed value (a YAML or JSON file has no such
+            # line): a file the parser refuses must not loosen the level the launcher sees.
+            try:
+                line_value = cls.toml_airgapped_value(path.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                line_value = None
+            for value in (line_value, ConfigFileStorageManager.load_config_dict(path).get("mightling_airgapped")):
+                level = cls.parse_airgapped_level(value)
+                if level is not None and (strictest is None or MIGHTLING_AIRGAPPED_LEVELS.index(level)
+                                          > MIGHTLING_AIRGAPPED_LEVELS.index(strictest)):
+                    strictest = level
         return strictest or DEFAULT_MIGHTLING_AIRGAPPED
+
+    @classmethod
+    def toml_airgapped_value(cls, text: str) -> Optional[str]:
+        """The value of the top-level `mightling_airgapped` key, read line by line.
+
+        As `toml_value` in ling-rs/airgapped does: the first `mightling_airgapped = <value>` before any table header,
+        a byte order mark skipped, a comment and quotes stripped. A syntax error elsewhere in the
+        file does not hide it, as it would from a TOML parser.
+
+        Args:
+            text: The file's text.
+
+        Returns:
+            Optional[str]: The raw value, or None when there is no such line.
+        """
+        for line in text.lstrip("﻿").splitlines():
+            line = line.strip()
+            if line.startswith("["):
+                return None
+            if not line.startswith("mightling_airgapped"):
+                continue
+            rest = line[len("mightling_airgapped"):].lstrip()
+            if not rest.startswith("="):
+                continue
+            return rest[1:].split("#", 1)[0].strip().strip("\"'")
+        return None
 
     def save_config(self, target_path: Optional[Path] = None) -> Path:
         """
-        Saves current active configuration parameters to YAML or JSON config file.
+        Saves current active configuration parameters to the TOML, YAML or JSON config file.
 
         Args:
             target_path (Optional[Path]): Target output file path. Defaults to self.config_file_path.
@@ -509,7 +560,14 @@ class DreamferenceConfig:
         if self.mightling_refine_version != DEFAULT_MIGHTLING_REFINE_VERSION:
             data["mightling_refine_version"] = self.mightling_refine_version
 
-        return ConfigFileStorageManager.save_config_dict(out_path, data)
+        # A value still as the environment gave it stays what the file held, or absent.
+        for key, value in self._from_environment.items():
+            if getattr(self, key) == value:
+                data.pop(key, None)
+                if key in self.file_data:
+                    data[key] = self.file_data[key]
+
+        return ConfigFileStorageManager.save_config_dict(out_path, data, owned=CONFIG_KEYS | RETIRED_KEYS)
 
     def resolve_tool_call_parser(self) -> str:
         """

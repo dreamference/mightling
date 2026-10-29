@@ -175,8 +175,19 @@ pub fn unit_text_on(ling: &Path, lan: bool, port: u16) -> String {
          \n\
          [Install]\n\
          WantedBy=default.target\n",
-        ling.display()
+        exec_path(ling)
     )
+}
+
+/// A path as one ExecStart word: `%` and `$` doubled so systemd does not expand them, and quoted
+/// when it holds a space, a quote or a backslash, which systemd would otherwise split or read.
+fn exec_path(path: &Path) -> String {
+    let path = path.display().to_string().replace('%', "%%").replace('$', "$$");
+    if path.chars().any(|c| c.is_whitespace() || c == '"' || c == '\'' || c == '\\') {
+        format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        path
+    }
 }
 
 fn systemctl(args: &[&str]) -> Result<(), String> {
@@ -295,7 +306,39 @@ fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.iter().position(|arg| arg == flag).and_then(|index| args.get(index + 1)).map(String::as_str)
 }
 
+/// The argument `ling web <args>` does not take, if any: an unknown flag, a stray word, or `--port`
+/// without a value. `ask` takes the question as free words and is not checked here.
+fn unexpected_argument(args: &[String]) -> Option<String> {
+    let (command, rest) = args.split_first()?;
+    let (switches, valued): (&[&str], &[&str]) = match command.as_str() {
+        "serve" | "start" => (&["--lan"], &["--port"]),
+        "open" => (&["--no-browser", "--print-url"], &[]),
+        "stop" | "status" | "pair" => (&[], &[]),
+        "revoke" => return (rest.len() != 1 || rest[0].starts_with('-')).then(|| "Usage: ling web revoke <device id or name>".to_string()),
+        "devices" => {
+            return (!(rest.is_empty() || (rest.len() == 3 && rest[0] == "--scope")))
+                .then(|| "Usage: ling web devices [--scope <device id or name> watch|control]".to_string());
+        }
+        _ => return None,
+    };
+    let mut words = rest.iter();
+    while let Some(word) = words.next() {
+        if valued.contains(&word.as_str()) {
+            if words.next().is_none() {
+                return Some(format!("`ling web {command} {word}` needs a value"));
+            }
+        } else if !switches.contains(&word.as_str()) {
+            return Some(format!("`ling web {command}` takes no `{word}`"));
+        }
+    }
+    None
+}
+
 pub async fn run_cli(args: &[String], environment: Environment) -> i32 {
+    if let Some(problem) = unexpected_argument(args) {
+        eprintln!("{problem}\n{USAGE}");
+        return 2;
+    }
     let state = environment.state_dir();
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.first().copied() {
@@ -720,6 +763,33 @@ mod tests {
         assert_eq!(unit_text_on(Path::new("/x/ling"), false, DEFAULT_PORT), unit_text(Path::new("/x/ling"), false));
         assert!(!unit_text(Path::new("/x/ling"), false).contains("--port"));
         assert!(unit_text_on(Path::new("/x/ling"), true, 3101).contains("ExecStart=/x/ling web serve --lan --port 3101\n"));
+    }
+
+    #[test]
+    fn the_unit_quotes_a_binary_path_with_spaces() {
+        // systemd splits ExecStart on spaces and expands `%` and `$`.
+        let text = unit_text(Path::new("/home/u/My Tools/100%/ling"), false);
+        assert!(text.contains("ExecStart=\"/home/u/My Tools/100%%/ling\" web serve\n"), "{text}");
+        assert!(unit_text(Path::new("/x/$HOME/ling"), false).contains("ExecStart=/x/$$HOME/ling web serve\n"));
+    }
+
+    #[test]
+    fn every_command_refuses_an_unknown_flag_and_a_stray_word() {
+        let words = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for command in ["serve", "start", "stop", "status", "open", "pair", "devices", "revoke"] {
+            assert!(unexpected_argument(&words(&[command, "--bogus-flag"])).is_some(), "{command} took an unknown flag");
+        }
+        for command in ["serve", "start", "stop", "status", "open", "pair", "devices"] {
+            assert!(unexpected_argument(&words(&[command, "stray"])).is_some(), "{command} took a stray word");
+        }
+        assert!(unexpected_argument(&words(&["revoke", "a", "b"])).is_some());
+        assert!(unexpected_argument(&words(&["devices", "--scope", "a", "watch", "more"])).is_some());
+        assert!(unexpected_argument(&words(&["serve", "--lan", "--port"])).is_some(), "a flag with no value");
+        assert!(unexpected_argument(&words(&["start", "--lan", "--port", "3101"])).is_none());
+        assert!(unexpected_argument(&words(&["open", "--print-url"])).is_none());
+        assert!(unexpected_argument(&words(&["devices", "--scope", "a", "watch"])).is_none());
+        assert!(unexpected_argument(&words(&["revoke", "phone"])).is_none());
+        assert!(unexpected_argument(&words(&["ask", "--any", "free", "words"])).is_none(), "ask takes a free question");
     }
 
     #[tokio::test]

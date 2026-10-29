@@ -7,14 +7,11 @@ renders Rich terminal user interfaces, and coordinates backend component executi
 """
 
 import argparse
+import functools
 import os
 import sys
 import time
-from typing import Final, List, Optional
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
+from typing import TYPE_CHECKING, Final, List, Optional
 
 from dreamference.cli.adapter_command import ADAPTER_COMMAND, AdapterCommand
 from dreamference.config import DreamferenceConfig, ProxyBypass
@@ -32,8 +29,19 @@ from dreamference.forge.forge_command import ForgeCommand
 from dreamference.mcp_server import main as run_mcp_server
 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 
-# Global Rich console instance for styled terminal outputs
-console: Final[Console] = Console()
+if TYPE_CHECKING:
+    from rich.console import Console
+
+
+@functools.cache
+def rich_console() -> "Console":
+    """Rich's console for styled terminal output, made at its first use.
+
+    Rich is not imported at the top: `--help` and `ling-admin mcp` never draw with it, and every
+    command imports this module (tests/test_cli_startup.py).
+    """
+    from rich.console import Console
+    return Console()
 
 # Where `ling-admin benchmark_server` stages vLLM's sonnet corpus. The text itself is embedded in
 # sonnet_dataset.py rather than read out of the image or fetched, because images disagree about
@@ -51,7 +59,8 @@ class DreamferenceCLIController:
     @classmethod
     def display_header(cls) -> None:
         """Renders the Rich header panel: Mightling by Dreamference, and the GB10 target architecture."""
-        console.print(Panel.fit(
+        from rich.panel import Panel
+        rich_console().print(Panel.fit(
             "[bold green]⚡ Mightling[/bold green] [dim]by Dreamference[/dim] - Autonomous Local Agentic Coding Engine\n"
             "[dim]Exclusive Target Hardware: NVIDIA GB10 (Blackwell Architecture | 128 GB Unified Memory)[/dim]",
             border_style="green"
@@ -190,6 +199,7 @@ class DreamferenceCLIController:
             except ValueError:
                 pass
 
+        from rich.table import Table
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("Workload")
         table.add_column("Acceptance", justify="right")
@@ -1095,6 +1105,9 @@ class DreamferenceCLIController:
         Executes `ling-admin status` command, displaying hardware metrics, vLLM health, Codex/Cline/Continue/OpenHands config,
         and context engine index telemetry in formatted Rich panels.
         """
+        from rich.panel import Panel
+        from rich.table import Table
+        console = rich_console()
         cls.display_header()
         hw = detect_gb10_hardware()
         config = DreamferenceConfig()
@@ -1304,7 +1317,7 @@ class DreamferenceCLIController:
         init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
         init_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
         init_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
-        init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+        init_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
 
         # Command: ling-admin run
         run_parser = subparsers.add_parser("run", help="Run an autonomous coding task")
@@ -1312,7 +1325,7 @@ class DreamferenceCLIController:
         run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         run_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
         run_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
-        run_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+        run_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
         run_parser.add_argument(
             "--compat",
@@ -1408,7 +1421,7 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
         start_server_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
-        start_server_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+        start_server_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
         start_server_parser.add_argument("--num-scheduler-steps", type=int, default=None, help="Multi-step scheduling iterations per step")
         start_server_parser.add_argument("--attention-backend", default=None, help="Attention backend (FLASHINFER, FLASH_ATTN, auto)")
         start_server_parser.add_argument("--kv-cache-dtype", default=None, help="KV cache precision (auto, fp8)")
@@ -2054,6 +2067,11 @@ class DreamferenceCLIController:
         else:
             runner = CodexRunner(config=config)
 
+        # Rich from here on: the commands above it (`mcp`, `images mcp`) never draw with it.
+        from rich.console import Console
+        from rich.table import Table
+        console = rich_console()
+
         # Dispatch subcommand logic
         if args.command == "model":
             if args.model_command == "list":
@@ -2681,7 +2699,7 @@ class DreamferenceCLIController:
             if not seen:
                 print("No MCP lifecycle entries found. Run `RUST_LOG=codex_mcp=trace ling` to record some.")
             else:
-                print("[bold]MCP server lifecycle (most recent first)[/bold]\n")
+                console.print("[bold]MCP server lifecycle (most recent first)[/bold]\n")
                 for name, marker in seen:
                     icon = "✅" if marker == "Service initialized as client" else "⚠️ "
                     print(f"   {icon} {name:16} {marker}")
@@ -2988,6 +3006,7 @@ class DreamferenceCLIController:
                         print(f"\n❌ The model server stopped before it answered. Its log: "
                               f"docker logs dreamference-vllm-{args.port}")
                         cls._suggest_engine_fallback(args.model, engine, "to start")
+                        sys.exit(1)
 
                     # Do not block: exit after health check passes (server keeps running)
                     
@@ -3234,7 +3253,10 @@ class DreamferenceCLIController:
                 print("✅ ling's app-server daemon started.")
             elif args.codex_command == "stop":
                 print("🛑 Stopping ling's app-server daemon...")
-                subprocess.call([codex_bin, "app-server", "daemon", "stop"])
+                returncode = subprocess.call([codex_bin, "app-server", "daemon", "stop"])
+                if returncode != 0:
+                    print(f"❌ ling's app-server daemon did not stop (exit code {returncode}).")
+                    sys.exit(returncode)
                 print("✅ ling's app-server daemon stopped.")
 
         elif args.command == "logs":
@@ -3289,6 +3311,7 @@ class DreamferenceCLIController:
                 subprocess.run(cmd, check=True)
             except subprocess.CalledProcessError as e:
                 print(f"❌ Benchmark failed: {e}")
+                sys.exit(1)
             except KeyboardInterrupt:
                 print("\n⏹️  Benchmark cancelled.")
 

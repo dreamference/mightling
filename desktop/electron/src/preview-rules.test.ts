@@ -30,6 +30,8 @@ describe("the preview tab's rules", () => {
     expect(decide("https://example.com/a", {}, none, false)).toMatchObject({ verdict: "ask", site: "example.com" });
     expect(decide("https://example.com/a", { "example.com": "allow" }, none, false).verdict).toBe("allow");
     expect(decide("https://example.com/a", { "example.com": "block" }, new Set(["example.com"]), false).verdict).toBe("block");
+    // The same site written with its root's dot (and in capitals) is still the site that was blocked.
+    expect(decide("https://Example.COM./a", { "example.com": "block" }, none, false)).toMatchObject({ verdict: "block", site: "example.com" });
     expect(decide("https://cdn.example.com/a.js", { "example.com": "allow" }, none, false).verdict).toBe("ask");
     expect(decide("https://example.com/a", {}, new Set(["example.com"]), false).verdict).toBe("allow");
     expect(decide("ftp://example.com/", {}, none, false).verdict).toBe("block");

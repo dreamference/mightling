@@ -145,3 +145,37 @@ def test_the_embedding_model_runs_on_the_cpu_with_bounded_inputs(monkeypatch):
     model = embedding_calculator.EmbeddingCalculator._get_model()
     assert made == ["cpu"]
     assert model.max_seq_length == embedding_calculator.MAX_SEQUENCE_TOKENS
+
+
+def test_a_workspace_inside_a_directory_named_like_build_output_is_indexed(tmp_path, monkeypatch):
+    # The ignore list was matched against every part of the absolute path, so a checkout under a
+    # `build/`, `dist/` or `target/` directory indexed nothing at all.
+    from dreamference.context_engine import embedding_calculator
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+    workspace = tmp_path / "build" / "project"
+    (workspace / "target").mkdir(parents=True)
+    (workspace / "target" / "out.rs").write_text("fn main() {}\n")
+    (workspace / "lib.py").write_text("def alpha():\n    pass\n")
+    engine = ContextEngine(workspace_root=str(workspace))
+    assert [p.name for p in engine.collect_files()] == ["lib.py"]
+    engine.index_workspace(force_reindex=True)
+    assert set(engine.indexed_files) == {"lib.py"}
+
+
+def test_the_full_text_score_is_highest_for_the_strongest_match(tmp_path):
+    # FTS5's rank is bm25 negated: the best match is the most negative. Its magnitude was then
+    # inverted a second time, so the strongest match scored lowest.
+    from dreamference.context_engine.sqlite_context_storage import SQLiteContextStorage
+
+    storage = SQLiteContextStorage(tmp_path / "context.db")
+    conn = storage.init_db()
+    with conn:
+        conn.execute("INSERT INTO fts_context VALUES (?, ?);", ("strong.py", "alpha alpha alpha alpha alpha beta"))
+        conn.execute("INSERT INTO fts_context VALUES (?, ?);",
+                     ("weak.py", "alpha gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi"))
+        for i in range(8):
+            conn.execute("INSERT INTO fts_context VALUES (?, ?);", (f"other{i}.py", "nothing here at all"))
+    conn.close()
+    scores = storage.search_fts(["alpha"], top_k=5)
+    assert scores["strong.py"] > scores["weak.py"] > 0

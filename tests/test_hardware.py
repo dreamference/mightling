@@ -374,6 +374,31 @@ def test_a_failed_release_download_leaves_nothing_half_written(monkeypatch):
     assert list((folder / "blobs").iterdir()) == []
 
 
+def test_a_connection_that_drops_mid_asset_is_a_failed_download_not_a_crash(monkeypatch):
+    # A body shorter than its Content-Length raises http.client.IncompleteRead, an HTTPException
+    # and not an OSError: `server start` crashed with a traceback and the `.incomplete` file stayed.
+    import http.client
+    import urllib.request
+
+    from dreamference.hardware import ModelDownloader
+    repo, payloads = _hosted_model(monkeypatch, {"model.safetensors": b"weights"})
+    _release_server(monkeypatch, payloads)
+
+    class Dropped:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, *args):
+            raise http.client.IncompleteRead(b"wei", 4)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout=None: Dropped())
+    assert not ModelDownloader.download_model(repo)
+    folder = ModelDownloader.get_hf_cache_dir() / "models--dreamference--test-drafter"
+    assert list((folder / "blobs").iterdir()) == []
+
+
 def test_node_sync_sends_a_release_hosted_drafter_as_a_hub_folder(monkeypatch):
     # The receiving node checks every 64-hex blob against its name: a release-hosted drafter's blobs are named so.
     from dreamference.hardware import ModelDownloader
@@ -492,3 +517,168 @@ def test_a_ling_engine_recipe_lists_kv_pages_exactly_when_its_commit_has_the_pag
         ["git", "-C", str(engine), "merge-base", "--is-ancestor", since, commit], capture_output=True
     ).returncode == 0
     assert ("kv-pages" in (recipe.get("engine_features") or [])) == descends, commit
+
+
+def test_a_model_refused_for_memory_is_told_the_budget_it_was_compared_against(monkeypatch):
+    # The check allows 95% of the total; the message used to call the total "available", so a
+    # model needing less than that total was refused as if it needed more.
+    from types import SimpleNamespace
+
+    from dreamference.hardware import HardwareManager
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    spec = ModelMatrixRegistry.get_spec("qwen3.8-27b-nvfp4-dflash2")
+    total = spec.min_memory_gb / 0.97
+    monkeypatch.setattr(
+        HardwareManager, "detect_gb10_hardware",
+        classmethod(lambda cls: SimpleNamespace(total_unified_memory_gb=total)),
+    )
+    valid, msg = check_model_compatibility("qwen3.8-27b-nvfp4-dflash2")
+    assert valid is False
+    assert f"{total * 0.95:.1f} GB" in msg and "available" not in msg
+
+
+def test_a_serialization_that_fails_midway_leaves_no_tensors_file(tmp_path, monkeypatch):
+    # A truncated model.tensors is non-empty, so is_model_tensorized() took it for a finished one.
+    import types
+
+    from dreamference.hardware import ModelDownloader
+    from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    # Fixed at import from the real home: point it at the test's folder.
+    monkeypatch.setattr(ModelDownloader, "TENSORIZER_CACHE_HOME", tmp_path / "tensorizer")
+    monkeypatch.setattr(VLLMServerManager, "check_host_safety", classmethod(lambda cls: None))
+    monkeypatch.setattr(ModelDownloader, "is_model_downloaded", classmethod(lambda cls, *a, **k: True))
+    monkeypatch.setattr(
+        ModelDownloader, "get_model_snapshot_dir", classmethod(lambda cls, *a, **k: snapshot)
+    )
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "subprocess.run", lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr="")
+    )
+
+    written = []
+
+    class Serializer:
+        def __init__(self, path):
+            self.path = path
+
+        def write_module(self, model):
+            written.append(Path(self.path).name)
+            Path(self.path).write_bytes(b"half a checkpoint")
+            raise RuntimeError("out of memory")
+
+    torch = types.ModuleType("torch")
+    torch.tensor = lambda *a, **k: None
+    nn = types.ModuleType("torch.nn")
+    nn.Parameter = lambda *a, **k: None
+    torch.nn = nn
+    model = types.SimpleNamespace(register_parameter=lambda *a: None)
+    transformers = types.ModuleType("transformers")
+    transformers.AutoModelForCausalLM = types.SimpleNamespace(from_pretrained=lambda *a, **k: model)
+    tensorizer = types.ModuleType("tensorizer")
+    tensorizer.TensorSerializer = Serializer
+    for name, module in {
+        "torch": torch, "torch.nn": nn, "transformers": transformers, "tensorizer": tensorizer
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    ModelDownloader.tensorize_model(model_key, force=True)
+    assert ModelDownloader.is_model_tensorized(model_key) is False
+    assert not (ModelDownloader.get_tensorized_dir(model_key) / "model.tensors").exists()
+    # A kill midway skips every except, so the file being written must not have the final name.
+    assert written and "model.tensors" not in written
+    assert not list(ModelDownloader.get_tensorized_dir(model_key).iterdir())
+
+
+def test_a_cached_model_is_sized_by_its_blobs_not_also_by_its_snapshot_links(monkeypatch):
+    from dreamference.hardware import ModelDownloader
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    repo = ModelMatrixRegistry.resolve_hf_repo(model_key)
+    root = ModelDownloader.get_hf_cache_dir() / ("models--" + repo.replace("/", "--"))
+    (root / "blobs").mkdir(parents=True)
+    (root / "blobs" / "abc").write_bytes(b"\0" * 2048)
+    (root / "snapshots" / "rev").mkdir(parents=True)
+    (root / "snapshots" / "rev" / "model.safetensors").symlink_to("../../blobs/abc")
+    assert ModelDownloader._get_cache_size(model_key) == "2.0 KB"
+
+
+def test_an_interrupted_download_is_not_taken_for_a_downloaded_model():
+    # download_model() skips the fetch for a model it finds, so a partial snapshot never resumed.
+    import json
+
+    from dreamference.hardware import ModelDownloader
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    repo = ModelMatrixRegistry.resolve_hf_repo(model_key)
+    revision = ModelMatrixRegistry.pinned_revision(model_key) or "main-rev"
+    root = ModelDownloader.get_hf_cache_dir() / ("models--" + repo.replace("/", "--"))
+    snapshot = root / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (root / "blobs").mkdir()
+    shards = ["model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"]
+    index = {"weight_map": {"a.weight": shards[0], "b.weight": shards[1]}}
+    (snapshot / "config.json").write_text("{}")
+    (snapshot / "model.safetensors.index.json").write_text(json.dumps(index))
+    (snapshot / shards[0]).write_bytes(b"\0")
+    assert ModelDownloader.is_model_downloaded(model_key, revision) is False
+    (snapshot / shards[1]).write_bytes(b"\0")
+    assert ModelDownloader.is_model_downloaded(model_key, revision) is True
+    # A blob still being written is a download that has not finished.
+    (root / "blobs" / "0123abcd.8d80c8fe.incomplete").write_bytes(b"\0")
+    assert ModelDownloader.is_model_downloaded(model_key, revision) is False
+    # One left behind by a download of the same blob that then finished is not.
+    (root / "blobs" / "0123abcd").write_bytes(b"\0")
+    assert ModelDownloader.is_model_downloaded(model_key, revision) is True
+
+
+def test_a_model_tensorized_at_one_pin_is_not_loaded_once_the_pin_moves(tmp_path, monkeypatch):
+    from dreamference.hardware import ModelDownloader
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    monkeypatch.setattr(ModelDownloader, "TENSORIZER_CACHE_HOME", tmp_path / "tensorizer")
+    monkeypatch.setattr(ModelMatrixRegistry, "pinned_revision", classmethod(lambda cls, k: "a" * 40))
+    tdir = ModelDownloader.get_tensorized_dir(model_key)
+    tdir.mkdir(parents=True)
+    (tdir / "model.tensors").write_bytes(b"weights of the old pin")
+    assert ModelDownloader.is_model_tensorized(model_key) is True
+    monkeypatch.setattr(ModelMatrixRegistry, "pinned_revision", classmethod(lambda cls, k: "b" * 40))
+    assert ModelDownloader.is_model_tensorized(model_key) is False
+
+
+def test_the_container_mounts_a_relative_hf_home_by_its_absolute_path(tmp_path, monkeypatch):
+    # Docker reads a bare name before the colon as a named volume, not the host folder.
+    from dreamference.hardware import ModelDownloader
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HF_HOME", "hf")
+    args = ModelDownloader.container_volume_args()
+    assert args == ["-v", f"{tmp_path / 'hf'}:{ModelDownloader.CONTAINER_HF_HOME}"]
+
+
+def test_a_cache_path_docker_cannot_mount_is_refused_by_name(tmp_path, monkeypatch):
+    from dreamference.hardware import ModelDownloader
+
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "a:b"))
+    with pytest.raises(ValueError, match="cannot be mounted"):
+        ModelDownloader.container_volume_args()
+
+
+def test_a_recipe_s_nested_values_are_isolated_per_call():
+    import copy
+
+    from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS, ModelMatrixRegistry
+
+    for engine in [None, *MODEL_MATRIX[DEFAULT_MODEL_ALIAS].engine_recipes]:
+        first = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, engine)
+        original = copy.deepcopy(first)
+        first["extra_args"].append("--mutated")
+        first["speculative_config"]["mutated"] = True
+        assert ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, engine) == original

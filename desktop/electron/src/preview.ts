@@ -17,6 +17,9 @@ export const PREVIEW_PARTITION = "persist:mightling-preview";
 /** The isolated world comment mode's picker runs in (anything but 0, the page's own). */
 const PICK_WORLD = 1307;
 
+/** How often an open tab's air-gap level is asked again, for a change made outside the app (`ling`, a project's setting). */
+const RECHECK_MS = 15_000;
+
 export interface PreviewEvent {
   id: string;
   kind: "state" | "ask" | "blocked" | "download" | "key";
@@ -64,6 +67,7 @@ export class Previews {
   /** The last site a tab asked about, so one blocked page asks once, not once per image. */
   private readonly asked = new Map<string, string>();
   private configured: Session | null = null;
+  private rechecking: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly emit: (window: BrowserWindow, event: PreviewEvent) => void,
@@ -148,6 +152,10 @@ export class Previews {
     this.session();
     const preview: Preview = { view, window, thread, airgapOn: await this.airgapOn(thread), console: [] };
     this.previews.set(id, preview);
+    if (!this.rechecking) {
+      this.rechecking = setInterval(() => void this.recheck().catch(() => {}), RECHECK_MS);
+      this.rechecking.unref?.();
+    }
     view.setVisible(false);
     window.contentView.addChildView(view);
     // The tab's body is already laid out: the view goes there at once, not at the next layout change.
@@ -197,6 +205,10 @@ export class Previews {
     window.on("closed", () => {
       this.previews.delete(id);
       if (!contents.isDestroyed()) contents.close();
+      if (!this.previews.size && this.rechecking) {
+        clearInterval(this.rechecking);
+        this.rechecking = null;
+      }
     });
     await this.navigate(id, url, thread);
   }
@@ -213,6 +225,23 @@ export class Previews {
       return;
     }
     await preview.view.webContents.loadURL(url).catch(() => {});
+  }
+
+  /**
+   * Asks each tab's air-gap level again (`/airgapped` changed it, or the timer above). The session's rules
+   * read the level a tab holds, so a page opened at `off` would otherwise go on fetching, opening sockets
+   * and loading images after `on`. A tab that turns `on` loads again: what it had open (a socket, a
+   * stream) closes, and every request of the new load is decided at `on`.
+   */
+  async recheck(): Promise<void> {
+    await Promise.all([...this.previews].map(async ([id, preview]) => {
+      const was = preview.airgapOn;
+      preview.airgapOn = await this.airgapOn(preview.thread);
+      if (preview.airgapOn && !was && !preview.view.webContents.isDestroyed()) {
+        this.asked.delete(id);
+        preview.view.webContents.reload();
+      }
+    }));
   }
 
   /** Allow once (this run of the app) or after Settings › Browser changed: load the page again. */

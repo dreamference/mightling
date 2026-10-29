@@ -163,6 +163,7 @@ export async function create(options: CreateOptions): Promise<Created> {
     await removeEmptyBucket(root);
     throw new GitError(`cannot create managed worktree: ${(error as Error).message}`);
   }
+  let included: string[];
   try {
     const config = (await git(root, ["rev-parse", "--path-format=absolute", "--git-path", "config.worktree"])).trim();
     await git(root, ["config", "--file", config, "core.worktree", root]);
@@ -171,11 +172,11 @@ export async function create(options: CreateOptions): Promise<Created> {
       const changes = await snapshot(sourceRoot, `source-${path.basename(path.dirname(root))}`);
       if (changes) await applySnapshot(root, changes);
     }
+    included = await copyInto(sourceRoot, root, await includedIgnoredFiles(sourceRoot));
   } catch (error) {
     await removeChecked(sourceRoot, root, null).catch(() => {});
     throw new GitError(`cannot populate managed worktree: ${(error as Error).message}`);
   }
-  const included = await copyInto(sourceRoot, root, await includedIgnoredFiles(sourceRoot));
   const cwd = path.join(root, relative);
   if (!(await userFs.exists(cwd))) {
     await removeChecked(sourceRoot, root, null).catch(() => {});
@@ -205,7 +206,8 @@ export async function bindThread(checkout: string, threadId: string): Promise<vo
   if (existing === threadId) return;
   if (existing) throw new GitError(`worktree already belongs to thread ${existing}`);
   const file = path.resolve(checkout, (await git(checkout, ["rev-parse", "--git-path", OWNER_FILE])).trim());
-  const temporary = `${file}.${process.pid}.tmp`;
+  // One name per bind, not per process: two binds at once (two windows) must not write each other's file.
+  const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   await fsp.writeFile(temporary, JSON.stringify({ version: 1, ownerThreadId: threadId }));
   try {
     await fsp.link(temporary, file);
@@ -268,7 +270,8 @@ export async function remove(sourceCwd: string, checkout: string, worktreeRoot: 
 
 async function removeChecked(sourceRoot: string, checkout: string, name: string | null): Promise<string | null> {
   let saved: string | null = null;
-  if (name && (await userFs.exists(checkout))) saved = await snapshot(checkout, name).catch(() => null);
+  // A snapshot that fails keeps the worktree: removing it then would lose the work it was to save.
+  if (name && (await userFs.exists(checkout))) saved = await snapshot(checkout, name);
   try {
     await git(sourceRoot, ["worktree", "remove", "--force", checkout]);
   } catch {

@@ -77,6 +77,22 @@ fn read_u64(path: &Path) -> Option<u64> {
     text.parse().ok()
 }
 
+/// The slice's aggregate limits (spec §6.4): the live caps, no swap, and four cores, the last four
+/// of the host's.
+fn slice_properties(memory_max: u64, cpus: usize) -> Vec<String> {
+    let allowed = if cpus > 4 {
+        format!("{}-{}", cpus - 4, cpus - 1)
+    } else {
+        format!("0-{}", cpus - 1)
+    };
+    vec![
+        format!("MemoryMax={memory_max}"),
+        "MemorySwapMax=0".to_string(),
+        "CPUQuota=400%".to_string(),
+        format!("AllowedCPUs={allowed}"),
+    ]
+}
+
 fn systemctl(args: &[&str]) -> Result<()> {
     let status = Command::new("systemctl")
         .arg("--user")
@@ -154,20 +170,10 @@ impl Host for SystemdHost {
         let cpus = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4);
-        let allowed = if cpus > 4 {
-            format!("{}-{}", cpus - 4, cpus - 1)
-        } else {
-            format!("0-{}", cpus - 1)
-        };
-        systemctl(&[
-            "set-property",
-            "--runtime",
-            SLICE,
-            &format!("MemoryMax={memory_max}"),
-            "MemorySwapMax=0",
-            "CPUQuota=400%",
-            &format!("AllowedCPUs={allowed}"),
-        ])
+        let properties = slice_properties(memory_max, cpus);
+        let mut args = vec!["set-property", "--runtime", SLICE];
+        args.extend(properties.iter().map(String::as_str));
+        systemctl(&args)
     }
 
     fn can_create_scopes(&self) -> bool {
@@ -408,6 +414,20 @@ pub mod fake {
 mod tests {
     use super::fake::FakeHost;
     use super::*;
+
+    #[test]
+    fn the_slice_gets_the_live_caps_no_swap_and_four_cores() {
+        assert_eq!(
+            slice_properties(12 * GIB, 20),
+            [
+                "MemoryMax=12884901888",
+                "MemorySwapMax=0",
+                "CPUQuota=400%",
+                "AllowedCPUs=16-19",
+            ]
+        );
+        assert_eq!(slice_properties(GIB, 2)[3], "AllowedCPUs=0-1");
+    }
 
     #[test]
     fn a_budget_below_the_floor_defers() {

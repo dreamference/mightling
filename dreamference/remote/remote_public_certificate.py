@@ -509,15 +509,30 @@ class RemotePublicCertificate:
             LOG.error(f"❌ Cloudflare did not list the CAA records of {dns_name} ({status}).")
             return False
         existing = [record for record in existing if isinstance(record, dict)]
-
-        def key(data: dict[str, Any]) -> tuple[int, str, str]:
-            return int(data.get("flags", 0)), str(data.get("tag")), str(data.get("value"))
-
-        if sorted(key(r.get("data") or {}) for r in existing) == sorted(map(key, wanted)):
+        present = [cls._caa_key(r.get("data") or {}) for r in existing]
+        if sorted(present) == sorted(map(cls._caa_key, wanted)):
             return True
-        for record in existing:
-            cls._cloudflare("DELETE", f"/zones/{zone}/dns_records/{record.get('id')}")
+        return cls._swap_caa(zone, dns_name, existing, wanted)
+
+    @staticmethod
+    def _caa_key(data: dict[str, Any]) -> tuple[int, str, str]:
+        return int(data.get("flags", 0)), str(data.get("tag")), str(data.get("value"))
+
+    @classmethod
+    def _swap_caa(
+        cls, zone: str, dns_name: str, existing: list[dict[str, Any]], wanted: list[dict[str, Any]]
+    ) -> bool:
+        """Adds the wanted CAA records that are missing, then deletes the ones not wanted.
+
+        The new records go in before the old ones go, so the name is never left without one.
+
+        Returns:
+            bool: True when Cloudflare took every change.
+        """
+        present = [cls._caa_key(r.get("data") or {}) for r in existing]
         for data in wanted:
+            if cls._caa_key(data) in present:
+                continue
             status, body = cls._cloudflare(
                 "POST",
                 f"/zones/{zone}/dns_records",
@@ -526,6 +541,14 @@ class RemotePublicCertificate:
             if status != HTTP_OK:
                 errors = [e.get("message") for e in body.get("errors") or [] if isinstance(e, dict)]
                 LOG.error(f"❌ Cloudflare refused a CAA record for {dns_name} ({status}): {errors}")
+                return False
+        allowed = set(map(cls._caa_key, wanted))
+        for record in existing:
+            if cls._caa_key(record.get("data") or {}) in allowed:
+                continue
+            status, _ = cls._cloudflare("DELETE", f"/zones/{zone}/dns_records/{record.get('id')}")
+            if status != HTTP_OK:
+                LOG.error(f"❌ Cloudflare kept an old CAA record of {dns_name} ({status}).")
                 return False
         return True
 

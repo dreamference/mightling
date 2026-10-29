@@ -206,6 +206,18 @@ describe("installBundle, listBundles, removeBundle", () => {
     const noDefault = bundle(good({ user_config: { root: { type: "directory", title: "Notes folder", required: true } } }), undefined, "c.mcpb");
     await expect(installBundle(noDefault, codexHome, places, { expected: "notes-search", values: {}, replace: false })).rejects.toThrow(/Notes folder is required/);
   });
+  it("asks about a package runner a setting names, before anything is installed", async () => {
+    const file = bundle(good({ user_config: { runner: { type: "string", title: "Runner", default: "npx" } }, server: { type: "node", mcp_config: { command: "${user_config.runner}", args: ["-y", "something"] } } }));
+    expect((await readBundle(file, codexHome, places)).summary.fetches).toBeNull();
+    const asked: string[] = [];
+    const fetching = async (command: string) => {
+      asked.push(command);
+      throw new Error(`${command} fetches what it runs`);
+    };
+    await expect(installBundle(file, codexHome, places, { expected: "notes-search", values: {}, replace: false, platform: "linux", fetching })).rejects.toThrow(/npx fetches/);
+    expect(asked).toEqual(["npx"]);
+    expect(fs.existsSync(path.join(codexHome, "mcpb"))).toBe(false);
+  });
   it("makes a binary command inside the bundle runnable", async () => {
     if (process.platform === "win32") return;
     const file = bundle([{ name: "manifest.json", data: manifestText({ server: { type: "binary", mcp_config: { command: "${__dirname}/bin/tool", args: [] } } }) }, { name: "bin/tool", data: "#!/bin/sh\n", mode: 0o100644 }]);

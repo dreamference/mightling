@@ -238,6 +238,26 @@ def test_the_probe_reads_and_never_writes():
     assert "model:models--a--b" in script and "image:dreamference-vllm:1" in script
 
 
+def test_a_folder_or_image_name_with_shell_characters_is_only_a_name(tmp_path):
+    folder, image = "m; touch PWN #", "i$(touch PWN)"
+    body = FleetProbe.script([folder], [image])
+    lines = [ln for ln in body.splitlines() if ln.startswith(("[ -d", "( docker"))]
+    script = "\n".join(
+        [
+            "v() { printf '%s=%s\\n' \"$1\" \"$2\"; }",
+            f"hub={tmp_path}",
+            "docker() { return 1; }",
+            "sg() { return 1; }",
+            *lines,
+        ]
+    )
+
+    done = subprocess.run(["sh", "-c", script], cwd=tmp_path, capture_output=True, text=True)
+
+    assert not (tmp_path / "PWN").exists()
+    assert done.stdout.splitlines() == [f"model:{folder}=0", f"image:{image}=0"]
+
+
 def test_the_probe_output_is_parsed_and_judged():
     state = FleetProbe.parse("dgx=1\ngpu=NVIDIA GB10\ndocker_group=1\nlinger=1\navahi_file=1\n"
                              "sandbox_profile=0\nuserns_restricted=1\ntelemetry=enabled\nmodel:m1=1\nmodel:m2=0\n"
@@ -275,6 +295,12 @@ def test_the_plan_for_each_offered_model(monkeypatch):
 def test_insufficient_disk_is_refused_before_any_copy():
     assert FleetModelPlan.fits(100, 50 * 1024 ** 3)
     assert not FleetModelPlan.fits(60, 50 * 1024 ** 3)
+
+
+def test_a_node_short_of_disk_that_has_every_model_is_not_refused():
+    # Nothing to copy needs no margin: a full node that has the model can still be updated.
+    assert FleetModelPlan.fits(5, 0)
+    assert FleetModelPlan.fits(0, 0)
 
 
 # -- discovery -------------------------------------------------------------------------------------
@@ -888,6 +914,8 @@ def test_bundle_from_release_downloads_with_gh_and_caches_tagged_release(
         gh_calls.append(argv)
         if len(gh_calls) == 1:
             return subprocess.CompletedProcess(argv, 1, "", "release not found")
+        if argv[:3] == ["gh", "release", "view"]:
+            return subprocess.CompletedProcess(argv, 0, "v1.8.0\n", "")
         dest = Path(argv[argv.index("-D") + 1])
         (dest / f"ling-{FleetBundle.target()}.sha256sums").write_text("ok\n", encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, "", "")
@@ -902,9 +930,11 @@ def test_bundle_from_release_downloads_with_gh_and_caches_tagged_release(
     assert FleetBundle.build("release=v1.7.0") == tagged
     assert len(gh_calls) == 2
 
+    # The latest release is recorded by its tag: a node installed from it is updated by the next.
     latest = FleetBundle.build("release")
-    assert latest is not None and FleetBundle.version(latest) == "latest"
-    assert len(gh_calls) == 3
+    assert latest is not None and FleetBundle.version(latest) == "v1.8.0"
+    assert [call[:3] for call in gh_calls[2:]] == [["gh", "release", "view"], ["gh", "release", "download"]]
+    assert "v1.8.0" in gh_calls[3]
 
 
 def test_bundle_rejects_empty_release_version_and_passes_valid_version(
@@ -940,3 +970,22 @@ def test_a_dry_run_with_empty_release_version_prints_error_and_does_not_crash(fl
     assert "nothing, --from release= needs a version" in out
 
 
+
+
+def test_a_second_edit_to_an_already_changed_file_makes_a_new_bundle_of_this_checkout(tmp_path, monkeypatch):
+    # `git status` names the file the same way before and after the edit; its content must count.
+    from dreamference.node import fleet_bundle as bundle_module
+    from dreamference.node.fleet_bundle import FleetBundle
+
+    edit = {"text": "+first edit\n"}
+
+    def git(cls, argv, *args, **kwargs):
+        out = {"rev-parse": "abc123\n", "status": " M dreamference/x.py\n"}.get(argv[0], edit["text"])
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+    monkeypatch.setattr(bundle_module.SafeGit, "run", classmethod(git))
+    binary = tmp_path / "ling"
+    binary.write_bytes(b"ling")
+    before = FleetBundle._digest([binary])
+    edit["text"] = "+second edit\n"
+    assert FleetBundle._digest([binary]) != before

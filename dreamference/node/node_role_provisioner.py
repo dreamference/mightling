@@ -25,7 +25,11 @@ from typing import TYPE_CHECKING, Any, Final
 
 from dreamference.node.fleet_model_plan import FleetModelPlan
 from dreamference.node.fleet_probe import FleetProbe
-from dreamference.node.fleet_session import REMOTE_ADMIN, FleetSession
+from dreamference.node.fleet_session import (
+    AUTHORIZED_KEYS_ENDS_IN_NEWLINE,
+    REMOTE_ADMIN,
+    FleetSession,
+)
 from dreamference.node.node_pairing import NodePairing
 
 if TYPE_CHECKING:
@@ -212,7 +216,8 @@ class NodeRoleProvisioner:
             host,
             f"authorise {public.name} in ~/.ssh/authorized_keys",
             lambda: session.run(
-                "umask 077 && mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys",
+                f"umask 077 && mkdir -p ~/.ssh && {AUTHORIZED_KEYS_ENDS_IN_NEWLINE} && "
+                "cat >> ~/.ssh/authorized_keys",
                 input_text=key + "\n",
             ),
         )

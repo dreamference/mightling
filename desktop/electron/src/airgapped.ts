@@ -25,6 +25,15 @@ export function airgapped(ling: string, thread: string | null): Promise<Airgappe
   });
 }
 
+/**
+ * Whether a level refuses what would reach the network (a push, a link, a preview's site): `on`, or a
+ * `ling airgapped` that did not answer, whose "unknown" source is no level at all. Fails closed, as
+ * `airgappedOn` does; the launcher names no source of its own "unknown" (`Source::label`).
+ */
+export function countsAsOn(level: Airgapped): boolean {
+  return level.level === "on" || level.source.startsWith("unknown");
+}
+
 /** One `ling airgapped [--thread <id>]` run in `cwd` (null: this process's folder); null when it did not answer. */
 export type StatusRun = (ling: string, args: string[], cwd: string | null) => Promise<Airgapped | null>;
 
@@ -44,11 +53,20 @@ const runStatus: StatusRun = (ling, args, cwd) =>
  * an answer that does not come counts as `on`: this gate fails closed.
  */
 export async function airgappedOn(ling: string, thread: string | null, cwd: string | null, run: StatusRun = runStatus): Promise<boolean> {
+  return countsAsOn(await airgappedLevel(ling, thread, cwd, run));
+}
+
+/**
+ * The level a refusal reads, asked as `airgappedOn` asks (here, and in `cwd` when it is known, so a
+ * project's `on` is seen): the stricter answer, one that did not come as "unknown" (`countsAsOn`).
+ */
+export async function airgappedLevel(ling: string, thread: string | null, cwd: string | null, run: StatusRun = runStatus): Promise<Airgapped> {
   const args = ["airgapped", ...(thread && /^[A-Za-z0-9-]+$/.test(thread) ? ["--thread", thread] : [])];
   const places: (string | null)[] = [null];
   if (cwd && fs.existsSync(cwd)) places.push(cwd);
-  const answers = await Promise.all(places.map((place) => run(ling, args, place)));
-  return answers.some((answer) => answer === null || answer.level === "on");
+  const answers = (await Promise.all(places.map((place) => run(ling, args, place))))
+    .map((answer): Airgapped => answer ?? { level: "off", source: "unknown (ling airgapped did not answer)" });
+  return answers.find(countsAsOn) ?? answers[answers.length - 1];
 }
 
 /** Sets the level new threads start at (`ling airgapped default <level>`); resolves with what it printed. */

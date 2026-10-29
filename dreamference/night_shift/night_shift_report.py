@@ -5,6 +5,7 @@ repository it is asked from, and the general notes after them.
 """
 
 import re
+import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
@@ -65,7 +66,7 @@ class NightShiftReport:
         branches = [task for task in tasks if (task.get("result") or {}).get("branch")]
         for task in branches:
             lines.append(
-                f"- `git -C {task['repo']} diff {task['base'][:12]}..{task['result']['branch']}`"
+                f"- `git -C {shlex.quote(task['repo'])} diff {task['base'][:12]}..{task['result']['branch']}`"
             )
         if branches:
             lines.append(

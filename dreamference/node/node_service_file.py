@@ -110,7 +110,7 @@ class NodeServiceFile:
         if not port:
             return None
         records: Dict[str, str] = {"port": port.group(1)}
-        for record in re.findall(r"<txt-record>(.*?)</txt-record>", text):
+        for record in re.findall(r"<txt-record>(.*?)</txt-record>", text, re.DOTALL):
             key, _, value = unescape(record).partition("=")
             records[key] = value
         return records

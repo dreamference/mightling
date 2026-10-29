@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { airgapped, airgappedOn, parseStatus, setDefault, type StatusRun } from "./airgapped";
+import { airgapped, airgappedLevel, airgappedOn, countsAsOn, parseStatus, setDefault, type StatusRun } from "./airgapped";
 import { nodeScript } from "./test-ling";
 
 describe("the air-gap status line", () => {
@@ -12,6 +12,14 @@ describe("the air-gap status line", () => {
     expect(parseStatus("Airgapped: on (this session)\n  off  …\n")).toEqual({ level: "on", source: "this session" });
     expect(parseStatus("Airgapped: off (default)")).toEqual({ level: "off", source: "default" });
     expect(parseStatus("Usage: ling airgapped [default <off|on>]")).toBeNull();
+  });
+});
+
+describe("a level that refuses the network", () => {
+  it("is on, or a launcher that did not answer: what reaches the network fails closed", async () => {
+    expect(countsAsOn({ level: "on", source: "this session" })).toBe(true);
+    expect(countsAsOn({ level: "off", source: "default" })).toBe(false);
+    expect(countsAsOn(await airgapped(path.join(os.tmpdir(), "no-such-ling-here"), null))).toBe(true);
   });
 });
 
@@ -33,6 +41,16 @@ describe("the level a binding refusal reads", () => {
     expect(off.asked).toEqual([[["airgapped", "--thread", "t-1"], null], [["airgapped", "--thread", "t-1"], folder]]);
     expect(await airgappedOn("ling", "t-1", folder, answering({ here: "off", [folder]: "on" }).run)).toBe(true);
     expect(await airgappedOn("ling", "t-1", null, answering({ here: "on" }).run)).toBe(true);
+  });
+
+  // What a push or a link checks: a project's own `on` (its dreamference.toml) is seen, and its source named.
+  it("names the stricter level, here or in the project's folder, and an unanswered one as unknown", async () => {
+    const folder = os.tmpdir();
+    const project = answering({ here: "off", [folder]: "on" });
+    expect(await airgappedLevel("ling", "t-1", folder, project.run)).toEqual({ level: "on", source: "test" });
+    expect(project.asked.map(([, cwd]) => cwd)).toEqual([null, folder]);
+    expect(await airgappedLevel("ling", null, folder, answering({ here: "off", [folder]: "off" }).run)).toEqual({ level: "off", source: "test" });
+    expect(countsAsOn(await airgappedLevel("ling", null, folder, answering({ here: "off", [folder]: null }).run))).toBe(true);
   });
 
   it("fails closed: no answer is on", async () => {

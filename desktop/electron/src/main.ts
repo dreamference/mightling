@@ -19,7 +19,7 @@ import * as userFs from "./userfs";
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, FAILED, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
-import { airgapped, setDefault } from "./airgapped";
+import { airgapped, airgappedLevel, countsAsOn, setDefault } from "./airgapped";
 import { serve } from "./app-protocol";
 import { auditPreview, type WorkTarget } from "./args";
 import { webUrl } from "./links";
@@ -149,8 +149,10 @@ export async function main(options: MainOptions): Promise<void> {
       recentQuestions.observe(message.payload);
       terminals.observe(message.payload);
       const routed = hub.incoming(message.payload);
-      for (const target of windows()) {
-        if (routed.to === "all" || String(target.webContents.id) === routed.to) send(target, { channel: "work://message", payload: routed.payload });
+      for (const delivery of [routed, ...(routed.also ?? [])]) {
+        for (const target of windows()) {
+          if (delivery.to === "all" || String(target.webContents.id) === delivery.to) send(target, { channel: "work://message", payload: delivery.payload });
+        }
       }
       return;
     }
@@ -551,11 +553,14 @@ export async function main(options: MainOptions): Promise<void> {
   });
   ipcMain.on(CHANNEL_CHUNK_ACK, () => {});
 
-  /** Refuses what would reach the network for a thread at `/airgapped on` (push, the forge's page). */
-  const offline = async (thread: string | null, what: string) => {
+  /**
+   * Refuses what would reach the network for a thread at `/airgapped on` (push, the forge's page), or when `ling airgapped` did not answer.
+   * `cwd` is the project's folder when there is one: `ling` reads that repository's own setting there, so a project's `on` is seen too.
+   */
+  const offline = async (thread: string | null, what: string, cwd: string | null = null) => {
     const ling = findLing(resourcesPath());
-    const level = ling ? await airgapped(ling, thread) : { level: "off", source: "" };
-    if (level.level === "on") throw new Error(`airgapped is on (${level.source}): ${what} would reach the network`);
+    const level = ling ? await airgappedLevel(ling, thread, cwd) : { level: "off" as const, source: "" };
+    if (countsAsOn(level)) throw new Error(`airgapped is on (${level.source}): ${what} would reach the network`);
   };
   /** Preview tabs (preview.ts): their rules read Settings › Browser and the thread's air-gap level. */
   const previews = new Previews(
@@ -567,7 +572,7 @@ export async function main(options: MainOptions): Promise<void> {
     },
     async (thread) => {
       const ling = findLing(resourcesPath());
-      return ling ? (await airgapped(ling, thread)).level === "on" : false;
+      return ling ? countsAsOn(await airgapped(ling, thread)) : false;
     },
   );
   let editors: Editor[] | null = null;
@@ -795,12 +800,16 @@ export async function main(options: MainOptions): Promise<void> {
         return appWindows.get(own.webContents.id)?.target ?? { cwd: null, thread: null };
       case "work/airgapped": {
         const ling = findLing(resourcesPath());
+        // The page asks after `/airgapped` and on a thread's change: open preview tabs read the level again too.
+        void previews.recheck().catch(() => {});
         return ling ? airgapped(ling, message.thread) : { level: "off", source: "ling is not installed" };
       }
       case "work/airgapped-default": {
         const ling = findLing(resourcesPath());
         if (!ling) throw new Error("ling is not installed");
-        return setDefault(ling, message.level);
+        const lines = await setDefault(ling, message.level);
+        await previews.recheck().catch(() => {});
+        return lines;
       }
       case "context-menu":
         showContextMenu(own, message);
@@ -833,7 +842,7 @@ export async function main(options: MainOptions): Promise<void> {
         return git.commit(await git.checkRoot(message.root), message.message, Boolean(message.all));
       case "git/push": {
         const root = await git.checkRoot(message.root);
-        await offline(message.thread, "a push");
+        await offline(message.thread, "a push", root);
         return git.push(root, Boolean(message.force));
       }
       case "open/url": {
@@ -846,7 +855,7 @@ export async function main(options: MainOptions): Promise<void> {
       }
       case "git/pull-request": {
         const root = await git.checkRoot(message.root);
-        await offline(message.thread, "the forge's pull-request page");
+        await offline(message.thread, "the forge's pull-request page", root);
         const url = await git.pullRequestUrl(root);
         await shell.openExternal(url);
         return url;
@@ -888,7 +897,7 @@ export async function main(options: MainOptions): Promise<void> {
         if (!(await userFs.samePath(cwd, project)) && (await common(cwd).catch(() => "")) !== (await common(project).catch(() => "-"))) {
           throw new Error("a project's script runs in the project or one of its worktrees");
         }
-        await offline(message.thread, "a project's own script (nothing sandboxes it)");
+        await offline(message.thread, "a project's own script (nothing sandboxes it)", cwd);
         const label = message.action === "setup" ? `Setup: ${environment.name}` : environment.actions[Number(message.action)].name;
         return tasks.run(label, script, cwd);
       }
@@ -971,10 +980,10 @@ export async function main(options: MainOptions): Promise<void> {
         }
         const picked = pickedBundles.get(String(message.token));
         if (!picked) throw new Error("choose the bundle's file again");
-        const { summary } = await mcpb.readBundle(picked.file, home, places);
-        if (summary.fetches) await offline(null, `this bundle's command, ${summary.fetches},`);
         const values = typeof message.values === "object" && message.values !== null && !Array.isArray(message.values) ? message.values : {};
-        const installed = await mcpb.installBundle(picked.file, home, places, { expected: picked.name, values, replace: message.replace === true });
+        // Checked on the command installBundle fills in from the file as it reads it then, not on an earlier read.
+        const fetching = (command: string) => offline(null, `this bundle's command, ${command},`);
+        const installed = await mcpb.installBundle(picked.file, home, places, { expected: picked.name, values, replace: message.replace === true, fetching });
         pickedBundles.delete(String(message.token));
         return installed;
       }
@@ -1091,7 +1100,7 @@ export async function main(options: MainOptions): Promise<void> {
       case "pr/activity":
       case "pr/create":
         // Off unless Settings › Git turned it on; never at airgapped on (it is GitHub, over the network).
-        return prs.handle(message, { enabled: prefs.read().pullRequests === true, offline: (what) => offline(message.thread ?? null, what), checkRoot: git.checkRoot });
+        return prs.handle(message, { enabled: prefs.read().pullRequests === true, offline: async (what) => offline(message.thread ?? null, what, await git.checkRoot(message.root)), checkRoot: git.checkRoot });
       case "board/read": {
         const home = codexHome();
         if (!home) return [];

@@ -78,10 +78,26 @@ pub struct Settings {
 impl Settings {
     /// Reads `[sync]` from the user's own configuration file; nothing set is the defaults.
     pub fn load() -> Settings {
-        ling_airgapped::user_config_file()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .map(|text| Settings::parse(&text, home().as_deref()))
-            .unwrap_or_default()
+        Settings::load_checked().unwrap_or_default()
+    }
+
+    /// As `load`, but a file that is there and does not read or parse is an error, never the
+    /// defaults: the agent must not take a typo for an empty `[sync] exclude`.
+    pub fn load_checked() -> Result<Settings, String> {
+        match ling_airgapped::user_config_file() {
+            Some(path) => Settings::read(&path, home().as_deref()),
+            None => Ok(Settings::default()),
+        }
+    }
+
+    pub fn read(config: &Path, home: Option<&Path>) -> Result<Settings, String> {
+        let text = match std::fs::read_to_string(config) {
+            Ok(text) => text,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Settings::default()),
+            Err(err) => return Err(format!("could not read {}: {err}", config.display())),
+        };
+        toml::from_str::<toml::Table>(&text).map_err(|err| format!("{} is not valid TOML: {err}", config.display()))?;
+        Ok(Settings::parse(&text, home))
     }
 
     pub fn parse(text: &str, home: Option<&Path>) -> Settings {
@@ -123,7 +139,11 @@ fn expand(path: &str, home: Option<&Path>) -> Option<PathBuf> {
 /// `ling sync exclude <folder>`: adds the folder to `[sync] exclude` in the user's configuration,
 /// keeping the rest of the file as it is. Returns false when it was already there.
 pub fn add_exclude(config: &Path, folder: &Path) -> Result<bool, String> {
-    let text = std::fs::read_to_string(config).unwrap_or_default();
+    let text = match std::fs::read_to_string(config) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(format!("could not read {}: {err}", config.display())),
+    };
     let mut document: toml_edit::DocumentMut = text.parse().map_err(|err| format!("{} is not valid TOML: {err}", config.display()))?;
     let sync = document.entry("sync").or_insert(toml_edit::table());
     let Some(sync) = sync.as_table_mut() else { return Err("`sync` in the configuration is not a table".to_string()) };
@@ -137,7 +157,18 @@ pub fn add_exclude(config: &Path, folder: &Path) -> Result<bool, String> {
     if let Some(parent) = config.parent() {
         std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
-    std::fs::write(config, document.to_string()).map_err(|err| format!("could not write {}: {err}", config.display()))?;
+    // Whole or not at all: the running agent reads this file every second.
+    let temporary = config.with_file_name(format!(".{}.sync-{}", config.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
+    let written = std::fs::write(&temporary, document.to_string())
+        .and_then(|()| match std::fs::metadata(config) {
+            Ok(metadata) => std::fs::set_permissions(&temporary, metadata.permissions()),
+            Err(_) => Ok(()),
+        })
+        .and_then(|()| std::fs::rename(&temporary, config));
+    if let Err(err) = written {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(format!("could not write {}: {err}", config.display()));
+    }
     Ok(true)
 }
 
@@ -191,5 +222,21 @@ mod tests {
         let text = std::fs::read_to_string(&config).unwrap();
         assert!(text.starts_with("# mine\nvllm_host = \"http://n:8000\"\n"));
         assert_eq!(Settings::parse(&text, None).exclude, [PathBuf::from("/w/secret")]);
+    }
+
+    #[test]
+    fn a_configuration_that_does_not_read_is_not_the_defaults() {
+        let dir = scratch("unreadable");
+        let config = dir.join("config.toml");
+        assert_eq!(Settings::read(&config, None), Ok(Settings::default()), "no file is the defaults");
+        // A typo anywhere in the file must not turn `[sync] exclude` off.
+        std::fs::write(&config, "[sync]\nexclude = [\"/w/secret\"]\n\n[chat\n").unwrap();
+        assert!(Settings::read(&config, None).is_err());
+        // Nor may `ling sync exclude` write a file it could not read over the user's.
+        let bytes = b"[sync]\nexclude = [\"/w/secret\"]\nnote = \"\xff\"\n";
+        std::fs::write(&config, bytes).unwrap();
+        assert!(Settings::read(&config, None).is_err());
+        assert!(add_exclude(&config, Path::new("/w/other")).is_err());
+        assert_eq!(std::fs::read(&config).unwrap(), bytes);
     }
 }
