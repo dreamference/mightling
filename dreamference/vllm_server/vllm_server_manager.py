@@ -1491,12 +1491,15 @@ class VLLMServerManager:
         from dreamference.hardware import resolve_model_hf_repo
 
         # The launched config, not the recipe's: a --draft-model or depth override changes the graph.
+        # The drafter is part of it for the same reason as the depth: `compute_hash()` does not
+        # name it, so a different drafter at the same depth would otherwise reuse the old graph.
         spec = cls.resolve_speculative_config(model, draft_model, num_speculative_tokens) or {}
         return "|".join(
             str(part)
             for part in (
                 resolve_model_hf_repo(model),
                 spec.get("method", "none"),
+                spec.get("model", "none"),
                 spec.get("num_speculative_tokens", 0),
             )
         )

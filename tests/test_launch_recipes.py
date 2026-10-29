@@ -94,6 +94,15 @@ def test_an_unreadable_signature_counts_as_none(vllm_recipes, cache_home, docker
     assert docker_runs[0] == []
 
 
+def test_the_signature_names_the_drafter(vllm_recipes):
+    # vLLM's hash leaves the drafter out as it does the depth, so a different drafter at the same
+    # depth needs a different signature.
+    sig = VLLMServerManager._compile_cache_signature
+    assert sig("test-vllm-dflash", draft_model="example/other-drafter") != sig("test-vllm-dflash")
+    assert sig("test-vllm-dflash", draft_model="example/other-drafter").endswith("|12")
+    assert sig("test-vllm-nvfp4") == "example/vllm-moe-NVFP4|mtp|none|3"
+
+
 def test_without_a_draft_model_the_recipe_is_used_as_it_is(vllm_recipes):
     resolve = VLLMServerManager.resolve_speculative_config
     recipe = ModelMatrixRegistry.get_launch_overrides("test-vllm-dflash")["speculative_config"]
