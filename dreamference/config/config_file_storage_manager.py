@@ -8,7 +8,7 @@ Dreamference configuration dictionaries to YAML or JSON formats.
 import json
 import tomllib
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict, Iterable
 
 try:
     import yaml
@@ -90,30 +90,34 @@ class ConfigFileStorageManager:
         return loaded
 
     @classmethod
-    def save_config_dict(cls, path: Path, data: Dict[str, Any]) -> Path:
+    def save_config_dict(cls, path: Path, data: Dict[str, Any], owned: Iterable[str] = ()) -> Path:
         """
         Saves configuration key-value dictionary to YAML, JSON, or TOML file on disk.
 
         Args:
             path (Path): Target file path.
             data (Dict[str, Any]): Dictionary of configuration options to serialize.
+            owned (Iterable[str]): Keys the caller writes whenever they matter, so one missing
+                from `data` is removed; every other key already in the file is kept.
 
         Returns:
             Path: Path object pointing to written file.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Tables in the file (`[night]`) belong to other readers, not to the flat keys being
+        # Tables in the file (`[night]`) and the keys only the Rust launcher reads
+        # (`mightling_context_window`, …) belong to other readers, not to the flat keys being
         # saved: until 2026-10-01 `main-model set` and `init` silently removed Night Shift's
-        # settings by rewriting the file from the flat keys alone.
+        # settings by rewriting the file from the flat keys alone, and until 2026-10-29 the
+        # launcher's keys and any array of tables.
         if path.is_file():
             # A file that does not parse would read as {} and lose everything below.
             try:
                 existing = cls.parse_config_file(path)
             except Exception as e:
                 raise ValueError(f"{path} could not be read, so it was not overwritten: {e}") from e
-            tables = {key: value for key, value in existing.items()
-                      if isinstance(value, dict) and key not in data}
-            data = {**data, **tables}
+            owned = set(owned)
+            kept = {key: value for key, value in existing.items() if key not in data and key not in owned}
+            data = {**data, **kept}
         if toml and path.suffix == ".toml":
             with open(path, "w", encoding="utf-8") as f:
                 toml.dump(data, f)

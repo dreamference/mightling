@@ -253,3 +253,39 @@ def test_saving_never_overwrites_a_file_it_could_not_read(tmp_path):
     with pytest.raises(ValueError, match="dreamference.toml"):
         ConfigFileStorageManager.save_config_dict(path, {"model": "y"})
     assert path.read_text(encoding="utf-8") == text
+
+
+def test_saving_keeps_the_keys_only_the_launcher_reads(tmp_path, monkeypatch):
+    # `main-model set` rewrote the file from the keys DreamferenceConfig knows plus its tables, so a
+    # `mightling_context_window` or `mightling_turn_end_compaction` the Rust launcher reads, and any
+    # array of tables, was deleted. A key this class owns still goes when it is back at its default.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    for name in ("DREAMFERENCE_MODEL", "DREAMFERENCE_CONFIG_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    path = tmp_path / "dreamference.toml"
+    path.write_text('mightling_context_window = 65536\nmightling_turn_end_compaction = false\n'
+                    'kv_cache_dtype = "fp8"\n[[repos]]\nname = "a"\n', encoding="utf-8")
+    config = DreamferenceConfig(config_file=str(path))
+    config.kv_cache_dtype = None
+    config.model = "qwen3.8-27b-nvfp4-dflash2"
+    config.save_config()
+    assert ConfigFileStorageManager.load_config_dict(path) == {
+        "mightling_context_window": 65536, "mightling_turn_end_compaction": False,
+        "model": "qwen3.8-27b-nvfp4-dflash2", "repos": [{"name": "a"}]}
+
+
+def test_every_key_save_config_writes_is_one_it_owns(tmp_path):
+    # A key written but not in CONFIG_KEYS would never be removed again once back at its default.
+    import dreamference.config.dreamference_config as cfg_mod
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    path = tmp_path / "all.json"
+    config = DreamferenceConfig(config_file=str(path))
+    for key in cfg_mod.CONFIG_KEYS:
+        value = getattr(config, key)
+        changed = (not value) if isinstance(value, bool) else (value + 1) if isinstance(value, int) else "x"
+        setattr(config, key, {"server_engine": "ling", "mightling_airgapped": "on",
+                              "mightling_refine_version": "v2"}.get(key, changed))
+    config.save_config()
+    assert set(ConfigFileStorageManager.load_config_dict(path)) == set(cfg_mod.CONFIG_KEYS)

@@ -76,6 +76,16 @@ DEFAULT_MIGHTLING_REFINE: Final[bool] = False
 DEFAULT_MIGHTLING_REFINE_VERSION: Final[str] = "v1"
 MIGHTLING_REFINE_VERSIONS: Final[tuple] = ("v1", "v2")
 
+# The keys save_config() writes when they differ from their default and removes when they do not;
+# every other key in the file belongs to another reader and is kept.
+CONFIG_KEYS: Final[frozenset] = frozenset({
+    "vllm_host", "agent_runner", "model", "diffusion_model", "draft_model", "num_speculative_tokens",
+    "hf_token", "enable_prefix_caching", "enable_chunked_prefill", "num_scheduler_steps",
+    "attention_backend", "kv_cache_dtype", "guided_decoding_backend", "use_tensorizer", "server_engine",
+    "mightling_gmail", "mightling_compaction_ledger", "mightling_airgapped", "mightling_prompt",
+    "mightling_refine", "mightling_refine_version",
+})
+
 class DreamferenceConfig:
     """
     Unified configuration manager implementing the 4-tier precedence hierarchy:
@@ -541,7 +551,7 @@ class DreamferenceConfig:
         if self.mightling_refine_version != DEFAULT_MIGHTLING_REFINE_VERSION:
             data["mightling_refine_version"] = self.mightling_refine_version
 
-        return ConfigFileStorageManager.save_config_dict(out_path, data)
+        return ConfigFileStorageManager.save_config_dict(out_path, data, owned=CONFIG_KEYS)
 
     def resolve_tool_call_parser(self) -> str:
         """
