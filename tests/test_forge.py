@@ -119,6 +119,16 @@ def test_the_switch_defaults_on_and_is_kept_in_the_nodes_config(monkeypatch):
     assert not ForgeSettings.enabled()
 
 
+def test_the_switch_finds_a_forge_table_written_with_spaces_or_a_comment(monkeypatch):
+    monkeypatch.delenv("DREAMFERENCE_FORGE", raising=False)
+    ForgeSettings.config_path().parent.mkdir(parents=True, exist_ok=True)
+    for header in ("[forge]  # the switch", "[ forge ]"):
+        ForgeSettings.config_path().write_text(f"{header}\nenabled = true\n")
+        ForgeSettings.set_enabled(False)
+        assert not ForgeSettings.enabled(), header
+        assert ForgeSettings.config_path().read_text().count("forge") == 1, header
+
+
 def test_secrets_are_private_and_the_role_is_kept():
     path = ForgeSettings.write_secret("owner-password", "x" * 24)
     assert oct(path.stat().st_mode & 0o777) == "0o600"
