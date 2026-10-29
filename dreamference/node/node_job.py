@@ -53,6 +53,9 @@ DEFAULT_TIME: Final[str] = "90m"
 # The most a sender may ask for; this node's ceilings, not the sender's.
 MAX_MEMORY_BYTES: Final[int] = 32 * 1024**3
 MAX_TIME_S: Final[int] = 8 * 3600
+# Processes and threads a job's unit may hold, so a fork bomb stops at its own unit and leaves
+# the user's slice (the model server, the web app) its share.
+MAX_TASKS: Final[int] = 4096
 
 # Free memory a job never eats into, as for a night task.
 MEMORY_RESERVE: Final[int] = 8 * 1024**3
@@ -410,6 +413,8 @@ class NodeJob:
             f"RuntimeMaxSec={record['time_s']}",
             "-p",
             "CPUQuota=800%",
+            "-p",
+            f"TasksMax={MAX_TASKS}",
             "--",
             admin,
             "node",
