@@ -115,12 +115,12 @@ LINGER_DIR="${MIGHTLING_LINGER_DIR:-/var/lib/systemd/linger}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --role)      ROLE="${2:-}"; shift 2 ;;
+        --role)      [ $# -ge 2 ] || fail "--role needs a value (see --help)"; ROLE="$2"; shift 2 ;;
         --role=*)    ROLE="${1#*=}"; shift ;;
-        --version)   VERSION="${2:-}"; shift 2 ;;
+        --version)   [ $# -ge 2 ] || fail "--version needs a value (see --help)"; VERSION="$2"; shift 2 ;;
         --version=*) VERSION="${1#*=}"; shift ;;
         --no-advertise) ADVERTISE=0; shift ;;
-        --from)      FROM="${2:-}"; shift 2 ;;
+        --from)      [ $# -ge 2 ] || fail "--from needs a value (see --help)"; FROM="$2"; shift 2 ;;
         --from=*)    FROM="${1#*=}"; shift ;;
         --no-host-setup) HOST_SETUP=0; shift ;;
         --no-model)  MODEL=0; shift ;;
