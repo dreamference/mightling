@@ -772,6 +772,18 @@ fn spreadsheets_and_presentations_are_indexed_and_read_in_their_own_parts() {
     );
     let read = ling_docs::read::read(&collections, &hit.doc_id, Some("sheet Notes"), 6000).unwrap();
     assert_eq!(read.text.trim_end(), "Remark\nRemark: Nothing to see");
+    let read = ling_docs::read::read(
+        &collections,
+        &hit.doc_id,
+        Some("sheet Notes, rows 1-10"),
+        6000,
+    )
+    .unwrap();
+    assert_eq!(
+        read.text.trim_end(),
+        "Remark\nRemark: Nothing to see",
+        "rows past a sheet's end are not read from the next sheet"
+    );
     let hit = top("motion controller late safety audit");
     assert_eq!(
         (hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()),

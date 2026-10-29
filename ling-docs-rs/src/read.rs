@@ -179,13 +179,19 @@ pub fn read(
         {
             let (prefix, _, a, b) = crate::chunk::prefixed(&part).unwrap();
             let prefix = prefix.to_lowercase();
-            let unit = rows.iter().find(|r| {
+            let in_part = |r: &&(Option<u32>, Option<u32>, String, String, Option<u32>)| {
                 crate::chunk::prefixed(&r.3).is_some_and(|(p, ..)| p.to_lowercase() == prefix)
-            });
+            };
+            let unit = rows.iter().find(in_part);
+            // The sheet's last line: rows past it are the next sheet's.
+            let last = rows.iter().filter(in_part).filter_map(|r| r.4).max();
             match unit.and_then(|r| Some((r.1?, crate::chunk::prefixed(&r.3)?.2))) {
                 Some((line, start)) => Some(Locator::Lines(
-                    (a + line).saturating_sub(start).max(1),
-                    (b + line).saturating_sub(start).max(1),
+                    a.saturating_add(line).saturating_sub(start).max(1),
+                    b.saturating_add(line)
+                        .saturating_sub(start)
+                        .max(1)
+                        .min(last.unwrap_or(u32::MAX)),
                 )),
                 None => bail!("{doc_id} has no part `{part}`"),
             }
