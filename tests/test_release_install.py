@@ -794,6 +794,22 @@ def test_an_option_without_its_value_is_named(tmp_path, release_server):
         assert f"{option} needs a value" in result.stderr, result.stderr
 
 
+def test_help_under_a_pipe_says_where_the_help_is(tmp_path):
+    # Under `curl … | bash -s -- --help` there is no file to read the header from: awk was given
+    # `bash` and the script ended with awk's error and exit 2.
+    with open(INSTALL_SH, "rb") as script:
+        result = subprocess.run(["bash", "-s", "--", "--help"], stdin=script, cwd=tmp_path, capture_output=True,
+                                text=True, timeout=30, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "bash install.sh --help" in result.stdout and result.stderr == ""
+
+
+def test_help_from_the_file_prints_its_header(tmp_path):
+    result = subprocess.run(["bash", str(INSTALL_SH), "--help"], cwd=tmp_path, capture_output=True, text=True,
+                            timeout=30, check=False)
+    assert result.returncode == 0 and result.stdout.startswith("Installs Mightling from a release")
+
+
 def test_the_node_role_needs_the_wheel(tmp_path, release_server):
     # The binaries are placed first; a release with no wheel then stops the node half by name.
     result = run_install(tmp_path, release_server(binaries()), "--role", "node")
