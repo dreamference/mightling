@@ -518,3 +518,35 @@ def test_the_shared_secret_is_created_once_and_kept_private(monkeypatch, tmp_pat
     path = folder / "service-secret"
     assert path.read_text() == first
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_an_empty_shared_secret_file_is_replaced_with_a_real_secret(monkeypatch, tmp_path):
+    # A save cut short leaves an empty file; reading it as "no secret" forever would keep the
+    # service from ever starting.
+    import dreamference.chat.gmail_credentials as credentials
+
+    folder = tmp_path / "gmail"
+    folder.mkdir()
+    (folder / "service-secret").write_text("")
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(folder))
+    value = GoogleService.secret()
+    assert value and (folder / "service-secret").read_text() == value
+
+
+def test_a_shared_secret_another_start_created_first_is_the_one_kept(monkeypatch, tmp_path):
+    # Two first starts at once must agree on one secret, or the service and its clients differ.
+    import secrets
+
+    import dreamference.chat.gmail_credentials as credentials
+
+    folder = tmp_path / "gmail"
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(folder))
+    real = secrets.token_urlsafe
+
+    def racing(size):
+        (folder / "service-secret").write_text("theirs")
+        return real(size)
+
+    monkeypatch.setattr(secrets, "token_urlsafe", racing)
+    assert GoogleService.secret() == "theirs"
+    assert (folder / "service-secret").read_text() == "theirs"
