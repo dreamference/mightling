@@ -2289,6 +2289,8 @@ def receive(monkeypatch, hub, members, size=0):
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         for name, data in members:
             info = tarfile.TarInfo(name)
+            if isinstance(data, str):  # a link to `data`
+                info.type, info.linkname, data = tarfile.SYMTYPE, data, b""
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(buffer.getvalue())))
@@ -2325,6 +2327,40 @@ def test_the_receiving_node_decides_what_lands_in_its_cache(tmp_path, monkeypatc
 
     assert NodeServe.serve("model-receive not-a-model 10") == 2
     assert NodeServe.serve(f"model-receive {SYNC_KEY} lots") == 2
+
+
+def test_a_copy_cannot_reach_outside_its_model_folder_through_a_link(tmp_path, monkeypatch, capsys):
+    import hashlib
+
+    from dreamference.node import NodeModelSync
+
+    # Each of these once landed in the hub beside the model's folder, where `_merge` kept it: a
+    # client could plant the files of a model the owner had not downloaded yet.
+    folder = "models--" + NodeModelSync.repos(SYNC_KEY)[0].replace("/", "--")
+    hub = tmp_path / "hub"
+    escapes = [
+        [(f"{folder}/l", ".."), (f"{folder}/l/models--evil--m/config.json", b"{}")],
+        [(f"{folder}/snapshots/l", "../.."), (f"{folder}/snapshots/l/stray", b"x")],
+        [(f"{folder}/here", "."), (f"{folder}/here/up", ".."), (f"{folder}/here/up/stray", b"x")],
+        [(f"..{folder}/stray", b"x")],
+        [(f"./{folder}/blobs/x", "/etc/passwd")],
+    ]
+    for members in escapes:
+        assert receive(monkeypatch, hub, members) == 1, members
+        assert list(hub.iterdir()) == [], members
+    assert "not a folder of this model" in capsys.readouterr().err
+    # The cache's own links, from a snapshot to its blob, still arrive.
+    good = b"weights"
+    digest = hashlib.sha256(good).hexdigest()
+    snapshot = f"{folder}/snapshots/{'a' * 40}"
+    members = [
+        (f"{folder}/blobs/{digest}", good),
+        (f"{snapshot}/model.bin", f"../../blobs/{digest}"),
+        (f"{snapshot}/sub/tokenizer.bin", f"../../../blobs/{digest}"),
+    ]
+    assert receive(monkeypatch, hub, members) == 0
+    assert (hub / snapshot / "model.bin").read_bytes() == good
+    assert (hub / snapshot / "sub" / "tokenizer.bin").read_bytes() == good
 
 
 def test_enable_without_avahi_installs_it_or_publishes_nothing(machine, monkeypatch, capsys):

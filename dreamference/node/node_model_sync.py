@@ -22,7 +22,7 @@ import subprocess
 import sys
 import tarfile
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Final, List, Optional
 
 GIB: Final[int] = 1024 ** 3
@@ -235,17 +235,55 @@ class NodeModelSync:
     @classmethod
     def _unpack(cls, stream: Any, staging: Path, allowed: set) -> Optional[str]:
         """Extracts the stream into `staging`; returns what was wrong with it, if anything."""
+        root = os.path.realpath(staging)
         try:
             with tarfile.open(fileobj=stream, mode="r|") as archive:
                 for member in archive:
-                    top = member.name.lstrip("./").split("/", 1)[0]
-                    if top not in allowed:
+                    if not cls._stays_in_folder(member, root, allowed):
                         return f"the copy carried {member.name}, which is not a folder of this model"
-                    # `data` refuses absolute names, `..`, devices, and links that leave the folder.
+                    # `data` also refuses devices and odd modes.
                     archive.extract(member, staging, filter="data")
         except (tarfile.TarError, OSError) as error:
             return f"the copy was cut short or malformed ({error})"
         return None
+
+    @classmethod
+    def _stays_in_folder(cls, member: tarfile.TarInfo, root: str, allowed: set) -> bool:
+        """
+        Whether a member of a copy lands inside one of the model's folders. The `data` filter alone
+        keeps a member inside the staging folder, not inside the model's own folder: a link to
+        `..` there, then a file through it, once put a folder of the client's choosing beside the
+        model's, and `_merge` moved it into the cache.
+
+        Args:
+            member: The member about to be extracted.
+            root: The staging folder, resolved.
+            allowed: The names of the model's folders.
+
+        Returns:
+            bool: True for a folder, file or link of the cache's own shape: the top is one of the
+            model's folders, no `..`, nothing below a link, and links only from a snapshot to a
+            blob of the same folder (`snapshots/<revision>/…/<file> -> ../../blobs/<file>`).
+        """
+        parts = PurePosixPath(member.name).parts
+        if not parts or parts[0] not in allowed or ".." in parts:
+            return False
+        if len(parts) == 1:
+            return member.isdir()
+        if member.islnk() or (parts[1] == "blobs" and not (member.isdir() if len(parts) == 2
+                                                           else member.isreg() and len(parts) == 3)):
+            return False
+        if member.issym():
+            target = PurePosixPath(member.linkname).parts
+            ups = len(parts) - 2
+            if parts[1] != "snapshots" or len(parts) < 4 or len(target) != ups + 2 \
+                    or target[:ups] != ("..",) * ups or target[ups] != "blobs" \
+                    or target[-1] in (".", ".."):
+                return False
+        folder = os.path.join(root, parts[0])
+        place = os.path.join(root, *parts)
+        parent = os.path.realpath(os.path.dirname(place))
+        return (parent == folder or parent.startswith(folder + os.sep)) and not os.path.islink(place)
 
     @classmethod
     def _verify(cls, staging: Path) -> Optional[str]:
