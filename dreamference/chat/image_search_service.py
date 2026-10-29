@@ -444,8 +444,16 @@ class ImageStore:
                 payload = out.getvalue()
             except Exception:
                 pass
-        with open(self.path(file_id), "wb") as fh:
-            fh.write(payload)
+        # The new file replaces the old in one step, so a reader is never served half an image.
+        target = self.path(file_id)
+        temporary = f"{target}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            with open(temporary, "wb") as fh:
+                fh.write(payload)
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
         with self._lock:
             self._db.execute(
                 "INSERT OR REPLACE INTO images (file_id, source_url, phash, title, created)"
