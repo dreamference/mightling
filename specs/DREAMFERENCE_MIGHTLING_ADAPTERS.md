@@ -448,7 +448,7 @@ Step 10 of the launcher prepends `--model <id>`. With adapters, `<id>` is the se
 
 1. `ling --adapter <name>` (removed from the arguments before Codex sees them);
 2. for `resume` and `fork`, the thread's own record, `$CODEX_HOME/adapter/<thread-id>` (§11.1), so a resumed thread keeps its adapter;
-3. `DREAMFERENCE_MIGHTLING_ADAPTER`, then `mightling_adapter` in the TOML file;
+3. `DREAMFERENCE_MIGHTLING_ADAPTER`, then `mightling_adapter` in the user's TOML file (`DREAMFERENCE_CONFIG_PATH`, else `~/.config/dreamference/config.toml`). A repository's `./dreamference.toml` does not choose (§6.3): its key is ignored with one notice at start (since 2026-10-29);
 4. the base.
 
 A name that `/v1/models` does not list (removed, never installed, or `base mismatch` after a base change) falls back to the base with a notice at start ("The Rust adapter is not on this node; this session uses the base model."), never an error that stops the session. This fallback happens only at launch, where the person sees it; mid-session the gate refuses instead (§8.3).

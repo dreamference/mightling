@@ -231,13 +231,45 @@ pub fn resolve_from(
 pub fn resolve(flag: Option<&str>, thread_id: Option<&str>) -> Choice {
     let thread = thread_id.and_then(read_record);
     let environment = std::env::var_os(ENV_VAR).map(|value| value.to_string_lossy().into_owned());
-    let config = crate::config_file().and_then(|path| std::fs::read_to_string(&path).ok().map(|text| (path, text)));
-    resolve_from(
-        flag,
-        thread.as_deref(),
-        environment.as_deref(),
-        config.as_ref().map(|(path, text)| (path.as_path(), text.as_str())),
-    )
+    let read = |path: PathBuf| std::fs::read_to_string(&path).ok().map(|text| (path, text));
+    let named = std::env::var("DREAMFERENCE_CONFIG_PATH").ok();
+    let own_path = crate::prompt::choice_file(named.as_deref(), ling_node_locator::home_dir().as_deref());
+    let here = crate::config_file()
+        .filter(|path| own_path.as_ref().is_none_or(|own| !crate::compat::same_file(own, path)))
+        .and_then(read);
+    let own = own_path.and_then(read);
+    let (config, ignored) = config_tier(borrowed(&own), borrowed(&here));
+    let choice = resolve_from(flag, thread.as_deref(), environment.as_deref(), config);
+    if let Some(line) = ignored
+        && matches!(choice.source, Source::ConfigFile(_) | Source::Base)
+    {
+        crate::notice::say(&line);
+    }
+    choice
+}
+
+fn borrowed(file: &Option<(PathBuf, String)>) -> Option<(&Path, &str)> {
+    file.as_ref().map(|(path, text)| (path.as_path(), text.as_str()))
+}
+
+/// The configuration tier: the user's own file (or the one `DREAMFERENCE_CONFIG_PATH` names),
+/// never a repository's `./dreamference.toml` (§6.3: which adapter a session uses is the user's
+/// choice, not a clone's). `here` is the file read in this folder when it is another one; its
+/// `mightling_adapter` is reported once and ignored.
+fn config_tier<'a>(
+    own: Option<(&'a Path, &'a str)>,
+    here: Option<(&Path, &str)>,
+) -> (Option<(&'a Path, &'a str)>, Option<String>) {
+    let ignored = here.and_then(|(path, text)| {
+        let value = toml::from_str::<toml::Table>(text).ok()?.get(TOML_KEY)?.as_str()?.to_string();
+        // Debug-quoted: the value is the repository's, and could hold terminal escapes.
+        Some(format!(
+            "Ignored {TOML_KEY} = {value:?} in {}: a repository's file does not choose the adapter. Name it in \
+             ~/.config/dreamference/config.toml, {ENV_VAR} or --adapter.",
+            path.display()
+        ))
+    });
+    (own, ignored)
 }
 
 /// The model id the session names, and the notice to give when its adapter is not listed.
@@ -527,6 +559,23 @@ mod tests {
         assert_eq!(from_file, Choice { name: Some("go".into()), source: Source::ConfigFile(path.to_path_buf()) });
         assert_eq!(resolve_from(None, None, None, Some((path, "vllm_host = \"x\"\n"))), Choice { name: None, source: Source::Base });
         assert_eq!(resolve_from(None, None, None, None).source, Source::Base);
+    }
+
+    #[test]
+    fn a_repository_file_does_not_choose_the_adapter() {
+        // A clone's `./dreamference.toml` chose the adapter for every session started in it.
+        let own = Path::new("/tmp/u/.config/dreamference/config.toml");
+        let here = Path::new("dreamference.toml");
+        let (config, ignored) = config_tier(None, Some((here, "mightling_adapter = \"rust\"\n")));
+        assert_eq!(resolve_from(None, None, None, config), Choice { name: None, source: Source::Base });
+        let ignored = ignored.expect("the repository's choice is reported");
+        assert!(ignored.contains("\"rust\"") && ignored.contains("dreamference.toml"), "{ignored}");
+        // The user's own file decides.
+        let (config, _) = config_tier(Some((own, "mightling_adapter = \"go\"\n")), Some((here, "mightling_adapter = \"rust\"\n")));
+        assert_eq!(resolve_from(None, None, None, config), Choice { name: Some("go".into()), source: Source::ConfigFile(own.to_path_buf()) });
+        // A repository file without the key says nothing.
+        assert_eq!(config_tier(None, Some((here, "model = \"m\"\n"))).1, None);
+        assert_eq!(config_tier(None, Some((here, "\u{1b}[31m"))).1, None);
     }
 
     #[test]

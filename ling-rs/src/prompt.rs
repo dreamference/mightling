@@ -605,10 +605,10 @@ fn use_prompt(name: &str) -> (Vec<String>, i32) {
     (lines, 0)
 }
 
-/// Where `ling prompt use` writes: the file `DREAMFERENCE_CONFIG_PATH` names, else the user's own
+/// Where `ling prompt use` writes, and the only file the adapter choice is read from: the file `DREAMFERENCE_CONFIG_PATH` names, else the user's own
 /// `~/.config/dreamference/config.toml`. Never `./dreamference.toml`, which belongs to the
 /// repository: a user's choice is not the repository's to carry.
-fn choice_file(named: Option<&str>, home: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn choice_file(named: Option<&str>, home: Option<&Path>) -> Option<PathBuf> {
     match named.filter(|path| !path.is_empty()) {
         Some(path) => Some(PathBuf::from(path)),
         None => Some(home?.join(".config").join("dreamference").join("config.toml")),
