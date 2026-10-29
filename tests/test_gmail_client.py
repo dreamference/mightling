@@ -578,3 +578,109 @@ def test_workspace_dispatch_covers_drive_and_calendar_routes(monkeypatch):
         "event": "ev-9",
     }
     assert GmailSearchService.workspace("/unknown", {}) == {"error": "not found"}
+
+
+def test_search_across_accounts_returns_the_newest_messages_of_all_of_them(monkeypatch):
+    # Each account gives its newest `limit`; cutting the concatenation at `limit` kept only the
+    # first account's, however old, and dropped the other's newer mail.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    class Conn:
+        def logout(self):
+            pass
+
+    dates = {
+        "old@example.com": ["Mon, 01 Jun 2026 10:00:00 +0000", "Sun, 31 May 2026 10:00:00 +0000"],
+        "new@example.com": ["Wed, 28 Oct 2026 10:00:00 +0000", "Tue, 27 Oct 2026 10:00:00 +0000"],
+    }
+    connections = {address: Conn() for address in dates}
+
+    def headers(cls, conn, uids):
+        address = next(name for name, open_conn in connections.items() if open_conn is conn)
+        return [{"id": str(n), "from": "x", "subject": "s", "date": d} for n, d in enumerate(dates[address])]
+
+    monkeypatch.setattr(GmailSearchService, "_open_mailboxes", classmethod(lambda cls: (dict(connections), None, [])))
+    monkeypatch.setattr(GmailSearchService, "_search_uids", classmethod(lambda cls, conn, query: [b"1", b"2"]))
+    monkeypatch.setattr(GmailSearchService, "_fetch_headers", classmethod(headers))
+    found = GmailSearchService.search("invoice", 2)["messages"]
+    assert [m["date"] for m in found] == dates["new@example.com"]
+    assert all(m["id"].startswith("new@example.com|") for m in found)
+
+
+def test_gmail_opens_only_accounts_granted_gmail(monkeypatch):
+    # An account connected for Drive alone has no Gmail scope; logging it in to IMAP failed on
+    # every search and showed as a broken account, as the workspace reader already knew to skip.
+    from dreamference.chat import gmail_search_service as service_module
+    from dreamference.chat.gmail_search_service import DRIVE_SCOPE, GMAIL_SCOPE, GmailSearchService
+
+    opened = []
+
+    class Conn:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def authenticate(self, mechanism, responder):
+            opened.append(responder(b"").split(b"\x01")[0])
+
+        def list(self):
+            return "OK", []
+
+        def select(self, folder, readonly=False):
+            return "OK", [b"1"]
+
+    accounts = [
+        {"email": "mail@example.com", "access_token": "t1", "scopes": [GMAIL_SCOPE]},
+        {"email": "files@example.com", "access_token": "t2", "scopes": [DRIVE_SCOPE]},
+    ]
+    monkeypatch.setattr(GmailSearchService, "credentials", classmethod(lambda cls, directory=None: accounts))
+    monkeypatch.setattr(service_module.imaplib, "IMAP4_SSL", Conn)
+    connections, error, failures = GmailSearchService._open_mailboxes()
+    assert list(connections) == ["mail@example.com"] and error is None and failures == []
+    assert opened == [b"user=mail@example.com"]
+
+    monkeypatch.setattr(GmailSearchService, "credentials", classmethod(lambda cls, directory=None: accounts[1:]))
+    assert GmailSearchService._open_mailboxes() == ({}, service_module.NOT_CONNECTED_MESSAGE, [])
+
+
+def test_saving_a_token_never_shows_another_thread_a_half_written_credentials_file(tmp_path, monkeypatch):
+    # The service answers each request on its own thread, and every request may refresh a token.
+    # Rewriting the file in place let a concurrent reader find it empty, take that for "no
+    # accounts", and write back its one account over all the others.
+    from dreamference.chat import gmail_search_service as service_module
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    directory = str(tmp_path)
+    assert GmailSearchService.save_token("a@example.com", "token-a", 3600, directory, refresh_token="refresh-a")
+    seen = []
+    real_dump = service_module.json.dump
+
+    def dump(obj, handle, **kwargs):
+        seen.append(sorted(GmailSearchService._raw(directory)["accounts"]))
+        real_dump(obj, handle, **kwargs)
+
+    monkeypatch.setattr(service_module.json, "dump", dump)
+    assert GmailSearchService.save_token("b@example.com", "token-b", 3600, directory)
+    assert GmailSearchService.delete_token("b@example.com", directory)
+    assert seen == [["a@example.com"], ["a@example.com", "b@example.com"]]
+    assert sorted(GmailSearchService._raw(directory)["accounts"]) == ["a@example.com"]
+    assert (tmp_path / "credentials.json").stat().st_mode & 0o777 == 0o600
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["credentials.json", "credentials.key"]
+
+
+def test_an_oauth_state_is_taken_once_and_expires(monkeypatch):
+    # Each start recorded a state with its time, and nothing ever read the time or removed one.
+    from dreamference.chat import gmail_search_service as service_module
+    from dreamference.chat.gmail_search_service import OAUTH_STATE_SECONDS, GmailSearchService
+
+    monkeypatch.setattr(service_module, "OAUTH_STATES", {})
+    clock = [1000.0]
+    monkeypatch.setattr(service_module.time, "time", lambda: clock[0])
+    fresh = GmailSearchService.new_state("drive", "verifier")
+    assert GmailSearchService.take_state(fresh) == {"code_verifier": "verifier", "time": 1000.0, "app": "drive"}
+    assert GmailSearchService.take_state(fresh) is None
+
+    stale = GmailSearchService.new_state("gmail", "old")
+    clock[0] += OAUTH_STATE_SECONDS + 1
+    GmailSearchService.new_state("gmail", "new")
+    assert stale not in service_module.OAUTH_STATES and len(service_module.OAUTH_STATES) == 1
+    assert GmailSearchService.take_state(stale) is None

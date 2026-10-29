@@ -176,23 +176,22 @@ def test_http_routes_cover_status_connect_and_oauth_flows(service_port, monkeypa
             return FakeResp(json.dumps({"email": "u@x.com"}).encode())
         return urllib.request.build_opener().open(req, timeout=timeout)
 
-    OAUTH_STATES["st-ok"] = {"code_verifier": "v", "time": 1.0, "app": "drive"}
+    OAUTH_STATES["st-ok"] = {"code_verifier": "v", "time": time.time(), "app": "drive"}
     monkeypatch.setattr(
         GmailSearchService, "accept_grant", classmethod(lambda cls, app, data, addr: None)
     )
     monkeypatch.setattr(svc_mod.urllib.request, "urlopen", fake_urlopen)
 
-    # Product bug at dreamference/chat/gmail_search_service.py:1216 & 1232: `import json` inside
-    # the `/disconnect` branch makes `json` a local variable in `do_POST`, so `/api/google/oauth/complete`
-    # raises UnboundLocalError at `json.loads(post_data)` and replies 400.
+    # A pasted redirect URL completes the consent like the browser's own callback does.
     comp_ok, comp_body = _req_status(
         service_port,
         "/api/google/oauth/complete",
         method="POST",
         body=json.dumps({"url": "http://localhost:8767/?code=c1&state=st-ok"}),
     )
-    assert comp_ok == HTTPStatus.BAD_REQUEST and "json" in comp_body
+    assert comp_ok == HTTPStatus.OK and json.loads(comp_body)["email"] == "u@x.com"
 
+    OAUTH_STATES["st-ok"] = {"code_verifier": "v", "time": time.time(), "app": "drive"}
     get_ok, html_ok = _req_status(service_port, "/?code=c1&state=st-ok")
     assert get_ok == HTTPStatus.OK and "Google Drive connected" in html_ok
     get_bad_st, html_bad = _req_status(service_port, "/?code=c1&state=missing")
@@ -205,7 +204,11 @@ def test_http_routes_cover_status_connect_and_oauth_flows(service_port, monkeypa
         return urllib.request.build_opener().open(req, timeout=timeout)
 
     monkeypatch.setattr(svc_mod.urllib.request, "urlopen", broken_urlopen)
-    get_err, html_err = _req_status(service_port, "/?code=c1&state=st-ok")
+    # A state is taken once: the second callback with st-ok is refused.
+    get_again, html_again = _req_status(service_port, "/?code=c1&state=st-ok")
+    assert get_again == HTTPStatus.OK and "Invalid state" in html_again
+    OAUTH_STATES["st-down"] = {"code_verifier": "v", "time": time.time(), "app": "drive"}
+    get_err, html_err = _req_status(service_port, "/?code=c1&state=st-down")
     assert get_err == HTTPStatus.OK and "token exchange down" in html_err
 
 

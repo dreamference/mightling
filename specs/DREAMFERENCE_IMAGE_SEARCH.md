@@ -151,7 +151,8 @@ secret — the browser is the caller and the ids are unguessable.
 
 The hardened downloader implements, and the tests assert:
 - **DNS pinning with private-address rejection** — every resolved address is checked
-  (private, loopback, link-local, multicast, reserved, unspecified) and the checked address is
+  (private, loopback, link-local, multicast, reserved, unspecified, or otherwise not globally
+  routable, such as the shared address space 100.64/10 that tailnets use) and the checked address is
   the one connected to, so a rebinding answer cannot swap targets between check and connect.
 - **Redirect capping** (3 hops), every hop re-validated.
 - **Streamed size caps** — 512 KB thumbnails, 15 MB full images; over-cap bodies are refused,

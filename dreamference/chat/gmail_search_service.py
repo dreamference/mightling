@@ -45,6 +45,8 @@ mail.
 """
 
 import base64
+import contextlib
+import datetime
 import email
 import email.header
 import email.utils
@@ -54,8 +56,10 @@ import html
 import imaplib
 import json
 import os
+import pathlib
 import re
 import secrets
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -73,6 +77,9 @@ except ImportError:  # pragma: no cover - the container's layout
 # Inside the container the credentials directory is mounted here.
 CONFIG_DIR: Final[str] = os.environ.get("MIGHTLING_GMAIL_CONFIG", "/config")
 CREDENTIALS_NAME: Final[str] = "credentials.json"
+# Requests run on threads of their own and any of them may refresh a token: every rewrite of the
+# credentials file is a read-modify-write, one at a time.
+CREDENTIALS_LOCK: Final[threading.Lock] = threading.Lock()
 
 # The key the stored token is sealed with. See `_seal`: this is obfuscation with a clear threat
 # model, not a secret-management system.
@@ -111,6 +118,9 @@ MISSING_APP_SCOPE: Final[str] = (
     "Google did not grant {app} access for {email}. Connect it again and leave the {app} box ticked."
 )
 OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
+# How long a consent started on the setup page may take to come back; a state is used once.
+OAUTH_STATE_SECONDS: Final[int] = 1800
+OAUTH_STATES_LOCK: Final[threading.Lock] = threading.Lock()
 
 
 # Written by the host so the setup page can say what GNOME is holding. The service cannot look for
@@ -374,19 +384,12 @@ class GmailSearchService:
 
     @classmethod
     def delete_token(cls, address: str, directory: Optional[str] = None) -> bool:
-        import os, json
-        path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
-        stored = cls._raw(directory)
-        accounts = stored.get("accounts", {})
-        if address in accounts:
-            del accounts[address]
-            try:
-                with open(path, "w") as handle:
-                    json.dump({"accounts": accounts}, handle, indent=2)
-                return True
-            except OSError:
+        with CREDENTIALS_LOCK:
+            accounts = cls._raw(directory).get("accounts", {})
+            if address not in accounts:
                 return False
-        return False
+            del accounts[address]
+            return cls._write_accounts(accounts, directory)
         
     @classmethod
     def save_token(
@@ -398,26 +401,43 @@ class GmailSearchService:
         refresh_token: str | None = None,
         scopes: list[str] | None = None,
     ) -> bool:
-        path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
-        stored = cls._raw(directory)
-        accounts = stored.get("accounts", {})
-        
-        acc = accounts.get(address, {"email": address})
-        # What the account held before: a stored token without recorded scopes was a Gmail grant.
-        previous = cls.account_scopes(acc) if acc.get("access_token") else []
-        acc["access_token"] = cls._seal(token, directory)
-        acc["expires_at"] = time.time() + max(0, lifetime - 60)
-        if refresh_token:
-            acc["refresh_token"] = cls._seal(refresh_token, directory)
-        if scopes:
-            acc["scopes"] = sorted(set(previous) | set(scopes))
-        accounts[address] = acc
-        
+        with CREDENTIALS_LOCK:
+            accounts = cls._raw(directory).get("accounts", {})
+            acc = accounts.get(address, {"email": address})
+            # What the account held before: a stored token without recorded scopes was a Gmail grant.
+            previous = cls.account_scopes(acc) if acc.get("access_token") else []
+            acc["access_token"] = cls._seal(token, directory)
+            acc["expires_at"] = time.time() + max(0, lifetime - 60)
+            if refresh_token:
+                acc["refresh_token"] = cls._seal(refresh_token, directory)
+            if scopes:
+                acc["scopes"] = sorted(set(previous) | set(scopes))
+            accounts[address] = acc
+            return cls._write_accounts(accounts, directory)
+
+    @classmethod
+    def _write_accounts(cls, accounts: dict[str, Any], directory: str | None = None) -> bool:
+        """Replaces the credentials file in one step, readable by this user only.
+
+        A reader on another request's thread, or the host's `GmailCredentials`, finds the old file
+        or the new one, never an empty one it would take for "no accounts" and write back.
+
+        Args:
+            accounts (dict[str, Any]): Every account, by address.
+            directory (str | None): Credentials directory; the mounted one by default.
+
+        Returns:
+            bool: True if the file was written.
+        """
+        path = pathlib.Path(directory or CONFIG_DIR) / CREDENTIALS_NAME
+        temporary = path.with_name(f"{CREDENTIALS_NAME}.{os.getpid()}.{threading.get_ident()}.tmp")
         try:
-            with open(path, "w") as handle:
+            with open(temporary, "w", opener=lambda name, flags: os.open(name, flags, 0o600)) as handle:
                 json.dump({"accounts": accounts}, handle, indent=2)
-            os.chmod(path, 0o600)
+            temporary.replace(path)
         except OSError:
+            with contextlib.suppress(OSError):
+                temporary.unlink()
             return False
         return True
 
@@ -556,7 +576,8 @@ class GmailSearchService:
             The open connections by address, an error when none could be opened, and one
             `{"account", "error"}` entry per account that failed.
         """
-        stored = cls.credentials()
+        # An account connected for Drive or Calendar alone cannot log in to IMAP.
+        stored = [cred for cred in cls.credentials() if GMAIL_SCOPE in (cred.get("scopes") or [GMAIL_SCOPE])]
         if not stored:
             return {}, NOT_CONNECTED_MESSAGE, []
         connections = {}
@@ -619,6 +640,41 @@ class GmailSearchService:
             "include_granted_scopes": "true", "code_challenge": challenge,
             "code_challenge_method": "S256", "state": state,
         })
+
+    @classmethod
+    def new_state(cls, app: str, verifier: str) -> str:
+        """Records a consent being started, dropping those that never came back.
+
+        Args:
+            app (str): The app being connected.
+            verifier (str): The PKCE verifier for the token exchange.
+
+        Returns:
+            str: The OAuth state to send to Google.
+        """
+        state = secrets.token_urlsafe(32)
+        now = time.time()
+        with OAUTH_STATES_LOCK:
+            for stale in [key for key, entry in OAUTH_STATES.items() if now - entry["time"] > OAUTH_STATE_SECONDS]:
+                del OAUTH_STATES[stale]
+            OAUTH_STATES[state] = {"code_verifier": verifier, "time": now, "app": app}
+        return state
+
+    @classmethod
+    def take_state(cls, state: str) -> dict[str, Any] | None:
+        """Takes a consent's record back, once, unless it has expired.
+
+        Args:
+            state (str): The state Google returned.
+
+        Returns:
+            dict[str, Any] | None: `code_verifier`, `time` and `app`, or None.
+        """
+        with OAUTH_STATES_LOCK:
+            entry = OAUTH_STATES.pop(state, None)
+        if entry is None or time.time() - entry["time"] > OAUTH_STATE_SECONDS:
+            return None
+        return entry
 
     @classmethod
     def missing_scope_message(cls, app: str, address: str) -> str:
@@ -815,11 +871,33 @@ class GmailSearchService:
                     connection.logout()
                 except Exception:
                     pass
-        
+
+        if len(connections) > 1:
+            # Each account gave its own newest; across accounts only the Date header orders them.
+            all_messages.sort(key=cls._sent_at, reverse=True)
         answer: Dict[str, Any] = {"messages": all_messages[:limit]}
         if failures:
             answer["errors"] = failures
         return answer
+
+    @classmethod
+    def _sent_at(cls, message: dict[str, str]) -> float:
+        """Reads when a result was sent, for ordering results from several accounts.
+
+        Args:
+            message (dict[str, str]): One summary from `_fetch_headers`.
+
+        Returns:
+            float: Seconds since the epoch; 0 for a missing or unreadable Date, which sorts last.
+        """
+        try:
+            sent = email.utils.parsedate_to_datetime(message.get("date", ""))
+        except (TypeError, ValueError, IndexError):
+            return 0.0
+        if sent.tzinfo is None:
+            # `-0000` means "zone unknown"; UTC is the closest reading.
+            sent = sent.replace(tzinfo=datetime.UTC)
+        return sent.timestamp()
 
     @classmethod
     def _fetch_headers(cls, connection: imaplib.IMAP4_SSL, uids: List[bytes]) -> List[Dict[str, str]]:
@@ -1201,10 +1279,9 @@ class GmailSearchService:
                 if parsed.path == "/api/google/oauth/start":
                     app = (urllib.parse.parse_qs(parsed.query).get("app") or ["gmail"])[0]
                     app = app if app in APP_SCOPES else "gmail"
-                    state = secrets.token_urlsafe(32)
                     verifier = secrets.token_urlsafe(32)
                     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).decode("ascii").rstrip("=")
-                    OAUTH_STATES[state] = {"code_verifier": verifier, "time": time.time(), "app": app}
+                    state = cls.new_state(app, verifier)
                     self._reply(200, {"auth_url": cls.auth_url(app, state, challenge)})
                     return
                     
@@ -1213,7 +1290,6 @@ class GmailSearchService:
                     content_length = int(self.headers.get('Content-Length', 0))
                     post_data = self.rfile.read(content_length).decode('utf-8')
                     try:
-                        import json
                         data = json.loads(post_data)
                         email = data.get("email")
                         if email:
@@ -1235,8 +1311,9 @@ class GmailSearchService:
                         if "code" in q and "state" in q:
                             code = q["code"][0]
                             state = q["state"][0]
-                            if state in OAUTH_STATES:
-                                verifier = OAUTH_STATES[state]["code_verifier"]
+                            started = cls.take_state(state)
+                            if started:
+                                verifier = started["code_verifier"]
                                 req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
                                     "client_id": GOOGLE_OAUTH_CLIENT_ID,
                                     "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
@@ -1253,7 +1330,7 @@ class GmailSearchService:
                                     user_data = json.load(res2)
                                     email_addr = user_data.get("email", "")
                                 
-                                app = OAUTH_STATES[state].get("app", "gmail")
+                                app = started.get("app", "gmail")
                                 if email_addr and "access_token" in tdata:
                                     refused = cls.accept_grant(app, tdata, email_addr)
                                     if refused:
@@ -1276,9 +1353,9 @@ class GmailSearchService:
                 if parsed.path == "/" and "code" in query and "state" in query:
                     code = query["code"][0]
                     state = query["state"][0]
-                    if state in OAUTH_STATES:
-                        verifier = OAUTH_STATES[state]["code_verifier"]
-                        import json
+                    started = cls.take_state(state)
+                    if started:
+                        verifier = started["code_verifier"]
                         req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
                             "client_id": GOOGLE_OAUTH_CLIENT_ID,
                             "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
@@ -1297,7 +1374,7 @@ class GmailSearchService:
                                 user_data = json.load(res2)
                                 email_addr = user_data.get("email", "")
                             
-                            app = OAUTH_STATES[state].get("app", "gmail")
+                            app = started.get("app", "gmail")
                             if email_addr and "access_token" in data:
                                 self._html(cls.grant_page(app, cls.accept_grant(app, data, email_addr)))
                                 return

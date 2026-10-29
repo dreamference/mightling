@@ -66,6 +66,12 @@ WINDOW_CLASS: Final[str] = "Mightling"
 # `puffin-app` is the name it had until the product became Mightling.
 LEGACY_ENTRY_NAMES: Final[tuple] = ("puffin-desktop", "puffin-ui", "puffin-app")
 
+# Characters that oblige an argument of a desktop entry's Exec key to be quoted (Desktop Entry
+# Specification, "The Exec key"); a checkout path with a space would otherwise run its first word.
+EXEC_RESERVED: Final[frozenset] = frozenset(' \t\n"\'\\><~|&;$*?#()`')
+# Those escaped with a backslash inside the quotes.
+EXEC_ESCAPED: Final[frozenset] = frozenset('"`$\\')
+
 # The architecture names Electron's packager puts in `out/<name>-linux-<arch>/` (Node's
 # `process.arch`), by what `platform.machine()` says.
 PACKAGER_ARCH: Final[dict] = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "x64", "amd64": "x64"}
@@ -419,6 +425,21 @@ class DesktopRunner:
         return False
 
     @classmethod
+    def exec_argument(cls, path: str) -> str:
+        """Quotes a path for a desktop entry's Exec key (Desktop Entry Specification, "The Exec key").
+
+        Args:
+            path (str): The program's path.
+
+        Returns:
+            str: The path as it stands unchanged, or in double quotes when it holds a reserved
+                character such as a space; `%` doubled and backslashes escaped as the key is a string.
+        """
+        if any(char in EXEC_RESERVED for char in path):
+            path = '"' + "".join("\\" + char if char in EXEC_ESCAPED else char for char in path) + '"'
+        return path.replace("\\", "\\\\").replace("%", "%%")
+
+    @classmethod
     def install_desktop_entry(cls) -> bool:
         """
         Registers the app with the desktop environment: an icon and a `.desktop` entry.
@@ -456,7 +477,7 @@ class DesktopRunner:
             "Type=Application\n"
             "Name=Mightling\n"
             "Comment=Local AI assistant served from this machine\n"
-            f"Exec={binary} %U\n"
+            f"Exec={cls.exec_argument(binary)} %U\n"
             f"Icon={ICON_NAME}\n"
             "Terminal=false\n"
             "StartupNotify=true\n"
