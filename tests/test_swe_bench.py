@@ -3357,6 +3357,20 @@ def test_eval_and_report_take_the_drop_test_hunks_switch(monkeypatch):
                     ("report", ("r", "r", DROP_TEST_HUNKS))]
 
 
+def test_eval_with_remove_images_and_no_dataset_says_so_rather_than_zero_graded(
+    bench, monkeypatch, capsys
+):
+    from dreamference.night_shift.night_shift_host import NightShiftHost
+
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 1 << 50))
+    run(bench, instances=["acme__widget-1"])
+    monkeypatch.setattr(SweBenchHarness, "rows", classmethod(lambda cls, dataset: []))
+    capsys.readouterr()
+    assert SweBenchCommand.evaluate("r1", None, remove_images=True) == 1
+    out = capsys.readouterr().out
+    assert "swe-bench setup" in out and "graded" not in out
+
+
 def test_eval_with_remove_images_grades_one_repository_at_a_time_and_removes_what_it_pulled(
     bench, monkeypatch
 ):

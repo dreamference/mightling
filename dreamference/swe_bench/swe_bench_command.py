@@ -913,10 +913,12 @@ class SweBenchCommand:
             # grading pulled goes once its chunk is graded, so the disk holds one chunk's.
             chunk = settings.image_chunk if image_chunk is None else image_chunk
             manifest = store.manifest() or {}
-            rows = {
-                row["instance_id"]: row
-                for row in SweBenchHarness.rows(manifest.get("dataset", "verified"))
-            }
+            dataset = manifest.get("dataset", "verified")
+            rows = {row["instance_id"]: row for row in SweBenchHarness.rows(dataset)}
+            if not rows and store.predictions():
+                # The chunks are made from the dataset's rows; without them none would be graded.
+                print(f"❌ The {dataset} dataset is not downloaded (swe-bench setup).")  # noqa: T201 — CLI output
+                return 1
             ids = [
                 prediction["instance_id"]
                 for prediction in store.predictions()
