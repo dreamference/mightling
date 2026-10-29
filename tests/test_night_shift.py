@@ -8,6 +8,7 @@ server or opens the user's queue: every test has its own queue directory and rep
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -542,6 +543,17 @@ def test_test_command_detection_order(tmp_path):
     (tree / "dreamference.toml").write_text('[night]\ntest = "tox"\n')
     assert detect(configured="make check") == ("tox", "dreamference.toml [night] test")
     assert detect(override="true", configured="make check") == ("true", "--test")
+
+
+def test_the_venv_test_command_survives_a_space_in_the_repository_path(tmp_path):
+    # The command runs through `bash -c`, so an unquoted path splits at the space.
+    repo, tree = tmp_path / "my repo", tmp_path / "tree"
+    (tree / "tests").mkdir(parents=True)
+    (tree / "setup.py").write_text("")
+    (repo / ".venv" / "bin").mkdir(parents=True)
+    (repo / ".venv" / "bin" / "python").write_text("")
+    command, _ = NightShiftTaskRun.detect_test_command(tree, None, None, repo)
+    assert shlex.split(command) == [str(repo / ".venv/bin/python"), "-m", "pytest", "-q"]
 
 
 # -- the host ------------------------------------------------------------------------------------
