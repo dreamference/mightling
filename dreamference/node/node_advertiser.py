@@ -79,6 +79,12 @@ class NodeAdvertiser:
         before = NodeSettings.load()
         NodeSettings.save(advertise=True, web=not no_web)
         port = cls.model_port()
+        # The forge's record is the forge's to change (`forge on|off`): a running forge stays
+        # advertised through an enable that does not set it up (`--no-forge`).
+        try:
+            forge = NodeServiceFile.parse_forge(NodeServiceFile.service_path.read_text())
+        except OSError:
+            forge = None
         text = NodeServiceFile.render(
             port=port, node_id=node_id, version=cls.version(),
             state="ready" if cls.model_answers(port) else "stopped",
@@ -86,6 +92,7 @@ class NodeAdvertiser:
             search_port=cls.search_port(),
             main=cls.serves_main_model(),
             remote=cls.remote_name(),
+            forge=forge,
         )
         # The advertisement first, the binds only once it is in place: a node whose web UI is on
         # the LAN but which nobody can find is the worst of both states.

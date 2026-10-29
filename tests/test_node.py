@@ -319,6 +319,11 @@ def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(
     assert "web" not in NodeServiceFile.read() and NodeServiceFile.read()["search"] == "8888"
     assert "ling web pair" not in capsys.readouterr().out.split("advertised as")[-1]
 
+    # A forge already advertised stays advertised: `node enable --no-forge` leaves the forge alone.
+    assert NodeServiceFile.update(forge=("record", 3300)) is True
+    assert NodeAdvertiser.enable(no_web=True) is True
+    assert NodeServiceFile.parse_forge(NodeServiceFile.service_path.read_text()) == ("record", 3300)
+
     assert NodeAdvertiser.disable() is True
     assert asked[-1] == ["rm", "-f", str(NodeServiceFile.service_path)]
     assert not NodeServiceFile.service_path.exists()
