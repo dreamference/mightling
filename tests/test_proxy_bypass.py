@@ -68,12 +68,14 @@ def test_a_host_with_a_comma_or_a_space_is_no_entry():
     assert merged == "localhost,127.0.0.1,::1"
 
 
-def test_the_configured_host_is_exempt_once_the_configuration_is_read(monkeypatch):
+def test_the_configured_host_is_exempt_once_the_configuration_is_read(monkeypatch, tmp_path):
     # The second apply: a host from the configuration, not from the environment, joins the list
     # before any runner or command starts.
     from types import SimpleNamespace
 
+    from dreamference.chat.retired_web_chat import RetiredWebChat
     from dreamference.cli import dreamference_cli_controller as controller
+    from dreamference.cli.legacy_name_migration import LegacyNameMigration
     from dreamference.vllm_server import SandboxPrerequisite
 
     class RunnerStartedError(Exception):
@@ -85,7 +87,10 @@ def test_the_configured_host_is_exempt_once_the_configuration_is_read(monkeypatc
     monkeypatch.setenv("NO_PROXY", "")
     monkeypatch.setenv("no_proxy", "")
     monkeypatch.delenv("DREAMFERENCE_VLLM_HOST", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(SandboxPrerequisite, "gate", classmethod(lambda cls, *a: True))
+    monkeypatch.setattr(LegacyNameMigration, "run", classmethod(lambda cls: None))
+    monkeypatch.setattr(RetiredWebChat, "offer", classmethod(lambda cls, command: None))
     monkeypatch.setattr(controller, "DreamferenceConfig",
                         lambda **kwargs: SimpleNamespace(vllm_host="http://10.7.8.9:8000", agent_runner="codex"))
     monkeypatch.setattr(controller, "CodexRunner", runner)
