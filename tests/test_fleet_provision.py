@@ -570,6 +570,16 @@ def test_another_model_is_assigned_there(fleet, vllm_recipes):
     assert any("main-model set test-vllm-nvfp4" in c for c in FakeSession.machines["spark-1"].commands)
 
 
+def test_a_node_serving_the_old_model_is_restarted_with_the_one_assigned(fleet, vllm_recipes, monkeypatch):
+    requests = []
+    monkeypatch.setattr(NodePairing, "run", classmethod(
+        lambda cls, record, request, capture=True, input_text=None:
+        requests.append(request) or subprocess.CompletedProcess([], 0, '{"model_port": 8000}', "")))
+    FakeSession.machines = {"spark-1": StandIn()}
+    assert provision(["spark-1"], model="test-vllm-nvfp4") == 0
+    assert "start" in requests
+
+
 def test_web_is_off_unless_asked(fleet):
     FakeSession.machines = {"spark-1": StandIn()}
     provision(["spark-1"], web=True)

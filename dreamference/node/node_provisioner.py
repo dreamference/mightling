@@ -644,7 +644,8 @@ class NodeProvisioner:
                 assigned.stdout.strip()[-200:],
                 f"ling-admin node set {host} --model {self.model}",
             )
-        self.results[host]["model"] = self.model
+        # A server already running keeps the old model until it starts again.
+        self.results[host].update(model=self.model, reassigned=True)
         return True
 
     def _step_pair(self, host: str, session: FleetSession) -> bool:
@@ -681,7 +682,7 @@ class NodeProvisioner:
             return
         address = self.connect.get(host, host)
         running = self._served_model(address, port)
-        if running is None or self.options.get("restart"):
+        if running is None or self.options.get("restart") or self.results[host].get("reassigned"):
             NodePairing.run(record, "start", capture=True)
             running = self._wait_for_model(address, port)
         if running is None:
