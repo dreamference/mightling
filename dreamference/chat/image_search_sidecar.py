@@ -69,6 +69,8 @@ class ImageSearchSidecar:
 
     # Why the last start failed, for the CLI to print; empty after a success.
     problem: ClassVar[str] = ""
+    # Why the SigLIP pre-filter did not start, for the CLI to warn; the service runs without it.
+    siglip_problem: ClassVar[str] = ""
 
     @classmethod
     def state(cls, container: str = IMAGE_SEARCH_CONTAINER_NAME) -> str:
@@ -218,10 +220,15 @@ class ImageSearchSidecar:
         if state == RUNNING:
             return True
         if state:
-            started = subprocess.run(["docker", "start", SIGLIP_CONTAINER_NAME],
-                                     capture_output=True, text=True, timeout=60, check=False)
-            return started.returncode == 0
-        result = subprocess.run(cls.siglip_command(), capture_output=True, text=True, timeout=300, check=False)
+            result = subprocess.run(["docker", "start", SIGLIP_CONTAINER_NAME],
+                                    capture_output=True, text=True, timeout=60, check=False)
+        else:
+            result = subprocess.run(cls.siglip_command(), capture_output=True, text=True, timeout=300, check=False)
+        if result.returncode != 0:
+            # On aarch64 this is Infinity's missing arm64 image (IMAGE_SEARCH §7).
+            reason = (result.stderr or "").strip()[:200] or f"docker exited {result.returncode}"
+            cls.siglip_problem = (f"The SigLIP pre-filter did not start ({reason}); "
+                                  "the service ranks its first candidates directly.")
         return result.returncode == 0
 
     @classmethod
@@ -279,6 +286,7 @@ class ImageSearchSidecar:
             bool: True if the container started (and, when waiting, answers its health route).
         """
         cls.problem = ""
+        cls.siglip_problem = ""
         secret = cls.secret()
         if not secret or not cls.stage():
             return False

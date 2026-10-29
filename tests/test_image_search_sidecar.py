@@ -105,6 +105,50 @@ def test_without_siglip_the_service_is_told_to_skip_the_prefilter(monkeypatch, s
     assert "MIGHTLING_SIGLIP_URL=" in run
 
 
+class NoSiglipDocker(FakeDocker):
+    """Docker without an image for this architecture: Infinity's SigLIP image is amd64 only."""
+
+    def __call__(self, argv, **kwargs):
+        argv = list(argv)
+        if argv[:2] == ["docker", "run"] and SIGLIP_CONTAINER_NAME in argv:
+            self.commands.append(argv)
+            self.environments.append(kwargs.get("env"))
+            return subprocess.CompletedProcess(argv, 125, "", "no matching manifest for linux/arm64\n")
+        return super().__call__(argv, **kwargs)
+
+
+def test_a_siglip_that_does_not_start_is_skipped_and_the_reason_kept(monkeypatch, store):
+    # IMAGE_SEARCH §7: the start is best-effort and the warning names the reason.
+    fake = NoSiglipDocker()
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured") is True
+    (run,) = fake.runs(IMAGE_SEARCH_CONTAINER_NAME)
+    assert "MIGHTLING_SIGLIP_URL=" in run
+    assert "no matching manifest for linux/arm64" in ImageSearchSidecar.siglip_problem
+    assert ImageSearchSidecar.problem == ""
+    # A later start that brings SigLIP up clears the warning.
+    monkeypatch.setattr(subprocess, "run", FakeDocker())
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured") is True
+    assert ImageSearchSidecar.siglip_problem == ""
+
+
+def test_images_start_prints_the_siglip_warning(monkeypatch, capsys):
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+
+    def start(cls, host, model, siglip=True, wait=True):
+        cls.siglip_problem = "The SigLIP pre-filter did not start (no matching manifest)."
+        return True
+
+    monkeypatch.setattr(ImageSearchSidecar, "start", classmethod(start))
+    monkeypatch.setattr(ImageSearchSidecar, "siglip_problem", "")
+    with pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(["images", "start"])
+    assert exit_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "✅ Image search is running" in out
+    assert "⚠️  The SigLIP pre-filter did not start (no matching manifest)." in out
+
+
 def test_containers_left_on_onyxs_network_are_replaced(monkeypatch, store):
     # What an install from before Onyx's retirement has: both created on Onyx's network.
     fake = FakeDocker(states={SIGLIP_CONTAINER_NAME: "running", IMAGE_SEARCH_CONTAINER_NAME: "running"},

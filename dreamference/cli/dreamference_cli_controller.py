@@ -849,6 +849,8 @@ class DreamferenceCLIController:
                 print(f"❌ Image search did not start. {ImageSearchSidecar.problem}")
                 return 1
             print(f"✅ Image search is running on http://127.0.0.1:{IMAGE_SEARCH_HOST_PORT}")
+            if ImageSearchSidecar.siglip_problem:
+                print(f"⚠️  {ImageSearchSidecar.siglip_problem}")
             print("💡 New ling sessions on this machine get the image_search tool; it needs SearXNG "
                   "(`ling-admin searxng start`) and the model server.")
             return 0
