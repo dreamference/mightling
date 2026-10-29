@@ -49,15 +49,20 @@ class ConfigFileStorageManager:
                     # escaped quoted key), so it is only the fallback for text tomllib refuses.
                     text = f.read()
                     try:
-                        return tomllib.loads(text)
+                        loaded = tomllib.loads(text)
                     except tomllib.TOMLDecodeError:
                         if toml is None:
                             raise
-                        return toml.loads(text)
+                        loaded = toml.loads(text)
                 elif yaml and path.suffix in (".yaml", ".yml"):
-                    return yaml.safe_load(f) or {}
+                    loaded = yaml.safe_load(f) or {}
                 else:
-                    return json.load(f) or {}
+                    loaded = json.load(f) or {}
+            if not isinstance(loaded, dict):
+                # A file that is only a list or a word has no settings; every caller reads a mapping.
+                print(f"⚠️ Mightling config file ({path}) is not a table of settings; ignoring it.")
+                return {}
+            return loaded
         except Exception as e:
             print(f"⚠️ Error reading Mightling config file ({path}): {e}")
             return {}

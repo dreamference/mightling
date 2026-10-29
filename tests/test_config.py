@@ -205,3 +205,15 @@ def test_a_config_file_saved_with_a_byte_order_mark_is_read_whole(tmp_path):
         path.write_bytes(b"\xef\xbb\xbf" + text.encode())
         assert ConfigFileStorageManager.load_config_dict(path) == {"mightling_airgapped": "on", "model": "m"}, name
     assert DreamferenceConfig(config_file=str(tmp_path / "marked.toml")).mightling_airgapped == "on"
+
+
+def test_a_config_file_that_is_not_a_table_of_settings_is_ignored(tmp_path):
+    # A YAML file holding one word or a JSON list came back as a str or a list, and the first
+    # `.get` on it raised AttributeError out of DreamferenceConfig().
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    for name, text in {"word.yaml": "just a word\n", "list.yml": "- a\n- b\n", "list.json": "[1, 2]"}.items():
+        path = tmp_path / name
+        path.write_text(text)
+        assert ConfigFileStorageManager.load_config_dict(path) == {}, name
+        assert DreamferenceConfig(config_file=str(path)).model
