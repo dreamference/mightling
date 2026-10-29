@@ -669,6 +669,8 @@ class EgressAudit:
         lines.append(f"Route lookups (UDP connect, nothing sent): {lookups}")
         names = ", ".join(f"{name} ({count}x)" for name, count in sorted(trace.dns_names.items())) or "none"
         lines.append(f"DNS queries: {names}")
+        resolvers = ", ".join(f"{server} ({count}x)" for server, count in sorted(trace.dns_servers.items())) or "none"
+        lines.append(f"DNS resolvers: {resolvers}")
         sockets = ", ".join(sorted(trace.unix_sockets)) or "none"
         lines.append(f"Unix sockets: {sockets}")
         programs = ", ".join(f"{name} ({count})" for name, count in sorted(trace.processes.items(), key=lambda item: (-item[1], item[0])))

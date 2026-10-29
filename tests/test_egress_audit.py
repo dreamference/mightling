@@ -145,9 +145,15 @@ def test_the_report_lists_everything_seen():
     assert "127.0.0.1:8000" in text and "model server" in text and "Gmail search service" in text
     assert "104.18.32.47:443" in text and "not on this machine" in text
     assert "DNS queries: ab.chatgpt.com (2x)" in text
+    # §10.2: resolvers are listed apart from the destinations.
+    assert "DNS resolvers: 127.0.0.53:53 (3x)" in lines
+    destinations = lines[lines.index("Network destinations:"):next(
+        index for index, line in enumerate(lines) if line.startswith("Route lookups"))]
+    assert not any("127.0.0.53" in line for line in destinations)
     ok = fixture("exec_pass.strace")
     lines = EgressAudit.render(ok, EgressAudit.judge(ok, ALLOWED, True), ALLOWED)
     assert lines[0] == "✅ Egress audit: pass" and "DNS queries: none" in lines and "Networked git commands: none" in lines
+    assert "DNS resolvers: none" in lines
 
 
 def test_the_audit_runs_the_session_in_a_throwaway_repository_and_home(tmp_path, monkeypatch, capsys):
