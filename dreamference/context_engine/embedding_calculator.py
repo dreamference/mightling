@@ -21,6 +21,13 @@ SentenceTransformer: Any = _NOT_LOADED
 
 EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 
+# The model loads with trust_remote_code, which runs the Hub's Python in this process, so it is
+# fetched at a fixed commit. Its config takes the modeling code from another repository
+# (nomic-ai/nomic-bert-2048), which transformers fetches at that repository's default branch unless
+# code_revision names a commit: both are pinned. Commits as on the Hub on 2026-10-29.
+EMBEDDING_REVISION: Final[str] = "e9b6763023c676ca8431644204f50c2b100d9aab"
+EMBEDDING_CODE_REVISION: Final[str] = "7710840340a098cfb869c4f65e87cf2b1b70caca"
+
 # nomic-embed-text was trained with task prefixes and retrieves noticeably worse without them:
 # documents are embedded as "search_document: ...", queries as "search_query: ...".
 DOCUMENT_PREFIX = "search_document: "
@@ -66,7 +73,14 @@ class EmbeddingCalculator:
                 SentenceTransformer = None
         if cls._model is None and not cls._unavailable and SentenceTransformer is not None:
             try:
-                cls._model = SentenceTransformer(EMBEDDING_MODEL, trust_remote_code=True, device=EMBEDDING_DEVICE)
+                cls._model = SentenceTransformer(
+                    EMBEDDING_MODEL,
+                    trust_remote_code=True,
+                    revision=EMBEDDING_REVISION,
+                    config_kwargs={"code_revision": EMBEDDING_CODE_REVISION},
+                    model_kwargs={"code_revision": EMBEDDING_CODE_REVISION},
+                    device=EMBEDDING_DEVICE,
+                )
                 cls._model.max_seq_length = MAX_SEQUENCE_TOKENS
             except Exception as error:
                 cls._unavailable = True

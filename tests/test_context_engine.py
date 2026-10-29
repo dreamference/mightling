@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from dreamference.context_engine import ContextEngine
 
@@ -135,7 +136,7 @@ def test_the_embedding_model_runs_on_the_cpu_with_bounded_inputs(monkeypatch):
     made = []
 
     class FakeSentenceTransformer:
-        def __init__(self, name, trust_remote_code=True, device=None):
+        def __init__(self, name, trust_remote_code=True, device=None, **kwargs):
             made.append(device)
             self.max_seq_length = 8192
 
@@ -145,6 +146,31 @@ def test_the_embedding_model_runs_on_the_cpu_with_bounded_inputs(monkeypatch):
     model = embedding_calculator.EmbeddingCalculator._get_model()
     assert made == ["cpu"]
     assert model.max_seq_length == embedding_calculator.MAX_SEQUENCE_TOKENS
+
+
+def test_the_embedding_model_and_its_remote_code_load_at_pinned_commits(monkeypatch):
+    # trust_remote_code runs the Hub's Python in this process. The checkpoint's config names its
+    # modeling code in another repository (nomic-ai/nomic-bert-2048), and transformers takes that
+    # one at its default branch unless code_revision is given, even when the checkpoint is pinned.
+    from dreamference.context_engine import embedding_calculator
+
+    made = []
+
+    class FakeSentenceTransformer:
+        def __init__(self, name, **kwargs):
+            made.append(kwargs)
+            self.max_seq_length = 8192
+
+    monkeypatch.setattr(embedding_calculator, "SentenceTransformer", FakeSentenceTransformer)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_model", None)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", False)
+    embedding_calculator.EmbeddingCalculator._get_model()
+    commit = re.compile(r"[0-9a-f]{40}")
+    (kwargs,) = made
+    assert commit.fullmatch(kwargs.get("revision") or "")
+    code = kwargs.get("config_kwargs", {}).get("code_revision") or ""
+    assert commit.fullmatch(code)
+    assert kwargs.get("model_kwargs", {}).get("code_revision") == code
 
 
 def test_a_workspace_inside_a_directory_named_like_build_output_is_indexed(tmp_path, monkeypatch):

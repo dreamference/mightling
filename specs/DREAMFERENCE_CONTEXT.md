@@ -50,7 +50,7 @@ The `ling` agent does **not** use it: it uses `ling-code` (built in `DREAMFERENC
    - `fts_context`, an FTS5 table with `rel_path UNINDEXED, content` (the full file text);
    - every connection sets `PRAGMA mmap_size = 2147483648` (2 GB).
 5. **TF-IDF:** `TFIDFCalculator.compute_matrix` builds an IDF table and a per-token TF-IDF map. It uses one `Counter` per document; until 2026-09-29 it scanned every document's token list once per token, which is quadratic.
-6. **Embeddings:** `EmbeddingCalculator.compute_embeddings` encodes each file with sentence-transformers `nomic-ai/nomic-embed-text-v1.5`, one vector per file.
+6. **Embeddings:** `EmbeddingCalculator.compute_embeddings` encodes each file with sentence-transformers `nomic-ai/nomic-embed-text-v1.5`, one vector per file. The model loads with `trust_remote_code`, so it is fetched at a pinned commit (`EMBEDDING_REVISION`), and so is the modeling code its config takes from `nomic-ai/nomic-bert-2048` (`EMBEDDING_CODE_REVISION`, passed as `code_revision`).
    - The model is loaded with `trust_remote_code=True`; vectors are normalised and 768-dim.
    - **Input:** each text is prefixed `search_document: ` and truncated to its first `MAX_SEQUENCE_TOKENS` (1,024) tokens. Texts are encoded in batches of 8.
    - **Device:** the model runs on the **CPU** (`EMBEDDING_DEVICE`). With vLLM resident, CUDA refuses even this model (out of memory, although the host has gigabytes free), and a failed attempt leaves a CUDA context in unified memory.
