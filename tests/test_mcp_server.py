@@ -121,7 +121,7 @@ def test_code_search_is_answered_by_the_code_index_when_the_workspace_has_one(tm
         {"rel_path": "pkg/a.py", "line": 40, "kind": "method", "symbol": "pkg.a.Loader.load", "source": "ling-code"},
     ]
     # The words are separate arguments: no shell, and nothing the query says is interpreted.
-    assert calls.read_text().strip() == "search --json -- loader load"
+    assert calls.read_text().strip() == "search --json --limit 2 -- loader load"
 
 
 def test_code_search_passes_words_that_look_like_options_as_words(tmp_path, monkeypatch):
@@ -132,7 +132,19 @@ def test_code_search_passes_words_that_look_like_options_as_words(tmp_path, monk
     calls = tmp_path / "calls"
     _fake_mightling_code(tmp_path, monkeypatch, f"echo \"$@\" >> {calls}\necho '{{\"rows\": []}}'\n")
     assert CodeIndexSearch.search("--path vendor -x") == []
-    assert calls.read_text().strip() == "search --json -- --path vendor -x"
+    assert calls.read_text().strip() == "search --json --limit 5 -- --path vendor -x"
+
+
+def test_code_search_asks_the_code_index_for_top_k_rows(tmp_path, monkeypatch):
+    # `ling-code` prints its configured `row_limit` (40 by default) unless told otherwise, so a
+    # `top_k` above it was cut short without a word.
+    from dreamference.mcp_server import CodeIndexSearch
+
+    rows = [{"path": f"m{i}.py", "line": 1, "detail": "function f"} for i in range(60)]
+    script = f"case \"$*\" in *'--limit 60'*) cat <<'JSON'\n{json.dumps({'rows': rows})}\nJSON\n;; " \
+             f"*) cat <<'JSON'\n{json.dumps({'rows': rows[:40]})}\nJSON\n;; esac\n"
+    _fake_mightling_code(tmp_path, monkeypatch, script)
+    assert len(CodeIndexSearch.search("f", top_k=60)) == 60
 
 
 def test_code_search_falls_back_to_the_context_engine(tmp_path, monkeypatch):

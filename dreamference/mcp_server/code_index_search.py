@@ -59,8 +59,10 @@ class CodeIndexSearch:
             return None
         try:
             result = subprocess.run(
-                # `--` before the words: a word such as `--path` is a word, not an option.
-                [binary, "search", "--json", "--", *query.split()],
+                # `--` before the words: a word such as `--path` is a word, not an option. `--limit`:
+                # otherwise `ling-code` prints its `row_limit` (40) rows, and a larger `top_k` was
+                # cut short silently. It clamps the limit to 1..200 itself.
+                [binary, "search", "--json", "--limit", str(max(1, top_k)), "--", *query.split()],
                 cwd=cwd or os.getcwd(), capture_output=True, text=True,
                 stdin=subprocess.DEVNULL, timeout=SEARCH_TIMEOUT_S,
             )
