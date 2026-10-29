@@ -173,6 +173,15 @@ describe("the policy", () => {
     expect(threadPlace({ method: "thread/started", params: { thread: { id: "t1" } } })).toBeNull();
   });
 
+  it("drops the import items the policy refuses at off too, and refuses an import it cannot read", () => {
+    const file = JSON.parse(fs.readFileSync(path.join(WEB, "policy.json"), "utf8"));
+    const policy = parsePolicy({ ...file, refusedImportItems: ["CONFIG"] });
+    const vet = (params: unknown) => vetOutgoing({ id: 1, method: policy.importRequest, params }, new Set(), PLAIN, policy).params;
+    expect(vet({ migrationItems: [{ itemType: "CONFIG" }, { itemType: "PLUGINS" }] })).toEqual({ migrationItems: [{ itemType: "PLUGINS" }] });
+    expect(() => vet({ migrationItems: [{ itemType: "CONFIG" }] })).toThrow(/^nothing left to import$/);
+    expect(() => vet({})).toThrow(/must list its migrationItems/);
+  });
+
   it("refuses a reason for a request not refused at on", () => {
     const file = JSON.parse(fs.readFileSync(path.join(WEB, "policy.json"), "utf8"));
     expect(() => parsePolicy({ ...file, airgappedRefusalReasons: { "thread/list": "no" } })).toThrow();
