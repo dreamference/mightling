@@ -493,12 +493,21 @@ impl Store {
         for entry in std::fs::read_dir(dir.join("rollouts"))?.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
             let Some(id) = name.strip_suffix(".jsonl").filter(|id| valid_id(id)) else { continue };
-            let Some(record) = std::fs::read_to_string(dir.join("rollouts").join(format!("{id}.json")))
-                .ok()
-                .and_then(|text| serde_json::from_str::<Record>(&text).ok())
-            else {
-                // A rollout whose first upload never committed.
-                let _ = std::fs::remove_file(entry.path());
+            let record_path = dir.join("rollouts").join(format!("{id}.json"));
+            let record = match std::fs::read_to_string(&record_path) {
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    // A rollout whose first upload never committed.
+                    let _ = std::fs::remove_file(entry.path());
+                    continue;
+                }
+                read => read.ok().and_then(|text| serde_json::from_str::<Record>(&text).ok()),
+            };
+            let Some(record) = record else {
+                // A record that does not read is not a reason to lose the history: both are set
+                // aside under names the store skips, for the owner to look at.
+                let aside = format!("unreadable-{}", now_secs());
+                let _ = std::fs::rename(&record_path, record_path.with_extension(format!("json.{aside}")));
+                let _ = std::fs::rename(entry.path(), entry.path().with_extension(format!("jsonl.{aside}")));
                 continue;
             };
             if entry.metadata().map(|m| m.len()).unwrap_or(0) > record.length {
@@ -1095,6 +1104,36 @@ mod tests {
         let browser = Caller { agent: false, ..laptop.clone() };
         assert!(matches!(store.append(ID, &browser, &Upload::first(FILE), b"x"), Err(Refusal::Forbidden(_))));
         assert_eq!(store.append("../etc", &laptop, &Upload::first(FILE), b"x").unwrap_err(), Refusal::NotFound);
+    }
+
+    /// A record the hub cannot read (a disk error, a cut write) sets the rollout aside, never
+    /// deletes it; a rollout with no record at all is a first upload that never committed.
+    #[test]
+    fn a_rollout_whose_record_does_not_read_is_set_aside_not_deleted() {
+        let home = scratch("unreadable");
+        let store = Store::open(&home).unwrap();
+        let line = b"{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"Keep me\"}}\n";
+        store.append(ID, &agent("lap1"), &Upload::first(FILE), line).unwrap();
+        drop(store);
+        let rollouts = hub_dir(&home).join("rollouts");
+        std::fs::write(rollouts.join(format!("{ID}.json")), "{\"thread\":").unwrap();
+        let orphan = "01a0f1ae-2da4-7942-99ae-c3151dc13700";
+        std::fs::write(rollouts.join(format!("{orphan}.jsonl")), "x\n").unwrap();
+        let store = Store::open(&home).unwrap();
+        assert!(store.record(ID).is_none());
+        let kept: Vec<String> = std::fs::read_dir(&rollouts)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(ID) && name.contains(".jsonl"))
+            .collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(std::fs::read(rollouts.join(&kept[0])).unwrap(), line);
+        assert!(!rollouts.join(format!("{orphan}.jsonl")).exists());
+        // Opened again, the set-aside rollout stays as it is.
+        drop(store);
+        Store::open(&home).unwrap();
+        assert_eq!(std::fs::read(rollouts.join(&kept[0])).unwrap(), line);
     }
 
     #[test]
