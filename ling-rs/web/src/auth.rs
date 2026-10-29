@@ -88,7 +88,8 @@ pub fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         private_dir(parent)?;
     }
-    let staging = path.with_extension(format!("tmp-{}", std::process::id()));
+    // Unique per call: two threads of one server may write the same file at once.
+    let staging = path.with_extension(format!("tmp-{}-{}", std::process::id(), random_hex(4)));
     {
         #[cfg(unix)]
         use std::os::unix::fs::OpenOptionsExt;
@@ -260,6 +261,22 @@ fn save_devices(state: &Path, devices: &[Device]) -> std::io::Result<()> {
     write_private(&devices_path(state), &serde_json::to_string_pretty(&items).unwrap_or_default())
 }
 
+/// Changes `devices.json` under its lock (`devices.lock`), read and written whole while it is held:
+/// the server's requests and `ling web revoke` in another process change the one file, and a change
+/// made between another's read and its write would otherwise be lost (a pairing dropped, a revoked
+/// device back). `change` says whether it changed anything to write.
+fn change_devices<T>(state: &Path, change: impl FnOnce(&mut Vec<Device>) -> (T, bool)) -> std::io::Result<T> {
+    private_dir(state)?;
+    let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(state.join("devices.lock"))?;
+    lock.lock()?;
+    let mut devices = load_devices(state);
+    let (result, changed) = change(&mut devices);
+    if changed {
+        save_devices(state, &devices)?;
+    }
+    Ok(result)
+}
+
 /// A name a person typed, made safe to keep and show: printable, at most 64 characters.
 pub fn clean_device_name(name: &str) -> String {
     let cleaned: String = name.chars().filter(|c| !c.is_control()).take(64).collect();
@@ -276,32 +293,32 @@ pub fn add_device(state: &Path, name: &str) -> std::io::Result<(String, String)>
 pub fn add_device_of(state: &Path, name: &str, kind: DeviceKind) -> std::io::Result<(String, String)> {
     let token = random_hex(32);
     let id = random_hex(4);
-    let mut devices = load_devices(state);
-    devices.push(Device {
-        id: id.clone(),
-        name: clean_device_name(name),
-        token_sha256: sha256_hex(&token),
-        created: now_secs(),
-        last_used: now_secs(),
-        kind,
-        scope: Scope::Control,
-    });
-    save_devices(state, &devices)?;
+    change_devices(state, |devices| {
+        devices.push(Device {
+            id: id.clone(),
+            name: clean_device_name(name),
+            token_sha256: sha256_hex(&token),
+            created: now_secs(),
+            last_used: now_secs(),
+            kind,
+            scope: Scope::Control,
+        });
+        ((), true)
+    })?;
     Ok((id, token))
 }
 
 /// `ling web devices --scope <device> watch|control`: by id or exact name. Returns the devices changed.
 pub fn set_scope(state: &Path, which: &str, scope: Scope) -> std::io::Result<Vec<Device>> {
-    let mut devices = load_devices(state);
-    let mut changed = Vec::new();
-    for device in devices.iter_mut().filter(|d| d.id == which || d.name == which) {
-        device.scope = scope;
-        changed.push(device.clone());
-    }
-    if !changed.is_empty() {
-        save_devices(state, &devices)?;
-    }
-    Ok(changed)
+    change_devices(state, |devices| {
+        let mut changed = Vec::new();
+        for device in devices.iter_mut().filter(|d| d.id == which || d.name == which) {
+            device.scope = scope;
+            changed.push(device.clone());
+        }
+        let any = !changed.is_empty();
+        (changed, any)
+    })
 }
 
 /// The browser a cookie's token belongs to. A sync agent's secret is no cookie: it opens only
@@ -318,24 +335,30 @@ pub fn sync_device_for_token(state: &Path, token: &str) -> Option<Device> {
 /// The device of `kind` a token belongs to, its last use brought up to date (at most once a minute).
 fn device_of_kind(state: &Path, token: &str, kind: DeviceKind) -> Option<Device> {
     let hash = sha256_hex(token);
-    let mut devices = load_devices(state);
-    let index = devices.iter().position(|d| d.kind == kind && same_secret(&d.token_sha256, &hash))?;
+    let mut device = load_devices(state).into_iter().find(|d| d.kind == kind && same_secret(&d.token_sha256, &hash))?;
     let now = now_secs();
-    if now.saturating_sub(devices[index].last_used) >= 60 {
-        devices[index].last_used = now;
-        let _ = save_devices(state, &devices);
+    if now.saturating_sub(device.last_used) >= 60 {
+        device.last_used = now;
+        // Read again under the lock: a device revoked meanwhile is not written back.
+        let _ = change_devices(state, |devices| match devices.iter_mut().find(|d| d.id == device.id && d.token_sha256 == device.token_sha256) {
+            Some(kept) => {
+                kept.last_used = now;
+                ((), true)
+            }
+            None => ((), false),
+        });
     }
-    Some(devices[index].clone())
+    Some(device)
 }
 
 /// `ling web revoke <device>`: by id or by exact name. Returns the devices removed.
 pub fn revoke_device(state: &Path, which: &str) -> std::io::Result<Vec<Device>> {
-    let devices = load_devices(state);
-    let (gone, kept): (Vec<Device>, Vec<Device>) = devices.into_iter().partition(|d| d.id == which || d.name == which);
-    if !gone.is_empty() {
-        save_devices(state, &kept)?;
-    }
-    Ok(gone)
+    change_devices(state, |devices| {
+        let (gone, kept): (Vec<Device>, Vec<Device>) = std::mem::take(devices).into_iter().partition(|d| d.id == which || d.name == which);
+        *devices = kept;
+        let any = !gone.is_empty();
+        (gone, any)
+    })
 }
 
 /// The `host:port` values a request may name in `Host`, and the origins it may come from.
@@ -498,6 +521,32 @@ mod tests {
         assert!(device_for_token(&state, &token).is_none());
         #[cfg(unix)]
         assert_eq!(mode(&state.join("devices.json")), 0o600);
+    }
+
+    #[test]
+    fn devices_paired_and_revoked_at_once_are_none_of_them_lost() {
+        let state = scratch("devices-at-once");
+        let (kept_id, _) = add_device(&state, "kept").unwrap();
+        let doomed: Vec<String> = (0..8).map(|n| add_device(&state, &format!("doomed-{n}")).unwrap().0).collect();
+        let threads: Vec<_> = (0..8)
+            .map(|n| {
+                let state = state.clone();
+                let doomed = doomed[n].clone();
+                std::thread::spawn(move || {
+                    for i in 0..10 {
+                        add_device(&state, &format!("new-{n}-{i}")).unwrap();
+                    }
+                    assert_eq!(revoke_device(&state, &doomed).unwrap().len(), 1);
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let devices = load_devices(&state);
+        assert_eq!(devices.len(), 1 + 80, "every pairing kept");
+        assert!(devices.iter().any(|d| d.id == kept_id));
+        assert!(devices.iter().all(|d| !doomed.contains(&d.id)), "every revoked device stays revoked");
     }
 
     #[test]
