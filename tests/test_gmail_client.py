@@ -762,3 +762,57 @@ def test_a_search_with_a_line_break_is_never_sent_as_a_quoted_string():
 
     assert GmailSearchService._search_uids(Conn(), 'x"\r\nA1 EXPUNGE') == []
     assert all("\n" not in arg and "\r" not in arg for args in sent for arg in args)
+
+
+def test_reading_a_message_logs_out_of_every_account_it_opened(monkeypatch):
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    raw = b"From: a@x.com\r\nSubject: Hi\r\n\r\nbody"
+    logged_out = []
+
+    class Conn:
+        def __init__(self, name, holds):
+            self.name, self.holds = name, holds
+
+        def uid(self, cmd, *args):
+            if cmd == "SEARCH":
+                return "OK", [b"7" if self.holds else b""]
+            return "OK", [(b"7 (X-GM-MSGID 42 BODY[] {30}", raw)]
+
+        def logout(self):
+            logged_out.append(self.name)
+
+    def opened(cls):
+        return {"a@x.com": Conn("a", True), "b@y.com": Conn("b", False)}, None, []
+
+    monkeypatch.setattr(GmailSearchService, "_open_mailboxes", classmethod(opened))
+    assert GmailSearchService.message("42")["body"] == "body"
+    assert sorted(logged_out) == ["a", "b"]
+
+
+def test_an_account_that_fails_to_log_in_has_its_connection_closed(monkeypatch):
+    import imaplib
+
+    from dreamference.chat import gmail_search_service as svc_mod
+    from dreamference.chat.gmail_search_service import GMAIL_SCOPE, GmailSearchService
+
+    closed = []
+
+    class FakeIMAP:
+        def __init__(self, host, port, timeout=None):
+            pass
+
+        def authenticate(self, mech, resp):
+            raise imaplib.IMAP4.error(b"[AUTHENTICATIONFAILED]")
+
+        def logout(self):
+            closed.append(True)
+
+    monkeypatch.setattr(svc_mod.imaplib, "IMAP4_SSL", FakeIMAP)
+    monkeypatch.setattr(
+        GmailSearchService, "credentials",
+        classmethod(lambda cls: [{"email": "a@x.com", "access_token": "t", "scopes": [GMAIL_SCOPE]}]),
+    )
+    connections, _error, failures = GmailSearchService._open_mailboxes()
+    assert connections == {} and len(failures) == 1
+    assert closed == [True]
