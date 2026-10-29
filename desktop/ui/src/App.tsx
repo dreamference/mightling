@@ -13,6 +13,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 
 import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseName, fileKindLabel, insideFolder, isAskThread, turnInput, viewTabs, type Attached } from "./ask";
 import * as bridge from "./bridge";
+import { needsNodeChoice, pickable } from "./nodechoice";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
 import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortChoices, effortFor, isLongPaste, keyAnswer, mentionPath, parseShell, parseSlash, pasteLabel, rememberModel, userTexts, withPastes, type SlashCommand } from "./composer";
@@ -3736,14 +3737,40 @@ function CopyButton({ text: value }: { text: string }) {
 
 
 function StartupScreen(props: { state: string; stderr: string[]; protocolErrors: string[]; notices: string[]; onRetry: () => void }) {
+  const log = [...props.stderr, ...props.protocolErrors, ...props.notices];
   return (
     <div className="startup">
       <h1>{props.state === "exited" ? "The agent's server stopped" : "Starting Mightling…"}</h1>
       <p>{props.state === "exited"
         ? "ling app-server exited. Its last messages are below."
         : "ling app-server is waiting for the model server. A cold load takes a few minutes; `ling-admin server start` starts it if it is stopped."}</p>
-      <pre className="log">{[...props.stderr, ...props.protocolErrors, ...props.notices].join("\n") || "…"}</pre>
+      <pre className="log">{log.join("\n") || "…"}</pre>
+      {props.state === "exited" && needsNodeChoice(log) ? <NodePicker /> : null}
       {props.state === "exited" ? <button className="primary" onClick={props.onRetry}>Start again</button> : null}
+    </div>
+  );
+}
+
+/** Several nodes answered and none is chosen: list them; the pick is remembered and the app restarts on it. */
+function NodePicker() {
+  const [nodes, setNodes] = useState<bridge.NodeEntry[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    bridge.nodes.list().then((list) => setNodes(pickable(list.nodes))).catch((e) => setError(String(e instanceof Error ? e.message : e)));
+  }, []);
+  const choose = (choice: string) => {
+    bridge.nodes.use(choice).then(() => bridge.relaunchApp()).catch((e) => setError(String(e instanceof Error ? e.message : e)));
+  };
+  return (
+    <div className="info-list" aria-label="Nodes found">
+      <p>Several Mightling nodes answered. Choose the one to use:</p>
+      {nodes === null && !error ? <p className="empty small">Looking for nodes…</p> : null}
+      {(nodes ?? []).map((node) => (
+        <button key={node.id || node.name} onClick={() => choose(node.choice as string)}>
+          {node.name || `node ${node.id.slice(0, 8)}`}{node.model ? ` — ${node.model}` : ""}
+        </button>
+      ))}
+      {error ? <p className="error">{error}</p> : null}
     </div>
   );
 }
