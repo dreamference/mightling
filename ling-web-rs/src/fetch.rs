@@ -131,6 +131,9 @@ pub fn fetch(url: &str, max_chars: i64) -> Result<FetchedPage, String> {
     // A page longer than the cap is read up to it, and says that it was cut.
     let cut = body.len() as u64 > MAX_DOWNLOAD_BYTES;
     body.truncate(MAX_DOWNLOAD_BYTES as usize);
+    if is_binary(&body, &content_type) {
+        return Err(format!("not text: {content_type}, {} bytes", body.len()));
+    }
     let mut page = page(url, final_url, status, content_type, &body, max_chars);
     page.truncated |= cut;
     Ok(page)
@@ -246,6 +249,16 @@ pub fn save_pdf(
         let _ = std::fs::remove_file(dest);
     }
     result
+}
+
+/// Whether a body is not text: it holds a NUL byte, which no text does except UTF-16, which says
+/// so with a byte-order mark or its `Content-Type`. Printed, it would be thousands of replacement
+/// characters.
+fn is_binary(body: &[u8], content_type: &str) -> bool {
+    body.contains(&0)
+        && !body.starts_with(&[0xff, 0xfe])
+        && !body.starts_with(&[0xfe, 0xff])
+        && !content_type.to_ascii_lowercase().contains("utf-16")
 }
 
 /// Builds the page from a response's parts; separate from the request so it can be tested alone.
