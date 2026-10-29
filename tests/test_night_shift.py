@@ -559,6 +559,24 @@ def test_test_command_detection_order(tmp_path):
     assert detect(override="true", configured="make check") == ("true", "--test")
 
 
+def test_a_resumed_task_takes_the_test_command_from_its_base_not_from_its_own_edits(tmp_path):
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    git(tree, "init", "-q")
+    (tree / "dreamference.toml").write_text('[night]\ntest = "make check"\n')
+    git(tree, "add", "-A")
+    git(tree, "-c", "user.name=T", "-c", "user.email=t@x", "commit", "-q", "-m", "base")
+    base = git(tree, "rev-parse", "HEAD").stdout.strip()
+    # Last night's work, left in the worktree of a task that ran out of time, names its own command.
+    (tree / "dreamference.toml").write_text('[night]\ntest = "true"\n')
+    detect = NightShiftTaskRun.detect_test_command
+    assert detect(tree, None, None, tmp_path, base) == ("make check", "dreamference.toml [night] test")
+    git(tree, "rm", "-q", "--cached", "dreamference.toml")
+    git(tree, "-c", "user.name=T", "-c", "user.email=t@x", "commit", "-q", "-m", "none")
+    head = git(tree, "rev-parse", "HEAD").stdout.strip()
+    assert detect(tree, None, "tox", tmp_path, head) == ("tox", "config [night] test")
+
+
 def test_the_venv_test_command_survives_a_space_in_the_repository_path(tmp_path):
     # The command runs through `bash -c`, so an unquoted path splits at the space.
     repo, tree = tmp_path / "my repo", tmp_path / "tree"
