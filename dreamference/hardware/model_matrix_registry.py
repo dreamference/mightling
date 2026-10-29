@@ -439,10 +439,10 @@ QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ("kv-pages", "sparse-head"
 # pages, reclaim of idle sessions, the last resort), which is what lets four sessions at 262,144 tokens
 # fit where the flat KV cannot (~19 GB each). A ling-engine recipe lists "kv-pages" in `engine_features`
 # exactly when its `engine_commit` descends from it (tests/test_hardware.py checks that against the
-# submodule), and only then, with the recipe's `kv_pages` on, does the launch pass `--sessions`/`--batch` and `--kv-pages` (an engine
-# before it either exits 2 on `--kv-pages` or, flat, would allocate four full contexts). P4d's merge keeps the flat slots the default and takes `--kv-pages` (and
-# `--no-kv-pages`), so this commit stays the boundary for the flags; the recipe's `kv_pages` decides whether
-# the launch passes them.
+# submodule), and only then, with the recipe's `kv_pages` on, does the launch pass `--sessions`/`--batch`
+# and `--kv-pages` (an engine before it either exits 2 on `--kv-pages` or, flat, would allocate four full
+# contexts). P4d's merge keeps the flat slots the default and takes `--kv-pages` (and `--no-kv-pages`), so
+# this commit stays the boundary for the flags; the recipe's `kv_pages` decides whether the launch passes them.
 LING_ENGINE_KV_PAGES_SINCE: Final[str] = "f180b44a40369d7dd03f9ae97e7fa8be4ece1380"
 
 # The sessions and the batch the recipe asks of a paged engine (1.8.0: four conversations at the full
