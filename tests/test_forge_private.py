@@ -109,6 +109,18 @@ def test_the_tick_removes_any_push_mirror_and_names_a_private_one(monkeypatch):
     assert "PRIVATE" in lines[0]
 
 
+def test_a_push_mirror_forgejo_would_not_remove_is_not_reported_removed(monkeypatch):
+    monkeypatch.setattr(ForgeRepositories, "all", classmethod(lambda cls, token=None: [PRIVATE]))
+
+    def api(cls, method, path, token, body=None, timeout=30):
+        return (500, None) if method == "DELETE" else (200, [{"remote_name": "remote_mirror_x"}])
+
+    monkeypatch.setattr(ForgeContainer, "api", classmethod(api))
+    lines = ForgeRepositories.remove_push_mirrors()
+    assert len(lines) == 1 and "Could not remove" in lines[0] and "PRIVATE" in lines[0]
+    assert "(500)" in lines[0]
+
+
 # -- a throwaway Forgejo -----------------------------------------------------------------------------
 
 
