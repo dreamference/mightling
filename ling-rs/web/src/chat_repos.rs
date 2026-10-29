@@ -4798,6 +4798,10 @@ async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
     let record = mreq.record.clone();
     let worktree_dir = mreq.worktree_dir.clone();
     let default_branch = record.base.clone();
+    // Already on main: `checkout -B` would reset it to the forge's and drop commits not yet pushed.
+    if record.branch.as_deref() == Some(default_branch.as_str()) {
+        return json_response(StatusCode::OK, json!({ "repo": record.repo, "branch": default_branch }));
+    }
 
     let repo_lock = server.chat_repos.repo_mutex(&record.repo);
     let _repo_guard = repo_lock.lock().await;
@@ -8552,6 +8556,50 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::FORBIDDEN, "{p_body}");
         assert!(p_body.contains("ling chat repos allow-main org/trunkrepo"), "{p_body}");
+    }
+
+    #[tokio::test]
+    async fn repo_main_again_keeps_the_commits_not_yet_pushed() {
+        let s = scratch("main-again");
+        let bare = make_bare_repo(&s.dir, "org/mainrepo");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/mainrepo",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(s.dir.join("user/.gitconfig"), "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n").unwrap();
+        std::fs::write(server.config.user_config.as_ref().unwrap(), "[chat_repos]\nallow_main = [\"org/mainrepo\"]\n").unwrap();
+        let cookie = owner_cookie(&server).await;
+        let (_, opened, _) =
+            post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/mainrepo", "bridge": "signal", "chat": "c1" })).await;
+        let thread = opened["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
+
+        let nonce = get_nonce(&server, &cookie, &thread, "main").await;
+        let (st, _, body) = post_json(&server, &cookie, "/api/repos/main", json!({ "thread": thread, "confirm": nonce })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        std::fs::write(wt.join("unpushed.txt"), "not on the forge yet\n").unwrap();
+        let nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, body) =
+            post_json(&server, &cookie, "/api/repos/commit", json!({ "thread": thread, "message": "unpushed", "confirm": nonce })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let head = git_stdout(&wt, &["rev-parse", "HEAD"]);
+
+        // A second /main on a checkout already on main changes nothing.
+        let nonce = get_nonce(&server, &cookie, &thread, "main").await;
+        let (st, again, body) = post_json(&server, &cookie, "/api/repos/main", json!({ "thread": thread, "confirm": nonce })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(again["branch"], "main");
+        assert_eq!(git_stdout(&wt, &["rev-parse", "HEAD"]), head, "the unpushed commit is still main's tip");
     }
 
     #[tokio::test]
