@@ -77,6 +77,19 @@ def test_private_files_are_0600_in_a_0700_folder_and_remote_json_needs_a_box():
     assert RemoteSettings.read()["dns_name"] == BOX
 
 
+def test_a_private_write_that_fails_leaves_the_old_file_whole():
+    """remote.json was truncated before the new text was written: a failed write lost the record."""
+    RemoteSettings.write({"dns_name": BOX, "overlay_name": "x"})
+    before = RemoteSettings.path("remote.json").read_text()
+    with pytest.raises(UnicodeEncodeError):
+        RemoteSettings.write_private("remote.json", "\udc80")
+    assert RemoteSettings.path("remote.json").read_text() == before
+    assert RemoteSettings.read()["dns_name"] == BOX
+    assert sorted(p.name for p in RemoteSettings.folder().iterdir()) == ["remote.json"], (
+        "no temporary file is left behind"
+    )
+
+
 def test_everything_from_netbird_is_pinned_by_digest():
     assert (
         "@sha256:" in remote_settings.SERVER_IMAGE

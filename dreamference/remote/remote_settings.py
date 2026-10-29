@@ -13,6 +13,7 @@ SHA-256 on the node and again on the box), and the client's release archive for 
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Final
 
@@ -167,6 +168,9 @@ class RemoteSettings:
     def write_private(cls, name: str, text: str) -> Path:
         """Writes a file under the folder with mode 0600, the folder 0700.
 
+        The text goes to a temporary file beside it that then replaces it, so a reader (the daily
+        renewal rewrites `remote.json`) never sees half a file and a failed write keeps the old one.
+
         Args:
             name: The path under the folder.
             text: The content.
@@ -177,9 +181,14 @@ class RemoteSettings:
         path = cls.path(name)
         path.parent.mkdir(parents=True, exist_ok=True)
         Path(cls.folder()).chmod(0o700)
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(descriptor, "w") as handle:
-            handle.write(text)
+        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        try:
+            with os.fdopen(descriptor, "w") as handle:
+                handle.write(text)
+            os.replace(temporary, path)
+        except BaseException:
+            Path(temporary).unlink(missing_ok=True)
+            raise
         Path(path).chmod(0o600)
         return path
 
