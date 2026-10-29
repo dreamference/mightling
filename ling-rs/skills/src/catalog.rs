@@ -872,4 +872,50 @@ mod tests {
             Some(Status::Unavailable("for Claude Code only (delegates to ling)".to_string()))
         );
     }
+
+    #[test]
+    fn a_link_is_named_by_its_folder_when_the_frontmatter_name_is_not_a_plain_name() {
+        let fixture = Fixture::new("catalog-link-names");
+        for (folder, name) in [("up", "../escape"), ("hid", ".hidden"), ("nest", "a/b"), ("back", "a\\b"), ("plain", "plain-name")] {
+            fixture.skill(&format!(".claude/skills/{folder}"), name, "");
+        }
+        let sets = plan(&fixture.machine(), &Settings::default()).link_sets(&fixture.home);
+        let claude = sets.iter().find(|set| set.agent == "claude").map(|set| set.links.clone()).unwrap_or_default();
+        let names: Vec<&str> = claude.keys().map(String::as_str).collect();
+        assert_eq!(names, vec!["back", "hid", "nest", "plain-name", "up"]);
+        assert_eq!(claude.get("up"), Some(&fixture.home.join(".claude/skills/up")));
+    }
+
+    #[test]
+    fn the_walk_skips_hidden_folders_stops_at_its_depth_and_survives_a_link_loop() {
+        let fixture = Fixture::new("catalog-walk");
+        let root = fixture.home.join(".claude/skills");
+        write_skill(&root.join("top"), "top", "");
+        write_skill(&root.join("group/inner"), "inner", "");
+        write_skill(&root.join("a/b/c/deep"), "deep", "");
+        write_skill(&root.join(".hidden/secret"), "secret", "");
+        // A skill's own subfolders are not searched for more skills.
+        write_skill(&root.join("top/examples/nested"), "nested", "");
+        std::os::unix::fs::symlink(&root, root.join("group/loop")).unwrap_or_default();
+        std::fs::write(root.join("group/SKILL.txt"), "not a skill").unwrap_or_default();
+        let found: Vec<PathBuf> = skill_dirs(&root, 3);
+        let relative: Vec<String> =
+            found.iter().filter_map(|dir| dir.strip_prefix(&root).ok()).map(|dir| dir.to_string_lossy().into_owned()).collect();
+        assert!(relative.contains(&"top".to_string()) && relative.contains(&"group/inner".to_string()), "{relative:?}");
+        assert!(!relative.iter().any(|dir| dir.contains("deep") || dir.contains("secret") || dir.contains("nested")), "{relative:?}");
+        // The loop is followed only to the depth: `group/loop/top` is one more route to a known skill.
+        assert!(relative.iter().all(|dir| dir.split('/').count() <= 3), "{relative:?}");
+        assert!(skill_dirs(&root.join("missing"), 3).is_empty());
+    }
+
+    #[test]
+    fn a_skill_linked_twice_inside_one_agents_folder_is_offered_once() {
+        let fixture = Fixture::new("catalog-twice");
+        let root = fixture.home.join(".claude/skills");
+        fixture.skill(".claude/skills/real", "real", "");
+        std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap_or_default();
+        let plan = plan(&fixture.machine(), &Settings::default());
+        let offered: Vec<&str> = plan.offered().map(|entry| entry.skill.name.as_str()).collect();
+        assert_eq!(offered, vec!["real"]);
+    }
 }
