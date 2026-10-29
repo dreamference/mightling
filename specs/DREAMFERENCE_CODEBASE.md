@@ -349,7 +349,7 @@ AST symbol extraction, TF-IDF, SQLite FTS5 and embeddings stored as plain float3
 `MCPServer` (stdio JSON-RPC) with the tools from `MCPToolRegistry`:
 - `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`;
 - `web_search`, `web_fetch`;
-- `workspace_search_code`, answered by `CodeIndexSearch` from `ling-code` when the workspace is indexed, and by the context engine otherwise.
+- `workspace_search_code`, answered by `CodeIndexSearch` from `ling-code` when the workspace is indexed, and by the context engine otherwise. The engine does not build a missing index while a Night Shift or SWE-bench run holds the runner lock (as `ling-admin index` waits); the tool answers with an error naming the status command instead.
 
 `WebTools` is the MCP server's copy of what `ling-search` and `ling-fetch` do, and like them it follows the `/airgapped` level; those two are Rust (`ling-web-rs/`, `DREAMFERENCE_MIGHTLING_CODEX.md` §4.1), and the two implementations are kept in step by hand.
 

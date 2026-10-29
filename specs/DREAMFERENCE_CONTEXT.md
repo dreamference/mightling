@@ -84,7 +84,7 @@ Each symbol records `name` (unqualified), `file_path`, `line_start`, `line_end` 
 
 `search_code(query, top_k=5)`:
 
-1. **FTS5:** the query tokens are joined with `OR` and matched against `fts_context`, taking up to `2 × top_k` rows. Each row adds `2 / (|rank| + 1)` to its file's score.
+1. **FTS5:** the query tokens are joined with `OR` and matched against `fts_context`, taking up to `2 × top_k` rows. Each row adds `2 · |rank| / (|rank| + 1)` to its file's score: FTS5's rank is bm25 negated, so the strongest match has the largest magnitude and scores closest to 2.
 2. **TF-IDF:** for each query token, each file's TF-IDF weight is added.
 3. **Dense:** the query is embedded with the `search_query: ` prefix, and every file vector adds `3.0 × max(0, cosine)`. Skipped when there are no file vectors or no model.
 4. The top `top_k` files are returned, sorted by the combined score.
