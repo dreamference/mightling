@@ -90,6 +90,16 @@ def test_a_hand_over_whose_set_is_not_taken_unfreezes(monkeypatch):
     assert not ForgeMove.frozen_flag().exists()
 
 
+def test_a_hand_over_whose_stream_fails_unfreezes(monkeypatch, tmp_path):
+    ForgeSettings.update_state(role=ROLE_RECORD)
+    monkeypatch.setattr(ForgeBackup, "take", classmethod(lambda cls: tmp_path / NAME))
+    monkeypatch.setattr(
+        subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 2)
+    )
+    assert ForgeMove.serve_hand_over() == 1
+    assert not ForgeMove.frozen_flag().exists()
+
+
 # -- moving the role away --------------------------------------------------------------------------
 
 

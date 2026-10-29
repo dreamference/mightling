@@ -418,7 +418,10 @@ class ForgeMove:
             stdout=sys.stdout.buffer,
             check=False,
         )
-        return 0 if packed.returncode == 0 else 1
+        if packed.returncode != 0:
+            cls.freeze(False)
+            return 1
+        return 0
 
     @classmethod
     def serve_become_mirror(cls, node_id: str, name: str) -> int:
