@@ -340,7 +340,7 @@ class NightShiftRecurring:
         """Queues every template due on ``today`` with ``ling night add`` in its repository.
 
         A template whose repository is gone, or that ``ling night add`` refuses, keeps the reason in
-        ``last_error`` and is tried again the next night.
+        ``last_error`` and is tried again on its next due night.
 
         Args:
             night_dir: Night Shift's folder.
