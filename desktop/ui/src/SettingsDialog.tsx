@@ -763,11 +763,15 @@ function MemoryFiles({ notice }: { notice: (error: unknown) => void }) {
           <div key={file.name} className="memory-file">
             <label className="field">
               <span><code>{file.name}</code>: {file.about}</span>
-              <textarea rows={8} aria-label={file.name} value={text} readOnly={file.cut} spellCheck={false} onChange={(event) => setDrafts({ ...drafts, [file.name]: event.target.value })} />
+              <textarea rows={8} aria-label={file.name} value={text} readOnly={file.cut} spellCheck={false} onChange={(event) => { const value = event.target.value; setDrafts((now) => ({ ...now, [file.name]: value })); }} />
             </label>
             {file.cut ? <p className="dialog-note">Too long to edit here; open it from ~/.mightling/memories/.</p> : (
               <div className="buttons">
-                <button className="primary" disabled={!changed} onClick={() => void bridge.memoryFiles.save(file.name, text).then(load).catch(notice)}>Save</button>
+                <button className="primary" disabled={!changed} onClick={() => void bridge.memoryFiles.save(file.name, text).then(() => bridge.memoryFiles.list()).then((list) => {
+                  // Only the saved file's draft goes: what is being written in the others stays.
+                  setFiles(list);
+                  setDrafts(({ [file.name]: _saved, ...rest }) => rest);
+                }).catch(notice)}>Save</button>
                 <button disabled={!changed} onClick={() => setDrafts(({ [file.name]: _gone, ...rest }) => rest)}>Undo</button>
               </div>
             )}
