@@ -1271,6 +1271,24 @@ def test_a_switch_written_halfway_leaves_the_nodes_config_as_it_was(monkeypatch)
     assert path.read_text() == '[night]\nwindow = "22-06"\n', "the node's config was truncated"
 
 
+def test_a_file_removed_while_the_prune_lists_them_is_skipped(monkeypatch):
+    folder = ForgeSettings.data_dir() / "log"
+    folder.mkdir(parents=True, exist_ok=True)
+    kept, gone = folder / "kept.log", folder / "gone.log"
+    kept.write_text("x")
+    gone.write_text("x")
+    real = Path.is_file
+
+    def listed_then_removed(self):
+        found = real(self)
+        if self == gone and found:
+            self.unlink()  # Forgejo rotates its log between the listing and the sort
+        return found
+
+    monkeypatch.setattr(Path, "is_file", listed_then_removed)
+    assert kept in ForgeStorage.candidates()
+
+
 def test_a_forge_switched_off_stays_off_when_the_rest_of_the_config_does_not_parse(monkeypatch):
     monkeypatch.delenv("DREAMFERENCE_FORGE", raising=False)
     path = ForgeSettings.config_path()
