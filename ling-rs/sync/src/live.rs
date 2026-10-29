@@ -260,7 +260,8 @@ impl Connection {
         }
         let loaded: BTreeSet<String> = ids.into_iter().collect();
         let mut attached = self.shared.attached.lock().unwrap_or_else(|p| p.into_inner());
-        attached.retain(|id, _| loaded.contains(id));
+        // A folder excluded since it was attached lets its thread go too.
+        attached.retain(|id, cwd| loaded.contains(id) && leaves(settings, &json!({ "cwd": cwd })));
         attached.keys().cloned().collect()
     }
 
