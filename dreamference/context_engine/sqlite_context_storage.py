@@ -92,6 +92,7 @@ class SQLiteContextStorage:
         """
         file_scores: Dict[str, float] = {}
         if self.db_path.exists():
+            conn: Optional[sqlite3.Connection] = None
             try:
                 conn = sqlite3.connect(self.db_path)
                 conn.execute("PRAGMA mmap_size = 2147483648;")
@@ -104,9 +105,12 @@ class SQLiteContextStorage:
                         # FTS5's rank is bm25 negated, so its magnitude already grows with relevance;
                         # mapped into [0, 2). (It was inverted, which scored the strongest match lowest.)
                         file_scores[r_path] = file_scores.get(r_path, 0.0) + (rank / (rank + 1.0)) * 2.0
-                conn.close()
             except Exception:
                 pass
+            finally:
+                # Closed in every case: a search that raised used to leave its connection open.
+                if conn is not None:
+                    conn.close()
         return file_scores
 
     def store_embeddings(self, file_to_embedding: Dict[str, np.ndarray]) -> None:

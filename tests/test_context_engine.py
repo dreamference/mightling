@@ -251,3 +251,19 @@ def test_snake_case_names_are_split_into_their_words():
     tokens = TFIDFCalculator.tokenize("def get_user_name(): pass\nclass UserConfig_v2: pass")
     assert {"get", "user", "name", "get_user_name"} <= set(tokens)
     assert {"config", "v2", "userconfig_v2"} <= set(tokens)
+
+
+def test_a_failed_full_text_search_closes_its_connection(tmp_path, monkeypatch):
+    # `close()` sat inside the `try`, so a search that raised (a malformed MATCH, a locked or
+    # damaged database) left its connection open for the life of the MCP server.
+    from unittest.mock import MagicMock
+
+    from dreamference.context_engine import sqlite_context_storage
+    from dreamference.context_engine.sqlite_context_storage import SQLiteContextStorage
+
+    (tmp_path / "context.db").write_bytes(b"")
+    conn = MagicMock()
+    conn.cursor.return_value.execute.side_effect = sqlite_context_storage.sqlite3.OperationalError("locked")
+    monkeypatch.setattr(sqlite_context_storage.sqlite3, "connect", lambda *a, **k: conn)
+    assert SQLiteContextStorage(tmp_path / "context.db").search_fts(["alpha"], top_k=5) == {}
+    conn.close.assert_called_once()
