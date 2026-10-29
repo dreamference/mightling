@@ -461,10 +461,13 @@ impl Live {
     /// The events of a thread after `after`, and its state.
     pub fn follow(&self, thread: &str, after: u64) -> Following {
         let inner = self.lock();
-        let mut following = Following { next: after.max(inner.seq), ..Following::default() };
+        // Numbers start again with every run: a cursor past them was given out before a restart.
+        let restarted = after > inner.seq;
+        let after = if restarted { 0 } else { after };
+        let mut following = Following { next: after.max(inner.seq), reset: restarted, ..Following::default() };
         if let Some(live) = inner.threads.get(thread) {
             // Numbers are shared by every thread, so a gap is no loss; only a dropped event is.
-            following.reset = after > 0 && live.dropped > after;
+            following.reset = restarted || (after > 0 && live.dropped > after);
             following.events = live.events.iter().filter(|(seq, _)| *seq > after).cloned().collect();
             following.running = live.turn.is_some();
             following.turn = live.turn.clone().filter(|turn| !turn.is_empty());
@@ -570,6 +573,8 @@ impl Live {
     pub fn notices(&self, after: u64) -> (Vec<Notice>, u64) {
         let inner = self.lock();
         let latest = inner.notices.back().map_or(0, |notice| notice.seq);
+        // A cursor past this run's numbers is from before a restart: every notice since is new.
+        let after = if after > inner.seq { 0 } else { after };
         (inner.notices.iter().filter(|notice| notice.seq > after).cloned().collect(), latest)
     }
 
@@ -639,6 +644,26 @@ mod tests {
         let other = device("desk", auth::Scope::Control, true);
         live.host_post(&other, post(vec![json!({ "method": "turn/completed", "params": { "threadId": T } })], &[]), &owners, &title);
         assert!(live.follow(T, 0).running);
+    }
+
+    #[test]
+    fn a_cursor_from_before_a_restart_starts_over_and_misses_nothing_new() {
+        let dir = scratch("restart");
+        let laptop = device("lap", auth::Scope::Control, true);
+        let live = Live::new(dir.clone());
+        let turn = |n: u64| json!({ "method": "item/completed", "params": { "threadId": T, "n": n } });
+        live.host_post(&laptop, post((0..5).map(turn).chain([approval(1)]).collect(), &[T]), &owners, &title);
+        let cursor = live.follow(T, 0).next;
+        let (_, seen) = live.notices(0);
+        assert!(seen > 0);
+        drop(live);
+
+        // The numbers start again after a restart: a cursor past them is from the run before.
+        let live = Live::new(dir);
+        live.host_post(&laptop, post(vec![approval(2)], &[T]), &owners, &title);
+        let following = live.follow(T, cursor);
+        assert!(following.reset && following.events.len() == 1 && following.next == live.seq(), "{:?}", following.events);
+        assert_eq!(live.notices(seen).0.len(), 1);
     }
 
     #[test]
