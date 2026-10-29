@@ -405,3 +405,60 @@ async fn when_signal_cli_cannot_edit_the_answer_comes_whole() {
     }
     daemon.abort();
 }
+
+#[tokio::test]
+async fn a_ling_web_that_opens_and_refuses_the_agent_is_tried_less_and_less_often() {
+    let dir = Scratch(std::env::temp_dir().join(format!("ling-signal-daemon-refused-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    let state = dir.0.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let log = dir.0.join("signal-cli.log");
+    // `ling web` takes the socket, then answers `work/start` with an error: no agent's server.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (opened_tx, mut opened) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let opened = opened_tx.clone();
+            tokio::spawn(async move {
+                let Ok(mut socket) = tokio_tungstenite::accept_async(stream).await else { return };
+                let _ = opened.send(());
+                while let Some(Ok(Message::Text(text))) = socket.next().await {
+                    let frame: Value = serde_json::from_str(text.as_str()).unwrap();
+                    let answer = json!({ "answer": frame["call"], "error": "the agent's server is not running" });
+                    let _ = socket.send(Message::Text(answer.to_string().into())).await;
+                }
+            });
+        }
+    });
+    Config {
+        mode: Mode::Dedicated,
+        account: "+15550000".to_string(),
+        own_uuid: Some("bridge".to_string()),
+        owner: Some(Owner { aci: "owner".to_string(), fingerprint: "fp-owner".to_string() }),
+        binding: None,
+        port,
+        node: "test-node".to_string(),
+        signal_cli: fake_signal_cli(&dir.0, &log, &[]),
+        signal_cli_env: vec![],
+        signal_cli_version: "0.14.9".to_string(),
+        vision: false,
+        instance: None,
+        user: None,
+    }
+    .save(&state)
+    .unwrap();
+    ling_signal::state::save_cookie(&state, "mightling_device=test").unwrap();
+    let daemon = {
+        let state = state.clone();
+        tokio::spawn(async move { ling_signal::serve::serve(&state, None).await })
+    };
+    // Waits of 1, 2 and 5 seconds: three tries in ten seconds, not one every other second.
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let mut tries = 0;
+    while opened.try_recv().is_ok() {
+        tries += 1;
+    }
+    assert!((2..=4).contains(&tries), "{tries} connections in ten seconds");
+    daemon.abort();
+}

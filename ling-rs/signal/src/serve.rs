@@ -329,15 +329,19 @@ impl Daemon {
                 let starting = connection.call(json!({ "type": "work/start" })).await.ok();
                 self.translator = Translator::default();
                 self.agent = Some(Agent { connection, incoming, starting });
-                self.attempts = 0;
             }
             Err(err) => {
                 self.note_error(err);
-                let wait = BACKOFF_S[self.attempts.min(BACKOFF_S.len() - 1)];
-                self.attempts += 1;
-                self.next_attempt_ms = now_ms() + wait * 1000;
+                self.back_off();
             }
         }
+    }
+
+    /// The next try waits longer each time, until the agent is reached (`AgentEvent::Connected`).
+    fn back_off(&mut self) {
+        let wait = BACKOFF_S[self.attempts.min(BACKOFF_S.len() - 1)];
+        self.attempts += 1;
+        self.next_attempt_ms = now_ms() + wait * 1000;
     }
 
     fn note_error(&mut self, error: String) {
@@ -349,7 +353,8 @@ impl Daemon {
 
     async fn disconnect(&mut self) {
         if self.agent.take().is_some() {
-            self.next_attempt_ms = now_ms() + 1000;
+            // A socket that opens and then fails (no agent's server) waits as a refused one does.
+            self.back_off();
             let actions = self.bridge.on_agent(AgentEvent::Disconnected, now_ms());
             Box::pin(self.carry_out(actions)).await;
         }
@@ -376,6 +381,7 @@ impl Daemon {
                         self.disconnect().await;
                         return;
                     }
+                    self.attempts = 0;
                     let actions = self.bridge.on_agent(AgentEvent::Connected, now_ms());
                     self.carry_out(actions).await;
                 } else if let Some(error) = error {
