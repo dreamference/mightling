@@ -123,14 +123,29 @@ class ForgeStorage:
             files = (
                 [item for item in folder.rglob("*") if item.is_file()] if folder.is_dir() else []
             )
-            found += sorted(files, key=lambda item: item.stat().st_mtime)
+            found += sorted(files, key=cls.modified)
         dumps = ForgeSettings.share_dir() / "dumps"
         if dumps.is_dir():
             found += sorted(
                 (item for item in dumps.rglob("*") if item.is_file()),
-                key=lambda item: item.stat().st_mtime,
+                key=cls.modified,
             )
         return found
+
+    @classmethod
+    def modified(cls, item: Path) -> float:
+        """When a file was last written, for the pruning order.
+
+        Args:
+            item: A prunable file.
+
+        Returns:
+            float: Its modification time; 0 when it is gone already (Forgejo rotates its own).
+        """
+        try:
+            return item.stat().st_mtime
+        except OSError:
+            return 0.0
 
     @classmethod
     def prune(cls, free_gb: float | None = None, night: bool | None = None) -> list[str]:
