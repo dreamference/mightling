@@ -145,25 +145,27 @@ def test_search_keeps_at_most_max_results(online):
     assert outcome["results"][0] == {"title": "0", "url": "u0", "snippet": "", "engine": ""}
 
 
-def test_a_body_sent_a_byte_at_a_time_ends_at_the_deadline(monkeypatch):
-    # A stand-in on loopback that sends a byte every 50 ms for at most 30 s: each read returns well
-    # within REQUEST_TIMEOUT_S, so only the total deadline (2 s here) ends the download.
+def drip(head: bytes) -> int:
+    """
+    Starts a stand-in on loopback that sends `head`, then a byte every 50 ms for at most 30 s.
+
+    Each read returns well within REQUEST_TIMEOUT_S, so only the total deadline ends a request.
+
+    Returns:
+        int: The stand-in's port.
+    """
     import socket
     import threading
     import time
 
     listener = socket.create_server(("127.0.0.1", 0))
-    port = listener.getsockname()[1]
 
     def serve():
         connection, _ = listener.accept()
         with connection, listener:
             connection.recv(65536)
             try:
-                connection.sendall(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
-                    b"Content-Length: 5000000\r\n\r\n"
-                )
+                connection.sendall(head)
                 for _ in range(600):
                     time.sleep(0.05)
                     connection.sendall(b"a")
@@ -171,12 +173,30 @@ def test_a_body_sent_a_byte_at_a_time_ends_at_the_deadline(monkeypatch):
                 pass
 
     threading.Thread(target=serve, daemon=True).start()
-    for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
-        monkeypatch.delenv(name, raising=False)
+    return listener.getsockname()[1]
+
+
+@pytest.mark.parametrize(
+    "scheme, head",
+    [
+        (
+            "http",
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5000000\r\n\r\n",
+        ),
+        ("http", b"HTTP/1.1 200 OK\r\nX-Slow: "),
+        # A TLS handshake record of 16 KiB, its body still to come.
+        ("https", b"\x16\x03\x03\x40\x00"),
+    ],
+    ids=["body", "headers", "tls-handshake"],
+)
+def test_a_page_sent_a_byte_at_a_time_ends_at_the_deadline(monkeypatch, loopback, scheme, head):
+    import time
+
+    port = drip(head)
     monkeypatch.setattr(web_tools, "REQUEST_DEADLINE_S", 2.0)
     started = time.monotonic()
     with pytest.raises(requests.Timeout):
-        WebTools._download(f"http://127.0.0.1:{port}/")
+        WebTools._download(f"{scheme}://127.0.0.1:{port}/")
     assert time.monotonic() - started < 10
 
 
@@ -184,11 +204,12 @@ def test_a_body_sent_a_byte_at_a_time_ends_at_the_deadline(monkeypatch):
 def loopback(monkeypatch):
     """The air gap is off and no proxy stands between a fetch and a stand-in on loopback."""
     monkeypatch.setattr(WebTools, "airgapped_level", classmethod(lambda cls: "off"))
-    for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
-        monkeypatch.delenv(name, raising=False)
+    for name in ("http", "https", "all"):
+        monkeypatch.delenv(f"{name}_proxy", raising=False)
+        monkeypatch.delenv(f"{name.upper()}_PROXY", raising=False)
 
 
-def test_fetch_sends_no_netrc_credentials_to_a_page_or_where_it_redirects(loopback, tmp_path):
+def test_fetch_sends_no_netrc_credentials_to_a_page_or_where_it_redirects(loopback):
     # requests adds the user's ~/.netrc login for the request's host and again for every redirect
     # target, so a page could send the agent to a host the user keeps a password for and have it
     # read what that login sees. ling-fetch never reads .netrc.
@@ -234,3 +255,21 @@ def test_fetch_sends_no_netrc_credentials_to_a_page_or_where_it_redirects(loopba
     assert seen == [
         ("/start", None), ("/final", None), ("/final", None), ("/final", "Basic bWU6cHc=")
     ]
+
+
+def test_a_page_sent_a_byte_at_a_time_through_a_proxy_ends_at_the_deadline(
+    monkeypatch, loopback
+):
+    # Through a proxy requests opens its connections from another pool manager; the stand-in is
+    # the proxy, so the page's own host is never looked up.
+    import time
+
+    port = drip(b"HTTP/1.1 200 OK\r\nX-Slow: ")
+    for name in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("http_proxy", f"http://127.0.0.1:{port}")
+    monkeypatch.setattr(web_tools, "REQUEST_DEADLINE_S", 2.0)
+    started = time.monotonic()
+    with pytest.raises(requests.Timeout):
+        WebTools._download("http://page.invalid/")
+    assert time.monotonic() - started < 10

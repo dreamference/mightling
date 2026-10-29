@@ -33,12 +33,14 @@ import codecs
 import contextlib
 import os
 import re
+import socket
 import threading
-import time
-from typing import Any, Dict, Final, List
+from typing import Any, Dict, Final, Iterator, List
 from urllib.parse import urlparse
 
 import requests
+import requests.adapters
+import urllib3
 
 # Sent on every request. Some sites serve a stub or a challenge page to unknown agents, and the
 # point of a fetch tool is to return what a person would see.
@@ -97,6 +99,131 @@ _NON_CONTENT_TAGS: Final[tuple] = (
 )
 
 
+class _Deadline:
+    """
+    The end of one call's requests, REQUEST_DEADLINE_S after it starts.
+
+    REQUEST_TIMEOUT_S applies to each read, so a server sending a byte every few seconds, in the
+    TLS handshake, the headers or the body, would otherwise hold the call as long as it liked.
+    Every socket the call opens is registered here (a duplicate of it, which stays valid when
+    TLS takes the socket over); at the deadline each is shut down, which wakes a read blocked
+    on it, and one opened later is shut down at once. Connecting is not covered: it fails at
+    REQUEST_TIMEOUT_S for each of the host's addresses.
+    """
+
+    def __init__(self) -> None:
+        self.expired = threading.Event()
+        self._lock = threading.Lock()
+        self._sockets: List[socket.socket] = []
+        self._timer = threading.Timer(REQUEST_DEADLINE_S, self._expire)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def attach(self, sock: socket.socket) -> None:
+        """Registers a socket the call opened, shutting it down if the deadline has passed."""
+        with self._lock:
+            handle = socket.socket(fileno=os.dup(sock.fileno()))
+            self._sockets.append(handle)
+            if self.expired.is_set():
+                self._shut(handle)
+
+    def close(self) -> None:
+        """Stops the clock and lets go of the duplicates; the sockets themselves stay open."""
+        self._timer.cancel()
+        with self._lock:
+            for handle in self._sockets:
+                handle.close()
+            self._sockets.clear()
+
+    def _expire(self) -> None:
+        with self._lock:
+            self.expired.set()
+            for handle in self._sockets:
+                self._shut(handle)
+
+    @staticmethod
+    def _shut(handle: socket.socket) -> None:
+        with contextlib.suppress(OSError):
+            handle.shutdown(socket.SHUT_RDWR)
+
+
+# The deadline of the call running on this thread, which its connections register with.
+_CALL = threading.local()
+
+
+class _DeadlineConnection:
+    """Mixed into a urllib3 connection class: registers each socket with the call's deadline."""
+
+    def _new_conn(self) -> socket.socket:
+        sock = super()._new_conn()  # type: ignore[misc]
+        deadline = getattr(_CALL, "deadline", None)
+        if deadline is not None:
+            deadline.attach(sock)
+        return sock
+
+
+# urllib3's pool classes (plain, TLS, SOCKS) and the same with _DeadlineConnection mixed in.
+_Pool = type[urllib3.HTTPConnectionPool]
+_DEADLINE_POOLS: Dict[_Pool, _Pool] = {}
+
+
+def _deadline_pools(pools: Dict[str, _Pool]) -> Dict[str, _Pool]:
+    """A pool manager's pool classes, each with its connections registering their sockets."""
+    for pool in pools.values():
+        if pool not in _DEADLINE_POOLS:
+            connection = type(
+                pool.ConnectionCls.__name__, (_DeadlineConnection, pool.ConnectionCls), {}
+            )
+            _DEADLINE_POOLS[pool] = type(pool.__name__, (pool,), {"ConnectionCls": connection})
+    return {scheme: _DEADLINE_POOLS[pool] for scheme, pool in pools.items()}
+
+
+class _DeadlineAdapter(requests.adapters.HTTPAdapter):
+    """requests' adapter, direct or through a proxy, with connections that obey _Deadline."""
+
+    def init_poolmanager(
+        self, connections: int, maxsize: int, block: bool = False, **pool_kwargs: object
+    ) -> None:
+        super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
+        self.poolmanager.pool_classes_by_scheme = _deadline_pools(
+            self.poolmanager.pool_classes_by_scheme
+        )
+
+    def proxy_manager_for(self, proxy: str, **proxy_kwargs: object) -> urllib3.PoolManager:
+        manager = super().proxy_manager_for(proxy, **proxy_kwargs)
+        manager.pool_classes_by_scheme = _deadline_pools(manager.pool_classes_by_scheme)
+        return manager
+
+
+@contextlib.contextmanager
+def _within_deadline() -> Iterator["_Session"]:
+    """
+    A session for one call, whose requests all end at REQUEST_DEADLINE_S (see _Deadline).
+
+    Yields:
+        _Session: The session, closed when the block ends.
+
+    Raises:
+        requests.Timeout: The deadline passed before the block ended; whatever the shut-down
+            socket made the block raise is its cause.
+    """
+    deadline = _Deadline()
+    _CALL.deadline = deadline
+    expired = requests.Timeout(f"the page took longer than {REQUEST_DEADLINE_S:.0f} s to arrive")
+    try:
+        with _Session() as session:
+            yield session
+    except Exception as error:
+        if deadline.expired.is_set():
+            raise expired from error
+        raise
+    finally:
+        _CALL.deadline = None
+        deadline.close()
+    if deadline.expired.is_set():
+        raise expired
+
+
 class _Session(requests.Session):
     """
     One call's session, which never sends the user's `~/.netrc` logins.
@@ -107,18 +234,26 @@ class _Session(requests.Session):
     stays on: it also brings the proxy and CA bundle settings, which both copies follow.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        adapter = _DeadlineAdapter()
+        self.mount("http://", adapter)
+        self.mount("https://", adapter)
+
     def prepare_request(self, request: requests.Request) -> requests.PreparedRequest:
         # Any auth set here skips the .netrc lookup. A login written in the URL itself is the
         # caller's and is still sent; otherwise the auth is one that changes nothing.
         if request.auth is None:
-            login = requests.utils.get_auth_from_url(request.url or "")
+            login = requests.utils.get_auth_from_url(str(request.url or ""))
             request.auth = login if any(login) else (lambda prepared: prepared)
         return super().prepare_request(request)
 
-    def rebuild_auth(self, prepared_request: requests.PreparedRequest, response: requests.Response) -> None:
+    def rebuild_auth(
+        self, prepared_request: requests.PreparedRequest, response: requests.Response
+    ) -> None:
         # requests' own, less the .netrc lookup for the new host.
         if "Authorization" in prepared_request.headers and self.should_strip_auth(
-            response.request.url, prepared_request.url
+            response.request.url or "", prepared_request.url or ""
         ):
             del prepared_request.headers["Authorization"]
 
@@ -172,9 +307,8 @@ class WebTools:
         Retrieves a URL with a size ceiling and a timeout.
 
         Streamed rather than read whole, so the ceiling is enforced while the body arrives instead
-        of after it has already been buffered. The body ends at REQUEST_DEADLINE_S from the start;
-        the status line and headers do not (requests gives no hold on the socket before them), so
-        a server sending those a byte at a time still holds the call.
+        of after it has already been buffered. The whole of it, redirects included, ends at
+        REQUEST_DEADLINE_S.
 
         Args:
             url (str): URL to retrieve.
@@ -182,42 +316,21 @@ class WebTools:
         Returns:
             requests.Response: The response, with `_body` holding at most MAX_DOWNLOAD_BYTES.
         """
-        started = time.monotonic()
-        response = _Session().get(
-            url,
-            headers={"User-Agent": USER_AGENT, "Accept-Language": "en"},
-            timeout=REQUEST_TIMEOUT_S,
-            stream=True,
-        )
-        response.raise_for_status()
-        # At REQUEST_DEADLINE_S the socket is shut down from another thread, which wakes a read
-        # blocked on it; a check between chunks would not, as one chunk can take a byte per read.
-        expired = threading.Event()
-
-        def expire() -> None:
-            expired.set()
-            with contextlib.suppress(Exception):
-                response.raw.shutdown()
-
-        remaining = max(0.0, REQUEST_DEADLINE_S - (time.monotonic() - started))
-        watchdog = threading.Timer(remaining, expire)
-        watchdog.daemon = True
-        watchdog.start()
-        chunks: List[bytes] = []
-        total = 0
-        try:
+        with _within_deadline() as session:
+            response = session.get(
+                url,
+                headers={"User-Agent": USER_AGENT, "Accept-Language": "en"},
+                timeout=REQUEST_TIMEOUT_S,
+                stream=True,
+            )
+            response.raise_for_status()
+            chunks: List[bytes] = []
+            total = 0
             for chunk in response.iter_content(8192):
                 chunks.append(chunk)
                 total += len(chunk)
-                if total >= MAX_DOWNLOAD_BYTES or expired.is_set():
+                if total >= MAX_DOWNLOAD_BYTES:
                     break
-        except Exception:
-            if not expired.is_set():
-                raise
-        finally:
-            watchdog.cancel()
-        if expired.is_set():
-            raise requests.Timeout(f"the page took longer than {REQUEST_DEADLINE_S:.0f} s to arrive")
         response._body = b"".join(chunks)  # type: ignore[attr-defined]
         return response
 
