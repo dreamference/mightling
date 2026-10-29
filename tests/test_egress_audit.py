@@ -10,6 +10,7 @@ import json
 import subprocess
 import os
 import stat
+import warnings
 from pathlib import Path
 
 import pytest
@@ -1024,3 +1025,24 @@ def test_an_interrupted_sendmmsg_on_a_route_lookup_socket_reaches_it_once(resume
                  'msg_len=1}], 1, 0) = 1\n')
     trace = StraceParser.parse(text)
     assert trace.destinations == {"198.51.100.7:443": 1}
+
+
+def test_an_exec_session_reads_its_reply_and_closes_the_file(tmp_path, monkeypatch):
+    # A stand-in for strace that writes the reply where `ling exec -o` would.
+    strace = tmp_path / "bin" / "strace"
+    strace.parent.mkdir()
+    strace.write_text(f"""#!{os.sys.executable}
+import sys
+args = sys.argv[1:]
+reply = args[args.index("-o", args.index("exec")) + 1]
+open(reply, "w").write("pong\\n")
+""")
+    strace.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
+    work = tmp_path / "work"
+    work.mkdir()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ResourceWarning)
+        _, replied, _ = EgressAudit.trace_session("/opt/ling", "http://localhost:8000", "pong?", str(work))
+    assert replied
+    assert not [f"{w.filename}:{w.lineno}: {w.message}" for w in caught if w.category is ResourceWarning]

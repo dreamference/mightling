@@ -290,7 +290,7 @@ class EgressAudit:
             pass
         if session == APP:
             return cls._read_trace(trace_path), exited == 0, trace_path
-        replied = os.path.isfile(reply_path) and bool(open(reply_path, errors="replace").read().strip())
+        replied = os.path.isfile(reply_path) and bool(Path(reply_path).read_text(errors="replace").strip())
         return cls._read_trace(trace_path), replied, trace_path
 
     @classmethod
