@@ -106,9 +106,11 @@ impl Node {
     /// Reads the file's text. `None` unless it is an object with an address.
     pub fn parse(text: &str) -> Option<Node> {
         let fields = flat_object(text)?;
+        // A key given twice has its last value, as in every JSON parser that keeps one.
         let get = |key: &str| {
             fields
                 .iter()
+                .rev()
                 .find(|(name, _)| name == key)
                 .map(|(_, value)| value.as_str())
         };
@@ -912,6 +914,16 @@ mod tests {
     fn backspace_and_form_feed_escapes_are_the_characters_not_the_letters() {
         let parsed = Node::parse("{\"address\": \"a\", \"name\": \"x\\by\\fz\"}").unwrap();
         assert_eq!(parsed.name, "x\u{8}y\u{c}z");
+    }
+
+    #[test]
+    fn a_key_given_twice_has_its_last_value_as_json_parsers_read_it() {
+        let parsed = Node::parse(
+            "{\"address\": \"10.0.0.1\", \"model_port\": 9000, \"address\": \"10.0.0.2\"}",
+        )
+        .unwrap();
+        assert_eq!(parsed.address, "10.0.0.2");
+        assert_eq!(parsed.model_port, 9000);
     }
 
     #[test]
