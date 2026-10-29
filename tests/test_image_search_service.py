@@ -939,6 +939,22 @@ def test_a_search_with_the_secret_runs_with_a_clean_query_list(served):
     assert count == 4  # an unparsable count falls back to the default
 
 
+@pytest.mark.parametrize("length", ["abc", "-1", str(2 * 1024 * 1024)])
+def test_a_search_with_a_content_length_that_cannot_be_read_is_a_bad_request(served, length):
+    # A negative or huge length used to block the handler until the client hung up, and one that
+    # is not a number dropped the connection with no answer.
+    port, _, searched = served
+    status, data = _http(
+        port,
+        "POST",
+        "/search",
+        body=b'{"queries": ["cat"]}',
+        headers={"X-Mightling-Image-Token": "s3cret", "Content-Length": length},
+    )
+    assert status == 400 and "Content-Length" in json.loads(data)["error"]
+    assert searched == []
+
+
 def test_a_search_with_no_queries_is_a_bad_request(served):
     port, _, _ = served
     body = json.dumps({"queries": ["  "]}).encode()
