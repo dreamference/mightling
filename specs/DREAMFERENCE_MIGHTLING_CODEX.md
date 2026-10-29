@@ -173,7 +173,7 @@ This is the Rust port of what the Python `ling` entry point used to do before ex
 9. **Edits `$CODEX_HOME/config.toml` with `toml_edit`.** Editing the document rather than appending text means a top-level key can never be absorbed into the preceding table, which twice stopped Codex from starting. It sets:
    - `model_catalog_json`, always;
    - `suppress_unstable_features_warning = true`, only if absent;
-   - `check_for_update_on_startup = false`, always (a `true` left in the file turned the request back on). The update check would offer to replace Mightling with upstream Codex.
+   - `check_for_update_on_startup = false`, always (a `true` left in the file turned the request back on). The update check would offer to replace Mightling with upstream Codex. Since 2026-10-29 every session also gets `-c check_for_update_on_startup=false`, `-c tui.pet="disabled"`, `-c features.remote_plugin=false` and `-c features.plugin_sharing=false` (`plugins::vendor_settings`): Codex reads a trusted folder's `.codex/config.toml` above this file and does not refuse these keys there, and the command line sits above both.
    - `chatgpt_base_url = "http://127.0.0.1:9/backend-api/"`, always: a privacy boundary, not a preference;
    - `[tui] pet` removed, since a pet's art comes from the upstream vendor's CDN (`/pets` is hidden by `0010`);
    - `[model_providers.openai-custom]`: `name`, a `base_url` that is always rewritten to follow the server, and `stream_idle_timeout_ms`, only if absent;

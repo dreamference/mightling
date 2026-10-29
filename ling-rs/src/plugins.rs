@@ -34,6 +34,18 @@ pub const OFF_AT_ON: &str = "features.plugins=false";
 /// `chatgpt_base_url` is: a privacy boundary, not a preference.
 pub const VENDOR_FEATURES: [&str; 2] = ["remote_plugin", "plugin_sharing"];
 
+/// The `-c` settings every session gets. The launcher closes the vendor's channels in the user's
+/// `config.toml`, but Codex reads a trusted folder's `.codex/config.toml` above that file, and its
+/// list of keys a project may not set leaves these out: the update check (api.github.com), a
+/// terminal pet (art from OpenAI's CDN) and [`VENDOR_FEATURES`]. A setting on the command line
+/// sits above the project's file. `chatgpt_base_url` needs none: Codex refuses it from a project.
+pub fn vendor_settings() -> Vec<String> {
+    ["check_for_update_on_startup=false".to_string(), "tui.pet=\"disabled\"".to_string()]
+        .into_iter()
+        .chain(VENDOR_FEATURES.iter().map(|feature| format!("features.{feature}=false")))
+        .collect()
+}
+
 /// What `/airgapped` adds at `on`.
 pub const STATUS_LINE: &str = "Plugins: off in a session started at on; a session switched to on keeps the plugins it loaded (their MCP servers keep the network) until it is restarted.";
 
@@ -140,6 +152,39 @@ mod tests {
         }
         let user = strings(&["-c", "features.plugins=false"]);
         assert!(with_level(vec![OsString::from("ling")], &user, Level::On).is_ok());
+    }
+
+    #[test]
+    fn every_session_shuts_the_vendor_channels_above_a_project_file() {
+        let settings = vendor_settings();
+        let mut merged = toml::Table::new();
+        for setting in &settings {
+            let parsed: toml::Table = toml::from_str(setting).unwrap();
+            for (key, value) in parsed {
+                match (merged.get_mut(&key), value) {
+                    (Some(toml::Value::Table(table)), toml::Value::Table(more)) => table.extend(more),
+                    (_, value) => {
+                        merged.insert(key, value);
+                    }
+                }
+            }
+        }
+        assert_eq!(merged["check_for_update_on_startup"].as_bool(), Some(false));
+        assert_eq!(merged["tui"]["pet"].as_str(), Some("disabled"));
+        for feature in VENDOR_FEATURES {
+            assert_eq!(merged["features"][feature].as_bool(), Some(false), "{feature}");
+        }
+        // The keys and the value exist in this Codex.
+        assert!(include_str!("../../config/src/config_toml.rs").contains("pub check_for_update_on_startup:"));
+        assert!(include_str!("../../config/src/types.rs").contains("pub pet: Option<String>"));
+        assert!(include_str!("../../tui/src/pets/mod.rs").contains("DISABLED_PET_ID: &str = \"disabled\""));
+        // Root options, before the subcommand, so `exec` and `app-server` take them too.
+        let args = crate::compat_tui::with_settings(
+            vec![OsString::from("ling"), OsString::from("app-server")],
+            &settings,
+        );
+        assert_eq!(args[1], OsString::from("-c"));
+        assert_eq!(args.last(), Some(&OsString::from("app-server")));
     }
 
     #[test]
