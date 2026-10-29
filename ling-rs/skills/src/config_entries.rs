@@ -27,8 +27,15 @@ pub fn without_managed(text: &str) -> String {
             index += 1;
             if lines.get(index).is_some_and(|line| line.trim() == "[[skills.config]]") {
                 index += 1;
-                while lines.get(index).is_some_and(|line| is_entry_key(line)) {
+                while let Some(line) = lines.get(index).filter(|line| is_entry_key(line)) {
                     index += 1;
+                    // A path an older launcher wrote across lines: its continuation lines go too.
+                    if let Some(closing) = open_multiline(line) {
+                        while lines.get(index).is_some_and(|line| !line.contains(closing)) {
+                            index += 1;
+                        }
+                        index += 1;
+                    }
                 }
             }
             if lines.get(index).is_some_and(|line| line.trim().is_empty()) {
@@ -52,6 +59,14 @@ pub fn without_managed(text: &str) -> String {
 fn is_entry_key(line: &str) -> bool {
     let line = line.trim_start();
     line.starts_with("path = ") || line.starts_with("enabled = ")
+}
+
+/// The closing quotes of a multi-line string that `line` opens and does not close.
+fn open_multiline(line: &str) -> Option<&'static str> {
+    let value = line.trim_start().strip_prefix("path = ")?.trim_start();
+    ["\"\"\"", "'''"]
+        .into_iter()
+        .find(|quotes| value.strip_prefix(quotes).is_some_and(|rest| !rest.contains(quotes)))
 }
 
 /// The `SKILL.md` paths the user's own entries select, on or off: the launcher leaves those
@@ -107,8 +122,25 @@ fn entry_text(path: &Path, reason: &str) -> String {
     let reason: String = reason.chars().filter(|ch| !ch.is_control()).collect();
     format!(
         "{MARKER} {reason}\n[[skills.config]]\npath = {}\nenabled = false\n",
-        toml::Value::String(path.to_string_lossy().into_owned())
+        one_line_string(&path.to_string_lossy())
     )
+}
+
+/// `text` as a TOML basic string on one line. A folder name may hold a line break, and a value
+/// written across lines would leave its continuation behind when [`without_managed`] removes the
+/// entry: the next start would write a `config.toml` that does not parse.
+fn one_line_string(text: &str) -> String {
+    let mut out = String::from('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            ch if ch.is_control() => out.push_str(&format!("\\u{:04X}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
 }
 
 #[cfg(test)]
@@ -175,5 +207,21 @@ mod tests {
     fn a_path_with_quotes_or_backslashes_is_escaped() {
         let out = with_managed("", &entries(&["/a/we\"ird\\name/SKILL.md"])).unwrap_or_default();
         assert_eq!(user_paths(&out.replace(MARKER, "# mine:")), vec![PathBuf::from("/a/we\"ird\\name/SKILL.md")]);
+    }
+
+    #[test]
+    fn a_path_with_a_line_break_stays_on_one_line_and_goes_whole() {
+        let path = "/r/.agents/skills/a\nb'c\"d\\e\u{7f}/SKILL.md";
+        let once = with_managed(USER, &entries(&[path])).unwrap_or_default();
+        assert_eq!(once.lines().count(), USER.lines().count() + 5, "{once}");
+        assert_eq!(user_paths(&once.replace(MARKER, "# mine:")).last(), Some(&PathBuf::from(path)));
+        assert_eq!(with_managed(&once, &entries(&[path])).as_deref(), Ok(once.as_str()));
+        assert_eq!(without_managed(&once), USER);
+        // What an older launcher wrote for such a path goes as well, its continuation lines too.
+        let old = format!("{USER}\n{MARKER} needs gh\n[[skills.config]]\npath = \"\"\"\n/r/a\nb'c\"/SKILL.md\"\"\"\nenabled = false\n");
+        assert!(old.parse::<toml::Table>().is_ok());
+        assert_eq!(without_managed(&old), USER);
+        let literal = format!("{USER}\n{MARKER} needs gh\n[[skills.config]]\npath = \'\'\'\n/r/a\nb/SKILL.md\'\'\'\nenabled = false\n");
+        assert_eq!(without_managed(&literal), USER);
     }
 }
