@@ -146,6 +146,47 @@ def test_the_mirror_recheck_raises_when_git_cannot_read_the_tips(work):
         ForgeAnonymity.added_text(work, ["0" * 40], [], [])
 
 
+def crafted_commit(work: Path, message: bytes) -> str:
+    """A commit whose header names an encoding git cannot convert, so `git log` prints it raw."""
+    tree = subprocess.run(
+        ["git", "-C", str(work), "write-tree"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    body = (
+        f"tree {tree}\nauthor d <d@example.com> 1 +0000\ncommitter d <d@example.com> 1 +0000\n"
+        "encoding not-an-encoding\n\n"
+    ).encode() + message
+    return subprocess.run(
+        ["git", "-C", str(work), "hash-object", "-t", "commit", "-w", "--stdin"],
+        input=body,
+        capture_output=True,
+        check=True,
+    ).stdout.decode().strip()
+
+
+def test_the_mirror_recheck_reads_a_commit_message_that_is_not_utf8(work):
+    tip = crafted_commit(work, b"caf\xff on node-q\n")
+    text = ForgeAnonymity.added_text(work, [tip], [], [])
+    assert ForgeAnonymity.findings(text, ForgeAnonymity.denylist_patterns("node-q"))
+
+
+def test_a_commit_message_that_is_not_utf8_stops_the_mirror_cleanly(work, monkeypatch):
+    write_denylist("node-q\n")
+    tip = crafted_commit(work, b"caf\xff on node-q\n")
+    monkeypatch.setattr(ForgeGithubMirror, "refs", classmethod(lambda cls, work, prefix: {}))
+    pushed = []
+    monkeypatch.setattr(
+        ForgeGithubMirror, "push_each", classmethod(lambda cls, *a: pushed.append(a) or {"ok": True})
+    )
+    result = ForgeGithubMirror.send_to_github(
+        work, [f"{tip}:refs/heads/main"], "https://github.com/o/r.git", mirror_settings(), {}
+    )
+    assert result["stop"] and "identifiers" in result["error"] and pushed == []
+
+
+def mirror_settings(scope="full"):
+    return {"scope": scope, "exempt": ["tests/test_anonymity.py"]}
+
+
 def test_the_mirror_pushes_nothing_when_the_recheck_finds_an_identifier(work, monkeypatch):
     tip = commit(work, "a.txt", f"reach {LAN}.7.105\n")
     monkeypatch.setattr(ForgeGithubMirror, "refs", classmethod(lambda cls, work, prefix: {}))
