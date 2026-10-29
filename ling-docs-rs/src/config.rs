@@ -284,7 +284,12 @@ impl Settings {
         };
         let flag = |key: &str, env_key: &str| -> Option<bool> {
             env(env_key)
-                .map(|v| !matches!(v.to_lowercase().as_str(), "0" | "false" | "no" | "off"))
+                .map(|v| {
+                    !matches!(
+                        v.trim().to_lowercase().as_str(),
+                        "0" | "false" | "no" | "off"
+                    )
+                })
                 .or_else(|| table.get(key).and_then(toml::Value::as_bool))
         };
         if let Some(v) = flag("mightling_docs", "DREAMFERENCE_MIGHTLING_DOCS") {
@@ -437,6 +442,18 @@ mod tests {
         let s = Settings::from_sources(&table, &env);
         assert!(s.enabled);
         assert_eq!(s.bm25_weight, 0.25);
+    }
+
+    #[test]
+    fn a_switch_written_with_spaces_around_it_still_switches_off() {
+        let table = toml::Table::new();
+        for value in [" off", "off ", " 0 ", "False\n"] {
+            let env = |key: &str| (key == "DREAMFERENCE_MIGHTLING_DOCS").then(|| value.to_string());
+            assert!(
+                !Settings::from_sources(&table, &env).enabled,
+                "{value:?} turns ling-docs off"
+            );
+        }
     }
 
     #[test]
