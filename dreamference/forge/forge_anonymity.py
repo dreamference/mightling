@@ -216,7 +216,7 @@ class ForgeAnonymity:
             'BEGIN { n = split(exempt, names, " "); for (i = 1; i <= n; i++) skip_name[names[i]] = 1 }\n'
             # A file's header runs from its `diff` line to its first hunk: a `+++ ` line further
             # down is an added line that starts with `++ `, never a header.
-            '/^diff --git / { file = ""; skipping = 0; header = 1; next }\n'
+            '/^diff (--git|--cc) / { file = ""; skipping = 0; header = 1; next }\n'
             "header && /^@@/ { header = 0; next }\n"
             'header && /^\\+\\+\\+ / { path = substr($0, 5); if (path == "/dev/null") { file = ""; next }\n'
             '  sub(/^b\\//, "", path); file = path; skipping = (file in skip_name); if (!skipping) print file; next }\n'
@@ -275,7 +275,8 @@ class ForgeAnonymity:
             lines += [
                 '  if [ "$(git cat-file -t "$new")" = tag ]; then git cat-file -p "$new" >> "$work/meta"; fi',
                 '  git log --format="commit %H%n%an <%ae>%n%cn <%ce>%n%B" "$new" --not --all >> "$work/meta" || exit 1',
-                '  git log -p --no-color --no-ext-diff --no-renames --format= "$new" --not --all \\',
+                # `--cc`: a merge's own patch, the lines its resolution added (one `+` per parent).
+                '  git log -p --cc --no-color --no-ext-diff --no-renames --format= "$new" --not --all \\',
                 f"    | awk -v exempt={' '.join(safe)!r} '{cls.awk_program()}' >> \"$work/added\" || exit 1",
             ]
         lines.append("done")
@@ -399,6 +400,7 @@ class ForgeAnonymity:
                 "log",
                 "--stdin",
                 "-p",
+                "--cc",
                 "--no-color",
                 "--no-ext-diff",
                 "--no-renames",
@@ -429,7 +431,7 @@ class ForgeAnonymity:
         current, skipping, header = "", False, False
         # Only `\n` ends a line in a patch; a header ends at the file's first hunk (`awk_program`).
         for line in patch.split("\n"):
-            if line.startswith("diff --git "):
+            if line.startswith(("diff --git ", "diff --cc ")):
                 current, skipping, header = "", False, True
             elif header and line.startswith("@@"):
                 header = False
