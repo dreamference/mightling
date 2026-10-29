@@ -92,8 +92,9 @@ pub fn install(
     let stem = slug(&entry.indexer, &entry.root);
     let staged_db = dir.join(format!(".{stem}.db.new"));
     let staged_scip = dir.join(format!(".{stem}.scip.new"));
-    std::fs::copy(converted, &staged_db)?;
-    std::fs::copy(scip_file, &staged_scip)?;
+    // Fresh copies: the staging names are predictable, and a planted symlink is not followed.
+    crate::paths::copy_fresh(converted, &staged_db)?;
+    crate::paths::copy_fresh(scip_file, &staged_scip)?;
     std::fs::rename(&staged_scip, dir.join(format!("{stem}.scip")))?;
     // A journal left beside the old store must not meet the new one.
     for suffix in ["-wal", "-shm", "-journal"] {

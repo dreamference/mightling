@@ -354,7 +354,7 @@ pub fn scope_argv(run: &Run, peak_file: &Path) -> Vec<String> {
 fn keep_log(repo: &Repo, run: &Run, log: &Path) {
     let dir = repo.state_dir().join("logs");
     if std::fs::create_dir_all(&dir).is_ok() {
-        let _ = std::fs::copy(log, dir.join(format!("{}.log", run.unit)));
+        let _ = crate::paths::copy_fresh(log, &dir.join(format!("{}.log", run.unit)));
     }
 }
 

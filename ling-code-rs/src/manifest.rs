@@ -179,7 +179,8 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         path.file_name().unwrap().to_string_lossy(),
         std::process::id()
     ));
-    std::fs::write(&staging, bytes)?;
+    std::io::Write::write_all(&mut crate::paths::create_fresh(&staging)?, bytes)?;
+    // A rename replaces a symlink at `path` instead of writing through it.
     std::fs::rename(&staging, path)?;
     Ok(())
 }
@@ -306,5 +307,24 @@ mod tests {
         std::fs::write(dir.path().join("graph.json"), "{not json").unwrap();
         assert!(Manifest::load(dir.path()).runs.is_empty());
         assert!(GraphSnapshot::load(dir.path()).is_none());
+    }
+
+    /// The staging file's name is predictable; a symlink planted there is not written through.
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_never_writes_through_a_planted_staging_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("outside");
+        std::fs::write(&target, "keep").unwrap();
+        let path = dir.path().join("state/manifest.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let staging = path
+            .parent()
+            .unwrap()
+            .join(format!(".manifest.json.{}", std::process::id()));
+        std::os::unix::fs::symlink(&target, &staging).unwrap();
+        write_atomic(&path, b"new").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
     }
 }

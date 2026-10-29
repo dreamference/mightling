@@ -330,6 +330,32 @@ fn read_capped(path: &Path, cap: u64, follow: bool) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// Creates `path` afresh for writing. Whatever is there already (a stale file, or a symlink planted
+/// to make this process write elsewhere) is removed, and the exclusive create neither follows a
+/// symlink nor opens one put back in between.
+pub fn create_fresh(path: &Path) -> std::io::Result<std::fs::File> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+}
+
+/// [`create_fresh`] filled with a copy of `from`.
+pub fn copy_fresh(from: &Path, to: &Path) -> std::io::Result<u64> {
+    std::io::copy(&mut std::fs::File::open(from)?, &mut create_fresh(to)?)
+}
+
+/// The text of `path` when it is a regular file of at most [`STATE_READ_CAP`] bytes; None when it
+/// is missing, unreadable, larger, or a symlink or anything else, whose target this process must
+/// not read.
+pub fn read_regular(path: &Path) -> Option<String> {
+    read_state_file(path, STATE_READ_CAP)
+}
+
 #[cfg(all(test, unix))]
 mod state_file_tests {
     use super::*;
@@ -390,6 +416,21 @@ mod state_file_tests {
         assert_eq!(read_state_file(&big, 64), None);
         assert_eq!(read_repo_file(&big, 64), None);
         assert!(read_repo_file(&big, 65).is_some());
+    }
+
+    #[test]
+    fn fresh_files_and_reads_never_go_through_a_planted_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "keep").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert_eq!(read_regular(&link), None);
+        let source = dir.path().join("source");
+        std::fs::write(&source, "copied").unwrap();
+        copy_fresh(&source, &link).unwrap();
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
+        assert_eq!(read_regular(&link).as_deref(), Some("copied"));
     }
 
     #[test]

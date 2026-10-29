@@ -93,8 +93,13 @@ pub fn spawn_supervisor_child(repo: &Repo, plan: &plan::Plan) -> Result<std::pro
     let dir = repo.state_dir().join("plans");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("plan-{}.json", std::process::id()));
-    std::fs::write(&path, serde_json::to_vec_pretty(plan)?)?;
-    let log = std::fs::File::create(dir.join(format!("supervisor-{}.log", std::process::id())))?;
+    // Fresh files: the names are predictable, and a symlink planted under them is not followed.
+    std::io::Write::write_all(
+        &mut crate::paths::create_fresh(&path)?,
+        &serde_json::to_vec_pretty(plan)?,
+    )?;
+    let log =
+        crate::paths::create_fresh(&dir.join(format!("supervisor-{}.log", std::process::id())))?;
     let exe = std::env::current_exe()?;
     let mut command = Command::new(exe);
     command
@@ -125,7 +130,9 @@ pub fn supervise(plan_path: &str) -> Result<()> {
         return Ok(());
     };
     let marker = plan.state_dir.join("code_index.running");
-    let _ = std::fs::write(&marker, std::process::id().to_string());
+    let _ = crate::paths::create_fresh(&marker).and_then(|mut f| {
+        std::io::Write::write_all(&mut f, std::process::id().to_string().as_bytes())
+    });
     for (unit, outcome) in supervisor::execute(
         &plan,
         &SystemdHost,
@@ -175,7 +182,9 @@ const CBMIGNORE_END: &str = "# END ling-code managed";
 /// for longer than one run. The policy is decided for the main worktree, whose index this is.
 pub fn write_cbmignore(repo: &Repo, settings: &Settings) -> Result<()> {
     let path = repo.main_root.join(".cbmignore");
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    // The session runs outside the sandbox, and a clone or the agent can plant `.cbmignore` as a
+    // symlink: its target is never read, and the rename below replaces the link.
+    let existing = crate::paths::read_regular(&path).unwrap_or_default();
     let main = Repo {
         root: repo.main_root.clone(),
         main_root: repo.main_root.clone(),
@@ -213,7 +222,7 @@ pub fn write_cbmignore(repo: &Repo, settings: &Settings) -> Result<()> {
     if text.trim().is_empty() {
         let _ = std::fs::remove_file(&path);
     } else if text != existing {
-        std::fs::write(&path, &text)?;
+        crate::manifest::write_atomic(&path, text.as_bytes())?;
     }
     if repo.is_git {
         exclude_from_git(repo, ".cbmignore")?;
@@ -230,16 +239,22 @@ fn exclude_from_git(repo: &Repo, entry: &str) -> Result<()> {
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
     )?;
     let exclude = PathBuf::from(common.trim()).join("info/exclude");
-    let text = std::fs::read_to_string(&exclude).unwrap_or_default();
+    let Some(text) = crate::paths::read_regular(&exclude).or_else(|| {
+        // Missing is fine; a symlink or anything else is not this process's to touch.
+        std::fs::symlink_metadata(&exclude)
+            .is_err()
+            .then(String::new)
+    }) else {
+        return Ok(());
+    };
     if !text.lines().any(|l| l.trim() == entry) {
-        std::fs::create_dir_all(exclude.parent().unwrap())?;
         let mut text = text;
         if !text.is_empty() && !text.ends_with('\n') {
             text.push('\n');
         }
         text.push_str(entry);
         text.push('\n');
-        std::fs::write(exclude, text)?;
+        crate::manifest::write_atomic(&exclude, text.as_bytes())?;
     }
     Ok(())
 }
@@ -360,5 +375,53 @@ mod tests {
         .unwrap();
         write_cbmignore(&repo, &Settings::default()).unwrap();
         assert!(!cbm.exists());
+    }
+
+    /// The session writes `.cbmignore` outside the sandbox, and a clone or the agent can plant it
+    /// as a symlink: its target is neither read into the file nor written.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_cbmignore_is_replaced_not_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = Repo {
+            root: root.clone(),
+            main_root: root.clone(),
+            is_git: false,
+        };
+        let target = dir.path().join("outside");
+        std::fs::write(&target, "keep\n").unwrap();
+        std::os::unix::fs::symlink(&target, root.join(".cbmignore")).unwrap();
+        write_cbmignore(&repo, &Settings::default()).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep\n");
+        assert!(std::fs::symlink_metadata(root.join(".cbmignore")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_git_exclude_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let ok = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(ok.success());
+        let exclude = root.join(".git/info/exclude");
+        let _ = std::fs::remove_file(&exclude);
+        std::fs::create_dir_all(exclude.parent().unwrap()).unwrap();
+        let target = dir.path().join("outside");
+        std::fs::write(&target, "keep\n").unwrap();
+        std::os::unix::fs::symlink(&target, &exclude).unwrap();
+        let repo = Repo {
+            root: root.clone(),
+            main_root: root,
+            is_git: true,
+        };
+        exclude_from_git(&repo, ".cbmignore").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep\n");
     }
 }
