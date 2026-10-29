@@ -669,6 +669,11 @@ class NodeJob:
             if added.returncode != 0:
                 record["note"] = f"git worktree add failed: {added.stderr.strip()[-200:]}"
                 return 1
+            # Read now, before the job runs: the job can rewrite the worktree's `.git`.
+            admin = cls._admin_dir(tree, repo)
+            if admin is None:
+                record["note"] = "git worktree add left no administrative folder in the repository"
+                return 1
             network = record["airgapped"] != "on"
             with open(log, "ab") as sink:
                 env_dir, problem = cls._environment(record, tree, network, sink)
@@ -696,7 +701,7 @@ class NodeJob:
                 )
             if record.get("out"):
                 record["out_files"] = cls._keep_out(record, tree, directory)
-            record["branch"] = cls._commit(record, tree, repo)
+            record["branch"] = cls._commit(record, tree, admin)
             return code
         except Exception as error:  # A runner bug must not leave the job `running` forever.
             record["note"] = f"job runner error: {error}"
@@ -985,9 +990,40 @@ class NodeJob:
         return removed
 
     @classmethod
-    def _commit(cls, record: Dict[str, Any], tree: Path, repo: Path) -> Optional[str]:
-        """Commits what `git status` shows on `job/<id>`; None when the job changed nothing."""
-        status = cls._git(["-C", str(tree), "status", "--porcelain"])
+    def _admin_dir(cls, tree: Path, repo: Path) -> Optional[Path]:
+        """
+        Args:
+            tree: A worktree `git worktree add` has just made.
+            repo: The job repository it belongs to.
+
+        Returns:
+            Optional[Path]: The worktree's administrative folder in `repo` (`worktrees/<name>`),
+            as its `.git` file names it; None when it names anything else.
+        """
+        try:
+            line = (tree / ".git").read_text().strip()
+        except OSError:
+            return None
+        if not line.startswith("gitdir: "):
+            return None
+        admin = Path(os.path.realpath(tree / line[len("gitdir: "):]))
+        worktrees = Path(os.path.realpath(repo)) / "worktrees"
+        return admin if admin.parent == worktrees and admin.is_dir() else None
+
+    @classmethod
+    def _commit(cls, record: Dict[str, Any], tree: Path, admin: Path) -> Optional[str]:
+        """
+        Commits what `git status` shows on `job/<id>`; None when the job changed nothing.
+
+        This runs outside the sandbox, so git is pointed at the worktree's administrative folder
+        in the job repository and never at the worktree's `.git`, which the job could have
+        replaced with a repository of its own: its hooks, fsmonitor or config would run here as
+        the node's user. No hook runs for a job's commit either; the owner's choice to let hooks
+        run (docs/dev/host-safety.md) is about their own checkouts, not a client's job.
+        """
+        location = ["--git-dir", str(admin), "-c", "core.hooksPath=/dev/null",
+                    "--work-tree", str(tree)]
+        status = cls._git([*location, "status", "--porcelain"])
         if status.returncode != 0 or not status.stdout.strip():
             return None
         branch = f"job/{record['id']}"
@@ -1003,7 +1039,7 @@ class NodeJob:
             ("add", ["add", "-A"]),
             ("commit", [*identity, "commit", "-q", "-m", f"job: {first_line}"]),
         ):
-            result = cls._git(["-C", str(tree), *arguments])
+            result = cls._git([*location, *arguments])
             if result.returncode != 0:
                 record["note"] = f"git {step} failed: {result.stderr.strip()[-200:]}"
                 return None

@@ -1684,6 +1684,33 @@ def test_out_files_are_kept_beside_the_job_and_never_committed(job_node, capsysb
             NodeJob.validate(job_request(**changes))
 
 
+def test_a_job_cannot_make_the_node_run_its_git_hooks(job_node, tmp_path):
+    from dreamference.node import NodeJob
+
+    # The job's changes are committed by the node, outside the sandbox. A job that replaced the
+    # worktree's `.git` with a repository of its own once had its hooks run there, as the node's
+    # user: an escape from the sandbox.
+    ran = tmp_path / "hook-ran"
+    hook = f"#!/bin/sh\ntouch {ran}\n"
+    script = (
+        "rm .git && git init -q . && "
+        f"for name in pre-commit post-checkout; do printf '{hook}' > .git/hooks/$name; "
+        "chmod +x .git/hooks/$name; done; echo two >> data.txt"
+    )
+    job = NodeJob.submit(
+        job_request(commit=job_node["commit"], command=["bash", "-c", script]), "/x"
+    )
+    assert NodeJob.execute(job["id"]) == 0
+    assert not ran.exists()
+    assert NodeJob.read(job["id"])["branch"] == f"job/{job['id']}"
+    changed = subprocess.run(
+        ["git", "--git-dir", str(job_node["repo"]), "show", "--name-only", "--format=",
+         f"job/{job['id']}"],
+        capture_output=True, text=True,
+    ).stdout.split()
+    assert changed == ["data.txt"]
+
+
 def test_out_cannot_reach_outside_the_worktree_through_a_link(job_node, tmp_path):
     from dreamference.node import NodeJob
 
