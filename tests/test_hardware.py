@@ -763,3 +763,62 @@ def test_the_container_writes_the_tensors_under_another_name_and_the_host_rename
 def test_tensorize_does_not_run_a_container_whose_image_is_missing(tmp_path, monkeypatch):
     _, docker_runs, _, _ = _tensorize_in_docker(tmp_path, monkeypatch, image_ready=False)
     assert docker_runs == []
+
+
+def test_tensorize_on_the_host_runs_no_code_and_unpickles_nothing_from_the_repository(
+    tmp_path, monkeypatch
+):
+    # The host attempt loaded any named repository with trust_remote_code=True and no
+    # use_safetensors: its modeling .py ran, and .bin weights were unpickled, outside any container.
+    import types
+
+    from dreamference.hardware import ModelDownloader
+    from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    monkeypatch.setattr(ModelDownloader, "TENSORIZER_CACHE_HOME", tmp_path / "tensorizer")
+    monkeypatch.setattr(VLLMServerManager, "check_host_safety", classmethod(lambda cls: None))
+    monkeypatch.setattr(ModelDownloader, "is_model_downloaded", classmethod(lambda cls, *a, **k: True))
+    monkeypatch.setattr(
+        ModelDownloader, "get_model_snapshot_dir", classmethod(lambda cls, *a, **k: snapshot)
+    )
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "subprocess.run", lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr="")
+    )
+    loads = []
+
+    def from_pretrained(path, **kwargs):
+        loads.append(kwargs)
+        return types.SimpleNamespace(register_parameter=lambda *a: None)
+
+    class Serializer:
+        def __init__(self, path):
+            self.path = path
+
+        def write_module(self, model):
+            Path(self.path).write_bytes(b"tensors")
+
+        def close(self):
+            pass
+
+    torch = types.ModuleType("torch")
+    torch.tensor = lambda *a, **k: None
+    nn = types.ModuleType("torch.nn")
+    nn.Parameter = lambda *a, **k: None
+    torch.nn = nn
+    transformers = types.ModuleType("transformers")
+    transformers.AutoModelForCausalLM = types.SimpleNamespace(from_pretrained=from_pretrained)
+    tensorizer = types.ModuleType("tensorizer")
+    tensorizer.TensorSerializer = Serializer
+    for name, module in {
+        "torch": torch, "torch.nn": nn, "transformers": transformers, "tensorizer": tensorizer
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    ModelDownloader.tensorize_model(model_key, force=True)
+    assert len(loads) == 1
+    assert loads[0]["trust_remote_code"] is False
+    assert loads[0]["use_safetensors"] is True
