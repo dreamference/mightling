@@ -562,6 +562,16 @@ mod tests {
     }
 
     #[test]
+    fn revoking_a_sync_device_ends_its_secret_and_its_scope_can_be_narrowed() {
+        let state = scratch("revoke-sync");
+        let (_, secret) = add_device_of(&state, "laptop", DeviceKind::Sync).unwrap();
+        assert_eq!(set_scope(&state, "laptop", Scope::Watch).unwrap().len(), 1);
+        assert_eq!(sync_device_for_token(&state, &secret).unwrap().scope, Scope::Watch);
+        revoke_device(&state, "laptop").unwrap();
+        assert!(sync_device_for_token(&state, &secret).is_none(), "a revoked agent's secret opens nothing");
+    }
+
+    #[test]
     fn every_pairing_gets_control_and_a_scope_can_be_narrowed() {
         let state = scratch("scopes");
         let (id, token) = add_device(&state, "phone").unwrap();
