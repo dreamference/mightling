@@ -187,8 +187,8 @@ def test_the_hub_reached_over_ipv6_loopback_passes():
     # The destination is `[::1]:port`: its address is read without the brackets and its port
     # after the last colon.
     line = (
-        "100 connect(9, {sa_family=AF_INET6, sin6_port=htons(%d), sin6_flowinfo=htonl(0), "
-        'inet_pton(AF_INET6, "::1", &sin6_addr), sin6_scope_id=0}, 28) = 0\n' % PORT
+        f"100 connect(9, {{sa_family=AF_INET6, sin6_port=htons({PORT}), sin6_flowinfo=htonl(0), "
+        'inet_pton(AF_INET6, "::1", &sin6_addr), sin6_scope_id=0}, 28) = 0\n'
     )
     trace = StraceParser.parse(STARTED + line)
     assert trace.destinations == {f"[::1]:{PORT}": 1}
