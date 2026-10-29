@@ -49,6 +49,10 @@ pub const LISTING_TTL: Duration = Duration::from_secs(60);
 pub const VERSION_TIMEOUT: Duration = Duration::from_secs(3);
 /// Timeout for forge API requests (`GET /api/v1/repos/search`).
 pub const FORGE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Reads of a pull request reported unmergeable before `/merge` calls it a conflict, and the wait
+/// between them: Forgejo reports `mergeable: false` until it has checked a new head.
+const MERGEABLE_READS: u32 = 4;
+const MERGEABLE_RECHECK: Duration = Duration::from_millis(500);
 /// Timeout for the `systemctl --user` SWE-bench unit check.
 pub const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -4746,33 +4750,41 @@ async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body:
     }
 
     let pr_path = format!("/api/v1/repos/{}/pulls/{pr_number}", record.repo);
-    match forge_get(&base_url, &pr_path, &token, FORGE_TIMEOUT).await {
-        Ok((200, p_body)) => {
-            let pr_json = serde_json::from_slice::<Value>(&p_body).unwrap_or(Value::Null);
-            let pr_head = pr_json.pointer("/head/sha").and_then(Value::as_str);
-            let pr_base = pr_json.pointer("/base/ref").and_then(Value::as_str);
-            if pr_head.is_some_and(|sha| sha != head_sha) || pr_base.is_some_and(|base| base != record.base) {
-                return confirmation_moved_response();
+    // Forgejo answers `mergeable: false` while it checks a pull request just opened or pushed to:
+    // read it again a few times before calling that a conflict.
+    for read in 1..=MERGEABLE_READS {
+        match forge_get(&base_url, &pr_path, &token, FORGE_TIMEOUT).await {
+            Ok((200, p_body)) => {
+                let pr_json = serde_json::from_slice::<Value>(&p_body).unwrap_or(Value::Null);
+                let pr_head = pr_json.pointer("/head/sha").and_then(Value::as_str);
+                let pr_base = pr_json.pointer("/base/ref").and_then(Value::as_str);
+                if pr_head.is_some_and(|sha| sha != head_sha) || pr_base.is_some_and(|base| base != record.base) {
+                    return confirmation_moved_response();
+                }
+                if pr_json.get("mergeable").and_then(Value::as_bool) != Some(false) {
+                    break;
+                }
+                if read == MERGEABLE_READS {
+                    record_refused(&server, &record, RefusedAction::Merge);
+                    return json_response(
+                        StatusCode::CONFLICT,
+                        json!({ "error": format!("conflicts with {}: /update, then /merge", record.base) }),
+                    );
+                }
+                tokio::time::sleep(MERGEABLE_RECHECK).await;
             }
-            if pr_json.get("mergeable").and_then(Value::as_bool) == Some(false) {
-                record_refused(&server, &record, RefusedAction::Merge);
+            Ok((code, _)) => {
                 return json_response(
-                    StatusCode::CONFLICT,
-                    json!({ "error": format!("conflicts with {}: /update, then /merge", record.base) }),
+                    StatusCode::BAD_GATEWAY,
+                    json!({ "error": format!("forge returned HTTP {code} for pull request details") }),
                 );
             }
-        }
-        Ok((code, _)) => {
-            return json_response(
-                StatusCode::BAD_GATEWAY,
-                json!({ "error": format!("forge returned HTTP {code} for pull request details") }),
-            );
-        }
-        Err(err) => {
-            return json_response(
-                StatusCode::BAD_GATEWAY,
-                json!({ "error": sanitize_error(&err, &server.config.state_dir) }),
-            );
+            Err(err) => {
+                return json_response(
+                    StatusCode::BAD_GATEWAY,
+                    json!({ "error": sanitize_error(&err, &server.config.state_dir) }),
+                );
+            }
         }
     }
 
@@ -5401,6 +5413,9 @@ mod tests {
         requests: Mutex<Vec<(String, String, Value)>>,
         /// Items per page in lists, as a forge admin's `MAX_RESPONSE_ITEMS` would cap them; 0 = all on page 1.
         page_cap: std::sync::atomic::AtomicUsize,
+        /// Reads of a pull request that still report `mergeable: false`, as Forgejo does while it
+        /// checks a pull request just opened or pushed to.
+        checking_reads: std::sync::atomic::AtomicUsize,
     }
 
     impl FakeForge {
@@ -5412,6 +5427,7 @@ mod tests {
                 default_mergeable: AtomicBool::new(true),
                 requests: Mutex::new(Vec::new()),
                 page_cap: std::sync::atomic::AtomicUsize::new(0),
+                checking_reads: std::sync::atomic::AtomicUsize::new(0),
             })
         }
 
@@ -5573,13 +5589,15 @@ mod tests {
                         }
                         let full = format!("{owner}/{repo}");
                         st.record("GET", &format!("/api/v1/repos/{full}/pulls/{index}"), Value::Null);
+                        let checking =
+                            st.checking_reads.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok();
                         let pulls = st.pulls.lock().unwrap_or_else(|p| p.into_inner());
                         let Some(p) = pulls.iter().find(|p| p.repo == full && p.number == index) else {
                             return (StatusCode::NOT_FOUND, "not found").into_response();
                         };
                         let resp = json!({
                             "number": p.number,
-                            "mergeable": p.mergeable,
+                            "mergeable": p.mergeable && !checking,
                             "merged": p.merged,
                             "html_url": format!("http://127.0.0.1:3200/{full}/pulls/{}", p.number),
                             "title": p.title,
@@ -7296,8 +7314,10 @@ mod tests {
         assert_eq!(st, StatusCode::CONFLICT, "{m_body}");
         assert!(m_body.contains("conflicts with main: /update, then /merge"), "{m_body}");
 
-        // 5. Green status and mergeable = true merges with {"Do": "merge"} and answers {merged: true, branch, into}.
+        // 5. Green status and mergeable = true merges with {"Do": "merge"} and answers {merged: true, branch, into},
+        // also when the forge's first answer still reports the pull request unmergeable while it checks it.
         forge.set_mergeable(1, true);
+        forge.checking_reads.store(1, Ordering::Relaxed);
         let m_nonce = get_nonce(&server, &cookie, &thread, "merge").await;
         let (st, m_res, m_body) = post_json(
             &server,
