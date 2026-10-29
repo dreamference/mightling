@@ -189,10 +189,17 @@ class RemotePublicCertificate:
         """The owner's Cloudflare token.
 
         Returns:
-            Optional[str]: The token, or None when the file is missing or empty.
+            Optional[str]: The token, or None when the file is missing, empty or readable by
+            others than the owner (as `ssh` refuses such a key).
         """
+        path = Path(CLOUDFLARE_TOKEN_FILE).expanduser()
         try:
-            text = Path(CLOUDFLARE_TOKEN_FILE).expanduser().read_text().strip()
+            if path.stat().st_mode & 0o077:
+                LOG.error(
+                    f"❌ {CLOUDFLARE_TOKEN_FILE} may be read by others: chmod 600 {CLOUDFLARE_TOKEN_FILE}"
+                )
+                return None
+            text = path.read_text().strip()
         except OSError:
             return None
         return text or None
