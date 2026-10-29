@@ -112,7 +112,7 @@ pub fn sandbox_lines(sandbox: &ChromiumSandbox, binary: &Path) -> Vec<String> {
     match sandbox {
         ChromiumSandbox::Ready => Vec::new(),
         ChromiumSandbox::Helper { owner, path } => vec![
-            format!("💡 No AppArmor profile lets {} create Chromium's sandbox; using {owner}'s setuid sandbox helper instead ({path}).", binary.display(), path = path.display()),
+            format!("💡 No AppArmor profile lets {} create Chromium's sandbox; using {owner}'s setuid sandbox helper instead ({path}), another vendor's root-owned program, which Chromium calls slightly weaker than its own sandbox.", binary.display(), path = path.display()),
             format!("   For the app's own sandbox, {fix}."),
         ],
         ChromiumSandbox::Missing => vec![
@@ -513,9 +513,49 @@ mod tests {
         let helper = ChromiumSandbox::Helper { owner: "Google Chrome".into(), path: "/opt/google/chrome/chrome-sandbox".into() };
         let lines = sandbox_lines(&helper, binary);
         assert!(lines[0].contains("Google Chrome's setuid sandbox helper") && lines[0].contains("/opt/google/chrome/chrome-sandbox"));
+        // §5.3: the trade-offs are said in the message too.
+        assert!(lines[0].contains("another vendor's root-owned") && lines[0].contains("slightly weaker"), "{lines:?}");
         let missing = sandbox_lines(&ChromiumSandbox::Missing, binary);
         assert!(missing[0].contains("will stop at start") && missing[1].contains("ling-admin desktop install"));
         assert!(!lines.iter().chain(&missing).any(|line| line.contains("--no-sandbox")));
+    }
+
+    #[test]
+    fn an_unpacked_build_is_fixed_by_the_script_beside_it() {
+        // §6.3: install-sandbox-profile.sh beside an unpacked binary, ling-admin desktop install
+        // for a checkout.
+        let dir = std::env::temp_dir().join(format!("ling-app-unpacked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary = dir.join("Mightling");
+        std::fs::write(&binary, "").unwrap();
+        std::fs::write(dir.join(PROFILE_SCRIPT), "").unwrap();
+        let script = dir.join(PROFILE_SCRIPT).display().to_string();
+        let missing = sandbox_lines(&ChromiumSandbox::Missing, &binary);
+        let helper = sandbox_lines(&ChromiumSandbox::Helper { owner: "Google Chrome".into(), path: "/opt/google/chrome/chrome-sandbox".into() }, &binary);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(missing[1], format!("   The fix: an administrator runs {script} once (--print shows what it does)."));
+        assert!(helper[1].contains(&script), "{helper:?}");
+        assert!(!missing.iter().chain(&helper).any(|line| line.contains("ling-admin")));
+    }
+
+    #[test]
+    fn the_helpers_are_tried_in_the_specs_order() {
+        // §5.3: the first root-owned setuid helper of these browsers, in this order.
+        let owners: Vec<&str> = SETUID_HELPERS.iter().map(|(owner, _)| *owner).collect();
+        assert_eq!(
+            owners,
+            ["Google Chrome", "Microsoft Edge", "Brave", "Vivaldi", "Chromium", "Visual Studio Code", "Slack", "Discord", "Signal"]
+        );
+        assert!(SETUID_HELPERS.iter().all(|(_, path)| path.starts_with('/') && path.ends_with("-sandbox")));
+    }
+
+    #[test]
+    fn a_helper_that_speaks_another_protocol_is_caught_at_start() {
+        // §5.3: an old browser's helper fails loudly, and the log watch says what fixes it.
+        let log = "[1:1:FATAL:setuid_sandbox_host.cc(158)] The SUID sandbox helper binary was found, but is not configured correctly.\nThe setuid sandbox is not running as root.\n";
+        let lines = failure_lines(Some(1), log, None);
+        assert!(lines.iter().any(|line| line.contains("Chromium could not start its sandbox")), "{lines:?}");
     }
 
     #[test]
