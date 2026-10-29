@@ -91,7 +91,7 @@ pub fn request_error(error: ureq::Error) -> String {
 /// page (`share_links`); where its redirects lead anywhere else, that page is read as any other.
 pub fn fetch(url: &str, max_chars: i64) -> Result<FetchedPage, String> {
     require_http_url(url)?;
-    let proxy = crate::proxy_for(url, |name| std::env::var(name).ok());
+    let proxy = crate::proxy_for(url, |name| std::env::var(name).ok())?;
     let response = if share_links::is_share_link(url) {
         match share_links::walk(
             &crate::agent_with_redirects(proxy, 0),
@@ -153,7 +153,7 @@ pub fn download_pdf(
     max_bytes: u64,
 ) -> Result<Downloaded, String> {
     require_http_url(url)?;
-    let proxy = crate::proxy_for(url, |name| std::env::var(name).ok());
+    let proxy = crate::proxy_for(url, |name| std::env::var(name).ok())?;
     let response = match agent(proxy)
         .get(url)
         .set("Accept", "application/pdf,*/*;q=0.8")
