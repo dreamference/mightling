@@ -41,7 +41,9 @@ pub fn home() -> PathBuf {
 
 /// The user's home directory.
 pub fn user_home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
 }
 
 /// Whether ling-docs may add the default collections and index without being asked (§5.1, §9):
@@ -51,7 +53,11 @@ pub fn user_home() -> PathBuf {
 /// `~/Downloads` for half an hour each. `DREAMFERENCE_MIGHTLING_DOCS=1`, set explicitly, asks
 /// for it in another home; `ling docs add` and `reindex` are asked for in any home.
 pub fn indexes_unasked() -> bool {
-    indexes_unasked_for(&home(), &user_home(), std::env::var("DREAMFERENCE_MIGHTLING_DOCS").ok().as_deref())
+    indexes_unasked_for(
+        &home(),
+        &user_home(),
+        std::env::var("DREAMFERENCE_MIGHTLING_DOCS").ok().as_deref(),
+    )
 }
 
 /// [`indexes_unasked`] for a given agent home, user home and `DREAMFERENCE_MIGHTLING_DOCS`.
@@ -95,12 +101,21 @@ pub const PDF_HASH_DIGITS: usize = 12;
 /// Whether `name` is a cache entry's (`pdf-` and 12 lower-case hex digits): never a user's
 /// collection.
 pub fn is_pdf_cache_name(name: &str) -> bool {
-    name.strip_prefix("pdf-").is_some_and(|h| h.len() == PDF_HASH_DIGITS && h.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)))
+    name.strip_prefix("pdf-").is_some_and(|h| {
+        h.len() == PDF_HASH_DIGITS
+            && h.chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+    })
 }
 
 /// The directory of the running executable, symlinks resolved.
 fn exe_dir() -> Option<PathBuf> {
-    std::env::current_exe().ok()?.canonicalize().ok()?.parent().map(Path::to_path_buf)
+    std::env::current_exe()
+        .ok()?
+        .canonicalize()
+        .ok()?
+        .parent()
+        .map(Path::to_path_buf)
 }
 
 /// Where PDFium and ONNX Runtime are: `MIGHTLING_DOCS_LIB_DIR`, else `../lib/ling-docs` beside
@@ -109,7 +124,9 @@ pub fn lib_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("MIGHTLING_DOCS_LIB_DIR").filter(|d| !d.is_empty()) {
         return PathBuf::from(dir);
     }
-    exe_dir().map(|d| d.join("../lib/ling-docs")).unwrap_or_else(|| PathBuf::from("lib/ling-docs"))
+    exe_dir()
+        .map(|d| d.join("../lib/ling-docs"))
+        .unwrap_or_else(|| PathBuf::from("lib/ling-docs"))
 }
 
 /// Where the embedding model is: `MIGHTLING_DOCS_MODEL_DIR`, else `../models/<MODEL_NAME>`
@@ -118,7 +135,9 @@ pub fn model_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("MIGHTLING_DOCS_MODEL_DIR").filter(|d| !d.is_empty()) {
         return PathBuf::from(dir);
     }
-    exe_dir().map(|d| d.join("../models").join(MODEL_NAME)).unwrap_or_else(|| PathBuf::from(MODEL_NAME))
+    exe_dir()
+        .map(|d| d.join("../models").join(MODEL_NAME))
+        .unwrap_or_else(|| PathBuf::from(MODEL_NAME))
 }
 
 /// The OCR models' folder (spec §20): `MIGHTLING_DOCS_OCR_DIR`, else `../models/rapidocr-3.9.2`
@@ -128,7 +147,9 @@ pub fn ocr_dir() -> PathBuf {
         return PathBuf::from(dir);
     }
     let name = format!("rapidocr-{}", crate::ocr::RAPIDOCR_VERSION);
-    exe_dir().map(|d| d.join("../models").join(&name)).unwrap_or_else(|| PathBuf::from(name))
+    exe_dir()
+        .map(|d| d.join("../models").join(&name))
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 /// What is missing for indexing, if anything: indexing waits and says why (§7.3).
@@ -143,13 +164,21 @@ pub fn missing_runtime_at(lib: &Path, model: &Path) -> Option<String> {
         (lib.join("libpdfium.so"), "PDFium"),
         (lib.join("libonnxruntime.so"), "ONNX Runtime"),
         (model.join("model.onnx"), "the embedding model"),
-        (model.join("tokenizer.json"), "the embedding model's tokenizer"),
+        (
+            model.join("tokenizer.json"),
+            "the embedding model's tokenizer",
+        ),
     ] {
         if !path.is_file() {
             missing.push(what);
         }
     }
-    (!missing.is_empty()).then(|| format!("{} not installed (run `ling-admin docs setup`)", missing.join(", ")))
+    (!missing.is_empty()).then(|| {
+        format!(
+            "{} not installed (run `ling-admin docs setup`)",
+            missing.join(", ")
+        )
+    })
 }
 
 /// The global settings (§11).
@@ -222,74 +251,152 @@ pub fn config_file() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("DREAMFERENCE_CONFIG_PATH").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(path)).filter(|p| p.is_file());
     }
-    [PathBuf::from("dreamference.toml"), user_home().join(".config/dreamference/config.toml")].into_iter().find(|p| p.is_file())
+    [
+        PathBuf::from("dreamference.toml"),
+        user_home().join(".config/dreamference/config.toml"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
 }
 
 impl Settings {
     pub fn load() -> Settings {
-        let table = config_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.parse::<toml::Table>().ok()).unwrap_or_default();
-        Settings::from_sources(&table, &|key| std::env::var(key).ok().filter(|v| !v.is_empty()))
+        let table = config_file()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|t| t.parse::<toml::Table>().ok())
+            .unwrap_or_default();
+        Settings::from_sources(&table, &|key| {
+            std::env::var(key).ok().filter(|v| !v.is_empty())
+        })
     }
 
     /// The settings from a parsed config file and an environment lookup; the environment wins.
     pub fn from_sources(table: &toml::Table, env: &dyn Fn(&str) -> Option<String>) -> Settings {
         let mut s = Settings::default();
         let number = |key: &str, env_key: &str| -> Option<f64> {
-            env(env_key).and_then(|v| v.trim().parse::<f64>().ok()).or_else(|| match table.get(key) {
-                Some(toml::Value::Integer(i)) => Some(*i as f64),
-                Some(toml::Value::Float(f)) => Some(*f),
-                _ => None,
-            })
+            env(env_key)
+                .and_then(|v| v.trim().parse::<f64>().ok())
+                .or_else(|| match table.get(key) {
+                    Some(toml::Value::Integer(i)) => Some(*i as f64),
+                    Some(toml::Value::Float(f)) => Some(*f),
+                    _ => None,
+                })
         };
         let flag = |key: &str, env_key: &str| -> Option<bool> {
-            env(env_key).map(|v| !matches!(v.to_lowercase().as_str(), "0" | "false" | "no" | "off")).or_else(|| table.get(key).and_then(toml::Value::as_bool))
+            env(env_key)
+                .map(|v| !matches!(v.to_lowercase().as_str(), "0" | "false" | "no" | "off"))
+                .or_else(|| table.get(key).and_then(toml::Value::as_bool))
         };
         if let Some(v) = flag("mightling_docs", "DREAMFERENCE_MIGHTLING_DOCS") {
             s.enabled = v;
         }
-        if let Some(v) = number("docs_bm25_weight", "DREAMFERENCE_MIGHTLING_DOCS_BM25_WEIGHT").filter(|v| (0.0..=10.0).contains(v)) {
+        if let Some(v) = number(
+            "docs_bm25_weight",
+            "DREAMFERENCE_MIGHTLING_DOCS_BM25_WEIGHT",
+        )
+        .filter(|v| (0.0..=10.0).contains(v))
+        {
             s.bm25_weight = v;
         }
-        if let Some(v) = number("docs_scan_interval_min", "DREAMFERENCE_MIGHTLING_DOCS_SCAN_INTERVAL_MIN").filter(|v| *v >= 1.0) {
+        if let Some(v) = number(
+            "docs_scan_interval_min",
+            "DREAMFERENCE_MIGHTLING_DOCS_SCAN_INTERVAL_MIN",
+        )
+        .filter(|v| *v >= 1.0)
+        {
             s.scan_interval_min = v as u64;
         }
-        if let Some(v) = number("docs_max_index_gb", "DREAMFERENCE_MIGHTLING_DOCS_MAX_INDEX_GB").filter(|v| *v > 0.0) {
+        if let Some(v) = number(
+            "docs_max_index_gb",
+            "DREAMFERENCE_MIGHTLING_DOCS_MAX_INDEX_GB",
+        )
+        .filter(|v| *v > 0.0)
+        {
             s.max_index_gb = v;
         }
-        if let Some(v) = number("docs_extract_timeout_s", "DREAMFERENCE_MIGHTLING_DOCS_EXTRACT_TIMEOUT_S").filter(|v| *v >= 1.0) {
+        if let Some(v) = number(
+            "docs_extract_timeout_s",
+            "DREAMFERENCE_MIGHTLING_DOCS_EXTRACT_TIMEOUT_S",
+        )
+        .filter(|v| *v >= 1.0)
+        {
             s.extract_timeout_s = v as u64;
         }
-        if let Some(v) = number("docs_pdf_max_mb", "DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_MB").filter(|v| *v >= 1.0) {
+        if let Some(v) = number("docs_pdf_max_mb", "DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_MB")
+            .filter(|v| *v >= 1.0)
+        {
             s.pdf_max_mb = v as u64;
         }
-        if let Some(v) = number("docs_pdf_max_pages", "DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_PAGES").filter(|v| *v >= 1.0) {
+        if let Some(v) = number(
+            "docs_pdf_max_pages",
+            "DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_PAGES",
+        )
+        .filter(|v| *v >= 1.0)
+        {
             s.pdf_max_pages = v.min(u32::MAX as f64) as u32;
         }
-        if let Some(v) = number("docs_pdf_timeout_s", "DREAMFERENCE_MIGHTLING_DOCS_PDF_TIMEOUT_S").filter(|v| *v >= 1.0) {
+        if let Some(v) = number(
+            "docs_pdf_timeout_s",
+            "DREAMFERENCE_MIGHTLING_DOCS_PDF_TIMEOUT_S",
+        )
+        .filter(|v| *v >= 1.0)
+        {
             s.pdf_timeout_s = v as u64;
         }
-        if let Some(v) = number("docs_pdf_wait_s", "DREAMFERENCE_MIGHTLING_DOCS_PDF_WAIT_S").filter(|v| *v >= 0.0) {
+        if let Some(v) = number("docs_pdf_wait_s", "DREAMFERENCE_MIGHTLING_DOCS_PDF_WAIT_S")
+            .filter(|v| *v >= 0.0)
+        {
             s.pdf_wait_s = v as u64;
         }
-        if let Some(v) = number("docs_pdf_cache_mb", "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_MB").filter(|v| *v >= 0.0) {
+        if let Some(v) = number(
+            "docs_pdf_cache_mb",
+            "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_MB",
+        )
+        .filter(|v| *v >= 0.0)
+        {
             s.pdf_cache_mb = v as u64;
         }
-        if let Some(v) = number("docs_pdf_cache_days", "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_DAYS").filter(|v| *v >= 0.0) {
+        if let Some(v) = number(
+            "docs_pdf_cache_days",
+            "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_DAYS",
+        )
+        .filter(|v| *v >= 0.0)
+        {
             s.pdf_cache_days = v as u64;
         }
         if let Some(v) = flag("docs_ocr", "DREAMFERENCE_MIGHTLING_DOCS_OCR") {
             s.ocr = v;
         }
-        if let Some(v) = number("docs_ocr_max_pages", "DREAMFERENCE_MIGHTLING_DOCS_OCR_MAX_PAGES").filter(|v| *v >= 0.0) {
+        if let Some(v) = number(
+            "docs_ocr_max_pages",
+            "DREAMFERENCE_MIGHTLING_DOCS_OCR_MAX_PAGES",
+        )
+        .filter(|v| *v >= 0.0)
+        {
             s.ocr_max_pages = v.min(u32::MAX as f64) as u32;
         }
-        if let Some(v) = number("docs_ocr_timeout_s", "DREAMFERENCE_MIGHTLING_DOCS_OCR_TIMEOUT_S").filter(|v| *v >= 1.0) {
+        if let Some(v) = number(
+            "docs_ocr_timeout_s",
+            "DREAMFERENCE_MIGHTLING_DOCS_OCR_TIMEOUT_S",
+        )
+        .filter(|v| *v >= 1.0)
+        {
             s.ocr_timeout_s = v as u64;
         }
-        if let Some(v) = number("docs_ocr_send_below", "DREAMFERENCE_MIGHTLING_DOCS_OCR_SEND_BELOW").filter(|v| (0.0..=1.0).contains(v)) {
+        if let Some(v) = number(
+            "docs_ocr_send_below",
+            "DREAMFERENCE_MIGHTLING_DOCS_OCR_SEND_BELOW",
+        )
+        .filter(|v| (0.0..=1.0).contains(v))
+        {
             s.ocr_send_below = v;
         }
-        if let Some(v) = env("DREAMFERENCE_MIGHTLING_DOCS_EMBEDDING_MODEL").or_else(|| table.get("docs_embedding_model").and_then(toml::Value::as_str).map(str::to_string)) {
+        if let Some(v) = env("DREAMFERENCE_MIGHTLING_DOCS_EMBEDDING_MODEL").or_else(|| {
+            table
+                .get("docs_embedding_model")
+                .and_then(toml::Value::as_str)
+                .map(str::to_string)
+        }) {
             s.embedding_model = v;
         }
         s
@@ -338,30 +445,60 @@ mod tests {
         let user = dir.path().join("user");
         std::fs::create_dir_all(user.join(".mightling")).unwrap();
         assert!(indexes_unasked_for(&user.join(".mightling"), &user, None));
-        assert!(indexes_unasked_for(&user.join(".mightling/"), &user, Some("")), "the same folder, written another way");
+        assert!(
+            indexes_unasked_for(&user.join(".mightling/"), &user, Some("")),
+            "the same folder, written another way"
+        );
         let scratch = dir.path().join("scratch/codexhome");
-        assert!(!indexes_unasked_for(&scratch, &user, None), "a scratch CODEX_HOME beside the real HOME");
+        assert!(
+            !indexes_unasked_for(&scratch, &user, None),
+            "a scratch CODEX_HOME beside the real HOME"
+        );
         assert!(!indexes_unasked_for(&scratch, &user, Some("0")));
-        assert!(indexes_unasked_for(&scratch, &user, Some("1")), "asked for explicitly");
+        assert!(
+            indexes_unasked_for(&scratch, &user, Some("1")),
+            "asked for explicitly"
+        );
         assert!(indexes_unasked_for(&scratch, &user, Some("on")));
     }
 
     #[test]
     fn defaults_are_the_specs() {
         let s = Settings::default();
-        assert_eq!((s.bm25_weight, s.scan_interval_min, s.extract_timeout_s), (0.25, 10, 30));
+        assert_eq!(
+            (s.bm25_weight, s.scan_interval_min, s.extract_timeout_s),
+            (0.25, 10, 30)
+        );
         assert_eq!(s.max_index_gb, 10.0);
         assert_eq!(CHUNK_TOKENS, 512);
-        assert_eq!((s.pdf_max_mb, s.pdf_max_pages, s.pdf_timeout_s, s.pdf_wait_s, s.pdf_cache_mb, s.pdf_cache_days), (64, 2000, 120, 45, 1024, 1));
+        assert_eq!(
+            (
+                s.pdf_max_mb,
+                s.pdf_max_pages,
+                s.pdf_timeout_s,
+                s.pdf_wait_s,
+                s.pdf_cache_mb,
+                s.pdf_cache_days
+            ),
+            (64, 2000, 120, 45, 1024, 1)
+        );
     }
 
     #[test]
     fn a_pdf_cache_entry_has_its_own_folder_and_name_pattern() {
         assert!(is_pdf_cache_name("pdf-3f2a9c01d4e7"));
-        for name in ["pdf-papers", "pdf-3F2A9C01D4E7", "pdf-3f2a9c01d4e", "documents"] {
+        for name in [
+            "pdf-papers",
+            "pdf-3F2A9C01D4E7",
+            "pdf-3f2a9c01d4e",
+            "documents",
+        ] {
             assert!(!is_pdf_cache_name(name), "{name}");
         }
-        assert_eq!(db_path("pdf-3f2a9c01d4e7"), pdf_cache_dir().join("pdf-3f2a9c01d4e7.db"));
+        assert_eq!(
+            db_path("pdf-3f2a9c01d4e7"),
+            pdf_cache_dir().join("pdf-3f2a9c01d4e7.db")
+        );
         assert_eq!(db_path("pdf-papers"), docs_dir().join("pdf-papers.db"));
     }
 }

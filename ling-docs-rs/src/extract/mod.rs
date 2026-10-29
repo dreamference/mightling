@@ -51,7 +51,10 @@ pub fn extractor_version(kind: Kind) -> String {
 
 /// Every kind's [`extractor_version`], by the kind's stored name.
 pub fn extractor_versions() -> std::collections::BTreeMap<String, String> {
-    Kind::ALL.iter().map(|k| (k.as_str().to_string(), extractor_version(*k))).collect()
+    Kind::ALL
+        .iter()
+        .map(|k| (k.as_str().to_string(), extractor_version(*k)))
+        .collect()
 }
 
 /// A located piece of a document: a page, a section, a block of lines.
@@ -89,7 +92,12 @@ pub fn sections(paras: Vec<Para>, word: &str) -> Vec<Unit> {
     let mut path: Vec<(usize, String)> = Vec::new();
     let mut buf: Vec<String> = Vec::new();
     let mut start = 1;
-    let heading = |path: &[(usize, String)]| path.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join(" > ");
+    let heading = |path: &[(usize, String)]| {
+        path.iter()
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" > ")
+    };
     let unit = |first: usize, last: usize, heading: String, buf: &[String]| Unit {
         loc: format!("{word} {first}-{last}"),
         page: None,
@@ -131,12 +139,18 @@ pub struct Readers {
 
 impl Readers {
     pub fn new(lib_dir: &Path) -> Readers {
-        Readers { lib_dir: Some(lib_dir.to_path_buf()), pdfium: std::cell::OnceCell::new() }
+        Readers {
+            lib_dir: Some(lib_dir.to_path_buf()),
+            pdfium: std::cell::OnceCell::new(),
+        }
     }
 
     /// No PDFium: PDFs fail, everything else reads.
     pub fn none() -> Readers {
-        Readers { lib_dir: None, pdfium: std::cell::OnceCell::new() }
+        Readers {
+            lib_dir: None,
+            pdfium: std::cell::OnceCell::new(),
+        }
     }
 
     pub fn pdf(&self) -> Result<&pdf::Pdf> {
@@ -177,23 +191,45 @@ pub fn decode(bytes: &[u8]) -> String {
 }
 
 /// Extracts one file; of a PDF, at most `max_pages` pages from the first.
-pub fn extract_file(path: &Path, kind: Kind, readers: &Readers, max_pages: Option<u32>) -> Result<Extracted> {
+pub fn extract_file(
+    path: &Path,
+    kind: Kind,
+    readers: &Readers,
+    max_pages: Option<u32>,
+) -> Result<Extracted> {
     if kind == Kind::Pdf {
         return Ok(pdf_extracted(readers.pdf()?.extract(path, max_pages)?));
     }
     if kind == Kind::Image {
         // Read only by OCR, in its own scope (§20): the extractor does not decode it.
-        return Ok(Extracted { pages: Some(1), needs_ocr: vec![1], ..Extracted::default() });
+        return Ok(Extracted {
+            pages: Some(1),
+            needs_ocr: vec![1],
+            ..Extracted::default()
+        });
     }
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     extract_bytes(&name, kind, &std::fs::read(path)?, readers, max_pages)
 }
 
 /// Extracts a file's bytes (an attachment's, or a file read whole); `name` decides between CSV
 /// and TSV.
-pub fn extract_bytes(name: &str, kind: Kind, bytes: &[u8], readers: &Readers, max_pages: Option<u32>) -> Result<Extracted> {
+pub fn extract_bytes(
+    name: &str,
+    kind: Kind,
+    bytes: &[u8],
+    readers: &Readers,
+    max_pages: Option<u32>,
+) -> Result<Extracted> {
     let units = match kind {
-        Kind::Pdf => return Ok(pdf_extracted(readers.pdf()?.extract_bytes(bytes, max_pages)?)),
+        Kind::Pdf => {
+            return Ok(pdf_extracted(
+                readers.pdf()?.extract_bytes(bytes, max_pages)?,
+            ))
+        }
         Kind::Docx => office::docx(bytes)?,
         Kind::Odt => office::odt(bytes)?,
         Kind::Html => html::html(bytes),
@@ -211,21 +247,37 @@ pub fn extract_bytes(name: &str, kind: Kind, bytes: &[u8], readers: &Readers, ma
         Kind::Tex => text::tex(&decode(bytes)),
         Kind::Text => text::plain(&decode(bytes)),
     };
-    Ok(Extracted { units, ..Extracted::default() })
+    Ok(Extracted {
+        units,
+        ..Extracted::default()
+    })
 }
 
 /// A PDF's pages as units; pages without text are recorded as needing OCR.
 fn pdf_extracted(text: pdf::PdfText) -> Extracted {
     {
         let read = text.pages.len() as u32;
-        let mut out = Extracted { pages: Some(text.page_count), pages_read: (read < text.page_count).then_some(read), title: text.title, ..Extracted::default() };
+        let mut out = Extracted {
+            pages: Some(text.page_count),
+            pages_read: (read < text.page_count).then_some(read),
+            title: text.title,
+            ..Extracted::default()
+        };
         for (i, page) in text.pages.into_iter().enumerate() {
             let number = i as u32 + 1;
             if page.trim().is_empty() {
                 out.needs_ocr.push(number);
                 continue;
             }
-            out.units.push(Unit { loc: format!("p.{number}"), page: Some(number), line_first: None, line_last: None, heading: String::new(), group: None, text: page });
+            out.units.push(Unit {
+                loc: format!("p.{number}"),
+                page: Some(number),
+                line_first: None,
+                line_last: None,
+                heading: String::new(),
+                group: None,
+                text: page,
+            });
         }
         out
     }
@@ -248,19 +300,38 @@ pub struct Job {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "lowercase")]
 pub enum Event {
-    Start { id: i64 },
-    Done { id: i64, result: Extracted },
-    Failed { id: i64, error: String },
-    Progress { id: i64 },
-    Ocr { id: i64, result: crate::ocr::worker::OcrResult },
-    OcrFailed { id: i64, error: String },
+    Start {
+        id: i64,
+    },
+    Done {
+        id: i64,
+        result: Extracted,
+    },
+    Failed {
+        id: i64,
+        error: String,
+    },
+    Progress {
+        id: i64,
+    },
+    Ocr {
+        id: i64,
+        result: crate::ocr::worker::OcrResult,
+    },
+    OcrFailed {
+        id: i64,
+        error: String,
+    },
 }
 
 impl Event {
     /// The document an event ends, if it ends one.
     pub fn finished(&self) -> Option<i64> {
         match self {
-            Event::Done { id, .. } | Event::Failed { id, .. } | Event::Ocr { id, .. } | Event::OcrFailed { id, .. } => Some(*id),
+            Event::Done { id, .. }
+            | Event::Failed { id, .. }
+            | Event::Ocr { id, .. }
+            | Event::OcrFailed { id, .. } => Some(*id),
             Event::Start { .. } | Event::Progress { .. } => None,
         }
     }
@@ -274,7 +345,10 @@ pub fn worker(jobs: &Path, out: &Path, lib_dir: &Path) -> Result<()> {
         .map_while(|l| l.ok())
         .filter_map(|l| serde_json::from_str(&l).ok())
         .collect();
-    let mut sink = std::fs::OpenOptions::new().create(true).append(true).open(out)?;
+    let mut sink = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(out)?;
     let readers = Readers::new(lib_dir);
     let mut emit = |event: &Event| -> Result<()> {
         writeln!(sink, "{}", serde_json::to_string(event)?)?;
@@ -286,7 +360,10 @@ pub fn worker(jobs: &Path, out: &Path, lib_dir: &Path) -> Result<()> {
         let result = extract_file(&job.path, job.kind, &readers, job.max_pages);
         match result {
             Ok(result) => emit(&Event::Done { id: job.id, result })?,
-            Err(error) => emit(&Event::Failed { id: job.id, error: format!("{error:#}") })?,
+            Err(error) => emit(&Event::Failed {
+                id: job.id,
+                error: format!("{error:#}"),
+            })?,
         }
     }
     Ok(())
@@ -309,7 +386,12 @@ mod tests {
 
     #[test]
     fn latin1_text_is_read_rather_than_dropped() {
-        assert_eq!(decode(b"caf\xe9 cr\xe8me br\xfbl\xe9e d\xe9j\xe0 vu, \xe0 la carte, na\xefve fa\xe7ade"), "café crème brûlée déjà vu, à la carte, naïve façade");
+        assert_eq!(
+            decode(
+                b"caf\xe9 cr\xe8me br\xfbl\xe9e d\xe9j\xe0 vu, \xe0 la carte, na\xefve fa\xe7ade"
+            ),
+            "café crème brûlée déjà vu, à la carte, naïve façade"
+        );
         assert_eq!(decode("ok ✓".as_bytes()), "ok ✓");
     }
 
@@ -320,13 +402,29 @@ mod tests {
         std::fs::write(&good, "hello\n").unwrap();
         let jobs = dir.path().join("jobs.jsonl");
         let lines = [
-            serde_json::to_string(&Job { id: 1, path: dir.path().join("missing.txt"), kind: Kind::Text, max_pages: None }).unwrap(),
-            serde_json::to_string(&Job { id: 2, path: good, kind: Kind::Text, max_pages: None }).unwrap(),
+            serde_json::to_string(&Job {
+                id: 1,
+                path: dir.path().join("missing.txt"),
+                kind: Kind::Text,
+                max_pages: None,
+            })
+            .unwrap(),
+            serde_json::to_string(&Job {
+                id: 2,
+                path: good,
+                kind: Kind::Text,
+                max_pages: None,
+            })
+            .unwrap(),
         ];
         std::fs::write(&jobs, lines.join("\n")).unwrap();
         let out = dir.path().join("out.jsonl");
         worker(&jobs, &out, dir.path()).unwrap();
-        let events: Vec<Event> = std::fs::read_to_string(&out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let events: Vec<Event> = std::fs::read_to_string(&out)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
         assert!(matches!(events[0], Event::Start { id: 1 }));
         assert!(matches!(events[1], Event::Failed { id: 1, .. }));
         assert!(matches!(&events[3], Event::Done { id: 2, result } if result.units.len() == 1));

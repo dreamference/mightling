@@ -100,7 +100,10 @@ fn percent_decode(text: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Some(byte) = std::str::from_utf8(&bytes[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+            if let Some(byte) = std::str::from_utf8(&bytes[i + 1..i + 3])
+                .ok()
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+            {
                 out.push(byte);
                 i += 3;
                 continue;
@@ -114,19 +117,45 @@ fn percent_decode(text: &str) -> String {
 
 /// Resolves a local source under the rule of §3.3.3: under `cwd` or a collection's root, outside
 /// the folders never read. Returns the file, resolved, or why not.
-pub fn resolve_local(given: &str, cwd: &Path, collections: &[Collection], user_home: &Path) -> std::result::Result<PathBuf, String> {
+pub fn resolve_local(
+    given: &str,
+    cwd: &Path,
+    collections: &[Collection],
+    user_home: &Path,
+) -> std::result::Result<PathBuf, String> {
     let expanded = match given.strip_prefix("~/") {
         Some(rest) => user_home.join(rest),
         None => PathBuf::from(given),
     };
-    let path = if expanded.is_absolute() { expanded } else { cwd.join(expanded) };
-    let resolved = path.canonicalize().map_err(|_| format!("{} does not exist", path.display()))?;
-    let home = user_home.canonicalize().unwrap_or_else(|_| user_home.to_path_buf());
-    if let Some(secret) = SECRET_DIRS.iter().map(|d| home.join(d)).find(|s| resolved.starts_with(s)) {
-        return Err(format!("{} is inside {}, which is never read", resolved.display(), secret.display()));
+    let path = if expanded.is_absolute() {
+        expanded
+    } else {
+        cwd.join(expanded)
+    };
+    let resolved = path
+        .canonicalize()
+        .map_err(|_| format!("{} does not exist", path.display()))?;
+    let home = user_home
+        .canonicalize()
+        .unwrap_or_else(|_| user_home.to_path_buf());
+    if let Some(secret) = SECRET_DIRS
+        .iter()
+        .map(|d| home.join(d))
+        .find(|s| resolved.starts_with(s))
+    {
+        return Err(format!(
+            "{} is inside {}, which is never read",
+            resolved.display(),
+            secret.display()
+        ));
     }
     let mut roots: Vec<PathBuf> = cwd.canonicalize().into_iter().collect();
-    roots.extend(collections.iter().filter(|c| c.enabled).filter_map(|c| c.root.canonicalize().ok()));
+    roots.extend(
+        collections
+            .iter()
+            .filter(|c| c.enabled)
+            .filter_map(|c| c.root.canonicalize().ok()),
+    );
     if !roots.iter().any(|r| resolved.starts_with(r)) {
         return Err(format!(
             "{} is outside this session's workspace ({}): copy it into the workspace first (cp in a shell command, which the sandbox allows or refuses)",
@@ -144,16 +173,28 @@ pub fn resolve_local(given: &str, cwd: &Path, collections: &[Collection], user_h
 /// (environment, then the configuration files, strictest wins), or a seal written by `parent`
 /// (AIRGAPPED §6; the same question `ling-rs/apps/src/lib.rs::air_gapped_for` asks).
 pub fn air_gapped(parent: u32) -> bool {
-    configured_on(std::env::var("DREAMFERENCE_MIGHTLING_AIRGAPPED").ok(), &config_texts()) || sealed_by(parent)
+    configured_on(
+        std::env::var("DREAMFERENCE_MIGHTLING_AIRGAPPED").ok(),
+        &config_texts(),
+    ) || sealed_by(parent)
 }
 
 /// The environment's level if it names one, else whether any configuration file says `on`.
 pub fn configured_on(environment: Option<String>, configs: &[String]) -> bool {
-    if let Some(level) = environment.map(|v| v.trim().to_ascii_lowercase()).filter(|v| v == "on" || v == "off") {
+    if let Some(level) = environment
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| v == "on" || v == "off")
+    {
         return level == "on";
     }
     configs.iter().any(|text| {
-        text.parse::<toml::Table>().ok().and_then(|t| t.get("mightling_airgapped").and_then(|v| v.as_str().map(|s| s.trim().eq_ignore_ascii_case("on")))).unwrap_or(false)
+        text.parse::<toml::Table>()
+            .ok()
+            .and_then(|t| {
+                t.get("mightling_airgapped")
+                    .and_then(|v| v.as_str().map(|s| s.trim().eq_ignore_ascii_case("on")))
+            })
+            .unwrap_or(false)
     })
 }
 
@@ -164,15 +205,21 @@ fn config_texts() -> Vec<String> {
         None => files.push(PathBuf::from("dreamference.toml")),
     }
     files.push(config::user_home().join(".config/dreamference/config.toml"));
-    files.iter().filter_map(|f| std::fs::read_to_string(f).ok()).collect()
+    files
+        .iter()
+        .filter_map(|f| std::fs::read_to_string(f).ok())
+        .collect()
 }
 
 /// The seals' folder: `$XDG_RUNTIME_DIR/ling-airgapped`, or `/run/user/<uid>/ling-airgapped`.
 fn seal_dir() -> Option<PathBuf> {
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_absolute() && d.is_dir()).or_else(|| {
-        let dir = PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() }));
-        dir.is_dir().then_some(dir)
-    })?;
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|d| d.is_absolute() && d.is_dir())
+        .or_else(|| {
+            let dir = PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() }));
+            dir.is_dir().then_some(dir)
+        })?;
     Some(runtime.join("ling-airgapped"))
 }
 
@@ -184,7 +231,11 @@ pub fn sealed_by(pid: u32) -> bool {
 
 pub fn sealed_in(dir: &Path, pid: u32) -> bool {
     let own = pid.to_string();
-    std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.trim() == own))
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.trim() == own))
 }
 
 /// `ling-fetch`: `MIGHTLING_FETCH_BIN`, else beside this binary (both are installed in one `bin/`).
@@ -204,7 +255,13 @@ pub fn download(url: &str, dest: &Path, max_bytes: u64) -> std::result::Result<S
         return Err("downloading needs ling-fetch, which is not installed beside ling-docs".into());
     };
     let mut child = Command::new(&binary)
-        .args(["--download", &dest.to_string_lossy(), "--max-bytes", &max_bytes.to_string(), url])
+        .args([
+            "--download",
+            &dest.to_string_lossy(),
+            "--max-bytes",
+            &max_bytes.to_string(),
+            url,
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -218,7 +275,10 @@ pub fn download(url: &str, dest: &Path, max_bytes: u64) -> std::result::Result<S
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = std::fs::remove_file(dest);
-                return Err(format!("the download took longer than {} s", FETCH_TIMEOUT.as_secs()));
+                return Err(format!(
+                    "the download took longer than {} s",
+                    FETCH_TIMEOUT.as_secs()
+                ));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(100)),
             Err(e) => return Err(e.to_string()),
@@ -232,7 +292,11 @@ pub fn download(url: &str, dest: &Path, max_bytes: u64) -> std::result::Result<S
     if !status.success() {
         let _ = std::fs::remove_file(dest);
         let why = line.trim_start_matches("❌").trim();
-        return Err(if why.is_empty() { "the download failed".to_string() } else { why.to_string() });
+        return Err(if why.is_empty() {
+            "the download failed".to_string()
+        } else {
+            why.to_string()
+        });
     }
     let info: Value = serde_json::from_str(line).unwrap_or_default();
     Ok(info["final_url"].as_str().unwrap_or(url).to_string())
@@ -240,13 +304,21 @@ pub fn download(url: &str, dest: &Path, max_bytes: u64) -> std::result::Result<S
 
 /// Copies `from` into `dest` (mode 600), at most `max_bytes`, and returns the SHA-256 in hex.
 /// The file must start like a PDF.
-pub fn copy_checked(from: &Path, dest: &Path, max_bytes: u64) -> std::result::Result<String, String> {
+pub fn copy_checked(
+    from: &Path,
+    dest: &Path,
+    max_bytes: u64,
+) -> std::result::Result<String, String> {
     let size = std::fs::metadata(from).map_err(|e| e.to_string())?.len();
     if size == 0 {
         return Err("the file is empty".into());
     }
     if size > max_bytes {
-        return Err(format!("larger than {} MiB ({} MiB): over docs_pdf_max_mb", max_bytes >> 20, size >> 20));
+        return Err(format!(
+            "larger than {} MiB ({} MiB): over docs_pdf_max_mb",
+            max_bytes >> 20,
+            size >> 20
+        ));
     }
     let mut input = std::fs::File::open(from).map_err(|e| e.to_string())?;
     let mut head = vec![0u8; 1024];
@@ -268,7 +340,10 @@ pub fn copy_checked(from: &Path, dest: &Path, max_bytes: u64) -> std::result::Re
         }
         total += n as u64;
         if total > max_bytes {
-            return Err(format!("larger than {} MiB: over docs_pdf_max_mb", max_bytes >> 20));
+            return Err(format!(
+                "larger than {} MiB: over docs_pdf_max_mb",
+                max_bytes >> 20
+            ));
         }
         hasher.update(&buffer[..n]);
         output.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
@@ -289,7 +364,11 @@ fn read_full(input: &mut std::fs::File, buffer: &mut [u8]) -> std::io::Result<us
 
 fn private_file(path: &Path) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
-    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -312,15 +391,27 @@ pub fn touch(name: &str) {
 /// The cache's entries: name, bytes (database and journal), last use.
 pub fn entries() -> Vec<(String, u64, SystemTime)> {
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(config::pdf_cache_dir()).into_iter().flatten().flatten() {
+    for entry in std::fs::read_dir(config::pdf_cache_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
         let file = entry.file_name().to_string_lossy().into_owned();
-        let Some(name) = file.strip_suffix(".db") else { continue };
+        let Some(name) = file.strip_suffix(".db") else {
+            continue;
+        };
         if !config::is_pdf_cache_name(name) {
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };
-        let journal = std::fs::metadata(entry.path().with_extension("db-journal")).map(|m| m.len()).unwrap_or(0);
-        out.push((name.to_string(), meta.len() + journal, meta.modified().unwrap_or(SystemTime::UNIX_EPOCH)));
+        let journal = std::fs::metadata(entry.path().with_extension("db-journal"))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        out.push((
+            name.to_string(),
+            meta.len() + journal,
+            meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+        ));
     }
     out
 }
@@ -334,7 +425,9 @@ pub fn evict(max_mb: u64, days: u64, keep: &[String]) -> usize {
     for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let pid = name.rsplit('-').next().and_then(|p| p.parse::<u32>().ok());
-        if (name.starts_with("run-") || name.starts_with("fetch-")) && pid.is_some_and(|p| !Path::new(&format!("/proc/{p}")).exists()) {
+        if (name.starts_with("run-") || name.starts_with("fetch-"))
+            && pid.is_some_and(|p| !Path::new(&format!("/proc/{p}")).exists())
+        {
             let _ = std::fs::remove_dir_all(entry.path());
         }
     }
@@ -348,7 +441,10 @@ pub fn evict(max_mb: u64, days: u64, keep: &[String]) -> usize {
         if keep.contains(&name) || in_use(&name) {
             continue;
         }
-        let stale = now.duration_since(used).map(|age| age > Duration::from_secs(days * 86400)).unwrap_or(false);
+        let stale = now
+            .duration_since(used)
+            .map(|age| age > Duration::from_secs(days * 86400))
+            .unwrap_or(false);
         if stale || total > max_mb << 20 {
             remove_entry(&name);
             total = total.saturating_sub(size);
@@ -377,8 +473,18 @@ fn remove_entry(name: &str) {
 
 /// A title for a source before the PDF names its own: the file name without `.pdf`.
 pub fn title_of(label: &str) -> String {
-    let last = label.split(['?', '#']).next().unwrap_or(label).trim_end_matches('/').rsplit('/').next().unwrap_or(label);
-    let stem = last.strip_suffix(".pdf").or_else(|| last.strip_suffix(".PDF")).unwrap_or(last);
+    let last = label
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(label)
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or(label);
+    let stem = last
+        .strip_suffix(".pdf")
+        .or_else(|| last.strip_suffix(".PDF"))
+        .unwrap_or(last);
     percent_decode(stem).replace(['_', '-'], " ")
 }
 
@@ -415,7 +521,16 @@ impl PdfSearch {
     /// One `pdf_search` call. `parent` is the session's pid, `cwd` the session's working
     /// directory.
     #[allow(clippy::too_many_arguments)]
-    pub fn call(&mut self, args: &Value, cwd: &Path, parent: u32, collections: &[Collection], settings: &Settings, env_for: EnvFor, embedder: Option<&dyn Embed>) -> Result<String> {
+    pub fn call(
+        &mut self,
+        args: &Value,
+        cwd: &Path,
+        parent: u32,
+        collections: &[Collection],
+        settings: &Settings,
+        env_for: EnvFor,
+        embedder: Option<&dyn Embed>,
+    ) -> Result<String> {
         self.reap();
         if !self.swept {
             self.swept = true;
@@ -426,7 +541,11 @@ impl PdfSearch {
         if query.is_empty() {
             bail!("pdf_search needs a query");
         }
-        let k = args["k"].as_u64().map(|k| k as usize).unwrap_or(DEFAULT_K).clamp(1, MAX_K);
+        let k = args["k"]
+            .as_u64()
+            .map(|k| k as usize)
+            .unwrap_or(DEFAULT_K)
+            .clamp(1, MAX_K);
         let max_bytes = settings.pdf_max_mb << 20;
         let dir = config::pdf_cache_dir();
         store::create_private_dir(&dir)?;
@@ -469,9 +588,23 @@ impl PdfSearch {
                     self.urls.retain(|_, (n, _)| *n != name);
                     bail!("this PDF's index was removed from the cache: ask again to download it once more");
                 }
-                let file = if copy.is_file() { copy.clone() } else { PathBuf::from("/nonexistent") };
-                match index::index_file(&env, &name, &label, &title_of(&label), &file, Some(settings.pdf_max_pages), Duration::from_secs(settings.pdf_wait_s))? {
-                    FileIndexed::Ready(Some(background)) => self.running.push((name.clone(), background)),
+                let file = if copy.is_file() {
+                    copy.clone()
+                } else {
+                    PathBuf::from("/nonexistent")
+                };
+                match index::index_file(
+                    &env,
+                    &name,
+                    &label,
+                    &title_of(&label),
+                    &file,
+                    Some(settings.pdf_max_pages),
+                    Duration::from_secs(settings.pdf_wait_s),
+                )? {
+                    FileIndexed::Ready(Some(background)) => {
+                        self.running.push((name.clone(), background))
+                    }
                     FileIndexed::Ready(None) => {}
                     FileIndexed::Stopped(Outcome::Failed(why)) => bail!("failed: {why}"),
                     FileIndexed::Stopped(other) => bail!("{}", other.status()),
@@ -481,7 +614,12 @@ impl PdfSearch {
                 self.urls.insert(url, (name.clone(), label.clone()));
             }
             touch(&name);
-            let keep: Vec<String> = self.running.iter().map(|(n, _)| n.clone()).chain([name.clone()]).collect();
+            let keep: Vec<String> = self
+                .running
+                .iter()
+                .map(|(n, _)| n.clone())
+                .chain([name.clone()])
+                .collect();
             evict(settings.pdf_cache_mb, settings.pdf_cache_days, &keep);
             render(&name, &query, k, settings, embedder)
         })();
@@ -492,22 +630,56 @@ impl PdfSearch {
 
 /// Whether an entry's text is in its database.
 fn index_ready(name: &str) -> bool {
-    store::open_ro(&config::db_path(name)).ok().flatten().is_some_and(|conn| conn.query_row("SELECT count(*) FROM documents WHERE status = 'ok'", [], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0)
+    store::open_ro(&config::db_path(name))
+        .ok()
+        .flatten()
+        .is_some_and(|conn| {
+            conn.query_row(
+                "SELECT count(*) FROM documents WHERE status = 'ok'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+                > 0
+        })
 }
 
 /// The answer: a header on the document, the passages as `docs_search` renders them, and how to
 /// read a page.
-pub fn render(name: &str, query: &str, k: usize, settings: &Settings, embedder: Option<&dyn Embed>) -> Result<String> {
+pub fn render(
+    name: &str,
+    query: &str,
+    k: usize,
+    settings: &Settings,
+    embedder: Option<&dyn Embed>,
+) -> Result<String> {
     let conn = store::open_ro(&config::db_path(name))?.context("the PDF's index is missing")?;
-    let (id, label, title, pages, needs_ocr, status): (i64, String, String, Option<u32>, String, String) = conn.query_row(
+    let (id, label, title, pages, needs_ocr, status): (
+        i64,
+        String,
+        String,
+        Option<u32>,
+        String,
+        String,
+    ) = conn.query_row(
         "SELECT id, path, title, pages, needs_ocr, status FROM documents ORDER BY id LIMIT 1",
         [],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+        |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        },
     )?;
     if status != "ok" {
         bail!("{status}");
     }
-    let pages_read: Option<u32> = store::get_meta(&conn, "pages_read")?.and_then(|v| v.parse().ok());
+    let pages_read: Option<u32> =
+        store::get_meta(&conn, "pages_read")?.and_then(|v| v.parse().ok());
     let chunks: i64 = conn.query_row("SELECT count(*) FROM chunks", [], |r| r.get(0))?;
     drop(conn);
     let doc_id = format!("{name}:{id}");
@@ -522,13 +694,21 @@ pub fn render(name: &str, query: &str, k: usize, settings: &Settings, embedder: 
         }
     }
     header.push('.');
-    let scanned: Vec<String> = needs_ocr.split(',').filter(|p| !p.is_empty()).map(|p| format!("p.{p}")).collect();
+    let scanned: Vec<String> = needs_ocr
+        .split(',')
+        .filter(|p| !p.is_empty())
+        .map(|p| format!("p.{p}"))
+        .collect();
     if chunks == 0 {
         return Ok(format!("{header}\nThis PDF has no text layer (a scan, or only images): it cannot be searched, because OCR is not offered yet."));
     }
     if !scanned.is_empty() {
         let shown: Vec<&str> = scanned.iter().take(20).map(String::as_str).collect();
-        let more = if scanned.len() > shown.len() { format!(" and {} more", scanned.len() - shown.len()) } else { String::new() };
+        let more = if scanned.len() > shown.len() {
+            format!(" and {} more", scanned.len() - shown.len())
+        } else {
+            String::new()
+        };
         header.push_str(&format!("\nNo text layer (scanned?) on {}{more}: OCR is not offered yet, so those pages are not searched.", shown.join(", ")));
     }
     // One document: every hit is a neighbour of another, and merging would turn k passages into
@@ -536,7 +716,13 @@ pub fn render(name: &str, query: &str, k: usize, settings: &Settings, embedder: 
     let mut searcher = Searcher::default();
     searcher.merge_adjacent = false;
     searcher.refresh(&[collection(name)])?;
-    let answer = searcher.search(query, k, &Filters::default(), embedder, settings.bm25_weight)?;
+    let answer = searcher.search(
+        query,
+        k,
+        &Filters::default(),
+        embedder,
+        settings.bm25_weight,
+    )?;
     let body = crate::mcp::render_search(&answer);
     let first_page = answer.hits.iter().find_map(|h| h.page).unwrap_or(1);
     Ok(format!(
@@ -557,11 +743,26 @@ mod tests {
 
     #[test]
     fn sources_are_told_apart() {
-        assert_eq!(Source::parse("https://arxiv.org/pdf/1706.03762").unwrap(), Source::Url("https://arxiv.org/pdf/1706.03762".into()));
-        assert_eq!(Source::parse("HTTP://x.org/a.pdf").unwrap(), Source::Url("HTTP://x.org/a.pdf".into()));
-        assert_eq!(Source::parse("drive:1AbC").unwrap(), Source::Drive("1AbC".into()));
-        assert_eq!(Source::parse("./docs/a.pdf").unwrap(), Source::Local("./docs/a.pdf".into()));
-        assert_eq!(Source::parse("file:///tmp/a%20b.pdf").unwrap(), Source::Local("/tmp/a b.pdf".into()));
+        assert_eq!(
+            Source::parse("https://arxiv.org/pdf/1706.03762").unwrap(),
+            Source::Url("https://arxiv.org/pdf/1706.03762".into())
+        );
+        assert_eq!(
+            Source::parse("HTTP://x.org/a.pdf").unwrap(),
+            Source::Url("HTTP://x.org/a.pdf".into())
+        );
+        assert_eq!(
+            Source::parse("drive:1AbC").unwrap(),
+            Source::Drive("1AbC".into())
+        );
+        assert_eq!(
+            Source::parse("./docs/a.pdf").unwrap(),
+            Source::Local("./docs/a.pdf".into())
+        );
+        assert_eq!(
+            Source::parse("file:///tmp/a%20b.pdf").unwrap(),
+            Source::Local("/tmp/a b.pdf".into())
+        );
         assert!(Source::parse("ftp://x/a.pdf").is_err());
         assert!(Source::parse("  ").is_err());
     }
@@ -571,7 +772,10 @@ mod tests {
         let meta = serde_json::json!({ SANDBOX_STATE_META: { "sandbox_cwd": "file:///home/u/My%20Thesis" } });
         assert_eq!(sandbox_cwd(&meta), Some(PathBuf::from("/home/u/My Thesis")));
         assert_eq!(sandbox_cwd(&serde_json::json!({})), None);
-        assert_eq!(sandbox_cwd(&serde_json::json!({ SANDBOX_STATE_META: { "sandbox_cwd": "relative" } })), None);
+        assert_eq!(
+            sandbox_cwd(&serde_json::json!({ SANDBOX_STATE_META: { "sandbox_cwd": "relative" } })),
+            None
+        );
     }
 
     #[test]
@@ -584,17 +788,35 @@ mod tests {
         for d in [&work, &docs, &ssh, &home.join("elsewhere")] {
             std::fs::create_dir_all(d).unwrap();
         }
-        for f in [work.join("a.pdf"), docs.join("b.pdf"), ssh.join("c.pdf"), home.join("elsewhere/d.pdf")] {
+        for f in [
+            work.join("a.pdf"),
+            docs.join("b.pdf"),
+            ssh.join("c.pdf"),
+            home.join("elsewhere/d.pdf"),
+        ] {
             std::fs::write(f, b"%PDF-1.4").unwrap();
         }
         let collections = vec![Collection::new("documents", docs.clone())];
-        assert_eq!(resolve_local("a.pdf", &work, &collections, &home).unwrap(), work.join("a.pdf"));
-        assert_eq!(resolve_local("~/Documents/b.pdf", &work, &collections, &home).unwrap(), docs.join("b.pdf"));
+        assert_eq!(
+            resolve_local("a.pdf", &work, &collections, &home).unwrap(),
+            work.join("a.pdf")
+        );
+        assert_eq!(
+            resolve_local("~/Documents/b.pdf", &work, &collections, &home).unwrap(),
+            docs.join("b.pdf")
+        );
         let outside = resolve_local("../elsewhere/d.pdf", &work, &collections, &home).unwrap_err();
-        assert!(outside.contains("outside this session's workspace") && outside.contains("cp"), "{outside}");
+        assert!(
+            outside.contains("outside this session's workspace") && outside.contains("cp"),
+            "{outside}"
+        );
         // The home folder as the workspace still never opens ~/.ssh.
-        assert!(resolve_local(".ssh/c.pdf", &home, &collections, &home).unwrap_err().contains("never read"));
-        assert!(resolve_local("missing.pdf", &work, &collections, &home).unwrap_err().contains("does not exist"));
+        assert!(resolve_local(".ssh/c.pdf", &home, &collections, &home)
+            .unwrap_err()
+            .contains("never read"));
+        assert!(resolve_local("missing.pdf", &work, &collections, &home)
+            .unwrap_err()
+            .contains("does not exist"));
         // A link out of the workspace is judged where it leads.
         std::os::unix::fs::symlink(home.join("elsewhere/d.pdf"), work.join("link.pdf")).unwrap();
         assert!(resolve_local("link.pdf", &work, &collections, &home).is_err());
@@ -607,12 +829,28 @@ mod tests {
         std::fs::write(&pdf, b"%PDF-1.4\nhello").unwrap();
         let sha = copy_checked(&pdf, &dir.path().join("copy"), 1 << 20).unwrap();
         assert_eq!(sha.len(), 64);
-        assert_eq!(std::fs::read(dir.path().join("copy")).unwrap(), b"%PDF-1.4\nhello");
+        assert_eq!(
+            std::fs::read(dir.path().join("copy")).unwrap(),
+            b"%PDF-1.4\nhello"
+        );
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(dir.path().join("copy")).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(dir.path().join("copy"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
         std::fs::write(dir.path().join("html"), b"<html>404</html>").unwrap();
-        assert!(copy_checked(&dir.path().join("html"), &dir.path().join("c2"), 1 << 20).unwrap_err().contains("not a PDF"));
-        assert!(copy_checked(&pdf, &dir.path().join("c3"), 4).unwrap_err().contains("larger than"));
+        assert!(
+            copy_checked(&dir.path().join("html"), &dir.path().join("c2"), 1 << 20)
+                .unwrap_err()
+                .contains("not a PDF")
+        );
+        assert!(copy_checked(&pdf, &dir.path().join("c3"), 4)
+            .unwrap_err()
+            .contains("larger than"));
         assert_eq!(entry_name(&sha), format!("pdf-{}", &sha[..12]));
         assert!(config::is_pdf_cache_name(&entry_name(&sha)));
     }
@@ -621,11 +859,20 @@ mod tests {
     fn the_air_gap_is_the_environment_then_the_files_or_the_parents_seal() {
         let on = "mightling_airgapped = \"on\"\n".to_string();
         let off = "mightling_airgapped = \"off\"\n".to_string();
-        assert!(configured_on(None, &[off.clone(), on.clone()]), "strictest file wins");
+        assert!(
+            configured_on(None, &[off.clone(), on.clone()]),
+            "strictest file wins"
+        );
         assert!(!configured_on(None, std::slice::from_ref(&off)));
-        assert!(!configured_on(Some("off".into()), std::slice::from_ref(&on)), "the environment wins");
+        assert!(
+            !configured_on(Some("off".into()), std::slice::from_ref(&on)),
+            "the environment wins"
+        );
         assert!(configured_on(Some("ON".into()), &[]));
-        assert!(configured_on(Some("bogus".into()), &[on]), "an invalid value is passed over");
+        assert!(
+            configured_on(Some("bogus".into()), &[on]),
+            "an invalid value is passed over"
+        );
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("0b5c-thread"), "4242\n").unwrap();
         assert!(sealed_in(dir.path(), 4242));
@@ -634,8 +881,14 @@ mod tests {
 
     #[test]
     fn titles_come_from_the_source_until_the_pdf_names_its_own() {
-        assert_eq!(title_of("https://x.org/papers/attention_is_all.pdf?dl=1"), "attention is all");
-        assert_eq!(title_of("/home/u/work/Master%20Agreement.pdf"), "Master Agreement");
+        assert_eq!(
+            title_of("https://x.org/papers/attention_is_all.pdf?dl=1"),
+            "attention is all"
+        );
+        assert_eq!(
+            title_of("/home/u/work/Master%20Agreement.pdf"),
+            "Master Agreement"
+        );
         assert_eq!(title_of("https://arxiv.org/pdf/1706.03762"), "1706.03762");
     }
 
@@ -650,7 +903,18 @@ mod tests {
         std::fs::write(disabled_root.join("old.pdf"), b"%PDF-1.4").unwrap();
         let mut col = Collection::new("archive", disabled_root.clone());
         col.enabled = false;
-        assert!(resolve_local(&disabled_root.join("old.pdf").to_string_lossy(), &work, &[col], &home).is_err(), "disabled collection root does not grant access");
-        assert!(resolve_local("subdir", &work, &[], &home).unwrap_err().contains("not a file"));
+        assert!(
+            resolve_local(
+                &disabled_root.join("old.pdf").to_string_lossy(),
+                &work,
+                &[col],
+                &home
+            )
+            .is_err(),
+            "disabled collection root does not grant access"
+        );
+        assert!(resolve_local("subdir", &work, &[], &home)
+            .unwrap_err()
+            .contains("not a file"));
     }
 }

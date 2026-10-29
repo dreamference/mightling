@@ -81,7 +81,13 @@ fn read_u64(path: &Path) -> Option<u64> {
 }
 
 fn systemctl(args: &[&str]) -> Result<()> {
-    let status = Command::new("systemctl").arg("--user").args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status()?;
+    let status = Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
     if !status.success() {
         bail!("systemctl --user {} failed", args.join(" "));
     }
@@ -99,34 +105,63 @@ impl Host for SystemdHost {
 
     fn earlyoom_percent(&self) -> Option<f64> {
         for entry in std::fs::read_dir("/proc").ok()?.flatten() {
-            let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else { continue };
-            let args: Vec<String> = cmdline.split(|b| *b == 0).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
-            if !args.first().map(|a| a.ends_with("earlyoom")).unwrap_or(false) {
+            let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else {
+                continue;
+            };
+            let args: Vec<String> = cmdline
+                .split(|b| *b == 0)
+                .map(|a| String::from_utf8_lossy(a).into_owned())
+                .collect();
+            if !args
+                .first()
+                .map(|a| a.ends_with("earlyoom"))
+                .unwrap_or(false)
+            {
                 continue;
             }
-            let value = args.iter().position(|a| a == "-m").and_then(|i| args.get(i + 1)).cloned();
+            let value = args
+                .iter()
+                .position(|a| a == "-m")
+                .and_then(|i| args.get(i + 1))
+                .cloned();
             // `-m 5` or `-m 5,2` (SIGTERM, SIGKILL); earlyoom's default is 10.
-            return Some(value.and_then(|v| v.split(',').next().and_then(|p| p.parse().ok())).unwrap_or(10.0));
+            return Some(
+                value
+                    .and_then(|v| v.split(',').next().and_then(|p| p.parse().ok()))
+                    .unwrap_or(10.0),
+            );
         }
         None
     }
 
     fn live_scopes(&self) -> Vec<LiveScope> {
-        let Ok(entries) = std::fs::read_dir(slice_cgroup()) else { return Vec::new() };
+        let Ok(entries) = std::fs::read_dir(slice_cgroup()) else {
+            return Vec::new();
+        };
         entries
             .flatten()
             .filter(|e| e.file_name().to_string_lossy().ends_with(".scope"))
             .filter_map(|e| {
                 let current = read_u64(&e.path().join("memory.current"))?;
                 let cap = read_u64(&e.path().join("memory.max"))?;
-                Some(LiveScope { unit: e.file_name().to_string_lossy().into_owned(), cap, current })
+                Some(LiveScope {
+                    unit: e.file_name().to_string_lossy().into_owned(),
+                    cap,
+                    current,
+                })
             })
             .collect()
     }
 
     fn set_slice_limits(&self, memory_max: u64) -> Result<()> {
-        let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-        let allowed = if cpus > 4 { format!("{}-{}", cpus - 4, cpus - 1) } else { format!("0-{}", cpus - 1) };
+        let cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let allowed = if cpus > 4 {
+            format!("{}-{}", cpus - 4, cpus - 1)
+        } else {
+            format!("0-{}", cpus - 1)
+        };
         systemctl(&[
             "set-property",
             "--runtime",
@@ -153,7 +188,15 @@ impl Host for SystemdHost {
             // the whole scope gets SIGTERM, which reads as a stop from outside (a model load) and
             // would retry the file that ran it out of memory forever (measured 2026-10-08 on
             // eval/hostile/text-ops.pdf).
-            .args(["-p", &format!("MemoryMax={cap}"), "-p", "MemorySwapMax=0", "-p", "OOMPolicy=continue", "--"])
+            .args([
+                "-p",
+                &format!("MemoryMax={cap}"),
+                "-p",
+                "MemorySwapMax=0",
+                "-p",
+                "OOMPolicy=continue",
+                "--",
+            ])
             .args(argv)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
@@ -223,7 +266,9 @@ pub struct RlimitHost {
 impl RlimitHost {
     /// A host whose ledger lives in this process's temporary directory.
     pub fn in_temp() -> RlimitHost {
-        RlimitHost { lock_dir: std::env::temp_dir().join(format!("ling-docs-{}", unsafe { libc::getuid() })) }
+        RlimitHost {
+            lock_dir: std::env::temp_dir().join(format!("ling-docs-{}", unsafe { libc::getuid() })),
+        }
     }
 }
 
@@ -256,11 +301,18 @@ impl Host for RlimitHost {
         use std::os::unix::process::CommandExt;
         let log = File::create(log)?;
         let mut command = Command::new(&argv[0]);
-        command.args(&argv[1..]).stdin(Stdio::null()).stdout(log.try_clone()?).stderr(log);
+        command
+            .args(&argv[1..])
+            .stdin(Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log);
         // SAFETY: setrlimit is async-signal-safe and touches only the child.
         unsafe {
             command.pre_exec(move || {
-                let limit = libc::rlimit { rlim_cur: cap as libc::rlim_t, rlim_max: cap as libc::rlim_t };
+                let limit = libc::rlimit {
+                    rlim_cur: cap as libc::rlim_t,
+                    rlim_max: cap as libc::rlim_t,
+                };
                 if libc::setrlimit(libc::RLIMIT_AS, &limit) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
@@ -295,7 +347,11 @@ pub fn reserve(host: &dyn Host) -> u64 {
 
 /// What a run needs: 1.2 × its recorded peak, or its kind's floor; never above its ceiling.
 pub fn need(kind: Kind, recorded_peak_mb: u64) -> u64 {
-    let need = if recorded_peak_mb == 0 { kind.floor() } else { (recorded_peak_mb * MIB) * 6 / 5 };
+    let need = if recorded_peak_mb == 0 {
+        kind.floor()
+    } else {
+        (recorded_peak_mb * MIB) * 6 / 5
+    };
     need.min(kind.ceiling())
 }
 
@@ -323,14 +379,24 @@ pub struct Deferred {
 /// `min(ceiling, budget)` and starts only if that covers its need. The slice's `MemoryMax` is set
 /// to the sum of the live caps plus this one. Keep the returned [`Admitted`] until the scope has
 /// been started, so a racing admission sees it.
-pub fn admit(host: &dyn Host, need: u64, ceiling: u64) -> Result<std::result::Result<Admitted, Deferred>> {
+pub fn admit(
+    host: &dyn Host,
+    need: u64,
+    ceiling: u64,
+) -> Result<std::result::Result<Admitted, Deferred>> {
     let dir = host.lock_dir();
     std::fs::create_dir_all(&dir)?;
     let lock = File::create(dir.join("admission.lock"))?;
     flock(&lock, true)?;
     let scopes = host.live_scopes();
-    let promised: u64 = scopes.iter().map(|s| s.cap.min(host.mem_total()).saturating_sub(s.current)).sum();
-    let budget = host.mem_available().saturating_sub(reserve(host)).saturating_sub(promised);
+    let promised: u64 = scopes
+        .iter()
+        .map(|s| s.cap.min(host.mem_total()).saturating_sub(s.current))
+        .sum();
+    let budget = host
+        .mem_available()
+        .saturating_sub(reserve(host))
+        .saturating_sub(promised);
     let cap = ceiling.min(budget);
     if cap < need {
         return Ok(Err(Deferred { budget, need }));
@@ -385,19 +451,38 @@ pub mod fake {
     }
 
     impl Host for FakeHost {
-        fn mem_available(&self) -> u64 { self.available }
-        fn mem_total(&self) -> u64 { self.total }
-        fn earlyoom_percent(&self) -> Option<f64> { Some(5.0) }
-        fn live_scopes(&self) -> Vec<LiveScope> { self.scopes.lock().unwrap().clone() }
+        fn mem_available(&self) -> u64 {
+            self.available
+        }
+        fn mem_total(&self) -> u64 {
+            self.total
+        }
+        fn earlyoom_percent(&self) -> Option<f64> {
+            Some(5.0)
+        }
+        fn live_scopes(&self) -> Vec<LiveScope> {
+            self.scopes.lock().unwrap().clone()
+        }
         fn set_slice_limits(&self, memory_max: u64) -> Result<()> {
             *self.slice_max.lock().unwrap() = Some(memory_max);
             Ok(())
         }
-        fn can_create_scopes(&self) -> bool { true }
+        fn can_create_scopes(&self) -> bool {
+            true
+        }
         fn start_scope(&self, unit: &str, cap: u64, argv: &[String], _log: &Path) -> Result<Child> {
-            self.started.lock().unwrap().push((unit.to_string(), cap, argv.to_vec()));
-            self.scopes.lock().unwrap().push(LiveScope { unit: unit.to_string(), cap, current: 0 });
-            Ok(Command::new(&self.stand_in[0]).args(&self.stand_in[1..]).spawn()?)
+            self.started
+                .lock()
+                .unwrap()
+                .push((unit.to_string(), cap, argv.to_vec()));
+            self.scopes.lock().unwrap().push(LiveScope {
+                unit: unit.to_string(),
+                cap,
+                current: 0,
+            });
+            Ok(Command::new(&self.stand_in[0])
+                .args(&self.stand_in[1..])
+                .spawn()?)
         }
         fn freeze(&self, unit: &str) -> Result<()> {
             self.actions.lock().unwrap().push(format!("freeze {unit}"));
@@ -411,7 +496,9 @@ pub mod fake {
             self.actions.lock().unwrap().push(format!("stop {unit}"));
             Ok(())
         }
-        fn lock_dir(&self) -> PathBuf { self.dir.clone() }
+        fn lock_dir(&self) -> PathBuf {
+            self.dir.clone()
+        }
     }
 }
 
@@ -425,18 +512,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // 121 GiB total, 5% earlyoom line: reserve is 6.05 + 4 = ~10.05 GiB; 11 GiB leaves ~0.95.
         let host = FakeHost::new(dir.path(), 11);
-        assert!(admit(&host, need(Kind::Embed, 0), Kind::Embed.ceiling()).unwrap().is_err());
-        let admitted = admit(&host, need(Kind::Extract, 0), Kind::Extract.ceiling()).unwrap().unwrap();
-        assert!(admitted.cap < GIB, "the cap is what the budget allows: {}", admitted.cap);
+        assert!(admit(&host, need(Kind::Embed, 0), Kind::Embed.ceiling())
+            .unwrap()
+            .is_err());
+        let admitted = admit(&host, need(Kind::Extract, 0), Kind::Extract.ceiling())
+            .unwrap()
+            .unwrap();
+        assert!(
+            admitted.cap < GIB,
+            "the cap is what the budget allows: {}",
+            admitted.cap
+        );
     }
 
     #[test]
     fn the_extractor_never_gets_more_than_the_pdf_cap() {
         let dir = tempfile::tempdir().unwrap();
         let host = FakeHost::new(dir.path(), 100);
-        let admitted = admit(&host, need(Kind::Extract, 5000), Kind::Extract.ceiling()).unwrap().unwrap();
+        let admitted = admit(&host, need(Kind::Extract, 5000), Kind::Extract.ceiling())
+            .unwrap()
+            .unwrap();
         assert_eq!(admitted.cap, GIB);
-        assert_eq!(need(Kind::Extract, 5000), GIB, "a recorded peak never asks above the ceiling");
+        assert_eq!(
+            need(Kind::Extract, 5000),
+            GIB,
+            "a recorded peak never asks above the ceiling"
+        );
         assert_eq!(need(Kind::Embed, 900), 1080 * MIB);
     }
 
@@ -445,16 +546,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // A code-index run holds 20 GiB of cap and uses 1: the docs run sees ~40 − 10.05 − 19.
         let host = FakeHost::new(dir.path(), 40);
-        host.scopes.lock().unwrap().push(LiveScope { unit: "mightling-index-code".into(), cap: 20 * GIB, current: GIB });
-        let admitted = admit(&host, need(Kind::Embed, 0), Kind::Embed.ceiling()).unwrap().unwrap();
+        host.scopes.lock().unwrap().push(LiveScope {
+            unit: "mightling-index-code".into(),
+            cap: 20 * GIB,
+            current: GIB,
+        });
+        let admitted = admit(&host, need(Kind::Embed, 0), Kind::Embed.ceiling())
+            .unwrap()
+            .unwrap();
         assert_eq!(admitted.cap, 2 * GIB);
         assert_eq!(*host.slice_max.lock().unwrap(), Some(22 * GIB));
         drop(admitted); // releases the ledger lock
         let crowded = FakeHost::new(dir.path(), 30);
-        crowded.scopes.lock().unwrap().push(LiveScope { unit: "mightling-index-code".into(), cap: 20 * GIB, current: GIB });
-        assert!(admit(&crowded, need(Kind::Embed, 0), Kind::Embed.ceiling()).unwrap().is_err());
+        crowded.scopes.lock().unwrap().push(LiveScope {
+            unit: "mightling-index-code".into(),
+            cap: 20 * GIB,
+            current: GIB,
+        });
+        assert!(admit(&crowded, need(Kind::Embed, 0), Kind::Embed.ceiling())
+            .unwrap()
+            .is_err());
     }
 
+    // The racing children are reaped by the scope's cleanup, not by a wait here.
+    #[allow(clippy::zombie_processes)]
     #[test]
     fn admissions_raced_from_two_processes_start_exactly_one() {
         let dir = tempfile::tempdir().unwrap();
@@ -463,18 +578,30 @@ mod tests {
         let handles: Vec<_> = (0..2)
             .map(|i| {
                 let host = host.clone();
-                std::thread::spawn(move || match admit(host.as_ref(), need(Kind::Embed, 0), Kind::Embed.ceiling()).unwrap() {
-                    Ok(admitted) => {
-                        std::thread::sleep(std::time::Duration::from_millis(50));
-                        host.start_scope(&format!("u{i}"), admitted.cap, &[], Path::new("/dev/null")).unwrap();
-                        admitted.release();
-                        true
+                std::thread::spawn(move || {
+                    match admit(host.as_ref(), need(Kind::Embed, 0), Kind::Embed.ceiling()).unwrap()
+                    {
+                        Ok(admitted) => {
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            host.start_scope(
+                                &format!("u{i}"),
+                                admitted.cap,
+                                &[],
+                                Path::new("/dev/null"),
+                            )
+                            .unwrap();
+                            admitted.release();
+                            true
+                        }
+                        Err(_) => false,
                     }
-                    Err(_) => false,
                 })
             })
             .collect();
-        let started: usize = handles.into_iter().map(|h| h.join().unwrap() as usize).sum();
+        let started: usize = handles
+            .into_iter()
+            .map(|h| h.join().unwrap() as usize)
+            .sum();
         assert_eq!(started, 1);
     }
 
@@ -488,28 +615,70 @@ mod tests {
     fn ceilings_default_earlyoom_reserve_and_over_cap_scopes_behave_safely() {
         struct NoEarlyOomHost(FakeHost);
         impl Host for NoEarlyOomHost {
-            fn mem_available(&self) -> u64 { self.0.mem_available() }
-            fn mem_total(&self) -> u64 { self.0.mem_total() }
-            fn earlyoom_percent(&self) -> Option<f64> { None }
-            fn live_scopes(&self) -> Vec<LiveScope> { self.0.live_scopes() }
-            fn set_slice_limits(&self, m: u64) -> Result<()> { self.0.set_slice_limits(m) }
-            fn can_create_scopes(&self) -> bool { true }
-            fn start_scope(&self, u: &str, c: u64, a: &[String], l: &Path) -> Result<Child> { self.0.start_scope(u, c, a, l) }
-            fn freeze(&self, u: &str) -> Result<()> { self.0.freeze(u) }
-            fn thaw(&self, u: &str) -> Result<()> { self.0.thaw(u) }
-            fn stop(&self, u: &str) -> Result<()> { self.0.stop(u) }
-            fn lock_dir(&self) -> PathBuf { self.0.lock_dir() }
+            fn mem_available(&self) -> u64 {
+                self.0.mem_available()
+            }
+            fn mem_total(&self) -> u64 {
+                self.0.mem_total()
+            }
+            fn earlyoom_percent(&self) -> Option<f64> {
+                None
+            }
+            fn live_scopes(&self) -> Vec<LiveScope> {
+                self.0.live_scopes()
+            }
+            fn set_slice_limits(&self, m: u64) -> Result<()> {
+                self.0.set_slice_limits(m)
+            }
+            fn can_create_scopes(&self) -> bool {
+                true
+            }
+            fn start_scope(&self, u: &str, c: u64, a: &[String], l: &Path) -> Result<Child> {
+                self.0.start_scope(u, c, a, l)
+            }
+            fn freeze(&self, u: &str) -> Result<()> {
+                self.0.freeze(u)
+            }
+            fn thaw(&self, u: &str) -> Result<()> {
+                self.0.thaw(u)
+            }
+            fn stop(&self, u: &str) -> Result<()> {
+                self.0.stop(u)
+            }
+            fn lock_dir(&self) -> PathBuf {
+                self.0.lock_dir()
+            }
         }
-        assert_eq!((Kind::Extract.ceiling(), Kind::Embed.ceiling(), Kind::Ocr.ceiling()), (GIB, 2 * GIB, 2 * GIB));
-        assert_eq!((need(Kind::Extract, 0), need(Kind::Embed, 0), need(Kind::Ocr, 0)), (256 * MIB, 1536 * MIB, GIB));
+        assert_eq!(
+            (
+                Kind::Extract.ceiling(),
+                Kind::Embed.ceiling(),
+                Kind::Ocr.ceiling()
+            ),
+            (GIB, 2 * GIB, 2 * GIB)
+        );
+        assert_eq!(
+            (
+                need(Kind::Extract, 0),
+                need(Kind::Embed, 0),
+                need(Kind::Ocr, 0)
+            ),
+            (256 * MIB, 1536 * MIB, GIB)
+        );
         assert_eq!(need(Kind::Ocr, 5000), 2 * GIB);
 
         let dir = tempfile::tempdir().unwrap();
         let host = NoEarlyOomHost(FakeHost::new(dir.path(), 50));
         let r = reserve(&host);
         assert!(r > 10 * GIB && r < 11 * GIB);
-        host.0.scopes.lock().unwrap().push(LiveScope { unit: "over".into(), cap: GIB, current: 2 * GIB });
-        let admitted = admit(&host, need(Kind::Ocr, 0), Kind::Ocr.ceiling()).unwrap().unwrap();
+        host.0.scopes.lock().unwrap().push(LiveScope {
+            unit: "over".into(),
+            cap: GIB,
+            current: 2 * GIB,
+        });
+        let admitted = admit(&host, need(Kind::Ocr, 0), Kind::Ocr.ceiling())
+            .unwrap()
+            .unwrap();
         assert_eq!(admitted.cap, 2 * GIB);
     }
 }

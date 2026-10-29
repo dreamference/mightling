@@ -22,7 +22,11 @@ impl FileStamp {
     /// Stamps a file on disk.
     pub fn of(path: &Path) -> Option<FileStamp> {
         let meta = std::fs::metadata(path).ok()?;
-        Some(FileStamp { sha256: sha256_file(path)?, mtime_ns: mtime_ns(&meta), size: meta.len() })
+        Some(FileStamp {
+            sha256: sha256_file(path)?,
+            mtime_ns: mtime_ns(&meta),
+            size: meta.len(),
+        })
     }
 }
 
@@ -118,7 +122,10 @@ impl Manifest {
 
     /// Writes the manifest atomically (temporary file, then rename).
     pub fn save(&self, scip_dir: &Path) -> Result<()> {
-        write_atomic(&scip_dir.join("manifest.json"), &serde_json::to_vec_pretty(self)?)
+        write_atomic(
+            &scip_dir.join("manifest.json"),
+            &serde_json::to_vec_pretty(self)?,
+        )
     }
 }
 
@@ -147,7 +154,10 @@ impl GraphSnapshot {
     }
 
     pub fn save(&self, scip_dir: &Path) -> Result<()> {
-        write_atomic(&scip_dir.join("graph.json"), &serde_json::to_vec_pretty(self)?)
+        write_atomic(
+            &scip_dir.join("graph.json"),
+            &serde_json::to_vec_pretty(self)?,
+        )
     }
 }
 
@@ -155,7 +165,11 @@ impl GraphSnapshot {
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let dir = path.parent().context("path has no parent")?;
     std::fs::create_dir_all(dir)?;
-    let staging = dir.join(format!(".{}.{}", path.file_name().unwrap().to_string_lossy(), std::process::id()));
+    let staging = dir.join(format!(
+        ".{}.{}",
+        path.file_name().unwrap().to_string_lossy(),
+        std::process::id()
+    ));
     std::fs::write(&staging, bytes)?;
     std::fs::rename(&staging, path)?;
     Ok(())
@@ -163,7 +177,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// The current UTC time as RFC 3339, without a date library.
 pub fn now_rfc3339() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let days = secs / 86_400;
     let (h, m, s) = ((secs % 86_400) / 3600, (secs % 3600) / 60, secs % 60);
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
@@ -190,7 +207,10 @@ mod tests {
         std::fs::write(&path, b"abc").unwrap();
         let stamp = FileStamp::of(&path).unwrap();
         assert_eq!(stamp.size, 3);
-        assert_eq!(stamp.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            stamp.sha256,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
         assert!(stamp.mtime_ns > 0);
         assert!(FileStamp::of(&dir.path().join("missing")).is_none());
     }

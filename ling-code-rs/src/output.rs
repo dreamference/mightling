@@ -50,8 +50,14 @@ pub fn narrow(answer: &mut Answer, page: &Page) -> Result<()> {
         answer.rows.retain(|r| r.tag == Some(Tag::Exact));
     }
     if let Some(kind) = &page.kind {
-        let kind = if kind == "def" { "definition" } else { kind.as_str() };
-        answer.rows.retain(|r| r.detail == kind || r.tag != Some(Tag::Exact) && r.detail.starts_with(kind));
+        let kind = if kind == "def" {
+            "definition"
+        } else {
+            kind.as_str()
+        };
+        answer.rows.retain(|r| {
+            r.detail == kind || r.tag != Some(Tag::Exact) && r.detail.starts_with(kind)
+        });
     }
     Ok(())
 }
@@ -68,7 +74,9 @@ fn path_matches(path: &str, pattern: &str) -> bool {
                 let rest = p[2..].strip_prefix(b"/").unwrap_or(&p[2..]);
                 (0..=s.len()).any(|i| go(rest, &s[i..]))
             }
-            (Some(b'*'), _) => (0..=s.len()).take_while(|i| *i == 0 || s[i - 1] != b'/').any(|i| go(&p[1..], &s[i..])),
+            (Some(b'*'), _) => (0..=s.len())
+                .take_while(|i| *i == 0 || s[i - 1] != b'/')
+                .any(|i| go(&p[1..], &s[i..])),
             (Some(a), Some(b)) if a == b => go(&p[1..], &s[1..]),
             _ => false,
         }
@@ -91,21 +99,39 @@ pub fn fold_docstring(lines: Vec<String>) -> Vec<String> {
     let source = |line: &str| line.get(7..).unwrap_or("").trim_start().to_string();
     let opens = |text: &str| {
         let text = text.trim_start_matches(['r', 'R', 'u', 'U', 'b', 'B']);
-        ["\"\"\"", "'''"].into_iter().find(|quote| text.starts_with(quote))
+        ["\"\"\"", "'''"]
+            .into_iter()
+            .find(|quote| text.starts_with(quote))
     };
     // The docstring is the first statement after the header, which ends at the first line ending
     // in `:` (a signature may span lines); decorators and comments come before it.
-    let Some(header_end) = lines.iter().position(|line| source(line).trim_end().ends_with(':')) else { return lines };
-    let Some(first) = lines.iter().skip(header_end + 1).position(|line| !source(line).is_empty()).map(|i| i + header_end + 1) else {
+    let Some(header_end) = lines
+        .iter()
+        .position(|line| source(line).trim_end().ends_with(':'))
+    else {
         return lines;
     };
-    let Some(quote) = opens(&source(&lines[first])) else { return lines };
+    let Some(first) = lines
+        .iter()
+        .skip(header_end + 1)
+        .position(|line| !source(line).is_empty())
+        .map(|i| i + header_end + 1)
+    else {
+        return lines;
+    };
+    let Some(quote) = opens(&source(&lines[first])) else {
+        return lines;
+    };
     let after_open = source(&lines[first]);
     let after_open = &after_open[after_open.find(quote).map_or(0, |at| at + quote.len())..];
     let last = if after_open.contains(quote) {
         first
     } else {
-        match lines.iter().skip(first + 1).position(|line| source(line).contains(quote)) {
+        match lines
+            .iter()
+            .skip(first + 1)
+            .position(|line| source(line).contains(quote))
+        {
             Some(i) => i + first + 1,
             None => return lines,
         }
@@ -117,7 +143,12 @@ pub fn fold_docstring(lines: Vec<String>) -> Vec<String> {
     let number = |line: &str| line.get(..5).unwrap_or("").trim().to_string();
     let hidden_from = first + DOCSTRING_LINES;
     let mut out: Vec<String> = lines[..hidden_from].to_vec();
-    let indent: String = lines[first].get(7..).unwrap_or("").chars().take_while(|c| c.is_whitespace()).collect();
+    let indent: String = lines[first]
+        .get(7..)
+        .unwrap_or("")
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .collect();
     out.push(format!(
         "{:>5}  {indent}… {} docstring lines folded ({}-{})",
         "",
@@ -158,16 +189,34 @@ pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
     // `show` pages its body, not rows (see `show_page`).
     let cut = body.is_none() && (total > page.offset + limit || page.offset > 0);
     let counts = if answer.tagged {
-        let exact = answer.rows.iter().filter(|r| r.tag == Some(Tag::Exact)).count();
-        format!("{total} results; {exact} exact, {} heuristic", total - exact)
+        let exact = answer
+            .rows
+            .iter()
+            .filter(|r| r.tag == Some(Tag::Exact))
+            .count();
+        format!(
+            "{total} results; {exact} exact, {} heuristic",
+            total - exact
+        )
     } else {
         format!("{total} results")
     };
     if cut {
         let shown = total.saturating_sub(page.offset).min(limit);
         let next = page.offset + shown;
-        let more = if next < total { format!("; next: --offset {next} --cursor {}", answer.cursor) } else { String::new() };
-        out.push(format!("{} {}   ({} in {} files; showing {shown} from {}{more})", answer.op, answer.query, counts, files.len(), page.offset));
+        let more = if next < total {
+            format!("; next: --offset {next} --cursor {}", answer.cursor)
+        } else {
+            String::new()
+        };
+        out.push(format!(
+            "{} {}   ({} in {} files; showing {shown} from {}{more})",
+            answer.op,
+            answer.query,
+            counts,
+            files.len(),
+            page.offset
+        ));
     } else if answer.op == "show" {
         out.push(format!("{} {}", answer.op, answer.query));
     } else if answer.candidates.is_empty() {
@@ -182,7 +231,10 @@ pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
             (_, Some(true)) => ", all searched".to_string(),
             (_, Some(false)) => ", not searched".to_string(),
         };
-        out.push(format!("changed since snapshot: {} files{searched}", answer.changed_files));
+        out.push(format!(
+            "changed since snapshot: {} files{searched}",
+            answer.changed_files
+        ));
     }
     if !answer.candidates.is_empty() {
         out.push("candidates:".to_string());
@@ -190,17 +242,30 @@ pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
     }
     // Rows keep one order on every page: exact before heuristic before text, and within a tag
     // the files with the most results first, so a later page never repeats or skips a row.
-    let rank: std::collections::HashMap<&str, usize> = files.iter().enumerate().map(|(i, (p, _))| (p.as_str(), i)).collect();
+    let rank: std::collections::HashMap<&str, usize> = files
+        .iter()
+        .enumerate()
+        .map(|(i, (p, _))| (p.as_str(), i))
+        .collect();
     let mut rows: Vec<_> = answer.rows.iter().collect();
     // `impact` keeps the order its rows were found in: nearest first.
     if cut && answer.op != "impact" {
-        rows.sort_by_key(|r| (r.tag, rank.get(r.path.as_str()).copied().unwrap_or(usize::MAX), r.line));
+        rows.sort_by_key(|r| {
+            (
+                r.tag,
+                rank.get(r.path.as_str()).copied().unwrap_or(usize::MAX),
+                r.line,
+            )
+        });
     }
     if cut && page.offset == 0 {
         // Grouping first, rows second: the 15 files with the most results.
         let top: Vec<&(String, usize)> = files.iter().take(15).collect();
         out.push(format!("by file (top {} of {}):", top.len(), files.len()));
-        out.extend(top.iter().map(|(path, count)| format!("  {count:>4}  {path}")));
+        out.extend(
+            top.iter()
+                .map(|(path, count)| format!("  {count:>4}  {path}")),
+        );
     }
     for row in rows.into_iter().skip(page.offset).take(limit) {
         let location = format!("{}:{}", row.path, row.line);
@@ -215,7 +280,10 @@ pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
         out.push(show_page(body, page));
     }
     if answer.deleted_dropped > 0 {
-        out.push(format!("dropped {} rows in files deleted since the snapshot", answer.deleted_dropped));
+        out.push(format!(
+            "dropped {} rows in files deleted since the snapshot",
+            answer.deleted_dropped
+        ));
     }
     for unresolved in &answer.unresolved {
         out.push(format!("unresolved {unresolved}"));
@@ -237,29 +305,46 @@ pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{fold_docstring, path_matches, render, repository_relative, Page, DOCSTRING_LINES, SHOW_LINES};
+    use super::{
+        fold_docstring, path_matches, render, repository_relative, Page, DOCSTRING_LINES,
+        SHOW_LINES,
+    };
     use crate::router::Answer;
 
     fn numbered(source: &[&str], from: usize) -> Vec<String> {
-        source.iter().enumerate().map(|(i, l)| format!("{:>5}  {l}", i + from)).collect()
+        source
+            .iter()
+            .enumerate()
+            .map(|(i, l)| format!("{:>5}  {l}", i + from))
+            .collect()
     }
 
     #[test]
     fn a_long_docstring_folds_after_twelve_lines_and_names_what_it_hides() {
-        let mut source = vec!["def solveset(f, symbol=None,", "             domain=None):", "    r\"\"\"Solves a given inequality."];
+        let mut source = vec![
+            "def solveset(f, symbol=None,",
+            "             domain=None):",
+            "    r\"\"\"Solves a given inequality.",
+        ];
         let doc: Vec<String> = (0..33).map(|n| format!("    doc line {n}")).collect();
         source.extend(doc.iter().map(String::as_str));
         source.extend(["    \"\"\"", "    return f"]);
         let folded = fold_docstring(numbered(&source, 1962));
         assert_eq!(folded.len(), 2 + DOCSTRING_LINES + 1 + 1);
         let fold = &folded[2 + DOCSTRING_LINES];
-        assert!(fold.ends_with("… 23 docstring lines folded (1976-1998)"), "{fold}");
+        assert!(
+            fold.ends_with("… 23 docstring lines folded (1976-1998)"),
+            "{fold}"
+        );
         assert!(folded.last().is_some_and(|l| l.ends_with("return f")));
     }
 
     #[test]
     fn short_or_missing_docstrings_are_left_alone() {
-        let short = numbered(&["def f():", "    \"\"\"One line.\"\"\"", "    return 1"], 1);
+        let short = numbered(
+            &["def f():", "    \"\"\"One line.\"\"\"", "    return 1"],
+            1,
+        );
         assert_eq!(fold_docstring(short.clone()), short);
         let none = numbered(&["def f():", "    x = 1", "    return x"], 1);
         assert_eq!(fold_docstring(none.clone()), none);
@@ -268,13 +353,37 @@ mod tests {
     #[test]
     fn show_prints_a_hundred_lines_and_names_the_rest() {
         let body = numbered(&vec!["    x = 1"; 165], 1962).join("\n");
-        let answer = Answer { op: "show".into(), query: "solveset  (sympy/solvers/solveset.py:1962-2126)".into(), ..Answer::default() };
-        let page = Page { limit: SHOW_LINES, ..Page::default() };
+        let answer = Answer {
+            op: "show".into(),
+            query: "solveset  (sympy/solvers/solveset.py:1962-2126)".into(),
+            ..Answer::default()
+        };
+        let page = Page {
+            limit: SHOW_LINES,
+            ..Page::default()
+        };
         let text = render(&answer, &page, Some(&body));
-        assert!(text.starts_with("show solveset  (sympy/solvers/solveset.py:1962-2126)\n"), "{text}");
-        assert_eq!(text.lines().filter(|l| l.ends_with("x = 1")).count(), SHOW_LINES);
-        assert!(text.contains("… lines 2062-2126 not shown; next: offset 100"), "{text}");
-        let next = render(&answer, &Page { limit: SHOW_LINES, offset: 100, ..Page::default() }, Some(&body));
+        assert!(
+            text.starts_with("show solveset  (sympy/solvers/solveset.py:1962-2126)\n"),
+            "{text}"
+        );
+        assert_eq!(
+            text.lines().filter(|l| l.ends_with("x = 1")).count(),
+            SHOW_LINES
+        );
+        assert!(
+            text.contains("… lines 2062-2126 not shown; next: offset 100"),
+            "{text}"
+        );
+        let next = render(
+            &answer,
+            &Page {
+                limit: SHOW_LINES,
+                offset: 100,
+                ..Page::default()
+            },
+            Some(&body),
+        );
         assert_eq!(next.lines().filter(|l| l.ends_with("x = 1")).count(), 65);
         assert!(!next.contains("not shown") && !next.contains("results"));
     }
@@ -290,11 +399,17 @@ mod tests {
     #[test]
     fn an_absolute_path_inside_the_repository_narrows_like_a_relative_one() {
         let root = std::path::Path::new("/testbed");
-        assert_eq!(repository_relative("/testbed/astropy/io", root), "astropy/io");
+        assert_eq!(
+            repository_relative("/testbed/astropy/io", root),
+            "astropy/io"
+        );
         assert_eq!(repository_relative("./astropy", root), "astropy");
         assert_eq!(repository_relative("astropy", root), "astropy");
         assert_eq!(repository_relative("/testbed", root), "");
-        assert!(path_matches("astropy/io/ascii/html.py", &repository_relative("/testbed/astropy", root)));
+        assert!(path_matches(
+            "astropy/io/ascii/html.py",
+            &repository_relative("/testbed/astropy", root)
+        ));
         // Outside the repository nothing matches, as before.
         assert_eq!(repository_relative("/elsewhere/x", root), "/elsewhere/x");
     }

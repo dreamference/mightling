@@ -10,7 +10,11 @@ use ling_code::paths::Repo;
 use ling_code::router::Context;
 
 #[derive(Parser)]
-#[command(name = "ling-code", about = "Answers questions about this repository's code from an index", disable_version_flag = true)]
+#[command(
+    name = "ling-code",
+    about = "Answers questions about this repository's code from an index",
+    disable_version_flag = true
+)]
 struct Cli {
     /// Print ling-code's version and the tool versions it was built for.
     #[arg(long, short = 'V')]
@@ -47,15 +51,35 @@ struct PageArgs {
 #[derive(Subcommand)]
 enum Command {
     /// Where a name is defined.
-    Def { name: String, #[command(flatten)] page: PageArgs },
+    Def {
+        name: String,
+        #[command(flatten)]
+        page: PageArgs,
+    },
     /// Every reference to a definition.
-    Refs { name: String, #[command(flatten)] page: PageArgs },
+    Refs {
+        name: String,
+        #[command(flatten)]
+        page: PageArgs,
+    },
     /// The definitions that refer to a definition.
-    Callers { name: String, #[command(flatten)] page: PageArgs },
+    Callers {
+        name: String,
+        #[command(flatten)]
+        page: PageArgs,
+    },
     /// What a definition's body refers to.
-    Callees { name: String, #[command(flatten)] page: PageArgs },
+    Callees {
+        name: String,
+        #[command(flatten)]
+        page: PageArgs,
+    },
     /// Implementations of a trait, interface or method.
-    Impl { name: String, #[command(flatten)] page: PageArgs },
+    Impl {
+        name: String,
+        #[command(flatten)]
+        page: PageArgs,
+    },
     /// What breaks if a definition changes: its references, then theirs, to a depth.
     Impact {
         /// The definition; omit it with --diff.
@@ -70,11 +94,23 @@ enum Command {
         page: PageArgs,
     },
     /// One definition's source, 100 lines at a time (`--offset` for the next).
-    Show { name: String, #[command(flatten)] page: PageArgs },
+    Show {
+        name: String,
+        #[command(flatten)]
+        page: PageArgs,
+    },
     /// The definitions of a file.
-    Outline { file: String, #[command(flatten)] page: PageArgs },
+    Outline {
+        file: String,
+        #[command(flatten)]
+        page: PageArgs,
+    },
     /// Definitions whose name or body matches the words.
-    Search { words: Vec<String>, #[command(flatten)] page: PageArgs },
+    Search {
+        words: Vec<String>,
+        #[command(flatten)]
+        page: PageArgs,
+    },
     /// Which layers exist, how fresh they are, and what is excluded.
     Status,
     /// Re-index the repository (outside the sandbox), or ask the session to (inside it).
@@ -116,7 +152,10 @@ enum Command {
     Supervise { plan: String },
     /// Add the SymbolInformation an indexer left out, so expt-convert accepts the index (internal).
     #[command(hide = true)]
-    ScipRepair { input: std::path::PathBuf, output: std::path::PathBuf },
+    ScipRepair {
+        input: std::path::PathBuf,
+        output: std::path::PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -143,7 +182,8 @@ fn main() -> ExitCode {
 
 fn run(command: Command) -> anyhow::Result<ExitCode> {
     if let Command::ScipRepair { input, output } = &command {
-        let (fixed, added) = ling_code::scip_store::repair_missing_symbol_information(&std::fs::read(input)?)?;
+        let (fixed, added) =
+            ling_code::scip_store::repair_missing_symbol_information(&std::fs::read(input)?)?;
         std::fs::write(output, fixed)?;
         if added > 0 {
             eprintln!("scip-repair: added {added} missing SymbolInformation entries");
@@ -164,7 +204,11 @@ fn run(command: Command) -> anyhow::Result<ExitCode> {
             ling_code::paths::indexing_supported()?;
             ling_code::session::run(repo, settings, parent_pid).map(|_| ExitCode::SUCCESS)
         }
-        Command::Index { exact, include_submodules, wait } => {
+        Command::Index {
+            exact,
+            include_submodules,
+            wait,
+        } => {
             ling_code::paths::indexing_supported()?;
             if include_submodules {
                 anyhow::bail!("--include-submodules is gone (it lasted one run): choose per submodule with `ling-code submodules include <path>`");
@@ -174,21 +218,31 @@ fn run(command: Command) -> anyhow::Result<ExitCode> {
         }
         Command::Submodules { verb, path } => {
             let lines = match (verb, path) {
-                (None, _) => ling_code::submodules::listing(&repo, &ling_code::submodules::evaluate(&repo, &settings)),
+                (None, _) => ling_code::submodules::listing(
+                    &repo,
+                    &ling_code::submodules::evaluate(&repo, &settings),
+                ),
                 (Some(verb), Some(path)) => {
                     let lines = ling_code::submodules::change(&repo, &settings, &verb, &path)?;
                     // A change adds or drops the submodule's files: ask for a re-index, as a
                     // query that found changed files does. Without a session, the next launch or
                     // `ling-code index` picks it up.
-                    let _ = ling_code::requests::append(&repo.state_dir(), ling_code::requests::Request::Index);
+                    let _ = ling_code::requests::append(
+                        &repo.state_dir(),
+                        ling_code::requests::Request::Index,
+                    );
                     lines
                 }
-                (Some(verb), None) => anyhow::bail!("`ling-code submodules {verb}` needs the submodule's path"),
+                (Some(verb), None) => {
+                    anyhow::bail!("`ling-code submodules {verb}` needs the submodule's path")
+                }
             };
             println!("{}", lines.join("\n"));
             Ok(ExitCode::SUCCESS)
         }
-        Command::Supervise { plan } => ling_code::index::supervise(&plan).map(|_| ExitCode::SUCCESS),
+        Command::Supervise { plan } => {
+            ling_code::index::supervise(&plan).map(|_| ExitCode::SUCCESS)
+        }
         Command::Forget => {
             ling_code::index::forget(&repo)?;
             Ok(ExitCode::SUCCESS)
@@ -207,10 +261,18 @@ fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<Ex
     let limit_default = settings.row_limit;
     let mut context = Context::load(repo.clone(), settings.clone())?;
     if !context.has_index() {
-        if context.repo.state_dir().join("code_index.building").exists() {
+        if context
+            .repo
+            .state_dir()
+            .join("code_index.building")
+            .exists()
+        {
             println!("index not ready yet: it is being built; use rg until `ling-code status` reports it ready");
         } else {
-            println!("{}", ling_code::paths::no_index_yet(ling_code::paths::indexing_here(), true));
+            println!(
+                "{}",
+                ling_code::paths::no_index_yet(ling_code::paths::indexing_here(), true)
+            );
         }
         return Ok(ExitCode::from(3));
     }
@@ -223,11 +285,17 @@ fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<Ex
         }
     };
     let page_options = Page {
-
-        limit: page.limit.unwrap_or(if body.is_some() { output::SHOW_LINES } else { limit_default }),
+        limit: page.limit.unwrap_or(if body.is_some() {
+            output::SHOW_LINES
+        } else {
+            limit_default
+        }),
         offset: page.offset,
         cursor: page.cursor.clone(),
-        path: page.path.as_deref().map(|path| output::repository_relative(path, &context.repo.root)),
+        path: page
+            .path
+            .as_deref()
+            .map(|path| output::repository_relative(path, &context.repo.root)),
         exact_only: page.exact_only,
         kind: page.kind.clone(),
     };
@@ -235,7 +303,10 @@ fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<Ex
     if page.json {
         println!("{}", serde_json::to_string_pretty(&answer)?);
     } else {
-        println!("{}", output::render(&answer, &page_options, body.as_deref()));
+        println!(
+            "{}",
+            output::render(&answer, &page_options, body.as_deref())
+        );
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -249,12 +320,19 @@ fn compute(context: &Context, command: &Command) -> anyhow::Result<Computed> {
         Command::Callers { name, page } => (context.callers(name)?, None, page.clone()),
         Command::Callees { name, page } => (context.callees(name)?, None, page.clone()),
         Command::Impl { name, page } => (context.implementations(name)?, None, page.clone()),
-        Command::Impact { name, diff, depth, page } => {
+        Command::Impact {
+            name,
+            diff,
+            depth,
+            page,
+        } => {
             let depth = depth.unwrap_or(ling_code::router::IMPACT_DEPTH);
             let answer = match (name, diff) {
                 (Some(name), None) => context.impact(name, depth)?,
                 (None, Some(rev)) => context.impact_of_diff(rev, depth)?,
-                _ => anyhow::bail!("`ling-code impact` takes a name or --diff, not both and not neither"),
+                _ => anyhow::bail!(
+                    "`ling-code impact` takes a name or --diff, not both and not neither"
+                ),
             };
             (answer, None, page.clone())
         }

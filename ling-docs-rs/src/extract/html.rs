@@ -16,28 +16,91 @@ use scraper::{Html, Node};
 use super::{sections, Para, Unit};
 
 /// ling-fetch's subtrees without prose (`ling-web-rs/src/html_text.rs`), less `form`.
-pub const NON_CONTENT_TAGS: [&str; 7] = ["script", "style", "noscript", "svg", "canvas", "template", "iframe"];
+pub const NON_CONTENT_TAGS: [&str; 7] = [
+    "script", "style", "noscript", "svg", "canvas", "template", "iframe",
+];
 
 /// Also left out here: the head, controls, embedded objects, and the page's navigation.
-const DROPPED_TAGS: &[&str] = &["head", "select", "textarea", "button", "object", "embed", "nav", "footer", "math"];
+const DROPPED_TAGS: &[&str] = &[
+    "head", "select", "textarea", "button", "object", "embed", "nav", "footer", "math",
+];
 
 /// Classes of navigation and apparatus (Wikipedia's chiefly): navigation boxes, edit links,
 /// reference lists and markers, category and print footers.
-const DROPPED_CLASSES: &[&str] = &["navbox", "vertical-navbox", "mw-editsection", "reflist", "mw-references-wrap", "references", "reference", "printfooter", "catlinks", "mw-jump-link", "navigation-not-searchable"];
+const DROPPED_CLASSES: &[&str] = &[
+    "navbox",
+    "vertical-navbox",
+    "mw-editsection",
+    "reflist",
+    "mw-references-wrap",
+    "references",
+    "reference",
+    "printfooter",
+    "catlinks",
+    "mw-jump-link",
+    "navigation-not-searchable",
+];
 
 /// Elements that end a paragraph where they open and where they close.
 const BLOCK_TAGS: &[&str] = &[
-    "address", "article", "aside", "blockquote", "body", "br", "caption", "center", "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "form", "header", "hgroup", "hr", "legend", "li", "main", "menu", "ol", "p", "pre", "section", "summary", "table", "tbody", "thead", "tfoot", "ul", "h1", "h2", "h3", "h4", "h5", "h6",
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "body",
+    "br",
+    "caption",
+    "center",
+    "dd",
+    "details",
+    "dialog",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "form",
+    "header",
+    "hgroup",
+    "hr",
+    "legend",
+    "li",
+    "main",
+    "menu",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "summary",
+    "table",
+    "tbody",
+    "thead",
+    "tfoot",
+    "ul",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
 ];
 
 /// Decodes a page: BOM, then `<meta charset>` in the first 4 KiB, then UTF-8, then Windows-1252.
 pub fn decode(bytes: &[u8]) -> String {
     if let Some((encoding, bom)) = encoding_rs::Encoding::for_bom(bytes) {
-        return encoding.decode_without_bom_handling(&bytes[bom..]).0.into_owned();
+        return encoding
+            .decode_without_bom_handling(&bytes[bom..])
+            .0
+            .into_owned();
     }
     let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]).to_ascii_lowercase();
     if let Some(at) = head.find("charset=") {
-        let label: String = head[at + 8..].trim_start_matches(['"', '\'', ' ']).chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':')).collect();
+        let label: String = head[at + 8..]
+            .trim_start_matches(['"', '\'', ' '])
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':'))
+            .collect();
         if let Some(encoding) = encoding_rs::Encoding::for_label(label.as_bytes()) {
             // A page that says UTF-16 in ASCII is not UTF-16.
             if encoding != encoding_rs::UTF_16LE && encoding != encoding_rs::UTF_16BE {
@@ -47,7 +110,10 @@ pub fn decode(bytes: &[u8]) -> String {
     }
     match std::str::from_utf8(bytes) {
         Ok(text) => text.to_string(),
-        Err(_) => encoding_rs::WINDOWS_1252.decode_without_bom_handling(bytes).0.into_owned(),
+        Err(_) => encoding_rs::WINDOWS_1252
+            .decode_without_bom_handling(bytes)
+            .0
+            .into_owned(),
     }
 }
 
@@ -56,7 +122,10 @@ fn dropped(element: &scraper::node::Element) -> bool {
     if NON_CONTENT_TAGS.contains(&name) || DROPPED_TAGS.contains(&name) {
         return true;
     }
-    if element.attr("hidden").is_some() || element.attr("aria-hidden") == Some("true") || element.attr("role") == Some("navigation") {
+    if element.attr("hidden").is_some()
+        || element.attr("aria-hidden") == Some("true")
+        || element.attr("role") == Some("navigation")
+    {
         return true;
     }
     element.classes().any(|c| DROPPED_CLASSES.contains(&c))
@@ -94,16 +163,24 @@ impl Walk {
         let text = self.line.split_whitespace().collect::<Vec<_>>().join(" ");
         self.line.clear();
         if !text.is_empty() {
-            self.paras.push(Para { text, level: self.level });
+            self.paras.push(Para {
+                text,
+                level: self.level,
+            });
         }
     }
 
     fn end_row(&mut self) {
-        let Some(table) = self.tables.last_mut() else { return };
+        let Some(table) = self.tables.last_mut() else {
+            return;
+        };
         if let Some(cell) = table.1.take() {
             table.0.push(cell);
         }
-        let cells: Vec<String> = std::mem::take(&mut table.0).into_iter().map(|c| c.split_whitespace().collect::<Vec<_>>().join(" ")).collect();
+        let cells: Vec<String> = std::mem::take(&mut table.0)
+            .into_iter()
+            .map(|c| c.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect();
         if cells.iter().all(|c| c.is_empty()) {
             return;
         }
@@ -117,7 +194,10 @@ impl Walk {
             return;
         }
         self.flush();
-        self.paras.push(Para { text: row, level: None });
+        self.paras.push(Para {
+            text: row,
+            level: None,
+        });
     }
 }
 
@@ -192,7 +272,9 @@ pub fn html(bytes: &[u8]) -> Vec<Unit> {
                 if skipping.is_some() {
                     continue;
                 }
-                let Node::Element(element) = node.value() else { continue };
+                let Node::Element(element) = node.value() else {
+                    continue;
+                };
                 let name = element.name();
                 match name {
                     "table" => {
@@ -256,34 +338,82 @@ line two</pre><form><p>Inside a form</p><input value="x"><button>Send</button></
             <script>var x = 1;</script><div hidden>secret</div><footer>Privacy policy</footer>
             <table class="navbox"><tr><td>Tea · Cocoa</td></tr></table></body></html>"#;
         let units = html(page.as_bytes());
-        let got: Vec<(&str, &str)> = units.iter().map(|u| (u.loc.as_str(), u.heading.as_str())).collect();
-        assert_eq!(got, [("para 1-4", "Coffee"), ("para 5-7", "Coffee > History"), ("para 8-14", "Coffee > History > Trade")], "{units:#?}");
+        let got: Vec<(&str, &str)> = units
+            .iter()
+            .map(|u| (u.loc.as_str(), u.heading.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("para 1-4", "Coffee"),
+                ("para 5-7", "Coffee > History"),
+                ("para 8-14", "Coffee > History > Trade")
+            ],
+            "{units:#?}"
+        );
         let lines: Vec<&str> = units.iter().flat_map(|u| u.text.lines()).collect();
         assert_eq!(
             lines,
-            ["Coffee", "Coffee is a beverage brewed from roasted beans.", "It is popular.", "After the paragraph.", "History", "Ethiopia", "Yemen", "Trade", "Exports", "Country | Tonnes", "Brazil | 2 million", "line one", "line two", "Inside a form"],
+            [
+                "Coffee",
+                "Coffee is a beverage brewed from roasted beans.",
+                "It is popular.",
+                "After the paragraph.",
+                "History",
+                "Ethiopia",
+                "Yemen",
+                "Trade",
+                "Exports",
+                "Country | Tonnes",
+                "Brazil | 2 million",
+                "line one",
+                "line two",
+                "Inside a form"
+            ],
         );
         let all = lines.join("\n");
-        for gone in ["Main page", "Jump to content", "[1]", "[edit]", "var x", "secret", "Privacy", "Tea", "Send", "Wikipedia"] {
+        for gone in [
+            "Main page",
+            "Jump to content",
+            "[1]",
+            "[edit]",
+            "var x",
+            "secret",
+            "Privacy",
+            "Tea",
+            "Send",
+            "Wikipedia",
+        ] {
             assert!(!all.contains(gone), "{gone:?} in {all:?}");
         }
     }
 
     #[test]
     fn the_charset_comes_from_the_page() {
-        assert_eq!(decode(b"<meta charset=\"iso-8859-1\"><p>caf\xe9</p>"), "<meta charset=\"iso-8859-1\"><p>café</p>");
+        assert_eq!(
+            decode(b"<meta charset=\"iso-8859-1\"><p>caf\xe9</p>"),
+            "<meta charset=\"iso-8859-1\"><p>café</p>"
+        );
         assert_eq!(decode("<p>café</p>".as_bytes()), "<p>café</p>");
         assert_eq!(decode(b"<p>caf\xe9</p>"), "<p>café</p>");
-        let utf16: Vec<u8> = [0xFF, 0xFE].into_iter().chain("<p>ok</p>".encode_utf16().flat_map(|u| u.to_le_bytes())).collect();
+        let utf16: Vec<u8> = [0xFF, 0xFE]
+            .into_iter()
+            .chain("<p>ok</p>".encode_utf16().flat_map(|u| u.to_le_bytes()))
+            .collect();
         assert_eq!(decode(&utf16), "<p>ok</p>");
     }
 
     #[test]
     fn the_dropped_tags_are_ling_fetchs_but_form() {
         // The same list as ling-fetch (spec §7.1: the same code), checked where the checkout has it.
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ling-web-rs/src/html_text.rs");
-        let Ok(source) = std::fs::read_to_string(&path) else { return };
-        let start = source.find("NON_CONTENT_TAGS: [&str; 8] = [").expect("ling-fetch's list");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../ling-web-rs/src/html_text.rs");
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let start = source
+            .find("NON_CONTENT_TAGS: [&str; 8] = [")
+            .expect("ling-fetch's list");
         let list = &source[start..start + source[start..].find("];").unwrap()];
         let theirs: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut ours: Vec<&str> = NON_CONTENT_TAGS.to_vec();

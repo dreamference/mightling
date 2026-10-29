@@ -28,11 +28,20 @@ fn cell(data: &Data) -> String {
         Data::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
         Data::DateTime(d) if d.is_duration() => {
             let seconds = (d.as_f64() * 86_400.0).round() as i64;
-            format!("{}:{:02}:{:02}", seconds / 3600, seconds / 60 % 60, seconds % 60)
+            format!(
+                "{}:{:02}:{:02}",
+                seconds / 3600,
+                seconds / 60 % 60,
+                seconds % 60
+            )
         }
         Data::DateTime(d) => {
             let (y, m, day, h, min, s, _) = d.to_ymd_hms_milli();
-            if (h, min, s) == (0, 0, 0) { format!("{y:04}-{m:02}-{day:02}") } else { format!("{y:04}-{m:02}-{day:02} {h:02}:{min:02}") }
+            if (h, min, s) == (0, 0, 0) {
+                format!("{y:04}-{m:02}-{day:02}")
+            } else {
+                format!("{y:04}-{m:02}-{day:02} {h:02}:{min:02}")
+            }
         }
         Data::DateTimeIso(s) | Data::DurationIso(s) => s.clone(),
         Data::Error(e) => format!("#{e:?}"),
@@ -41,20 +50,41 @@ fn cell(data: &Data) -> String {
 
 /// A workbook's worksheets as located units.
 pub fn sheets(bytes: &[u8]) -> Result<Vec<Unit>> {
-    let mut workbook = calamine::open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|e| anyhow!("not a readable spreadsheet: {e}"))?;
-    let names: Vec<String> = workbook.sheets_metadata().iter().filter(|s| s.typ == SheetType::WorkSheet).map(|s| s.name.clone()).collect();
+    let mut workbook = calamine::open_workbook_auto_from_rs(Cursor::new(bytes))
+        .map_err(|e| anyhow!("not a readable spreadsheet: {e}"))?;
+    let names: Vec<String> = workbook
+        .sheets_metadata()
+        .iter()
+        .filter(|s| s.typ == SheetType::WorkSheet)
+        .map(|s| s.name.clone())
+        .collect();
     let mut units = Vec::new();
     let mut line = 1u32;
     let mut read = 0usize;
     for (number, name) in names.into_iter().enumerate() {
         let group = number as u32 + 1;
-        let Ok(range) = workbook.worksheet_range(&name) else { continue };
-        let Some((first_row, _)) = range.start() else { continue };
+        let Ok(range) = workbook.worksheet_range(&name) else {
+            continue;
+        };
+        let Some((first_row, _)) = range.start() else {
+            continue;
+        };
         let rows: Vec<Vec<String>> = range.rows().map(|r| r.iter().map(cell).collect()).collect();
-        let Some(header_at) = rows.iter().position(|r| r.iter().any(|c| !c.is_empty())) else { continue };
+        let Some(header_at) = rows.iter().position(|r| r.iter().any(|c| !c.is_empty())) else {
+            continue;
+        };
         let header = &rows[header_at];
-        let columns = header.iter().filter(|h| !h.is_empty()).cloned().collect::<Vec<_>>().join(", ");
-        let heading = if columns.is_empty() { name.clone() } else { format!("{name} > {columns}") };
+        let columns = header
+            .iter()
+            .filter(|h| !h.is_empty())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let heading = if columns.is_empty() {
+            name.clone()
+        } else {
+            format!("{name} > {columns}")
+        };
         // Sheet rows from the header on, as the spreadsheet numbers them.
         let start = first_row + header_at as u32 + 1;
         let mut lines = vec![columns.clone()];
@@ -78,17 +108,23 @@ pub fn sheets(bytes: &[u8]) -> Result<Vec<Unit>> {
             lines.push(fields.join(", "));
             let sheet_row = start + 1 + i as u32;
             if lines.len() - usize::from(unit_start == start) == ROWS_PER_UNIT {
-                units.push(unit(&name, group, unit_start, sheet_row, &heading, &lines, &mut line));
+                units.push(unit(
+                    &name, group, unit_start, sheet_row, &heading, &lines, &mut line,
+                ));
                 lines.clear();
                 unit_start = sheet_row + 1;
             }
         }
         if cut {
-            lines.push(format!("[the rows after the first {MAX_ROWS} of this file are not indexed]"));
+            lines.push(format!(
+                "[the rows after the first {MAX_ROWS} of this file are not indexed]"
+            ));
         }
         if lines.iter().any(|l| !l.is_empty()) {
             let last = unit_start + lines.len() as u32 - 1;
-            units.push(unit(&name, group, unit_start, last, &heading, &lines, &mut line));
+            units.push(unit(
+                &name, group, unit_start, last, &heading, &lines, &mut line,
+            ));
         }
         if cut {
             break;
@@ -97,7 +133,15 @@ pub fn sheets(bytes: &[u8]) -> Result<Vec<Unit>> {
     Ok(units)
 }
 
-fn unit(sheet: &str, group: u32, first: u32, last: u32, heading: &str, lines: &[String], line: &mut u32) -> Unit {
+fn unit(
+    sheet: &str,
+    group: u32,
+    first: u32,
+    last: u32,
+    heading: &str,
+    lines: &[String],
+    line: &mut u32,
+) -> Unit {
     let count = lines.len() as u32;
     let unit = Unit {
         loc: format!("sheet {sheet}, rows {first}-{last}"),
@@ -148,11 +192,33 @@ pub mod tests {
     #[test]
     fn each_sheet_is_read_like_a_table_in_its_own_rows() {
         let units = sheets(&sample_xlsx()).unwrap();
-        let got: Vec<(&str, &str)> = units.iter().map(|u| (u.loc.as_str(), u.heading.as_str())).collect();
-        assert_eq!(got, [("sheet Budget, rows 2-5", "Budget > Item, Cost, Due"), ("sheet Staff, rows 1-2", "Staff > Name")], "{units:#?}");
+        let got: Vec<(&str, &str)> = units
+            .iter()
+            .map(|u| (u.loc.as_str(), u.heading.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("sheet Budget, rows 2-5", "Budget > Item, Cost, Due"),
+                ("sheet Staff, rows 1-2", "Staff > Name")
+            ],
+            "{units:#?}"
+        );
         let lines: Vec<&str> = units[0].text.split('\n').collect();
-        assert_eq!(lines, ["Item, Cost, Due", "Item: Servo batch, Cost: 1490, Due: 2025-03-14", "", "Item: Gripper, Cost: 12.5"]);
-        assert_eq!((units[1].line_first, units[1].line_last), (Some(5), Some(6)), "one line numbering across sheets");
+        assert_eq!(
+            lines,
+            [
+                "Item, Cost, Due",
+                "Item: Servo batch, Cost: 1490, Due: 2025-03-14",
+                "",
+                "Item: Gripper, Cost: 12.5"
+            ]
+        );
+        assert_eq!(
+            (units[1].line_first, units[1].line_last),
+            (Some(5), Some(6)),
+            "one line numbering across sheets"
+        );
         assert!(sheets(b"PK\x03\x04 not a workbook").is_err());
     }
 }

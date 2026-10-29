@@ -37,7 +37,11 @@ impl<R: Read> Read for Capped<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = self.inner.read(buf)?;
         if n as u64 > self.left {
-            return Err(std::io::Error::other(format!("{} inflates past {} MB (a ZIP bomb?)", self.name, MAX_ENTRY_BYTES >> 20)));
+            return Err(std::io::Error::other(format!(
+                "{} inflates past {} MB (a ZIP bomb?)",
+                self.name,
+                MAX_ENTRY_BYTES >> 20
+            )));
         }
         self.left -= n as u64;
         Ok(n)
@@ -51,7 +55,11 @@ pub(super) fn open(bytes: &[u8]) -> Result<Archive<'_>> {
 }
 
 /// Streams one entry's XML events to `each`; a missing entry is `Ok(false)`.
-pub(super) fn read_xml(archive: &mut Archive, name: &str, each: &mut dyn FnMut(Event) -> Result<()>) -> Result<bool> {
+pub(super) fn read_xml(
+    archive: &mut Archive,
+    name: &str,
+    each: &mut dyn FnMut(Event) -> Result<()>,
+) -> Result<bool> {
     let entry = match archive.by_name(name) {
         Ok(entry) => entry,
         Err(zip::result::ZipError::FileNotFound) => return Ok(false),
@@ -60,12 +68,18 @@ pub(super) fn read_xml(archive: &mut Archive, name: &str, each: &mut dyn FnMut(E
     if entry.encrypted() {
         bail!("password-protected");
     }
-    let capped = Capped { inner: entry, left: MAX_ENTRY_BYTES, name: name.to_string() };
+    let capped = Capped {
+        inner: entry,
+        left: MAX_ENTRY_BYTES,
+        name: name.to_string(),
+    };
     let mut reader = Reader::from_reader(BufReader::new(capped));
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
     loop {
-        let event = reader.read_event_into(&mut buf).map_err(|e| anyhow!("{name}: {e}"))?;
+        let event = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| anyhow!("{name}: {e}"))?;
         if matches!(event, Event::Eof) {
             break;
         }
@@ -82,7 +96,14 @@ pub(super) fn local(e: &BytesStart) -> String {
 
 /// The value of attribute `name` (local name, any prefix).
 pub(super) fn attr(e: &BytesStart, name: &str) -> Option<String> {
-    e.attributes().flatten().find(|a| a.key.local_name().as_ref() == name).and_then(|a| a.normalized_value(quick_xml::XmlVersion::Implicit1_0).ok().map(|v| v.into_owned()))
+    e.attributes()
+        .flatten()
+        .find(|a| a.key.local_name().as_ref() == name)
+        .and_then(|a| {
+            a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                .ok()
+                .map(|v| v.into_owned())
+        })
 }
 
 /// The text of an entity or character reference (`&amp;`, `&#233;`).
@@ -163,7 +184,9 @@ impl Collector {
         if self.skip > 0 {
             return;
         }
-        let Some((text, level, dropped)) = self.open.pop() else { return };
+        let Some((text, level, dropped)) = self.open.pop() else {
+            return;
+        };
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
         if text.is_empty() || dropped {
             return;
@@ -202,8 +225,13 @@ impl Collector {
         if self.skip > 0 {
             return;
         }
-        let Some(table) = self.tables.last_mut() else { return };
-        let cells: Vec<String> = std::mem::take(&mut table.0).into_iter().map(|c| c.trim().to_string()).collect();
+        let Some(table) = self.tables.last_mut() else {
+            return;
+        };
+        let cells: Vec<String> = std::mem::take(&mut table.0)
+            .into_iter()
+            .map(|c| c.trim().to_string())
+            .collect();
         if cells.iter().all(|c| c.is_empty()) {
             return;
         }
@@ -219,7 +247,10 @@ impl Collector {
                 return;
             }
         }
-        self.paras.push(Para { text: row, level: None });
+        self.paras.push(Para {
+            text: row,
+            level: None,
+        });
     }
 
     pub(super) fn end_table(&mut self) {
@@ -230,6 +261,8 @@ impl Collector {
 }
 
 /// A DOCX's styles: id → (outline level, based on).
+// a one-off row tuple.
+#[allow(clippy::type_complexity)]
 fn docx_styles(archive: &mut Archive) -> Result<HashMap<String, (Option<usize>, Option<String>)>> {
     let mut styles: HashMap<String, (Option<usize>, Option<String>)> = HashMap::new();
     let mut current: Option<String> = None;
@@ -250,7 +283,11 @@ fn docx_styles(archive: &mut Archive) -> Result<HashMap<String, (Option<usize>, 
                         if let (Some(id), Some(name)) = (&current, attr(e, "val")) {
                             let lower = name.to_ascii_lowercase();
                             let level = match lower.strip_prefix("heading ") {
-                                Some(n) => n.trim().parse::<usize>().ok().filter(|n| (1..=9).contains(n)),
+                                Some(n) => n
+                                    .trim()
+                                    .parse::<usize>()
+                                    .ok()
+                                    .filter(|n| (1..=9).contains(n)),
                                 None if lower == "title" => Some(1),
                                 None => None,
                             };
@@ -268,7 +305,10 @@ fn docx_styles(archive: &mut Archive) -> Result<HashMap<String, (Option<usize>, 
                     }
                     "pPr" if !empty => in_ppr = true,
                     "outlineLvl" if in_ppr => {
-                        if let (Some(id), Some(level)) = (&current, attr(e, "val").and_then(|v| v.parse::<usize>().ok())) {
+                        if let (Some(id), Some(level)) = (
+                            &current,
+                            attr(e, "val").and_then(|v| v.parse::<usize>().ok()),
+                        ) {
                             if let Some(style) = styles.get_mut(id) {
                                 // 9 is body text.
                                 style.0 = (level < 9).then_some(level + 1);
@@ -291,7 +331,10 @@ fn docx_styles(archive: &mut Archive) -> Result<HashMap<String, (Option<usize>, 
 }
 
 /// A style's heading level, through its `basedOn` chain.
-fn style_level(styles: &HashMap<String, (Option<usize>, Option<String>)>, id: &str) -> Option<usize> {
+fn style_level(
+    styles: &HashMap<String, (Option<usize>, Option<String>)>,
+    id: &str,
+) -> Option<usize> {
     let mut id = id.to_string();
     for _ in 0..16 {
         let (level, base) = styles.get(&id)?;
@@ -304,10 +347,22 @@ fn style_level(styles: &HashMap<String, (Option<usize>, Option<String>)>, id: &s
 }
 
 /// The paragraphs of one WordprocessingML part (`document.xml`, `footnotes.xml`, …).
-fn docx_part(archive: &mut Archive, name: &str, styles: &HashMap<String, (Option<usize>, Option<String>)>, out: &mut Collector) -> Result<bool> {
+fn docx_part(
+    archive: &mut Archive,
+    name: &str,
+    styles: &HashMap<String, (Option<usize>, Option<String>)>,
+    out: &mut Collector,
+) -> Result<bool> {
     // Skipped with their subtree: deleted text, field codes, the fallback copy of a drawing
     // (its text box is read once, from the choice), and a footnote separator.
-    const SKIP: &[&str] = &["del", "moveFrom", "instrText", "delInstrText", "Fallback", "comment"];
+    const SKIP: &[&str] = &[
+        "del",
+        "moveFrom",
+        "instrText",
+        "delInstrText",
+        "Fallback",
+        "comment",
+    ];
     let mut in_t = false;
     read_xml(archive, name, &mut |event| {
         match &event {
@@ -319,7 +374,9 @@ fn docx_part(archive: &mut Archive, name: &str, styles: &HashMap<String, (Option
                 }
                 match tag.as_str() {
                     t if SKIP.contains(&t) => out.skip = 1,
-                    "footnote" | "endnote" if attr(e, "type").is_some_and(|t| t != "normal") => out.skip = 1,
+                    "footnote" | "endnote" if attr(e, "type").is_some_and(|t| t != "normal") => {
+                        out.skip = 1
+                    }
                     "p" => out.start_para(None),
                     "t" => in_t = true,
                     "tbl" => out.start_table(),
@@ -339,7 +396,12 @@ fn docx_part(archive: &mut Archive, name: &str, styles: &HashMap<String, (Option
                         }
                         out.set_level(style_level(styles, &id));
                     }
-                    "outlineLvl" => out.set_level(attr(e, "val").and_then(|v| v.parse::<usize>().ok()).filter(|l| *l < 9).map(|l| l + 1)),
+                    "outlineLvl" => out.set_level(
+                        attr(e, "val")
+                            .and_then(|v| v.parse::<usize>().ok())
+                            .filter(|l| *l < 9)
+                            .map(|l| l + 1),
+                    ),
                     "tab" | "br" | "cr" => out.text(" "),
                     "noBreakHyphen" => out.text("-"),
                     _ => {}
@@ -391,7 +453,13 @@ pub fn docx(bytes: &[u8]) -> Result<Vec<Unit>> {
     }
     let mut paras = out.paras;
     if paras.len() > body {
-        paras.insert(body, Para { text: "Notes".into(), level: Some(1) });
+        paras.insert(
+            body,
+            Para {
+                text: "Notes".into(),
+                level: Some(1),
+            },
+        );
     }
     Ok(sections(paras, "para"))
 }
@@ -400,7 +468,16 @@ pub fn docx(bytes: &[u8]) -> Result<Vec<Unit>> {
 fn odt_content(archive: &mut Archive, out: &mut Collector) -> Result<bool> {
     // Skipped with their subtree: comments, the deleted text of tracked changes, a note's
     // number, a table of contents (it repeats the headings), the sequence declarations.
-    const SKIP: &[&str] = &["annotation", "tracked-changes", "note-citation", "table-of-content", "sequence-decls", "illustration-index", "alphabetical-index", "bibliography"];
+    const SKIP: &[&str] = &[
+        "annotation",
+        "tracked-changes",
+        "note-citation",
+        "table-of-content",
+        "sequence-decls",
+        "illustration-index",
+        "alphabetical-index",
+        "bibliography",
+    ];
     let mut in_body = false;
     read_xml(archive, "content.xml", &mut |event| {
         match &event {
@@ -414,7 +491,12 @@ fn odt_content(archive: &mut Archive, out: &mut Collector) -> Result<bool> {
                     "body" => in_body = true,
                     t if SKIP.contains(&t) => out.skip = 1,
                     "p" if in_body => out.start_para(None),
-                    "h" if in_body => out.start_para(Some(attr(e, "outline-level").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).clamp(1, 9))),
+                    "h" if in_body => out.start_para(Some(
+                        attr(e, "outline-level")
+                            .and_then(|v| v.parse::<usize>().ok())
+                            .unwrap_or(1)
+                            .clamp(1, 9),
+                    )),
                     "table" if in_body => out.start_table(),
                     "table-cell" if in_body => out.start_cell(),
                     _ => {}
@@ -426,7 +508,10 @@ fn odt_content(archive: &mut Archive, out: &mut Collector) -> Result<bool> {
                 }
                 match local(e).as_str() {
                     "s" => {
-                        let n = attr(e, "c").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).min(64);
+                        let n = attr(e, "c")
+                            .and_then(|v| v.parse::<usize>().ok())
+                            .unwrap_or(1)
+                            .min(64);
                         out.text(&" ".repeat(n));
                     }
                     "tab" | "line-break" => out.text(" "),
@@ -484,7 +569,8 @@ pub mod tests {
         let mut out = Cursor::new(Vec::new());
         {
             let mut writer = zip::ZipWriter::new(&mut out);
-            let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
             for (name, body) in entries {
                 writer.start_file(*name, options).unwrap();
                 writer.write_all(body.as_bytes()).unwrap();
@@ -523,20 +609,55 @@ pub mod tests {
             r#"<?xml version="1.0"?><w:footnotes {W}><w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:t>----</w:t></w:r></w:p></w:footnote>
             <w:footnote w:id="1"><w:p><w:r><w:t>See the annex.</w:t></w:r></w:p></w:footnote></w:footnotes>"#
         );
-        zip_of(&[("[Content_Types].xml", "<Types/>"), ("word/document.xml", &document), ("word/styles.xml", &styles), ("word/footnotes.xml", &footnotes)])
+        zip_of(&[
+            ("[Content_Types].xml", "<Types/>"),
+            ("word/document.xml", &document),
+            ("word/styles.xml", &styles),
+            ("word/footnotes.xml", &footnotes),
+        ])
     }
 
     #[test]
     fn a_docx_becomes_sections_by_outline_level_with_tables_and_notes() {
         let units = docx(&sample_docx()).unwrap();
-        let got: Vec<(&str, &str)> = units.iter().map(|u| (u.loc.as_str(), u.heading.as_str())).collect();
-        assert_eq!(got, [("para 1-1", ""), ("para 2-3", "Notice"), ("para 4-8", "Notice > Fees"), ("para 9-10", "Notes")], "{units:#?}");
+        let got: Vec<(&str, &str)> = units
+            .iter()
+            .map(|u| (u.loc.as_str(), u.heading.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("para 1-1", ""),
+                ("para 2-3", "Notice"),
+                ("para 4-8", "Notice > Fees"),
+                ("para 9-10", "Notes")
+            ],
+            "{units:#?}"
+        );
         let text: Vec<&str> = units.iter().flat_map(|u| u.text.lines()).collect();
-        assert_eq!(text[2], "The notice period is ninety days & more", "deleted text is not read");
-        assert_eq!(&text[4..8], ["Item | Price", "Setup | 100 EUR", "Boxed text", "After the box"], "{text:?}");
+        assert_eq!(
+            text[2], "The notice period is ninety days & more",
+            "deleted text is not read"
+        );
+        assert_eq!(
+            &text[4..8],
+            [
+                "Item | Price",
+                "Setup | 100 EUR",
+                "Boxed text",
+                "After the box"
+            ],
+            "{text:?}"
+        );
         assert_eq!(text[9], "See the annex.");
-        assert!(!text.iter().any(|l| l.contains("----") || l.contains("PAGE") || l.contains("sixty") || l.contains("Notice 1")));
-        assert_eq!((units[1].line_first, units[1].line_last), (Some(2), Some(3)));
+        assert!(!text.iter().any(|l| l.contains("----")
+            || l.contains("PAGE")
+            || l.contains("sixty")
+            || l.contains("Notice 1")));
+        assert_eq!(
+            (units[1].line_first, units[1].line_last),
+            (Some(2), Some(3))
+        );
     }
 
     #[test]
@@ -551,12 +672,32 @@ pub mod tests {
             <table:table><table:table-row><table:table-cell><text:p>Zone</text:p></table:table-cell><table:table-cell/><table:table-cell><text:p>Rate</text:p></table:table-cell></table:table-row></table:table>
             <office:annotation><text:p>A reviewer's comment</text:p></office:annotation>
             </office:text></office:body></office:document-content>"#;
-        let bytes = zip_of(&[("mimetype", "application/vnd.oasis.opendocument.text"), ("content.xml", content)]);
+        let bytes = zip_of(&[
+            ("mimetype", "application/vnd.oasis.opendocument.text"),
+            ("content.xml", content),
+        ]);
         let units = odt(&bytes).unwrap();
-        let got: Vec<(&str, &str)> = units.iter().map(|u| (u.loc.as_str(), u.heading.as_str())).collect();
-        assert_eq!(got, [("para 1-4", "Delivery"), ("para 5-6", "Delivery > Rates")], "{units:#?}");
+        let got: Vec<(&str, &str)> = units
+            .iter()
+            .map(|u| (u.loc.as_str(), u.heading.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [("para 1-4", "Delivery"), ("para 5-6", "Delivery > Rates")],
+            "{units:#?}"
+        );
         let text: Vec<&str> = units.iter().flat_map(|u| u.text.lines()).collect();
-        assert_eq!(text, ["Delivery", "Working days.", "Goods arrive within ten days.", "First item", "Rates", "Zone |  | Rate"]);
+        assert_eq!(
+            text,
+            [
+                "Delivery",
+                "Working days.",
+                "Goods arrive within ten days.",
+                "First item",
+                "Rates",
+                "Zone |  | Rate"
+            ]
+        );
     }
 
     #[test]
@@ -565,10 +706,13 @@ pub mod tests {
         let mut out = Cursor::new(Vec::new());
         {
             let mut writer = zip::ZipWriter::new(&mut out);
-            let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
             writer.start_file("content.xml", options).unwrap();
             let block = vec![b'a'; 1 << 20];
-            writer.write_all(b"<office:document-content><office:body><office:text><text:p>").unwrap();
+            writer
+                .write_all(b"<office:document-content><office:body><office:text><text:p>")
+                .unwrap();
             for _ in 0..300 {
                 writer.write_all(&block).unwrap();
             }
@@ -578,7 +722,10 @@ pub mod tests {
         assert!(bomb.len() < 4 << 20, "{}", bomb.len());
         let error = format!("{:#}", odt(&bomb).unwrap_err());
         assert!(error.contains("ZIP bomb"), "{error}");
-        let error = format!("{:#}", docx(&zip_of(&[("content.xml", "<x/>")])).unwrap_err());
+        let error = format!(
+            "{:#}",
+            docx(&zip_of(&[("content.xml", "<x/>")])).unwrap_err()
+        );
         assert!(error.contains("not a Word document"), "{error}");
         assert!(docx(b"PK\x03\x04 broken").is_err());
     }

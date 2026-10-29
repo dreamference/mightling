@@ -52,7 +52,10 @@ const GRAPH_GAP_ROWS: usize = 100;
 /// Whether `search` reads a file's text for body matches: source, not prose or data. Prose is
 /// already in the graph as sections, and data files would bury the code under their matches.
 fn is_code_path(path: &str) -> bool {
-    const SKIP: &[&str] = &["md", "rst", "txt", "json", "lock", "csv", "svg", "html", "xml", "yaml", "yml", "toml", "ipynb", "patch", "tex", "bib"];
+    const SKIP: &[&str] = &[
+        "md", "rst", "txt", "json", "lock", "csv", "svg", "html", "xml", "yaml", "yml", "toml",
+        "ipynb", "patch", "tex", "bib",
+    ];
     let extension = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
     extension.is_some_and(|e| !SKIP.contains(&e.as_str()))
 }
@@ -63,7 +66,11 @@ fn starts_a_word(text: &str, word: &str) -> bool {
     let mut from = 0;
     while let Some(found) = text[from..].find(word) {
         let start = from + found;
-        if !text[..start].chars().next_back().is_some_and(char::is_alphanumeric) {
+        if !text[..start]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric)
+        {
             return true;
         }
         from = start + text[start..].chars().next().map_or(1, char::len_utf8);
@@ -73,7 +80,14 @@ fn starts_a_word(text: &str, word: &str) -> bool {
 
 /// A test file: its bodies mention everything the code does, so they rank below the code.
 fn is_test_path(path: &str) -> bool {
-    path.split('/').any(|part| part == "tests" || part == "test" || part.starts_with("test_") || part.ends_with("_test.go") || part.contains(".test.") || part.contains(".spec."))
+    path.split('/').any(|part| {
+        part == "tests"
+            || part == "test"
+            || part.starts_with("test_")
+            || part.ends_with("_test.go")
+            || part.contains(".test.")
+            || part.contains(".spec.")
+    })
 }
 
 /// How far a row can be trusted.
@@ -189,7 +203,11 @@ impl Context {
     /// Opens both layers and computes their changed sets.
     pub fn load(repo: Repo, settings: Settings) -> Result<Context> {
         let decisions = submodules::evaluate(&repo, &settings);
-        let left_out: Vec<String> = decisions.iter().filter(|s| !s.indexed).map(|s| s.path.clone()).collect();
+        let left_out: Vec<String> = decisions
+            .iter()
+            .filter(|s| !s.indexed)
+            .map(|s| s.path.clone())
+            .collect();
         let mut git = GitView::with_included(&repo, submodules::included(&decisions));
         // ling-code's own state (stores, manifests, requests) is never part of a changed set,
         // whether or not the repository ignores it.
@@ -217,11 +235,19 @@ impl Context {
             Some(graph) => {
                 let excluded: Vec<String> = graph.not_indexed()?.into_iter().collect();
                 let is_excluded = |path: &str| {
-                    is_state(path) || excluded.iter().any(|dir| path == dir || path.starts_with(&format!("{dir}/")))
+                    is_state(path)
+                        || excluded
+                            .iter()
+                            .any(|dir| path == dir || path.starts_with(&format!("{dir}/")))
                 };
                 // Tracked files an ignore rule dropped: covered by text instead (§4.1).
                 for file in git.all_files().clone() {
-                    if !is_state(&file) && is_excluded(&file) && !left_out.iter().any(|s| file == *s || file.starts_with(&format!("{s}/"))) {
+                    if !is_state(&file)
+                        && is_excluded(&file)
+                        && !left_out
+                            .iter()
+                            .any(|s| file == *s || file.starts_with(&format!("{s}/")))
+                    {
                         not_indexed_files.insert(file);
                     }
                 }
@@ -229,7 +255,10 @@ impl Context {
                     if not_indexed_files.contains(dir) {
                         // A single file the graph skipped (often binary); it is searched like the rest.
                         not_indexed_dirs.push(dir.clone());
-                    } else if not_indexed_files.iter().any(|f| f.starts_with(&format!("{dir}/"))) {
+                    } else if not_indexed_files
+                        .iter()
+                        .any(|f| f.starts_with(&format!("{dir}/")))
+                    {
                         not_indexed_dirs.push(format!("{dir}/"));
                     }
                 }
@@ -237,7 +266,15 @@ impl Context {
                 let commit = snapshot.as_ref().and_then(|s| s.commit.clone());
                 let dirty = snapshot.map(|s| s.dirty_files).unwrap_or_default();
                 let stamps = graph.file_hashes()?;
-                let changes = layer_changes(&repo, &mut git, commit.as_deref(), &dirty, &stamps, None, &is_excluded);
+                let changes = layer_changes(
+                    &repo,
+                    &mut git,
+                    commit.as_deref(),
+                    &dirty,
+                    &stamps,
+                    None,
+                    &is_excluded,
+                );
                 if changes.method == Method::Stat {
                     method = Method::Stat;
                 }
@@ -261,9 +298,16 @@ impl Context {
                 Ok(store) => {
                     // No scope: a store has documents outside its root (what the root imports),
                     // and its snapshot stamps every file of the repository.
-                    let stamps: HashMap<_, _> = store.entry.file_hashes.clone().into_iter().collect();
+                    let stamps: HashMap<_, _> =
+                        store.entry.file_hashes.clone().into_iter().collect();
                     let changes = layer_changes(
-                        &repo, &mut git, store.entry.commit.as_deref(), &store.entry.dirty_files, &stamps, None, &is_state,
+                        &repo,
+                        &mut git,
+                        store.entry.commit.as_deref(),
+                        &store.entry.dirty_files,
+                        &stamps,
+                        None,
+                        &is_state,
                     );
                     if changes.method == Method::Stat {
                         method = Method::Stat;
@@ -281,9 +325,18 @@ impl Context {
             // repository's vendored C (astropy's `cextern/`) gave a thousand rows of noise. With no
             // store at all, every source file.
             let extension = |path: &str| path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
-            let indexed: BTreeSet<String> = stores.iter().flat_map(|s| s.documents()).filter_map(|d| extension(&d)).collect();
+            let indexed: BTreeSet<String> = stores
+                .iter()
+                .flat_map(|s| s.documents())
+                .filter_map(|d| extension(&d))
+                .collect();
             for file in git.all_files().clone() {
-                if is_state(&file) || !is_code_path(&file) || left_out.iter().any(|s| file == *s || file.starts_with(&format!("{s}/"))) {
+                if is_state(&file)
+                    || !is_code_path(&file)
+                    || left_out
+                        .iter()
+                        .any(|s| file == *s || file.starts_with(&format!("{s}/")))
+                {
                     continue;
                 }
                 if !indexed.is_empty() && !extension(&file).is_some_and(|e| indexed.contains(&e)) {
@@ -324,7 +377,9 @@ impl Context {
     /// database uses a rollback journal, so a query that straddles a commit may have read both
     /// sides of it. The caller answers again, once (§7.5).
     pub fn graph_changed_since_load(&self) -> bool {
-        let Some(before) = &self.graph_generation else { return false };
+        let Some(before) = &self.graph_generation else {
+            return false;
+        };
         match GraphStore::open(&self.repo) {
             Ok(Some(graph)) => graph.mutation_gen() != *before,
             _ => false,
@@ -347,7 +402,10 @@ impl Context {
     }
 
     fn graph_fresh(&self, path: &str) -> bool {
-        self.graph_changes.as_ref().map(|c| c.is_fresh(path)).unwrap_or(false)
+        self.graph_changes
+            .as_ref()
+            .map(|c| c.is_fresh(path))
+            .unwrap_or(false)
     }
 
     /// The cursor of §7.2: the graph's mutation generation, each store's run id, and the changed set.
@@ -372,7 +430,11 @@ impl Context {
         answer.sources = self.sources(Some(stores));
         let mut changed = BTreeSet::new();
         let mut deleted = BTreeSet::new();
-        for set in self.graph_changes.iter().chain(stores.iter().map(|i| &self.store_changes[*i])) {
+        for set in self
+            .graph_changes
+            .iter()
+            .chain(stores.iter().map(|i| &self.store_changes[*i]))
+        {
             changed.extend(set.changed.iter().cloned());
             deleted.extend(set.deleted.iter().cloned());
         }
@@ -386,7 +448,11 @@ impl Context {
     }
 
     fn answer_changed<'a>(&'a self, answer: &'a Answer) -> &'a BTreeSet<String> {
-        answer.scope.as_ref().map(|(c, _)| c).unwrap_or(&self.changed)
+        answer
+            .scope
+            .as_ref()
+            .map(|(c, _)| c)
+            .unwrap_or(&self.changed)
     }
 
     /// The header's source line: which snapshot each tag comes from.
@@ -396,12 +462,25 @@ impl Context {
             .iter()
             .enumerate()
             .filter(|(i, _)| only.map(|set| set.contains(i)).unwrap_or(true))
-            .map(|(_, s)| (s.entry.indexer.as_str(), s.entry.root.as_str(), s.entry.commit.as_deref()));
+            .map(|(_, s)| {
+                (
+                    s.entry.indexer.as_str(),
+                    s.entry.root.as_str(),
+                    s.entry.commit.as_deref(),
+                )
+            });
         let mut out = Vec::new();
         if let Some(line) = sources_line(stores) {
             out.push(line);
         }
-        out.push(if self.settings.exact_only() { "heuristic = text search (layers = exact)" } else { "heuristic = codebase-memory or text search" }.to_string());
+        out.push(
+            if self.settings.exact_only() {
+                "heuristic = text search (layers = exact)"
+            } else {
+                "heuristic = codebase-memory or text search"
+            }
+            .to_string(),
+        );
         out
     }
 
@@ -422,13 +501,18 @@ impl Context {
     ///
     /// A query of the form `path:line` names the definition on that line.
     fn resolve(&self, query: &str) -> Result<Vec<Candidate>> {
-        if let Some((path, line)) = query.rsplit_once(':').and_then(|(p, l)| Some((p, l.parse::<u32>().ok()?))) {
+        if let Some((path, line)) = query
+            .rsplit_once(':')
+            .and_then(|(p, l)| Some((p, l.parse::<u32>().ok()?)))
+        {
             if self.repo.abs(path).is_file() {
                 return self.resolve_location(path, line);
             }
         }
         let segments = query_segments(query);
-        let Some(name) = segments.last().cloned() else { bail!("an empty name") };
+        let Some(name) = segments.last().cloned() else {
+            bail!("an empty name")
+        };
         let mut out: Vec<Candidate> = Vec::new();
         if let Some(graph) = &self.graph {
             for node in graph.candidates(&segments)? {
@@ -444,7 +528,9 @@ impl Context {
                 };
                 for (i, store) in self.stores.iter().enumerate() {
                     if self.scip_fresh(i, &candidate.path) {
-                        if let Some((id, symbol)) = store.symbol_defined_at(&candidate.path, candidate.span, &name)? {
+                        if let Some((id, symbol)) =
+                            store.symbol_defined_at(&candidate.path, candidate.span, &name)?
+                        {
                             candidate.scip.push((i, id, symbol));
                         }
                     }
@@ -455,8 +541,15 @@ impl Context {
         for (i, store) in self.stores.iter().enumerate() {
             for def in store.definitions_named(&segments)? {
                 let fresh = self.scip_fresh(i, &def.path);
-                if let Some(existing) = out.iter_mut().find(|c| c.path == def.path && c.span.0 <= def.line && def.line <= c.span.1) {
-                    if !existing.scip.iter().any(|(j, id, _)| *j == i && *id == def.symbol_id) {
+                if let Some(existing) = out
+                    .iter_mut()
+                    .find(|c| c.path == def.path && c.span.0 <= def.line && def.line <= c.span.1)
+                {
+                    if !existing
+                        .scip
+                        .iter()
+                        .any(|(j, id, _)| *j == i && *id == def.symbol_id)
+                    {
                         existing.scip.push((i, def.symbol_id, def.symbol.clone()));
                         existing.by_name |= !fresh;
                     }
@@ -486,7 +579,11 @@ impl Context {
     fn resolve_location(&self, path: &str, line: u32) -> Result<Vec<Candidate>> {
         let mut out = Vec::new();
         if let Some(graph) = &self.graph {
-            let node = graph.outline(path)?.into_iter().filter(|n| n.start_line == line).min_by_key(|n| n.end_line - n.start_line);
+            let node = graph
+                .outline(path)?
+                .into_iter()
+                .filter(|n| n.start_line == line)
+                .min_by_key(|n| n.end_line - n.start_line);
             let node = match node {
                 Some(node) => Some(node),
                 None => graph.enclosing(path, line)?,
@@ -504,7 +601,9 @@ impl Context {
                 };
                 for (i, store) in self.stores.iter().enumerate() {
                     if self.scip_fresh(i, path) {
-                        if let Some((id, symbol)) = store.symbol_defined_at(path, candidate.span, &node.name)? {
+                        if let Some((id, symbol)) =
+                            store.symbol_defined_at(path, candidate.span, &node.name)?
+                        {
                             candidate.scip.push((i, id, symbol));
                         }
                     }
@@ -518,7 +617,9 @@ impl Context {
                 continue;
             }
             if let Some(symbol) = store.enclosing_definition(path, line)? {
-                let Some(name) = scip_symbol::parse(&symbol) else { continue };
+                let Some(name) = scip_symbol::parse(&symbol) else {
+                    continue;
+                };
                 for def in store.definitions_named(&[name.name().to_string()])? {
                     if def.symbol == symbol && def.path == path {
                         out.push(Candidate {
@@ -544,7 +645,9 @@ impl Context {
         let mut candidates = self.resolve(query)?;
         match candidates.len() {
             0 => {
-                answer.notes.push(format!("no definition named `{query}` in the index"));
+                answer
+                    .notes
+                    .push(format!("no definition named `{query}` in the index"));
                 if self.settings.exact_only() {
                     answer.notes.push(format!(
                         "layers = exact, so no graph stands in: `search {}` finds it by text",
@@ -582,10 +685,21 @@ impl Context {
     }
 
     /// Runs the text search and records its outcome on the answer.
-    fn text_rows(&self, name: &str, answer: &mut Answer, keep: &dyn Fn(&str, u32) -> bool) -> Vec<Row> {
+    fn text_rows(
+        &self,
+        name: &str,
+        answer: &mut Answer,
+        keep: &dyn Fn(&str, u32) -> bool,
+    ) -> Vec<Row> {
         let changed = self.answer_changed(answer).clone();
         let files = self.text_files(&changed);
-        let scan = textscan::scan(&self.repo.root, &files, name, self.settings.scan_max_files, self.settings.scan_max_bytes);
+        let scan = textscan::scan(
+            &self.repo.root,
+            &files,
+            name,
+            self.settings.scan_max_files,
+            self.settings.scan_max_bytes,
+        );
         answer.changed_searched = Some(scan.over_limit.is_none());
         if let Some(why) = &scan.over_limit {
             answer.not_checked = Some(format!(
@@ -593,18 +707,38 @@ impl Context {
                 files.len()
             ));
         }
-        let text_dirs: Vec<&String> = self.not_indexed_dirs.iter().filter(|d| d.ends_with('/')).collect();
+        let text_dirs: Vec<&String> = self
+            .not_indexed_dirs
+            .iter()
+            .filter(|d| d.ends_with('/'))
+            .collect();
         if !text_dirs.is_empty() {
             let shown: Vec<&str> = text_dirs.iter().take(5).map(|d| d.as_str()).collect();
-            let more = if text_dirs.len() > 5 { format!(" and {} more", text_dirs.len() - 5) } else { String::new() };
-            answer.not_indexed.push(format!("{}{more} (ignored by the graph; searched by text)", shown.join(", ")));
+            let more = if text_dirs.len() > 5 {
+                format!(" and {} more", text_dirs.len() - 5)
+            } else {
+                String::new()
+            };
+            answer.not_indexed.push(format!(
+                "{}{more} (ignored by the graph; searched by text)",
+                shown.join(", ")
+            ));
         }
         scan.hits
             .into_iter()
             .filter(|hit| keep(&hit.path, hit.line))
             .map(|hit| {
-                let why = if changed.contains(&hit.path) { "changed since snapshot" } else { "not indexed" };
-                Row { tag: Some(Tag::Text), path: hit.path, line: hit.line, detail: why.to_string() }
+                let why = if changed.contains(&hit.path) {
+                    "changed since snapshot"
+                } else {
+                    "not indexed"
+                };
+                Row {
+                    tag: Some(Tag::Text),
+                    path: hit.path,
+                    line: hit.line,
+                    detail: why.to_string(),
+                }
             })
             .collect()
     }
@@ -618,31 +752,67 @@ impl Context {
     /// `impact` and `callers` answered 0 for methods the repository calls, and the note's advice to
     /// confirm with `rg` named a tool that is not installed there. The rows over-report (another
     /// definition of the same name matches too), the safe direction, and say `heuristic (text)`.
-    fn graph_gap_rows(&self, candidate: &Candidate, found: &[Row], answer: &mut Answer) -> Vec<Row> {
-        let extension = std::path::Path::new(&candidate.path).extension().and_then(|e| e.to_str());
-        let (Some(extension), true) = (extension, self.repo.is_git) else { return Vec::new() };
+    fn graph_gap_rows(
+        &self,
+        candidate: &Candidate,
+        found: &[Row],
+        answer: &mut Answer,
+    ) -> Vec<Row> {
+        let extension = std::path::Path::new(&candidate.path)
+            .extension()
+            .and_then(|e| e.to_str());
+        let (Some(extension), true) = (extension, self.repo.is_git) else {
+            return Vec::new();
+        };
         // `safe.directory`: the files may belong to another user (a SWE-bench image's root), and
         // an MCP server is not given the agent's git configuration.
         let pattern = format!("*.{extension}");
         let output = std::process::Command::new("git")
             .args(["-c", "safe.directory=*", "-C"])
             .arg(&self.repo.root)
-            .args(ling_safegit::hardened_args(Some(&self.repo.root), &["grep", "-n", "-I", "-w", "-F", "--no-color", "-e", &candidate.name, "--", &pattern]))
+            .args(ling_safegit::hardened_args(
+                Some(&self.repo.root),
+                &[
+                    "grep",
+                    "-n",
+                    "-I",
+                    "-w",
+                    "-F",
+                    "--no-color",
+                    "-e",
+                    &candidate.name,
+                    "--",
+                    &pattern,
+                ],
+            ))
             .envs(ling_safegit::FIXED_ENV.iter().copied())
             .env_remove("GIT_EXTERNAL_DIFF")
             .output();
-        let Ok(output) = output else { return Vec::new() };
+        let Ok(output) = output else {
+            return Vec::new();
+        };
         let mut rows = Vec::new();
         let mut matches = 0;
         for line in String::from_utf8_lossy(&output.stdout).lines() {
             let mut parts = line.splitn(3, ':');
-            let (Some(path), Some(Ok(number))) = (parts.next(), parts.next().map(str::parse::<u32>)) else { continue };
-            if (path == candidate.path && number == candidate.line) || found.iter().any(|r| r.path == path && r.line == number) {
+            let (Some(path), Some(Ok(number))) =
+                (parts.next(), parts.next().map(str::parse::<u32>))
+            else {
+                continue;
+            };
+            if (path == candidate.path && number == candidate.line)
+                || found.iter().any(|r| r.path == path && r.line == number)
+            {
                 continue;
             }
             matches += 1;
             if rows.len() < GRAPH_GAP_ROWS {
-                rows.push(Row { tag: Some(Tag::Text), path: path.to_string(), line: number, detail: "text match of the name".to_string() });
+                rows.push(Row {
+                    tag: Some(Tag::Text),
+                    path: path.to_string(),
+                    line: number,
+                    detail: "text match of the name".to_string(),
+                });
             }
         }
         if matches > rows.len() {
@@ -678,7 +848,9 @@ impl Context {
                 ));
             }
         } else if let Some(error) = &self.graph_error {
-            answer.notes.push(format!("universal layer unavailable: {error}"));
+            answer
+                .notes
+                .push(format!("universal layer unavailable: {error}"));
         } else if self.graph.is_none() {
             answer.notes.push(format!(
                 "universal layer not built yet; {}",
@@ -686,10 +858,15 @@ impl Context {
             ));
         }
         for error in &self.store_errors {
-            answer.notes.push(format!("exact layer unavailable: {error}"));
+            answer
+                .notes
+                .push(format!("exact layer unavailable: {error}"));
         }
         if self.method == Method::Stat {
-            answer.notes.push("a snapshot's commit is unknown here; freshness was checked file by file".to_string());
+            answer.notes.push(
+                "a snapshot's commit is unknown here; freshness was checked file by file"
+                    .to_string(),
+            );
         }
     }
 
@@ -699,8 +876,13 @@ impl Context {
     pub fn refs(&self, query: &str) -> Result<Answer> {
         let mut answer = self.new_answer("refs", query);
         self.note_missing_layers(&mut answer);
-        let Some(candidate) = self.resolve_one(query, &mut answer)? else { return Ok(answer) };
-        answer.query = format!("{}  ({}:{})", candidate.display, candidate.path, candidate.line);
+        let Some(candidate) = self.resolve_one(query, &mut answer)? else {
+            return Ok(answer);
+        };
+        answer.query = format!(
+            "{}  ({}:{})",
+            candidate.display, candidate.path, candidate.line
+        );
         let mut rows = Vec::new();
         let mut exact_stores: BTreeSet<usize> = BTreeSet::new();
         for (i, id, symbol) in &candidate.scip {
@@ -715,8 +897,17 @@ impl Context {
                 }
                 // An identity found by name (§7.4 step 4) is still one symbol: its references in
                 // fresh files are exact. Only a definition located that way is not.
-                let tag = if candidate.by_name && occ.roles & ROLE_DEFINITION != 0 { Tag::Heuristic } else { Tag::Exact };
-                rows.push(Row { tag: Some(tag), path: occ.path, line: occ.line, detail: role_label(occ.roles).to_string() });
+                let tag = if candidate.by_name && occ.roles & ROLE_DEFINITION != 0 {
+                    Tag::Heuristic
+                } else {
+                    Tag::Exact
+                };
+                rows.push(Row {
+                    tag: Some(tag),
+                    path: occ.path,
+                    line: occ.line,
+                    detail: role_label(occ.roles).to_string(),
+                });
             }
         }
         let covered_exactly = |path: &str| exact_stores.iter().any(|i| self.scip_fresh(*i, path));
@@ -726,14 +917,25 @@ impl Context {
                 if covered_exactly(&file) || !self.graph_fresh(&file) {
                     continue;
                 }
-                let detail = format!("{} in {}", edge.kind.to_lowercase(), edge.other.display(&graph.project));
+                let detail = format!(
+                    "{} in {}",
+                    edge.kind.to_lowercase(),
+                    edge.other.display(&graph.project)
+                );
                 for line in self.edge_lines(&edge.other, edge.line, &candidate.name) {
-                    rows.push(Row { tag: Some(Tag::Heuristic), path: file.clone(), line, detail: detail.clone() });
+                    rows.push(Row {
+                        tag: Some(Tag::Heuristic),
+                        path: file.clone(),
+                        line,
+                        detail: detail.clone(),
+                    });
                 }
                 if edge.candidates > 1 {
                     answer.unresolved.push(format!(
                         "{}:{} resolved among {} candidates by name",
-                        file, edge.line.unwrap_or(edge.other.start_line), edge.candidates
+                        file,
+                        edge.line.unwrap_or(edge.other.start_line),
+                        edge.candidates
                     ));
                 }
             }
@@ -758,15 +960,29 @@ impl Context {
         let candidates = self.resolve(query)?;
         let name = query_segments(query).last().cloned().unwrap_or_default();
         let mut rows = Vec::new();
-        let used: BTreeSet<usize> = candidates.iter().flat_map(|c| c.scip.iter().map(|(i, _, _)| *i)).collect();
+        let used: BTreeSet<usize> = candidates
+            .iter()
+            .flat_map(|c| c.scip.iter().map(|(i, _, _)| *i))
+            .collect();
         self.set_sources(&mut answer, &used);
         for c in &candidates {
             let fresh = c.scip.iter().any(|(i, _, _)| self.scip_fresh(*i, &c.path));
-            let tag = if fresh && !c.by_name { Tag::Exact } else { Tag::Heuristic };
-            rows.push(Row { tag: Some(tag), path: c.path.clone(), line: c.line, detail: c.display.clone() });
+            let tag = if fresh && !c.by_name {
+                Tag::Exact
+            } else {
+                Tag::Heuristic
+            };
+            rows.push(Row {
+                tag: Some(tag),
+                path: c.path.clone(),
+                line: c.line,
+                detail: c.display.clone(),
+            });
         }
         // A definition written since the snapshots: a text hit on a line that defines the name.
-        rows.extend(self.text_rows(&name, &mut answer, &|path, line| defines_on_line(&self.repo, path, line, &name)));
+        rows.extend(self.text_rows(&name, &mut answer, &|path, line| {
+            defines_on_line(&self.repo, path, line, &name)
+        }));
         answer.rows = dedup(rows);
         if answer.rows.is_empty() && self.settings.exact_only() {
             answer.notes.push(format!("no exact definition named `{name}`, and layers = exact, so no graph stands in: `search {name}` finds it by text"));
@@ -785,8 +1001,12 @@ impl Context {
                 continue;
             }
             let caller = match row.tag {
-                Some(Tag::Exact) => self.stores.iter().find_map(|s| s.enclosing_definition(&row.path, row.line).ok().flatten())
-                    .and_then(|s| scip_symbol::parse(&s)).map(|n| n.display()),
+                Some(Tag::Exact) => self
+                    .stores
+                    .iter()
+                    .find_map(|s| s.enclosing_definition(&row.path, row.line).ok().flatten())
+                    .and_then(|s| scip_symbol::parse(&s))
+                    .map(|n| n.display()),
                 Some(Tag::Heuristic) => row.detail.split_once(" in ").map(|(_, c)| c.to_string()),
                 _ => None,
             };
@@ -795,7 +1015,11 @@ impl Context {
                 if !self.graph_fresh(&row.path) {
                     return None;
                 }
-                graph.enclosing(&row.path, row.line).ok().flatten().map(|n| n.display(&graph.project))
+                graph
+                    .enclosing(&row.path, row.line)
+                    .ok()
+                    .flatten()
+                    .map(|n| n.display(&graph.project))
             });
             let detail = match caller {
                 Some(caller) => format!("in {caller}"),
@@ -823,7 +1047,9 @@ impl Context {
             return Ok(answer);
         }
         let mut probe = Answer::default();
-        let Some(root) = self.resolve_one(query, &mut probe)? else { return Ok(answer) };
+        let Some(root) = self.resolve_one(query, &mut probe)? else {
+            return Ok(answer);
+        };
         let first = std::mem::take(&mut answer.rows);
         let mut walk = ImpactWalk::new(depth.clamp(1, IMPACT_MAX_DEPTH));
         walk.seen_definitions.insert((root.path.clone(), root.line));
@@ -840,34 +1066,67 @@ impl Context {
         if !self.repo.is_git {
             bail!("`impact --diff` needs a git repository");
         }
-        let diff = crate::paths::git(&self.repo.root, &["diff", "-U0", "--no-renames", "--no-ext-diff", rev, "--"])?;
+        let diff = crate::paths::git(
+            &self.repo.root,
+            &["diff", "-U0", "--no-renames", "--no-ext-diff", rev, "--"],
+        )?;
         let mut touched: Vec<Candidate> = Vec::new();
         for (path, start, end) in diff_ranges(&diff) {
             // The definition enclosing the hunk, and every definition that begins inside it.
             let mut lines = vec![start];
             if let Some(graph) = &self.graph {
-                lines.extend(graph.outline(&path)?.into_iter().map(|n| n.start_line).filter(|l| *l > start && *l <= end));
+                lines.extend(
+                    graph
+                        .outline(&path)?
+                        .into_iter()
+                        .map(|n| n.start_line)
+                        .filter(|l| *l > start && *l <= end),
+                );
             } else if self.settings.exact_only() {
-                lines.extend(self.exact_outline(&path).into_iter().map(|(s, _, _)| s).filter(|l| *l > start && *l <= end));
+                lines.extend(
+                    self.exact_outline(&path)
+                        .into_iter()
+                        .map(|(s, _, _)| s)
+                        .filter(|l| *l > start && *l <= end),
+                );
             }
             for line in lines {
                 for candidate in self.resolve_location(&path, line)? {
-                    if !touched.iter().any(|c| c.path == candidate.path && c.line == candidate.line) {
+                    if !touched
+                        .iter()
+                        .any(|c| c.path == candidate.path && c.line == candidate.line)
+                    {
                         touched.push(candidate);
                     }
                 }
             }
         }
         if touched.is_empty() {
-            answer.notes.push(format!("the diff against {rev} touches no definition the index knows"));
+            answer.notes.push(format!(
+                "the diff against {rev} touches no definition the index knows"
+            ));
             return Ok(answer);
         }
-        let shown: Vec<String> = touched.iter().take(IMPACT_DIFF_DEFINITIONS).map(|c| c.display.clone()).collect();
+        let shown: Vec<String> = touched
+            .iter()
+            .take(IMPACT_DIFF_DEFINITIONS)
+            .map(|c| c.display.clone())
+            .collect();
         let more = touched.len().saturating_sub(shown.len());
-        answer.query = format!("--diff {rev}  ({} changed definitions: {}{})", touched.len(), shown.join(", "), if more > 0 { format!(" +{more} more, not followed") } else { String::new() });
+        answer.query = format!(
+            "--diff {rev}  ({} changed definitions: {}{})",
+            touched.len(),
+            shown.join(", "),
+            if more > 0 {
+                format!(" +{more} more, not followed")
+            } else {
+                String::new()
+            }
+        );
         let mut walk = ImpactWalk::new(depth.clamp(1, IMPACT_MAX_DEPTH));
         for candidate in &touched {
-            walk.seen_definitions.insert((candidate.path.clone(), candidate.line));
+            walk.seen_definitions
+                .insert((candidate.path.clone(), candidate.line));
         }
         let mut stores: BTreeSet<usize> = BTreeSet::new();
         for candidate in touched.iter().take(IMPACT_DIFF_DEFINITIONS) {
@@ -895,17 +1154,33 @@ impl Context {
             // The chain is as good as its weakest link.
             let tag = row.tag.unwrap_or(Tag::Heuristic).max(via);
             let followable = row.tag != Some(Tag::Text) && row.detail != "import";
-            let caller = if followable { self.resolve_location(&row.path, row.line).ok().and_then(|mut c| c.pop()) } else { None };
+            let caller = if followable {
+                self.resolve_location(&row.path, row.line)
+                    .ok()
+                    .and_then(|mut c| c.pop())
+            } else {
+                None
+            };
             let detail = match (&caller, row.tag) {
                 (Some(caller), _) => format!("depth {level}: in {}", caller.display),
                 (None, Some(Tag::Text)) => format!("depth {level}: {} (not followed)", row.detail),
                 (None, _) if row.detail == "import" => format!("depth {level}: import"),
                 (None, _) => format!("depth {level}: at module level"),
             };
-            walk.rows.push(Row { tag: Some(tag), path: row.path, line: row.line, detail });
+            walk.rows.push(Row {
+                tag: Some(tag),
+                path: row.path,
+                line: row.line,
+                detail,
+            });
             if let Some(caller) = caller {
-                if level < walk.depth && walk.seen_definitions.insert((caller.path.clone(), caller.line)) {
-                    walk.queue.push_back((caller.path, caller.line, tag, level + 1));
+                if level < walk.depth
+                    && walk
+                        .seen_definitions
+                        .insert((caller.path.clone(), caller.line))
+                {
+                    walk.queue
+                        .push_back((caller.path, caller.line, tag, level + 1));
                 }
             }
         }
@@ -930,22 +1205,44 @@ impl Context {
     pub fn callees(&self, query: &str) -> Result<Answer> {
         let mut answer = self.new_answer("callees", query);
         self.note_missing_layers(&mut answer);
-        let Some(candidate) = self.resolve_one(query, &mut answer)? else { return Ok(answer) };
-        answer.query = format!("{}  ({}:{})", candidate.display, candidate.path, candidate.line);
-        self.set_sources(&mut answer, &candidate.scip.iter().map(|(i, _, _)| *i).collect());
+        let Some(candidate) = self.resolve_one(query, &mut answer)? else {
+            return Ok(answer);
+        };
+        answer.query = format!(
+            "{}  ({}:{})",
+            candidate.display, candidate.path, candidate.line
+        );
+        self.set_sources(
+            &mut answer,
+            &candidate.scip.iter().map(|(i, _, _)| *i).collect(),
+        );
         let mut rows = Vec::new();
         let mut seen: BTreeSet<String> = BTreeSet::new();
-        let exact = candidate.scip.iter().find(|(i, _, _)| self.scip_fresh(*i, &candidate.path));
+        let exact = candidate
+            .scip
+            .iter()
+            .find(|(i, _, _)| self.scip_fresh(*i, &candidate.path));
         if let Some((i, _, _)) = exact {
             for occ in self.stores[*i].occurrences_within(&candidate.path, candidate.span)? {
                 if occ.roles & ROLE_IMPORT != 0 {
                     continue;
                 }
-                let Some(name) = scip_symbol::parse(&occ.symbol) else { continue };
-                if matches!(name.kind, scip_symbol::Kind::Parameter | scip_symbol::Kind::TypeParameter) || !seen.insert(occ.symbol.clone()) {
+                let Some(name) = scip_symbol::parse(&occ.symbol) else {
+                    continue;
+                };
+                if matches!(
+                    name.kind,
+                    scip_symbol::Kind::Parameter | scip_symbol::Kind::TypeParameter
+                ) || !seen.insert(occ.symbol.clone())
+                {
                     continue;
                 }
-                rows.push(Row { tag: Some(Tag::Exact), path: occ.path, line: occ.line, detail: name.display() });
+                rows.push(Row {
+                    tag: Some(Tag::Exact),
+                    path: occ.path,
+                    line: occ.line,
+                    detail: name.display(),
+                });
             }
         } else if let (Some(graph), Some(node)) = (&self.graph, &candidate.node) {
             if self.graph_fresh(&candidate.path) {
@@ -954,12 +1251,20 @@ impl Context {
                     if !seen.insert(target.clone()) {
                         continue;
                     }
-                    rows.push(Row { tag: Some(Tag::Heuristic), path: candidate.path.clone(), line: edge.line.unwrap_or(candidate.line), detail: target });
+                    rows.push(Row {
+                        tag: Some(Tag::Heuristic),
+                        path: candidate.path.clone(),
+                        line: edge.line.unwrap_or(candidate.line),
+                        detail: target,
+                    });
                 }
             }
         }
         if self.changed.contains(&candidate.path) {
-            answer.not_checked = Some(format!("{} changed since the snapshots; read its body for current callees", candidate.path));
+            answer.not_checked = Some(format!(
+                "{} changed since the snapshots; read its body for current callees",
+                candidate.path
+            ));
         }
         answer.rows = rows;
         self.request_reindex(&mut answer);
@@ -970,9 +1275,17 @@ impl Context {
     pub fn implementations(&self, query: &str) -> Result<Answer> {
         let mut answer = self.new_answer("impl", query);
         self.note_missing_layers(&mut answer);
-        let Some(candidate) = self.resolve_one(query, &mut answer)? else { return Ok(answer) };
-        answer.query = format!("{}  ({}:{})", candidate.display, candidate.path, candidate.line);
-        self.set_sources(&mut answer, &candidate.scip.iter().map(|(i, _, _)| *i).collect());
+        let Some(candidate) = self.resolve_one(query, &mut answer)? else {
+            return Ok(answer);
+        };
+        answer.query = format!(
+            "{}  ({}:{})",
+            candidate.display, candidate.path, candidate.line
+        );
+        self.set_sources(
+            &mut answer,
+            &candidate.scip.iter().map(|(i, _, _)| *i).collect(),
+        );
         let mut rows = Vec::new();
         for (i, _, symbol) in &candidate.scip {
             let store = &self.stores[*i];
@@ -981,14 +1294,24 @@ impl Context {
                     // `impl#[Type][Trait]`: the impl block itself.
                     for occ in store.occurrences_of(id, &implementation)? {
                         if occ.roles & ROLE_DEFINITION != 0 && self.scip_fresh(*i, &occ.path) {
-                            rows.push(Row { tag: Some(Tag::Exact), path: occ.path, line: occ.line, detail: impl_block_label(&implementation) });
+                            rows.push(Row {
+                                tag: Some(Tag::Exact),
+                                path: occ.path,
+                                line: occ.line,
+                                detail: impl_block_label(&implementation),
+                            });
                         }
                     }
                     continue;
                 };
                 for def in store.definitions_of(id, &implementation, &name)? {
                     if self.scip_fresh(*i, &def.path) {
-                        rows.push(Row { tag: Some(Tag::Exact), path: def.path, line: def.line, detail: name.display() });
+                        rows.push(Row {
+                            tag: Some(Tag::Exact),
+                            path: def.path,
+                            line: def.line,
+                            detail: name.display(),
+                        });
                     }
                 }
             }
@@ -999,11 +1322,26 @@ impl Context {
                 if !self.graph_fresh(&file) {
                     continue;
                 }
-                rows.push(Row { tag: Some(Tag::Heuristic), path: file, line: edge.other.start_line, detail: edge.other.display(&graph.project) });
+                rows.push(Row {
+                    tag: Some(Tag::Heuristic),
+                    path: file,
+                    line: edge.other.start_line,
+                    detail: edge.other.display(&graph.project),
+                });
             }
         }
-        let trait_name = if candidate.node.as_ref().map(|n| n.label == "Method").unwrap_or(false) {
-            candidate.display.rsplit('.').nth(1).unwrap_or(&candidate.name).to_string()
+        let trait_name = if candidate
+            .node
+            .as_ref()
+            .map(|n| n.label == "Method")
+            .unwrap_or(false)
+        {
+            candidate
+                .display
+                .rsplit('.')
+                .nth(1)
+                .unwrap_or(&candidate.name)
+                .to_string()
         } else {
             candidate.name.clone()
         };
@@ -1019,7 +1357,9 @@ impl Context {
         let mut answer = self.new_answer("show", query);
         answer.tagged = false;
         self.note_missing_layers(&mut answer);
-        let Some(candidate) = self.resolve_one(query, &mut answer)? else { return Ok((answer, None)) };
+        let Some(candidate) = self.resolve_one(query, &mut answer)? else {
+            return Ok((answer, None));
+        };
         let text = std::fs::read_to_string(self.repo.abs(&candidate.path)).unwrap_or_default();
         let (start, end) = candidate.span;
         let end = end.min(start + 400);
@@ -1030,10 +1370,20 @@ impl Context {
             .take((end + 1 - start) as usize)
             .map(|(i, l)| format!("{:>5}  {l}", i + 1))
             .collect();
-        let body = if candidate.path.ends_with(".py") { crate::output::fold_docstring(body) } else { body };
-        answer.query = format!("{}  ({}:{}-{})", candidate.display, candidate.path, start, end);
+        let body = if candidate.path.ends_with(".py") {
+            crate::output::fold_docstring(body)
+        } else {
+            body
+        };
+        answer.query = format!(
+            "{}  ({}:{}-{})",
+            candidate.display, candidate.path, start, end
+        );
         if self.changed.contains(&candidate.path) {
-            answer.notes.push(format!("{} changed since the snapshot; the lines above may have moved", candidate.path));
+            answer.notes.push(format!(
+                "{} changed since the snapshot; the lines above may have moved",
+                candidate.path
+            ));
         }
         Ok((answer, Some(body.join("\n"))))
     }
@@ -1045,27 +1395,45 @@ impl Context {
         self.note_missing_layers(&mut answer);
         if self.settings.exact_only() {
             for (start, end, label) in self.exact_outline(file) {
-                answer.rows.push(Row { tag: None, path: file.to_string(), line: start, detail: format!("{label} (to {end})") });
+                answer.rows.push(Row {
+                    tag: None,
+                    path: file.to_string(),
+                    line: start,
+                    detail: format!("{label} (to {end})"),
+                });
             }
             if self.changed.contains(file) {
-                answer.notes.push(format!("{file} changed since the SCIP snapshot; lines may have moved"));
+                answer.notes.push(format!(
+                    "{file} changed since the SCIP snapshot; lines may have moved"
+                ));
             }
             if answer.rows.is_empty() && self.not_indexed_files.contains(file) {
-                answer.notes.push(format!("no SCIP index covers {file}; read it, or `search` its words"));
+                answer.notes.push(format!(
+                    "no SCIP index covers {file}; read it, or `search` its words"
+                ));
             }
             return Ok(answer);
         }
-        let Some(graph) = &self.graph else { return Ok(answer) };
+        let Some(graph) = &self.graph else {
+            return Ok(answer);
+        };
         for node in graph.outline(file)? {
             answer.rows.push(Row {
                 tag: None,
                 path: file.to_string(),
                 line: node.start_line,
-                detail: format!("{} {} (to {})", node.label.to_lowercase(), node.display(&graph.project), node.end_line),
+                detail: format!(
+                    "{} {} (to {})",
+                    node.label.to_lowercase(),
+                    node.display(&graph.project),
+                    node.end_line
+                ),
             });
         }
         if !self.graph_fresh(file) {
-            answer.notes.push(format!("{file} changed since the graph's snapshot; lines may have moved"));
+            answer.notes.push(format!(
+                "{file} changed since the graph's snapshot; lines may have moved"
+            ));
         }
         Ok(answer)
     }
@@ -1077,13 +1445,16 @@ impl Context {
         self.note_missing_layers(&mut answer);
         if self.settings.exact_only() {
             self.search_names_exact(text, &mut answer)?;
-            let mut files: BTreeSet<String> = self.stores.iter().flat_map(|s| s.documents()).collect();
+            let mut files: BTreeSet<String> =
+                self.stores.iter().flat_map(|s| s.documents()).collect();
             files.extend(self.not_indexed_files.iter().cloned());
             let files: Vec<(String, u64)> = files
                 .into_iter()
                 .filter(|f| is_code_path(f) && !self.deleted.contains(f))
                 .map(|f| {
-                    let size = std::fs::metadata(self.repo.abs(&f)).map(|m| m.len()).unwrap_or(0);
+                    let size = std::fs::metadata(self.repo.abs(&f))
+                        .map(|m| m.len())
+                        .unwrap_or(0);
                     (f, size)
                 })
                 .collect();
@@ -1093,17 +1464,27 @@ impl Context {
             }
             return Ok(answer);
         }
-        let Some(graph) = &self.graph else { return Ok(answer) };
+        let Some(graph) = &self.graph else {
+            return Ok(answer);
+        };
         for node in graph.search(text, 200)? {
             answer.rows.push(Row {
                 tag: None,
                 path: node.file_path.clone(),
                 line: node.start_line,
-                detail: format!("{} {}", node.label.to_lowercase(), node.display(&graph.project)),
+                detail: format!(
+                    "{} {}",
+                    node.label.to_lowercase(),
+                    node.display(&graph.project)
+                ),
             });
         }
         let files: Vec<(String, u64)> = match graph.file_hashes() {
-            Ok(hashes) => hashes.into_iter().filter(|(f, _)| is_code_path(f) && !self.deleted.contains(f)).map(|(f, stamp)| (f, stamp.size)).collect(),
+            Ok(hashes) => hashes
+                .into_iter()
+                .filter(|(f, _)| is_code_path(f) && !self.deleted.contains(f))
+                .map(|(f, stamp)| (f, stamp.size))
+                .collect(),
             Err(_) => Vec::new(),
         };
         let outline_of = |file: &str| -> Vec<(u32, u32, String)> {
@@ -1111,12 +1492,21 @@ impl Context {
                 .outline(file)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|n| (n.start_line, n.end_line.max(n.start_line), format!("{} {}", n.label.to_lowercase(), n.display(&graph.project))))
+                .map(|n| {
+                    (
+                        n.start_line,
+                        n.end_line.max(n.start_line),
+                        format!("{} {}", n.label.to_lowercase(), n.display(&graph.project)),
+                    )
+                })
                 .collect()
         };
         self.search_bodies(files, &outline_of, text, &mut answer);
         if !self.changed.is_empty() {
-            answer.notes.push(format!("{} files changed since the graph's snapshot are ranked as they were then", self.changed.len()));
+            answer.notes.push(format!(
+                "{} files changed since the graph's snapshot are ranked as they were then",
+                self.changed.len()
+            ));
         }
         Ok(answer)
     }
@@ -1133,8 +1523,20 @@ impl Context {
     /// for one or two); it is ranked by the rarity of the words it holds, and a line holding all
     /// of them counts extra. Code comes first in the answer: the graph's code rows, these, then
     /// its documentation sections. Above the text bounds nothing is read and a note says so.
-    fn search_bodies(&self, files: Vec<(String, u64)>, outline_of: &dyn Fn(&str) -> Vec<(u32, u32, String)>, text: &str, answer: &mut Answer) {
-        let mut words: Vec<String> = text.split_whitespace().map(str::to_lowercase).filter(|w| w.len() > 1).collect();
+    // a one-off row tuple.
+    #[allow(clippy::type_complexity)]
+    fn search_bodies(
+        &self,
+        files: Vec<(String, u64)>,
+        outline_of: &dyn Fn(&str) -> Vec<(u32, u32, String)>,
+        text: &str,
+        answer: &mut Answer,
+    ) {
+        let mut words: Vec<String> = text
+            .split_whitespace()
+            .map(str::to_lowercase)
+            .filter(|w| w.len() > 1)
+            .collect();
         words.sort();
         words.dedup();
         if words.is_empty() {
@@ -1150,16 +1552,31 @@ impl Context {
             ));
             return;
         }
-        let needed = if words.len() <= 2 { words.len() } else { words.len().div_ceil(2) };
-        let listed: BTreeSet<(String, u32)> = answer.rows.iter().map(|r| (r.path.clone(), r.line)).collect();
+        let needed = if words.len() <= 2 {
+            words.len()
+        } else {
+            words.len().div_ceil(2)
+        };
+        let listed: BTreeSet<(String, u32)> = answer
+            .rows
+            .iter()
+            .map(|r| (r.path.clone(), r.line))
+            .collect();
         // Files holding each word (its rarity), and per definition: the words it holds and, for
         // each of its matching lines, the words on that line.
         let mut in_files = vec![0usize; words.len()];
-        let mut found: Vec<(BTreeSet<usize>, Vec<(u32, Vec<usize>)>, String, u32, String)> = Vec::new();
+        // a one-off row tuple.
+        #[allow(clippy::type_complexity)]
+        let mut found: Vec<(BTreeSet<usize>, Vec<(u32, Vec<usize>)>, String, u32, String)> =
+            Vec::new();
         for file in &files {
-            let Ok(raw) = std::fs::read(self.repo.abs(file)) else { continue };
+            let Ok(raw) = std::fs::read(self.repo.abs(file)) else {
+                continue;
+            };
             let lower = String::from_utf8_lossy(&raw).to_lowercase();
-            let present: Vec<usize> = (0..words.len()).filter(|i| starts_a_word(&lower, &words[*i])).collect();
+            let present: Vec<usize> = (0..words.len())
+                .filter(|i| starts_a_word(&lower, &words[*i]))
+                .collect();
             for i in &present {
                 in_files[*i] += 1;
             }
@@ -1167,9 +1584,18 @@ impl Context {
                 continue;
             }
             let outline = outline_of(file);
-            let mut spans: BTreeMap<Option<usize>, (BTreeSet<usize>, Vec<(u32, Vec<usize>)>)> = BTreeMap::new();
+            // a one-off row tuple.
+            #[allow(clippy::type_complexity)]
+            let mut spans: BTreeMap<
+                Option<usize>,
+                (BTreeSet<usize>, Vec<(u32, Vec<usize>)>),
+            > = BTreeMap::new();
             for (index, line) in lower.lines().enumerate() {
-                let hits: Vec<usize> = present.iter().copied().filter(|i| starts_a_word(line, &words[*i])).collect();
+                let hits: Vec<usize> = present
+                    .iter()
+                    .copied()
+                    .filter(|i| starts_a_word(line, &words[*i]))
+                    .collect();
                 if hits.is_empty() {
                     continue;
                 }
@@ -1187,7 +1613,9 @@ impl Context {
             for (node, (seen, lines)) in spans {
                 // Outside any definition the words must share a line: a file's top level is not a
                 // unit, and its scattered words say nothing.
-                if seen.len() < needed || (node.is_none() && !lines.iter().any(|(_, hits)| hits.len() >= needed)) {
+                if seen.len() < needed
+                    || (node.is_none() && !lines.iter().any(|(_, hits)| hits.len() >= needed))
+                {
                     continue;
                 }
                 let (line, detail) = match node {
@@ -1207,17 +1635,36 @@ impl Context {
             .into_iter()
             .map(|(seen, lines, path, line, detail)| {
                 let on_line = |hits: &Vec<usize>| hits.iter().map(|i| rarity(*i)).sum::<f64>();
-                let best = lines.iter().max_by(|a, b| on_line(&a.1).total_cmp(&on_line(&b.1))).map(|l| (l.0, on_line(&l.1))).unwrap_or((line, 0.0));
+                let best = lines
+                    .iter()
+                    .max_by(|a, b| on_line(&a.1).total_cmp(&on_line(&b.1)))
+                    .map(|l| (l.0, on_line(&l.1)))
+                    .unwrap_or((line, 0.0));
                 let mut score = 2.0 * best.1 + seen.iter().map(|i| rarity(*i)).sum::<f64>();
                 if is_test_path(&path) {
                     score *= 0.6;
                 }
-                (score, path, line, format!("{detail}  (body: line {})", best.0))
+                (
+                    score,
+                    path,
+                    line,
+                    format!("{detail}  (body: line {})", best.0),
+                )
             })
             .collect();
         scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
-        let body = scored.into_iter().take(BODY_ROWS).map(|(_, path, line, detail)| Row { tag: None, path, line, detail });
-        let (sections, mut rows): (Vec<Row>, Vec<Row>) = std::mem::take(&mut answer.rows).into_iter().partition(|r| r.detail.starts_with("section "));
+        let body = scored
+            .into_iter()
+            .take(BODY_ROWS)
+            .map(|(_, path, line, detail)| Row {
+                tag: None,
+                path,
+                line,
+                detail,
+            });
+        let (sections, mut rows): (Vec<Row>, Vec<Row>) = std::mem::take(&mut answer.rows)
+            .into_iter()
+            .partition(|r| r.detail.starts_with("section "));
         rows.extend(body);
         rows.extend(sections);
         answer.rows = rows;
@@ -1229,14 +1676,23 @@ impl Context {
         let mut out: Vec<(u32, u32, String)> = Vec::new();
         for store in self.stores.iter().filter(|s| s.covers(file)) {
             for (start, end, symbol) in store.definitions_in(file).unwrap_or_default() {
-                let Some(name) = scip_symbol::parse(&symbol) else { continue };
-                if matches!(name.kind, scip_symbol::Kind::Parameter | scip_symbol::Kind::TypeParameter) {
+                let Some(name) = scip_symbol::parse(&symbol) else {
+                    continue;
+                };
+                if matches!(
+                    name.kind,
+                    scip_symbol::Kind::Parameter | scip_symbol::Kind::TypeParameter
+                ) {
                     continue;
                 }
-                out.push((start, end, format!("{} {}", kind_label(name.kind), name.display())));
+                out.push((
+                    start,
+                    end,
+                    format!("{} {}", kind_label(name.kind), name.display()),
+                ));
             }
         }
-        out.sort_by(|a, b| (a.0, std::cmp::Reverse(a.1)).cmp(&(b.0, std::cmp::Reverse(b.1))));
+        out.sort_by_key(|a| (a.0, std::cmp::Reverse(a.1)));
         out.dedup();
         out
     }
@@ -1264,21 +1720,30 @@ impl Context {
                 let found = store.symbols_containing(word, NAME_MATCHES_PER_WORD)?;
                 per_word[w] += found.len();
                 for (id, symbol) in found {
-                    hits.entry((i, id)).or_insert_with(|| (symbol, BTreeSet::new())).1.insert(w);
+                    hits.entry((i, id))
+                        .or_insert_with(|| (symbol, BTreeSet::new()))
+                        .1
+                        .insert(w);
                 }
             }
         }
-        let rarity = |w: usize| (1.0 + NAME_MATCHES_PER_WORD as f64 / per_word[w].max(1) as f64).ln();
+        let rarity =
+            |w: usize| (1.0 + NAME_MATCHES_PER_WORD as f64 / per_word[w].max(1) as f64).ln();
         let mut ranked: Vec<(f64, usize, i64, String)> = hits
             .into_iter()
             .filter(|(_, (_, held))| held.len() >= needed)
             .filter_map(|((i, id), (symbol, held))| {
                 let name = scip_symbol::parse(&symbol)?;
-                if !matches!(name.kind, scip_symbol::Kind::Type | scip_symbol::Kind::Method | scip_symbol::Kind::Macro) {
+                if !matches!(
+                    name.kind,
+                    scip_symbol::Kind::Type | scip_symbol::Kind::Method | scip_symbol::Kind::Macro
+                ) {
                     return None;
                 }
                 // A word that is the whole name says more than one inside a longer name.
-                let whole = held.iter().any(|w| name.name().eq_ignore_ascii_case(&words[*w]));
+                let whole = held
+                    .iter()
+                    .any(|w| name.name().eq_ignore_ascii_case(&words[*w]));
                 let mut score: f64 = held.iter().map(|w| rarity(*w)).sum();
                 if whole {
                     score *= 1.5;
@@ -1289,12 +1754,19 @@ impl Context {
         ranked.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.3.len().cmp(&b.3.len())));
         let mut rows: Vec<Row> = Vec::new();
         for (_, i, id, symbol) in ranked.into_iter().take(NAME_ROWS) {
-            let Some(name) = scip_symbol::parse(&symbol) else { continue };
+            let Some(name) = scip_symbol::parse(&symbol) else {
+                continue;
+            };
             for def in self.stores[i].definitions_of(id, &symbol, &name)? {
                 if self.deleted.contains(&def.path) {
                     continue;
                 }
-                rows.push(Row { tag: None, path: def.path, line: def.line, detail: format!("{} {}", kind_label(name.kind), name.display()) });
+                rows.push(Row {
+                    tag: None,
+                    path: def.path,
+                    line: def.line,
+                    detail: format!("{} {}", kind_label(name.kind), name.display()),
+                });
             }
         }
         answer.rows.extend(dedup(rows));
@@ -1307,13 +1779,21 @@ impl Context {
         if let Some(line) = line {
             return vec![line];
         }
-        let Ok(text) = std::fs::read_to_string(self.repo.abs(&source.file_path)) else { return vec![source.start_line.max(1)] };
-        let (start, end) = if source.start_line == 0 { (1, u32::MAX) } else { (source.start_line, source.end_line.max(source.start_line)) };
+        let Ok(text) = std::fs::read_to_string(self.repo.abs(&source.file_path)) else {
+            return vec![source.start_line.max(1)];
+        };
+        let (start, end) = if source.start_line == 0 {
+            (1, u32::MAX)
+        } else {
+            (source.start_line, source.end_line.max(source.start_line))
+        };
         let found: Vec<u32> = text
             .lines()
             .enumerate()
             .map(|(i, l)| (i as u32 + 1, l))
-            .filter(|(n, l)| *n >= start && *n <= end && !textscan::word_matches(l, name).is_empty())
+            .filter(|(n, l)| {
+                *n >= start && *n <= end && !textscan::word_matches(l, name).is_empty()
+            })
             .map(|(n, _)| n)
             .collect();
         if found.is_empty() {
@@ -1338,19 +1818,37 @@ impl Context {
                 "universal: codebase-memory, project {} (indexed {}), {} files changed since",
                 graph.project,
                 graph.indexed_at(),
-                self.graph_changes.as_ref().map(|c| c.changed.len() + c.deleted.len()).unwrap_or(0)
+                self.graph_changes
+                    .as_ref()
+                    .map(|c| c.changed.len() + c.deleted.len())
+                    .unwrap_or(0)
             )),
             (None, Some(error)) => lines.push(format!("universal: unavailable: {error}")),
-            (None, None) if self.settings.exact_only() => lines.push("universal: off (layers = exact)".to_string()),
-            (None, None) => lines.push(format!("universal: not built yet ({})", build("ling-code index"))),
+            (None, None) if self.settings.exact_only() => {
+                lines.push("universal: off (layers = exact)".to_string())
+            }
+            (None, None) => lines.push(format!(
+                "universal: not built yet ({})",
+                build("ling-code index")
+            )),
         }
         if !self.changed.is_empty() || !self.deleted.is_empty() {
-            let listed: Vec<String> = self.changed.iter().chain(self.deleted.iter()).take(8).cloned().collect();
+            let listed: Vec<String> = self
+                .changed
+                .iter()
+                .chain(self.deleted.iter())
+                .take(8)
+                .cloned()
+                .collect();
             let more = (self.changed.len() + self.deleted.len()).saturating_sub(listed.len());
             lines.push(format!(
                 "changed since the snapshots: {}{}",
                 listed.join(", "),
-                if more > 0 { format!(" and {more} more") } else { String::new() }
+                if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                }
             ));
         }
         let manifest = Manifest::load(&self.repo.scip_dir());
@@ -1358,7 +1856,11 @@ impl Context {
             lines.push("exact: no SCIP index yet".to_string());
         }
         for (key, entry) in &manifest.runs {
-            let commit = entry.commit.as_deref().map(|c| &c[..c.len().min(7)]).unwrap_or("-");
+            let commit = entry
+                .commit
+                .as_deref()
+                .map(|c| &c[..c.len().min(7)])
+                .unwrap_or("-");
             let changed = self
                 .stores
                 .iter()
@@ -1367,8 +1869,22 @@ impl Context {
             lines.push(format!(
                 "exact: {key}: {} @ {commit}{}{}",
                 entry.status,
-                changed.map(|n| format!(", {n} files changed since")).unwrap_or_default(),
-                if entry.peak_rss_mb > 0 { format!(", peak {} MiB{}", entry.peak_rss_mb, if entry.peak_cap_bounded { " (cap-bounded)" } else { "" }) } else { String::new() }
+                changed
+                    .map(|n| format!(", {n} files changed since"))
+                    .unwrap_or_default(),
+                if entry.peak_rss_mb > 0 {
+                    format!(
+                        ", peak {} MiB{}",
+                        entry.peak_rss_mb,
+                        if entry.peak_cap_bounded {
+                            " (cap-bounded)"
+                        } else {
+                            ""
+                        }
+                    )
+                } else {
+                    String::new()
+                }
             ));
         }
         for error in &self.store_errors {
@@ -1377,48 +1893,96 @@ impl Context {
         // The languages the repository has that no exact index covers yet, and why.
         let tools = crate::index::plan::Tools::find();
         let trusted = crate::config::is_trusted(&self.repo.main_root);
-        let (in_submodules, skipped_in_submodules) = crate::index::plan::detect_in_submodules(&self.repo, &self.submodules);
-        for target in crate::index::plan::detect(&self.repo).into_iter().chain(in_submodules) {
+        let (in_submodules, skipped_in_submodules) =
+            crate::index::plan::detect_in_submodules(&self.repo, &self.submodules);
+        for target in crate::index::plan::detect(&self.repo)
+            .into_iter()
+            .chain(in_submodules)
+        {
             let key = crate::index::store::key(target.indexer, &target.root);
             if manifest.runs.contains_key(&key) {
                 continue;
             }
             let executing = target.kind == crate::index::host::Kind::Executing;
-            let untrusted = if executing { crate::index::plan::untrusted_reason(&self.repo, trusted, &self.submodules, &target) } else { None };
+            let untrusted = if executing {
+                crate::index::plan::untrusted_reason(&self.repo, trusted, &self.submodules, &target)
+            } else {
+                None
+            };
             let why = match tools.unavailable(target.indexer) {
                 // The tools' absence is no news where nothing indexes, and their setup command is not there.
                 _ if !indexing => format!("not built ({})", crate::paths::BUILT_ON_LINUX),
                 Some(why) => why,
                 None if untrusted.is_some() && target.submodule.is_empty() => continue, // the untrusted line below says it
                 None if untrusted.is_some() => untrusted.unwrap_or_default(),
-                None if executing => format!("not built yet ({})", build("ling-code index --exact")),
-                None if target.on_demand => format!("not built yet; runs on demand ({})", build("ling-code index")),
+                None if executing => {
+                    format!("not built yet ({})", build("ling-code index --exact"))
+                }
+                None if target.on_demand => format!(
+                    "not built yet; runs on demand ({})",
+                    build("ling-code index")
+                ),
                 None => format!("not built yet ({})", build("ling-code index")),
             };
-            lines.push(format!("exact: {} for {}: {why}", target.indexer, crate::index::plan::display_root(&target.root)));
+            lines.push(format!(
+                "exact: {} for {}: {why}",
+                target.indexer,
+                crate::index::plan::display_root(&target.root)
+            ));
         }
-        for why in crate::index::plan::root_python_note(crate::index::plan::root_python_files(&self.repo).1, "").into_iter().chain(skipped_in_submodules) {
+        for why in crate::index::plan::root_python_note(
+            crate::index::plan::root_python_files(&self.repo).1,
+            "",
+        )
+        .into_iter()
+        .chain(skipped_in_submodules)
+        {
             lines.push(format!("exact: {why}"));
         }
-        let submodules: Vec<String> = self.submodules.iter().filter(|s| !s.indexed).map(|s| s.path.clone()).collect();
+        let submodules: Vec<String> = self
+            .submodules
+            .iter()
+            .filter(|s| !s.indexed)
+            .map(|s| s.path.clone())
+            .collect();
         let dirs: Vec<&String> = self
             .not_indexed_dirs
             .iter()
-            .filter(|d| d.ends_with('/') && !submodules.iter().any(|s| d.trim_end_matches('/') == s))
+            .filter(|d| {
+                d.ends_with('/') && !submodules.iter().any(|s| d.trim_end_matches('/') == s)
+            })
             .collect();
-        let files = self.not_indexed_dirs.iter().filter(|d| !d.ends_with('/') && !submodules.contains(d)).count();
+        let files = self
+            .not_indexed_dirs
+            .iter()
+            .filter(|d| !d.ends_with('/') && !submodules.contains(d))
+            .count();
         if !dirs.is_empty() || files > 0 {
             lines.push(format!(
                 "not indexed by the graph (searched by text): {}{}",
-                dirs.iter().map(|d| d.as_str()).collect::<Vec<_>>().join(", "),
-                if files > 0 { format!("{}{files} single files (mostly binary)", if dirs.is_empty() { "" } else { "; " }) } else { String::new() }
+                dirs.iter()
+                    .map(|d| d.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if files > 0 {
+                    format!(
+                        "{}{files} single files (mostly binary)",
+                        if dirs.is_empty() { "" } else { "; " }
+                    )
+                } else {
+                    String::new()
+                }
             ));
         }
         for submodule in &self.submodules {
             lines.push(format!(
                 "submodule {}: {} ({})",
                 submodule.path,
-                if submodule.indexed { "indexed" } else { "not indexed" },
+                if submodule.indexed {
+                    "indexed"
+                } else {
+                    "not indexed"
+                },
                 submodule.reason.label()
             ));
         }
@@ -1439,7 +2003,9 @@ const SOURCE_ROOTS_NAMED: usize = 4;
 /// the stores an answer's `exact` rows come from, grouped by indexer and snapshot. A repository
 /// has a store per root, and a Python file at its root is a root of its own, so naming every one
 /// on every answer would cost more than the answer; past [`SOURCE_ROOTS_NAMED`] they are counted.
-fn sources_line<'a>(stores: impl Iterator<Item = (&'a str, &'a str, Option<&'a str>)>) -> Option<String> {
+fn sources_line<'a>(
+    stores: impl Iterator<Item = (&'a str, &'a str, Option<&'a str>)>,
+) -> Option<String> {
     let mut groups: Vec<((&str, &str), Vec<&str>)> = Vec::new();
     for (indexer, root, commit) in stores {
         let commit = commit.map(|c| &c[..c.len().min(7)]).unwrap_or("no commit");
@@ -1455,7 +2021,12 @@ fn sources_line<'a>(stores: impl Iterator<Item = (&'a str, &'a str, Option<&'a s
     let parts: Vec<String> = groups
         .into_iter()
         .map(|((indexer, commit), roots)| {
-            let named: Vec<&str> = roots.iter().copied().filter(|r| !r.is_empty()).take(SOURCE_ROOTS_NAMED).collect();
+            let named: Vec<&str> = roots
+                .iter()
+                .copied()
+                .filter(|r| !r.is_empty())
+                .take(SOURCE_ROOTS_NAMED)
+                .collect();
             let more = roots.iter().filter(|r| !r.is_empty()).count() - named.len();
             let roots = match (named.is_empty(), more) {
                 (true, _) => String::new(),
@@ -1550,10 +2121,17 @@ fn diff_ranges(diff: &str) -> Vec<(String, u32, u32)> {
             path = rest.strip_prefix("b/").map(str::to_string);
         } else if line.starts_with("@@") {
             let Some(path) = &path else { continue };
-            let Some(new_side) = line.split_whitespace().find(|part| part.starts_with('+')) else { continue };
+            let Some(new_side) = line.split_whitespace().find(|part| part.starts_with('+')) else {
+                continue;
+            };
             let mut numbers = new_side[1..].split(',');
-            let Some(start) = numbers.next().and_then(|n| n.parse::<u32>().ok()) else { continue };
-            let count = numbers.next().and_then(|n| n.parse::<u32>().ok()).unwrap_or(1);
+            let Some(start) = numbers.next().and_then(|n| n.parse::<u32>().ok()) else {
+                continue;
+            };
+            let count = numbers
+                .next()
+                .and_then(|n| n.parse::<u32>().ok())
+                .unwrap_or(1);
             let start = start.max(1);
             out.push((path.clone(), start, start + count.saturating_sub(1)));
         }
@@ -1584,7 +2162,13 @@ fn role_label(roles: i32) -> &'static str {
 }
 
 fn graph_only_note(path: &str) -> String {
-    let language = if path.ends_with(".py") { "Python" } else if path.ends_with(".rs") { "Rust" } else { "this language" };
+    let language = if path.ends_with(".py") {
+        "Python"
+    } else if path.ends_with(".rs") {
+        "Rust"
+    } else {
+        "this language"
+    };
     let recall = match language {
         "Python" => "about 58% (52% for methods)",
         "Rust" => "about 78%",
@@ -1597,7 +2181,13 @@ fn graph_only_note(path: &str) -> String {
 
 fn impl_block_label(symbol: &str) -> String {
     // `…/impl#[Circle][Shape]` → `impl Shape for Circle`.
-    let parts: Vec<&str> = symbol.rsplit("impl#").next().unwrap_or("").trim_matches(|c| c == '[' || c == ']').split("][").collect();
+    let parts: Vec<&str> = symbol
+        .rsplit("impl#")
+        .next()
+        .unwrap_or("")
+        .trim_matches(|c| c == '[' || c == ']')
+        .split("][")
+        .collect();
     match parts.as_slice() {
         [owner, trait_name] => format!("impl {trait_name} for {owner}"),
         [owner] => format!("impl {owner}"),
@@ -1608,15 +2198,52 @@ fn impl_block_label(symbol: &str) -> String {
 /// Whether line `line` of `path` defines `name`: the text before it ends in a defining keyword.
 fn defines_on_line(repo: &Repo, path: &str, line: u32, name: &str) -> bool {
     const KEYWORDS: &[&str] = &[
-        "def", "class", "fn", "struct", "enum", "trait", "type", "const", "static", "let", "mod", "function", "interface", "var", "impl",
+        "def",
+        "class",
+        "fn",
+        "struct",
+        "enum",
+        "trait",
+        "type",
+        "const",
+        "static",
+        "let",
+        "mod",
+        "function",
+        "interface",
+        "var",
+        "impl",
     ];
-    let Ok(text) = std::fs::read_to_string(repo.abs(path)) else { return false };
-    let Some(content) = text.lines().nth(line.saturating_sub(1) as usize) else { return false };
+    let Ok(text) = std::fs::read_to_string(repo.abs(path)) else {
+        return false;
+    };
+    let Some(content) = text.lines().nth(line.saturating_sub(1) as usize) else {
+        return false;
+    };
     textscan::word_matches(content, name).into_iter().any(|at| {
         let before = content[..at].trim_end();
-        let word = before.rsplit(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or("");
-        KEYWORDS.contains(&word) || before.ends_with("async def") || before.ends_with(':') && before.contains("let")
+        let word = before
+            .rsplit(|c: char| !c.is_alphanumeric() && c != '_')
+            .next()
+            .unwrap_or("");
+        KEYWORDS.contains(&word)
+            || before.ends_with("async def")
+            || before.ends_with(':') && before.contains("let")
     })
+}
+
+/// Groups rows by file (for §7.2's per-file summary).
+pub fn per_file(rows: &[Row]) -> Vec<(String, usize)> {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for row in rows {
+        *counts.entry(row.path.as_str()).or_default() += 1;
+    }
+    let mut list: Vec<(String, usize)> = counts
+        .into_iter()
+        .map(|(p, c)| (p.to_string(), c))
+        .collect();
+    list.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    list
 }
 
 #[cfg(test)]
@@ -1655,7 +2282,10 @@ mod tests {
     fn diff_hunks_give_new_side_ranges() {
         let diff = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -3 +3,2 @@ def f():\n+x\n+y\n@@ -10,2 +11,0 @@\n-gone\n-gone\n\
                     diff --git a/old.py b/old.py\n--- a/old.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-x\n";
-        assert_eq!(diff_ranges(diff), vec![("a.py".to_string(), 3, 4), ("a.py".to_string(), 11, 11)]);
+        assert_eq!(
+            diff_ranges(diff),
+            vec![("a.py".to_string(), 3, 4), ("a.py".to_string(), 11, 11)]
+        );
     }
 
     #[test]
@@ -1687,8 +2317,18 @@ mod tests {
             row(super::Tag::Heuristic, "b.rs", 5, "graph"),
         ]);
         assert_eq!(deduped.len(), 2);
-        assert_eq!((deduped[0].path.as_str(), deduped[0].tag, deduped[0].detail.as_str()), ("a.rs", Some(super::Tag::Exact), "exact"));
-        assert_eq!((deduped[1].path.as_str(), deduped[1].tag), ("b.rs", Some(super::Tag::Heuristic)));
+        assert_eq!(
+            (
+                deduped[0].path.as_str(),
+                deduped[0].tag,
+                deduped[0].detail.as_str()
+            ),
+            ("a.rs", Some(super::Tag::Exact), "exact")
+        );
+        assert_eq!(
+            (deduped[1].path.as_str(), deduped[1].tag),
+            ("b.rs", Some(super::Tag::Heuristic))
+        );
 
         let summary = super::per_file(&[
             row(super::Tag::Exact, "b.rs", 1, ""),
@@ -1700,17 +2340,30 @@ mod tests {
 
     #[test]
     fn role_labels_impl_labels_and_defining_lines_are_recognized() {
-        assert_eq!(super::role_label(super::ROLE_DEFINITION | super::ROLE_WRITE), "definition");
+        assert_eq!(
+            super::role_label(super::ROLE_DEFINITION | super::ROLE_WRITE),
+            "definition"
+        );
         assert_eq!(super::role_label(super::ROLE_IMPORT), "import");
         assert_eq!(super::role_label(super::ROLE_WRITE), "write");
         assert_eq!(super::role_label(super::ROLE_READ), "read");
         assert_eq!(super::role_label(0), "reference");
 
-        assert_eq!(super::impl_block_label("rust-analyzer cargo p 0.1.0 impl#[Circle][Shape]"), "impl Shape for Circle");
-        assert_eq!(super::impl_block_label("rust-analyzer cargo p 0.1.0 impl#[Circle]"), "impl Circle");
+        assert_eq!(
+            super::impl_block_label("rust-analyzer cargo p 0.1.0 impl#[Circle][Shape]"),
+            "impl Shape for Circle"
+        );
+        assert_eq!(
+            super::impl_block_label("rust-analyzer cargo p 0.1.0 impl#[Circle]"),
+            "impl Circle"
+        );
 
         let dir = tempfile::tempdir().unwrap();
-        let repo = crate::paths::Repo { root: dir.path().to_path_buf(), main_root: dir.path().to_path_buf(), is_git: false };
+        let repo = crate::paths::Repo {
+            root: dir.path().to_path_buf(),
+            main_root: dir.path().to_path_buf(),
+            is_git: false,
+        };
         std::fs::write(
             dir.path().join("sample.py"),
             "async def compute(x):\n    return compute(x - 1)\nclass Widget:\n    pass\n",
@@ -1720,15 +2373,4 @@ mod tests {
         assert!(!super::defines_on_line(&repo, "sample.py", 2, "compute"));
         assert!(super::defines_on_line(&repo, "sample.py", 3, "Widget"));
     }
-}
-
-/// Groups rows by file (for §7.2's per-file summary).
-pub fn per_file(rows: &[Row]) -> Vec<(String, usize)> {
-    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-    for row in rows {
-        *counts.entry(row.path.as_str()).or_default() += 1;
-    }
-    let mut list: Vec<(String, usize)> = counts.into_iter().map(|(p, c)| (p.to_string(), c)).collect();
-    list.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    list
 }

@@ -32,12 +32,20 @@ pub struct HttpProbe {
 
 impl HttpProbe {
     pub fn new(base_url: &str) -> Self {
-        HttpProbe { base_url: base_url.to_string(), docker: true }
+        HttpProbe {
+            base_url: base_url.to_string(),
+            docker: true,
+        }
     }
 }
 
 /// The request gauges of both engines.
-const GAUGES: &[&str] = &["sglang:num_running_reqs", "sglang:num_queue_reqs", "vllm:num_requests_running", "vllm:num_requests_waiting"];
+const GAUGES: &[&str] = &[
+    "sglang:num_running_reqs",
+    "sglang:num_queue_reqs",
+    "vllm:num_requests_running",
+    "vllm:num_requests_waiting",
+];
 
 impl Probe for HttpProbe {
     fn state(&self) -> ModelState {
@@ -66,7 +74,12 @@ pub fn busy(body: &str) -> bool {
     body.lines().filter(|l| !l.starts_with('#')).any(|line| {
         GAUGES.iter().any(|gauge| {
             line.starts_with(gauge)
-                && line.rsplit(' ').next().and_then(|v| v.parse::<f64>().ok()).map(|v| v > 0.0).unwrap_or(false)
+                && line
+                    .rsplit(' ')
+                    .next()
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .map(|v| v > 0.0)
+                    .unwrap_or(false)
         })
     })
 }
@@ -74,7 +87,13 @@ pub fn busy(body: &str) -> bool {
 /// A container named like the model server (`dreamference-vllm-<port>`, both engines) exists.
 fn model_container_present() -> bool {
     Command::new("docker")
-        .args(["ps", "--filter", "name=dreamference-vllm-", "--format", "{{.Names}}"])
+        .args([
+            "ps",
+            "--filter",
+            "name=dreamference-vllm-",
+            "--format",
+            "{{.Names}}",
+        ])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
@@ -86,7 +105,11 @@ fn model_container_present() -> bool {
 pub fn http_get(base_url: &str, path: &str) -> Option<(u16, String)> {
     let rest = base_url.strip_prefix("http://")?;
     let host_port = rest.split('/').next()?;
-    let address = if host_port.contains(':') { host_port.to_string() } else { format!("{host_port}:80") };
+    let address = if host_port.contains(':') {
+        host_port.to_string()
+    } else {
+        format!("{host_port}:80")
+    };
     let socket = address.to_socket_addrs().ok()?.next()?;
     let mut stream = TcpStream::connect_timeout(&socket, Duration::from_secs(2)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
@@ -96,7 +119,10 @@ pub fn http_get(base_url: &str, path: &str) -> Option<(u16, String)> {
     stream.read_to_end(&mut response).ok();
     let text = String::from_utf8_lossy(&response);
     let status = text.split_whitespace().nth(1)?.parse().ok()?;
-    let body = text.split_once("\r\n\r\n").map(|(_, b)| b.to_string()).unwrap_or_default();
+    let body = text
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b.to_string())
+        .unwrap_or_default();
     Some((status, body))
 }
 
@@ -120,7 +146,11 @@ mod tests {
                         Ok(n) => request.extend_from_slice(&buffer[..n]),
                     }
                 }
-                let _ = write!(stream, "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
             }
         });
         format!("http://{address}")
@@ -128,7 +158,9 @@ mod tests {
 
     #[test]
     fn gauges_of_both_engines() {
-        assert!(busy("# HELP x\nsglang:num_running_reqs{model_name=\"q\"} 1.0\n"));
+        assert!(busy(
+            "# HELP x\nsglang:num_running_reqs{model_name=\"q\"} 1.0\n"
+        ));
         assert!(busy("vllm:num_requests_waiting{model_name=\"q\"} 3\n"));
         assert!(!busy("sglang:num_running_reqs{model_name=\"q\"} 0.0\nsglang:num_queue_reqs{model_name=\"q\"} 0.0\n"));
         assert!(!busy("vllm:num_requests_running{model_name=\"q\"} 0.0\n"));
@@ -136,13 +168,19 @@ mod tests {
 
     #[test]
     fn idle_and_busy_over_http() {
-        let probe = |url: String| HttpProbe { base_url: url, docker: false };
+        let probe = |url: String| HttpProbe {
+            base_url: url,
+            docker: false,
+        };
         let idle = probe(serve("sglang:num_running_reqs{m=\"q\"} 0.0\n", 200));
         assert_eq!(idle.state(), ModelState::Idle);
         let busy = probe(serve("vllm:num_requests_running{m=\"q\"} 2.0\n", 200));
         assert_eq!(busy.state(), ModelState::Busy);
         let loading = probe(serve("", 503));
         assert_eq!(loading.state(), ModelState::Loading);
-        assert_eq!(probe("http://127.0.0.1:9".into()).state(), ModelState::Absent);
+        assert_eq!(
+            probe("http://127.0.0.1:9".into()).state(),
+            ModelState::Absent
+        );
     }
 }

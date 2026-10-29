@@ -59,16 +59,25 @@ impl<'a> GitView<'a> {
 
     /// The view when the caller has already decided which submodules are indexed.
     pub fn with_included(repo: &'a Repo, included: Vec<String>) -> Self {
-        GitView { repo, included, status: None, diffs: HashMap::new(), all: None }
+        GitView {
+            repo,
+            included,
+            status: None,
+            diffs: HashMap::new(),
+            all: None,
+        }
     }
 
     /// Every file of an included submodule, with the submodule's path as its prefix.
     fn submodule_files(&self, submodule: &str) -> Vec<String> {
-        git_z(&self.repo.root.join(submodule), &["ls-files", "-co", "--exclude-standard", "-z"])
-            .unwrap_or_default()
-            .into_iter()
-            .map(|file| format!("{submodule}/{file}"))
-            .collect()
+        git_z(
+            &self.repo.root.join(submodule),
+            &["ls-files", "-co", "--exclude-standard", "-z"],
+        )
+        .unwrap_or_default()
+        .into_iter()
+        .map(|file| format!("{submodule}/{file}"))
+        .collect()
     }
 
     /// The files of an included submodule that differ between the commit its parent recorded at
@@ -76,7 +85,11 @@ impl<'a> GitView<'a> {
     /// not in the submodule's clone, or the submodule is nested and `since` names a commit of the
     /// superproject, whose parent's commit at that point is not known here).
     fn submodule_diff(&self, submodule: &str, since: &str) -> Option<Vec<String>> {
-        let parent = self.included.iter().filter(|p| submodule.starts_with(&format!("{p}/"))).max_by_key(|p| p.len());
+        let parent = self
+            .included
+            .iter()
+            .filter(|p| submodule.starts_with(&format!("{p}/")))
+            .max_by_key(|p| p.len());
         let (parent_dir, rel) = match parent {
             Some(parent) => (self.repo.root.join(parent), &submodule[parent.len() + 1..]),
             None => (self.repo.root.clone(), submodule),
@@ -95,8 +108,25 @@ impl<'a> GitView<'a> {
         if head.trim() == old {
             return Some(Vec::new());
         }
-        let files = git_z(&dir, &["diff", "--name-only", "-z", "--no-renames", old, "HEAD", "--"]).ok()?;
-        Some(files.into_iter().map(|file| format!("{submodule}/{file}")).collect())
+        let files = git_z(
+            &dir,
+            &[
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                old,
+                "HEAD",
+                "--",
+            ],
+        )
+        .ok()?;
+        Some(
+            files
+                .into_iter()
+                .map(|file| format!("{submodule}/{file}"))
+                .collect(),
+        )
     }
 
     /// Replaces each included submodule's own entry in a set of superproject paths (a directory,
@@ -106,10 +136,13 @@ impl<'a> GitView<'a> {
     fn expand_submodules(&self, paths: &mut BTreeSet<String>, since: &str) {
         let mut unchanged: Vec<&String> = Vec::new();
         for submodule in &self.included {
-            let nested_in_unchanged = unchanged.iter().any(|p| submodule.starts_with(&format!("{p}/")));
+            let nested_in_unchanged = unchanged
+                .iter()
+                .any(|p| submodule.starts_with(&format!("{p}/")));
             // Under a parent that has not moved, a nested submodule's recorded commit has not
             // either: it is compared with what its parent records now.
-            let changed = self.submodule_diff(submodule, if nested_in_unchanged { "HEAD" } else { since });
+            let changed =
+                self.submodule_diff(submodule, if nested_in_unchanged { "HEAD" } else { since });
             match changed {
                 Some(files) => {
                     if files.is_empty() {
@@ -136,7 +169,11 @@ impl<'a> GitView<'a> {
                 // not at all, so each included submodule is asked itself.
                 self.expand_submodules(&mut paths, "HEAD");
                 for submodule in &self.included {
-                    paths.extend(status_paths(&self.repo.root.join(submodule)).into_iter().map(|path| format!("{submodule}/{path}")));
+                    paths.extend(
+                        status_paths(&self.repo.root.join(submodule))
+                            .into_iter()
+                            .map(|path| format!("{submodule}/{path}")),
+                    );
                 }
                 for submodule in &self.included {
                     paths.remove(submodule);
@@ -152,7 +189,20 @@ impl<'a> GitView<'a> {
     pub fn diff(&mut self, commit: &str) -> Option<&BTreeSet<String>> {
         if !self.diffs.contains_key(commit) {
             let paths = if self.repo.is_git {
-                git_z(&self.repo.root, &["diff", "--name-only", "-z", "--no-renames", commit, "HEAD", "--"]).ok().map(|v| {
+                git_z(
+                    &self.repo.root,
+                    &[
+                        "diff",
+                        "--name-only",
+                        "-z",
+                        "--no-renames",
+                        commit,
+                        "HEAD",
+                        "--",
+                    ],
+                )
+                .ok()
+                .map(|v| {
                     let mut paths: BTreeSet<String> = v.into_iter().collect();
                     self.expand_submodules(&mut paths, commit);
                     paths
@@ -169,7 +219,12 @@ impl<'a> GitView<'a> {
     pub fn all_files(&mut self) -> &BTreeSet<String> {
         if self.all.is_none() {
             let mut files: BTreeSet<String> = if self.repo.is_git {
-                git_z(&self.repo.root, &["ls-files", "-co", "--exclude-standard", "-z"]).map(|v| v.into_iter().collect()).unwrap_or_default()
+                git_z(
+                    &self.repo.root,
+                    &["ls-files", "-co", "--exclude-standard", "-z"],
+                )
+                .map(|v| v.into_iter().collect())
+                .unwrap_or_default()
             } else {
                 BTreeSet::new()
             };
@@ -210,7 +265,11 @@ fn status_paths(dir: &Path) -> BTreeSet<String> {
 /// `src/a.rs`, not `src2/a.rs`); an empty prefix holds everything.
 fn in_scope(path: &str, prefix: &str) -> bool {
     let dir = prefix.trim_end_matches('/');
-    dir.is_empty() || path == dir || path.strip_prefix(dir).is_some_and(|rest| rest.starts_with('/'))
+    dir.is_empty()
+        || path == dir
+        || path
+            .strip_prefix(dir)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// One layer's changed set.
@@ -246,7 +305,11 @@ pub fn layer_changes(
     let mut changed = BTreeSet::new();
     let mut deleted = BTreeSet::new();
     for path in candidates {
-        if scope.map(|prefix| !in_scope(&path, prefix)).unwrap_or(false) || exclude(&path) {
+        if scope
+            .map(|prefix| !in_scope(&path, prefix))
+            .unwrap_or(false)
+            || exclude(&path)
+        {
             continue;
         }
         match std::fs::metadata(repo.abs(&path)) {
@@ -263,7 +326,11 @@ pub fn layer_changes(
             }
         }
     }
-    ChangeSet { changed, deleted, method }
+    ChangeSet {
+        changed,
+        deleted,
+        method,
+    }
 }
 
 /// Whether a file on disk still matches its stamp: `(mtime, size)` first, content only if either
@@ -319,7 +386,12 @@ mod tests {
         let edit = dir.path().join("src/edit.rs");
         let gone = dir.path().join("src/gone.rs");
         let out = dir.path().join("other/out.rs");
-        for (p, body) in [(&keep, "fn a() {}\n"), (&edit, "fn b() {}\n"), (&gone, "fn c() {}\n"), (&out, "fn d() {}\n")] {
+        for (p, body) in [
+            (&keep, "fn a() {}\n"),
+            (&edit, "fn b() {}\n"),
+            (&gone, "fn c() {}\n"),
+            (&out, "fn d() {}\n"),
+        ] {
             std::fs::write(p, body).unwrap();
         }
         let mut stamps = HashMap::new();
@@ -331,7 +403,9 @@ mod tests {
         std::fs::write(&out, "fn d() { 2 }\n").unwrap();
 
         let mut git = GitView::new(&repo);
-        let cs = layer_changes(&repo, &mut git, None, &[], &stamps, Some("src/"), &|p| p.ends_with("ignored.rs"));
+        let cs = layer_changes(&repo, &mut git, None, &[], &stamps, Some("src/"), &|p| {
+            p.ends_with("ignored.rs")
+        });
         assert_eq!(cs.method, Method::Stat);
         assert!(cs.is_fresh("src/keep.rs"));
         assert!(!cs.is_fresh("src/edit.rs"));
@@ -365,7 +439,12 @@ mod tests {
     fn git_layer_changes_uses_git_diff_status_and_dirty_list() {
         let dir = tempfile::tempdir().unwrap();
         let run = |args: &[&str]| {
-            assert!(std::process::Command::new("git").current_dir(dir.path()).args(args).status().unwrap().success());
+            assert!(std::process::Command::new("git")
+                .current_dir(dir.path())
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
         };
         run(&["init", "-q"]);
         run(&["config", "user.email", "test@example.local"]);
@@ -375,14 +454,29 @@ mod tests {
         run(&["add", "a.rs", "b.rs"]);
         run(&["commit", "-q", "-m", "init"]);
 
-        let repo = Repo { root: dir.path().to_path_buf(), main_root: dir.path().to_path_buf(), is_git: true };
+        let repo = Repo {
+            root: dir.path().to_path_buf(),
+            main_root: dir.path().to_path_buf(),
+            is_git: true,
+        };
         let mut stamps = HashMap::new();
         stamps.insert("a.rs".into(), FileStamp::of(&repo.abs("a.rs")).unwrap());
         stamps.insert("b.rs".into(), FileStamp::of(&repo.abs("b.rs")).unwrap());
 
-        let commit = git(&repo.root, &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        let commit = git(&repo.root, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
         let mut git_view = GitView::with_included(&repo, Vec::new());
-        let fresh = layer_changes(&repo, &mut git_view, Some(&commit), &[], &stamps, None, &|_| false);
+        let fresh = layer_changes(
+            &repo,
+            &mut git_view,
+            Some(&commit),
+            &[],
+            &stamps,
+            None,
+            &|_| false,
+        );
         assert_eq!(fresh.method, Method::Git);
         assert!(fresh.is_fresh("a.rs") && fresh.is_fresh("b.rs"));
 
@@ -390,13 +484,32 @@ mod tests {
         std::fs::write(dir.path().join("a.rs"), "fn a() { 42 }\n").unwrap();
         std::fs::write(dir.path().join("new.rs"), "fn n() {}\n").unwrap();
         let mut git_view = GitView::with_included(&repo, Vec::new());
-        let dirty = layer_changes(&repo, &mut git_view, Some(&commit), &[], &stamps, None, &|_| false);
+        let dirty = layer_changes(
+            &repo,
+            &mut git_view,
+            Some(&commit),
+            &[],
+            &stamps,
+            None,
+            &|_| false,
+        );
         assert_eq!(dirty.method, Method::Git);
-        assert_eq!(dirty.changed, BTreeSet::from(["a.rs".into(), "new.rs".into()]));
+        assert_eq!(
+            dirty.changed,
+            BTreeSet::from(["a.rs".into(), "new.rs".into()])
+        );
         assert!(dirty.deleted.is_empty());
 
         // Unknown commit falls back to Method::Stat.
-        let fallback = layer_changes(&repo, &mut git_view, Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), &[], &stamps, None, &|_| false);
+        let fallback = layer_changes(
+            &repo,
+            &mut git_view,
+            Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
+            &[],
+            &stamps,
+            None,
+            &|_| false,
+        );
         assert_eq!(fallback.method, Method::Stat);
     }
 }

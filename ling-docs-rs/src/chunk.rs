@@ -43,7 +43,11 @@ pub fn embed_text(title: &str, chunk: &Chunk) -> String {
 
 /// [`embed_text`] from the parts a stored chunk has.
 pub fn embed_input(title: &str, heading: &str, text: &str) -> String {
-    let head = if heading.is_empty() { title.to_string() } else { format!("{title} | {heading}") };
+    let head = if heading.is_empty() {
+        title.to_string()
+    } else {
+        format!("{title} | {heading}")
+    };
     format!("{head}\n{text}")
 }
 
@@ -96,17 +100,29 @@ fn pieces(unit: &Unit, counter: &dyn TokenCount) -> Vec<Piece> {
         let number = unit.line_first.map(|first| first + i as u32);
         if line.trim().is_empty() {
             if in_para {
-                out.push(Piece { text: String::new(), tokens: 0, line: number });
+                out.push(Piece {
+                    text: String::new(),
+                    tokens: 0,
+                    line: number,
+                });
                 in_para = false;
             }
             continue;
         }
         in_para = true;
         for sentence in sentences(line) {
-            out.push(Piece { text: sentence.to_string(), tokens: counter.count(sentence), line: number });
+            out.push(Piece {
+                text: sentence.to_string(),
+                tokens: counter.count(sentence),
+                line: number,
+            });
         }
     }
-    out.push(Piece { text: String::new(), tokens: 0, line: None });
+    out.push(Piece {
+        text: String::new(),
+        tokens: 0,
+        line: None,
+    });
     out
 }
 
@@ -144,7 +160,9 @@ pub fn part_of(loc: &str) -> Option<&str> {
     let loc = loc.split(" .. ").next().unwrap_or(loc);
     for keyword in ["msg ", "slide "] {
         if let Some(rest) = loc.strip_prefix(keyword) {
-            let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            let digits = rest
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(rest.len());
             return (digits > 0).then(|| &loc[..keyword.len() + digits]);
         }
     }
@@ -189,7 +207,11 @@ impl Packing {
     fn emit(&mut self, heading: &str, out: &mut Vec<Chunk>) {
         let text = self.texts.join("\n");
         if !self.texts.is_empty() && !text.trim().is_empty() {
-            let loc = if self.locs.len() == 1 { self.locs[0].clone() } else { join_locs(&self.locs[0], &self.locs[self.locs.len() - 1]) };
+            let loc = if self.locs.len() == 1 {
+                self.locs[0].clone()
+            } else {
+                join_locs(&self.locs[0], &self.locs[self.locs.len() - 1])
+            };
             out.push(Chunk {
                 loc,
                 page_first: self.pages.iter().min().copied(),
@@ -290,28 +312,50 @@ mod tests {
 
     fn unit(loc: &str, first: u32, text: &str) -> Unit {
         let n = text.split('\n').count() as u32;
-        Unit { loc: loc.into(), page: None, line_first: Some(first), line_last: Some(first + n - 1), heading: String::new(), group: None, text: text.into() }
+        Unit {
+            loc: loc.into(),
+            page: None,
+            line_first: Some(first),
+            line_last: Some(first + n - 1),
+            heading: String::new(),
+            group: None,
+            text: text.into(),
+        }
     }
 
     #[test]
     fn small_units_are_packed_to_the_target() {
-        let units = vec![unit("lines 1-1", 1, "a b c"), unit("lines 2-2", 2, "d e f"), unit("lines 3-3", 3, "g h i j")];
+        let units = vec![
+            unit("lines 1-1", 1, "a b c"),
+            unit("lines 2-2", 2, "d e f"),
+            unit("lines 3-3", 3, "g h i j"),
+        ];
         let chunks = chunk(&units, &Words, 6, 0.15);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].loc, "lines 1-2");
-        assert_eq!((chunks[0].line_first, chunks[0].line_last), (Some(1), Some(2)));
+        assert_eq!(
+            (chunks[0].line_first, chunks[0].line_last),
+            (Some(1), Some(2))
+        );
         assert_eq!(chunks[1].text, "g h i j");
     }
 
     #[test]
     fn a_long_unit_is_windowed_with_overlap_and_line_locators() {
-        let text: String = (1..=30).map(|i| format!("Sentence number {i} is here.")).collect::<Vec<_>>().join("\n");
+        let text: String = (1..=30)
+            .map(|i| format!("Sentence number {i} is here."))
+            .collect::<Vec<_>>()
+            .join("\n");
         let units = vec![unit("lines 10-39", 10, &text)];
         let chunks = chunk(&units, &Words, 50, 0.15);
         assert!(chunks.len() >= 3, "{chunks:?}");
         // Each window starts with the tail of the one before.
         let last_of_first = chunks[0].text.lines().last().unwrap();
-        assert!(chunks[1].text.starts_with(last_of_first), "{:?}", chunks[1].text);
+        assert!(
+            chunks[1].text.starts_with(last_of_first),
+            "{:?}",
+            chunks[1].text
+        );
         assert_eq!(chunks[0].line_first, Some(10));
         assert!(chunks[0].loc.starts_with("lines 10-"));
         assert_eq!(chunks.last().unwrap().line_last, Some(39));
@@ -319,43 +363,85 @@ mod tests {
 
     #[test]
     fn a_message_is_never_packed_with_another_and_its_windows_name_it() {
-        let mut units = vec![unit("msg 1", 1, "a b"), unit("msg 1 · notes.txt", 2, "c d"), unit("msg 2", 3, "e f")];
+        let mut units = vec![
+            unit("msg 1", 1, "a b"),
+            unit("msg 1 · notes.txt", 2, "c d"),
+            unit("msg 2", 3, "e f"),
+        ];
         units[0].group = Some(1);
         units[1].group = Some(1);
         units[2].group = Some(2);
         let chunks = chunk(&units, &Words, 100, 0.15);
         let locs: Vec<&str> = chunks.iter().map(|c| c.loc.as_str()).collect();
         assert_eq!(locs, ["msg 1", "msg 2"]);
-        let text: String = (1..=30).map(|i| format!("Sentence number {i} is here.")).collect::<Vec<_>>().join("\n");
+        let text: String = (1..=30)
+            .map(|i| format!("Sentence number {i} is here."))
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut long = unit("msg 4", 10, &text);
         long.group = Some(4);
         let chunks = chunk(&[long], &Words, 50, 0.15);
-        assert!(chunks[0].loc.starts_with("msg 4, lines 10-"), "{}", chunks[0].loc);
+        assert!(
+            chunks[0].loc.starts_with("msg 4, lines 10-"),
+            "{}",
+            chunks[0].loc
+        );
         assert_eq!(join_locs("para 1-4", "para 5-9"), "para 1-9");
         assert_eq!(join_locs("p.1", "p.2"), "p.1 .. p.2");
-        assert_eq!(join_locs("msg 12, lines 3-9", "msg 12 · a.pdf p.2"), "msg 12");
+        assert_eq!(
+            join_locs("msg 12, lines 3-9", "msg 12 · a.pdf p.2"),
+            "msg 12"
+        );
         assert_eq!(join_locs("msg 1", "msg 12"), "msg 1 .. msg 12");
-        assert_eq!(join_locs("sheet Q1, Q2, rows 1-21", "sheet Q1, Q2, rows 22-41"), "sheet Q1, Q2, rows 1-41");
+        assert_eq!(
+            join_locs("sheet Q1, Q2, rows 1-21", "sheet Q1, Q2, rows 22-41"),
+            "sheet Q1, Q2, rows 1-41"
+        );
         assert_eq!(join_locs("slide 3", "slide 3, lines 9-12"), "slide 3");
-        assert!(!same_message("sheet A, rows 1-21", "sheet B, rows 1-21") && same_message("slide 2", "slide 2 .. slide 2"));
+        assert!(
+            !same_message("sheet A, rows 1-21", "sheet B, rows 1-21")
+                && same_message("slide 2", "slide 2 .. slide 2")
+        );
         // A long row group of a sheet is windowed in the sheet's own rows.
-        let text: String = (1..=30).map(|i| format!("Row {i} has a long value here.")).collect::<Vec<_>>().join("\n");
+        let text: String = (1..=30)
+            .map(|i| format!("Row {i} has a long value here."))
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut sheet = unit("sheet Budget, rows 2-31", 101, &text);
         sheet.line_last = Some(130);
         let chunks = chunk(&[sheet], &Words, 50, 0.15);
-        assert!(chunks[0].loc.starts_with("sheet Budget, rows 2-"), "{}", chunks[0].loc);
-        assert!(chunks.last().unwrap().loc.ends_with("-31"), "{}", chunks.last().unwrap().loc);
+        assert!(
+            chunks[0].loc.starts_with("sheet Budget, rows 2-"),
+            "{}",
+            chunks[0].loc
+        );
+        assert!(
+            chunks.last().unwrap().loc.ends_with("-31"),
+            "{}",
+            chunks.last().unwrap().loc
+        );
     }
 
     #[test]
     fn sentences_split_after_terminal_punctuation_only() {
-        assert_eq!(sentences("One. Two!  Three? four e.g.five"), ["One.", "Two!", "Three?", "four e.g.five"]);
+        assert_eq!(
+            sentences("One. Two!  Three? four e.g.five"),
+            ["One.", "Two!", "Three?", "four e.g.five"]
+        );
         assert_eq!(sentences("   "), Vec::<&str>::new());
     }
 
     #[test]
     fn the_heading_path_is_embedded_but_not_stored() {
-        let c = Chunk { loc: "p.1".into(), page_first: Some(1), page_last: Some(1), line_first: None, line_last: None, heading: "A > B".into(), text: "body".into() };
+        let c = Chunk {
+            loc: "p.1".into(),
+            page_first: Some(1),
+            page_last: Some(1),
+            line_first: None,
+            line_last: None,
+            heading: "A > B".into(),
+            text: "body".into(),
+        };
         assert_eq!(embed_text("doc", &c), "doc | A > B\nbody");
     }
 }

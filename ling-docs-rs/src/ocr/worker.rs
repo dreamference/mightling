@@ -51,14 +51,41 @@ pub struct OcrResult {
 }
 
 fn unit(kind: Kind, page: u32, text: String) -> Unit {
-    let loc = if kind == Kind::Image { IMAGE_LOC.to_string() } else { format!("p.{page}") };
-    Unit { loc, page: Some(page), line_first: None, line_last: None, heading: OCR_HEADING.to_string(), group: None, text }
+    let loc = if kind == Kind::Image {
+        IMAGE_LOC.to_string()
+    } else {
+        format!("p.{page}")
+    };
+    Unit {
+        loc,
+        page: Some(page),
+        line_first: None,
+        line_last: None,
+        heading: OCR_HEADING.to_string(),
+        group: None,
+        text,
+    }
 }
 
 /// The OCR worker's main loop.
-pub fn worker(jobs: &Path, out: &Path, lib_dir: &Path, ocr_dir: &Path, threads: usize) -> Result<()> {
-    let jobs: Vec<OcrJob> = std::io::BufReader::new(std::fs::File::open(jobs)?).lines().map_while(|l| l.ok()).filter_map(|l| serde_json::from_str(&l).ok()).collect();
-    let sink = std::cell::RefCell::new(std::fs::OpenOptions::new().create(true).append(true).open(out)?);
+pub fn worker(
+    jobs: &Path,
+    out: &Path,
+    lib_dir: &Path,
+    ocr_dir: &Path,
+    threads: usize,
+) -> Result<()> {
+    let jobs: Vec<OcrJob> = std::io::BufReader::new(std::fs::File::open(jobs)?)
+        .lines()
+        .map_while(|l| l.ok())
+        .filter_map(|l| serde_json::from_str(&l).ok())
+        .collect();
+    let sink = std::cell::RefCell::new(
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(out)?,
+    );
     let emit = |event: &Event| -> Result<()> {
         let mut sink = sink.borrow_mut();
         writeln!(sink, "{}", serde_json::to_string(event)?)?;
@@ -73,26 +100,51 @@ pub fn worker(jobs: &Path, out: &Path, lib_dir: &Path, ocr_dir: &Path, threads: 
         emit(&Event::Start { id: job.id })?;
         let mut result = OcrResult::default();
         let outcome = (|| -> Result<()> {
-            let mut read = |page: u32, img: &super::image::Image, result: &mut OcrResult| -> Result<()> {
-                let text = if fake {
-                    let name = job.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    super::PageText { lines: vec![super::Line { text: format!("Recognised text of {name} page {page}"), score: 0.9 }], confidence: 0.9, route: "fake".into(), tesseract_script: None }
-                } else {
-                    let engine = engine.get_or_insert_with(|| super::Ocr::load(lib_dir, ocr_dir, threads).map_err(|e| format!("{e:#}")));
-                    let engine = engine.as_mut().map_err(|why| anyhow::anyhow!("{why}"))?;
-                    engine.read_page(img)?
+            let mut read =
+                |page: u32, img: &super::image::Image, result: &mut OcrResult| -> Result<()> {
+                    let text = if fake {
+                        let name = job
+                            .path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        super::PageText {
+                            lines: vec![super::Line {
+                                text: format!("Recognised text of {name} page {page}"),
+                                score: 0.9,
+                            }],
+                            confidence: 0.9,
+                            route: "fake".into(),
+                            tesseract_script: None,
+                        }
+                    } else {
+                        let engine = engine.get_or_insert_with(|| {
+                            super::Ocr::load(lib_dir, ocr_dir, threads)
+                                .map_err(|e| format!("{e:#}"))
+                        });
+                        let engine = engine.as_mut().map_err(|why| anyhow::anyhow!("{why}"))?;
+                        engine.read_page(img)?
+                    };
+                    emit(&Event::Progress { id: job.id })?;
+                    let joined = text.text();
+                    result.pages.push(OcrPage {
+                        page,
+                        confidence: text.confidence,
+                        route: text.route.clone(),
+                        lines: text.lines.len(),
+                    });
+                    if !joined.trim().is_empty() {
+                        result.units.push(unit(job.kind, page, joined));
+                    }
+                    Ok(())
                 };
-                emit(&Event::Progress { id: job.id })?;
-                let joined = text.text();
-                result.pages.push(OcrPage { page, confidence: text.confidence, route: text.route.clone(), lines: text.lines.len() });
-                if !joined.trim().is_empty() {
-                    result.units.push(unit(job.kind, page, joined));
-                }
-                Ok(())
-            };
             match job.kind {
                 Kind::Image => {
-                    let img = if fake { super::image::Image::new(1, 1) } else { super::decode_image(&std::fs::read(&job.path)?)? };
+                    let img = if fake {
+                        super::image::Image::new(1, 1)
+                    } else {
+                        super::decode_image(&std::fs::read(&job.path)?)?
+                    };
                     read(1, &img, &mut result)?;
                 }
                 Kind::Pdf => {
@@ -101,13 +153,23 @@ pub fn worker(jobs: &Path, out: &Path, lib_dir: &Path, ocr_dir: &Path, threads: 
                             read(page, &super::image::Image::new(1, 1), &mut result)?;
                         }
                     } else {
-                        let pdf = pdfium.get_or_insert_with(|| crate::extract::pdf::Pdf::load(lib_dir).map_err(|e| format!("{e:#}")));
+                        let pdf = pdfium.get_or_insert_with(|| {
+                            crate::extract::pdf::Pdf::load(lib_dir).map_err(|e| format!("{e:#}"))
+                        });
                         let pdf = pdf.as_ref().map_err(|why| anyhow::anyhow!("{why}"))?;
                         let mut each = |page: u32, w: usize, h: usize, gray: &[u8]| -> Result<()> {
-                            read(page, &super::image::Image::from_gray(w, h, gray), &mut result)?;
+                            read(
+                                page,
+                                &super::image::Image::from_gray(w, h, gray),
+                                &mut result,
+                            )?;
                             Ok(())
                         };
-                        pdf.render_gray(crate::extract::pdf::Source::Path(&job.path), &job.pages, &mut each)?;
+                        pdf.render_gray(
+                            crate::extract::pdf::Source::Path(&job.path),
+                            &job.pages,
+                            &mut each,
+                        )?;
                     }
                 }
                 other => anyhow::bail!("{} files are not read by OCR", other.as_str()),
@@ -116,7 +178,10 @@ pub fn worker(jobs: &Path, out: &Path, lib_dir: &Path, ocr_dir: &Path, threads: 
         })();
         match outcome {
             Ok(()) => emit(&Event::Ocr { id: job.id, result })?,
-            Err(error) => emit(&Event::OcrFailed { id: job.id, error: format!("{error:#}") })?,
+            Err(error) => emit(&Event::OcrFailed {
+                id: job.id,
+                error: format!("{error:#}"),
+            })?,
         }
     }
     Ok(())
@@ -129,19 +194,41 @@ mod tests {
     #[test]
     fn unit_locators_distinguish_images_from_pdf_pages_and_non_ocr_kinds_fail() {
         let img_unit = unit(Kind::Image, 1, "hello".into());
-        assert_eq!((img_unit.loc.as_str(), img_unit.page, img_unit.heading.as_str()), (IMAGE_LOC, Some(1), OCR_HEADING));
+        assert_eq!(
+            (
+                img_unit.loc.as_str(),
+                img_unit.page,
+                img_unit.heading.as_str()
+            ),
+            (IMAGE_LOC, Some(1), OCR_HEADING)
+        );
         let pdf_unit = unit(Kind::Pdf, 7, "page seven".into());
         assert_eq!((pdf_unit.loc.as_str(), pdf_unit.page), ("p.7", Some(7)));
 
         let dir = tempfile::tempdir().unwrap();
         let jobs = dir.path().join("jobs.jsonl");
         let out = dir.path().join("out.jsonl");
-        let bad_job = OcrJob { id: 9, path: dir.path().join("a.md"), kind: Kind::Markdown, pages: vec![1] };
-        std::fs::write(&jobs, format!("{}\n", serde_json::to_string(&bad_job).unwrap())).unwrap();
+        let bad_job = OcrJob {
+            id: 9,
+            path: dir.path().join("a.md"),
+            kind: Kind::Markdown,
+            pages: vec![1],
+        };
+        std::fs::write(
+            &jobs,
+            format!("{}\n", serde_json::to_string(&bad_job).unwrap()),
+        )
+        .unwrap();
         worker(&jobs, &out, dir.path(), dir.path(), 1).unwrap();
-        let events: Vec<Event> = std::fs::read_to_string(&out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let events: Vec<Event> = std::fs::read_to_string(&out)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
         assert_eq!(events.len(), 2);
         assert!(matches!(&events[0], Event::Start { id: 9 }));
-        assert!(matches!(&events[1], Event::OcrFailed { id: 9, error } if error.contains("markdown files are not read by OCR")));
+        assert!(
+            matches!(&events[1], Event::OcrFailed { id: 9, error } if error.contains("markdown files are not read by OCR"))
+        );
     }
 }

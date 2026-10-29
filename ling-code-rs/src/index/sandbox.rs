@@ -33,8 +33,20 @@ pub struct Spec {
 pub fn bwrap_args(spec: &Spec) -> Vec<String> {
     let s = |p: &Path| p.to_string_lossy().into_owned();
     let mut args: Vec<String> = [
-        "bwrap", "--die-with-parent", "--new-session", "--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
-        "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+        "bwrap",
+        "--die-with-parent",
+        "--new-session",
+        "--unshare-net",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--unshare-uts",
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
     ]
     .iter()
     .map(|a| a.to_string())
@@ -45,10 +57,15 @@ pub fn bwrap_args(spec: &Spec) -> Vec<String> {
     }
     args.extend(["--tmpfs".to_string(), s(&spec.home)]);
     // Then the binds, parents before children, read-only before read-write at the same depth.
-    let mut binds: Vec<(PathBuf, bool)> = spec.read_only.iter().map(|p| (p.clone(), false)).collect();
+    let mut binds: Vec<(PathBuf, bool)> =
+        spec.read_only.iter().map(|p| (p.clone(), false)).collect();
     binds.push((spec.scratch.clone(), true));
     binds.extend(spec.writable.iter().map(|p| (p.clone(), true)));
-    binds.extend(spec.writable_outside_scratch.iter().map(|(p, _)| (p.clone(), true)));
+    binds.extend(
+        spec.writable_outside_scratch
+            .iter()
+            .map(|(p, _)| (p.clone(), true)),
+    );
     binds.sort_by_key(|(p, rw)| (p.components().count(), *rw));
     binds.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
     for (path, writable) in binds {
@@ -67,7 +84,11 @@ pub fn bwrap_args(spec: &Spec) -> Vec<String> {
 /// The read-write binds of an argument list that are neither the scratch directory (or under it)
 /// nor explicitly allowed. Empty for a safe list.
 pub fn unexpected_writable(args: &[String], spec: &Spec) -> Vec<String> {
-    let allowed: Vec<&PathBuf> = spec.writable_outside_scratch.iter().map(|(p, _)| p).collect();
+    let allowed: Vec<&PathBuf> = spec
+        .writable_outside_scratch
+        .iter()
+        .map(|(p, _)| p)
+        .collect();
     let mut out = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -95,7 +116,11 @@ mod tests {
         Spec {
             home: "/home/u".into(),
             scratch: "/tmp/mightling-index-x".into(),
-            read_only: vec!["/home/u/.cargo".into(), "/home/u/.rustup".into(), "/home/u/src/repo".into()],
+            read_only: vec![
+                "/home/u/.cargo".into(),
+                "/home/u/.rustup".into(),
+                "/home/u/src/repo".into(),
+            ],
             writable: vec!["/tmp/mightling-index-x/out".into()],
             writable_outside_scratch: vec![],
             env: vec![("PATH".into(), "/usr/bin".into())],
@@ -111,7 +136,10 @@ mod tests {
         assert!(unexpected_writable(&args, &spec).is_empty(), "{args:?}");
         let mut bad = spec.clone();
         bad.writable.push("/home/u/.cargo".into());
-        assert_eq!(unexpected_writable(&bwrap_args(&bad), &bad), vec!["/home/u/.cargo".to_string()]);
+        assert_eq!(
+            unexpected_writable(&bwrap_args(&bad), &bad),
+            vec!["/home/u/.cargo".to_string()]
+        );
     }
 
     #[test]
@@ -119,11 +147,19 @@ mod tests {
         let args = bwrap_args(&spec());
         let last_tmpfs = args.iter().rposition(|a| a == "--tmpfs").unwrap();
         // The only bind before the tmpfs mounts is the read-only root `/ /` itself.
-        let early: Vec<usize> = args[..last_tmpfs].iter().enumerate().filter(|(_, a)| *a == "--bind" || *a == "--ro-bind").map(|(i, _)| i).collect();
+        let early: Vec<usize> = args[..last_tmpfs]
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| *a == "--bind" || *a == "--ro-bind")
+            .map(|(i, _)| i)
+            .collect();
         assert_eq!(early.len(), 1, "{args:?}");
         assert_eq!(&args[early[0] + 1..early[0] + 3], ["/", "/"]);
         // So the scratch directory under /tmp and the toolchain under $HOME stay visible.
-        let scratch = args.iter().position(|a| a == "/tmp/mightling-index-x").unwrap();
+        let scratch = args
+            .iter()
+            .position(|a| a == "/tmp/mightling-index-x")
+            .unwrap();
         let cargo = args.iter().position(|a| a == "/home/u/.cargo").unwrap();
         assert!(scratch > last_tmpfs && cargo > last_tmpfs);
     }
@@ -132,9 +168,16 @@ mod tests {
     fn no_network_no_run_no_home() {
         let args = bwrap_args(&spec());
         assert!(args.contains(&"--unshare-net".to_string()));
-        let tmpfs: Vec<&String> = args.windows(2).filter(|w| w[0] == "--tmpfs").map(|w| &w[1]).collect();
+        let tmpfs: Vec<&String> = args
+            .windows(2)
+            .filter(|w| w[0] == "--tmpfs")
+            .map(|w| &w[1])
+            .collect();
         for hidden in ["/run", "/tmp", "/home/u"] {
-            assert!(tmpfs.iter().any(|t| *t == hidden), "{hidden} not hidden: {args:?}");
+            assert!(
+                tmpfs.iter().any(|t| *t == hidden),
+                "{hidden} not hidden: {args:?}"
+            );
         }
         assert!(args.contains(&"--clearenv".to_string()));
     }
@@ -151,9 +194,24 @@ mod tests {
         s.argv = vec!["cmd".into(), "--bind".into(), "/etc".into(), "/etc".into()];
         let args = bwrap_args(&s);
         let parent_pos = args.iter().position(|a| a == "/home/u/src/repo").unwrap();
-        let child_pos = args.iter().position(|a| a == "/home/u/src/repo/sub").unwrap();
-        assert!(parent_pos < child_pos, "parent mount must precede child mount");
-        assert_eq!(args.iter().filter(|a| a.as_str() == "/home/u/src/repo").count(), 3, "two for --ro-bind + one for --chdir");
-        assert!(unexpected_writable(&args, &s).is_empty(), "--bind after `--` and writable_outside_scratch are allowed");
+        let child_pos = args
+            .iter()
+            .position(|a| a == "/home/u/src/repo/sub")
+            .unwrap();
+        assert!(
+            parent_pos < child_pos,
+            "parent mount must precede child mount"
+        );
+        assert_eq!(
+            args.iter()
+                .filter(|a| a.as_str() == "/home/u/src/repo")
+                .count(),
+            3,
+            "two for --ro-bind + one for --chdir"
+        );
+        assert!(
+            unexpected_writable(&args, &s).is_empty(),
+            "--bind after `--` and writable_outside_scratch are allowed"
+        );
     }
 }

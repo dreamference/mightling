@@ -22,7 +22,11 @@ pub struct Image {
 
 impl Image {
     pub fn new(width: usize, height: usize) -> Image {
-        Image { width, height, data: vec![0; width * height * 3] }
+        Image {
+            width,
+            height,
+            data: vec![0; width * height * 3],
+        }
     }
 
     /// From one 8-bit grey channel, repeated three times (Phase 0 rendered PDF pages grey).
@@ -31,7 +35,11 @@ impl Image {
         for &g in &gray[..width * height] {
             data.extend([g, g, g]);
         }
-        Image { width, height, data }
+        Image {
+            width,
+            height,
+            data,
+        }
     }
 
     #[inline]
@@ -41,7 +49,12 @@ impl Image {
 
     /// The luma of every pixel (BT.601, as `cv2.cvtColor(…, RGB2GRAY)`), for script detection.
     pub fn gray(&self) -> Vec<u8> {
-        self.data.chunks_exact(3).map(|p| ((p[0] as u32 * 4899 + p[1] as u32 * 9617 + p[2] as u32 * 1868 + 8192) >> 14) as u8).collect()
+        self.data
+            .chunks_exact(3)
+            .map(|p| {
+                ((p[0] as u32 * 4899 + p[1] as u32 * 9617 + p[2] as u32 * 1868 + 8192) >> 14) as u8
+            })
+            .collect()
     }
 
     /// `cv2.resize(img, (width, height))` with `INTER_LINEAR`.
@@ -79,7 +92,8 @@ impl Image {
                 for c in 0..3 {
                     let a = self.at(x0, y0, c) as f32 * (1.0 - wx) + self.at(x1, y0, c) as f32 * wx;
                     let b = self.at(x0, y1, c) as f32 * (1.0 - wx) + self.at(x1, y1, c) as f32 * wx;
-                    out.data[(y * width + x) * 3 + c] = (a * (1.0 - wy) + b * wy).round().clamp(0.0, 255.0) as u8;
+                    out.data[(y * width + x) * 3 + c] =
+                        (a * (1.0 - wy) + b * wy).round().clamp(0.0, 255.0) as u8;
                 }
             }
         }
@@ -105,7 +119,12 @@ impl Image {
     /// A half turn.
     pub fn rot180(&self) -> Image {
         let mut out = self.clone();
-        let pixels: Vec<[u8; 3]> = self.data.chunks_exact(3).rev().map(|p| [p[0], p[1], p[2]]).collect();
+        let pixels: Vec<[u8; 3]> = self
+            .data
+            .chunks_exact(3)
+            .rev()
+            .map(|p| [p[0], p[1], p[2]])
+            .collect();
         for (i, p) in pixels.iter().enumerate() {
             out.data[i * 3..i * 3 + 3].copy_from_slice(p);
         }
@@ -123,11 +142,18 @@ impl Image {
     /// The quadrilateral `quad` (top-left, top-right, bottom-right, bottom-left) straightened to a
     /// `width` × `height` image: `cv2.warpPerspective` with `INTER_CUBIC` and `BORDER_REPLICATE`.
     pub fn warp(&self, quad: &[[f32; 2]; 4], width: usize, height: usize) -> Image {
-        let dst = [[0.0, 0.0], [width as f64, 0.0], [width as f64, height as f64], [0.0, height as f64]];
+        let dst = [
+            [0.0, 0.0],
+            [width as f64, 0.0],
+            [width as f64, height as f64],
+            [0.0, height as f64],
+        ];
         let src: Vec<[f64; 2]> = quad.iter().map(|p| [p[0] as f64, p[1] as f64]).collect();
         // The map from an output pixel to its source point (OpenCV inverts the forward map; this
         // solves for the inverse directly).
-        let Some(m) = homography(&dst, &[src[0], src[1], src[2], src[3]]) else { return Image::new(width.max(1), height.max(1)) };
+        let Some(m) = homography(&dst, &[src[0], src[1], src[2], src[3]]) else {
+            return Image::new(width.max(1), height.max(1));
+        };
         let mut out = Image::new(width, height);
         for y in 0..height {
             for x in 0..width {
@@ -201,7 +227,12 @@ pub fn homography(from: &[[f64; 2]; 4], to: &[[f64; 2]; 4]) -> Option<[f64; 9]> 
     }
     // Gaussian elimination with partial pivoting on the 8×8 system.
     for col in 0..8 {
-        let pivot = (col..8).max_by(|&i, &j| a[i][col].abs().partial_cmp(&a[j][col].abs()).unwrap_or(std::cmp::Ordering::Equal))?;
+        let pivot = (col..8).max_by(|&i, &j| {
+            a[i][col]
+                .abs()
+                .partial_cmp(&a[j][col].abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })?;
         if a[pivot][col].abs() < 1e-12 {
             return None;
         }
@@ -209,8 +240,9 @@ pub fn homography(from: &[[f64; 2]; 4], to: &[[f64; 2]; 4]) -> Option<[f64; 9]> 
         for row in 0..8 {
             if row != col {
                 let f = a[row][col] / a[col][col];
-                for k in col..9 {
-                    a[row][k] -= f * a[col][k];
+                let pivot_row = a[col];
+                for (k, value) in a[row].iter_mut().enumerate().skip(col) {
+                    *value -= f * pivot_row[k];
                 }
             }
         }
@@ -226,7 +258,11 @@ pub fn homography(from: &[[f64; 2]; 4], to: &[[f64; 2]; 4]) -> Option<[f64; 9]> 
 /// Python's `round` (half to even), which RapidOCR's sizes go through.
 pub fn round_half_even(x: f64) -> f64 {
     let r = x.round();
-    if (x - x.trunc()).abs() == 0.5 && r % 2.0 != 0.0 { r - x.signum() } else { r }
+    if (x - x.trunc()).abs() == 0.5 && r % 2.0 != 0.0 {
+        r - x.signum()
+    } else {
+        r
+    }
 }
 
 #[cfg(test)]
@@ -284,7 +320,11 @@ mod tests {
                 assert_eq!(out.at(x, y, 0), img.at(x + 5, y + 2, 0), "({x},{y})");
             }
         }
-        let m = homography(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], &[[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]]).unwrap();
+        let m = homography(
+            &[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            &[[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]],
+        )
+        .unwrap();
         assert!((m[0] - 2.0).abs() < 1e-9 && (m[4] - 2.0).abs() < 1e-9);
     }
 }

@@ -23,21 +23,52 @@ struct LocalHost {
 }
 
 impl Host for LocalHost {
-    fn mem_available(&self) -> u64 { 100 << 30 }
-    fn mem_total(&self) -> u64 { 121 << 30 }
-    fn earlyoom_percent(&self) -> Option<f64> { Some(5.0) }
-    fn live_scopes(&self) -> Vec<LiveScope> { Vec::new() }
-    fn set_slice_limits(&self, _: u64) -> anyhow::Result<()> { Ok(()) }
-    fn can_create_scopes(&self) -> bool { true }
-    fn start_scope(&self, unit: &str, cap: u64, argv: &[String], log: &Path) -> anyhow::Result<Child> {
+    fn mem_available(&self) -> u64 {
+        100 << 30
+    }
+    fn mem_total(&self) -> u64 {
+        121 << 30
+    }
+    fn earlyoom_percent(&self) -> Option<f64> {
+        Some(5.0)
+    }
+    fn live_scopes(&self) -> Vec<LiveScope> {
+        Vec::new()
+    }
+    fn set_slice_limits(&self, _: u64) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn can_create_scopes(&self) -> bool {
+        true
+    }
+    fn start_scope(
+        &self,
+        unit: &str,
+        cap: u64,
+        argv: &[String],
+        log: &Path,
+    ) -> anyhow::Result<Child> {
         self.started.lock().unwrap().push((unit.to_string(), cap));
         let log = std::fs::File::create(log)?;
-        Ok(Command::new(&argv[0]).args(&argv[1..]).stdin(Stdio::null()).stdout(log.try_clone()?).stderr(log).spawn()?)
+        Ok(Command::new(&argv[0])
+            .args(&argv[1..])
+            .stdin(Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log)
+            .spawn()?)
     }
-    fn freeze(&self, _: &str) -> anyhow::Result<()> { Ok(()) }
-    fn thaw(&self, _: &str) -> anyhow::Result<()> { Ok(()) }
-    fn stop(&self, _: &str) -> anyhow::Result<()> { Ok(()) }
-    fn lock_dir(&self) -> PathBuf { self.dir.clone() }
+    fn freeze(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn thaw(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn stop(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn lock_dir(&self) -> PathBuf {
+        self.dir.clone()
+    }
 }
 
 fn exe() -> PathBuf {
@@ -45,7 +76,9 @@ fn exe() -> PathBuf {
 }
 
 fn lib_dir() -> Option<PathBuf> {
-    std::env::var_os("MIGHTLING_DOCS_LIB_DIR").map(PathBuf::from).filter(|d| d.join("libpdfium.so").is_file())
+    std::env::var_os("MIGHTLING_DOCS_LIB_DIR")
+        .map(PathBuf::from)
+        .filter(|d| d.join("libpdfium.so").is_file())
 }
 
 /// A one-page PDF whose text layer is `lines`, in Helvetica.
@@ -60,18 +93,30 @@ fn pdf_pages(pages: &[&[&str]], title: Option<&str>) -> Vec<u8> {
     // 1 catalog, 2 pages, 3 font, 4 info, then a page and its content per page.
     let mut objects = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-        format!("<< /Type /Pages /Kids [{}] /Count {n} >>", (0..n).map(|i| format!("{} 0 R", 5 + 2 * i)).collect::<Vec<_>>().join(" ")),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {n} >>",
+            (0..n)
+                .map(|i| format!("{} 0 R", 5 + 2 * i))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
         format!("<< /Title ({}) >>", title.unwrap_or("")),
     ];
     for (i, lines) in pages.iter().enumerate() {
         let mut content = String::from("BT /F1 12 Tf 72 720 Td 14 TL\n");
         for line in lines.iter() {
-            content.push_str(&format!("({}) Tj T*\n", line.replace('(', "\\(").replace(')', "\\)")));
+            content.push_str(&format!(
+                "({}) Tj T*\n",
+                line.replace('(', "\\(").replace(')', "\\)")
+            ));
         }
         content.push_str("ET");
         objects.push(format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> >> >>", 6 + 2 * i));
-        objects.push(format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()));
+        objects.push(format!(
+            "<< /Length {} >>\nstream\n{content}\nendstream",
+            content.len()
+        ));
     }
     let mut out = b"%PDF-1.4\n".to_vec();
     let mut offsets = Vec::new();
@@ -85,19 +130,30 @@ fn pdf_pages(pages: &[&[&str]], title: Option<&str>) -> Vec<u8> {
         out.extend(format!("{offset:010} 00000 n \n").as_bytes());
     }
     let info = if title.is_some() { " /Info 4 0 R" } else { "" };
-    out.extend(format!("trailer\n<< /Size {} /Root 1 0 R{info} >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+    out.extend(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R{info} >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
     out
 }
 
 fn env<'a>(host: &'a LocalHost, home: &Path, exe: PathBuf) -> Env<'a> {
     Env {
         host,
-        settings: Settings { extract_timeout_s: 2, ..Settings::default() },
+        settings: Settings {
+            extract_timeout_s: 2,
+            ..Settings::default()
+        },
         user_home: home.to_path_buf(),
         exe,
         lib_dir: lib_dir().unwrap_or_else(|| home.join("no-lib")),
         model_dir: home.join("no-model"),
-        ocr_dir: std::env::var_os("MIGHTLING_DOCS_OCR_DIR").map(PathBuf::from).unwrap_or_else(|| home.join("no-ocr")),
+        ocr_dir: std::env::var_os("MIGHTLING_DOCS_OCR_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("no-ocr")),
         sandbox: false,
         worker_args: vec!["--test-embedder".into()],
         poll: Duration::from_millis(20),
@@ -122,66 +178,142 @@ fn a_collection_is_indexed_searched_read_and_kept_current() {
     let docs_root = home.join("Documents");
     std::fs::create_dir_all(docs_root.join("contracts")).unwrap();
     std::fs::write(docs_root.join("contracts/acme.md"), "# Acme MSA\n\n## Termination\n\nEither party may terminate with a notice period of ninety days.\n\n## Fees\n\nInvoices are due within thirty days.\n").unwrap();
-    std::fs::write(docs_root.join("contracts/acme (1).md"), std::fs::read(docs_root.join("contracts/acme.md")).unwrap()).unwrap();
-    std::fs::write(docs_root.join("coffee.md"), "# 咖啡\n\n咖啡是一种用烘焙过的咖啡豆制作的饮料。\n").unwrap();
-    std::fs::write(docs_root.join("plain.txt"), (1..=60).map(|i| format!("line {i} about volcanoes\n")).collect::<String>()).unwrap();
-    std::fs::write(docs_root.join("movie.pdf"), b"\x00\x00\x00\x18ftypmp42 not a pdf").unwrap();
+    std::fs::write(
+        docs_root.join("contracts/acme (1).md"),
+        std::fs::read(docs_root.join("contracts/acme.md")).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        docs_root.join("coffee.md"),
+        "# 咖啡\n\n咖啡是一种用烘焙过的咖啡豆制作的饮料。\n",
+    )
+    .unwrap();
+    std::fs::write(
+        docs_root.join("plain.txt"),
+        (1..=60)
+            .map(|i| format!("line {i} about volcanoes\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+    std::fs::write(
+        docs_root.join("movie.pdf"),
+        b"\x00\x00\x00\x18ftypmp42 not a pdf",
+    )
+    .unwrap();
     std::fs::write(docs_root.join("setup.iso"), b"never opened").unwrap();
     std::fs::write(docs_root.join("id_rsa.txt"), b"-----BEGIN KEY-----").unwrap();
     let with_pdf = lib_dir().is_some();
     if with_pdf {
-        std::fs::write(docs_root.join("report.pdf"), pdf(&["Quarterly report", "The reactor output rose by eleven percent."])).unwrap();
-        std::fs::write(docs_root.join("broken.pdf"), b"%PDF-1.4\n garbage with no objects").unwrap();
+        std::fs::write(
+            docs_root.join("report.pdf"),
+            pdf(&[
+                "Quarterly report",
+                "The reactor output rose by eleven percent.",
+            ]),
+        )
+        .unwrap();
+        std::fs::write(
+            docs_root.join("broken.pdf"),
+            b"%PDF-1.4\n garbage with no objects",
+        )
+        .unwrap();
     }
 
     let mut docs = DocsToml::default();
     assert_eq!(docs.ensure_defaults(&home), vec!["documents".to_string()]);
     docs.save().unwrap();
-    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let host = LocalHost {
+        dir: home.join("locks"),
+        started: Mutex::new(Vec::new()),
+    };
     let env = env(&host, &home, exe());
     let outcome = index::run(&env, &docs, None, false).unwrap();
     assert_eq!(outcome, vec![("documents".to_string(), Outcome::Ok)]);
     // Two scopes, each named for `server start` to stop, the extractor capped at the PDF cap.
     let started = host.started.lock().unwrap().clone();
     assert_eq!(started.len(), 2, "{started:?}");
-    assert!(started.iter().all(|(unit, _)| unit.starts_with("mightling-index-docs-documents-")));
+    assert!(started
+        .iter()
+        .all(|(unit, _)| unit.starts_with("mightling-index-docs-documents-")));
     assert_eq!(started[0].1, 1 << 30);
 
-    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents")).unwrap().unwrap();
+    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents"))
+        .unwrap()
+        .unwrap();
     let counts = ling_docs::store::counts(&conn).unwrap();
     assert_eq!(counts.duplicates, 1, "{counts:?}");
     assert_eq!(counts.skipped, 1, "the lying movie.pdf");
     assert_eq!(counts.indexed, if with_pdf { 4 } else { 3 }, "{counts:?}");
     assert_eq!(counts.failed, if with_pdf { 1 } else { 0 }, "{counts:?}");
     assert_eq!(counts.chunks, counts.embedded);
-    let skipped: String = ling_docs::store::get_meta(&conn, "skipped_unopened").unwrap().unwrap();
-    assert!(skipped.contains("\"type not read\":1") && skipped.contains("named like a secret"), "{skipped}");
+    let skipped: String = ling_docs::store::get_meta(&conn, "skipped_unopened")
+        .unwrap()
+        .unwrap();
+    assert!(
+        skipped.contains("\"type not read\":1") && skipped.contains("named like a secret"),
+        "{skipped}"
+    );
     drop(conn);
 
     let collections: Vec<_> = docs.enabled().cloned().collect();
     let mut searcher = Searcher::default();
     searcher.refresh(&collections).unwrap();
     let embedder = HashEmbedder { dim: 64 };
-    let answer = searcher.search("notice period termination", 3, &Filters::default(), Some(&embedder), 0.25).unwrap();
+    let answer = searcher
+        .search(
+            "notice period termination",
+            3,
+            &Filters::default(),
+            Some(&embedder),
+            0.25,
+        )
+        .unwrap();
     let top = &answer.hits[0];
     assert_eq!(top.rel, "contracts/acme.md");
     assert!(top.text.contains("ninety days"));
     assert!(top.loc.starts_with("lines 1-"), "{}", top.loc);
     // Chinese, which unicode61 cannot segment, through the trigram table.
-    let answer = searcher.search("烘焙过的咖啡豆", 3, &Filters::default(), Some(&embedder), 0.25).unwrap();
+    let answer = searcher
+        .search(
+            "烘焙过的咖啡豆",
+            3,
+            &Filters::default(),
+            Some(&embedder),
+            0.25,
+        )
+        .unwrap();
     assert_eq!(answer.hits[0].rel, "coffee.md");
     // Filters.
-    let only_text = Filters { kind: Some("txt".into()), ..Filters::default() };
-    let answer = searcher.search("volcanoes", 5, &only_text, Some(&embedder), 0.25).unwrap();
+    let only_text = Filters {
+        kind: Some("txt".into()),
+        ..Filters::default()
+    };
+    let answer = searcher
+        .search("volcanoes", 5, &only_text, Some(&embedder), 0.25)
+        .unwrap();
     assert!(answer.hits.iter().all(|h| h.rel == "plain.txt") && !answer.hits.is_empty());
     if with_pdf {
-        let answer = searcher.search("reactor output eleven percent", 3, &Filters::default(), Some(&embedder), 0.25).unwrap();
+        let answer = searcher
+            .search(
+                "reactor output eleven percent",
+                3,
+                &Filters::default(),
+                Some(&embedder),
+                0.25,
+            )
+            .unwrap();
         assert_eq!(answer.hits[0].rel, "report.pdf");
         assert_eq!(answer.hits[0].loc, "p.1");
-        let read = ling_docs::read::read(&collections, &answer.hits[0].doc_id, Some("p.1"), 6000).unwrap();
+        let read =
+            ling_docs::read::read(&collections, &answer.hits[0].doc_id, Some("p.1"), 6000).unwrap();
         assert!(read.text.contains("eleven percent"), "{}", read.text);
     }
-    let plain = searcher.search("volcanoes", 1, &only_text, Some(&embedder), 0.25).unwrap().hits[0].doc_id.clone();
+    let plain = searcher
+        .search("volcanoes", 1, &only_text, Some(&embedder), 0.25)
+        .unwrap()
+        .hits[0]
+        .doc_id
+        .clone();
     let read = ling_docs::read::read(&collections, &plain, Some("lines 41-45"), 6000).unwrap();
     assert_eq!(read.text.lines().next(), Some("line 41 about volcanoes"));
     assert_eq!(read.loc, "lines 41-45");
@@ -189,7 +321,13 @@ fn a_collection_is_indexed_searched_read_and_kept_current() {
 
     // The prompt block names the collection with its count.
     let block = ling_docs::prompt::block(&collections, true);
-    assert!(block.contains(&format!("documents ({} files)", if with_pdf { 4 } else { 3 })), "{block}");
+    assert!(
+        block.contains(&format!(
+            "documents ({} files)",
+            if with_pdf { 4 } else { 3 }
+        )),
+        "{block}"
+    );
 
     // A change, a deletion: the next scan follows.
     std::thread::sleep(Duration::from_millis(20));
@@ -198,9 +336,22 @@ fn a_collection_is_indexed_searched_read_and_kept_current() {
     index::run(&env, &docs, None, false).unwrap();
     let mut searcher = Searcher::default();
     searcher.refresh(&collections).unwrap();
-    let answer = searcher.search("glaciers", 3, &Filters::default(), Some(&embedder), 0.25).unwrap();
+    let answer = searcher
+        .search("glaciers", 3, &Filters::default(), Some(&embedder), 0.25)
+        .unwrap();
     assert_eq!(answer.hits[0].rel, "plain.txt");
-    assert!(searcher.search("烘焙过的咖啡豆", 3, &Filters::default(), Some(&embedder), 0.25).unwrap().hits.iter().all(|h| h.rel != "coffee.md"));
+    assert!(searcher
+        .search(
+            "烘焙过的咖啡豆",
+            3,
+            &Filters::default(),
+            Some(&embedder),
+            0.25
+        )
+        .unwrap()
+        .hits
+        .iter()
+        .all(|h| h.rel != "coffee.md"));
 
     // The MCP server answers both tools, wrapped as untrusted text.
     let mut server = Command::new(exe())
@@ -221,14 +372,37 @@ fn a_collection_is_indexed_searched_read_and_kept_current() {
     ask(serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}));
     let list = ask(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
     // docs_search and docs_read, and pdf_search where PDFium is installed.
-    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), if with_pdf { 3 } else { 2 });
-    let found = ask(serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "docs_search", "arguments": {"query": "notice period", "k": 2}}}));
-    let text = found["result"]["content"][0]["text"].as_str().unwrap().to_string();
-    assert!(text.starts_with("<untrusted source=\"docs\" id=\"documents:"), "{text}");
+    assert_eq!(
+        list["result"]["tools"].as_array().unwrap().len(),
+        if with_pdf { 3 } else { 2 }
+    );
+    let found = ask(
+        serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "docs_search", "arguments": {"query": "notice period", "k": 2}}}),
+    );
+    let text = found["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        text.starts_with("<untrusted source=\"docs\" id=\"documents:"),
+        "{text}"
+    );
     assert!(text.contains("ninety days"));
-    let id = text.split("id=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
-    let read = ask(serde_json::json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "docs_read", "arguments": {"doc_id": id}}}));
-    assert!(read["result"]["content"][0]["text"].as_str().unwrap().contains("Invoices are due"));
+    let id = text
+        .split("id=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+    let read = ask(
+        serde_json::json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "docs_read", "arguments": {"doc_id": id}}}),
+    );
+    assert!(read["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("Invoices are due"));
     drop(stdin);
     let _ = server.wait();
 }
@@ -238,12 +412,22 @@ fn base64(bytes: &[u8]) -> String {
     const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
-        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (chunk[0] as u32) << 16
+            | (*chunk.get(1).unwrap_or(&0) as u32) << 8
+            | *chunk.get(2).unwrap_or(&0) as u32;
         for i in 0..4 {
-            out.push(if i <= chunk.len() { A[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+            out.push(if i <= chunk.len() {
+                A[(n >> (18 - 6 * i) & 63) as usize] as char
+            } else {
+                '='
+            });
         }
     }
-    out.as_bytes().chunks(76).map(|l| String::from_utf8_lossy(l).into_owned()).collect::<Vec<_>>().join("\n")
+    out.as_bytes()
+        .chunks(76)
+        .map(|l| String::from_utf8_lossy(l).into_owned())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// A ZIP archive of the given entries (a DOCX or ODT).
@@ -251,7 +435,8 @@ fn zip_of(entries: &[(&str, &str)]) -> Vec<u8> {
     let mut out = std::io::Cursor::new(Vec::new());
     {
         let mut writer = zip::ZipWriter::new(&mut out);
-        let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
         for (name, body) in entries {
             writer.start_file(*name, options).unwrap();
             writer.write_all(body.as_bytes()).unwrap();
@@ -272,23 +457,46 @@ fn office_files_pages_mail_and_tables_are_indexed_searched_and_read() {
         r#"<w:document {w}><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Retry policy</w:t></w:r></w:p>
         <w:p><w:r><w:t>Clients retry a failed upload three times with exponential backoff.</w:t></w:r></w:p></w:body></w:document>"#
     );
-    let styles = format!(r#"<w:styles {w}><w:style w:styleId="Heading1"><w:name w:val="heading 1"/></w:style></w:styles>"#);
-    std::fs::write(root.join("design.docx"), zip_of(&[("word/document.xml", &document), ("word/styles.xml", &styles)])).unwrap();
+    let styles = format!(
+        r#"<w:styles {w}><w:style w:styleId="Heading1"><w:name w:val="heading 1"/></w:style></w:styles>"#
+    );
+    std::fs::write(
+        root.join("design.docx"),
+        zip_of(&[
+            ("word/document.xml", &document),
+            ("word/styles.xml", &styles),
+        ]),
+    )
+    .unwrap();
     let content = r#"<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:h text:outline-level="1">Minutes</text:h><text:p>The board approved the Gothenburg lease.</text:p></office:text></office:body></office:document-content>"#;
-    std::fs::write(root.join("minutes.odt"), zip_of(&[("mimetype", "application/vnd.oasis.opendocument.text"), ("content.xml", content)])).unwrap();
+    std::fs::write(
+        root.join("minutes.odt"),
+        zip_of(&[
+            ("mimetype", "application/vnd.oasis.opendocument.text"),
+            ("content.xml", content),
+        ]),
+    )
+    .unwrap();
     std::fs::write(root.join("page.html"), "<html><head><title>T</title></head><body><nav>Home</nav><h1>Volcanoes</h1><p>Basaltic lava flows quietly.</p><h2>Eruptions</h2><p>Plinian eruptions eject pumice high into the stratosphere.</p></body></html>").unwrap();
     let mbox = "From a@x Tue Mar  4 09:30:00 2025\nFrom: Maria <maria@kestrel.example>\nSubject: Shipment held\n\nThe gripper parts are stuck in Rotterdam customs.\n\nFrom b@x Wed Mar  5 09:30:00 2025\nFrom: Ops <ops@kestrel.example>\nSubject: Price list\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: text/plain\n\nNew prices attached.\n--b\nContent-Type: text/csv\nContent-Disposition: attachment; filename=prices.csv\n\nModel,Price\nRX-40,1490 EUR\n--b--\n";
     let with_pdf = lib_dir().is_some();
     let mut mbox = mbox.to_string();
     if with_pdf {
         // A PDF attachment goes through PDFium like a PDF file.
-        let pdf = base64(&pdf(&["Credit note", "Acme credits 4200 EUR for the bearing claim."]));
+        let pdf = base64(&pdf(&[
+            "Credit note",
+            "Acme credits 4200 EUR for the bearing claim.",
+        ]));
         mbox.push_str(&format!("\nFrom c@x Thu Mar  6 09:30:00 2025\nFrom: Acme <billing@acme.example>\nSubject: Credit note\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=c\n\n--c\nContent-Type: text/plain\n\nSee attached.\n--c\nContent-Type: application/pdf\nContent-Disposition: attachment; filename=credit.pdf\nContent-Transfer-Encoding: base64\n\n{pdf}\n--c--\n"));
     }
     std::fs::write(root.join("inbox.mbox"), mbox).unwrap();
     let mut csv = String::from("Sensor,Calibrated by,Date\n");
     for i in 1..=30 {
-        csv.push_str(&format!("TS-{i:04},{},2025-01-{:02}\n", if i == 27 { "Ingrid Berg" } else { "Lab" }, i % 28 + 1));
+        csv.push_str(&format!(
+            "TS-{i:04},{},2025-01-{:02}\n",
+            if i == 27 { "Ingrid Berg" } else { "Lab" },
+            i % 28 + 1
+        ));
     }
     std::fs::write(root.join("calibration.csv"), csv).unwrap();
     std::fs::write(root.join("fake.docx"), "not a zip").unwrap();
@@ -296,64 +504,158 @@ fn office_files_pages_mail_and_tables_are_indexed_searched_and_read() {
     let mut docs = DocsToml::default();
     docs.ensure_defaults(&home);
     docs.save().unwrap();
-    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let host = LocalHost {
+        dir: home.join("locks"),
+        started: Mutex::new(Vec::new()),
+    };
     let env = env(&host, &home, exe());
-    assert_eq!(index::run(&env, &docs, None, false).unwrap(), vec![("documents".to_string(), Outcome::Ok)]);
-    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents")).unwrap().unwrap();
+    assert_eq!(
+        index::run(&env, &docs, None, false).unwrap(),
+        vec![("documents".to_string(), Outcome::Ok)]
+    );
+    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents"))
+        .unwrap()
+        .unwrap();
     let counts = ling_docs::store::counts(&conn).unwrap();
-    assert_eq!((counts.indexed, counts.skipped, counts.failed), (5, 1, 0), "{counts:?}");
+    assert_eq!(
+        (counts.indexed, counts.skipped, counts.failed),
+        (5, 1, 0),
+        "{counts:?}"
+    );
     drop(conn);
 
     let collections: Vec<_> = docs.enabled().cloned().collect();
     let mut searcher = Searcher::default();
     searcher.refresh(&collections).unwrap();
     let embedder = HashEmbedder { dim: 64 };
-    let mut top = |query: &str| searcher.search(query, 3, &Filters::default(), Some(&embedder), 0.25).unwrap().hits.remove(0);
+    let mut top = |query: &str| {
+        searcher
+            .search(query, 3, &Filters::default(), Some(&embedder), 0.25)
+            .unwrap()
+            .hits
+            .remove(0)
+    };
     let hit = top("exponential backoff upload");
-    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("design.docx", "para 1-2", "Retry policy"));
+    assert_eq!(
+        (hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()),
+        ("design.docx", "para 1-2", "Retry policy")
+    );
     // Its citation link opens the file, and only inside the collection.
     let link = ling_docs::locate::link(&hit.doc_id, None).unwrap();
     let located = ling_docs::locate::locate(&collections, &link).unwrap();
     assert_eq!(located.path, root.join("design.docx"));
     std::fs::rename(root.join("design.docx"), home.join("moved.docx")).unwrap();
     std::os::unix::fs::symlink(home.join("moved.docx"), root.join("design.docx")).unwrap();
-    assert!(ling_docs::locate::locate(&collections, &link).unwrap_err().to_string().contains("leads out"));
+    assert!(ling_docs::locate::locate(&collections, &link)
+        .unwrap_err()
+        .to_string()
+        .contains("leads out"));
     let hit = top("Gothenburg lease");
-    assert_eq!((hit.rel.as_str(), hit.loc.as_str()), ("minutes.odt", "para 1-2"));
+    assert_eq!(
+        (hit.rel.as_str(), hit.loc.as_str()),
+        ("minutes.odt", "para 1-2")
+    );
     let hit = top("Plinian pumice stratosphere");
-    assert_eq!((hit.rel.as_str(), hit.heading.as_str()), ("page.html", "Volcanoes > Eruptions"));
+    assert_eq!(
+        (hit.rel.as_str(), hit.heading.as_str()),
+        ("page.html", "Volcanoes > Eruptions")
+    );
     assert!(!hit.text.contains("Home"));
     let hit = top("gripper parts customs");
-    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("inbox.mbox", "msg 1", "Shipment held"));
+    assert_eq!(
+        (hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()),
+        ("inbox.mbox", "msg 1", "Shipment held")
+    );
     let hit = top("RX-40 price");
-    assert_eq!((hit.rel.as_str(), hit.loc.as_str()), ("inbox.mbox", "msg 2"), "the attachment is chunked with its message");
-    assert!(hit.text.contains("Model: RX-40, Price: 1490 EUR"), "{}", hit.text);
+    assert_eq!(
+        (hit.rel.as_str(), hit.loc.as_str()),
+        ("inbox.mbox", "msg 2"),
+        "the attachment is chunked with its message"
+    );
+    assert!(
+        hit.text.contains("Model: RX-40, Price: 1490 EUR"),
+        "{}",
+        hit.text
+    );
     let mail = hit.doc_id.clone();
     if with_pdf {
         let hit = top("bearing claim credit 4200");
-        assert_eq!((hit.rel.as_str(), hit.loc.as_str()), ("inbox.mbox", "msg 3"));
-        let read = ling_docs::read::read(&collections, &mail, Some("msg 3 · credit.pdf p.1"), 6000).unwrap();
-        assert!(read.text.contains("Acme credits 4200 EUR") && !read.text.contains("See attached"), "{}", read.text);
+        assert_eq!(
+            (hit.rel.as_str(), hit.loc.as_str()),
+            ("inbox.mbox", "msg 3")
+        );
+        let read = ling_docs::read::read(&collections, &mail, Some("msg 3 · credit.pdf p.1"), 6000)
+            .unwrap();
+        assert!(
+            read.text.contains("Acme credits 4200 EUR") && !read.text.contains("See attached"),
+            "{}",
+            read.text
+        );
     }
     let hit = top("Ingrid Berg calibrated");
-    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("calibration.csv", "rows 1-31", "Sensor, Calibrated by, Date"), "small row groups are packed together");
+    assert_eq!(
+        (hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()),
+        (
+            "calibration.csv",
+            "rows 1-31",
+            "Sensor, Calibrated by, Date"
+        ),
+        "small row groups are packed together"
+    );
     let table = hit.doc_id.clone();
 
     // Read back at the locators the search gave, in each kind's own words.
     let read = ling_docs::read::read(&collections, &mail, Some("msg 2"), 6000).unwrap();
-    assert!(read.text.starts_with("From: Ops <ops@kestrel.example>") && read.text.contains("Model: RX-40"), "{}", read.text);
+    assert!(
+        read.text.starts_with("From: Ops <ops@kestrel.example>")
+            && read.text.contains("Model: RX-40"),
+        "{}",
+        read.text
+    );
     assert!(!read.text.contains("gripper"));
-    let read = ling_docs::read::read(&collections, &mail, Some("msg 2 · prices.csv"), 6000).unwrap();
-    assert_eq!(read.text.trim_end(), "Model, Price\nModel: RX-40, Price: 1490 EUR");
+    let read =
+        ling_docs::read::read(&collections, &mail, Some("msg 2 · prices.csv"), 6000).unwrap();
+    assert_eq!(
+        read.text.trim_end(),
+        "Model, Price\nModel: RX-40, Price: 1490 EUR"
+    );
     let read = ling_docs::read::read(&collections, &table, Some("rows 28-28"), 6000).unwrap();
-    assert_eq!(read.text.trim_end(), "Sensor: TS-0027, Calibrated by: Ingrid Berg, Date: 2025-01-28");
-    assert_eq!((read.loc.as_str(), read.next.as_deref()), ("rows 28-28", Some("rows 29-29")));
-    assert!(ling_docs::read::read(&collections, &table, Some("p.2"), 6000).unwrap_err().to_string().contains("by rows"));
+    assert_eq!(
+        read.text.trim_end(),
+        "Sensor: TS-0027, Calibrated by: Ingrid Berg, Date: 2025-01-28"
+    );
+    assert_eq!(
+        (read.loc.as_str(), read.next.as_deref()),
+        ("rows 28-28", Some("rows 29-29"))
+    );
+    assert!(
+        ling_docs::read::read(&collections, &table, Some("p.2"), 6000)
+            .unwrap_err()
+            .to_string()
+            .contains("by rows")
+    );
     // The type filter knows the new kinds.
-    let only = Filters { kind: Some("eml".into()), ..Filters::default() };
-    assert!(searcher.search("gripper", 3, &only, Some(&embedder), 0.25).unwrap().hits.is_empty());
-    let only = Filters { kind: Some("mbox".into()), ..Filters::default() };
-    assert_eq!(searcher.search("gripper", 3, &only, Some(&embedder), 0.25).unwrap().hits[0].rel, "inbox.mbox");
+    let only = Filters {
+        kind: Some("eml".into()),
+        ..Filters::default()
+    };
+    assert!(searcher
+        .search("gripper", 3, &only, Some(&embedder), 0.25)
+        .unwrap()
+        .hits
+        .is_empty());
+    let only = Filters {
+        kind: Some("mbox".into()),
+        ..Filters::default()
+    };
+    assert_eq!(
+        searcher
+            .search("gripper", 3, &only, Some(&embedder), 0.25)
+            .unwrap()
+            .hits[0]
+            .rel,
+        "inbox.mbox"
+    );
 }
 
 #[test]
@@ -364,29 +666,62 @@ fn spreadsheets_and_presentations_are_indexed_and_read_in_their_own_parts() {
     std::fs::create_dir_all(&root).unwrap();
     let main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
     let rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-    let workbook = format!(r#"<workbook xmlns="{main}" xmlns:r="{rel}"><sheets><sheet name="Notes" sheetId="1" r:id="rId1"/><sheet name="Fleet" sheetId="2" r:id="rId2"/></sheets></workbook>"#);
-    let rels = format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="{rel}/worksheet" Target="worksheets/sheet2.xml"/></Relationships>"#);
-    let notes = format!(r#"<worksheet xmlns="{main}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Remark</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Nothing to see</t></is></c></row></sheetData></worksheet>"#);
-    let mut rows = String::from(r#"<row r="1"><c r="A1" t="inlineStr"><is><t>Robot</t></is></c><c r="B1" t="inlineStr"><is><t>Site</t></is></c></row>"#);
+    let workbook = format!(
+        r#"<workbook xmlns="{main}" xmlns:r="{rel}"><sheets><sheet name="Notes" sheetId="1" r:id="rId1"/><sheet name="Fleet" sheetId="2" r:id="rId2"/></sheets></workbook>"#
+    );
+    let rels = format!(
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="{rel}/worksheet" Target="worksheets/sheet2.xml"/></Relationships>"#
+    );
+    let notes = format!(
+        r#"<worksheet xmlns="{main}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Remark</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Nothing to see</t></is></c></row></sheetData></worksheet>"#
+    );
+    let mut rows = String::from(
+        r#"<row r="1"><c r="A1" t="inlineStr"><is><t>Robot</t></is></c><c r="B1" t="inlineStr"><is><t>Site</t></is></c></row>"#,
+    );
     for i in 2..=40 {
-        let site = if i == 33 { "Volvo Cars Torslanda" } else { "Depot" };
+        let site = if i == 33 {
+            "Volvo Cars Torslanda"
+        } else {
+            "Depot"
+        };
         rows.push_str(&format!(r#"<row r="{i}"><c r="A{i}" t="inlineStr"><is><t>RX-{i}</t></is></c><c r="B{i}" t="inlineStr"><is><t>{site}</t></is></c></row>"#));
     }
     let fleet = format!(r#"<worksheet xmlns="{main}"><sheetData>{rows}</sheetData></worksheet>"#);
-    let root_rels = format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/officeDocument" Target="xl/workbook.xml"/></Relationships>"#);
+    let root_rels = format!(
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/officeDocument" Target="xl/workbook.xml"/></Relationships>"#
+    );
     std::fs::write(
         root.join("fleet.xlsx"),
-        zip_of(&[("_rels/.rels", &root_rels), ("xl/workbook.xml", &workbook), ("xl/_rels/workbook.xml.rels", &rels), ("xl/worksheets/sheet1.xml", &notes), ("xl/worksheets/sheet2.xml", &fleet)]),
+        zip_of(&[
+            ("_rels/.rels", &root_rels),
+            ("xl/workbook.xml", &workbook),
+            ("xl/_rels/workbook.xml.rels", &rels),
+            ("xl/worksheets/sheet1.xml", &notes),
+            ("xl/worksheets/sheet2.xml", &fleet),
+        ]),
     )
     .unwrap();
     let ns = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#;
-    let slide = |title: &str, body: &str| format!(r#"<p:sld {ns}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>{title}</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:txBody><a:p><a:r><a:t>{body}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"#);
+    let slide = |title: &str, body: &str| {
+        format!(
+            r#"<p:sld {ns}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>{title}</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:txBody><a:p><a:r><a:t>{body}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"#
+        )
+    };
     std::fs::write(
         root.join("roadmap.pptx"),
         zip_of(&[
             ("ppt/presentation.xml", &format!("<p:presentation {ns}/>")),
-            ("ppt/slides/slide1.xml", &slide("Roadmap", "Three releases this year.")),
-            ("ppt/slides/slide2.xml", &slide("Risks", "The motion controller software is late because of the safety audit.")),
+            (
+                "ppt/slides/slide1.xml",
+                &slide("Roadmap", "Three releases this year."),
+            ),
+            (
+                "ppt/slides/slide2.xml",
+                &slide(
+                    "Risks",
+                    "The motion controller software is late because of the safety audit.",
+                ),
+            ),
         ]),
     )
     .unwrap();
@@ -395,27 +730,64 @@ fn spreadsheets_and_presentations_are_indexed_and_read_in_their_own_parts() {
     let mut docs = DocsToml::default();
     docs.ensure_defaults(&home);
     docs.save().unwrap();
-    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let host = LocalHost {
+        dir: home.join("locks"),
+        started: Mutex::new(Vec::new()),
+    };
     let env = env(&host, &home, exe());
-    assert_eq!(index::run(&env, &docs, None, false).unwrap(), vec![("documents".to_string(), Outcome::Ok)]);
+    assert_eq!(
+        index::run(&env, &docs, None, false).unwrap(),
+        vec![("documents".to_string(), Outcome::Ok)]
+    );
     let collections: Vec<_> = docs.enabled().cloned().collect();
     let mut searcher = Searcher::default();
     searcher.refresh(&collections).unwrap();
     let embedder = HashEmbedder { dim: 64 };
-    let mut top = |query: &str| searcher.search(query, 3, &Filters::default(), Some(&embedder), 0.25).unwrap().hits.remove(0);
+    let mut top = |query: &str| {
+        searcher
+            .search(query, 3, &Filters::default(), Some(&embedder), 0.25)
+            .unwrap()
+            .hits
+            .remove(0)
+    };
     let hit = top("RX-33 Volvo Cars Torslanda");
-    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("fleet.xlsx", "sheet Fleet, rows 1-40", "Fleet > Robot, Site"));
-    let read = ling_docs::read::read(&collections, &hit.doc_id, Some("sheet Fleet, rows 33-33"), 6000).unwrap();
-    assert_eq!(read.text.trim_end(), "Robot: RX-33, Site: Volvo Cars Torslanda");
+    assert_eq!(
+        (hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()),
+        (
+            "fleet.xlsx",
+            "sheet Fleet, rows 1-40",
+            "Fleet > Robot, Site"
+        )
+    );
+    let read = ling_docs::read::read(
+        &collections,
+        &hit.doc_id,
+        Some("sheet Fleet, rows 33-33"),
+        6000,
+    )
+    .unwrap();
+    assert_eq!(
+        read.text.trim_end(),
+        "Robot: RX-33, Site: Volvo Cars Torslanda"
+    );
     let read = ling_docs::read::read(&collections, &hit.doc_id, Some("sheet Notes"), 6000).unwrap();
     assert_eq!(read.text.trim_end(), "Remark\nRemark: Nothing to see");
     let hit = top("motion controller late safety audit");
-    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("roadmap.pptx", "slide 2", "Risks"));
+    assert_eq!(
+        (hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()),
+        ("roadmap.pptx", "slide 2", "Risks")
+    );
     let read = ling_docs::read::read(&collections, &hit.doc_id, Some("slide 1"), 6000).unwrap();
     assert_eq!(read.text.trim_end(), "Roadmap\nThree releases this year.");
-    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents")).unwrap().unwrap();
+    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents"))
+        .unwrap()
+        .unwrap();
     let counts = ling_docs::store::counts(&conn).unwrap();
-    assert_eq!((counts.indexed, counts.skipped), (2, 1), "the .xls that is no workbook is skipped by its sniff");
+    assert_eq!(
+        (counts.indexed, counts.skipped),
+        (2, 1),
+        "the .xls that is no workbook is skipped by its sniff"
+    );
 }
 
 #[test]
@@ -426,62 +798,145 @@ fn scanned_pages_and_images_are_read_by_ocr_once_and_again_when_they_change() {
     std::fs::create_dir_all(&root).unwrap();
     let png = |shade: u8| {
         let mut bytes = Vec::new();
-        image::RgbImage::from_pixel(8, 8, image::Rgb([shade, shade, shade])).write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+        image::RgbImage::from_pixel(8, 8, image::Rgb([shade, shade, shade]))
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
         bytes
     };
     std::fs::write(root.join("receipt.png"), png(200)).unwrap();
     std::fs::write(root.join("fake.jpg"), b"not a jpeg").unwrap();
     let with_pdf = lib_dir().is_some();
     if with_pdf {
-        std::fs::write(root.join("contract.pdf"), pdf_pages(&[&["Master services agreement, page one."], &[]], None)).unwrap();
+        std::fs::write(
+            root.join("contract.pdf"),
+            pdf_pages(&[&["Master services agreement, page one."], &[]], None),
+        )
+        .unwrap();
     }
     // SAFETY: the tests of this file take turns (TURN).
     unsafe { std::env::set_var("MIGHTLING_DOCS_TEST_OCR", "fake") };
     let mut docs = DocsToml::default();
     docs.ensure_defaults(&home);
     docs.save().unwrap();
-    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let host = LocalHost {
+        dir: home.join("locks"),
+        started: Mutex::new(Vec::new()),
+    };
     let env = env(&host, &home, exe());
-    assert_eq!(index::run(&env, &docs, None, false).unwrap(), vec![("documents".to_string(), Outcome::Ok)]);
+    assert_eq!(
+        index::run(&env, &docs, None, false).unwrap(),
+        vec![("documents".to_string(), Outcome::Ok)]
+    );
     // The OCR ran in a scope of its own, named for `server start` to stop.
     let started = host.started.lock().unwrap().clone();
-    assert!(started.iter().any(|(unit, cap)| unit.starts_with("mightling-index-docs-documents-o") && *cap == 2 << 30), "{started:?}");
-    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents")).unwrap().unwrap();
+    assert!(
+        started.iter().any(
+            |(unit, cap)| unit.starts_with("mightling-index-docs-documents-o") && *cap == 2 << 30
+        ),
+        "{started:?}"
+    );
+    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents"))
+        .unwrap()
+        .unwrap();
     let counts = ling_docs::store::counts(&conn).unwrap();
-    assert_eq!((counts.ocr_pages, counts.needs_ocr_pages, counts.skipped), (if with_pdf { 2 } else { 1 }, 0, 1), "{counts:?}");
+    assert_eq!(
+        (counts.ocr_pages, counts.needs_ocr_pages, counts.skipped),
+        (if with_pdf { 2 } else { 1 }, 0, 1),
+        "{counts:?}"
+    );
     drop(conn);
 
     let collections: Vec<_> = docs.enabled().cloned().collect();
     let mut searcher = Searcher::default();
     searcher.refresh(&collections).unwrap();
     let embedder = HashEmbedder { dim: 64 };
-    let hit = searcher.search("recognised text receipt", 3, &Filters::default(), Some(&embedder), 0.25).unwrap().hits.remove(0);
-    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("receipt.png", "image", "scanned page (OCR)"));
+    let hit = searcher
+        .search(
+            "recognised text receipt",
+            3,
+            &Filters::default(),
+            Some(&embedder),
+            0.25,
+        )
+        .unwrap()
+        .hits
+        .remove(0);
+    assert_eq!(
+        (hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()),
+        ("receipt.png", "image", "scanned page (OCR)")
+    );
     let read = ling_docs::read::read(&collections, &hit.doc_id, None, 6000).unwrap();
-    assert_eq!((read.loc.as_str(), read.text.as_str()), ("image", "Recognised text of receipt.png page 1"));
+    assert_eq!(
+        (read.loc.as_str(), read.text.as_str()),
+        ("image", "Recognised text of receipt.png page 1")
+    );
     if with_pdf {
-        let hit = searcher.search("recognised text contract page 2", 3, &Filters::default(), Some(&embedder), 0.25).unwrap().hits.remove(0);
+        let hit = searcher
+            .search(
+                "recognised text contract page 2",
+                3,
+                &Filters::default(),
+                Some(&embedder),
+                0.25,
+            )
+            .unwrap()
+            .hits
+            .remove(0);
         assert_eq!(hit.rel, "contract.pdf");
         let read = ling_docs::read::read(&collections, &hit.doc_id, Some("p.2"), 6000).unwrap();
-        assert!(read.text.contains("Recognised text of contract.pdf page 2"), "{}", read.text);
+        assert!(
+            read.text.contains("Recognised text of contract.pdf page 2"),
+            "{}",
+            read.text
+        );
         let read = ling_docs::read::read(&collections, &hit.doc_id, Some("p.1"), 6000).unwrap();
-        assert!(read.text.contains("Master services agreement"), "the text layer stays: {}", read.text);
+        assert!(
+            read.text.contains("Master services agreement"),
+            "the text layer stays: {}",
+            read.text
+        );
     }
 
     // Read once: a second run starts no OCR scope.
     host.started.lock().unwrap().clear();
     index::run(&env, &docs, None, false).unwrap();
-    assert!(!host.started.lock().unwrap().iter().any(|(unit, _)| unit.contains("-o")), "{:?}", host.started.lock().unwrap());
+    assert!(
+        !host
+            .started
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(unit, _)| unit.contains("-o")),
+        "{:?}",
+        host.started.lock().unwrap()
+    );
     // A changed image is read again.
     std::thread::sleep(Duration::from_millis(20));
     std::fs::write(root.join("receipt.png"), png(100)).unwrap();
     index::run(&env, &docs, None, false).unwrap();
-    assert!(host.started.lock().unwrap().iter().any(|(unit, _)| unit.contains("-o")));
+    assert!(host
+        .started
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(unit, _)| unit.contains("-o")));
 
     // With OCR switched off, images are not even kept.
-    let off = Env { settings: Settings { ocr: false, ..env.settings.clone() }, ..env };
+    let off = Env {
+        settings: Settings {
+            ocr: false,
+            ..env.settings.clone()
+        },
+        ..env
+    };
     let found = ling_docs::discover::walk(&docs.collections[0], &home, false);
-    assert!(found.candidates.iter().all(|c| c.kind != ling_docs::discover::Kind::Image));
+    assert!(found
+        .candidates
+        .iter()
+        .all(|c| c.kind != ling_docs::discover::Kind::Image));
     assert!(index::ocr_ready(&off).is_some());
     unsafe { std::env::remove_var("MIGHTLING_DOCS_TEST_OCR") };
 }
@@ -526,22 +981,44 @@ fn a_file_that_hangs_or_kills_the_extractor_fails_alone() {
     let (_dir, home) = scratch_home();
     let root = home.join("notes");
     std::fs::create_dir_all(&root).unwrap();
-    for (name, text) in [("a.txt", "alpha"), ("crash.txt", "boom"), ("hang.txt", "stuck"), ("z.txt", "omega")] {
+    for (name, text) in [
+        ("a.txt", "alpha"),
+        ("crash.txt", "boom"),
+        ("hang.txt", "stuck"),
+        ("z.txt", "omega"),
+    ] {
         std::fs::write(root.join(name), text).unwrap();
     }
     let mut docs = DocsToml::default();
     docs.add(&root, None, &home).unwrap();
     docs.save().unwrap();
-    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let host = LocalHost {
+        dir: home.join("locks"),
+        started: Mutex::new(Vec::new()),
+    };
     let env = env(&host, &home, fake_worker(&home));
     let started = std::time::Instant::now();
-    assert_eq!(index::run(&env, &docs, Some("notes"), false).unwrap()[0].1, Outcome::Ok);
+    assert_eq!(
+        index::run(&env, &docs, Some("notes"), false).unwrap()[0].1,
+        Outcome::Ok
+    );
     assert!(started.elapsed() < Duration::from_secs(30));
-    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("notes")).unwrap().unwrap();
-    let status = |path: &str| conn.query_row("SELECT status FROM documents WHERE path = ?", [path], |r| r.get::<_, String>(0)).unwrap();
+    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("notes"))
+        .unwrap()
+        .unwrap();
+    let status = |path: &str| {
+        conn.query_row("SELECT status FROM documents WHERE path = ?", [path], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap()
+    };
     assert_eq!(status("a.txt"), "ok");
     assert_eq!(status("z.txt"), "ok", "the run went on after both");
-    assert!(status("crash.txt").starts_with("failed: killed"), "{}", status("crash.txt"));
+    assert!(
+        status("crash.txt").starts_with("failed: killed"),
+        "{}",
+        status("crash.txt")
+    );
     assert_eq!(status("hang.txt"), "failed: timed out after 2 s");
     // Jobs run shortest name first (a, z, hang, crash): one extractor until the hang, a new one
     // for the crash, then the embedder.
@@ -582,7 +1059,11 @@ print(json.dumps({{"final_url": url, "status": 200, "content_type": "application
 }
 
 /// `ling-docs mcp` in a scratch home, its runs as plain children, with `extra` in its environment.
-fn pdf_server(home: &Path, cwd: &Path, extra: &[(&str, &str)]) -> (Child, impl FnMut(serde_json::Value) -> serde_json::Value) {
+fn pdf_server(
+    home: &Path,
+    cwd: &Path,
+    extra: &[(&str, &str)],
+) -> (Child, impl FnMut(serde_json::Value) -> serde_json::Value) {
     let mut command = Command::new(exe());
     command
         .arg("mcp")
@@ -625,7 +1106,10 @@ fn call(name: &str, arguments: serde_json::Value) -> serde_json::Value {
 }
 
 fn text(answer: &serde_json::Value) -> String {
-    answer["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string()
+    answer["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[test]
@@ -639,15 +1123,31 @@ fn pdf_search_finds_the_page_reads_it_back_and_keeps_to_the_session() {
     let work = home.join("work");
     std::fs::create_dir_all(work.join("papers")).unwrap();
     // Pages of about 400 words, as a paper's are, so each page is a chunk of its own.
-    let filler: Vec<String> = (0..32).map(|i| format!("Line {i} of measured field observations from the eruption campaign data")).collect();
-    let page = |lead: &[&str]| -> Vec<String> { lead.iter().map(|l| l.to_string()).chain(filler.iter().cloned()).collect() };
+    let filler: Vec<String> = (0..32)
+        .map(|i| format!("Line {i} of measured field observations from the eruption campaign data"))
+        .collect();
+    let page = |lead: &[&str]| -> Vec<String> {
+        lead.iter()
+            .map(|l| l.to_string())
+            .chain(filler.iter().cloned())
+            .collect()
+    };
     let pages = [
-        page(&["Scaling laws for volcanic ash dispersal", "We study plume height and wind shear."]),
-        page(&["Training details", "All models used a learning rate of 0.0003 with cosine decay."]),
+        page(&[
+            "Scaling laws for volcanic ash dispersal",
+            "We study plume height and wind shear.",
+        ]),
+        page(&[
+            "Training details",
+            "All models used a learning rate of 0.0003 with cosine decay.",
+        ]),
         Vec::new(),
         page(&["Results", "Ash travelled furthest under strong shear."]),
     ];
-    let refs: Vec<Vec<&str>> = pages.iter().map(|p| p.iter().map(String::as_str).collect()).collect();
+    let refs: Vec<Vec<&str>> = pages
+        .iter()
+        .map(|p| p.iter().map(String::as_str).collect())
+        .collect();
     let slices: Vec<&[&str]> = refs.iter().map(|p| p.as_slice()).collect();
     let paper = pdf_pages(&slices, Some("Volcanic Ash Transport"));
     std::fs::write(work.join("papers/ash.pdf"), &paper).unwrap();
@@ -655,29 +1155,77 @@ fn pdf_search_finds_the_page_reads_it_back_and_keeps_to_the_session() {
     std::fs::create_dir_all(home.join("elsewhere")).unwrap();
     std::fs::write(home.join("elsewhere/ash.pdf"), &paper).unwrap();
 
-    let (mut server, mut ask) = pdf_server(&home, &work, &[("DREAMFERENCE_MIGHTLING_DOCS_PDF_WAIT_S", "0")]);
+    let (mut server, mut ask) = pdf_server(
+        &home,
+        &work,
+        &[("DREAMFERENCE_MIGHTLING_DOCS_PDF_WAIT_S", "0")],
+    );
     let init = ask(serde_json::json!({ "method": "initialize", "params": {} }));
-    assert!(init["result"]["capabilities"]["experimental"]["codex/sandbox-state-meta"].is_object(), "{init}");
+    assert!(
+        init["result"]["capabilities"]["experimental"]["codex/sandbox-state-meta"].is_object(),
+        "{init}"
+    );
     let list = ask(serde_json::json!({ "method": "tools/list" }));
-    let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["pdf_search", "docs_read"], "no collection: no docs_search");
+    let names: Vec<&str> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["pdf_search", "docs_read"],
+        "no collection: no docs_search"
+    );
 
     // The page that holds the answer comes first, cited by source and page.
-    let found = ask(call("pdf_search", serde_json::json!({ "source": "papers/ash.pdf", "query": "learning rate" })));
+    let found = ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "papers/ash.pdf", "query": "learning rate" }),
+    ));
     let answer = text(&found);
     assert!(found["result"]["isError"].is_null(), "{answer}");
     let path = work.join("papers/ash.pdf");
-    assert!(answer.starts_with(&format!("PDF: {} — \"Volcanic Ash Transport\", 4 pages.", path.display())), "{answer}");
-    assert!(answer.contains("No text layer (scanned?) on p.3"), "{answer}");
+    assert!(
+        answer.starts_with(&format!(
+            "PDF: {} — \"Volcanic Ash Transport\", 4 pages.",
+            path.display()
+        )),
+        "{answer}"
+    );
+    assert!(
+        answer.contains("No text layer (scanned?) on p.3"),
+        "{answer}"
+    );
     let first = answer.split("<untrusted").nth(1).unwrap();
-    assert!(first.contains("locator: p.2\n") && first.contains("0.0003"), "{answer}");
-    let id = first.split("id=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+    assert!(
+        first.contains("locator: p.2\n") && first.contains("0.0003"),
+        "{answer}"
+    );
+    let id = first
+        .split("id=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
     assert!(id.starts_with("pdf-") && id.ends_with(":1"), "{id}");
-    assert!(answer.contains(&format!("docs_read(doc_id=\"{id}\", locator=\"p.2\")")), "{answer}");
+    assert!(
+        answer.contains(&format!("docs_read(doc_id=\"{id}\", locator=\"p.2\")")),
+        "{answer}"
+    );
 
     // docs_read serves the cached pages, a page at a time.
-    let read = text(&ask(call("docs_read", serde_json::json!({ "doc_id": id, "locator": "p.4" }))));
-    assert!(read.contains("Ash travelled furthest") && read.contains(&format!("path: {}", path.display())), "{read}");
+    let read = text(&ask(call(
+        "docs_read",
+        serde_json::json!({ "doc_id": id, "locator": "p.4" }),
+    )));
+    assert!(
+        read.contains("Ash travelled furthest")
+            && read.contains(&format!("path: {}", path.display())),
+        "{read}"
+    );
 
     // The same bytes elsewhere in the workspace (another call's working directory from Codex's
     // `_meta`) are the same entry: no second extraction.
@@ -685,7 +1233,9 @@ fn pdf_search_finds_the_page_reads_it_back_and_keeps_to_the_session() {
     std::fs::create_dir_all(&other).unwrap();
     std::fs::write(other.join("copy.pdf"), &paper).unwrap();
     let meta = serde_json::json!({ "codex/sandbox-state-meta": { "sandbox_cwd": format!("file://{}", other.display()) } });
-    let again = ask(serde_json::json!({ "method": "tools/call", "params": { "name": "pdf_search", "arguments": { "source": "copy.pdf", "query": "wind shear" }, "_meta": meta } }));
+    let again = ask(
+        serde_json::json!({ "method": "tools/call", "params": { "name": "pdf_search", "arguments": { "source": "copy.pdf", "query": "wind shear" }, "_meta": meta } }),
+    );
     assert!(text(&again).contains(&id), "{}", text(&again));
     let entries = ling_docs::pdf_search::entries();
     assert_eq!(entries.len(), 1, "{entries:?}");
@@ -695,32 +1245,93 @@ fn pdf_search_finds_the_page_reads_it_back_and_keeps_to_the_session() {
         assert_eq!(answer["result"]["isError"], true, "{answer}");
         text(&answer)
     };
-    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "../elsewhere/ash.pdf", "query": "x" })))).contains("outside this session's workspace"));
-    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "notes.pdf", "query": "x" })))).contains("not a PDF"));
-    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "drive:1AbC", "query": "x" })))).contains("Drive PDFs cannot be searched yet"));
-    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "papers/ash.pdf" })))).contains("needs a query"));
+    assert!(refuse(ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "../elsewhere/ash.pdf", "query": "x" })
+    )))
+    .contains("outside this session's workspace"));
+    assert!(refuse(ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "notes.pdf", "query": "x" })
+    )))
+    .contains("not a PDF"));
+    assert!(refuse(ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "drive:1AbC", "query": "x" })
+    )))
+    .contains("Drive PDFs cannot be searched yet"));
+    assert!(refuse(ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "papers/ash.pdf" })
+    )))
+    .contains("needs a query"));
 
     // A URL goes through ling-fetch; at /airgapped on (a seal written by the session, this test)
     // a new one is refused before anything is started, and a local PDF is still searched.
-    std::fs::write(home.join("web/remote.pdf"), pdf_pages(&[&["Remote appendix", "The contract ends after ninety days of notice."]], None)).unwrap();
-    let remote = text(&ask(call("pdf_search", serde_json::json!({ "source": "https://example.org/files/remote.pdf", "query": "notice period" }))));
-    assert!(remote.starts_with("PDF: https://example.org/files/remote.pdf — \"remote\", 1 pages.") && remote.contains("ninety days"), "{remote}");
-    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "https://example.org/files/missing.pdf", "query": "x" })))).contains("HTTP 404"));
+    std::fs::write(
+        home.join("web/remote.pdf"),
+        pdf_pages(
+            &[&[
+                "Remote appendix",
+                "The contract ends after ninety days of notice.",
+            ]],
+            None,
+        ),
+    )
+    .unwrap();
+    let remote = text(&ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "https://example.org/files/remote.pdf", "query": "notice period" }),
+    )));
+    assert!(
+        remote.starts_with("PDF: https://example.org/files/remote.pdf — \"remote\", 1 pages.")
+            && remote.contains("ninety days"),
+        "{remote}"
+    );
+    assert!(refuse(ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "https://example.org/files/missing.pdf", "query": "x" })
+    )))
+    .contains("HTTP 404"));
     std::fs::create_dir_all(home.join("run/ling-airgapped")).unwrap();
-    std::fs::write(home.join("run/ling-airgapped/thread-1"), std::process::id().to_string()).unwrap();
+    std::fs::write(
+        home.join("run/ling-airgapped/thread-1"),
+        std::process::id().to_string(),
+    )
+    .unwrap();
     std::fs::write(home.join("web/other.pdf"), pdf_pages(&[&["Other"]], None)).unwrap();
-    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "https://example.org/other.pdf", "query": "x" })))).contains("/airgapped on"));
-    assert!(text(&ask(call("pdf_search", serde_json::json!({ "source": "papers/ash.pdf", "query": "plume height" })))).contains("p.1"));
+    assert!(refuse(ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "https://example.org/other.pdf", "query": "x" })
+    )))
+    .contains("/airgapped on"));
+    assert!(text(&ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "papers/ash.pdf", "query": "plume height" })
+    )))
+    .contains("p.1"));
     drop(ask);
     let _ = server.wait();
 
     // Every chunk ended up embedded, in the background where the call did not wait.
-    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path(id.split(':').next().unwrap())).unwrap().unwrap();
+    let conn =
+        ling_docs::store::open_ro(&ling_docs::config::db_path(id.split(':').next().unwrap()))
+            .unwrap()
+            .unwrap();
     let counts = ling_docs::store::counts(&conn).unwrap();
-    assert_eq!((counts.indexed, counts.needs_ocr_pages), (1, 1), "{counts:?}");
+    assert_eq!(
+        (counts.indexed, counts.needs_ocr_pages),
+        (1, 1),
+        "{counts:?}"
+    );
     assert_eq!(counts.chunks, counts.embedded, "{counts:?}");
     // Nothing left behind but the indexes.
-    let left: Vec<String> = std::fs::read_dir(ling_docs::config::pdf_cache_dir()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| !n.ends_with(".db") && !n.ends_with(".lock")).collect();
+    let left: Vec<String> = std::fs::read_dir(ling_docs::config::pdf_cache_dir())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.ends_with(".db") && !n.ends_with(".lock"))
+        .collect();
     assert!(left.is_empty(), "{left:?}");
 }
 
@@ -729,15 +1340,35 @@ fn a_pdf_over_the_page_cap_is_indexed_from_the_start_and_says_so() {
     let Some(_) = lib_dir() else { return };
     let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
     let (_dir, home) = scratch_home();
-    let pages: Vec<Vec<String>> = (1..=5).map(|i| vec![format!("Chapter {i}"), format!("marker{i} appears on this page only")]).collect();
-    let refs: Vec<Vec<&str>> = pages.iter().map(|p| p.iter().map(String::as_str).collect()).collect();
+    let pages: Vec<Vec<String>> = (1..=5)
+        .map(|i| {
+            vec![
+                format!("Chapter {i}"),
+                format!("marker{i} appears on this page only"),
+            ]
+        })
+        .collect();
+    let refs: Vec<Vec<&str>> = pages
+        .iter()
+        .map(|p| p.iter().map(String::as_str).collect())
+        .collect();
     let slices: Vec<&[&str]> = refs.iter().map(|p| p.as_slice()).collect();
     std::fs::write(home.join("long.pdf"), pdf_pages(&slices, None)).unwrap();
-    let (mut server, mut ask) = pdf_server(&home, &home, &[("DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_PAGES", "2")]);
-    let answer = text(&ask(call("pdf_search", serde_json::json!({ "source": "long.pdf", "query": "marker2" }))));
+    let (mut server, mut ask) = pdf_server(
+        &home,
+        &home,
+        &[("DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_PAGES", "2")],
+    );
+    let answer = text(&ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "long.pdf", "query": "marker2" }),
+    )));
     assert!(answer.contains("5 pages (pages 1-2 indexed"), "{answer}");
     assert!(answer.contains("marker2"), "{answer}");
-    let late = text(&ask(call("pdf_search", serde_json::json!({ "source": "long.pdf", "query": "marker5" }))));
+    let late = text(&ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "long.pdf", "query": "marker5" }),
+    )));
     assert!(!late.contains("marker5 appears"), "{late}");
     drop(ask);
     let _ = server.wait();
@@ -753,7 +1384,12 @@ fn the_cache_is_evicted_by_age_and_size_and_spares_what_is_in_use() {
     let entry = |hex: &str, mb: usize, hours_ago: u64| {
         let path = dir.join(format!("pdf-{hex}.db"));
         std::fs::write(&path, vec![0u8; mb << 20]).unwrap();
-        std::fs::File::options().append(true).open(&path).unwrap().set_modified(now - Duration::from_secs(hours_ago * 3600)).unwrap();
+        std::fs::File::options()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(now - Duration::from_secs(hours_ago * 3600))
+            .unwrap();
         format!("pdf-{hex}")
     };
     let old = entry("000000000001", 1, 30);
@@ -766,13 +1402,22 @@ fn the_cache_is_evicted_by_age_and_size_and_spares_what_is_in_use() {
     let held = std::fs::File::create(dir.join(format!("{busy}.lock"))).unwrap();
     ling_docs::host::flock(&held, false).unwrap();
     // One day unused goes; then the oldest until at most 6 MiB, sparing the ones in use.
-    let removed = ling_docs::pdf_search::evict(6, 1, &[in_use.clone()]);
-    let left: Vec<String> = ling_docs::pdf_search::entries().into_iter().map(|(n, ..)| n).collect();
+    let removed = ling_docs::pdf_search::evict(6, 1, std::slice::from_ref(&in_use));
+    let left: Vec<String> = ling_docs::pdf_search::entries()
+        .into_iter()
+        .map(|(n, ..)| n)
+        .collect();
     assert_eq!(removed, 2, "{left:?}");
     assert!(!left.contains(&old) && !left.contains(&big_old), "{left:?}");
-    assert!(left.contains(&in_use) && left.contains(&fresh) && left.contains(&busy), "{left:?}");
+    assert!(
+        left.contains(&in_use) && left.contains(&fresh) && left.contains(&busy),
+        "{left:?}"
+    );
     drop(held);
-    assert!(!dir.join("run-pdf-000000000009-999999999").exists(), "a dead run's folder is removed");
+    assert!(
+        !dir.join("run-pdf-000000000009-999999999").exists(),
+        "a dead run's folder is removed"
+    );
 }
 
 #[test]
@@ -780,7 +1425,14 @@ fn extract_prints_pages_and_names_the_scans_without_a_scope() {
     let Some(_) = lib_dir() else { return };
     let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
     let (_dir, home) = scratch_home();
-    std::fs::write(home.join("doc.pdf"), pdf_pages(&[&["First page"], &["Second page text"], &[]], Some("Three Pages"))).unwrap();
+    std::fs::write(
+        home.join("doc.pdf"),
+        pdf_pages(
+            &[&["First page"], &["Second page text"], &[]],
+            Some("Three Pages"),
+        ),
+    )
+    .unwrap();
     // No user bus here: the worker runs as a plain child under RLIMIT_AS, as inside the sandbox.
     let output = Command::new(exe())
         .args(["extract", "doc.pdf", "--pages", "2-3"])
@@ -792,20 +1444,46 @@ fn extract_prints_pages_and_names_the_scans_without_a_scope() {
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "{out} {}", String::from_utf8_lossy(&output.stderr));
-    assert!(out.starts_with("doc.pdf — \"Three Pages\", 3 pages; p.2 returned"), "{out}");
-    assert!(out.contains("--- page 2 of 3 ---\nSecond page text"), "{out}");
+    assert!(
+        output.status.success(),
+        "{out} {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        out.starts_with("doc.pdf — \"Three Pages\", 3 pages; p.2 returned"),
+        "{out}"
+    );
+    assert!(
+        out.contains("--- page 2 of 3 ---\nSecond page text"),
+        "{out}"
+    );
     assert!(!out.contains("First page"), "{out}");
     assert!(out.contains("p.3: no text layer (scanned?)"), "{out}");
     let broken = home.join("broken.pdf");
     std::fs::write(&broken, b"%PDF-1.4\n garbage").unwrap();
-    let output = Command::new(exe()).args(["extract", "broken.pdf"]).current_dir(&home).env("HOME", &home).env("XDG_RUNTIME_DIR", home.join("no-run")).env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent").output().unwrap();
+    let output = Command::new(exe())
+        .args(["extract", "broken.pdf"])
+        .current_dir(&home)
+        .env("HOME", &home)
+        .env("XDG_RUNTIME_DIR", home.join("no-run"))
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+        .output()
+        .unwrap();
     assert!(!output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "failed: not a PDF, or damaged");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "failed: not a PDF, or damaged"
+    );
 }
 
 /// `ling-docs <args>` with a given user home and agent home, and nothing of the real machine's.
-fn docs_command(args: &[&str], user: &Path, agent: &Path, cwd: &Path, docs_setting: Option<&str>) -> std::process::Output {
+fn docs_command(
+    args: &[&str],
+    user: &Path,
+    agent: &Path,
+    cwd: &Path,
+    docs_setting: Option<&str>,
+) -> std::process::Output {
     let mut command = Command::new(exe());
     command
         .args(args)
@@ -832,7 +1510,11 @@ fn a_scratch_agent_home_adds_no_collections_and_indexes_nothing() {
     let user = root.join("user");
     for folder in ["Documents", "Downloads"] {
         std::fs::create_dir_all(user.join(folder)).unwrap();
-        std::fs::write(user.join(folder).join("note.md"), "# Note\n\nsomething to index\n").unwrap();
+        std::fs::write(
+            user.join(folder).join("note.md"),
+            "# Note\n\nsomething to index\n",
+        )
+        .unwrap();
     }
     let scratch = root.join("scratch/codexhome");
     std::fs::create_dir_all(&scratch).unwrap();
@@ -841,9 +1523,22 @@ fn a_scratch_agent_home_adds_no_collections_and_indexes_nothing() {
     gone.wait().unwrap();
     let parent = gone.id().to_string();
 
-    let output = docs_command(&["session", "--parent-pid", &parent], &user, &scratch, &root, None);
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert!(!scratch.join("docs.toml").exists(), "no default collections in a scratch home");
+    let output = docs_command(
+        &["session", "--parent-pid", &parent],
+        &user,
+        &scratch,
+        &root,
+        None,
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !scratch.join("docs.toml").exists(),
+        "no default collections in a scratch home"
+    );
     assert!(!scratch.join("docs").exists(), "no index, no lock, no run");
     let listed = docs_command(&["list", "--json"], &user, &scratch, &root, None);
     assert_eq!(String::from_utf8_lossy(&listed.stdout).trim(), "[]");
@@ -851,15 +1546,32 @@ fn a_scratch_agent_home_adds_no_collections_and_indexes_nothing() {
 
     // Asked for explicitly, a scratch home has them.
     let listed = docs_command(&["list", "--json"], &user, &scratch, &root, Some("1"));
-    let names: Vec<String> = serde_json::from_slice::<Vec<serde_json::Value>>(&listed.stdout).unwrap().iter().map(|c| c["name"].as_str().unwrap().to_string()).collect();
+    let names: Vec<String> = serde_json::from_slice::<Vec<serde_json::Value>>(&listed.stdout)
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap().to_string())
+        .collect();
     assert_eq!(names, ["documents", "downloads"]);
 
     // The user's own home, `~/.mightling`, has them without asking.
     let own = user.join(".mightling");
-    let output = docs_command(&["session", "--parent-pid", &parent], &user, &own, &root, None);
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let output = docs_command(
+        &["session", "--parent-pid", &parent],
+        &user,
+        &own,
+        &root,
+        None,
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let toml = std::fs::read_to_string(own.join("docs.toml")).unwrap();
-    assert!(toml.contains("name = \"documents\"") && toml.contains("name = \"downloads\""), "{toml}");
+    assert!(
+        toml.contains("name = \"documents\"") && toml.contains("name = \"downloads\""),
+        "{toml}"
+    );
 }
 
 /// A stand-in model with files: the hash embedder under a model's name, dimension and files.
@@ -870,26 +1582,53 @@ struct FileModel {
 }
 
 impl ling_docs::embed::Embed for FileModel {
-    fn dim(&self) -> usize { self.inner.dim }
-    fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> { ling_docs::embed::Embed::embed(&self.inner, text) }
-    fn name(&self) -> &str { self.name }
-    fn model_files(&self) -> Vec<PathBuf> { self.files.clone() }
+    fn dim(&self) -> usize {
+        self.inner.dim
+    }
+    fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        ling_docs::embed::Embed::embed(&self.inner, text)
+    }
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn model_files(&self) -> Vec<PathBuf> {
+        self.files.clone()
+    }
 }
 
 /// Every chunk's vector, by chunk id.
 fn vectors(db: &Path) -> Vec<(i64, Option<Vec<u8>>)> {
     let conn = ling_docs::store::open_ro(db).unwrap().unwrap();
-    let mut stmt = conn.prepare("SELECT id, vector FROM chunks ORDER BY id").unwrap();
-    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+    let mut stmt = conn
+        .prepare("SELECT id, vector FROM chunks ORDER BY id")
+        .unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
 }
 
 /// A collection of a few Markdown and text files, indexed once with the test embedder.
 fn indexed_collection(home: &Path) -> DocsToml {
     let root = home.join("Documents");
     std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(root.join("acme.md"), "# Acme\n\n## Termination\n\nEither party may terminate with ninety days of notice.\n").unwrap();
-    std::fs::write(root.join("plain.txt"), (1..=40).map(|i| format!("line {i} about volcanoes\n")).collect::<String>()).unwrap();
-    std::fs::write(root.join("notes.md"), "# Notes\n\nGlaciers retreat in summer.\n").unwrap();
+    std::fs::write(
+        root.join("acme.md"),
+        "# Acme\n\n## Termination\n\nEither party may terminate with ninety days of notice.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("plain.txt"),
+        (1..=40)
+            .map(|i| format!("line {i} about volcanoes\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("notes.md"),
+        "# Notes\n\nGlaciers retreat in summer.\n",
+    )
+    .unwrap();
     let mut docs = DocsToml::default();
     docs.ensure_defaults(home);
     docs.save().unwrap();
@@ -901,8 +1640,14 @@ fn a_new_binary_with_the_same_model_embeds_nothing_again() {
     let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
     let (_dir, home) = scratch_home();
     let docs = indexed_collection(&home);
-    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
-    assert_eq!(index::run(&env(&host, &home, exe()), &docs, None, false).unwrap(), vec![("documents".to_string(), Outcome::Ok)]);
+    let host = LocalHost {
+        dir: home.join("locks"),
+        started: Mutex::new(Vec::new()),
+    };
+    assert_eq!(
+        index::run(&env(&host, &home, exe()), &docs, None, false).unwrap(),
+        vec![("documents".to_string(), Outcome::Ok)]
+    );
     let db = ling_docs::config::db_path("documents");
     let before = vectors(&db);
     assert!(!before.is_empty() && before.iter().all(|(_, v)| v.is_some()));
@@ -914,24 +1659,53 @@ fn a_new_binary_with_the_same_model_embeds_nothing_again() {
     std::fs::copy(exe(), &upgraded).unwrap();
     {
         let conn = ling_docs::store::open_rw(&db).unwrap();
-        conn.execute("DELETE FROM meta WHERE key IN ('chunking', 'extractors', 'model_stat', 'model_sha')", []).unwrap();
+        conn.execute(
+            "DELETE FROM meta WHERE key IN ('chunking', 'extractors', 'model_stat', 'model_sha')",
+            [],
+        )
+        .unwrap();
     }
     host.started.lock().unwrap().clear();
-    assert_eq!(index::run(&env(&host, &home, upgraded.clone()), &docs, None, false).unwrap(), vec![("documents".to_string(), Outcome::Ok)]);
-    assert!(host.started.lock().unwrap().is_empty(), "nothing changed: no scope at all");
+    assert_eq!(
+        index::run(&env(&host, &home, upgraded.clone()), &docs, None, false).unwrap(),
+        vec![("documents".to_string(), Outcome::Ok)]
+    );
+    assert!(
+        host.started.lock().unwrap().is_empty(),
+        "nothing changed: no scope at all"
+    );
     assert_eq!(vectors(&db), before);
 
     // A new file: only its own chunks are embedded, and the key is recorded on the way.
-    std::fs::write(home.join("Documents/new.md"), "# New\n\nFresh words about basalt.\n").unwrap();
+    std::fs::write(
+        home.join("Documents/new.md"),
+        "# New\n\nFresh words about basalt.\n",
+    )
+    .unwrap();
     index::run(&env(&host, &home, upgraded), &docs, None, false).unwrap();
     let after = vectors(&db);
     assert_eq!(after.len(), before.len() + 1);
-    assert_eq!(&after[..before.len()], &before[..], "the old chunks keep their vectors");
-    let log = std::fs::read_to_string(ling_docs::config::docs_dir().join("logs/documents-embed.log")).unwrap();
-    assert!(log.contains("documents: 1 documents written") && log.contains("documents: 1 chunks embedded"), "{log}");
+    assert_eq!(
+        &after[..before.len()],
+        &before[..],
+        "the old chunks keep their vectors"
+    );
+    let log =
+        std::fs::read_to_string(ling_docs::config::docs_dir().join("logs/documents-embed.log"))
+            .unwrap();
+    assert!(
+        log.contains("documents: 1 documents written")
+            && log.contains("documents: 1 chunks embedded"),
+        "{log}"
+    );
     let conn = ling_docs::store::open_ro(&db).unwrap().unwrap();
-    assert_eq!(ling_docs::store::get_meta(&conn, "chunking").unwrap(), Some(ling_docs::config::chunking_key()));
-    assert!(ling_docs::store::get_meta(&conn, "extractors").unwrap().is_some());
+    assert_eq!(
+        ling_docs::store::get_meta(&conn, "chunking").unwrap(),
+        Some(ling_docs::config::chunking_key())
+    );
+    assert!(ling_docs::store::get_meta(&conn, "extractors")
+        .unwrap()
+        .is_some());
 }
 
 #[test]
@@ -939,7 +1713,10 @@ fn a_model_change_embeds_every_chunk_again_and_nothing_else_does() {
     let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
     let (_dir, home) = scratch_home();
     let docs = indexed_collection(&home);
-    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let host = LocalHost {
+        dir: home.join("locks"),
+        started: Mutex::new(Vec::new()),
+    };
     let mut env = env(&host, &home, exe());
     index::run(&env, &docs, None, false).unwrap();
     let db = ling_docs::config::db_path("documents");
@@ -951,9 +1728,21 @@ fn a_model_change_embeds_every_chunk_again_and_nothing_else_does() {
     std::fs::write(model.join("model.onnx"), b"weights v1").unwrap();
     std::fs::write(model.join("tokenizer.json"), b"{\"vocab\": 1}").unwrap();
     let run = |name: &'static str, dim: usize| -> (usize, String) {
-        let embedder = FileModel { inner: HashEmbedder { dim }, name, files: ling_docs::embed::model_files_in(&model) };
+        let embedder = FileModel {
+            inner: HashEmbedder { dim },
+            name,
+            files: ling_docs::embed::model_files_in(&model),
+        };
         let mut log = Vec::new();
-        let (_, done) = index::index_worker("documents", &db, &events, &embedder, &ling_docs::chunk::Words, &mut log).unwrap();
+        let (_, done) = index::index_worker(
+            "documents",
+            &db,
+            &events,
+            &embedder,
+            &ling_docs::chunk::Words,
+            &mut log,
+        )
+        .unwrap();
         (done, String::from_utf8(log).unwrap())
     };
     // The same model, its files' hash recorded for the first time: nothing embedded again.
@@ -968,13 +1757,23 @@ fn a_model_change_embeds_every_chunk_again_and_nothing_else_does() {
     }
     let (done, log) = run("hash-test", 64);
     assert_eq!(done, 0, "{log}");
-    assert!(log.contains("the chunking changed: 3 documents chunked again\n"), "{log}");
+    assert!(
+        log.contains("the chunking changed: 3 documents chunked again\n"),
+        "{log}"
+    );
     // The coordinator starts the worker when the model's files change.
     std::fs::write(model.join("model.onnx"), b"weights v2").unwrap();
     env.model_dir = model.clone();
     host.started.lock().unwrap().clear();
     index::run(&env, &docs, None, false).unwrap();
-    assert!(host.started.lock().unwrap().iter().any(|(unit, _)| unit.starts_with("mightling-index-docs-documents-e")), "the worker checks the new files");
+    assert!(
+        host.started
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(unit, _)| unit.starts_with("mightling-index-docs-documents-e")),
+        "the worker checks the new files"
+    );
     // A new revision under the same name, a new dimension, a new model: every chunk again.
     let (done, log) = run("hash-test", 64);
     assert_eq!(done, total, "{log}");
@@ -989,7 +1788,10 @@ fn an_extractor_change_reads_only_its_kind_again_and_embeds_only_changed_chunks(
     let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
     let (_dir, home) = scratch_home();
     let docs = indexed_collection(&home);
-    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let host = LocalHost {
+        dir: home.join("locks"),
+        started: Mutex::new(Vec::new()),
+    };
     let env = env(&host, &home, exe());
     index::run(&env, &docs, None, false).unwrap();
     let db = ling_docs::config::db_path("documents");
@@ -999,15 +1801,33 @@ fn an_extractor_change_reads_only_its_kind_again_and_embeds_only_changed_chunks(
         let conn = ling_docs::store::open_rw(&db).unwrap();
         let mut versions = ling_docs::extract::extractor_versions();
         versions.insert("markdown".into(), "0".into());
-        ling_docs::store::set_meta(&conn, "extractors", &serde_json::to_string(&versions).unwrap()).unwrap();
+        ling_docs::store::set_meta(
+            &conn,
+            "extractors",
+            &serde_json::to_string(&versions).unwrap(),
+        )
+        .unwrap();
     }
     host.started.lock().unwrap().clear();
     index::run(&env, &docs, None, false).unwrap();
     let started = host.started.lock().unwrap().clone();
-    assert!(started.iter().any(|(unit, _)| unit.starts_with("mightling-index-docs-documents-x")), "{started:?}");
-    let log = std::fs::read_to_string(ling_docs::config::docs_dir().join("logs/documents-embed.log")).unwrap();
-    assert!(log.contains("documents: 2 documents written"), "the two Markdown files, not the text file: {log}");
-    assert!(log.contains("documents: 0 chunks embedded"), "their text came back the same: {log}");
+    assert!(
+        started
+            .iter()
+            .any(|(unit, _)| unit.starts_with("mightling-index-docs-documents-x")),
+        "{started:?}"
+    );
+    let log =
+        std::fs::read_to_string(ling_docs::config::docs_dir().join("logs/documents-embed.log"))
+            .unwrap();
+    assert!(
+        log.contains("documents: 2 documents written"),
+        "the two Markdown files, not the text file: {log}"
+    );
+    assert!(
+        log.contains("documents: 0 chunks embedded"),
+        "their text came back the same: {log}"
+    );
     // The same vectors, under the new chunks' ids.
     let sorted = |v: Vec<(i64, Option<Vec<u8>>)>| {
         let mut v: Vec<Option<Vec<u8>>> = v.into_iter().map(|(_, v)| v).collect();

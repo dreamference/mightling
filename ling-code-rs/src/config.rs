@@ -85,10 +85,16 @@ impl Settings {
     /// Reads the settings: `DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then
     /// `~/.config/dreamference/config.toml`, the first that exists; every key is optional.
     pub fn load(repo_root: &Path) -> Settings {
-        let mut settings = Settings::default();
-        settings.config_path = config_file(repo_root);
+        let mut settings = Settings {
+            config_path: config_file(repo_root),
+            ..Settings::default()
+        };
         settings.read_file();
-        if let Some(layers) = std::env::var("MIGHTLING_CODE_LAYERS").ok().as_deref().and_then(Layers::parse) {
+        if let Some(layers) = std::env::var("MIGHTLING_CODE_LAYERS")
+            .ok()
+            .as_deref()
+            .and_then(Layers::parse)
+        {
             settings.layers = layers;
         }
         settings
@@ -101,25 +107,70 @@ impl Settings {
 
     fn read_file(&mut self) {
         let settings = self;
-        let Some(table) = settings.config_path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.parse::<toml::Table>().ok()) else {
+        let Some(table) = settings
+            .config_path
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|t| t.parse::<toml::Table>().ok())
+        else {
             return;
         };
-        let int = |key: &str| table.get(key).and_then(toml::Value::as_integer).filter(|v| *v >= 0).map(|v| v as u64);
+        let int = |key: &str| {
+            table
+                .get(key)
+                .and_then(toml::Value::as_integer)
+                .filter(|v| *v >= 0)
+                .map(|v| v as u64)
+        };
         if let Some(host) = table.get("vllm_host").and_then(toml::Value::as_str) {
             settings.vllm_host = host.trim_end_matches('/').to_string();
         }
-        if let Some(v) = int("code_index_scan_max_files") { settings.scan_max_files = v as usize }
-        if let Some(v) = int("code_index_scan_max_bytes") { settings.scan_max_bytes = v }
-        if let Some(v) = int("code_index_row_limit") { settings.row_limit = (v as usize).clamp(1, 200) }
-        if let Some(v) = int("code_index_max_files") { settings.max_files = v as usize }
-        if let Some(v) = int("code_index_memory_ceiling_mb") { settings.memory_ceiling_mb = v }
-        if let Some(v) = int("code_index_small_ceiling_mb") { settings.small_ceiling_mb = v }
-        if let Some(v) = int("code_index_min_interval_s") { settings.min_interval_s = v }
-        if let Some(v) = int("code_index_stale_commits") { settings.stale_commits = v }
-        if let Some(v) = int("code_index_submodule_max_files") { settings.submodule_max_files = v as usize }
-        if let Some(v) = table.get("mightling_code_semantic").and_then(toml::Value::as_bool) { settings.semantic = v }
-        if let Some(v) = table.get("code_index_enabled").and_then(toml::Value::as_bool) { settings.enabled = v }
-        if let Some(v) = table.get("mightling_code_layers").and_then(toml::Value::as_str).and_then(Layers::parse) { settings.layers = v }
+        if let Some(v) = int("code_index_scan_max_files") {
+            settings.scan_max_files = v as usize
+        }
+        if let Some(v) = int("code_index_scan_max_bytes") {
+            settings.scan_max_bytes = v
+        }
+        if let Some(v) = int("code_index_row_limit") {
+            settings.row_limit = (v as usize).clamp(1, 200)
+        }
+        if let Some(v) = int("code_index_max_files") {
+            settings.max_files = v as usize
+        }
+        if let Some(v) = int("code_index_memory_ceiling_mb") {
+            settings.memory_ceiling_mb = v
+        }
+        if let Some(v) = int("code_index_small_ceiling_mb") {
+            settings.small_ceiling_mb = v
+        }
+        if let Some(v) = int("code_index_min_interval_s") {
+            settings.min_interval_s = v
+        }
+        if let Some(v) = int("code_index_stale_commits") {
+            settings.stale_commits = v
+        }
+        if let Some(v) = int("code_index_submodule_max_files") {
+            settings.submodule_max_files = v as usize
+        }
+        if let Some(v) = table
+            .get("mightling_code_semantic")
+            .and_then(toml::Value::as_bool)
+        {
+            settings.semantic = v
+        }
+        if let Some(v) = table
+            .get("code_index_enabled")
+            .and_then(toml::Value::as_bool)
+        {
+            settings.enabled = v
+        }
+        if let Some(v) = table
+            .get("mightling_code_layers")
+            .and_then(toml::Value::as_str)
+            .and_then(Layers::parse)
+        {
+            settings.layers = v
+        }
         if let Ok(host) = std::env::var("DREAMFERENCE_VLLM_HOST") {
             settings.vllm_host = host.trim_end_matches('/').to_string();
         }
@@ -149,13 +200,21 @@ pub fn is_trusted(root: &Path) -> bool {
 
 /// [`is_trusted`] against a given `$CODEX_HOME`.
 pub fn is_trusted_in(codex_home: &Path, root: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(codex_home.join("config.toml")) else { return false };
-    let Ok(table) = text.parse::<toml::Table>() else { return false };
-    let Some(projects) = table.get("projects").and_then(toml::Value::as_table) else { return false };
+    let Ok(text) = std::fs::read_to_string(codex_home.join("config.toml")) else {
+        return false;
+    };
+    let Ok(table) = text.parse::<toml::Table>() else {
+        return false;
+    };
+    let Some(projects) = table.get("projects").and_then(toml::Value::as_table) else {
+        return false;
+    };
     let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     projects.iter().any(|(path, entry)| {
         let listed = Path::new(path);
-        let listed = listed.canonicalize().unwrap_or_else(|_| listed.to_path_buf());
+        let listed = listed
+            .canonicalize()
+            .unwrap_or_else(|_| listed.to_path_buf());
         listed == canonical
             && entry.get("trust_level").and_then(toml::Value::as_str) == Some("trusted")
     })
@@ -200,7 +259,10 @@ mightling_code_layers = "exact"
 "#,
         )
         .unwrap();
-        let mut s = Settings { config_path: Some(file.clone()), ..Settings::default() };
+        let mut s = Settings {
+            config_path: Some(file.clone()),
+            ..Settings::default()
+        };
         s.read_file();
         if std::env::var_os("DREAMFERENCE_VLLM_HOST").is_none() {
             assert_eq!(s.vllm_host, "http://127.0.0.1:9000");
@@ -218,11 +280,22 @@ mightling_code_layers = "exact"
         assert!(!s.enabled);
         assert_eq!(s.layers, Layers::Exact);
 
-        std::fs::write(&file, "code_index_row_limit = 0\ncode_index_memory_ceiling_mb = -5\n").unwrap();
-        let mut s2 = Settings { config_path: Some(file), ..Settings::default() };
+        std::fs::write(
+            &file,
+            "code_index_row_limit = 0\ncode_index_memory_ceiling_mb = -5\n",
+        )
+        .unwrap();
+        let mut s2 = Settings {
+            config_path: Some(file),
+            ..Settings::default()
+        };
         s2.read_file();
         assert_eq!(s2.row_limit, 1, "clamped to 1");
-        assert_eq!(s2.memory_ceiling_mb, Settings::default().memory_ceiling_mb, "negative values are ignored");
+        assert_eq!(
+            s2.memory_ceiling_mb,
+            Settings::default().memory_ceiling_mb,
+            "negative values are ignored"
+        );
     }
 
     #[test]
@@ -247,7 +320,10 @@ mightling_code_layers = "exact"
         std::fs::write(codex.join("config.toml"), config).unwrap();
 
         assert!(is_trusted_in(&codex, &repo));
-        assert!(is_trusted_in(&codex, &link), "symlink resolves to canonical trusted root");
+        assert!(
+            is_trusted_in(&codex, &link),
+            "symlink resolves to canonical trusted root"
+        );
         assert!(!is_trusted_in(&codex, &untrusted));
         assert!(!is_trusted_in(&codex, &dir.path().join("other")));
     }

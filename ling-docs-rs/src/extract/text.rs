@@ -13,7 +13,15 @@ fn lines(text: &str) -> Vec<&str> {
 }
 
 fn unit(first: usize, last: usize, heading: String, buf: &[&str]) -> Unit {
-    Unit { loc: format!("lines {first}-{last}"), page: None, line_first: Some(first as u32), line_last: Some(last as u32), heading, group: None, text: buf.join("\n") }
+    Unit {
+        loc: format!("lines {first}-{last}"),
+        page: None,
+        line_first: Some(first as u32),
+        line_last: Some(last as u32),
+        heading,
+        group: None,
+        text: buf.join("\n"),
+    }
 }
 
 fn has_text(buf: &[&str]) -> bool {
@@ -98,7 +106,9 @@ pub fn rst(text: &str) -> Vec<Unit> {
 
 fn underline(line: &str) -> bool {
     let mut chars = line.chars();
-    let Some(first) = chars.next() else { return false };
+    let Some(first) = chars.next() else {
+        return false;
+    };
     "=-~^\"'`#*+".contains(first) && line.chars().count() >= 3 && line.chars().all(|c| c == first)
 }
 
@@ -165,7 +175,15 @@ pub fn tex(text: &str) -> Vec<Unit> {
     }
     if has_text(&buf) {
         let path: Vec<&String> = heading.iter().filter(|h| !h.is_empty()).collect();
-        units.push(unit(start, all.len(), path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" > "), &buf));
+        units.push(unit(
+            start,
+            all.len(),
+            path.iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(" > "),
+            &buf,
+        ));
     }
     units
 }
@@ -195,8 +213,19 @@ mod tests {
     fn markdown_sections_keep_their_heading_path_and_lines() {
         let text = "intro line\n# Title\npara\n## Part A\nalpha\n```\n# not a heading\n```\n## Part B\nbeta\n";
         let units = markdown(text);
-        let locs: Vec<(&str, &str)> = units.iter().map(|u| (u.loc.as_str(), u.heading.as_str())).collect();
-        assert_eq!(locs, [("lines 1-1", ""), ("lines 2-3", "Title"), ("lines 4-8", "Title > Part A"), ("lines 9-10", "Title > Part B")]);
+        let locs: Vec<(&str, &str)> = units
+            .iter()
+            .map(|u| (u.loc.as_str(), u.heading.as_str()))
+            .collect();
+        assert_eq!(
+            locs,
+            [
+                ("lines 1-1", ""),
+                ("lines 2-3", "Title"),
+                ("lines 4-8", "Title > Part A"),
+                ("lines 9-10", "Title > Part B")
+            ]
+        );
         assert!(units[2].text.contains("# not a heading"));
     }
 
@@ -204,8 +233,18 @@ mod tests {
     fn rst_sections_follow_their_underlines() {
         let text = "PEP: 8\n\nIntroduction\n============\n\nSome text.\n\nCode lay-out\n------------\nIndent.\n";
         let units = rst(text);
-        let got: Vec<(&str, &str)> = units.iter().map(|u| (u.loc.as_str(), u.heading.as_str())).collect();
-        assert_eq!(got, [("lines 1-2", ""), ("lines 3-7", "Introduction"), ("lines 8-10", "Code lay-out")]);
+        let got: Vec<(&str, &str)> = units
+            .iter()
+            .map(|u| (u.loc.as_str(), u.heading.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("lines 1-2", ""),
+                ("lines 3-7", "Introduction"),
+                ("lines 8-10", "Code lay-out")
+            ]
+        );
     }
 
     #[test]
@@ -216,6 +255,9 @@ mod tests {
         assert_eq!(units[1].heading, "Intro > Details");
         let text: String = (1..=85).map(|i| format!("line {i}\n")).collect();
         let units = plain(&text);
-        assert_eq!(units.iter().map(|u| u.loc.as_str()).collect::<Vec<_>>(), ["lines 1-40", "lines 41-80", "lines 81-85"]);
+        assert_eq!(
+            units.iter().map(|u| u.loc.as_str()).collect::<Vec<_>>(),
+            ["lines 1-40", "lines 41-80", "lines 81-85"]
+        );
     }
 }

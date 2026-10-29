@@ -16,15 +16,43 @@ use crate::router::Context;
 // tokens of fixed overhead (specs/DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md §4.3). When to use which
 // tool is the prompt block's job (prompt.rs).
 const TOOLS: &[(&str, &str, &str)] = &[
-    ("search", "words", "Find definitions by topic when you know no name (a bug report); use before grep."),
-    ("def", "name", "Where a name is defined. Qualified (Circle.area) or path:line."),
-    ("show", "name", "A definition's source with line numbers, 100 lines a page (offset for more)."),
-    ("refs", "name", "Every use of a definition. Run before renaming or changing a signature."),
+    (
+        "search",
+        "words",
+        "Find definitions by topic when you know no name (a bug report); use before grep.",
+    ),
+    (
+        "def",
+        "name",
+        "Where a name is defined. Qualified (Circle.area) or path:line.",
+    ),
+    (
+        "show",
+        "name",
+        "A definition's source with line numbers, 100 lines a page (offset for more).",
+    ),
+    (
+        "refs",
+        "name",
+        "Every use of a definition. Run before renaming or changing a signature.",
+    ),
     ("callers", "name", "What calls a definition."),
     ("callees", "name", "What a definition calls."),
-    ("impl", "name", "Implementations of a trait, interface or method."),
-    ("impact", "name", "What breaks if a definition changes, three levels deep."),
-    ("outline", "file", "A file's definitions and line ranges; use before reading a file."),
+    (
+        "impl",
+        "name",
+        "Implementations of a trait, interface or method.",
+    ),
+    (
+        "impact",
+        "name",
+        "What breaks if a definition changes, three levels deep.",
+    ),
+    (
+        "outline",
+        "file",
+        "A file's definitions and line ranges; use before reading a file.",
+    ),
     ("status", "", "Index layers, freshness and exclusions."),
 ];
 
@@ -58,8 +86,12 @@ pub fn serve(repo: Repo, settings: Settings) -> Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
-        let Some(id) = message.get("id").cloned() else { continue }; // a notification
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let Some(id) = message.get("id").cloned() else {
+            continue;
+        }; // a notification
         let method = message.get("method").and_then(Value::as_str).unwrap_or("");
         let result = match method {
             "initialize" => Ok(json!({
@@ -68,13 +100,16 @@ pub fn serve(repo: Repo, settings: Settings) -> Result<()> {
                 "serverInfo": { "name": "ling-code", "version": env!("CARGO_PKG_VERSION") }
             })),
             "tools/list" => Ok(tools_list()),
-            "tools/call" => call(&repo, &settings, &message["params"]).map(|text| json!({ "content": [{ "type": "text", "text": text }] })),
+            "tools/call" => call(&repo, &settings, &message["params"])
+                .map(|text| json!({ "content": [{ "type": "text", "text": text }] })),
             "ping" => Ok(json!({})),
             _ => Err(anyhow::anyhow!("method not found: {method}")),
         };
         let response = match result {
             Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-            Err(error) => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": error.to_string() } }),
+            Err(error) => {
+                json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": error.to_string() } })
+            }
         };
         writeln!(stdout, "{response}")?;
         stdout.flush()?;
@@ -83,7 +118,10 @@ pub fn serve(repo: Repo, settings: Settings) -> Result<()> {
 }
 
 fn call(repo: &Repo, settings: &Settings, params: &Value) -> Result<String> {
-    let name = params["name"].as_str().unwrap_or("").trim_start_matches("code_");
+    let name = params["name"]
+        .as_str()
+        .unwrap_or("")
+        .trim_start_matches("code_");
     let args = &params["arguments"];
     let text = |key: &str| args[key].as_str().unwrap_or("").to_string();
     let context = Context::load(repo.clone(), settings.clone())?;
@@ -91,7 +129,10 @@ fn call(repo: &Repo, settings: &Settings, params: &Value) -> Result<String> {
         return Ok(context.status().join("\n"));
     }
     if !context.has_index() {
-        return Ok(crate::paths::no_index_yet(crate::paths::indexing_here(), false));
+        return Ok(crate::paths::no_index_yet(
+            crate::paths::indexing_here(),
+            false,
+        ));
     }
     let (mut answer, body) = match name {
         "def" => (context.def(&text("name"))?, None),
@@ -99,16 +140,28 @@ fn call(repo: &Repo, settings: &Settings, params: &Value) -> Result<String> {
         "callers" => (context.callers(&text("name"))?, None),
         "callees" => (context.callees(&text("name"))?, None),
         "impl" => (context.implementations(&text("name"))?, None),
-        "impact" => (context.impact(&text("name"), crate::router::IMPACT_DEPTH)?, None),
+        "impact" => (
+            context.impact(&text("name"), crate::router::IMPACT_DEPTH)?,
+            None,
+        ),
         "outline" => (context.outline(&text("file"))?, None),
         "search" => (context.search(&text("words"))?, None),
         "show" => context.show(&text("name"))?,
         other => anyhow::bail!("unknown tool {other}"),
     };
     let page = Page {
-        limit: args["limit"].as_u64().map(|v| v as usize).unwrap_or(if body.is_some() { output::SHOW_LINES } else { settings.row_limit }),
+        limit: args["limit"]
+            .as_u64()
+            .map(|v| v as usize)
+            .unwrap_or(if body.is_some() {
+                output::SHOW_LINES
+            } else {
+                settings.row_limit
+            }),
         offset: args["offset"].as_u64().unwrap_or(0) as usize,
-        path: args["path"].as_str().map(|path| output::repository_relative(path, &repo.root)),
+        path: args["path"]
+            .as_str()
+            .map(|path| output::repository_relative(path, &repo.root)),
         ..Page::default()
     };
     output::narrow(&mut answer, &page)?;
@@ -128,6 +181,9 @@ mod tests {
         }
         // `search` leads: it is where a task that names no symbol starts.
         assert_eq!(tools[0]["name"], "code_search");
-        assert!(tools[0]["description"].as_str().unwrap().contains("before grep"));
+        assert!(tools[0]["description"]
+            .as_str()
+            .unwrap()
+            .contains("before grep"));
     }
 }

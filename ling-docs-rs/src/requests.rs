@@ -55,7 +55,10 @@ pub fn path(docs_dir: &Path) -> PathBuf {
 /// Appends a request. Fails where the directory is read-only (the agent's read-only sandbox).
 pub fn append(docs_dir: &Path, request: &Request) -> Result<()> {
     crate::store::create_private_dir(docs_dir)?;
-    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path(docs_dir))?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path(docs_dir))?;
     writeln!(file, "{}", request.line())?;
     Ok(())
 }
@@ -65,7 +68,9 @@ pub fn append(docs_dir: &Path, request: &Request) -> Result<()> {
 /// nothing.
 pub fn drain(docs_dir: &Path) -> Vec<Request> {
     let file = path(docs_dir);
-    let Ok(meta) = std::fs::symlink_metadata(&file) else { return Vec::new() };
+    let Ok(meta) = std::fs::symlink_metadata(&file) else {
+        return Vec::new();
+    };
     if !meta.file_type().is_file() || meta.len() > 1 << 20 {
         let _ = std::fs::remove_file(&file);
         return Vec::new();
@@ -89,13 +94,24 @@ mod tests {
     #[test]
     fn only_fixed_words_and_valid_names_count() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(path(dir.path()), "rm -rf /\nindex ../../etc\nindex; curl x\nrebuild\n").unwrap();
+        std::fs::write(
+            path(dir.path()),
+            "rm -rf /\nindex ../../etc\nindex; curl x\nrebuild\n",
+        )
+        .unwrap();
         assert!(drain(dir.path()).is_empty());
         append(dir.path(), &Request::One("documents".into())).unwrap();
         append(dir.path(), &Request::One("documents".into())).unwrap();
         append(dir.path(), &Request::Rebuild("notes".into())).unwrap();
         append(dir.path(), &Request::All).unwrap();
-        assert_eq!(drain(dir.path()), vec![Request::All, Request::One("documents".into()), Request::Rebuild("notes".into())]);
+        assert_eq!(
+            drain(dir.path()),
+            vec![
+                Request::All,
+                Request::One("documents".into()),
+                Request::Rebuild("notes".into())
+            ]
+        );
         assert!(drain(dir.path()).is_empty());
     }
 

@@ -44,16 +44,27 @@ pub enum Locator {
 /// `p.7`, `page 7`, `7`, `lines 120-180`, `120-180`, `L120-L180`, `lines 120`, `para 12-30`,
 /// `rows 2-21`, `msg 3`, `msg 3 · invoice.pdf`, `msg 3, lines 40-60`.
 pub fn parse_locator(text: &str) -> Result<Locator> {
-    let original = text.trim().split(" .. ").next().unwrap_or("").trim().to_string();
+    let original = text
+        .trim()
+        .split(" .. ")
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let t = original.to_lowercase();
     if t.starts_with("msg ") || t.starts_with("slide ") || t.starts_with("sheet ") {
         // A message's or a slide's lines are the file's own; a sheet's rows are the sheet's.
         return match crate::chunk::prefixed(&t) {
-            Some((_, "lines", ..)) => parse_locator(t.rsplit_once(", ").map(|(_, lines)| lines).unwrap_or(&t)),
+            Some((_, "lines", ..)) => {
+                parse_locator(t.rsplit_once(", ").map(|(_, lines)| lines).unwrap_or(&t))
+            }
             _ => Ok(Locator::Part(original)),
         };
     }
-    let page = t.strip_prefix("p.").or_else(|| t.strip_prefix("page")).or_else(|| t.strip_prefix('p'));
+    let page = t
+        .strip_prefix("p.")
+        .or_else(|| t.strip_prefix("page"))
+        .or_else(|| t.strip_prefix('p'));
     if let Some(n) = page.and_then(|p| p.trim().parse::<u32>().ok()) {
         if n >= 1 {
             return Ok(Locator::Page(n));
@@ -64,11 +75,27 @@ pub fn parse_locator(text: &str) -> Result<Locator> {
             return Ok(Locator::Page(n));
         }
     }
-    let words = ["lines", "line", "paragraphs", "paragraph", "para", "rows", "row"];
-    let lines = words.iter().find_map(|w| t.strip_prefix(w)).unwrap_or(&t).trim().replace('l', "");
+    let words = [
+        "lines",
+        "line",
+        "paragraphs",
+        "paragraph",
+        "para",
+        "rows",
+        "row",
+    ];
+    let lines = words
+        .iter()
+        .find_map(|w| t.strip_prefix(w))
+        .unwrap_or(&t)
+        .trim()
+        .replace('l', "");
     let (a, b) = match lines.split_once('-') {
         Some((a, b)) => (a.trim().parse::<u32>(), b.trim().parse::<u32>()),
-        None => (lines.trim().parse::<u32>(), lines.trim().parse::<u32>().map(|n| n + 199)),
+        None => (
+            lines.trim().parse::<u32>(),
+            lines.trim().parse::<u32>().map(|n| n + 199),
+        ),
     };
     match (a, b) {
         (Ok(a), Ok(b)) if a >= 1 && b >= a => Ok(Locator::Lines(a, b)),
@@ -93,34 +120,73 @@ pub struct ReadOut {
 
 /// Splits `collection:N`.
 pub fn parse_doc_id(id: &str) -> Result<(String, i64)> {
-    let (collection, n) = id.trim().rsplit_once(':').ok_or_else(|| anyhow!("`{id}` is not a document id (they look like documents:42)"))?;
-    let n: i64 = n.parse().map_err(|_| anyhow!("`{id}` is not a document id (they look like documents:42)"))?;
+    let (collection, n) = id
+        .trim()
+        .rsplit_once(':')
+        .ok_or_else(|| anyhow!("`{id}` is not a document id (they look like documents:42)"))?;
+    let n: i64 = n
+        .parse()
+        .map_err(|_| anyhow!("`{id}` is not a document id (they look like documents:42)"))?;
     Ok((collection.to_string(), n))
 }
 
-pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, budget: usize) -> Result<ReadOut> {
+pub fn read(
+    collections: &[Collection],
+    doc_id: &str,
+    locator: Option<&str>,
+    budget: usize,
+) -> Result<ReadOut> {
     let (name, id) = parse_doc_id(doc_id)?;
-    let collection = collections.iter().find(|c| c.name == name).ok_or_else(|| anyhow!("no collection named `{name}`"))?;
-    let conn = store::open_ro(&crate::config::db_path(&name))?.ok_or_else(|| anyhow!("the collection `{name}` has not been indexed yet"))?;
+    let collection = collections
+        .iter()
+        .find(|c| c.name == name)
+        .ok_or_else(|| anyhow!("no collection named `{name}`"))?;
+    let conn = store::open_ro(&crate::config::db_path(&name))?
+        .ok_or_else(|| anyhow!("the collection `{name}` has not been indexed yet"))?;
     let (rel, title, kind, pages, status): (String, String, String, Option<u32>, String) = conn
-        .query_row("SELECT path, title, kind, pages, status FROM documents WHERE id = ?", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        .query_row(
+            "SELECT path, title, kind, pages, status FROM documents WHERE id = ?",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
         .map_err(|_| anyhow!("no document {doc_id}"))?;
     if status != "ok" {
         bail!("{doc_id} ({rel}) is not indexed: {status}");
     }
-    let locator = locator.filter(|l| !l.trim().is_empty()).map(parse_locator).transpose()?;
-    let mut stmt = conn.prepare("SELECT page, line_first, text, loc, line_last FROM units WHERE doc_id = ? ORDER BY ord")?;
-    let rows: Vec<(Option<u32>, Option<u32>, String, String, Option<u32>)> = stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.filter_map(|r| r.ok()).collect();
-    let word = crate::discover::Kind::parse(&kind).map(|k| k.line_word()).unwrap_or("lines");
+    let locator = locator
+        .filter(|l| !l.trim().is_empty())
+        .map(parse_locator)
+        .transpose()?;
+    let mut stmt = conn.prepare(
+        "SELECT page, line_first, text, loc, line_last FROM units WHERE doc_id = ? ORDER BY ord",
+    )?;
+    // a one-off row tuple.
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(Option<u32>, Option<u32>, String, String, Option<u32>)> = stmt
+        .query_map([id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+    let word = crate::discover::Kind::parse(&kind)
+        .map(|k| k.line_word())
+        .unwrap_or("lines");
     // A part named by its locator becomes the range of its units' lines.
     let locator = match locator {
         // A sheet's rows: shifted by where the sheet's first unit starts.
-        Some(Locator::Part(part)) if crate::chunk::prefixed(&part).is_some_and(|(_, word, ..)| word != "lines") => {
+        Some(Locator::Part(part))
+            if crate::chunk::prefixed(&part).is_some_and(|(_, word, ..)| word != "lines") =>
+        {
             let (prefix, _, a, b) = crate::chunk::prefixed(&part).unwrap();
             let prefix = prefix.to_lowercase();
-            let unit = rows.iter().find(|r| crate::chunk::prefixed(&r.3).is_some_and(|(p, ..)| p.to_lowercase() == prefix));
+            let unit = rows.iter().find(|r| {
+                crate::chunk::prefixed(&r.3).is_some_and(|(p, ..)| p.to_lowercase() == prefix)
+            });
             match unit.and_then(|r| Some((r.1?, crate::chunk::prefixed(&r.3)?.2))) {
-                Some((line, start)) => Some(Locator::Lines((a + line).saturating_sub(start).max(1), (b + line).saturating_sub(start).max(1))),
+                Some((line, start)) => Some(Locator::Lines(
+                    (a + line).saturating_sub(start).max(1),
+                    (b + line).saturating_sub(start).max(1),
+                )),
                 None => bail!("{doc_id} has no part `{part}`"),
             }
         }
@@ -128,10 +194,21 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
             let lower = part.to_lowercase();
             let inside = |loc: &str| {
                 let loc = loc.to_lowercase();
-                loc == lower || loc.strip_prefix(lower.as_str()).is_some_and(|rest| rest.starts_with(' ') || rest.starts_with(','))
+                loc == lower
+                    || loc
+                        .strip_prefix(lower.as_str())
+                        .is_some_and(|rest| rest.starts_with(' ') || rest.starts_with(','))
             };
-            let first = rows.iter().filter(|r| inside(&r.3)).filter_map(|r| r.1).min();
-            let last = rows.iter().filter(|r| inside(&r.3)).filter_map(|r| r.4).max();
+            let first = rows
+                .iter()
+                .filter(|r| inside(&r.3))
+                .filter_map(|r| r.1)
+                .min();
+            let last = rows
+                .iter()
+                .filter(|r| inside(&r.3))
+                .filter_map(|r| r.4)
+                .max();
             match (first, last) {
                 (Some(a), Some(b)) => Some(Locator::Lines(a, b)),
                 _ => bail!("{doc_id} has no part `{part}`"),
@@ -139,24 +216,41 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
         }
         other => other,
     };
-    let units: Vec<(Option<u32>, Option<u32>, String)> = rows.into_iter().map(|(p, l, t, _, _)| (p, l, t)).collect();
+    let units: Vec<(Option<u32>, Option<u32>, String)> =
+        rows.into_iter().map(|(p, l, t, _, _)| (p, l, t)).collect();
     let path = collection.root.join(&rel).to_string_lossy().into_owned();
-    let mut out = ReadOut { doc_id: doc_id.to_string(), path, title, kind: kind.clone(), pages, loc: String::new(), text: String::new(), next: None };
+    let mut out = ReadOut {
+        doc_id: doc_id.to_string(),
+        path,
+        title,
+        kind: kind.clone(),
+        pages,
+        loc: String::new(),
+        text: String::new(),
+        next: None,
+    };
     if kind == "image" {
         // An image's text, read by OCR (§20), is one unit.
         out.loc = crate::ocr::worker::IMAGE_LOC.to_string();
         out.text = match units.first() {
             Some((_, _, text)) => clip(text, budget),
-            None => format!("{doc_id} is an image in which OCR found no text, or which OCR has not read yet"),
+            None => format!(
+                "{doc_id} is an image in which OCR found no text, or which OCR has not read yet"
+            ),
         };
         return Ok(out);
     }
     if kind == "pdf" {
-        let by_page: BTreeMap<u32, &str> = units.iter().filter_map(|(p, _, t)| p.map(|p| (p, t.as_str()))).collect();
+        let by_page: BTreeMap<u32, &str> = units
+            .iter()
+            .filter_map(|(p, _, t)| p.map(|p| (p, t.as_str())))
+            .collect();
         let first = match locator {
             Some(Locator::Page(p)) => p,
             None => 1,
-            Some(Locator::Lines(..)) | Some(Locator::Part(_)) => bail!("{doc_id} is a PDF: read it by page (p.7)"),
+            Some(Locator::Lines(..)) | Some(Locator::Part(_)) => {
+                bail!("{doc_id} is a PDF: read it by page (p.7)")
+            }
         };
         if pages.is_some_and(|n| first > n) {
             bail!("{doc_id} has {} pages", pages.unwrap_or(0));
@@ -205,7 +299,9 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
     let (a, b) = match locator {
         Some(Locator::Lines(a, b)) => (a, b),
         None => (1, u32::MAX),
-        Some(Locator::Page(_)) => bail!("{doc_id} is not paged: read it by {word} ({word} 120-180)"),
+        Some(Locator::Page(_)) => {
+            bail!("{doc_id} is not paged: read it by {word} ({word} 120-180)")
+        }
         Some(Locator::Part(_)) => unreachable!("resolved above"),
     };
     let mut used = 0;
@@ -213,7 +309,10 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
     for (n, line) in lines.range(a..=b) {
         let cost = estimate_tokens(line) + 1;
         if shown.is_some() && used + cost > budget {
-            out.next = Some(format!("{word} {n}-{}", if b == u32::MAX { n + 199 } else { b }));
+            out.next = Some(format!(
+                "{word} {n}-{}",
+                if b == u32::MAX { n + 199 } else { b }
+            ));
             break;
         }
         out.text.push_str(line);
@@ -226,7 +325,9 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
             out.next = Some(format!("{word} {n}-{}", n + (b - a)));
         }
     }
-    out.loc = shown.map(|(a, b)| format!("{word} {a}-{b}")).unwrap_or_else(|| format!("{word} {a}-{a}"));
+    out.loc = shown
+        .map(|(a, b)| format!("{word} {a}-{b}"))
+        .unwrap_or_else(|| format!("{word} {a}-{a}"));
     if shown.is_none() {
         out.text = format!("{doc_id} has no {word} in that range");
     }
@@ -241,7 +342,7 @@ fn clip(text: &str, budget: usize) -> String {
     let mut out = String::new();
     for c in text.chars() {
         out.push(c);
-        if out.len() % 256 == 0 && estimate_tokens(&out) > budget {
+        if out.len().is_multiple_of(256) && estimate_tokens(&out) > budget {
             break;
         }
     }
@@ -266,18 +367,42 @@ mod tests {
         assert_eq!(parse_locator("p.7").unwrap(), Locator::Page(7));
         assert_eq!(parse_locator("page 12").unwrap(), Locator::Page(12));
         assert_eq!(parse_locator("3").unwrap(), Locator::Page(3));
-        assert_eq!(parse_locator("lines 120-180").unwrap(), Locator::Lines(120, 180));
+        assert_eq!(
+            parse_locator("lines 120-180").unwrap(),
+            Locator::Lines(120, 180)
+        );
         assert_eq!(parse_locator("L5-L9").unwrap(), Locator::Lines(5, 9));
         assert_eq!(parse_locator("p.7 .. p.8").unwrap(), Locator::Page(7));
         assert!(parse_locator("chapter two").is_err());
         assert_eq!(parse_locator("para 12-30").unwrap(), Locator::Lines(12, 30));
-        assert_eq!(parse_locator("rows 2-21 .. rows 22-41").unwrap(), Locator::Lines(2, 21));
-        assert_eq!(parse_locator("msg 3").unwrap(), Locator::Part("msg 3".into()));
-        assert_eq!(parse_locator("msg 3 · Invoice.pdf p.2").unwrap(), Locator::Part("msg 3 · Invoice.pdf p.2".into()));
-        assert_eq!(parse_locator("msg 3, lines 40-60").unwrap(), Locator::Lines(40, 60));
-        assert_eq!(parse_locator("sheet Budget, rows 5-9").unwrap(), Locator::Part("sheet Budget, rows 5-9".into()));
-        assert_eq!(parse_locator("slide 4").unwrap(), Locator::Part("slide 4".into()));
-        assert_eq!(parse_doc_id("documents:42").unwrap(), ("documents".to_string(), 42));
+        assert_eq!(
+            parse_locator("rows 2-21 .. rows 22-41").unwrap(),
+            Locator::Lines(2, 21)
+        );
+        assert_eq!(
+            parse_locator("msg 3").unwrap(),
+            Locator::Part("msg 3".into())
+        );
+        assert_eq!(
+            parse_locator("msg 3 · Invoice.pdf p.2").unwrap(),
+            Locator::Part("msg 3 · Invoice.pdf p.2".into())
+        );
+        assert_eq!(
+            parse_locator("msg 3, lines 40-60").unwrap(),
+            Locator::Lines(40, 60)
+        );
+        assert_eq!(
+            parse_locator("sheet Budget, rows 5-9").unwrap(),
+            Locator::Part("sheet Budget, rows 5-9".into())
+        );
+        assert_eq!(
+            parse_locator("slide 4").unwrap(),
+            Locator::Part("slide 4".into())
+        );
+        assert_eq!(
+            parse_doc_id("documents:42").unwrap(),
+            ("documents".to_string(), 42)
+        );
         assert!(parse_doc_id("42").is_err());
     }
 
@@ -291,7 +416,10 @@ mod tests {
     fn single_line_locators_reverse_ranges_and_clipping_respect_bounds() {
         assert_eq!(parse_locator("lines 10").unwrap(), Locator::Lines(10, 209));
         assert_eq!(parse_locator("L10").unwrap(), Locator::Lines(10, 209));
-        assert_eq!(parse_locator("slide 4, lines 10-20").unwrap(), Locator::Lines(10, 20));
+        assert_eq!(
+            parse_locator("slide 4, lines 10-20").unwrap(),
+            Locator::Lines(10, 20)
+        );
         assert!(parse_locator("lines 20-10").is_err(), "reversed range");
         assert!(parse_locator("lines 0-5").is_err(), "0-based line range");
         assert!(parse_doc_id("documents:not_a_number").is_err());

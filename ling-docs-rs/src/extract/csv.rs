@@ -31,7 +31,12 @@ fn delimiter(text: &str, tab: bool) -> u8 {
             }
         }
     }
-    counts.iter().max_by_key(|(d, n)| (*n, *d == b',')).filter(|(_, n)| *n > 0).map(|(d, _)| *d).unwrap_or(b',')
+    counts
+        .iter()
+        .max_by_key(|(d, n)| (*n, *d == b','))
+        .filter(|(_, n)| *n > 0)
+        .map(|(d, _)| *d)
+        .unwrap_or(b',')
 }
 
 fn clean(value: &str) -> String {
@@ -40,11 +45,22 @@ fn clean(value: &str) -> String {
 
 /// A table's text as located units. `tab` for a `.tsv`.
 pub fn csv(text: &str, tab: bool) -> Vec<Unit> {
-    let mut reader = ::csv::ReaderBuilder::new().has_headers(false).flexible(true).delimiter(delimiter(text, tab)).from_reader(text.as_bytes());
+    let mut reader = ::csv::ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .delimiter(delimiter(text, tab))
+        .from_reader(text.as_bytes());
     let mut records = reader.records().map_while(|r| r.ok());
-    let Some(header) = records.next() else { return Vec::new() };
+    let Some(header) = records.next() else {
+        return Vec::new();
+    };
     let header: Vec<String> = header.iter().map(clean).collect();
-    let heading = header.iter().filter(|h| !h.is_empty()).cloned().collect::<Vec<_>>().join(", ");
+    let heading = header
+        .iter()
+        .filter(|h| !h.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut units = Vec::new();
     let mut lines = vec![heading.clone()];
     let mut first_row = 1usize;
@@ -84,13 +100,26 @@ pub fn csv(text: &str, tab: bool) -> Vec<Unit> {
         lines.push(format!("[the rows after row {MAX_ROWS} are not indexed]"));
     }
     if !lines.is_empty() && lines.iter().any(|l| !l.is_empty()) {
-        units.push(unit(first_row, first_row + lines.len() - 1, &heading, &lines));
+        units.push(unit(
+            first_row,
+            first_row + lines.len() - 1,
+            &heading,
+            &lines,
+        ));
     }
     units
 }
 
 fn unit(first: usize, last: usize, heading: &str, lines: &[String]) -> Unit {
-    Unit { loc: format!("rows {first}-{last}"), page: None, line_first: Some(first as u32), line_last: Some(last as u32), heading: heading.to_string(), group: None, text: lines.join("\n") }
+    Unit {
+        loc: format!("rows {first}-{last}"),
+        page: None,
+        line_first: Some(first as u32),
+        line_last: Some(last as u32),
+        heading: heading.to_string(),
+        group: None,
+        text: lines.join("\n"),
+    }
 }
 
 #[cfg(test)]
@@ -110,8 +139,14 @@ mod tests {
         let lines: Vec<&str> = units[0].text.lines().collect();
         assert_eq!(lines[0], "Item, Location, Note");
         assert_eq!(lines[1], "Item: part 1, Location: Shelf 1 left");
-        assert_eq!(units[2].text.lines().last(), Some("Item: part 45, Location: Shelf 45 left"));
-        assert_eq!((units[1].line_first, units[1].line_last), (Some(22), Some(41)));
+        assert_eq!(
+            units[2].text.lines().last(),
+            Some("Item: part 45, Location: Shelf 45 left")
+        );
+        assert_eq!(
+            (units[1].line_first, units[1].line_last),
+            (Some(22), Some(41))
+        );
     }
 
     #[test]

@@ -62,8 +62,24 @@ pub enum Kind {
 impl Kind {
     /// Every kind, in the order `--type` lists them.
     pub const ALL: [Kind; 18] = [
-        Kind::Text, Kind::Markdown, Kind::Rst, Kind::Org, Kind::Tex, Kind::Pdf, Kind::Docx, Kind::Odt, Kind::Html, Kind::Eml, Kind::Mbox, Kind::Csv, Kind::Xlsx, Kind::Xls,
-        Kind::Ods, Kind::Pptx, Kind::Odp, Kind::Image,
+        Kind::Text,
+        Kind::Markdown,
+        Kind::Rst,
+        Kind::Org,
+        Kind::Tex,
+        Kind::Pdf,
+        Kind::Docx,
+        Kind::Odt,
+        Kind::Html,
+        Kind::Eml,
+        Kind::Mbox,
+        Kind::Csv,
+        Kind::Xlsx,
+        Kind::Xls,
+        Kind::Ods,
+        Kind::Pptx,
+        Kind::Odp,
+        Kind::Image,
     ];
 
     /// The kind of a file name, by extension only (§7.1: the formats of Phases 1, 2 and 3).
@@ -121,7 +137,10 @@ impl Kind {
 
     /// A ZIP archive (Office and OpenDocument files).
     pub fn is_zip(self) -> bool {
-        matches!(self, Kind::Docx | Kind::Odt | Kind::Xlsx | Kind::Ods | Kind::Pptx | Kind::Odp)
+        matches!(
+            self,
+            Kind::Docx | Kind::Odt | Kind::Xlsx | Kind::Ods | Kind::Pptx | Kind::Odp
+        )
     }
 
     /// What a locator over this kind's numbered lines calls them (§7.1's locators): paragraphs
@@ -155,7 +174,12 @@ pub struct Discovery {
 }
 
 /// Folder names never entered: package and build trees.
-const SKIP_DIRS: &[&str] = &["node_modules", "__pycache__", "site-packages", "bower_components"];
+const SKIP_DIRS: &[&str] = &[
+    "node_modules",
+    "__pycache__",
+    "site-packages",
+    "bower_components",
+];
 
 /// File names that look like secrets (§5.2).
 fn secret_name(name: &str) -> bool {
@@ -163,7 +187,9 @@ fn secret_name(name: &str) -> bool {
     lower.starts_with(".env")
         || lower.starts_with("id_")
         || lower.starts_with("credentials")
-        || [".pem", ".key", ".p12", ".pfx", ".kdbx", ".keystore", ".jks"].iter().any(|ext| lower.ends_with(ext) || lower.contains(&format!("{ext}.")))
+        || [".pem", ".key", ".p12", ".pfx", ".kdbx", ".keystore", ".jks"]
+            .iter()
+            .any(|ext| lower.ends_with(ext) || lower.contains(&format!("{ext}.")))
 }
 
 /// Whether a folder is a build or cache tree by its own marker: `CACHEDIR.TAG` (Cargo's
@@ -198,13 +224,20 @@ pub fn walk(collection: &Collection, user_home: &Path, images: bool) -> Discover
 }
 
 /// [`walk`] with the agent's home named (where a project's knowledge folder may be a collection).
-pub fn walk_in(collection: &Collection, user_home: &Path, codex_home: &Path, images: bool) -> Discovery {
+pub fn walk_in(
+    collection: &Collection,
+    user_home: &Path,
+    codex_home: &Path,
+    images: bool,
+) -> Discovery {
     let mut out = Discovery::default();
     let root = match collection.root.canonicalize() {
         Ok(root) => root,
         Err(_) => return out,
     };
-    let home = user_home.canonicalize().unwrap_or_else(|_| user_home.to_path_buf());
+    let home = user_home
+        .canonicalize()
+        .unwrap_or_else(|_| user_home.to_path_buf());
     let secret: Vec<PathBuf> = secret_dirs_in(&root, &home, codex_home);
     let include = globs(&collection.include);
     let exclude = globs(&collection.exclude);
@@ -223,13 +256,17 @@ pub fn walk_in(collection: &Collection, user_home: &Path, codex_home: &Path, ima
                 ignores.push(gi);
             }
         }
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         let mut entries: Vec<_> = entries.flatten().collect();
         entries.sort_by_key(|e| e.file_name());
         for entry in entries {
             let name = entry.file_name().to_string_lossy().into_owned();
             let walked = entry.path();
-            let Ok(meta) = std::fs::symlink_metadata(&walked) else { continue };
+            let Ok(meta) = std::fs::symlink_metadata(&walked) else {
+                continue;
+            };
             if name.starts_with('.') {
                 *out.skipped.entry("hidden").or_default() += 1;
                 continue;
@@ -240,12 +277,18 @@ pub fn walk_in(collection: &Collection, user_home: &Path, codex_home: &Path, ima
                     *out.skipped.entry("symlink").or_default() += 1;
                     continue;
                 }
-                let Ok(target) = walked.canonicalize() else { continue };
+                let Ok(target) = walked.canonicalize() else {
+                    continue;
+                };
                 if !target.starts_with(&root) {
-                    *out.skipped.entry("symlink out of the collection").or_default() += 1;
+                    *out.skipped
+                        .entry("symlink out of the collection")
+                        .or_default() += 1;
                     continue;
                 }
-                let Ok(meta) = std::fs::metadata(&target) else { continue };
+                let Ok(meta) = std::fs::metadata(&target) else {
+                    continue;
+                };
                 (target, meta)
             } else {
                 (walked.clone(), meta)
@@ -290,8 +333,13 @@ pub fn walk_in(collection: &Collection, user_home: &Path, codex_home: &Path, ima
                 continue;
             }
             // Named by where it was found (a link by its own name); read from where it points.
-            let rel = walked.strip_prefix(&root).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| name.clone());
-            if include.as_ref().is_some_and(|g| !g.is_match(&rel)) || exclude.as_ref().is_some_and(|g| g.is_match(&rel)) {
+            let rel = walked
+                .strip_prefix(&root)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| name.clone());
+            if include.as_ref().is_some_and(|g| !g.is_match(&rel))
+                || exclude.as_ref().is_some_and(|g| g.is_match(&rel))
+            {
                 *out.skipped.entry("collection globs").or_default() += 1;
                 continue;
             }
@@ -309,7 +357,13 @@ pub fn walk_in(collection: &Collection, user_home: &Path, codex_home: &Path, ima
             }
             use std::os::unix::fs::MetadataExt;
             let mtime_ns = meta.mtime() * 1_000_000_000 + meta.mtime_nsec();
-            out.candidates.push(Candidate { rel, abs: path, size: meta.len(), mtime_ns, kind });
+            out.candidates.push(Candidate {
+                rel,
+                abs: path,
+                size: meta.len(),
+                mtime_ns,
+                kind,
+            });
         }
     }
     out.candidates.sort_by(|a, b| a.rel.cmp(&b.rel));
@@ -341,22 +395,49 @@ pub fn sniff_bytes(head: &[u8], kind: Kind) -> std::result::Result<(), &'static 
     match kind {
         Kind::Pdf => {
             let window = &head[..head.len().min(1024)];
-            if window.windows(5).any(|w| w == b"%PDF-") { Ok(()) } else { Err("not a PDF (no %PDF- header)") }
+            if window.windows(5).any(|w| w == b"%PDF-") {
+                Ok(())
+            } else {
+                Err("not a PDF (no %PDF- header)")
+            }
         }
         Kind::Image => {
-            let magic: &[&[u8]] = &[b"\x89PNG\r\n\x1a\n", b"\xFF\xD8\xFF", b"II*\x00", b"MM\x00*", b"GIF87a", b"GIF89a", b"BM"];
+            let magic: &[&[u8]] = &[
+                b"\x89PNG\r\n\x1a\n",
+                b"\xFF\xD8\xFF",
+                b"II*\x00",
+                b"MM\x00*",
+                b"GIF87a",
+                b"GIF89a",
+                b"BM",
+            ];
             let webp = head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"WEBP";
-            if webp || magic.iter().any(|m| head.starts_with(m)) { Ok(()) } else { Err("not an image (no PNG, JPEG, TIFF, WebP, GIF or BMP header)") }
+            if webp || magic.iter().any(|m| head.starts_with(m)) {
+                Ok(())
+            } else {
+                Err("not an image (no PNG, JPEG, TIFF, WebP, GIF or BMP header)")
+            }
         }
         Kind::Xls => {
-            if head.starts_with(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") { Ok(()) } else { Err("not an Excel workbook (no OLE header)") }
+            if head.starts_with(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") {
+                Ok(())
+            } else {
+                Err("not an Excel workbook (no OLE header)")
+            }
         }
         k if k.is_zip() => {
-            if head.starts_with(b"PK\x03\x04") { Ok(()) } else { Err("not an Office or OpenDocument file (not a ZIP archive)") }
+            if head.starts_with(b"PK\x03\x04") {
+                Ok(())
+            } else {
+                Err("not an Office or OpenDocument file (not a ZIP archive)")
+            }
         }
         Kind::Mbox => {
             let text = head.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(head);
-            let start = text.iter().position(|b| !b.is_ascii_whitespace()).unwrap_or(text.len());
+            let start = text
+                .iter()
+                .position(|b| !b.is_ascii_whitespace())
+                .unwrap_or(text.len());
             if head.contains(&0) {
                 Err("binary content (NUL byte)")
             } else if text[start..].starts_with(b"From ") {
@@ -366,7 +447,11 @@ pub fn sniff_bytes(head: &[u8], kind: Kind) -> std::result::Result<(), &'static 
             }
         }
         _ => {
-            if head.contains(&0) { Err("binary content (NUL byte)") } else { Ok(()) }
+            if head.contains(&0) {
+                Err("binary content (NUL byte)")
+            } else {
+                Ok(())
+            }
         }
     }
 }
@@ -383,7 +468,11 @@ pub fn hash(path: &Path) -> Result<String> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 #[cfg(test)]
@@ -405,9 +494,11 @@ mod tests {
         write(&home.join(".ssh/id_ed25519.md"), b"secret");
         write(&codex.join("sessions/rollout.md"), b"a session");
         write(&home.join("elsewhere/notes.md"), b"not the project's");
-        std::os::unix::fs::symlink(home.join(".ssh/id_ed25519.md"), knowledge.join("key.md")).unwrap();
+        std::os::unix::fs::symlink(home.join(".ssh/id_ed25519.md"), knowledge.join("key.md"))
+            .unwrap();
         std::os::unix::fs::symlink(codex.join("sessions"), knowledge.join("sessions")).unwrap();
-        std::os::unix::fs::symlink(home.join("elsewhere/notes.md"), knowledge.join("notes.md")).unwrap();
+        std::os::unix::fs::symlink(home.join("elsewhere/notes.md"), knowledge.join("notes.md"))
+            .unwrap();
         let mut collection = Collection::new("project-p-1", knowledge.clone());
         let found = walk_in(&collection, &home, &codex, true);
         let rels: Vec<_> = found.candidates.iter().map(|c| c.rel.clone()).collect();
@@ -416,12 +507,23 @@ mod tests {
         // Followed, a link still never leads out of the folder.
         collection.follow_symlinks = true;
         let found = walk_in(&collection, &home, &codex, true);
-        assert_eq!(found.candidates.iter().map(|c| c.rel.clone()).collect::<Vec<_>>(), vec!["checklist.md".to_string()]);
+        assert_eq!(
+            found
+                .candidates
+                .iter()
+                .map(|c| c.rel.clone())
+                .collect::<Vec<_>>(),
+            vec!["checklist.md".to_string()]
+        );
         assert_eq!(found.skipped["symlink out of the collection"], 3);
         // A sibling of the knowledge folder, and a knowledge folder that is a link to a secret one, stay refused.
-        assert!(crate::collections::validate_root_in(&codex.join("projects/p-1"), &home, &codex).is_err());
+        assert!(
+            crate::collections::validate_root_in(&codex.join("projects/p-1"), &home, &codex)
+                .is_err()
+        );
         std::fs::create_dir_all(codex.join("projects/p-2")).unwrap();
-        std::os::unix::fs::symlink(home.join(".ssh"), codex.join("projects/p-2/knowledge")).unwrap();
+        std::os::unix::fs::symlink(home.join(".ssh"), codex.join("projects/p-2/knowledge"))
+            .unwrap();
         let linked = codex.join("projects/p-2/knowledge").canonicalize().unwrap();
         assert!(crate::collections::validate_root_in(&linked, &home, &codex).is_err());
     }
@@ -449,7 +551,11 @@ mod tests {
         // An unreadable file of a skipped type: the walk would fail if it opened it.
         write(&root.join("locked.zip"), b"x");
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(root.join("locked.zip"), std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::set_permissions(
+            root.join("locked.zip"),
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
         let collection = Collection::new("downloads", root.clone());
         let found = walk(&collection, &home, true);
         let rels: Vec<&str> = found.candidates.iter().map(|c| c.rel.as_str()).collect();
@@ -472,7 +578,13 @@ mod tests {
         std::os::unix::fs::symlink(root.join("in.md"), root.join("alias.md")).unwrap();
         std::os::unix::fs::symlink(&root, root.join("loop")).unwrap();
         let mut collection = Collection::new("docs", root.clone());
-        let rels = |c: &Collection| walk(c, &home, true).candidates.iter().map(|c| c.rel.clone()).collect::<Vec<_>>();
+        let rels = |c: &Collection| {
+            walk(c, &home, true)
+                .candidates
+                .iter()
+                .map(|c| c.rel.clone())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(rels(&collection), ["in.md"]);
         collection.follow_symlinks = true;
         // The alias is kept under its own name (the hash makes it a duplicate later); the escape
@@ -493,7 +605,14 @@ mod tests {
         std::fs::write(&pdf, b"\n%PDF-1.4\n").unwrap();
         assert!(sniff(&pdf, Kind::Pdf).is_ok());
         // Pictures by their own headers (§20).
-        for head in [&b"\x89PNG\r\n\x1a\n...."[..], b"\xFF\xD8\xFF\xE0..JFIF", b"RIFF\x00\x00\x00\x00WEBPVP8 ", b"II*\x00....", b"GIF89a..", b"BM......"] {
+        for head in [
+            &b"\x89PNG\r\n\x1a\n...."[..],
+            b"\xFF\xD8\xFF\xE0..JFIF",
+            b"RIFF\x00\x00\x00\x00WEBPVP8 ",
+            b"II*\x00....",
+            b"GIF89a..",
+            b"BM......",
+        ] {
             assert!(sniff_bytes(head, Kind::Image).is_ok(), "{head:?}");
         }
         assert!(sniff_bytes(b"%PDF-1.4", Kind::Image).is_err());
@@ -516,7 +635,14 @@ mod tests {
         c.exclude = vec!["**/scan*".into()];
         c.max_file_mb = 1;
         let found = walk(&c, &home, true);
-        assert_eq!(found.candidates.iter().map(|x| x.rel.as_str()).collect::<Vec<_>>(), ["keep/a.md"]);
+        assert_eq!(
+            found
+                .candidates
+                .iter()
+                .map(|x| x.rel.as_str())
+                .collect::<Vec<_>>(),
+            ["keep/a.md"]
+        );
         assert_eq!(found.skipped["collection globs"], 2);
         assert_eq!(found.skipped["too large"], 1);
 

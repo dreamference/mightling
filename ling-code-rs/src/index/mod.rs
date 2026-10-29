@@ -29,8 +29,13 @@ use host::{Host, SystemdHost};
 pub fn request_or_run(repo: &Repo, settings: &Settings, exact: bool, wait: bool) -> Result<()> {
     let host = SystemdHost;
     if !host.can_create_scopes() {
-        let request = if exact { Request::IndexExact } else { Request::Index };
-        requests::append(&repo.state_dir(), request).context("queueing the request (this sandbox cannot write the repository)")?;
+        let request = if exact {
+            Request::IndexExact
+        } else {
+            Request::Index
+        };
+        requests::append(&repo.state_dir(), request)
+            .context("queueing the request (this sandbox cannot write the repository)")?;
         println!("queued: the Mightling session outside the sandbox will re-index when the model is idle");
         return Ok(());
     }
@@ -44,13 +49,20 @@ pub fn request_or_run(repo: &Repo, settings: &Settings, exact: bool, wait: bool)
         return Ok(());
     }
     if wait {
-        for (unit, outcome) in supervisor::execute(&plan, &host, &probe::HttpProbe::new(&plan.vllm_host), supervisor::POLL) {
+        for (unit, outcome) in supervisor::execute(
+            &plan,
+            &host,
+            &probe::HttpProbe::new(&plan.vllm_host),
+            supervisor::POLL,
+        ) {
             println!("{unit}: {}", outcome.status());
         }
         return Ok(());
     }
     let pid = spawn_supervisor(repo, &plan)?;
-    println!("indexing in the background (supervisor pid {pid}); `ling-code status` reports progress");
+    println!(
+        "indexing in the background (supervisor pid {pid}); `ling-code status` reports progress"
+    );
     Ok(())
 }
 
@@ -93,8 +105,17 @@ pub fn supervise(plan_path: &str) -> Result<()> {
     let plan: plan::Plan = serde_json::from_slice(&std::fs::read(plan_path)?)?;
     let marker = plan.state_dir.join("code_index.running");
     let _ = std::fs::write(&marker, std::process::id().to_string());
-    for (unit, outcome) in supervisor::execute(&plan, &SystemdHost, &probe::HttpProbe::new(&plan.vllm_host), supervisor::POLL) {
-        println!("{} {unit}: {}", crate::manifest::now_rfc3339(), outcome.status());
+    for (unit, outcome) in supervisor::execute(
+        &plan,
+        &SystemdHost,
+        &probe::HttpProbe::new(&plan.vllm_host),
+        supervisor::POLL,
+    ) {
+        println!(
+            "{} {unit}: {}",
+            crate::manifest::now_rfc3339(),
+            outcome.status()
+        );
     }
     let _ = std::fs::remove_file(&marker);
     let _ = std::fs::remove_file(plan.state_dir.join("code_index.building"));
@@ -111,7 +132,8 @@ pub fn running(repo: &Repo) -> bool {
         .unwrap_or(false)
 }
 
-const CBMIGNORE_BEGIN: &str = "# BEGIN ling-code managed: submodules that are not indexed (see `ling-code submodules`)";
+const CBMIGNORE_BEGIN: &str =
+    "# BEGIN ling-code managed: submodules that are not indexed (see `ling-code submodules`)";
 const CBMIGNORE_BEGIN_PREFIX: &str = "# BEGIN ling-code managed";
 const CBMIGNORE_END: &str = "# END ling-code managed";
 
@@ -123,8 +145,16 @@ const CBMIGNORE_END: &str = "# END ling-code managed";
 pub fn write_cbmignore(repo: &Repo, settings: &Settings) -> Result<()> {
     let path = repo.main_root.join(".cbmignore");
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let main = Repo { root: repo.main_root.clone(), main_root: repo.main_root.clone(), is_git: repo.is_git };
-    let excluded: Vec<String> = crate::submodules::evaluate(&main, settings).into_iter().filter(|s| !s.indexed).map(|s| s.path).collect();
+    let main = Repo {
+        root: repo.main_root.clone(),
+        main_root: repo.main_root.clone(),
+        is_git: repo.is_git,
+    };
+    let excluded: Vec<String> = crate::submodules::evaluate(&main, settings)
+        .into_iter()
+        .filter(|s| !s.indexed)
+        .map(|s| s.path)
+        .collect();
     let mut kept: Vec<&str> = Vec::new();
     let mut inside = false;
     for line in existing.lines() {
@@ -164,7 +194,10 @@ pub fn write_cbmignore(repo: &Repo, settings: &Settings) -> Result<()> {
 }
 
 fn exclude_from_git(repo: &Repo, entry: &str) -> Result<()> {
-    let common = crate::paths::git(&repo.root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    let common = crate::paths::git(
+        &repo.root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
     let exclude = PathBuf::from(common.trim()).join("info/exclude");
     let text = std::fs::read_to_string(&exclude).unwrap_or_default();
     if !text.lines().any(|l| l.trim() == entry) {
@@ -183,7 +216,11 @@ fn exclude_from_git(repo: &Repo, entry: &str) -> Result<()> {
 /// `ling-code forget`: deletes this repository's graph and SCIP stores.
 pub fn forget(repo: &Repo) -> Result<()> {
     let (graph, _) = crate::graph::locate(repo);
-    for path in [graph.clone(), PathBuf::from(format!("{}-wal", graph.display())), PathBuf::from(format!("{}-journal", graph.display()))] {
+    for path in [
+        graph.clone(),
+        PathBuf::from(format!("{}-wal", graph.display())),
+        PathBuf::from(format!("{}-journal", graph.display())),
+    ] {
         let _ = std::fs::remove_file(path);
     }
     let scip = repo.scip_dir();
@@ -197,7 +234,9 @@ pub fn forget(repo: &Repo) -> Result<()> {
 /// Disk used by a file or directory tree.
 pub fn disk_use(path: &Path) -> u64 {
     match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => std::fs::read_dir(path).map(|e| e.flatten().map(|e| disk_use(&e.path())).sum()).unwrap_or(0),
+        Ok(meta) if meta.is_dir() => std::fs::read_dir(path)
+            .map(|e| e.flatten().map(|e| disk_use(&e.path())).sum())
+            .unwrap_or(0),
         Ok(meta) => meta.len(),
         Err(_) => 0,
     }
@@ -216,10 +255,18 @@ mod tests {
         std::fs::write(dir.path().join("sub/b"), b"123456").unwrap();
         assert_eq!(disk_use(dir.path()), 10);
 
-        let repo = Repo { root: dir.path().to_path_buf(), main_root: dir.path().to_path_buf(), is_git: false };
+        let repo = Repo {
+            root: dir.path().to_path_buf(),
+            main_root: dir.path().to_path_buf(),
+            is_git: false,
+        };
         assert!(!running(&repo));
         std::fs::create_dir_all(repo.state_dir()).unwrap();
-        std::fs::write(repo.state_dir().join("code_index.running"), std::process::id().to_string()).unwrap();
+        std::fs::write(
+            repo.state_dir().join("code_index.running"),
+            std::process::id().to_string(),
+        )
+        .unwrap();
         assert!(running(&repo));
         std::fs::write(repo.state_dir().join("code_index.running"), "999999999").unwrap();
         assert!(!running(&repo));
@@ -228,7 +275,11 @@ mod tests {
     #[test]
     fn write_cbmignore_preserves_user_lines_and_strips_empty_managed_file() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repo { root: dir.path().to_path_buf(), main_root: dir.path().to_path_buf(), is_git: false };
+        let repo = Repo {
+            root: dir.path().to_path_buf(),
+            main_root: dir.path().to_path_buf(),
+            is_git: false,
+        };
         let cbm = dir.path().join(".cbmignore");
         std::fs::write(
             &cbm,
@@ -239,7 +290,11 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&cbm).unwrap(), "custom_dir/");
 
         // When only the managed block was present and no submodules are excluded, the file is removed.
-        std::fs::write(&cbm, format!("{CBMIGNORE_BEGIN}\nold_sub/\n{CBMIGNORE_END}\n")).unwrap();
+        std::fs::write(
+            &cbm,
+            format!("{CBMIGNORE_BEGIN}\nold_sub/\n{CBMIGNORE_END}\n"),
+        )
+        .unwrap();
         write_cbmignore(&repo, &Settings::default()).unwrap();
         assert!(!cbm.exists());
     }

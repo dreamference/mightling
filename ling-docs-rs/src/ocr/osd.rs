@@ -34,7 +34,11 @@ impl Script {
         let n = name.trim();
         if n.starts_with("Hangul") || n.starts_with("Korean") {
             Script::Hangul
-        } else if n.starts_with("Han") || n.starts_with("Japanese") || n == "Katakana" || n == "Hiragana" {
+        } else if n.starts_with("Han")
+            || n.starts_with("Japanese")
+            || n == "Katakana"
+            || n == "Hiragana"
+        {
             Script::Han
         } else if n.starts_with("Cyrillic") {
             Script::Cyrillic
@@ -60,7 +64,13 @@ type Create = unsafe extern "C" fn() -> *mut c_void;
 type Init3 = unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char) -> c_int;
 type SetPsm = unsafe extern "C" fn(*mut c_void, c_int);
 type SetImage = unsafe extern "C" fn(*mut c_void, *const u8, c_int, c_int, c_int, c_int);
-type Detect = unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_float, *mut *const c_char, *mut c_float) -> c_int;
+type Detect = unsafe extern "C" fn(
+    *mut c_void,
+    *mut c_int,
+    *mut c_float,
+    *mut *const c_char,
+    *mut c_float,
+) -> c_int;
 type Delete = unsafe extern "C" fn(*mut c_void);
 type SetVariable = unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char) -> c_int;
 
@@ -75,7 +85,11 @@ pub struct Osd {
 
 fn dlerror() -> String {
     let e = unsafe { libc::dlerror() };
-    if e.is_null() { "unknown error".into() } else { unsafe { CStr::from_ptr(e) }.to_string_lossy().into_owned() }
+    if e.is_null() {
+        "unknown error".into()
+    } else {
+        unsafe { CStr::from_ptr(e) }.to_string_lossy().into_owned()
+    }
 }
 
 fn open(path: &Path) -> Result<*mut c_void> {
@@ -105,18 +119,32 @@ impl Osd {
         let create: Create = symbol(tess, "TessBaseAPICreate")?;
         let init: Init3 = symbol(tess, "TessBaseAPIInit3")?;
         let set_variable: SetVariable = symbol(tess, "TessBaseAPISetVariable")?;
-        let (set_psm, set_image, detect, delete) = (symbol(tess, "TessBaseAPISetPageSegMode")?, symbol(tess, "TessBaseAPISetImage")?, symbol(tess, "TessBaseAPIDetectOrientationScript")?, symbol(tess, "TessBaseAPIDelete")?);
+        let (set_psm, set_image, detect, delete) = (
+            symbol(tess, "TessBaseAPISetPageSegMode")?,
+            symbol(tess, "TessBaseAPISetImage")?,
+            symbol(tess, "TessBaseAPIDetectOrientationScript")?,
+            symbol(tess, "TessBaseAPIDelete")?,
+        );
         let api = unsafe { create() };
         if api.is_null() {
             bail!("Tesseract could not start");
         }
         // Owned from here: dropped (and the API deleted) on any error below.
-        let osd = Osd { api, set_psm, set_image, detect, delete };
+        let osd = Osd {
+            api,
+            set_psm,
+            set_image,
+            detect,
+            delete,
+        };
         let data = CString::new(tessdata.as_os_str().as_encoded_bytes())?;
         let lang = CString::new("osd")?;
         // Tesseract prints its own warnings to stderr (the worker's log).
         if unsafe { init(api, data.as_ptr(), lang.as_ptr()) } != 0 {
-            bail!("Tesseract could not read {}", tessdata.join("osd.traineddata").display());
+            bail!(
+                "Tesseract could not read {}",
+                tessdata.join("osd.traineddata").display()
+            );
         }
         let (key, value) = (CString::new("debug_file")?, CString::new("/dev/null")?);
         unsafe { set_variable(api, key.as_ptr(), value.as_ptr()) };
@@ -130,13 +158,32 @@ impl Osd {
         if width == 0 || height == 0 || gray.len() < width * height {
             return None;
         }
-        unsafe { (self.set_image)(self.api, gray.as_ptr(), width as c_int, height as c_int, 1, width as c_int) };
-        let (mut deg, mut oconf, mut name, mut sconf) = (0 as c_int, 0 as c_float, std::ptr::null::<c_char>(), 0 as c_float);
+        unsafe {
+            (self.set_image)(
+                self.api,
+                gray.as_ptr(),
+                width as c_int,
+                height as c_int,
+                1,
+                width as c_int,
+            )
+        };
+        let (mut deg, mut oconf, mut name, mut sconf) = (
+            0 as c_int,
+            0 as c_float,
+            std::ptr::null::<c_char>(),
+            0 as c_float,
+        );
         let ok = unsafe { (self.detect)(self.api, &mut deg, &mut oconf, &mut name, &mut sconf) };
         if ok == 0 || name.is_null() {
             return None;
         }
-        Some((unsafe { CStr::from_ptr(name) }.to_string_lossy().into_owned(), sconf))
+        Some((
+            unsafe { CStr::from_ptr(name) }
+                .to_string_lossy()
+                .into_owned(),
+            sconf,
+        ))
     }
 }
 
@@ -153,10 +200,13 @@ impl Drop for Osd {
 pub fn probe(lib_dir: &Path) -> Option<String> {
     for name in ["liblept.so.5", "libtesseract.so.5"] {
         if !lib_dir.join(name).is_file() {
-            return Some(format!("{name} is not installed (run `ling-admin docs setup`)"));
+            return Some(format!(
+                "{name} is not installed (run `ling-admin docs setup`)"
+            ));
         }
     }
-    match open(&lib_dir.join("liblept.so.5")).and_then(|_| open(&lib_dir.join("libtesseract.so.5"))) {
+    match open(&lib_dir.join("liblept.so.5")).and_then(|_| open(&lib_dir.join("libtesseract.so.5")))
+    {
         Ok(_) => None,
         Err(e) => Some(format!("{e:#}")),
     }
@@ -168,7 +218,19 @@ mod tests {
 
     #[test]
     fn tesseract_scripts_map_to_routes() {
-        for (name, script) in [("Latin", Script::Latin), ("HanS", Script::Han), ("HanT", Script::Han), ("Japanese", Script::Han), ("Hangul", Script::Hangul), ("Korean", Script::Hangul), ("Cyrillic", Script::Cyrillic), ("Arabic", Script::Arabic), ("Greek", Script::Latin), ("Devanagari", Script::Latin), ("", Script::Latin)] {
+        for (name, script) in [
+            ("Latin", Script::Latin),
+            ("HanS", Script::Han),
+            ("HanT", Script::Han),
+            ("Japanese", Script::Han),
+            ("Hangul", Script::Hangul),
+            ("Korean", Script::Hangul),
+            ("Cyrillic", Script::Cyrillic),
+            ("Arabic", Script::Arabic),
+            ("Greek", Script::Latin),
+            ("Devanagari", Script::Latin),
+            ("", Script::Latin),
+        ] {
             assert_eq!(Script::of_tesseract(name), script, "{name}");
         }
     }
@@ -176,13 +238,20 @@ mod tests {
     #[test]
     fn the_libraries_detect_the_script_where_they_are_installed() {
         // Only with `MIGHTLING_DOCS_LIB_DIR` and `MIGHTLING_DOCS_OCR_DIR` naming installed copies.
-        let (Some(lib), Some(ocr)) = (std::env::var_os("MIGHTLING_DOCS_LIB_DIR"), std::env::var_os("MIGHTLING_DOCS_OCR_DIR")) else { return };
+        let (Some(lib), Some(ocr)) = (
+            std::env::var_os("MIGHTLING_DOCS_LIB_DIR"),
+            std::env::var_os("MIGHTLING_DOCS_OCR_DIR"),
+        ) else {
+            return;
+        };
         let (lib, ocr) = (std::path::PathBuf::from(lib), std::path::PathBuf::from(ocr));
         if probe(&lib).is_some() || !ocr.join("tessdata/osd.traineddata").is_file() {
             return;
         }
         let mut osd = Osd::load(&lib, &ocr.join("tessdata")).unwrap();
         // A blank page: no answer, and no crash.
-        assert!(osd.script(&vec![255u8; 400 * 300], 400, 300).is_none_or(|(n, _)| !n.is_empty()));
+        assert!(osd
+            .script(&vec![255u8; 400 * 300], 400, 300)
+            .is_none_or(|(n, _)| !n.is_empty()));
     }
 }

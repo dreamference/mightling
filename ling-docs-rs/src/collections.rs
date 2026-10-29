@@ -74,7 +74,9 @@ impl DocsToml {
     /// so a typo never silently drops every collection.
     pub fn load_from(path: &Path) -> Result<DocsToml> {
         match std::fs::read_to_string(path) {
-            Ok(text) => toml::from_str(&text).with_context(|| format!("{} does not parse", path.display())),
+            Ok(text) => {
+                toml::from_str(&text).with_context(|| format!("{} does not parse", path.display()))
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(DocsToml::default()),
             Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
         }
@@ -86,13 +88,18 @@ impl DocsToml {
 
     /// Writes the file whole (a temporary file renamed over it), mode 600.
     pub fn save_to(&self, path: &Path) -> Result<()> {
-        use std::os::unix::fs::OpenOptionsExt;
         use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let staging = path.with_extension("toml.new");
-        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&staging)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&staging)?;
         file.write_all(HEADER.as_bytes())?;
         file.write_all(toml::to_string_pretty(self)?.as_bytes())?;
         file.sync_all()?;
@@ -120,7 +127,9 @@ impl DocsToml {
             if self.removed_defaults.iter().any(|r| r == name) || self.get(name).is_some() {
                 continue;
             }
-            let Ok(root) = folder.canonicalize() else { continue };
+            let Ok(root) = folder.canonicalize() else {
+                continue;
+            };
             if !root.is_dir() || self.collections.iter().any(|c| c.root == root) {
                 continue;
             }
@@ -136,8 +145,15 @@ impl DocsToml {
     }
 
     /// Adds a collection after the checks of §5.2. Returns it.
-    pub fn add(&mut self, folder: &Path, name: Option<&str>, user_home: &Path) -> Result<Collection> {
-        let root = folder.canonicalize().with_context(|| format!("{} does not exist", folder.display()))?;
+    pub fn add(
+        &mut self,
+        folder: &Path,
+        name: Option<&str>,
+        user_home: &Path,
+    ) -> Result<Collection> {
+        let root = folder
+            .canonicalize()
+            .with_context(|| format!("{} does not exist", folder.display()))?;
         if !root.is_dir() {
             bail!("{} is not a folder", root.display());
         }
@@ -151,13 +167,29 @@ impl DocsToml {
             bail!("a collection named `{name}` exists already (choose another with --name)");
         }
         if let Some(other) = self.collections.iter().find(|c| c.root == root) {
-            bail!("{} is the collection `{}` already", root.display(), other.name);
+            bail!(
+                "{} is the collection `{}` already",
+                root.display(),
+                other.name
+            );
         }
-        if let Some(other) = self.collections.iter().find(|c| root.starts_with(&c.root) || c.root.starts_with(&root)) {
-            bail!("{} overlaps the collection `{}` ({}); remove that one first", root.display(), other.name, other.root.display());
+        if let Some(other) = self
+            .collections
+            .iter()
+            .find(|c| root.starts_with(&c.root) || c.root.starts_with(&root))
+        {
+            bail!(
+                "{} overlaps the collection `{}` ({}); remove that one first",
+                root.display(),
+                other.name,
+                other.root.display()
+            );
         }
         let mut collection = Collection::new(&name, root);
-        collection.default = DEFAULT_NAMES.contains(&name.as_str()) && default_folders(user_home).iter().any(|(n, f)| *n == name && f.canonicalize().ok().as_deref() == Some(&collection.root));
+        collection.default = DEFAULT_NAMES.contains(&name.as_str())
+            && default_folders(user_home).iter().any(|(n, f)| {
+                *n == name && f.canonicalize().ok().as_deref() == Some(&collection.root)
+            });
         // Adding back a default the user removed earlier is their choice now.
         self.removed_defaults.retain(|r| *r != name);
         self.collections.push(collection.clone());
@@ -171,7 +203,9 @@ impl DocsToml {
             bail!("no collection named `{name}`");
         };
         let removed = self.collections.remove(index);
-        if (removed.default || DEFAULT_NAMES.contains(&name)) && !self.removed_defaults.iter().any(|r| r == name) {
+        if (removed.default || DEFAULT_NAMES.contains(&name))
+            && !self.removed_defaults.iter().any(|r| r == name)
+        {
             self.removed_defaults.push(name.to_string());
         }
         Ok(removed)
@@ -188,13 +222,23 @@ pub fn default_folders(user_home: &Path) -> Vec<(&'static str, PathBuf)> {
     let lookup = |key: &str| -> Option<PathBuf> {
         let line = xdg.lines().find(|l| l.trim_start().starts_with(key))?;
         let value = line.split_once('=')?.1.trim().trim_matches('"');
-        let path = if let Some(rest) = value.strip_prefix("$HOME") { user_home.join(rest.trim_start_matches('/')) } else { PathBuf::from(value) };
+        let path = if let Some(rest) = value.strip_prefix("$HOME") {
+            user_home.join(rest.trim_start_matches('/'))
+        } else {
+            PathBuf::from(value)
+        };
         // `XDG_DOCUMENTS_DIR="$HOME/"` means "none"; never the home folder itself.
         (path != user_home && path.is_absolute()).then_some(path)
     };
     vec![
-        ("documents", lookup("XDG_DOCUMENTS_DIR").unwrap_or_else(|| user_home.join("Documents"))),
-        ("downloads", lookup("XDG_DOWNLOAD_DIR").unwrap_or_else(|| user_home.join("Downloads"))),
+        (
+            "documents",
+            lookup("XDG_DOCUMENTS_DIR").unwrap_or_else(|| user_home.join("Documents")),
+        ),
+        (
+            "downloads",
+            lookup("XDG_DOWNLOAD_DIR").unwrap_or_else(|| user_home.join("Downloads")),
+        ),
     ]
 }
 
@@ -203,7 +247,9 @@ pub fn validate_name(name: &str) -> Result<()> {
     let ok = !name.is_empty()
         && name.len() <= 40
         && name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
-        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
     if !ok {
         bail!("`{name}` is not a collection name: use lower-case letters, digits, - and _ (up to 40, starting with a letter)");
     }
@@ -214,8 +260,14 @@ pub fn validate_name(name: &str) -> Result<()> {
 }
 
 fn name_from(root: &Path) -> String {
-    let base = root.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-    let mut name: String = base.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let base = root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let mut name: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
     name = name.trim_matches('-').to_string();
     if !name.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
         name = format!("docs-{name}");
@@ -249,12 +301,26 @@ pub const SECRET_DIRS: &[&str] = &[
 /// them. The one folder inside a secret folder that may be a collection, since everything in it was
 /// put there to be read; nothing else under `$CODEX_HOME` is.
 pub fn is_project_knowledge(root: &Path, codex_home: &Path) -> bool {
-    let projects = codex_home.canonicalize().unwrap_or_else(|_| codex_home.to_path_buf()).join("projects");
-    let Some(project) = root.parent() else { return false };
-    let id_ok = project.file_name().and_then(|n| n.to_str()).is_some_and(|id| {
-        !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    });
-    root.file_name().is_some_and(|n| n == "knowledge") && project.parent() == Some(projects.as_path()) && id_ok
+    let projects = codex_home
+        .canonicalize()
+        .unwrap_or_else(|_| codex_home.to_path_buf())
+        .join("projects");
+    let Some(project) = root.parent() else {
+        return false;
+    };
+    let id_ok = project
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|id| {
+            !id.is_empty()
+                && id.len() <= 128
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        });
+    root.file_name().is_some_and(|n| n == "knowledge")
+        && project.parent() == Some(projects.as_path())
+        && id_ok
 }
 
 /// The secret folders a walk of `root` skips: all of them, except the one holding a project's knowledge folder when `root` is one.
@@ -265,7 +331,11 @@ pub fn secret_dirs(root: &Path, home: &Path) -> Vec<PathBuf> {
 /// [`secret_dirs`] with the agent's home named.
 pub fn secret_dirs_in(root: &Path, home: &Path, codex_home: &Path) -> Vec<PathBuf> {
     let knowledge = is_project_knowledge(root, codex_home);
-    SECRET_DIRS.iter().map(|d| home.join(d)).filter(|s| !(knowledge && root.starts_with(s))).collect()
+    SECRET_DIRS
+        .iter()
+        .map(|d| home.join(d))
+        .filter(|s| !(knowledge && root.starts_with(s)))
+        .collect()
 }
 
 /// Refuses `/`, the home folder, any folder containing it, and anything inside a secret folder.
@@ -278,7 +348,9 @@ pub fn validate_root_in(root: &Path, user_home: &Path, codex_home: &Path) -> Res
     if root == Path::new("/") {
         bail!("`/` cannot be a collection: name the folders that hold documents instead");
     }
-    let home = user_home.canonicalize().unwrap_or_else(|_| user_home.to_path_buf());
+    let home = user_home
+        .canonicalize()
+        .unwrap_or_else(|_| user_home.to_path_buf());
     if root == home || home.starts_with(root) {
         bail!("{} holds your whole home folder, with its keys and settings: name the folders that hold documents instead (for example ~/Documents)", root.display());
     }
@@ -288,7 +360,11 @@ pub fn validate_root_in(root: &Path, user_home: &Path, codex_home: &Path) -> Res
     for secret in SECRET_DIRS {
         let secret = home.join(secret);
         if root.starts_with(&secret) {
-            bail!("{} is inside {}, which is never indexed", root.display(), secret.display());
+            bail!(
+                "{} is inside {}, which is never indexed",
+                root.display(),
+                secret.display()
+            );
         }
     }
     Ok(())
@@ -304,7 +380,11 @@ mod tests {
         let home = home.path().canonicalize().unwrap();
         std::fs::create_dir(home.join("Documents")).unwrap();
         let mut docs = DocsToml::default();
-        assert_eq!(docs.ensure_defaults(&home), vec!["documents".to_string()], "no Downloads folder, no downloads collection");
+        assert_eq!(
+            docs.ensure_defaults(&home),
+            vec!["documents".to_string()],
+            "no Downloads folder, no downloads collection"
+        );
         std::fs::create_dir(home.join("Downloads")).unwrap();
         assert_eq!(docs.ensure_defaults(&home), vec!["downloads".to_string()]);
         assert!(docs.ensure_defaults(&home).is_empty());
@@ -312,13 +392,21 @@ mod tests {
         let path = home.join(".mightling/docs.toml");
         docs.save_to(&path).unwrap();
         let mut again = DocsToml::load_from(&path).unwrap();
-        assert!(again.ensure_defaults(&home).is_empty(), "a removed default is never added back");
+        assert!(
+            again.ensure_defaults(&home).is_empty(),
+            "a removed default is never added back"
+        );
         assert_eq!(again.removed_defaults, vec!["downloads".to_string()]);
         assert!(again.get("documents").unwrap().default);
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         // The user may add it back explicitly.
-        again.add(&home.join("Downloads"), Some("downloads"), &home).unwrap();
+        again
+            .add(&home.join("Downloads"), Some("downloads"), &home)
+            .unwrap();
         assert!(again.removed_defaults.is_empty());
     }
 
@@ -328,20 +416,39 @@ mod tests {
         let home = home.path().canonicalize().unwrap();
         let codex = home.join(".mightling");
         let knowledge = codex.join("projects/p-1a2b/knowledge");
-        for dir in [knowledge.as_path(), &codex.join("projects/p-1a2b/other"), &codex.join("sessions"), &codex.join("projects/bad id/knowledge")] {
+        for dir in [
+            knowledge.as_path(),
+            &codex.join("projects/p-1a2b/other"),
+            &codex.join("sessions"),
+            &codex.join("projects/bad id/knowledge"),
+        ] {
             std::fs::create_dir_all(dir).unwrap();
         }
         assert!(is_project_knowledge(&knowledge, &codex));
         assert!(validate_root_in(&knowledge, &home, &codex).is_ok());
-        for refused in [codex.join("projects/p-1a2b/other"), codex.join("sessions"), codex.join("projects/bad id/knowledge"), codex.join("projects")] {
-            assert!(!is_project_knowledge(&refused, &codex), "{}", refused.display());
-            assert!(validate_root_in(&refused, &home, &codex).is_err(), "{}", refused.display());
+        for refused in [
+            codex.join("projects/p-1a2b/other"),
+            codex.join("sessions"),
+            codex.join("projects/bad id/knowledge"),
+            codex.join("projects"),
+        ] {
+            assert!(
+                !is_project_knowledge(&refused, &codex),
+                "{}",
+                refused.display()
+            );
+            assert!(
+                validate_root_in(&refused, &home, &codex).is_err(),
+                "{}",
+                refused.display()
+            );
         }
         // A walk of the knowledge folder skips every secret folder but the one it is in.
         let skipped = secret_dirs_in(&knowledge, &home, &codex);
         assert!(!skipped.contains(&home.join(".mightling")));
         assert!(skipped.contains(&home.join(".ssh")));
-        assert!(secret_dirs_in(&home.join("Documents"), &home, &codex).contains(&home.join(".mightling")));
+        assert!(secret_dirs_in(&home.join("Documents"), &home, &codex)
+            .contains(&home.join(".mightling")));
     }
 
     #[test]
@@ -352,15 +459,31 @@ mod tests {
             std::fs::create_dir_all(home.join(dir)).unwrap();
         }
         let mut docs = DocsToml::default();
-        assert!(docs.add(&home, None, &home).unwrap_err().to_string().contains("whole home folder"));
+        assert!(docs
+            .add(&home, None, &home)
+            .unwrap_err()
+            .to_string()
+            .contains("whole home folder"));
         assert!(docs.add(Path::new("/"), None, &home).is_err());
-        assert!(docs.add(home.parent().unwrap(), None, &home).is_err(), "a folder containing the home is refused");
-        assert!(docs.add(&home.join(".ssh/keys"), None, &home).unwrap_err().to_string().contains("never indexed"));
+        assert!(
+            docs.add(home.parent().unwrap(), None, &home).is_err(),
+            "a folder containing the home is refused"
+        );
+        assert!(docs
+            .add(&home.join(".ssh/keys"), None, &home)
+            .unwrap_err()
+            .to_string()
+            .contains("never indexed"));
         assert!(docs.add(&home.join(".config/app"), None, &home).is_err());
         let added = docs.add(&home.join("notes"), None, &home).unwrap();
         assert_eq!(added.name, "notes");
-        assert!(docs.add(&home.join("notes"), Some("other"), &home).is_err(), "the same folder twice");
-        assert!(docs.add(&home.join("notes"), Some("Bad Name"), &home).is_err());
+        assert!(
+            docs.add(&home.join("notes"), Some("other"), &home).is_err(),
+            "the same folder twice"
+        );
+        assert!(docs
+            .add(&home.join("notes"), Some("Bad Name"), &home)
+            .is_err());
     }
 
     #[test]
@@ -369,7 +492,11 @@ mod tests {
         let home = home.path().canonicalize().unwrap();
         std::fs::create_dir_all(home.join(".config")).unwrap();
         std::fs::create_dir_all(home.join("Dokumente")).unwrap();
-        std::fs::write(home.join(".config/user-dirs.dirs"), "XDG_DOCUMENTS_DIR=\"$HOME/Dokumente\"\nXDG_DOWNLOAD_DIR=\"$HOME/\"\n").unwrap();
+        std::fs::write(
+            home.join(".config/user-dirs.dirs"),
+            "XDG_DOCUMENTS_DIR=\"$HOME/Dokumente\"\nXDG_DOWNLOAD_DIR=\"$HOME/\"\n",
+        )
+        .unwrap();
         let mut docs = DocsToml::default();
         assert_eq!(docs.ensure_defaults(&home), vec!["documents".to_string()]);
         assert_eq!(docs.get("documents").unwrap().root, home.join("Dokumente"));
@@ -381,7 +508,10 @@ mod tests {
         let path = dir.path().join("docs.toml");
         std::fs::write(&path, "[[collection]]\nname = ").unwrap();
         assert!(DocsToml::load_from(&path).is_err());
-        assert_eq!(DocsToml::load_from(&dir.path().join("missing.toml")).unwrap(), DocsToml::default());
+        assert_eq!(
+            DocsToml::load_from(&dir.path().join("missing.toml")).unwrap(),
+            DocsToml::default()
+        );
     }
 
     #[test]
@@ -389,15 +519,29 @@ mod tests {
         for good in ["documents", "a", "work_2026-q4"] {
             assert!(validate_name(good).is_ok(), "{good}");
         }
-        for bad in ["", "-bad", "_bad", "Bad", "a/b", "a..b", "pdf-0123456789ab", &"x".repeat(65)] {
+        for bad in [
+            "",
+            "-bad",
+            "_bad",
+            "Bad",
+            "a/b",
+            "a..b",
+            "pdf-0123456789ab",
+            &"x".repeat(65),
+        ] {
             assert!(validate_name(bad).is_err(), "{bad}");
         }
         let home = tempfile::tempdir().unwrap();
         let home = home.path().canonicalize().unwrap();
         std::fs::create_dir_all(home.join("papers/sub")).unwrap();
         let mut docs = DocsToml::default();
-        docs.add(&home.join("papers"), Some("papers"), &home).unwrap();
-        assert!(docs.add(&home.join("papers/sub"), Some("sub"), &home).is_err(), "overlapping collection root is refused");
+        docs.add(&home.join("papers"), Some("papers"), &home)
+            .unwrap();
+        assert!(
+            docs.add(&home.join("papers/sub"), Some("sub"), &home)
+                .is_err(),
+            "overlapping collection root is refused"
+        );
         docs.collections[0].enabled = false;
         assert_eq!(docs.enabled().count(), 0);
         docs.collections[0].enabled = true;

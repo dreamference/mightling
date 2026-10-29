@@ -32,7 +32,13 @@ pub fn scan(root: &Path, files: &[String], name: &str, max_files: usize, max_byt
         return Scan::default();
     }
     if files.len() > max_files {
-        return Scan { over_limit: Some(format!("{} files, above the {max_files}-file bound", files.len())), ..Scan::default() };
+        return Scan {
+            over_limit: Some(format!(
+                "{} files, above the {max_files}-file bound",
+                files.len()
+            )),
+            ..Scan::default()
+        };
     }
     let text_files: Vec<(&String, u64)> = files
         .iter()
@@ -44,16 +50,29 @@ pub fn scan(root: &Path, files: &[String], name: &str, max_files: usize, max_byt
         .collect();
     let total: u64 = text_files.iter().map(|(_, size)| size).sum();
     if total > max_bytes {
-        return Scan { over_limit: Some(format!("{} MiB, above the {} MiB bound", total >> 20, max_bytes >> 20)), ..Scan::default() };
+        return Scan {
+            over_limit: Some(format!(
+                "{} MiB, above the {} MiB bound",
+                total >> 20,
+                max_bytes >> 20
+            )),
+            ..Scan::default()
+        };
     }
     let mut result = Scan::default();
     for (file, _) in text_files {
-        let Ok(bytes) = std::fs::read(root.join(file)) else { continue };
+        let Ok(bytes) = std::fs::read(root.join(file)) else {
+            continue;
+        };
         result.files_searched += 1;
         let text = String::from_utf8_lossy(&bytes);
         for (index, line) in text.lines().enumerate() {
             for column in word_matches(line, name) {
-                result.hits.push(Hit { path: file.clone(), line: index as u32 + 1, column: column as u32 + 1 });
+                result.hits.push(Hit {
+                    path: file.clone(),
+                    line: index as u32 + 1,
+                    column: column as u32 + 1,
+                });
             }
         }
     }
@@ -65,7 +84,9 @@ pub fn scan(root: &Path, files: &[String], name: &str, max_files: usize, max_byt
 fn is_binary(path: &Path) -> bool {
     use std::io::Read;
     let mut head = [0u8; 8192];
-    let Ok(mut file) = std::fs::File::open(path) else { return false };
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
     let mut filled = 0;
     while filled < head.len() {
         match file.read(&mut head[filled..]) {
@@ -104,9 +125,17 @@ mod tests {
     #[test]
     fn binary_files_do_not_count_against_the_byte_bound() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("paper.pdf"), [b"%PDF-1.7\0".as_slice(), &vec![7u8; 4096]].concat()).unwrap();
+        std::fs::write(
+            dir.path().join("paper.pdf"),
+            [b"%PDF-1.7\0".as_slice(), &vec![7u8; 4096]].concat(),
+        )
+        .unwrap();
         std::fs::write(dir.path().join("a.py"), "x = area()\n").unwrap();
-        let files = vec!["paper.pdf".to_string(), "a.py".to_string(), "gone.py".to_string()];
+        let files = vec![
+            "paper.pdf".to_string(),
+            "a.py".to_string(),
+            "gone.py".to_string(),
+        ];
         // 4 KiB of PDF beside 11 bytes of text, under a 1 KiB bound: the text is still searched.
         let found = scan(dir.path(), &files, "area", 10, 1024);
         assert_eq!(found.over_limit, None);
@@ -117,8 +146,14 @@ mod tests {
 
     #[test]
     fn whole_words_only() {
-        assert_eq!(word_matches("area() + square.area() + areas + _area", "area"), vec![0, 16]);
-        assert_eq!(word_matches("make_circle(1)", "circle"), Vec::<usize>::new());
+        assert_eq!(
+            word_matches("area() + square.area() + areas + _area", "area"),
+            vec![0, 16]
+        );
+        assert_eq!(
+            word_matches("make_circle(1)", "circle"),
+            Vec::<usize>::new()
+        );
         assert_eq!(word_matches("x", ""), Vec::<usize>::new());
     }
 }

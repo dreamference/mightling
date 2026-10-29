@@ -51,7 +51,13 @@ pub fn files_stat(files: &[PathBuf]) -> String {
     files
         .iter()
         .map(|f| match std::fs::metadata(f) {
-            Ok(m) => format!("{}:{}:{}.{}", f.file_name().unwrap_or_default().to_string_lossy(), m.len(), m.mtime(), m.mtime_nsec()),
+            Ok(m) => format!(
+                "{}:{}:{}.{}",
+                f.file_name().unwrap_or_default().to_string_lossy(),
+                m.len(),
+                m.mtime(),
+                m.mtime_nsec()
+            ),
             Err(_) => format!("{}:-", f.file_name().unwrap_or_default().to_string_lossy()),
         })
         .collect::<Vec<_>>()
@@ -63,11 +69,24 @@ pub fn files_sha256(files: &[PathBuf]) -> Result<String> {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     for f in files {
-        hasher.update(f.file_name().unwrap_or_default().to_string_lossy().as_bytes());
+        hasher.update(
+            f.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_bytes(),
+        );
         hasher.update([0u8]);
-        hasher.update(crate::discover::hash(f).with_context(|| format!("reading {}", f.display()))?.as_bytes());
+        hasher.update(
+            crate::discover::hash(f)
+                .with_context(|| format!("reading {}", f.display()))?
+                .as_bytes(),
+        );
     }
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// The model's tokenizer, which also counts tokens for chunking.
@@ -78,18 +97,24 @@ pub struct ModelTokenizer {
 impl ModelTokenizer {
     pub fn load(model_dir: &Path) -> Result<ModelTokenizer> {
         let path = model_dir.join("tokenizer.json");
-        let mut tokenizer = Tokenizer::from_file(&path).map_err(|e| anyhow!("cannot load {}: {e}", path.display()))?;
+        let mut tokenizer = Tokenizer::from_file(&path)
+            .map_err(|e| anyhow!("cannot load {}: {e}", path.display()))?;
         // The file carries the model's 512-token truncation: with it every long unit would count
         // as 512 tokens and never be windowed (found 2026-10-08: half Phase 0's chunk count, and
         // chunks whose tail the model never saw). Counting needs the true length; `ids` cuts.
-        tokenizer.with_truncation(None).map_err(|e| anyhow!("{e}"))?;
+        tokenizer
+            .with_truncation(None)
+            .map_err(|e| anyhow!("{e}"))?;
         tokenizer.with_padding(None);
         Ok(ModelTokenizer { tokenizer })
     }
 
     /// Token ids with the special tokens, cut to [`MAX_TOKENS`] (the closing token kept).
     pub fn ids(&self, text: &str) -> Result<Vec<i64>> {
-        let encoding = self.tokenizer.encode(text, true).map_err(|e| anyhow!("tokenizer: {e}"))?;
+        let encoding = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|e| anyhow!("tokenizer: {e}"))?;
         let mut ids: Vec<i64> = encoding.get_ids().iter().map(|i| *i as i64).collect();
         if ids.len() > MAX_TOKENS {
             let last = *ids.last().unwrap_or(&2);
@@ -102,7 +127,10 @@ impl ModelTokenizer {
 
 impl TokenCount for ModelTokenizer {
     fn count(&self, text: &str) -> usize {
-        self.tokenizer.encode(text, false).map(|e| e.get_ids().len()).unwrap_or_else(|_| text.split_whitespace().count())
+        self.tokenizer
+            .encode(text, false)
+            .map(|e| e.get_ids().len())
+            .unwrap_or_else(|_| text.split_whitespace().count())
     }
 }
 
@@ -121,7 +149,10 @@ pub fn init_runtime(lib_dir: &Path) -> Result<()> {
     DONE.get_or_init(|| {
         let path = lib_dir.join("libonnxruntime.so");
         if !path.is_file() {
-            return Err(format!("ONNX Runtime is not installed ({} is missing)", path.display()));
+            return Err(format!(
+                "ONNX Runtime is not installed ({} is missing)",
+                path.display()
+            ));
         }
         ort::init_from(&path).map_err(|e| e.to_string())?.commit();
         Ok(())
@@ -144,7 +175,13 @@ impl OnnxEmbedder {
             .commit_from_file(&model)
             .with_context(|| format!("loading {}", model.display()))?;
         let dim = 768;
-        Ok(OnnxEmbedder { session: Mutex::new(session), tokenizer, dim, name: crate::config::MODEL_NAME.to_string(), files: model_files_in(model_dir) })
+        Ok(OnnxEmbedder {
+            session: Mutex::new(session),
+            tokenizer,
+            dim,
+            name: crate::config::MODEL_NAME.to_string(),
+            files: model_files_in(model_dir),
+        })
     }
 }
 
@@ -167,10 +204,17 @@ impl Embed for OnnxEmbedder {
         let mask = vec![1i64; n];
         let input_ids = Tensor::from_array(([1usize, n], ids)).map_err(|e| anyhow!("{e}"))?;
         let attention = Tensor::from_array(([1usize, n], mask)).map_err(|e| anyhow!("{e}"))?;
-        let mut session = self.session.lock().map_err(|_| anyhow!("the model session is poisoned"))?;
-        let outputs = session.run(ort::inputs!["input_ids" => input_ids, "attention_mask" => attention]).map_err(|e| anyhow!("{e}"))?;
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| anyhow!("the model session is poisoned"))?;
+        let outputs = session
+            .run(ort::inputs!["input_ids" => input_ids, "attention_mask" => attention])
+            .map_err(|e| anyhow!("{e}"))?;
         // CLS pooling: the first token of the last hidden state.
-        let (shape, data) = outputs["token_embeddings"].try_extract_tensor::<f32>().map_err(|e| anyhow!("{e}"))?;
+        let (shape, data) = outputs["token_embeddings"]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| anyhow!("{e}"))?;
         let dim = *shape.last().ok_or_else(|| anyhow!("no output"))? as usize;
         let mut vector = data[..dim].to_vec();
         normalise(&mut vector);
@@ -206,9 +250,14 @@ impl Embed for HashEmbedder {
     fn embed(&self, text: &str) -> Result<Vec<f32>> {
         let mut v = vec![0f32; self.dim];
         let text = text.strip_prefix(QUERY_PREFIX).unwrap_or(text);
-        for word in text.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 2) {
+        for word in text
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 2)
+        {
             let word = word.to_lowercase();
-            let h = word.bytes().fold(1469598103934665603u64, |h, b| (h ^ b as u64).wrapping_mul(1099511628211));
+            let h = word.bytes().fold(1469598103934665603u64, |h, b| {
+                (h ^ b as u64).wrapping_mul(1099511628211)
+            });
             v[(h % self.dim as u64) as usize] += 1.0;
         }
         normalise(&mut v);
@@ -223,7 +272,9 @@ pub fn to_blob(v: &[f32]) -> Vec<u8> {
 
 /// Reads a float32 blob.
 pub fn from_blob(b: &[u8]) -> Vec<f32> {
-    b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    b.chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
 }
 
 #[cfg(test)]
@@ -233,10 +284,18 @@ mod tests {
     #[test]
     fn the_tokenizer_counts_past_the_models_window() {
         // Only where the model is installed (`MIGHTLING_DOCS_MODEL_DIR`).
-        let Some(dir) = std::env::var_os("MIGHTLING_DOCS_MODEL_DIR").map(std::path::PathBuf::from).filter(|d| d.join("tokenizer.json").is_file()) else { return };
+        let Some(dir) = std::env::var_os("MIGHTLING_DOCS_MODEL_DIR")
+            .map(std::path::PathBuf::from)
+            .filter(|d| d.join("tokenizer.json").is_file())
+        else {
+            return;
+        };
         let tokenizer = ModelTokenizer::load(&dir).unwrap();
         let long = "The quick brown fox jumps over the lazy dog. ".repeat(200);
-        assert!(tokenizer.count(&long) > 1500, "counting must not stop at 512");
+        assert!(
+            tokenizer.count(&long) > 1500,
+            "counting must not stop at 512"
+        );
         assert_eq!(tokenizer.ids(&long).unwrap().len(), MAX_TOKENS);
     }
 

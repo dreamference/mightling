@@ -52,11 +52,16 @@ impl SymbolName {
     /// the trait's own member, not its implementations: `Shape::area` is the trait method, and
     /// `impl Shape::area` lists the implementations.
     pub fn matches(&self, query: &[String]) -> bool {
-        let Some((last, rest)) = query.split_last() else { return false };
+        let Some((last, rest)) = query.split_last() else {
+            return false;
+        };
         if self.name() != last {
             return false;
         }
-        let haystack: Vec<&str> = self.segments[..self.segments.len() - 1].iter().map(String::as_str).collect();
+        let haystack: Vec<&str> = self.segments[..self.segments.len() - 1]
+            .iter()
+            .map(String::as_str)
+            .collect();
         let mut position = haystack.len();
         for want in rest.iter().rev() {
             match haystack[..position].iter().rposition(|seg| seg == want) {
@@ -97,8 +102,10 @@ pub fn parse(symbol: &str) -> Option<SymbolName> {
         match descriptor.kind {
             // rust-analyzer: `impl#[Type][Trait]member` — the members belong to `Type`.
             Kind::Type if descriptor.name == "impl" => {
-                let params: Vec<&Descriptor> =
-                    descriptors[index + 1..].iter().take_while(|d| d.kind == Kind::TypeParameter).collect();
+                let params: Vec<&Descriptor> = descriptors[index + 1..]
+                    .iter()
+                    .take_while(|d| d.kind == Kind::TypeParameter)
+                    .collect();
                 if let Some(owner) = params.first() {
                     segments.push(owner.name.clone());
                 }
@@ -111,12 +118,22 @@ pub fn parse(symbol: &str) -> Option<SymbolName> {
             Kind::TypeParameter | Kind::Parameter => {}
             // Module paths split into their parts: `shapes.geometry` (scip-python),
             // `shapes.ts` (scip-typescript's file namespaces), `example.com/m/geom` (scip-go).
-            Kind::Namespace => segments.extend(descriptor.name.split(['.', '/']).filter(|s| !s.is_empty()).map(str::to_string)),
+            Kind::Namespace => segments.extend(
+                descriptor
+                    .name
+                    .split(['.', '/'])
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+            ),
             _ => segments.push(descriptor.name.clone()),
         }
         index += 1;
     }
-    Some(SymbolName { segments, trait_impl, kind: last.kind })
+    Some(SymbolName {
+        segments,
+        trait_impl,
+        kind: last.kind,
+    })
 }
 
 /// Skips `<scheme> <manager> <package> <version> `, where a double space is an escaped space.
@@ -148,12 +165,18 @@ fn parse_descriptors(text: &str) -> Option<Vec<Descriptor>> {
         match chars[i] {
             '[' => {
                 let (name, next) = read_until(&chars, i + 1, ']')?;
-                out.push(Descriptor { name, kind: Kind::TypeParameter });
+                out.push(Descriptor {
+                    name,
+                    kind: Kind::TypeParameter,
+                });
                 i = next + 1;
             }
             '(' => {
                 let (name, next) = read_until(&chars, i + 1, ')')?;
-                out.push(Descriptor { name, kind: Kind::Parameter });
+                out.push(Descriptor {
+                    name,
+                    kind: Kind::Parameter,
+                });
                 i = next + 1;
             }
             _ => {
@@ -169,7 +192,10 @@ fn parse_descriptors(text: &str) -> Option<Vec<Descriptor>> {
                         if chars.get(close + 1) != Some(&'.') {
                             return None;
                         }
-                        out.push(Descriptor { name, kind: Kind::Method });
+                        out.push(Descriptor {
+                            name,
+                            kind: Kind::Method,
+                        });
                         i = close + 2;
                         continue;
                     }
@@ -248,7 +274,10 @@ mod tests {
 
     #[test]
     fn parameters_and_locals_are_not_targets() {
-        assert!(parse("scip-python python shapes 7f5b `shapes.geometry`/Circle#area().(self)").is_none());
+        assert!(
+            parse("scip-python python shapes 7f5b `shapes.geometry`/Circle#area().(self)")
+                .is_none()
+        );
         assert!(parse("local 12").is_none());
     }
 
@@ -267,11 +296,19 @@ mod tests {
     #[test]
     fn go_java_dotnet_and_clang_shapes() {
         // Go: the package path is one backticked namespace with dots and slashes in it.
-        let go = parse("scip-go gomod example.com/geom 0f3a7c1 `example.com/geom/shapes`/Circle#Area().").unwrap();
-        assert_eq!(go.segments, ["example", "com", "geom", "shapes", "Circle", "Area"]);
+        let go = parse(
+            "scip-go gomod example.com/geom 0f3a7c1 `example.com/geom/shapes`/Circle#Area().",
+        )
+        .unwrap();
+        assert_eq!(
+            go.segments,
+            ["example", "com", "geom", "shapes", "Circle", "Area"]
+        );
         assert!(go.matches(&query_segments("shapes.Circle.Area")));
         // Java (semanticdb): packages as plain namespaces, overloads as a disambiguator.
-        let java = parse("semanticdb maven maven/com.example/geom 1.0 com/example/geom/Circle#area(+1).").unwrap();
+        let java =
+            parse("semanticdb maven maven/com.example/geom 1.0 com/example/geom/Circle#area(+1).")
+                .unwrap();
         assert_eq!(java.segments, ["com", "example", "geom", "Circle", "area"]);
         assert!(java.matches(&query_segments("Circle.area")));
         // .NET and clang leave package and version as `.`.

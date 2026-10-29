@@ -24,7 +24,8 @@ use crate::scip_symbol::{self, SymbolName};
 
 /// SHA-256 of the ordered `sql` column of `sqlite_master` of an `expt-convert` store, scip CLI
 /// v0.10.0, `puffin_*` objects excluded. A store whose schema differs is not read (§7.5).
-pub const SCHEMA_FINGERPRINT: &str = "5ac15027d79d86e9d43ec1489ca13345f75a6d937b9e254a11bf2ff0d9d0c68c";
+pub const SCHEMA_FINGERPRINT: &str =
+    "5ac15027d79d86e9d43ec1489ca13345f75a6d937b9e254a11bf2ff0d9d0c68c";
 
 /// Role bits of a SCIP occurrence.
 pub const ROLE_DEFINITION: i32 = 1;
@@ -85,15 +86,21 @@ fn rebuild_hint() -> String {
     if crate::paths::indexing_here() {
         "run `ling-code index` to rebuild it".to_string()
     } else {
-        format!("{}, so rebuild it on the node", crate::paths::BUILT_ON_LINUX)
+        format!(
+            "{}, so rebuild it on the node",
+            crate::paths::BUILT_ON_LINUX
+        )
     }
 }
 
 impl ScipStore {
     /// Opens a store read-only and checks its fingerprint.
     pub fn open(path: &Path, entry: RunEntry) -> Result<ScipStore> {
-        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
-            .with_context(|| format!("opening {}", path.display()))?;
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .with_context(|| format!("opening {}", path.display()))?;
         conn.busy_timeout(Duration::from_secs(2))?;
         let fingerprint = schema_fingerprint(&conn)?;
         if fingerprint != SCHEMA_FINGERPRINT {
@@ -105,17 +112,34 @@ impl ScipStore {
             );
         }
         let has_names: bool = conn
-            .query_row("SELECT count(*) FROM sqlite_master WHERE name = 'puffin_names'", [], |r| r.get::<_, i64>(0))
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'puffin_names'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
             .map(|n| n > 0)?;
         if !has_names {
-            bail!("{} has not been post-processed; {}", path.display(), rebuild_hint());
+            bail!(
+                "{} has not been post-processed; {}",
+                path.display(),
+                rebuild_hint()
+            );
         }
         let docs = {
             let mut stmt = conn.prepare("SELECT relative_path FROM documents")?;
-            let docs = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            docs.into_iter().map(|d| (join_normalized(&entry.path_prefix, &d), d)).collect()
+            let docs = stmt
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            docs.into_iter()
+                .map(|d| (join_normalized(&entry.path_prefix, &d), d))
+                .collect()
         };
-        Ok(ScipStore { conn, entry, path: path.to_path_buf(), docs })
+        Ok(ScipStore {
+            conn,
+            entry,
+            path: path.to_path_buf(),
+            docs,
+        })
     }
 
     /// The store's document path for a repository-relative path, if it has one.
@@ -136,15 +160,20 @@ impl ScipStore {
     /// Definitions of symbols whose descriptor name is `query`'s last segment and whose path the
     /// query's earlier segments match.
     pub fn definitions_named(&self, query: &[String]) -> Result<Vec<Definition>> {
-        let Some(last) = query.last() else { return Ok(Vec::new()) };
+        let Some(last) = query.last() else {
+            return Ok(Vec::new());
+        };
         let mut stmt = self.conn.prepare_cached(
             "SELECT g.id, g.symbol FROM puffin_names n JOIN global_symbols g ON g.id = n.symbol_id WHERE n.name = ?1",
         )?;
-        let symbols: Vec<(i64, String)> =
-            stmt.query_map([last], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        let symbols: Vec<(i64, String)> = stmt
+            .query_map([last], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
         let mut out = Vec::new();
         for (id, symbol) in symbols {
-            let Some(name) = scip_symbol::parse(&symbol) else { continue };
+            let Some(name) = scip_symbol::parse(&symbol) else {
+                continue;
+            };
             if !name.matches(query) {
                 continue;
             }
@@ -154,7 +183,12 @@ impl ScipStore {
     }
 
     /// The definition sites of one symbol.
-    pub fn definitions_of(&self, symbol_id: i64, symbol: &str, name: &SymbolName) -> Result<Vec<Definition>> {
+    pub fn definitions_of(
+        &self,
+        symbol_id: i64,
+        symbol: &str,
+        name: &SymbolName,
+    ) -> Result<Vec<Definition>> {
         let spans = self.enclosing_spans(symbol_id)?;
         let mut out = Vec::new();
         for occ in self.occurrences_of(symbol_id, symbol)? {
@@ -162,40 +196,67 @@ impl ScipStore {
                 continue;
             }
             let span = spans.get(&occ.path).and_then(|list| {
-                list.iter().copied().filter(|(s, e)| *s <= occ.line && occ.line <= *e).min_by_key(|(s, e)| e - s)
+                list.iter()
+                    .copied()
+                    .filter(|(s, e)| *s <= occ.line && occ.line <= *e)
+                    .min_by_key(|(s, e)| e - s)
             });
-            out.push(Definition { symbol_id, symbol: symbol.to_string(), name: name.clone(), path: occ.path, line: occ.line, span });
+            out.push(Definition {
+                symbol_id,
+                symbol: symbol.to_string(),
+                name: name.clone(),
+                path: occ.path,
+                line: occ.line,
+                span,
+            });
         }
         Ok(out)
     }
 
     /// The symbol defined at a location: the definition occurrence on `line` (1-based) of
     /// `repo_path` whose name is `name`, if the store has one (spec §7.4 step 2).
-    pub fn symbol_defined_at(&self, repo_path: &str, lines: (u32, u32), name: &str) -> Result<Option<(i64, String)>> {
-        let Some(doc) = self.doc_path(repo_path) else { return Ok(None) };
+    pub fn symbol_defined_at(
+        &self,
+        repo_path: &str,
+        lines: (u32, u32),
+        name: &str,
+    ) -> Result<Option<(i64, String)>> {
+        let Some(doc) = self.doc_path(repo_path) else {
+            return Ok(None);
+        };
         let (first, last) = (lines.0.saturating_sub(1), lines.1.saturating_sub(1));
         let mut stmt = self.conn.prepare_cached(
             "SELECT c.occurrences FROM chunks c JOIN documents d ON d.id = c.document_id
              WHERE d.relative_path = ?1 AND c.start_line <= ?3 AND c.end_line >= ?2 ORDER BY c.chunk_index",
         )?;
-        let blobs: Vec<Vec<u8>> = stmt.query_map(params![doc, first, last], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let blobs: Vec<Vec<u8>> = stmt
+            .query_map(params![doc, first, last], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
         let mut best: Option<(u32, String)> = None;
         for blob in blobs {
             for occ in decode_chunk(&blob)? {
                 if occ.roles & ROLE_DEFINITION == 0 || occ.line < first || occ.line > last {
                     continue;
                 }
-                if scip_symbol::parse(&occ.symbol).map(|n| n.name() == name).unwrap_or(false)
+                if scip_symbol::parse(&occ.symbol)
+                    .map(|n| n.name() == name)
+                    .unwrap_or(false)
                     && best.as_ref().map(|(l, _)| occ.line < *l).unwrap_or(true)
                 {
                     best = Some((occ.line, occ.symbol));
                 }
             }
         }
-        let Some((_, symbol)) = best else { return Ok(None) };
+        let Some((_, symbol)) = best else {
+            return Ok(None);
+        };
         let id: Option<i64> = self
             .conn
-            .query_row("SELECT id FROM global_symbols WHERE symbol = ?1", [&symbol], |r| r.get(0))
+            .query_row(
+                "SELECT id FROM global_symbols WHERE symbol = ?1",
+                [&symbol],
+                |r| r.get(0),
+            )
             .optional()?;
         Ok(id.map(|id| (id, symbol)))
     }
@@ -207,8 +268,9 @@ impl ScipStore {
              JOIN chunks c ON c.id = m.chunk_id JOIN documents d ON d.id = c.document_id
              WHERE m.symbol_id = ?1",
         )?;
-        let rows: Vec<(i64, Vec<u8>, String)> =
-            stmt.query_map([symbol_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+        let rows: Vec<(i64, Vec<u8>, String)> = stmt
+            .query_map([symbol_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?;
         let mut out = Vec::new();
         for (_, blob, doc) in rows {
             for occ in decode_chunk(&blob)? {
@@ -235,9 +297,17 @@ impl ScipStore {
              JOIN documents d ON d.id = r.document_id WHERE r.symbol_id = ?1",
         )?;
         let mut out: HashMap<String, Vec<(u32, u32)>> = HashMap::new();
-        for row in stmt.query_map([symbol_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?, r.get::<_, u32>(2)?)))? {
+        for row in stmt.query_map([symbol_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, u32>(1)?,
+                r.get::<_, u32>(2)?,
+            ))
+        })? {
             let (doc, start, end) = row?;
-            out.entry(self.repo_path(&doc)).or_default().push((start + 1, end + 1));
+            out.entry(self.repo_path(&doc))
+                .or_default()
+                .push((start + 1, end + 1));
         }
         Ok(out)
     }
@@ -245,7 +315,9 @@ impl ScipStore {
     /// The innermost definition enclosing a line (1-based) of a repository path (spec §7.1's
     /// `callers`).
     pub fn enclosing_definition(&self, repo_path: &str, line: u32) -> Result<Option<String>> {
-        let Some(doc) = self.doc_path(repo_path) else { return Ok(None) };
+        let Some(doc) = self.doc_path(repo_path) else {
+            return Ok(None);
+        };
         let line0 = line.saturating_sub(1);
         let mut stmt = self.conn.prepare_cached(
             "SELECT g.symbol FROM defn_enclosing_ranges r JOIN documents d ON d.id = r.document_id
@@ -253,24 +325,40 @@ impl ScipStore {
              WHERE d.relative_path = ?1 AND r.start_line <= ?2 AND r.end_line >= ?2
              ORDER BY (r.end_line - r.start_line), r.start_line DESC LIMIT 1",
         )?;
-        Ok(stmt.query_row(params![doc, line0], |r| r.get(0)).optional()?)
+        Ok(stmt
+            .query_row(params![doc, line0], |r| r.get(0))
+            .optional()?)
     }
 
     /// The occurrences inside a span (1-based, inclusive) of a repository path, definitions
     /// excluded: what the code there refers to (`callees`).
     pub fn occurrences_within(&self, repo_path: &str, span: (u32, u32)) -> Result<Vec<Occurrence>> {
-        let Some(doc) = self.doc_path(repo_path) else { return Ok(Vec::new()) };
+        let Some(doc) = self.doc_path(repo_path) else {
+            return Ok(Vec::new());
+        };
         let (first, last) = (span.0.saturating_sub(1), span.1.saturating_sub(1));
         let mut stmt = self.conn.prepare_cached(
             "SELECT c.occurrences FROM chunks c JOIN documents d ON d.id = c.document_id
              WHERE d.relative_path = ?1 AND c.start_line <= ?3 AND c.end_line >= ?2 ORDER BY c.chunk_index",
         )?;
-        let blobs: Vec<Vec<u8>> = stmt.query_map(params![doc, first, last], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let blobs: Vec<Vec<u8>> = stmt
+            .query_map(params![doc, first, last], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
         let mut out = Vec::new();
         for blob in blobs {
             for occ in decode_chunk(&blob)? {
-                if occ.line >= first && occ.line <= last && occ.roles & ROLE_DEFINITION == 0 && !occ.symbol.starts_with("local ") {
-                    out.push(Occurrence { path: repo_path.to_string(), line: occ.line + 1, column: occ.column + 1, roles: occ.roles, symbol: occ.symbol });
+                if occ.line >= first
+                    && occ.line <= last
+                    && occ.roles & ROLE_DEFINITION == 0
+                    && !occ.symbol.starts_with("local ")
+                {
+                    out.push(Occurrence {
+                        path: repo_path.to_string(),
+                        line: occ.line + 1,
+                        column: occ.column + 1,
+                        roles: occ.roles,
+                        symbol: occ.symbol,
+                    });
                 }
             }
         }
@@ -283,23 +371,36 @@ impl ScipStore {
             "SELECT g.id, g.symbol FROM puffin_relationships r JOIN global_symbols g ON g.id = r.symbol_id
              WHERE r.target = ?1 AND r.is_implementation = 1",
         )?;
-        let mut out: Vec<(i64, String)> =
-            stmt.query_map([symbol], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        let mut out: Vec<(i64, String)> = stmt
+            .query_map([symbol], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
         // rust-analyzer emits no relationships; its trait implementations are named
         // `impl#[Type][Trait]member`, and a trait's own implementations `impl#[Type][Trait]`.
         if let Some(target) = scip_symbol::parse(symbol) {
             let mut stmt = self.conn.prepare_cached(
                 "SELECT g.id, g.symbol FROM puffin_names n JOIN global_symbols g ON g.id = n.symbol_id WHERE n.name = ?1",
             )?;
-            let trait_name = if target.kind == scip_symbol::Kind::Type { target.name().to_string() } else {
-                target.segments.iter().rev().nth(1).cloned().unwrap_or_default()
+            let trait_name = if target.kind == scip_symbol::Kind::Type {
+                target.name().to_string()
+            } else {
+                target
+                    .segments
+                    .iter()
+                    .rev()
+                    .nth(1)
+                    .cloned()
+                    .unwrap_or_default()
             };
-            let member = (target.kind != scip_symbol::Kind::Type).then(|| target.name().to_string());
+            let member =
+                (target.kind != scip_symbol::Kind::Type).then(|| target.name().to_string());
             let lookup = member.clone().unwrap_or_else(|| trait_name.clone());
-            let candidates: Vec<(i64, String)> =
-                stmt.query_map([&lookup], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+            let candidates: Vec<(i64, String)> = stmt
+                .query_map([&lookup], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
             for (id, candidate) in candidates {
-                let Some(parsed) = scip_symbol::parse(&candidate) else { continue };
+                let Some(parsed) = scip_symbol::parse(&candidate) else {
+                    continue;
+                };
                 if parsed.trait_impl.as_deref() == Some(trait_name.as_str()) && member.is_some() {
                     out.push((id, candidate));
                 }
@@ -310,18 +411,29 @@ impl ScipStore {
                 let mut stmt = self.conn.prepare_cached(
                     "SELECT symbol FROM global_symbols WHERE symbol LIKE '%impl#[%][' || ?1 || ']%'",
                 )?;
-                let members: Vec<String> = stmt.query_map([&trait_name], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+                let members: Vec<String> = stmt
+                    .query_map([&trait_name], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
                 let mut owners = BTreeSet::new();
                 for member in members {
-                    let Some((namespace, rest)) = member.rsplit_once("impl#[") else { continue };
-                    let Some((owner, after)) = rest.split_once("][") else { continue };
+                    let Some((namespace, rest)) = member.rsplit_once("impl#[") else {
+                        continue;
+                    };
+                    let Some((owner, after)) = rest.split_once("][") else {
+                        continue;
+                    };
                     if after.starts_with(&format!("{trait_name}]")) {
                         owners.insert(format!("{namespace}{owner}#"));
                     }
                 }
-                let mut lookup = self.conn.prepare_cached("SELECT id FROM global_symbols WHERE symbol = ?1")?;
+                let mut lookup = self
+                    .conn
+                    .prepare_cached("SELECT id FROM global_symbols WHERE symbol = ?1")?;
                 for owner in owners {
-                    if let Some(id) = lookup.query_row([&owner], |r| r.get::<_, i64>(0)).optional()? {
+                    if let Some(id) = lookup
+                        .query_row([&owner], |r| r.get::<_, i64>(0))
+                        .optional()?
+                    {
                         out.push((id, owner));
                     }
                 }
@@ -336,13 +448,21 @@ impl ScipStore {
     /// symbol)`, 1-based and inclusive. What `outline` lists, and what a body match of `search`
     /// is attributed to, when the graph is off (`layers = exact`).
     pub fn definitions_in(&self, repo_path: &str) -> Result<Vec<(u32, u32, String)>> {
-        let Some(doc) = self.doc_path(repo_path) else { return Ok(Vec::new()) };
+        let Some(doc) = self.doc_path(repo_path) else {
+            return Ok(Vec::new());
+        };
         let mut stmt = self.conn.prepare_cached(
             "SELECT r.start_line, r.end_line, g.symbol FROM defn_enclosing_ranges r
              JOIN documents d ON d.id = r.document_id JOIN global_symbols g ON g.id = r.symbol_id
              WHERE d.relative_path = ?1 ORDER BY r.start_line, r.end_line DESC",
         )?;
-        let rows = stmt.query_map([doc], |r| Ok((r.get::<_, u32>(0)? + 1, r.get::<_, u32>(1)? + 1, r.get::<_, String>(2)?)))?;
+        let rows = stmt.query_map([doc], |r| {
+            Ok((
+                r.get::<_, u32>(0)? + 1,
+                r.get::<_, u32>(1)? + 1,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
         let mut out: Vec<(u32, u32, String)> = rows.collect::<rusqlite::Result<_>>()?;
         out.retain(|(_, _, symbol)| !symbol.starts_with("local "));
         out.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1 && a.2 == b.2);
@@ -351,12 +471,19 @@ impl ScipStore {
 
     /// Symbols whose descriptor name contains `word` (ASCII case ignored), at most `limit`.
     pub fn symbols_containing(&self, word: &str, limit: usize) -> Result<Vec<(i64, String)>> {
-        let pattern = format!("%{}%", word.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        let pattern = format!(
+            "%{}%",
+            word.replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
         let mut stmt = self.conn.prepare_cached(
             "SELECT g.id, g.symbol FROM puffin_names n JOIN global_symbols g ON g.id = n.symbol_id
              WHERE n.name LIKE ?1 ESCAPE '\\' LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![pattern, limit as i64], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = stmt.query_map(params![pattern, limit as i64], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -397,8 +524,11 @@ pub fn postprocess(db: &Path, scip_file: &Path) -> Result<()> {
     )?;
     {
         let mut select = tx.prepare("SELECT id, symbol FROM global_symbols")?;
-        let mut insert = tx.prepare("INSERT INTO puffin_names (symbol_id, name) VALUES (?1, ?2)")?;
-        let rows: Vec<(i64, String)> = select.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        let mut insert =
+            tx.prepare("INSERT INTO puffin_names (symbol_id, name) VALUES (?1, ?2)")?;
+        let rows: Vec<(i64, String)> = select
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
         for (id, symbol) in rows {
             if let Some(name) = scip_symbol::parse(&symbol) {
                 insert.execute(params![id, name.name()])?;
@@ -406,16 +536,25 @@ pub fn postprocess(db: &Path, scip_file: &Path) -> Result<()> {
         }
         let ids: HashMap<String, i64> = {
             let mut stmt = tx.prepare("SELECT symbol, id FROM global_symbols")?;
-            let pairs = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            let pairs = stmt
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
             pairs.into_iter().collect()
         };
-        let bytes = std::fs::read(scip_file).with_context(|| format!("reading {}", scip_file.display()))?;
+        let bytes =
+            std::fs::read(scip_file).with_context(|| format!("reading {}", scip_file.display()))?;
         let mut insert = tx.prepare(
             "INSERT INTO puffin_relationships (symbol_id, target, is_reference, is_implementation, is_type_definition) VALUES (?1, ?2, ?3, ?4, ?5)",
         )?;
         for (symbol, rel) in relationships(&bytes)? {
             if let Some(id) = ids.get(&symbol) {
-                insert.execute(params![id, rel.symbol, rel.is_reference, rel.is_implementation, rel.is_type_definition])?;
+                insert.execute(params![
+                    id,
+                    rel.symbol,
+                    rel.is_reference,
+                    rel.is_implementation,
+                    rel.is_type_definition
+                ])?;
             }
         }
     }
@@ -423,7 +562,10 @@ pub fn postprocess(db: &Path, scip_file: &Path) -> Result<()> {
         "CREATE INDEX puffin_names_name ON puffin_names(name);
          CREATE INDEX puffin_relationships_target ON puffin_relationships(target);",
     )?;
-    tx.execute("INSERT INTO puffin_meta (k, v) VALUES ('postprocessed', '1')", [])?;
+    tx.execute(
+        "INSERT INTO puffin_meta (k, v) VALUES ('postprocessed', '1')",
+        [],
+    )?;
     tx.commit()?;
     // expt-convert writes WAL mode, and a WAL database cannot be opened read-only where its
     // directory is not writable (the read-only sandbox): the reader must create `-shm`.
@@ -468,7 +610,12 @@ pub fn decode_chunk(blob: &[u8]) -> Result<Vec<RawOccurrence>> {
 }
 
 fn decode_occurrence(bytes: &[u8]) -> Result<RawOccurrence> {
-    let mut occ = RawOccurrence { line: 0, column: 0, roles: 0, symbol: String::new() };
+    let mut occ = RawOccurrence {
+        line: 0,
+        column: 0,
+        roles: 0,
+        symbol: String::new(),
+    };
     let mut legacy: Vec<i64> = Vec::new();
     let mut typed: Option<(u32, u32)> = None;
     let mut reader = Wire::new(bytes);
@@ -500,7 +647,12 @@ fn decode_occurrence(bytes: &[u8]) -> Result<RawOccurrence> {
             _ => {}
         }
     }
-    let (line, column) = typed.unwrap_or_else(|| (legacy.first().copied().unwrap_or(0) as u32, legacy.get(1).copied().unwrap_or(0) as u32));
+    let (line, column) = typed.unwrap_or_else(|| {
+        (
+            legacy.first().copied().unwrap_or(0) as u32,
+            legacy.get(1).copied().unwrap_or(0) as u32,
+        )
+    });
     occ.line = line;
     occ.column = column;
     Ok(occ)
@@ -540,7 +692,9 @@ fn symbol_relationships(info: &[u8], out: &mut Vec<(String, Relationship)>) -> R
                 let mut r = Wire::new(rel);
                 while let Some((f, v)) = r.next()? {
                     match (f, v) {
-                        (1, Value::Bytes(s)) => relationship.symbol = String::from_utf8_lossy(s).into_owned(),
+                        (1, Value::Bytes(s)) => {
+                            relationship.symbol = String::from_utf8_lossy(s).into_owned()
+                        }
                         (2, Value::Varint(x)) => relationship.is_reference = x != 0,
                         (3, Value::Varint(x)) => relationship.is_implementation = x != 0,
                         (4, Value::Varint(x)) => relationship.is_type_definition = x != 0,
@@ -602,7 +756,10 @@ fn repair_document(document: &[u8]) -> Result<(Vec<u8>, usize)> {
         match (field, value) {
             (2, Value::Bytes(occurrence)) => {
                 let occ = decode_occurrence(occurrence)?;
-                if occ.roles & ROLE_DEFINITION != 0 && !occ.symbol.is_empty() && !occ.symbol.starts_with("local ") {
+                if occ.roles & ROLE_DEFINITION != 0
+                    && !occ.symbol.is_empty()
+                    && !occ.symbol.starts_with("local ")
+                {
                     defined.push(occ.symbol);
                 }
             }
@@ -673,7 +830,9 @@ impl<'a> Wire<'a> {
     fn varint(&mut self) -> Result<u64> {
         let mut value = 0u64;
         for shift in (0..64).step_by(7) {
-            let Some(&byte) = self.bytes.get(self.pos) else { bail!("truncated varint") };
+            let Some(&byte) = self.bytes.get(self.pos) else {
+                bail!("truncated varint")
+            };
             self.pos += 1;
             value |= u64::from(byte & 0x7f) << shift;
             if byte & 0x80 == 0 {
@@ -687,7 +846,9 @@ impl<'a> Wire<'a> {
     fn next_raw(&mut self) -> Result<Option<(u32, Value<'a>, &'a [u8])>> {
         let start = self.pos;
         let bytes = self.bytes;
-        Ok(self.next()?.map(|(field, value)| (field, value, &bytes[start..self.pos])))
+        Ok(self
+            .next()?
+            .map(|(field, value)| (field, value, &bytes[start..self.pos])))
     }
 
     fn next(&mut self) -> Result<Option<(u32, Value<'a>)>> {
@@ -704,7 +865,11 @@ impl<'a> Wire<'a> {
             }
             2 => {
                 let len = self.varint()? as usize;
-                let end = self.pos.checked_add(len).filter(|e| *e <= self.bytes.len()).context("truncated field")?;
+                let end = self
+                    .pos
+                    .checked_add(len)
+                    .filter(|e| *e <= self.bytes.len())
+                    .context("truncated field")?;
                 let slice = &self.bytes[self.pos..end];
                 self.pos = end;
                 Value::Bytes(slice)
@@ -726,12 +891,21 @@ impl<'a> Wire<'a> {
 mod tests {
     #[test]
     fn documents_outside_the_root_map_back_into_the_repository() {
-        assert_eq!(super::join_normalized("tests/", "../dreamference/a.py"), "dreamference/a.py");
-        assert_eq!(super::join_normalized("tests/", "test_a.py"), "tests/test_a.py");
+        assert_eq!(
+            super::join_normalized("tests/", "../dreamference/a.py"),
+            "dreamference/a.py"
+        );
+        assert_eq!(
+            super::join_normalized("tests/", "test_a.py"),
+            "tests/test_a.py"
+        );
         assert_eq!(super::join_normalized("", "./src/lib.rs"), "src/lib.rs");
         // A single-file root: the file itself, and what it imports from beside it.
         assert_eq!(super::join_normalized("fano/main.py/", "."), "fano/main.py");
-        assert_eq!(super::join_normalized("fano/main.py/", "../make_figures.py"), "fano/make_figures.py");
+        assert_eq!(
+            super::join_normalized("fano/main.py/", "../make_figures.py"),
+            "fano/make_figures.py"
+        );
     }
 
     /// The `relative_path` fields of an index's documents, in order.
@@ -773,7 +947,10 @@ mod tests {
         // An index that needs nothing is returned byte for byte.
         let mut whole = Vec::new();
         super::put_len_field(&mut whole, 2, &named);
-        assert_eq!(super::repair_missing_symbol_information(&whole).unwrap().0, whole);
+        assert_eq!(
+            super::repair_missing_symbol_information(&whole).unwrap().0,
+            whole
+        );
     }
 
     #[test]
@@ -809,15 +986,31 @@ mod tests {
         let compressed = zstd::encode_all(&doc[..], 1).unwrap();
         let decoded = super::decode_chunk(&compressed).unwrap();
         assert_eq!(decoded.len(), 2);
-        assert_eq!((decoded[0].line, decoded[0].column, decoded[0].roles), (4, 2, super::ROLE_DEFINITION));
-        assert_eq!((decoded[1].line, decoded[1].column, decoded[1].symbol.as_str()), (9, 5, "local 1"));
+        assert_eq!(
+            (decoded[0].line, decoded[0].column, decoded[0].roles),
+            (4, 2, super::ROLE_DEFINITION)
+        );
+        assert_eq!(
+            (
+                decoded[1].line,
+                decoded[1].column,
+                decoded[1].symbol.as_str()
+            ),
+            (9, 5, "local 1")
+        );
 
         // Repair adds SymbolInformation for `Foo#` (non-local definition without info), not for `local 1`.
         let mut index = Vec::new();
         super::put_len_field(&mut index, 2, &doc);
         let (repaired, added) = super::repair_missing_symbol_information(&index).unwrap();
         assert_eq!(added, 1);
-        assert_eq!(super::repair_missing_symbol_information(&repaired).unwrap().1, 0, "idempotent");
+        assert_eq!(
+            super::repair_missing_symbol_information(&repaired)
+                .unwrap()
+                .1,
+            0,
+            "idempotent"
+        );
 
         // External symbol (field 3 on Index) with an implementation relationship.
         let mut rel = Vec::new();

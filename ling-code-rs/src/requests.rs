@@ -35,7 +35,10 @@ pub fn path(state_dir: &Path) -> PathBuf {
 /// Appends a request line. Fails where the directory is read-only (the `read-only` sandbox).
 pub fn append(state_dir: &Path, request: Request) -> Result<()> {
     std::fs::create_dir_all(state_dir)?;
-    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path(state_dir))?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path(state_dir))?;
     writeln!(file, "{}", request.word())?;
     Ok(())
 }

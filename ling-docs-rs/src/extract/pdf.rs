@@ -32,7 +32,9 @@ pub struct Glyph {
 /// Hebrew, Arabic, Syriac, Thaana, N'Ko and the Arabic presentation forms.
 pub fn is_rtl(ch: char) -> bool {
     let o = ch as u32;
-    (0x0590..=0x08FF).contains(&o) || (0xFB1D..=0xFDFF).contains(&o) || (0xFE70..=0xFEFF).contains(&o)
+    (0x0590..=0x08FF).contains(&o)
+        || (0xFB1D..=0xFDFF).contains(&o)
+        || (0xFE70..=0xFEFF).contains(&o)
 }
 
 /// A run: characters in stream order on one line, with its box and its glyphs' extents.
@@ -54,6 +56,8 @@ struct Line {
     runs: Vec<Run>,
 }
 
+// The literal is kept as written: the rotation thresholds were tuned against it.
+#[allow(clippy::approx_constant)]
 const PI: f64 = 3.14159265;
 
 /// The page's text from its glyphs.
@@ -91,7 +95,8 @@ pub fn ordered_text(glyphs: &[Glyph]) -> String {
             let centre = (bottom + top) / 2.0;
             let same_line = run.bottom - 0.2 * h <= centre && centre <= run.top + 0.2 * h;
             if same_line
-                && ((run.right - 0.5 * h <= left && left <= run.right + 3.0 * h) || (rtl && run.left - 3.0 * h <= right && right <= run.left + 0.5 * h))
+                && ((run.right - 0.5 * h <= left && left <= run.right + 3.0 * h)
+                    || (rtl && run.left - 3.0 * h <= right && right <= run.left + 0.5 * h))
             {
                 run.left = run.left.min(left);
                 run.right = run.right.max(right);
@@ -103,13 +108,27 @@ pub fn ordered_text(glyphs: &[Glyph]) -> String {
             }
             segs.push(cur.take().unwrap());
         }
-        cur = Some(Run { left, bottom, right, top, text: ch.to_string(), glyphs: vec![(left, right, ch)] });
+        cur = Some(Run {
+            left,
+            bottom,
+            right,
+            top,
+            text: ch.to_string(),
+            glyphs: vec![(left, right, ch)],
+        });
     }
     if let Some(run) = cur {
         segs.push(run);
     }
-    let segs: Vec<Run> = segs.into_iter().filter(|s| !s.text.trim().is_empty()).collect();
-    let tail = if rotated.trim().is_empty() { String::new() } else { format!("\n{rotated}") };
+    let segs: Vec<Run> = segs
+        .into_iter()
+        .filter(|s| !s.text.trim().is_empty())
+        .collect();
+    let tail = if rotated.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n{rotated}")
+    };
     if segs.is_empty() {
         return tail.trim().to_string();
     }
@@ -119,7 +138,10 @@ pub fn ordered_text(glyphs: &[Glyph]) -> String {
         let centre = (s.bottom + s.top) / 2.0;
         let mut home: Option<usize> = None;
         if let Some(last) = lines.last() {
-            if last.bottom - 0.2 * h <= centre && centre <= last.top + 0.2 * h && (s.left >= last.left - h || s.text.chars().any(is_rtl)) {
+            if last.bottom - 0.2 * h <= centre
+                && centre <= last.top + 0.2 * h
+                && (s.left >= last.left - h || s.text.chars().any(is_rtl))
+            {
                 home = Some(lines.len() - 1);
             }
         }
@@ -139,7 +161,13 @@ pub fn ordered_text(glyphs: &[Glyph]) -> String {
             }
         }
         match home {
-            None => lines.push(Line { bottom: s.bottom, top: s.top, left: s.left, right: s.right, runs: vec![s] }),
+            None => lines.push(Line {
+                bottom: s.bottom,
+                top: s.top,
+                left: s.left,
+                right: s.right,
+                runs: vec![s],
+            }),
             Some(index) => {
                 let ln = &mut lines[index];
                 ln.bottom = ln.bottom.min(s.bottom);
@@ -152,7 +180,11 @@ pub fn ordered_text(glyphs: &[Glyph]) -> String {
     }
     let mut text: Vec<String> = Vec::new();
     for mut ln in lines {
-        ln.runs.sort_by(|a, b| a.left.partial_cmp(&b.left).unwrap_or(std::cmp::Ordering::Equal));
+        ln.runs.sort_by(|a, b| {
+            a.left
+                .partial_cmp(&b.left)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         if ln.runs.iter().any(|r| r.text.chars().any(is_rtl)) {
             text.push(rtl_line(&ln.runs));
             continue;
@@ -161,7 +193,10 @@ pub fn ordered_text(glyphs: &[Glyph]) -> String {
         let mut prev: Option<f64> = None;
         for r in &ln.runs {
             if let Some(p) = prev {
-                if r.left - p > 0.15 * (r.top - r.bottom) && !parts.ends_with(' ') && !r.text.starts_with(' ') {
+                if r.left - p > 0.15 * (r.top - r.bottom)
+                    && !parts.ends_with(' ')
+                    && !r.text.starts_with(' ')
+                {
                     parts.push(' ');
                 }
             }
@@ -179,9 +214,13 @@ pub fn ordered_text(glyphs: &[Glyph]) -> String {
 /// keep their order). Stream order cannot be trusted here: Chromium's PDFs draw Arabic glyphs in
 /// visual order, and PDFium's own text reverses some words and not others.
 fn rtl_line(runs: &[Run]) -> String {
-    let mut glyphs: Vec<(f64, f64, char)> = runs.iter().flat_map(|r| r.glyphs.iter().copied()).collect();
+    let mut glyphs: Vec<(f64, f64, char)> =
+        runs.iter().flat_map(|r| r.glyphs.iter().copied()).collect();
     glyphs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let h = runs.iter().map(|r| r.top - r.bottom).fold(f64::MIN, f64::max);
+    let h = runs
+        .iter()
+        .map(|r| r.top - r.bottom)
+        .fold(f64::MIN, f64::max);
     let mut visual = String::new();
     let mut prev: Option<f64> = None;
     for (left, right, ch) in glyphs {
@@ -197,7 +236,10 @@ fn rtl_line(runs: &[Run]) -> String {
         });
     }
     let n_rtl = visual.chars().filter(|c| is_rtl(*c)).count();
-    let n_ltr = visual.chars().filter(|c| c.is_alphabetic() && !is_rtl(*c)).count();
+    let n_ltr = visual
+        .chars()
+        .filter(|c| c.is_alphabetic() && !is_rtl(*c))
+        .count();
     display(&visual, n_rtl >= n_ltr)
 }
 
@@ -233,7 +275,8 @@ pub struct Pdf {
 impl Pdf {
     pub fn load(lib_dir: &Path) -> Result<Pdf> {
         let path = Pdfium::pdfium_platform_library_name_at_path(lib_dir);
-        let bindings = Pdfium::bind_to_library(&path).map_err(|e| anyhow!("cannot load PDFium from {}: {e:?}", path.display()))?;
+        let bindings = Pdfium::bind_to_library(&path)
+            .map_err(|e| anyhow!("cannot load PDFium from {}: {e:?}", path.display()))?;
         unsafe { bindings.FPDF_InitLibrary() };
         Ok(Pdf { bindings })
     }
@@ -241,7 +284,9 @@ impl Pdf {
     /// Every page's text, or the first `max_pages`. Encrypted, damaged or empty files are errors
     /// with a short reason.
     pub fn extract(&self, path: &Path, max_pages: Option<u32>) -> Result<PdfText> {
-        let file = path.to_str().ok_or_else(|| anyhow!("the path is not UTF-8"))?;
+        let file = path
+            .to_str()
+            .ok_or_else(|| anyhow!("the path is not UTF-8"))?;
         let doc = unsafe { self.bindings.FPDF_LoadDocument(file, None) };
         self.read(doc, max_pages)
     }
@@ -268,12 +313,23 @@ impl Pdf {
         let needed = unsafe { b.FPDF_GetMetaText(doc, "Title", std::ptr::null_mut(), 0) } as usize;
         let title = if needed > 2 && needed <= 4096 {
             let mut buffer = vec![0u8; needed];
-            unsafe { b.FPDF_GetMetaText(doc, "Title", buffer.as_mut_ptr() as *mut std::ffi::c_void, needed as _) };
+            unsafe {
+                b.FPDF_GetMetaText(
+                    doc,
+                    "Title",
+                    buffer.as_mut_ptr() as *mut std::ffi::c_void,
+                    needed as _,
+                )
+            };
             title_from_utf16(&buffer)
         } else {
             None
         };
-        let mut out = PdfText { page_count: count as u32, title, ..PdfText::default() };
+        let mut out = PdfText {
+            page_count: count as u32,
+            title,
+            ..PdfText::default()
+        };
         let read = max_pages.map_or(count, |m| count.min(m.min(i32::MAX as u32) as i32));
         for index in 0..read {
             let page = unsafe { b.FPDF_LoadPage(doc, index) };
@@ -298,11 +354,29 @@ impl Pdf {
                         cp = 0x10000 + ((high - 0xD800) << 10) + (cp - 0xDC00);
                     }
                     pending_high = None;
-                    let Some(ch) = char::from_u32(cp).filter(|_| cp > 0) else { continue };
+                    let Some(ch) = char::from_u32(cp).filter(|_| cp > 0) else {
+                        continue;
+                    };
                     let angle = unsafe { b.FPDFText_GetCharAngle(text_page, c) } as f64;
                     let (mut left, mut right, mut bottom, mut top) = (0f64, 0f64, 0f64, 0f64);
-                    unsafe { b.FPDFText_GetCharBox(text_page, c, &mut left, &mut right, &mut bottom, &mut top) };
-                    glyphs.push(Glyph { ch, angle, left, bottom, right, top });
+                    unsafe {
+                        b.FPDFText_GetCharBox(
+                            text_page,
+                            c,
+                            &mut left,
+                            &mut right,
+                            &mut bottom,
+                            &mut top,
+                        )
+                    };
+                    glyphs.push(Glyph {
+                        ch,
+                        angle,
+                        left,
+                        bottom,
+                        right,
+                        top,
+                    });
                 }
                 unsafe { b.FPDFText_ClosePage(text_page) };
             }
@@ -325,19 +399,48 @@ impl Pdf {
     /// it (a scan's own, between 100 and 300 dpi; 200 dpi when it has none), its longer side at most
     /// [`OCR_MAX_SIDE`]. `each` gets the 1-based page number, the width, the height and the
     /// pixels, one page at a time; a page that cannot be loaded is skipped.
-    pub fn render_gray(&self, source: Source, pages: &[u32], each: &mut dyn FnMut(u32, usize, usize, &[u8]) -> Result<()>) -> Result<()> {
+    // a one-off row tuple.
+    #[allow(clippy::type_complexity)]
+    pub fn render_gray(
+        &self,
+        source: Source,
+        pages: &[u32],
+        each: &mut dyn FnMut(u32, usize, usize, &[u8]) -> Result<()>,
+    ) -> Result<()> {
         self.render(source, pages, None, each)
     }
 
     /// [`Pdf::render_gray`] at a given resolution (the measurements render each fixture at its own).
-    pub fn render_gray_at(&self, source: Source, pages: &[u32], dpi: f32, each: &mut dyn FnMut(u32, usize, usize, &[u8]) -> Result<()>) -> Result<()> {
+    // a one-off row tuple.
+    #[allow(clippy::type_complexity)]
+    pub fn render_gray_at(
+        &self,
+        source: Source,
+        pages: &[u32],
+        dpi: f32,
+        each: &mut dyn FnMut(u32, usize, usize, &[u8]) -> Result<()>,
+    ) -> Result<()> {
         self.render(source, pages, Some(dpi), each)
     }
 
-    fn render(&self, source: Source, pages: &[u32], fixed: Option<f32>, each: &mut dyn FnMut(u32, usize, usize, &[u8]) -> Result<()>) -> Result<()> {
+    // a one-off row tuple.
+    #[allow(clippy::type_complexity)]
+    fn render(
+        &self,
+        source: Source,
+        pages: &[u32],
+        fixed: Option<f32>,
+        each: &mut dyn FnMut(u32, usize, usize, &[u8]) -> Result<()>,
+    ) -> Result<()> {
         let b = self.bindings.as_ref();
         let doc = match source {
-            Source::Path(path) => unsafe { b.FPDF_LoadDocument(path.to_str().ok_or_else(|| anyhow!("the path is not UTF-8"))?, None) },
+            Source::Path(path) => unsafe {
+                b.FPDF_LoadDocument(
+                    path.to_str()
+                        .ok_or_else(|| anyhow!("the path is not UTF-8"))?,
+                    None,
+                )
+            },
             Source::Bytes(bytes) => unsafe { b.FPDF_LoadMemDocument(bytes, None) },
         };
         if doc.is_null() {
@@ -361,7 +464,10 @@ impl Pdf {
                     }
                     let (mut iw, mut ih) = (0u32, 0u32);
                     let (mut l, mut bo, mut r, mut t) = (0f32, 0f32, 0f32, 0f32);
-                    if unsafe { b.FPDFImageObj_GetImagePixelSize(obj, &mut iw, &mut ih) } == 0 || unsafe { b.FPDFPageObj_GetBounds(obj, &mut l, &mut bo, &mut r, &mut t) } == 0 {
+                    if unsafe { b.FPDFImageObj_GetImagePixelSize(obj, &mut iw, &mut ih) } == 0
+                        || unsafe { b.FPDFPageObj_GetBounds(obj, &mut l, &mut bo, &mut r, &mut t) }
+                            == 0
+                    {
                         continue;
                     }
                     let (bw, bh) = ((r - l).abs(), (t - bo).abs());
@@ -371,9 +477,13 @@ impl Pdf {
                     }
                 }
                 let dpi = fixed.unwrap_or_else(|| dpi.unwrap_or(OCR_DPI).clamp(100.0, 300.0));
-                let scale = (dpi as f64 / 72.0).min(OCR_MAX_SIDE as f64 / pw.max(ph).max(1.0) as f64);
+                let scale =
+                    (dpi as f64 / 72.0).min(OCR_MAX_SIDE as f64 / pw.max(ph).max(1.0) as f64);
                 // Rounded up in double precision, as pypdfium2 sizes a rendering.
-                let (w, h) = ((pw as f64 * scale).ceil().max(1.0) as i32, (ph as f64 * scale).ceil().max(1.0) as i32);
+                let (w, h) = (
+                    (pw as f64 * scale).ceil().max(1.0) as i32,
+                    (ph as f64 * scale).ceil().max(1.0) as i32,
+                );
                 let bitmap = unsafe { b.FPDFBitmap_CreateEx(w, h, 1, std::ptr::null_mut(), 0) };
                 if bitmap.is_null() {
                     unsafe { b.FPDF_ClosePage(page) };
@@ -387,7 +497,9 @@ impl Pdf {
                 let (w, h) = (w as usize, h as usize);
                 let mut gray = Vec::with_capacity(w * h);
                 for y in 0..h {
-                    gray.extend_from_slice(unsafe { std::slice::from_raw_parts(buffer.add(y * stride), w) });
+                    gray.extend_from_slice(unsafe {
+                        std::slice::from_raw_parts(buffer.add(y * stride), w)
+                    });
                 }
                 unsafe { b.FPDFBitmap_Destroy(bitmap) };
                 unsafe { b.FPDF_ClosePage(page) };
@@ -407,8 +519,15 @@ pub enum Source<'a> {
 }
 
 fn title_from_utf16(buffer: &[u8]) -> Option<String> {
-    let units: Vec<u16> = buffer.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|u| *u != 0).collect();
-    let title = String::from_utf16_lossy(&units).split_whitespace().collect::<Vec<_>>().join(" ");
+    let units: Vec<u16> = buffer
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .take_while(|u| *u != 0)
+        .collect();
+    let title = String::from_utf16_lossy(&units)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     (!title.is_empty()).then_some(title)
 }
 
@@ -420,12 +539,26 @@ mod tests {
     fn word(text: &str, x: f64, y: f64) -> Vec<Glyph> {
         text.chars()
             .enumerate()
-            .map(|(i, ch)| Glyph { ch, angle: 0.0, left: x + 5.0 * i as f64, right: x + 5.0 * i as f64 + 4.5, bottom: y, top: y + 8.0 })
+            .map(|(i, ch)| Glyph {
+                ch,
+                angle: 0.0,
+                left: x + 5.0 * i as f64,
+                right: x + 5.0 * i as f64 + 4.5,
+                bottom: y,
+                top: y + 8.0,
+            })
             .collect()
     }
 
     fn newline() -> Glyph {
-        Glyph { ch: '\n', angle: 0.0, left: 0.0, right: 0.0, bottom: 0.0, top: 0.0 }
+        Glyph {
+            ch: '\n',
+            angle: 0.0,
+            left: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            top: 0.0,
+        }
     }
 
     #[test]
@@ -444,7 +577,14 @@ mod tests {
     #[test]
     fn rotated_margin_text_goes_after_the_page() {
         let mut glyphs = word("Body", 10.0, 700.0);
-        glyphs.extend("Margin".chars().map(|ch| Glyph { ch, angle: 1.5708, left: 0.0, right: 1.0, bottom: 0.0, top: 1.0 }));
+        glyphs.extend("Margin".chars().map(|ch| Glyph {
+            ch,
+            angle: std::f64::consts::FRAC_PI_2,
+            left: 0.0,
+            right: 1.0,
+            bottom: 0.0,
+            top: 1.0,
+        }));
         assert_eq!(ordered_text(&glyphs), "Body\nMargin");
     }
 
@@ -456,7 +596,14 @@ mod tests {
             .iter()
             .rev()
             .enumerate()
-            .map(|(i, ch)| Glyph { ch: *ch, angle: 0.0, left: 10.0 + 5.0 * i as f64, right: 14.5 + 5.0 * i as f64, bottom: 700.0, top: 708.0 })
+            .map(|(i, ch)| Glyph {
+                ch: *ch,
+                angle: 0.0,
+                left: 10.0 + 5.0 * i as f64,
+                right: 14.5 + 5.0 * i as f64,
+                bottom: 700.0,
+                top: 708.0,
+            })
             .collect();
         assert_eq!(ordered_text(&glyphs), "سلام");
     }

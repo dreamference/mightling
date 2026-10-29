@@ -31,16 +31,28 @@ pub fn next_run(pending: &mut Vec<Request>) -> Option<Vec<String>> {
     }
     pending.sort();
     pending.dedup();
-    if let Some(index) = pending.iter().position(|r| matches!(r, Request::Rebuild(_))) {
-        let Request::Rebuild(name) = pending.remove(index) else { unreachable!() };
+    if let Some(index) = pending
+        .iter()
+        .position(|r| matches!(r, Request::Rebuild(_)))
+    {
+        let Request::Rebuild(name) = pending.remove(index) else {
+            unreachable!()
+        };
         pending.retain(|r| *r != Request::One(name.clone()));
-        return Some(vec!["index".into(), "--collection".into(), name, "--rebuild".into()]);
+        return Some(vec![
+            "index".into(),
+            "--collection".into(),
+            name,
+            "--rebuild".into(),
+        ]);
     }
     if pending.contains(&Request::All) {
         pending.retain(|r| matches!(r, Request::Rebuild(_)));
         return Some(vec!["index".into()]);
     }
-    let Request::One(name) = pending.remove(0) else { unreachable!() };
+    let Request::One(name) = pending.remove(0) else {
+        unreachable!()
+    };
     Some(vec!["index".into(), "--collection".into(), name])
 }
 
@@ -80,7 +92,9 @@ pub fn run(parent: Option<i32>) -> Result<()> {
         pending.extend(requests::drain(&dir));
         if let Some(watcher) = watcher.as_mut() {
             // Collections added or removed since: watched afresh.
-            let stamp = std::fs::metadata(config::docs_toml()).and_then(|m| m.modified()).ok();
+            let stamp = std::fs::metadata(config::docs_toml())
+                .and_then(|m| m.modified())
+                .ok();
             if watched_stamp != Some(stamp) {
                 if let Ok(docs) = DocsToml::load() {
                     let collections: Vec<_> = docs.enabled().cloned().collect();
@@ -88,7 +102,12 @@ pub fn run(parent: Option<i32>) -> Result<()> {
                 }
                 watched_stamp = Some(stamp);
             }
-            pending.extend(watcher.poll(&config::user_home()).into_iter().map(Request::One));
+            pending.extend(
+                watcher
+                    .poll(&config::user_home())
+                    .into_iter()
+                    .map(Request::One),
+            );
         }
         if last_scan.elapsed() >= interval {
             pending.push(Request::All);
@@ -132,12 +151,31 @@ mod tests {
 
     #[test]
     fn requests_coalesce_into_runs() {
-        let mut pending = vec![Request::One("a".into()), Request::All, Request::One("b".into())];
+        let mut pending = vec![
+            Request::One("a".into()),
+            Request::All,
+            Request::One("b".into()),
+        ];
         assert_eq!(next_run(&mut pending), Some(vec!["index".to_string()]));
         assert!(pending.is_empty());
-        let mut pending = vec![Request::One("a".into()), Request::Rebuild("a".into()), Request::One("b".into())];
-        assert_eq!(next_run(&mut pending), Some(vec!["index".into(), "--collection".into(), "a".into(), "--rebuild".into()]));
-        assert_eq!(next_run(&mut pending), Some(vec!["index".into(), "--collection".into(), "b".into()]));
+        let mut pending = vec![
+            Request::One("a".into()),
+            Request::Rebuild("a".into()),
+            Request::One("b".into()),
+        ];
+        assert_eq!(
+            next_run(&mut pending),
+            Some(vec![
+                "index".into(),
+                "--collection".into(),
+                "a".into(),
+                "--rebuild".into()
+            ])
+        );
+        assert_eq!(
+            next_run(&mut pending),
+            Some(vec!["index".into(), "--collection".into(), "b".into()])
+        );
         assert_eq!(next_run(&mut pending), None);
     }
 }

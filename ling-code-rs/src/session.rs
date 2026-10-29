@@ -49,7 +49,11 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
         let _ = std::fs::write(state.join("code_index.building"), "");
     }
     // The launch-time run: universal and static, and executing when trusted and stale.
-    let mut pending: Option<Request> = Some(if wants_exact(&repo, &settings) { Request::IndexExact } else { Request::Index });
+    let mut pending: Option<Request> = Some(if wants_exact(&repo, &settings) {
+        Request::IndexExact
+    } else {
+        Request::Index
+    });
     let mut last_start: Option<Instant> = None;
     let mut child: Option<std::process::Child> = None;
     let probe = HttpProbe::new(&settings.vllm_host);
@@ -69,10 +73,13 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
             None => index::running(&repo),
         };
         // Probed during a run too, so the idle clock never spans a stretch nobody watched.
-        let quiet = ticks % PROBE_EVERY == 0 && trigger.observe(probe.state(), Instant::now());
+        let quiet =
+            ticks.is_multiple_of(PROBE_EVERY) && trigger.observe(probe.state(), Instant::now());
         if !busy {
             child = None;
-            let interval_passed = last_start.map(|t| t.elapsed() >= Duration::from_secs(settings.min_interval_s)).unwrap_or(true);
+            let interval_passed = last_start
+                .map(|t| t.elapsed() >= Duration::from_secs(settings.min_interval_s))
+                .unwrap_or(true);
             if let Some(request) = pending {
                 if interval_passed || request == Request::IndexExact {
                     pending = None;
@@ -88,7 +95,9 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
                 // Cheap checks first: HEAD, then the trust and staleness test, which runs git.
                 let interval = Duration::from_secs(settings.min_interval_s);
                 if let Some(head) = repo.head() {
-                    if trigger.may_claim(&head, last_start, interval, Instant::now()) && exact_due(&repo, &settings, 0) {
+                    if trigger.may_claim(&head, last_start, interval, Instant::now())
+                        && exact_due(&repo, &settings, 0)
+                    {
                         trigger.claim(head);
                         pending = Some(Request::IndexExact);
                     }
@@ -136,8 +145,17 @@ impl IdleTrigger {
 
     /// Whether a run may be asked for at `head`: not already asked for at that commit in this
     /// session, and no run started less than `interval` ago.
-    fn may_claim(&self, head: &str, last_start: Option<Instant>, interval: Duration, now: Instant) -> bool {
-        self.claimed.as_deref() != Some(head) && last_start.map(|t| now.duration_since(t) >= interval).unwrap_or(true)
+    fn may_claim(
+        &self,
+        head: &str,
+        last_start: Option<Instant>,
+        interval: Duration,
+        now: Instant,
+    ) -> bool {
+        self.claimed.as_deref() != Some(head)
+            && last_start
+                .map(|t| now.duration_since(t) >= interval)
+                .unwrap_or(true)
     }
 
     fn claim(&mut self, head: String) {
@@ -163,17 +181,33 @@ fn exact_due(repo: &Repo, settings: &Settings, behind: u64) -> bool {
         return false;
     }
     let manifest = crate::manifest::Manifest::load(&repo.scip_dir());
-    let targets: Vec<plan::Target> = plan::detect(repo).into_iter().chain(plan::detect_in_submodules(repo, &decisions).0).collect();
-    targets.iter().filter(|t| t.kind == index::host::Kind::Executing && plan::untrusted_reason(repo, trusted, &decisions, t).is_none()).any(|target| {
-        match manifest.runs.get(&index::store::key(target.indexer, &target.root)).and_then(|e| e.commit.clone()) {
-            None => true,
-            Some(commit) => crate::paths::git(&repo.root, &["rev-list", "--count", &format!("{commit}..HEAD")])
+    let targets: Vec<plan::Target> = plan::detect(repo)
+        .into_iter()
+        .chain(plan::detect_in_submodules(repo, &decisions).0)
+        .collect();
+    targets
+        .iter()
+        .filter(|t| {
+            t.kind == index::host::Kind::Executing
+                && plan::untrusted_reason(repo, trusted, &decisions, t).is_none()
+        })
+        .any(|target| {
+            match manifest
+                .runs
+                .get(&index::store::key(target.indexer, &target.root))
+                .and_then(|e| e.commit.clone())
+            {
+                None => true,
+                Some(commit) => crate::paths::git(
+                    &repo.root,
+                    &["rev-list", "--count", &format!("{commit}..HEAD")],
+                )
                 .ok()
                 .and_then(|n| n.trim().parse::<u64>().ok())
                 .map(|n| n > behind)
                 .unwrap_or(true),
-        }
-    })
+            }
+        })
 }
 
 fn start(repo: &Repo, settings: &Settings, exact: bool) -> Result<Option<std::process::Child>> {
@@ -224,7 +258,10 @@ mod tests {
         trigger.observe(ModelState::Idle, now);
         assert!(!trigger.observe(ModelState::Busy, now + IDLE_FOR / 2));
         assert!(!trigger.observe(ModelState::Idle, now + IDLE_FOR));
-        assert!(trigger.observe(ModelState::Idle, now + IDLE_FOR / 2 + IDLE_FOR + IDLE_FOR / 2));
+        assert!(trigger.observe(
+            ModelState::Idle,
+            now + IDLE_FOR / 2 + IDLE_FOR + IDLE_FOR / 2
+        ));
     }
 
     #[test]

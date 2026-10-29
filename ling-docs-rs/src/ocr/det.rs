@@ -33,7 +33,8 @@ fn regions(mask: &[bool], width: usize, height: usize) -> Vec<Vec<(i32, i32)>> {
         label[start] = id;
         stack.push(start);
         // Per row: (min x, max x).
-        let mut rows: std::collections::BTreeMap<usize, (usize, usize)> = std::collections::BTreeMap::new();
+        let mut rows: std::collections::BTreeMap<usize, (usize, usize)> =
+            std::collections::BTreeMap::new();
         while let Some(p) = stack.pop() {
             let (x, y) = (p % width, p / width);
             let row = rows.entry(y).or_insert((x, x));
@@ -42,7 +43,12 @@ fn regions(mask: &[bool], width: usize, height: usize) -> Vec<Vec<(i32, i32)>> {
             for dy in -1i64..=1 {
                 for dx in -1i64..=1 {
                     let (nx, ny) = (x as i64 + dx, y as i64 + dy);
-                    if (dx, dy) == (0, 0) || nx < 0 || ny < 0 || nx >= width as i64 || ny >= height as i64 {
+                    if (dx, dy) == (0, 0)
+                        || nx < 0
+                        || ny < 0
+                        || nx >= width as i64
+                        || ny >= height as i64
+                    {
                         continue;
                     }
                     let q = ny as usize * width + nx as usize;
@@ -73,7 +79,9 @@ fn hull(points: &[(i32, i32)]) -> Vec<(f64, f64)> {
     if p.len() < 3 {
         return p.into_iter().map(|(x, y)| (x as f64, y as f64)).collect();
     }
-    let cross = |o: (i64, i64), a: (i64, i64), b: (i64, i64)| (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0);
+    let cross = |o: (i64, i64), a: (i64, i64), b: (i64, i64)| {
+        (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
+    };
     let mut lower: Vec<(i64, i64)> = Vec::new();
     for &q in &p {
         while lower.len() >= 2 && cross(lower[lower.len() - 2], lower[lower.len() - 1], q) <= 0 {
@@ -91,7 +99,10 @@ fn hull(points: &[(i32, i32)]) -> Vec<(f64, f64)> {
     lower.pop();
     upper.pop();
     lower.extend(upper);
-    lower.into_iter().map(|(x, y)| (x as f64, y as f64)).collect()
+    lower
+        .into_iter()
+        .map(|(x, y)| (x as f64, y as f64))
+        .collect()
 }
 
 /// A rotated rectangle: its corners (in no particular order) and its two side lengths.
@@ -112,7 +123,15 @@ pub fn min_area_rect(points: &[(f64, f64)]) -> Option<Rect> {
     let edges: Vec<(f64, f64)> = if n < 2 {
         vec![(1.0, 0.0)]
     } else {
-        (0..n).map(|i| (points[(i + 1) % n].0 - points[i].0, points[(i + 1) % n].1 - points[i].1)).filter(|e| e.0 != 0.0 || e.1 != 0.0).collect()
+        (0..n)
+            .map(|i| {
+                (
+                    points[(i + 1) % n].0 - points[i].0,
+                    points[(i + 1) % n].1 - points[i].1,
+                )
+            })
+            .filter(|e| e.0 != 0.0 || e.1 != 0.0)
+            .collect()
     };
     for (ex, ey) in edges {
         let len = (ex * ex + ey * ey).sqrt();
@@ -133,7 +152,11 @@ pub fn min_area_rect(points: &[(f64, f64)]) -> Option<Rect> {
     }
     let (_, (ux, uy), [a0, a1, b0, b1]) = best?;
     let at = |a: f64, b: f64| (a * ux - b * uy, a * uy + b * ux);
-    Some(Rect { corners: [at(a0, b0), at(a1, b0), at(a1, b1), at(a0, b1)], w: a1 - a0, h: b1 - b0 })
+    Some(Rect {
+        corners: [at(a0, b0), at(a1, b0), at(a1, b1), at(a0, b1)],
+        w: a1 - a0,
+        h: b1 - b0,
+    })
 }
 
 /// `get_mini_boxes`: the rectangle's corners ordered as RapidOCR orders them, and its short side.
@@ -155,7 +178,10 @@ fn box_score(pred: &[f32], width: usize, height: usize, quad: &[(f64, f64); 4]) 
     let xmax = clip(xs.fold(f64::MIN, f64::max).ceil(), width);
     let ymin = clip(ys.clone().fold(f64::MAX, f64::min).floor(), height);
     let ymax = clip(ys.fold(f64::MIN, f64::max).ceil(), height);
-    let poly: Vec<(f64, f64)> = quad.iter().map(|p| ((p.0 - xmin as f64).trunc(), (p.1 - ymin as f64).trunc())).collect();
+    let poly: Vec<(f64, f64)> = quad
+        .iter()
+        .map(|p| ((p.0 - xmin as f64).trunc(), (p.1 - ymin as f64).trunc()))
+        .collect();
     let (mut sum, mut n) = (0f64, 0usize);
     for y in ymin..=ymax {
         for x in xmin..=xmax {
@@ -165,7 +191,11 @@ fn box_score(pred: &[f32], width: usize, height: usize, quad: &[(f64, f64); 4]) 
             }
         }
     }
-    if n == 0 { 0.0 } else { (sum / n as f64) as f32 }
+    if n == 0 {
+        0.0
+    } else {
+        (sum / n as f64) as f32
+    }
 }
 
 /// Whether a point lies in a convex polygon, edges included.
@@ -205,14 +235,36 @@ fn unclip(quad: &[(f64, f64); 4], ratio: f64) -> Option<([(f64, f64); 4], f64)> 
     let rect = min_area_rect(&hull_f(&truncated))?;
     // Grow along the rectangle's own axes.
     let (c0, c1, c3) = (rect.corners[0], rect.corners[1], rect.corners[3]);
-    let ulen = ((c1.0 - c0.0).powi(2) + (c1.1 - c0.1).powi(2)).sqrt().max(1e-12);
-    let vlen = ((c3.0 - c0.0).powi(2) + (c3.1 - c0.1).powi(2)).sqrt().max(1e-12);
+    let ulen = ((c1.0 - c0.0).powi(2) + (c1.1 - c0.1).powi(2))
+        .sqrt()
+        .max(1e-12);
+    let vlen = ((c3.0 - c0.0).powi(2) + (c3.1 - c0.1).powi(2))
+        .sqrt()
+        .max(1e-12);
     let u = ((c1.0 - c0.0) / ulen, (c1.1 - c0.1) / ulen);
     let v = ((c3.0 - c0.0) / vlen, (c3.1 - c0.1) / vlen);
-    let (u, v) = if rect.w > 0.0 && rect.h > 0.0 { (u, v) } else { ((1.0, 0.0), (0.0, 1.0)) };
-    let grown = |p: (f64, f64), su: f64, sv: f64| (p.0 + d * (su * u.0 + sv * v.0), p.1 + d * (su * u.1 + sv * v.1));
-    let corners = [grown(rect.corners[0], -1.0, -1.0), grown(rect.corners[1], 1.0, -1.0), grown(rect.corners[2], 1.0, 1.0), grown(rect.corners[3], -1.0, 1.0)];
-    Some(mini_box(&Rect { corners, w: rect.w + 2.0 * d, h: rect.h + 2.0 * d }))
+    let (u, v) = if rect.w > 0.0 && rect.h > 0.0 {
+        (u, v)
+    } else {
+        ((1.0, 0.0), (0.0, 1.0))
+    };
+    let grown = |p: (f64, f64), su: f64, sv: f64| {
+        (
+            p.0 + d * (su * u.0 + sv * v.0),
+            p.1 + d * (su * u.1 + sv * v.1),
+        )
+    };
+    let corners = [
+        grown(rect.corners[0], -1.0, -1.0),
+        grown(rect.corners[1], 1.0, -1.0),
+        grown(rect.corners[2], 1.0, 1.0),
+        grown(rect.corners[3], -1.0, 1.0),
+    ];
+    Some(mini_box(&Rect {
+        corners,
+        w: rect.w + 2.0 * d,
+        h: rect.h + 2.0 * d,
+    }))
 }
 
 fn hull_f(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
@@ -239,7 +291,9 @@ pub fn boxes(pred: &[f32], pw: usize, ph: usize, width: usize, height: usize) ->
     }
     let mut out: Vec<Quad> = Vec::new();
     for region in regions(&mask, pw, ph).into_iter().take(MAX_CANDIDATES) {
-        let Some(rect) = min_area_rect(&hull(&region)) else { continue };
+        let Some(rect) = min_area_rect(&hull(&region)) else {
+            continue;
+        };
         let (quad, short) = mini_box(&rect);
         if short < MIN_SIZE as f64 {
             continue;
@@ -247,18 +301,30 @@ pub fn boxes(pred: &[f32], pw: usize, ph: usize, width: usize, height: usize) ->
         if box_score(pred, pw, ph, &quad) < BOX_THRESH {
             continue;
         }
-        let Some((grown, short)) = unclip(&quad, UNCLIP_RATIO as f64) else { continue };
+        let Some((grown, short)) = unclip(&quad, UNCLIP_RATIO as f64) else {
+            continue;
+        };
         if short < MIN_SIZE as f64 + 2.0 {
             continue;
         }
-        let scale = |v: f64, from: usize, to: usize| crate::ocr::image::round_half_even(v / from as f64 * to as f64).clamp(0.0, to as f64) as f32;
+        let scale = |v: f64, from: usize, to: usize| {
+            crate::ocr::image::round_half_even(v / from as f64 * to as f64).clamp(0.0, to as f64)
+                as f32
+        };
         let mut q: Quad = [[0.0; 2]; 4];
         for (i, p) in grown.iter().enumerate() {
             q[i] = [scale(p.0, pw, width), scale(p.1, ph, height)];
         }
         let q = clockwise(q);
-        let q = q.map(|p| [p[0].clamp(0.0, width as f32 - 1.0).trunc(), p[1].clamp(0.0, height as f32 - 1.0).trunc()]);
-        let dist = |a: [f32; 2], b: [f32; 2]| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt() as i32;
+        let q = q.map(|p| {
+            [
+                p[0].clamp(0.0, width as f32 - 1.0).trunc(),
+                p[1].clamp(0.0, height as f32 - 1.0).trunc(),
+            ]
+        });
+        let dist = |a: [f32; 2], b: [f32; 2]| {
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt() as i32
+        };
         if dist(q[0], q[1]) <= 3 || dist(q[0], q[3]) <= 3 {
             continue;
         }
@@ -281,7 +347,11 @@ fn clockwise(q: Quad) -> Quad {
 /// `sorted_boxes`: by the top-left corner's y; tops within 10 pixels of the previous make a line,
 /// read left to right.
 fn sorted(mut boxes: Vec<Quad>) -> Vec<Quad> {
-    boxes.sort_by(|a, b| a[0][1].partial_cmp(&b[0][1]).unwrap_or(std::cmp::Ordering::Equal));
+    boxes.sort_by(|a, b| {
+        a[0][1]
+            .partial_cmp(&b[0][1])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut line = 0usize;
     let mut keyed: Vec<(usize, f32, Quad)> = Vec::with_capacity(boxes.len());
     for (i, b) in boxes.iter().enumerate() {
@@ -290,7 +360,10 @@ fn sorted(mut boxes: Vec<Quad>) -> Vec<Quad> {
         }
         keyed.push((line, b[0][0], *b));
     }
-    keyed.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)));
+    keyed.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
     keyed.into_iter().map(|(_, _, b)| b).collect()
 }
 
@@ -305,12 +378,18 @@ mod tests {
         for i in 0..20 {
             for j in 0..8 {
                 let (a, b) = (i as f64 * 0.5, j as f64 * 0.5);
-                points.push(((a - b) * std::f64::consts::FRAC_1_SQRT_2, (a + b) * std::f64::consts::FRAC_1_SQRT_2));
+                points.push((
+                    (a - b) * std::f64::consts::FRAC_1_SQRT_2,
+                    (a + b) * std::f64::consts::FRAC_1_SQRT_2,
+                ));
             }
         }
         let rect = min_area_rect(&points).unwrap();
         let (long, short) = (rect.w.max(rect.h), rect.w.min(rect.h));
-        assert!((long - 9.5).abs() < 1e-6 && (short - 3.5).abs() < 1e-6, "{rect:?}");
+        assert!(
+            (long - 9.5).abs() < 1e-6 && (short - 3.5).abs() < 1e-6,
+            "{rect:?}"
+        );
     }
 
     #[test]
@@ -340,14 +419,20 @@ mod tests {
         // Grown by area × 1.6 / perimeter ≈ 4.6 map pixels on each side, then doubled.
         assert!((first[0][0] - 2.0 * (10.0 - 4.6)).abs() <= 2.0, "{first:?}");
         assert!((first[2][0] - 2.0 * (81.0 + 4.6)).abs() <= 3.0, "{first:?}");
-        assert!(first[0][1] < first[3][1] && first[0][0] < first[1][0], "clockwise from the top left");
+        assert!(
+            first[0][1] < first[3][1] && first[0][0] < first[1][0],
+            "clockwise from the top left"
+        );
     }
 
     #[test]
     fn boxes_on_one_line_read_left_to_right() {
         let b = |x: f32, y: f32| [[x, y], [x + 10.0, y], [x + 10.0, y + 5.0], [x, y + 5.0]];
         let out = sorted(vec![b(50.0, 3.0), b(10.0, 8.0), b(0.0, 40.0)]);
-        assert_eq!(out.iter().map(|q| q[0][0]).collect::<Vec<_>>(), [10.0, 50.0, 0.0]);
+        assert_eq!(
+            out.iter().map(|q| q[0][0]).collect::<Vec<_>>(),
+            [10.0, 50.0, 0.0]
+        );
     }
 }
 
@@ -357,11 +442,16 @@ mod probe {
     /// prints how many boxes come out, for comparing the two post-processings by hand.
     #[test]
     fn a_saved_map_gives_its_boxes() {
-        let Ok(spec) = std::env::var("MIGHTLING_DOCS_TEST_PRED") else { return };
+        let Ok(spec) = std::env::var("MIGHTLING_DOCS_TEST_PRED") else {
+            return;
+        };
         let parts: Vec<&str> = spec.split_whitespace().collect();
         let (w, h): (usize, usize) = (parts[1].parse().unwrap(), parts[2].parse().unwrap());
         let bytes = std::fs::read(parts[0]).unwrap();
-        let pred: Vec<f32> = bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        let pred: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
         let quads = super::boxes(&pred, w, h, w, h);
         eprintln!("boxes: {}", quads.len());
         for q in quads.iter().take(5) {

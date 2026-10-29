@@ -15,7 +15,11 @@ use ling_docs::search::{Filters, Searcher};
 use ling_docs::{index, mcp, prompt, read, search, store};
 
 #[derive(Parser)]
-#[command(name = "ling-docs", about = "Search the user's own documents, indexed on this machine", version)]
+#[command(
+    name = "ling-docs",
+    about = "Search the user's own documents, indexed on this machine",
+    version
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -218,7 +222,11 @@ fn request_index(request: Request) -> Result<String> {
     match &request {
         Request::All => {}
         Request::One(name) => args.extend(["--collection".to_string(), name.clone()]),
-        Request::Rebuild(name) => args.extend(["--collection".to_string(), name.clone(), "--rebuild".to_string()]),
+        Request::Rebuild(name) => args.extend([
+            "--collection".to_string(),
+            name.clone(),
+            "--rebuild".to_string(),
+        ]),
     }
     store::create_private_dir(&config::docs_dir())?;
     let log = std::fs::File::create(config::docs_dir().join("index.log"))?;
@@ -232,7 +240,10 @@ fn request_index(request: Request) -> Result<String> {
 fn load_docs() -> Result<DocsToml> {
     let mut docs = DocsToml::load()?;
     let mut probe = docs.clone();
-    if config::indexes_unasked() && !probe.ensure_defaults(&config::user_home()).is_empty() && probe.save().is_ok() {
+    if config::indexes_unasked()
+        && !probe.ensure_defaults(&config::user_home()).is_empty()
+        && probe.save().is_ok()
+    {
         docs = probe;
     }
     Ok(docs)
@@ -248,8 +259,14 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 }
 
 fn parse_date(text: &str) -> Result<i64> {
-    let parts: Vec<i64> = text.split('-').map(|p| p.parse::<i64>()).collect::<std::result::Result<_, _>>().with_context(|| format!("`{text}` is not a date (YYYY-MM-DD)"))?;
-    let [y, m, d] = parts[..] else { bail!("`{text}` is not a date (YYYY-MM-DD)") };
+    let parts: Vec<i64> = text
+        .split('-')
+        .map(|p| p.parse::<i64>())
+        .collect::<std::result::Result<_, _>>()
+        .with_context(|| format!("`{text}` is not a date (YYYY-MM-DD)"))?;
+    let [y, m, d] = parts[..] else {
+        bail!("`{text}` is not a date (YYYY-MM-DD)")
+    };
     Ok(days_from_civil(y, m, d) * 86400)
 }
 
@@ -268,11 +285,20 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let mut docs = load_docs()?;
             let collection = docs.add(&folder, name.as_deref(), &config::user_home())?;
             docs.save()?;
-            writeln!(out, "Added `{}`: {}", collection.name, collection.root.display())?;
+            writeln!(
+                out,
+                "Added `{}`: {}",
+                collection.name,
+                collection.root.display()
+            )?;
             if let Some(missing) = config::missing_runtime() {
                 writeln!(out, "Indexing waits: {missing}.")?;
             } else {
-                writeln!(out, "{}; `ling docs status` shows progress.", request_index(Request::One(collection.name.clone()))?)?;
+                writeln!(
+                    out,
+                    "{}; `ling docs status` shows progress.",
+                    request_index(Request::One(collection.name.clone()))?
+                )?;
             }
         }
         Command::Remove { name } => {
@@ -282,7 +308,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
             index::remove_database(&name)?;
             writeln!(out, "Removed `{name}` ({}); its index, which held the documents' text, is deleted. The files are untouched.", removed.root.display())?;
             if removed.default {
-                writeln!(out, "It is a default collection: it will not be added back.")?;
+                writeln!(
+                    out,
+                    "It is a default collection: it will not be added back."
+                )?;
             }
         }
         Command::List { json } => {
@@ -290,22 +319,46 @@ fn run(cli: Cli) -> Result<ExitCode> {
             if json {
                 writeln!(out, "{}", serde_json::to_string_pretty(&docs.collections)?)?;
             } else if docs.collections.is_empty() {
-                writeln!(out, "No collections. Add one with `ling docs add <folder>`.")?;
+                writeln!(
+                    out,
+                    "No collections. Add one with `ling docs add <folder>`."
+                )?;
             } else {
                 for c in &docs.collections {
-                    writeln!(out, "{:<16} {}{}", c.name, c.root.display(), if c.enabled { "" } else { " (disabled)" })?;
+                    writeln!(
+                        out,
+                        "{:<16} {}{}",
+                        c.name,
+                        c.root.display(),
+                        if c.enabled { "" } else { " (disabled)" }
+                    )?;
                 }
             }
         }
         Command::Status { name, json } => {
             let docs = load_docs()?;
             let mut rows = Vec::new();
-            for c in docs.collections.iter().filter(|c| name.as_ref().is_none_or(|n| *n == c.name)) {
+            for c in docs
+                .collections
+                .iter()
+                .filter(|c| name.as_ref().is_none_or(|n| *n == c.name))
+            {
                 let path = config::db_path(&c.name);
                 let conn = store::open_ro(&path)?;
-                let counts = conn.as_ref().map(store::counts).transpose()?.unwrap_or_default();
-                let meta = |key: &str| conn.as_ref().and_then(|c| store::get_meta(c, key).ok().flatten());
-                let size = ["", "-journal"].iter().filter_map(|s| std::fs::metadata(format!("{}{s}", path.display())).ok()).map(|m| m.len()).sum::<u64>();
+                let counts = conn
+                    .as_ref()
+                    .map(store::counts)
+                    .transpose()?
+                    .unwrap_or_default();
+                let meta = |key: &str| {
+                    conn.as_ref()
+                        .and_then(|c| store::get_meta(c, key).ok().flatten())
+                };
+                let size = ["", "-journal"]
+                    .iter()
+                    .filter_map(|s| std::fs::metadata(format!("{}{s}", path.display())).ok())
+                    .map(|m| m.len())
+                    .sum::<u64>();
                 rows.push(serde_json::json!({
                     "name": c.name, "root": c.root, "enabled": c.enabled, "default": c.default,
                     "counts": counts, "last_status": meta("last_status"), "last_run": meta("last_run").and_then(|v| v.parse::<i64>().ok()),
@@ -316,39 +369,94 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
             let missing = config::missing_runtime();
             let settings = Settings::load();
-            let ocr_missing = if !settings.ocr { Some("OCR is switched off (docs_ocr = false)".to_string()) } else { ling_docs::ocr::missing(&config::lib_dir(), &config::ocr_dir()) };
+            let ocr_missing = if !settings.ocr {
+                Some("OCR is switched off (docs_ocr = false)".to_string())
+            } else {
+                ling_docs::ocr::missing(&config::lib_dir(), &config::ocr_dir())
+            };
             if json {
-                writeln!(out, "{}", serde_json::to_string_pretty(&serde_json::json!({ "collections": rows, "runtime_missing": missing, "ocr_missing": ocr_missing, "network": "none: local only, unaffected by /airgapped" }))?)?;
+                writeln!(
+                    out,
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({ "collections": rows, "runtime_missing": missing, "ocr_missing": ocr_missing, "network": "none: local only, unaffected by /airgapped" })
+                    )?
+                )?;
                 return Ok(ExitCode::SUCCESS);
             }
             if rows.is_empty() {
-                writeln!(out, "No collections. Add one with `ling docs add <folder>`.")?;
+                writeln!(
+                    out,
+                    "No collections. Add one with `ling docs add <folder>`."
+                )?;
             }
             for row in &rows {
                 let n = |key: &str| row["counts"][key].as_i64().unwrap_or(0);
-                writeln!(out, "{} — {}", row["name"].as_str().unwrap_or(""), row["root"].as_str().unwrap_or(""))?;
-                writeln!(out, "  documents {} indexed, {} pending, {} failed, {} duplicates, {} skipped", n("indexed"), n("pending"), n("failed"), n("duplicates"), n("skipped"))?;
-                writeln!(out, "  chunks {} ({} embedded); index {}", n("chunks"), n("embedded"), human_bytes(row["disk_bytes"].as_u64().unwrap_or(0)))?;
+                writeln!(
+                    out,
+                    "{} — {}",
+                    row["name"].as_str().unwrap_or(""),
+                    row["root"].as_str().unwrap_or("")
+                )?;
+                writeln!(
+                    out,
+                    "  documents {} indexed, {} pending, {} failed, {} duplicates, {} skipped",
+                    n("indexed"),
+                    n("pending"),
+                    n("failed"),
+                    n("duplicates"),
+                    n("skipped")
+                )?;
+                writeln!(
+                    out,
+                    "  chunks {} ({} embedded); index {}",
+                    n("chunks"),
+                    n("embedded"),
+                    human_bytes(row["disk_bytes"].as_u64().unwrap_or(0))
+                )?;
                 if n("ocr_pages") > 0 {
-                    writeln!(out, "  OCR: {} scanned pages and images read, {} of them with low confidence", n("ocr_pages"), n("ocr_low_pages"))?;
+                    writeln!(
+                        out,
+                        "  OCR: {} scanned pages and images read, {} of them with low confidence",
+                        n("ocr_pages"),
+                        n("ocr_low_pages")
+                    )?;
                 }
                 if n("needs_ocr_pages") > 0 {
                     let why = match &ocr_missing {
                         Some(why) => format!("not read: {why}"),
-                        None if n("ocr_waiting_documents") > 0 => format!("{} documents wait for OCR", n("ocr_waiting_documents")),
+                        None if n("ocr_waiting_documents") > 0 => {
+                            format!("{} documents wait for OCR", n("ocr_waiting_documents"))
+                        }
                         None => "past docs_ocr_max_pages, or unreadable".to_string(),
                     };
-                    writeln!(out, "  without text: {} scanned pages in {} documents ({why})", n("needs_ocr_pages"), n("needs_ocr_documents"))?;
+                    writeln!(
+                        out,
+                        "  without text: {} scanned pages in {} documents ({why})",
+                        n("needs_ocr_pages"),
+                        n("needs_ocr_documents")
+                    )?;
                 }
                 if n("ocr_failed_documents") > 0 {
-                    writeln!(out, "  OCR could not read {} documents (not retried until they change)", n("ocr_failed_documents"))?;
+                    writeln!(
+                        out,
+                        "  OCR could not read {} documents (not retried until they change)",
+                        n("ocr_failed_documents")
+                    )?;
                 }
                 if let Some(status) = row["last_status"].as_str() {
-                    let ago = row["last_run"].as_i64().map(|t| format!(", {} min ago", (index::now() - t) / 60)).unwrap_or_default();
+                    let ago = row["last_run"]
+                        .as_i64()
+                        .map(|t| format!(", {} min ago", (index::now() - t) / 60))
+                        .unwrap_or_default();
                     writeln!(out, "  last run: {status}{ago}")?;
                 }
-                if let Some(skipped) = row["skipped_unopened"].as_object().filter(|m| !m.is_empty()) {
-                    let parts: Vec<String> = skipped.iter().map(|(k, v)| format!("{v} {k}")).collect();
+                if let Some(skipped) = row["skipped_unopened"]
+                    .as_object()
+                    .filter(|m| !m.is_empty())
+                {
+                    let parts: Vec<String> =
+                        skipped.iter().map(|(k, v)| format!("{v} {k}")).collect();
                     writeln!(out, "  left out without opening: {}", parts.join(", "))?;
                 }
             }
@@ -357,14 +465,35 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
             let cache = ling_docs::pdf_search::entries();
             if !cache.is_empty() {
-                writeln!(out, "pdf_search cache: {} PDFs, {}", cache.len(), human_bytes(cache.iter().map(|(_, size, _)| size).sum()))?;
+                writeln!(
+                    out,
+                    "pdf_search cache: {} PDFs, {}",
+                    cache.len(),
+                    human_bytes(cache.iter().map(|(_, size, _)| size).sum())
+                )?;
             }
-            writeln!(out, "Network: none. The index is local only, unaffected by /airgapped.")?;
+            writeln!(
+                out,
+                "Network: none. The index is local only, unaffected by /airgapped."
+            )?;
         }
-        Command::Search { query, collection, k, path, kind, after, json } => {
+        Command::Search {
+            query,
+            collection,
+            k,
+            path,
+            kind,
+            after,
+            json,
+        } => {
             let query = query.join(" ");
             let collections = search::collections()?;
-            let filters = Filters { collection, path_glob: path, kind, modified_after: after.as_deref().map(parse_date).transpose()? };
+            let filters = Filters {
+                collection,
+                path_glob: path,
+                kind,
+                modified_after: after.as_deref().map(parse_date).transpose()?,
+            };
             let mut searcher = Searcher::default();
             searcher.refresh(&collections)?;
             for c in &collections {
@@ -373,7 +502,13 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 }
             }
             let embedder = mcp::query_embedder().ok();
-            let answer = searcher.search(&query, k.clamp(1, 50), &filters, embedder.as_deref(), Settings::load().bm25_weight)?;
+            let answer = searcher.search(
+                &query,
+                k.clamp(1, 50),
+                &filters,
+                embedder.as_deref(),
+                Settings::load().bm25_weight,
+            )?;
             if json {
                 writeln!(out, "{}", serde_json::to_string_pretty(&answer)?)?;
             } else {
@@ -384,22 +519,53 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     writeln!(out, "No passage matched.")?;
                 }
                 for (i, hit) in answer.hits.iter().enumerate() {
-                    writeln!(out, "{}. {}  {}  {}  [{}]", i + 1, hit.doc_id, hit.path, hit.loc, format_args!("{:.4}", hit.score))?;
+                    writeln!(
+                        out,
+                        "{}. {}  {}  {}  [{}]",
+                        i + 1,
+                        hit.doc_id,
+                        hit.path,
+                        hit.loc,
+                        format_args!("{:.4}", hit.score)
+                    )?;
                     writeln!(out, "   {}", hit.snippet)?;
                 }
             }
         }
-        Command::Read { doc_id, page, lines, at, json } => {
+        Command::Read {
+            doc_id,
+            page,
+            lines,
+            at,
+            json,
+        } => {
             let collections = search::collections()?;
-            let locator = page.map(|p| format!("p.{p}")).or(lines.map(|l| format!("lines {l}"))).or(at);
-            let result = read::read(&collections, &doc_id, locator.as_deref(), read::BUDGET_TOKENS)?;
+            let locator = page
+                .map(|p| format!("p.{p}"))
+                .or(lines.map(|l| format!("lines {l}")))
+                .or(at);
+            let result = read::read(
+                &collections,
+                &doc_id,
+                locator.as_deref(),
+                read::BUDGET_TOKENS,
+            )?;
             if json {
                 writeln!(out, "{}", serde_json::to_string_pretty(&result)?)?;
             } else {
                 writeln!(out, "{} {} ({})", result.doc_id, result.path, result.loc)?;
                 writeln!(out, "{}", result.text.trim_end())?;
                 if let Some(next) = result.next {
-                    writeln!(out, "-- more: ling docs read {} {}", result.doc_id, if next.starts_with("p.") { format!("--page {}", &next[2..]) } else { format!("--at '{next}'") })?;
+                    writeln!(
+                        out,
+                        "-- more: ling docs read {} {}",
+                        result.doc_id,
+                        if let Some(page) = next.strip_prefix("p.") {
+                            format!("--page {page}")
+                        } else {
+                            format!("--at '{next}'")
+                        }
+                    )?;
                 }
             }
         }
@@ -416,9 +582,16 @@ fn run(cli: Cli) -> Result<ExitCode> {
             if docs.get(&name).is_none() {
                 bail!("no collection named `{name}`");
             }
-            writeln!(out, "Rebuilding `{name}`: {}.", request_index(Request::Rebuild(name.clone()))?)?;
+            writeln!(
+                out,
+                "Rebuilding `{name}`: {}.",
+                request_index(Request::Rebuild(name.clone()))?
+            )?;
         }
-        Command::Index { collection, rebuild } => {
+        Command::Index {
+            collection,
+            rebuild,
+        } => {
             let docs = load_docs()?;
             // `MIGHTLING_DOCS_TEST_HOST=direct`, as for pdf_search: the workers as plain children
             // under `RLIMIT_AS`, without bwrap, inside whatever scope runs this (measurements in a
@@ -455,28 +628,84 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 }
             }
         }
-        Command::Extract { file, page, pages, max_chars, json } => return extract_command(&file, page, pages.as_deref(), max_chars, json),
-        Command::ExtractWorker { jobs, out: events, lib_dir } => ling_docs::extract::worker(&jobs, &events, &lib_dir)?,
-        Command::OcrWorker { jobs, out: events, lib_dir, ocr_dir, threads } => ling_docs::ocr::worker::worker(&jobs, &events, &lib_dir, &ocr_dir, threads)?,
-        Command::IndexWorker { collection, db, events, threads, lib_dir, model_dir, test_embedder, send_below } => {
+        Command::Extract {
+            file,
+            page,
+            pages,
+            max_chars,
+            json,
+        } => return extract_command(&file, page, pages.as_deref(), max_chars, json),
+        Command::ExtractWorker {
+            jobs,
+            out: events,
+            lib_dir,
+        } => ling_docs::extract::worker(&jobs, &events, &lib_dir)?,
+        Command::OcrWorker {
+            jobs,
+            out: events,
+            lib_dir,
+            ocr_dir,
+            threads,
+        } => ling_docs::ocr::worker::worker(&jobs, &events, &lib_dir, &ocr_dir, threads)?,
+        Command::IndexWorker {
+            collection,
+            db,
+            events,
+            threads,
+            lib_dir,
+            model_dir,
+            test_embedder,
+            send_below,
+        } => {
             let mut log = std::io::stderr();
             if test_embedder {
                 let embedder = ling_docs::embed::HashEmbedder { dim: 64 };
-                index::index_worker_with(&collection, &db, &events, &embedder, &ling_docs::chunk::Words, send_below, &mut log)?;
+                index::index_worker_with(
+                    &collection,
+                    &db,
+                    &events,
+                    &embedder,
+                    &ling_docs::chunk::Words,
+                    send_below,
+                    &mut log,
+                )?;
             } else {
                 let embedder = ling_docs::embed::OnnxEmbedder::load(&model_dir, &lib_dir, threads)?;
-                index::index_worker_with(&collection, &db, &events, &embedder, &embedder.tokenizer, send_below, &mut log)?;
+                index::index_worker_with(
+                    &collection,
+                    &db,
+                    &events,
+                    &embedder,
+                    &embedder.tokenizer,
+                    send_below,
+                    &mut log,
+                )?;
             }
         }
-        Command::BenchSearch { questions, out: path, k, no_merge } => bench_search(&questions, &path, k, no_merge)?,
-        Command::OcrFile { file, dpi, route, threads } => ocr_file(&file, dpi, route.as_deref(), threads)?,
+        Command::BenchSearch {
+            questions,
+            out: path,
+            k,
+            no_merge,
+        } => bench_search(&questions, &path, k, no_merge)?,
+        Command::OcrFile {
+            file,
+            dpi,
+            route,
+            threads,
+        } => ocr_file(&file, dpi, route.as_deref(), threads)?,
         Command::Embed { query } => {
             use std::io::BufRead;
-            let embedder = ling_docs::embed::OnnxEmbedder::load(&config::model_dir(), &config::lib_dir(), 4)?;
+            let embedder =
+                ling_docs::embed::OnnxEmbedder::load(&config::model_dir(), &config::lib_dir(), 4)?;
             for line in std::io::stdin().lock().lines() {
                 // Each line is a JSON string, so texts may hold newlines.
                 let text: String = serde_json::from_str(&line?)?;
-                let text = if query { format!("{}{text}", ling_docs::embed::QUERY_PREFIX) } else { text };
+                let text = if query {
+                    format!("{}{text}", ling_docs::embed::QUERY_PREFIX)
+                } else {
+                    text
+                };
                 use ling_docs::embed::Embed;
                 writeln!(out, "{}", serde_json::to_string(&embedder.embed(&text)?)?)?;
             }
@@ -487,7 +716,13 @@ fn run(cli: Cli) -> Result<ExitCode> {
 
 /// `ling-docs extract` (PDF_SEARCH §4): the extractor in a capped scope and bwrap where the user's
 /// systemd is reachable, else (inside the agent's sandbox) a plain child under `RLIMIT_AS`.
-fn extract_command(file: &std::path::Path, page: Option<u32>, pages: Option<&str>, max_chars: usize, json: bool) -> Result<ExitCode> {
+fn extract_command(
+    file: &std::path::Path,
+    page: Option<u32>,
+    pages: Option<&str>,
+    max_chars: usize,
+    json: bool,
+) -> Result<ExitCode> {
     let mut out = std::io::stdout();
     let range = match (page, pages) {
         (Some(p), _) => Some((p, p)),
@@ -501,7 +736,10 @@ fn extract_command(file: &std::path::Path, page: Option<u32>, pages: Option<&str
         }
         (None, None) => None,
     };
-    if ling_docs::discover::Kind::of(&file.to_string_lossy()) == Some(ling_docs::discover::Kind::Pdf) && !config::lib_dir().join("libpdfium.so").is_file() {
+    if ling_docs::discover::Kind::of(&file.to_string_lossy())
+        == Some(ling_docs::discover::Kind::Pdf)
+        && !config::lib_dir().join("libpdfium.so").is_file()
+    {
         writeln!(out, "failed: reading PDFs needs PDFium, which is not installed (run `ling-admin docs setup` on a node)")?;
         return Ok(ExitCode::from(1));
     }
@@ -521,7 +759,10 @@ fn extract_command(file: &std::path::Path, page: Option<u32>, pages: Option<&str
         }
     };
     let count = extracted.pages.unwrap_or(0);
-    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     // Units by page (a PDF) or the file's sections (text), the requested ones only.
     let mut shown: Vec<(Option<u32>, String)> = Vec::new();
     let mut used = 0;
@@ -539,35 +780,73 @@ fn extract_command(file: &std::path::Path, page: Option<u32>, pages: Option<&str
         used += unit.text.chars().count();
         shown.push((unit.page, unit.text.clone()));
     }
-    let scans: Vec<u32> = extracted.needs_ocr.iter().copied().filter(|p| range.is_none_or(|(a, b)| *p >= a && *p <= b)).collect();
-    let returned = match (shown.first().and_then(|s| s.0), shown.last().and_then(|s| s.0)) {
+    let scans: Vec<u32> = extracted
+        .needs_ocr
+        .iter()
+        .copied()
+        .filter(|p| range.is_none_or(|(a, b)| *p >= a && *p <= b))
+        .collect();
+    let returned = match (
+        shown.first().and_then(|s| s.0),
+        shown.last().and_then(|s| s.0),
+    ) {
         (Some(a), Some(b)) if a == b => format!("p.{a}"),
         (Some(a), Some(b)) => format!("pp.{a}-{b}"),
         _ => String::new(),
     };
     if json {
-        let pages: Vec<serde_json::Value> = shown.iter().map(|(p, t)| serde_json::json!({ "page": p, "text": t })).collect();
-        writeln!(out, "{}", serde_json::to_string_pretty(&serde_json::json!({
-            "file": name, "title": extracted.title, "page_count": extracted.pages, "returned": returned,
-            "pages": pages, "needs_ocr": scans, "next_page": next,
-        }))?)?;
+        let pages: Vec<serde_json::Value> = shown
+            .iter()
+            .map(|(p, t)| serde_json::json!({ "page": p, "text": t }))
+            .collect();
+        writeln!(
+            out,
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "file": name, "title": extracted.title, "page_count": extracted.pages, "returned": returned,
+                "pages": pages, "needs_ocr": scans, "next_page": next,
+            }))?
+        )?;
         return Ok(ExitCode::SUCCESS);
     }
-    let title = extracted.title.as_ref().map(|t| format!(" — \"{t}\"")).unwrap_or_default();
+    let title = extracted
+        .title
+        .as_ref()
+        .map(|t| format!(" — \"{t}\""))
+        .unwrap_or_default();
     if extracted.pages.is_some() {
-        writeln!(out, "{name}{title}, {count} pages{}", if returned.is_empty() { String::new() } else { format!("; {returned} returned") })?;
+        writeln!(
+            out,
+            "{name}{title}, {count} pages{}",
+            if returned.is_empty() {
+                String::new()
+            } else {
+                format!("; {returned} returned")
+            }
+        )?;
         if extracted.units.is_empty() {
-            writeln!(out, "No page has a text layer (a scan, or only images): OCR is not offered here.")?;
+            writeln!(
+                out,
+                "No page has a text layer (a scan, or only images): OCR is not offered here."
+            )?;
         }
         for (page, text) in &shown {
             writeln!(out, "--- page {} of {count} ---", page.unwrap_or(0))?;
             writeln!(out, "{}", text.trim_end())?;
         }
         for p in scans {
-            writeln!(out, "p.{p}: no text layer (scanned?); OCR is not offered here")?;
+            writeln!(
+                out,
+                "p.{p}: no text layer (scanned?); OCR is not offered here"
+            )?;
         }
         if let Some(n) = next {
-            writeln!(out, "-- more: ling-docs extract {} --pages {n}-{}", file.display(), (n + 4).min(count))?;
+            writeln!(
+                out,
+                "-- more: ling-docs extract {} --pages {n}-{}",
+                file.display(),
+                (n + 4).min(count)
+            )?;
         }
     } else {
         for (_, text) in &shown {
@@ -589,21 +868,42 @@ fn bench_search(questions: &PathBuf, path: &PathBuf, k: usize, no_merge: bool) -
     let weight = Settings::load().bm25_weight;
     let mut sink = std::fs::File::create(path)?;
     // One warm-up query loads the vectors, as the first query of a session does.
-    let _ = searcher.search("warm up", 1, &Filters::default(), Some(embedder.as_ref()), weight)?;
+    let _ = searcher.search(
+        "warm up",
+        1,
+        &Filters::default(),
+        Some(embedder.as_ref()),
+        weight,
+    )?;
     for line in std::io::BufReader::new(std::fs::File::open(questions)?).lines() {
         let q: serde_json::Value = serde_json::from_str(&line?)?;
         let text = q["question"].as_str().unwrap_or("");
         let started = std::time::Instant::now();
-        let answer = searcher.search(text, k, &Filters::default(), Some(embedder.as_ref()), weight)?;
+        let answer = searcher.search(
+            text,
+            k,
+            &Filters::default(),
+            Some(embedder.as_ref()),
+            weight,
+        )?;
         let ms = started.elapsed().as_secs_f64() * 1000.0;
         let hits: Vec<serde_json::Value> = answer.hits.iter().map(|h| serde_json::json!({ "rel": h.rel, "collection": h.collection, "loc": h.loc, "text": h.text })).collect();
-        writeln!(sink, "{}", serde_json::json!({ "id": q["id"], "ms": ms, "hits": hits }))?;
+        writeln!(
+            sink,
+            "{}",
+            serde_json::json!({ "id": q["id"], "ms": ms, "hits": hits })
+        )?;
     }
     Ok(())
 }
 
 /// `ling-docs ocr-file`: every page of a PDF (or the image) through the OCR, one JSON line each.
-fn ocr_file(file: &std::path::Path, dpi: Option<f32>, route: Option<&str>, threads: usize) -> Result<()> {
+fn ocr_file(
+    file: &std::path::Path,
+    dpi: Option<f32>,
+    route: Option<&str>,
+    threads: usize,
+) -> Result<()> {
     use ling_docs::ocr::{self, image::Image, osd::Script};
     let mut out = std::io::stdout();
     let mut engine = ocr::Ocr::load(&config::lib_dir(), &config::ocr_dir(), threads)?;
@@ -621,10 +921,16 @@ fn ocr_file(file: &std::path::Path, dpi: Option<f32>, route: Option<&str>, threa
             None => engine.read_page(img)?,
         };
         let seconds = started.elapsed().as_secs_f64();
-        writeln!(out, "{}", serde_json::json!({ "page": page, "seconds": seconds, "width": img.width, "height": img.height, "route": text.route, "tesseract_script": text.tesseract_script, "confidence": text.confidence, "lines": text.lines, "text": text.text() }))?;
+        writeln!(
+            out,
+            "{}",
+            serde_json::json!({ "page": page, "seconds": seconds, "width": img.width, "height": img.height, "route": text.route, "tesseract_script": text.tesseract_script, "confidence": text.confidence, "lines": text.lines, "text": text.text() })
+        )?;
         Ok(())
     };
-    if ling_docs::discover::Kind::of(&file.to_string_lossy()) == Some(ling_docs::discover::Kind::Pdf) {
+    if ling_docs::discover::Kind::of(&file.to_string_lossy())
+        == Some(ling_docs::discover::Kind::Pdf)
+    {
         let pdf = ling_docs::extract::pdf::Pdf::load(&config::lib_dir())?;
         let count = pdf.extract(file, Some(0))?.page_count;
         let pages: Vec<u32> = (1..=count).collect();
@@ -633,8 +939,17 @@ fn ocr_file(file: &std::path::Path, dpi: Option<f32>, route: Option<&str>, threa
             read(number, &img)
         };
         match dpi {
-            Some(dpi) => pdf.render_gray_at(ling_docs::extract::pdf::Source::Path(file), &pages, dpi, &mut render)?,
-            None => pdf.render_gray(ling_docs::extract::pdf::Source::Path(file), &pages, &mut render)?,
+            Some(dpi) => pdf.render_gray_at(
+                ling_docs::extract::pdf::Source::Path(file),
+                &pages,
+                dpi,
+                &mut render,
+            )?,
+            None => pdf.render_gray(
+                ling_docs::extract::pdf::Source::Path(file),
+                &pages,
+                &mut render,
+            )?,
         }
     } else {
         let img = ocr::decode_image(&std::fs::read(file)?)?;

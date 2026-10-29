@@ -29,9 +29,36 @@ const THEIR_COMMITS: &str = "-200";
 
 /// Mail providers whose domain says nothing about an organisation.
 const PUBLIC_MAIL_DOMAINS: &[&str] = &[
-    "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "ymail.com", "icloud.com", "me.com",
-    "mac.com", "proton.me", "protonmail.com", "pm.me", "gmx.com", "gmx.de", "gmx.net", "mail.com", "aol.com", "qq.com", "163.com", "126.com",
-    "yandex.ru", "yandex.com", "fastmail.com", "hey.com", "tutanota.com", "users.noreply.github.com", "users.noreply.gitlab.com", "localhost",
+    "gmail.com",
+    "googlemail.com",
+    "outlook.com",
+    "hotmail.com",
+    "live.com",
+    "msn.com",
+    "yahoo.com",
+    "ymail.com",
+    "icloud.com",
+    "me.com",
+    "mac.com",
+    "proton.me",
+    "protonmail.com",
+    "pm.me",
+    "gmx.com",
+    "gmx.de",
+    "gmx.net",
+    "mail.com",
+    "aol.com",
+    "qq.com",
+    "163.com",
+    "126.com",
+    "yandex.ru",
+    "yandex.com",
+    "fastmail.com",
+    "hey.com",
+    "tutanota.com",
+    "users.noreply.github.com",
+    "users.noreply.gitlab.com",
+    "localhost",
 ];
 
 /// GitHub's web-flow committer: it commits for everyone, so it identifies no one.
@@ -109,9 +136,15 @@ impl Submodule {
     pub fn evidence(&self) -> String {
         let mut parts = Vec::new();
         match (self.namespace, &self.our_namespace, &self.their_namespace) {
-            (Namespace::Same, Some(ours), Some(theirs)) if ours == theirs => parts.push(format!("namespace {ours}")),
-            (Namespace::Same, Some(ours), _) => parts.push(format!("namespace {ours} (relative URL)")),
-            (Namespace::Different, Some(ours), Some(theirs)) => parts.push(format!("namespace {theirs}, yours is {ours}")),
+            (Namespace::Same, Some(ours), Some(theirs)) if ours == theirs => {
+                parts.push(format!("namespace {ours}"))
+            }
+            (Namespace::Same, Some(ours), _) => {
+                parts.push(format!("namespace {ours} (relative URL)"))
+            }
+            (Namespace::Different, Some(ours), Some(theirs)) => {
+                parts.push(format!("namespace {theirs}, yours is {ours}"))
+            }
             _ => parts.push("no namespace to compare".to_string()),
         }
         if self.reason != Reason::NotCheckedOut {
@@ -148,7 +181,10 @@ impl RemoteId {
 pub fn parse_remote(url: &str) -> Option<RemoteId> {
     let url = url.trim();
     let (authority, path) = if let Some((scheme, rest)) = url.split_once("://") {
-        if !matches!(scheme.to_ascii_lowercase().as_str(), "https" | "http" | "ssh" | "git" | "git+ssh" | "ssh+git") {
+        if !matches!(
+            scheme.to_ascii_lowercase().as_str(),
+            "https" | "http" | "ssh" | "git" | "git+ssh" | "ssh+git"
+        ) {
             return None;
         }
         let (authority, path) = rest.split_once('/')?;
@@ -178,7 +214,11 @@ pub fn parse_remote(url: &str) -> Option<RemoteId> {
     }
     let owner = segments[0].trim_start_matches('~').to_ascii_lowercase();
     let repo = segments[segments.len() - 1].trim_end_matches(".git");
-    Some(RemoteId { display: format!("{host}/{owner}/{repo}"), host, owner })
+    Some(RemoteId {
+        display: format!("{host}/{owner}/{repo}"),
+        host,
+        owner,
+    })
 }
 
 fn is_relative_url(url: &str) -> bool {
@@ -187,10 +227,24 @@ fn is_relative_url(url: &str) -> bool {
 
 /// The superproject's remote: that of the current branch, else `origin`, else the only remote.
 fn superproject_remote(root: &Path) -> Option<RemoteId> {
-    let remotes: Vec<String> = git(root, &["remote"]).ok()?.lines().map(str::to_string).collect();
+    let remotes: Vec<String> = git(root, &["remote"])
+        .ok()?
+        .lines()
+        .map(str::to_string)
+        .collect();
     let branch_remote = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
         .ok()
-        .and_then(|branch| git(root, &["config", "--get", &format!("branch.{}.remote", branch.trim())]).ok())
+        .and_then(|branch| {
+            git(
+                root,
+                &[
+                    "config",
+                    "--get",
+                    &format!("branch.{}.remote", branch.trim()),
+                ],
+            )
+            .ok()
+        })
         .map(|r| r.trim().to_string())
         .filter(|r| remotes.contains(r));
     let remote = branch_remote
@@ -224,8 +278,11 @@ impl Authors {
     }
 
     fn of(root: &Path) -> Authors {
-        let mut addresses: Vec<String> =
-            git(root, &["log", OUR_COMMITS, "--format=%ae%n%ce"]).unwrap_or_default().lines().map(str::to_string).collect();
+        let mut addresses: Vec<String> = git(root, &["log", OUR_COMMITS, "--format=%ae%n%ce"])
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect();
         if let Ok(own) = git(root, &["config", "--get", "user.email"]) {
             addresses.push(own);
         }
@@ -234,7 +291,10 @@ impl Authors {
 
     pub fn wrote(&self, address: &str) -> bool {
         let address = address.trim().to_ascii_lowercase();
-        self.addresses.contains(&address) || address.rsplit_once('@').is_some_and(|(_, domain)| self.domains.contains(domain))
+        self.addresses.contains(&address)
+            || address
+                .rsplit_once('@')
+                .is_some_and(|(_, domain)| self.domains.contains(domain))
     }
 }
 
@@ -264,7 +324,11 @@ pub fn choices_file() -> PathBuf {
 }
 
 fn project_key(repo: &Repo) -> String {
-    repo.main_root.canonicalize().unwrap_or_else(|_| repo.main_root.clone()).to_string_lossy().into_owned()
+    repo.main_root
+        .canonicalize()
+        .unwrap_or_else(|_| repo.main_root.clone())
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// The user's choices for this repository, keyed by submodule path or name.
@@ -273,7 +337,12 @@ pub fn choices(repo: &Repo) -> Vec<(String, Choice)> {
 }
 
 fn choices_in(file: &Path, repo: &Repo) -> Vec<(String, Choice)> {
-    let Some(table) = std::fs::read_to_string(file).ok().and_then(|t| t.parse::<toml::Table>().ok()) else { return Vec::new() };
+    let Some(table) = std::fs::read_to_string(file)
+        .ok()
+        .and_then(|t| t.parse::<toml::Table>().ok())
+    else {
+        return Vec::new();
+    };
     let Some(submodules) = table
         .get("projects")
         .and_then(|p| p.get(project_key(repo)))
@@ -299,7 +368,9 @@ fn choices_in(file: &Path, repo: &Repo) -> Vec<(String, Choice)> {
 pub fn set_choice(repo: &Repo, submodule: &Submodule, choice: Option<Choice>) -> Result<()> {
     let file = choices_file();
     let mut table = match std::fs::read_to_string(&file) {
-        Ok(text) => text.parse::<toml::Table>().with_context(|| format!("{} is not valid TOML", file.display()))?,
+        Ok(text) => text
+            .parse::<toml::Table>()
+            .with_context(|| format!("{} is not valid TOML", file.display()))?,
         Err(_) => toml::Table::new(),
     };
     let as_table = |value: &mut toml::Value| -> Result<()> {
@@ -308,19 +379,35 @@ pub fn set_choice(repo: &Repo, submodule: &Submodule, choice: Option<Choice>) ->
         }
         Ok(())
     };
-    let projects = table.entry("projects").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let projects = table
+        .entry("projects")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
     as_table(projects)?;
-    let project = projects.as_table_mut().unwrap().entry(project_key(repo)).or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let project = projects
+        .as_table_mut()
+        .unwrap()
+        .entry(project_key(repo))
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
     as_table(project)?;
-    let submodules = project.as_table_mut().unwrap().entry("submodules").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let submodules = project
+        .as_table_mut()
+        .unwrap()
+        .entry("submodules")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
     as_table(submodules)?;
     let submodules = submodules.as_table_mut().unwrap();
     // One entry per submodule, under its path; an older entry under its name goes.
     submodules.remove(&submodule.name);
     submodules.remove(&submodule.path);
     match choice {
-        Some(Choice::Include) => submodules.insert(submodule.path.clone(), toml::Value::String("include".into())),
-        Some(Choice::Exclude) => submodules.insert(submodule.path.clone(), toml::Value::String("exclude".into())),
+        Some(Choice::Include) => submodules.insert(
+            submodule.path.clone(),
+            toml::Value::String("include".into()),
+        ),
+        Some(Choice::Exclude) => submodules.insert(
+            submodule.path.clone(),
+            toml::Value::String("exclude".into()),
+        ),
         None => None,
     };
     let text = toml::to_string(&table)?;
@@ -345,7 +432,18 @@ fn declared(dir: &Path) -> Vec<(String, String)> {
     if !dir.join(".gitmodules").is_file() {
         return Vec::new();
     }
-    let Ok(listing) = git(dir, &["config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"]) else { return Vec::new() };
+    let Ok(listing) = git(
+        dir,
+        &[
+            "config",
+            "-f",
+            ".gitmodules",
+            "--get-regexp",
+            r"^submodule\..*\.path$",
+        ],
+    ) else {
+        return Vec::new();
+    };
     listing
         .lines()
         .filter_map(|line| {
@@ -383,7 +481,9 @@ fn list(root: &Path) -> Vec<(String, String, PathBuf, bool)> {
 fn max_files(repo: &Repo, settings: &Settings) -> usize {
     let inside = settings.config_path.as_ref().is_some_and(|path| {
         let path = path.canonicalize().unwrap_or_else(|_| path.clone());
-        [&repo.root, &repo.main_root].iter().any(|root| path.starts_with(root.canonicalize().unwrap_or_else(|_| root.to_path_buf())))
+        [&repo.root, &repo.main_root].iter().any(|root| {
+            path.starts_with(root.canonicalize().unwrap_or_else(|_| root.to_path_buf()))
+        })
     });
     if inside {
         Settings::default().submodule_max_files
@@ -398,7 +498,11 @@ pub fn evaluate(repo: &Repo, settings: &Settings) -> Vec<Submodule> {
 }
 
 /// [`evaluate`] with the size guard and the user's choices given.
-pub fn evaluate_with(repo: &Repo, max_files: usize, choices: &[(String, Choice)]) -> Vec<Submodule> {
+pub fn evaluate_with(
+    repo: &Repo,
+    max_files: usize,
+    choices: &[(String, Choice)],
+) -> Vec<Submodule> {
     if !repo.is_git {
         return Vec::new();
     }
@@ -411,7 +515,11 @@ pub fn evaluate_with(repo: &Repo, max_files: usize, choices: &[(String, Choice)]
     let mut out: Vec<Submodule> = Vec::new();
     for (name, path, parent_dir, checked_out) in listed {
         // The declaring repository: the superproject, or the submodule this one is nested in.
-        let parent = out.iter().filter(|s| path.starts_with(&format!("{}/", s.path))).max_by_key(|s| s.path.len()).cloned();
+        let parent = out
+            .iter()
+            .filter(|s| path.starts_with(&format!("{}/", s.path)))
+            .max_by_key(|s| s.path.len())
+            .cloned();
         let dir = repo.root.join(&path);
         let mut submodule = Submodule {
             path: path.clone(),
@@ -424,9 +532,19 @@ pub fn evaluate_with(repo: &Repo, max_files: usize, choices: &[(String, Choice)]
             commits: 0,
             ours: 0,
             files: 0,
-            shallow: git(&parent_dir, &["config", "-f", ".gitmodules", "--bool", "--get", &format!("submodule.{name}.shallow")])
-                .map(|v| v.trim() == "true")
-                .unwrap_or(false),
+            shallow: git(
+                &parent_dir,
+                &[
+                    "config",
+                    "-f",
+                    ".gitmodules",
+                    "--bool",
+                    "--get",
+                    &format!("submodule.{name}.shallow"),
+                ],
+            )
+            .map(|v| v.trim() == "true")
+            .unwrap_or(false),
             tag: None,
             inherits_trust: false,
         };
@@ -442,16 +560,32 @@ pub fn evaluate_with(repo: &Repo, max_files: usize, choices: &[(String, Choice)]
             continue;
         }
         // Namespace: the effective URL (the user's own override first), expanded by git.
-        let raw_url = git(&parent_dir, &["config", "--get", &format!("submodule.{name}.url")])
-            .or_else(|_| git(&parent_dir, &["config", "-f", ".gitmodules", "--get", &format!("submodule.{name}.url")]))
-            .map(|u| u.trim().to_string())
-            .unwrap_or_default();
+        let raw_url = git(
+            &parent_dir,
+            &["config", "--get", &format!("submodule.{name}.url")],
+        )
+        .or_else(|_| {
+            git(
+                &parent_dir,
+                &[
+                    "config",
+                    "-f",
+                    ".gitmodules",
+                    "--get",
+                    &format!("submodule.{name}.url"),
+                ],
+            )
+        })
+        .map(|u| u.trim().to_string())
+        .unwrap_or_default();
         submodule.namespace = if raw_url.is_empty() || our_remote.is_none() {
             Namespace::Unavailable
         } else if is_relative_url(&raw_url) {
             Namespace::Same
         } else {
-            let expanded = git(&parent_dir, &["ls-remote", "--get-url", &raw_url]).map(|u| u.trim().to_string()).unwrap_or(raw_url);
+            let expanded = git(&parent_dir, &["ls-remote", "--get-url", &raw_url])
+                .map(|u| u.trim().to_string())
+                .unwrap_or(raw_url);
             match (parse_remote(&expanded), &our_remote) {
                 (Some(theirs), Some(ours)) => {
                     submodule.their_namespace = Some(theirs.namespace());
@@ -470,7 +604,11 @@ pub fn evaluate_with(repo: &Repo, max_files: usize, choices: &[(String, Choice)]
             let mut args = vec!["log", THEIR_COMMITS];
             args.extend_from_slice(extra);
             args.push("--format=%ae");
-            git(&dir, &args).unwrap_or_default().lines().map(str::to_string).collect()
+            git(&dir, &args)
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_string)
+                .collect()
         };
         let mut addresses = log(&["--no-merges"]);
         if addresses.is_empty() {
@@ -478,9 +616,14 @@ pub fn evaluate_with(repo: &Repo, max_files: usize, choices: &[(String, Choice)]
         }
         submodule.commits = addresses.len();
         submodule.ours = addresses.iter().filter(|a| authors.wrote(a)).count();
-        submodule.files = git(&dir, &["ls-files", "-z"]).map(|out| out.split('\0').filter(|f| !f.is_empty()).count()).unwrap_or(0);
+        submodule.files = git(&dir, &["ls-files", "-z"])
+            .map(|out| out.split('\0').filter(|f| !f.is_empty()).count())
+            .unwrap_or(0);
         if git(&dir, &["symbolic-ref", "--quiet", "HEAD"]).is_err() {
-            submodule.tag = git(&dir, &["describe", "--tags", "--exact-match", "HEAD"]).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+            submodule.tag = git(&dir, &["describe", "--tags", "--exact-match", "HEAD"])
+                .ok()
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty());
         }
         let (indexed, reason) = decide(submodule.namespace, submodule.ours, submodule.commits);
         submodule.inherits_trust = indexed && submodule.namespace == Namespace::Same;
@@ -491,7 +634,11 @@ pub fn evaluate_with(repo: &Repo, max_files: usize, choices: &[(String, Choice)]
             submodule.reason = Reason::TooLarge(submodule.files);
         }
         // An explicit choice beats the tests.
-        match choices.iter().find(|(key, _)| *key == submodule.path || *key == submodule.name).map(|(_, choice)| *choice) {
+        match choices
+            .iter()
+            .find(|(key, _)| *key == submodule.path || *key == submodule.name)
+            .map(|(_, choice)| *choice)
+        {
             Some(Choice::Include) => {
                 submodule.indexed = true;
                 submodule.reason = Reason::IncludedByYou;
@@ -509,7 +656,11 @@ pub fn evaluate_with(repo: &Repo, max_files: usize, choices: &[(String, Choice)]
 
 /// The paths of the submodules that are indexed.
 pub fn included(decisions: &[Submodule]) -> Vec<String> {
-    decisions.iter().filter(|s| s.indexed).map(|s| s.path.clone()).collect()
+    decisions
+        .iter()
+        .filter(|s| s.indexed)
+        .map(|s| s.path.clone())
+        .collect()
 }
 
 /// The line every answer and the prompt block carry when a submodule is left out:
@@ -519,7 +670,11 @@ pub fn not_indexed_line(decisions: &[Submodule]) -> Option<String> {
     if left_out.is_empty() {
         return None;
     }
-    let mut names: Vec<String> = left_out.iter().take(3).map(|s| format!("{}/ ({})", s.path, s.reason.label())).collect();
+    let mut names: Vec<String> = left_out
+        .iter()
+        .take(3)
+        .map(|s| format!("{}/ ({})", s.path, s.reason.label()))
+        .collect();
     if left_out.len() > 3 {
         names.push(format!("+{} more", left_out.len() - 3));
     }
@@ -529,10 +684,21 @@ pub fn not_indexed_line(decisions: &[Submodule]) -> Option<String> {
 /// Finds a submodule by its path or name; an unknown one is an error that lists the known ones.
 pub fn find<'a>(decisions: &'a [Submodule], wanted: &str) -> Result<&'a Submodule> {
     let wanted = wanted.trim_end_matches('/');
-    match decisions.iter().find(|s| s.path == wanted).or_else(|| decisions.iter().find(|s| s.name == wanted)) {
+    match decisions
+        .iter()
+        .find(|s| s.path == wanted)
+        .or_else(|| decisions.iter().find(|s| s.name == wanted))
+    {
         Some(submodule) => Ok(submodule),
         None if decisions.is_empty() => bail!("this repository has no submodules"),
-        None => bail!("no submodule `{wanted}`; this repository has: {}", decisions.iter().map(|s| s.path.as_str()).collect::<Vec<_>>().join(", ")),
+        None => bail!(
+            "no submodule `{wanted}`; this repository has: {}",
+            decisions
+                .iter()
+                .map(|s| s.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
 }
 
@@ -543,11 +709,24 @@ pub fn listing(repo: &Repo, decisions: &[Submodule]) -> Vec<String> {
     }
     let mut lines = Vec::new();
     for submodule in decisions {
-        let decision = if submodule.indexed { "indexed" } else { "not indexed" };
-        lines.push(format!("{}  {decision} ({})  {}", submodule.path, submodule.reason.label(), submodule.evidence()));
+        let decision = if submodule.indexed {
+            "indexed"
+        } else {
+            "not indexed"
+        };
+        lines.push(format!(
+            "{}  {decision} ({})  {}",
+            submodule.path,
+            submodule.reason.label(),
+            submodule.evidence()
+        ));
         if submodule.indexed {
             // The executing indexers run on a scratch copy of the submodule, on its own trust.
-            let sub_repo = Repo { root: repo.root.join(&submodule.path), main_root: repo.root.join(&submodule.path), is_git: true };
+            let sub_repo = Repo {
+                root: repo.root.join(&submodule.path),
+                main_root: repo.root.join(&submodule.path),
+                is_git: true,
+            };
             let executing: BTreeSet<&str> = crate::index::plan::detect(&sub_repo)
                 .iter()
                 .filter(|t| t.kind == crate::index::host::Kind::Executing)
@@ -574,7 +753,10 @@ pub fn listing(repo: &Repo, decisions: &[Submodule]) -> Vec<String> {
             }
         }
     }
-    lines.push("change: `ling-code submodules include|exclude|auto <path>` (in your own shell)".to_string());
+    lines.push(
+        "change: `ling-code submodules include|exclude|auto <path>` (in your own shell)"
+            .to_string(),
+    );
     lines
 }
 
@@ -596,7 +778,16 @@ pub fn change(repo: &Repo, settings: &Settings, verb: &str, wanted: &str) -> Res
     }
     let after = evaluate(repo, settings);
     let now = find(&after, &submodule.path)?;
-    let mut lines = vec![format!("{}  {} ({})", now.path, if now.indexed { "indexed" } else { "not indexed" }, now.reason.label())];
+    let mut lines = vec![format!(
+        "{}  {} ({})",
+        now.path,
+        if now.indexed {
+            "indexed"
+        } else {
+            "not indexed"
+        },
+        now.reason.label()
+    )];
     if now.indexed != submodule.indexed {
         lines.push(if crate::paths::indexing_here() {
             "re-index: `ling-code index` (a running ling session does it by itself)".to_string()
@@ -614,15 +805,45 @@ mod tests {
     #[test]
     fn remotes_of_every_form_give_host_and_owner() {
         let id = |url: &str| parse_remote(url).map(|r| (r.host, r.owner, r.display));
-        let expect = |host: &str, owner: &str, repo: &str| Some((host.to_string(), owner.to_string(), format!("{host}/{owner}/{repo}")));
-        assert_eq!(id("https://github.com/DGXcoder/fano.git"), expect("github.com", "dgxcoder", "fano"));
-        assert_eq!(id("git@GitHub.com:dgxcoder/codex.git"), expect("github.com", "dgxcoder", "codex"));
-        assert_eq!(id("ssh://git@gitlab.example.com:2222/group/sub/project.git"), expect("gitlab.example.com", "group", "project"));
-        assert_eq!(id("git://host.example/owner/repo"), expect("host.example", "owner", "repo"));
-        assert_eq!(id("git@ssh.dev.azure.com:v3/org/project/repo"), expect("ssh.dev.azure.com", "org", "repo"));
-        assert_eq!(id("https://dev.azure.com/org/project/_git/repo"), expect("dev.azure.com", "org", "repo"));
+        let expect = |host: &str, owner: &str, repo: &str| {
+            Some((
+                host.to_string(),
+                owner.to_string(),
+                format!("{host}/{owner}/{repo}"),
+            ))
+        };
+        assert_eq!(
+            id("https://github.com/DGXcoder/fano.git"),
+            expect("github.com", "dgxcoder", "fano")
+        );
+        assert_eq!(
+            id("git@GitHub.com:dgxcoder/codex.git"),
+            expect("github.com", "dgxcoder", "codex")
+        );
+        assert_eq!(
+            id("ssh://git@gitlab.example.com:2222/group/sub/project.git"),
+            expect("gitlab.example.com", "group", "project")
+        );
+        assert_eq!(
+            id("git://host.example/owner/repo"),
+            expect("host.example", "owner", "repo")
+        );
+        assert_eq!(
+            id("git@ssh.dev.azure.com:v3/org/project/repo"),
+            expect("ssh.dev.azure.com", "org", "repo")
+        );
+        assert_eq!(
+            id("https://dev.azure.com/org/project/_git/repo"),
+            expect("dev.azure.com", "org", "repo")
+        );
         // A local path or a file URL names no organisation.
-        for local in ["/srv/git/repo.git", "./sibling", "../sibling", "file:///srv/git/repo.git", "C:/repo"] {
+        for local in [
+            "/srv/git/repo.git",
+            "./sibling",
+            "../sibling",
+            "file:///srv/git/repo.git",
+            "C:/repo",
+        ] {
             assert_eq!(id(local), None, "{local}");
         }
     }
@@ -637,12 +858,30 @@ mod tests {
     #[test]
     fn our_domains_leave_out_public_mail_and_web_flow() {
         let authors = Authors::from_addresses(
-            ["Owner@Kestrel.example", "friend@gmail.com", "noreply@github.com", "1+bob@users.noreply.github.com"].map(String::from),
+            [
+                "Owner@Kestrel.example",
+                "friend@gmail.com",
+                "noreply@github.com",
+                "1+bob@users.noreply.github.com",
+            ]
+            .map(String::from),
         );
-        assert!(authors.wrote("colleague@kestrel.example"), "an organisation domain counts");
-        assert!(authors.wrote("friend@gmail.com"), "an address counts as itself");
-        assert!(!authors.wrote("stranger@gmail.com"), "a public provider's domain does not");
-        assert!(authors.wrote("1+bob@users.noreply.github.com") && !authors.wrote("2+eve@users.noreply.github.com"));
+        assert!(
+            authors.wrote("colleague@kestrel.example"),
+            "an organisation domain counts"
+        );
+        assert!(
+            authors.wrote("friend@gmail.com"),
+            "an address counts as itself"
+        );
+        assert!(
+            !authors.wrote("stranger@gmail.com"),
+            "a public provider's domain does not"
+        );
+        assert!(
+            authors.wrote("1+bob@users.noreply.github.com")
+                && !authors.wrote("2+eve@users.noreply.github.com")
+        );
         assert!(!authors.wrote("noreply@github.com"));
     }
 
@@ -652,8 +891,15 @@ mod tests {
         assert_eq!(decide(Same, 200, 200), (true, Reason::Yours));
         // A fork carrying a few of our commits fails the majority test.
         assert_eq!(decide(Same, 4, 200), (false, Reason::ThirdParty));
-        assert_eq!(decide(Same, 100, 200), (false, Reason::ThirdParty), "exactly half is not most");
-        assert_eq!(decide(Different, 200, 200), (false, Reason::OtherOrganisation));
+        assert_eq!(
+            decide(Same, 100, 200),
+            (false, Reason::ThirdParty),
+            "exactly half is not most"
+        );
+        assert_eq!(
+            decide(Different, 200, 200),
+            (false, Reason::OtherOrganisation)
+        );
         assert_eq!(decide(Unavailable, 3, 4), (true, Reason::YoursByAuthorship));
         assert_eq!(decide(Unavailable, 0, 4), (false, Reason::ThirdParty));
         assert_eq!(decide(Unavailable, 0, 0), (false, Reason::Unknown));
@@ -681,10 +927,17 @@ mod tests {
     fn the_line_names_at_most_three() {
         assert_eq!(not_indexed_line(&[sub("fano", true, Reason::Yours)]), None);
         assert_eq!(
-            not_indexed_line(&[sub("codex", false, Reason::ThirdParty), sub("fano", true, Reason::Yours)]).as_deref(),
+            not_indexed_line(&[
+                sub("codex", false, Reason::ThirdParty),
+                sub("fano", true, Reason::Yours)
+            ])
+            .as_deref(),
             Some("codex/ (third-party)")
         );
-        let many: Vec<Submodule> = ["a", "b", "c", "d", "e"].iter().map(|p| sub(p, false, Reason::OtherOrganisation)).collect();
+        let many: Vec<Submodule> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|p| sub(p, false, Reason::OtherOrganisation))
+            .collect();
         let line = not_indexed_line(&many).unwrap();
         assert!(line.ends_with("c/ (other organisation), +2 more"), "{line}");
     }

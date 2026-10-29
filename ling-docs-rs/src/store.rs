@@ -142,8 +142,11 @@ pub fn open_ro(path: &Path) -> Result<Option<Connection>> {
     if !path.is_file() {
         return Ok(None);
     }
-    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
-        .with_context(|| format!("opening {}", path.display()))?;
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| format!("opening {}", path.display()))?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(Some(conn))
 }
@@ -162,7 +165,9 @@ pub fn is_cjk(c: char) -> bool {
 }
 
 pub fn get_meta(conn: &Connection, key: &str) -> Result<Option<String>> {
-    Ok(conn.query_row("SELECT value FROM meta WHERE key = ?", [key], |r| r.get(0)).optional()?)
+    Ok(conn
+        .query_row("SELECT value FROM meta WHERE key = ?", [key], |r| r.get(0))
+        .optional()?)
 }
 
 pub fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<()> {
@@ -182,9 +187,20 @@ pub struct DocRow {
 }
 
 pub fn documents(conn: &Connection) -> Result<HashMap<String, DocRow>> {
-    let mut stmt = conn.prepare("SELECT path, id, size, mtime_ns, sha256, status, dup_of FROM documents")?;
+    let mut stmt =
+        conn.prepare("SELECT path, id, size, mtime_ns, sha256, status, dup_of FROM documents")?;
     let rows = stmt.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, DocRow { id: r.get(1)?, size: r.get(2)?, mtime_ns: r.get(3)?, sha256: r.get(4)?, status: r.get(5)?, dup_of: r.get(6)? }))
+        Ok((
+            r.get::<_, String>(0)?,
+            DocRow {
+                id: r.get(1)?,
+                size: r.get(2)?,
+                mtime_ns: r.get(3)?,
+                sha256: r.get(4)?,
+                status: r.get(5)?,
+                dup_of: r.get(6)?,
+            },
+        ))
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
@@ -198,7 +214,10 @@ pub fn clear_document(conn: &Connection, id: i64) -> Result<()> {
 
 /// Removes a document's chunks and their search rows.
 fn clear_chunks(conn: &Connection, id: i64) -> Result<()> {
-    let ids: Vec<i64> = conn.prepare("SELECT id FROM chunks WHERE doc_id = ?")?.query_map([id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let ids: Vec<i64> = conn
+        .prepare("SELECT id FROM chunks WHERE doc_id = ?")?
+        .query_map([id], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
     let mut fts = conn.prepare("DELETE FROM chunks_fts WHERE rowid = ?")?;
     let mut cjk = conn.prepare("DELETE FROM chunks_cjk WHERE rowid = ?")?;
     for chunk in ids {
@@ -213,7 +232,14 @@ fn clear_chunks(conn: &Connection, id: i64) -> Result<()> {
 /// its chunks are written again.
 fn vectors_by_text(conn: &Connection, id: i64) -> Result<HashMap<[u8; 32], Vec<u8>>> {
     let mut stmt = conn.prepare("SELECT d.title, c.heading, c.text, c.vector FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE c.doc_id = ? AND c.vector IS NOT NULL")?;
-    let rows = stmt.query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Vec<u8>>(3)?)))?;
+    let rows = stmt.query_map([id], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, Vec<u8>>(3)?,
+        ))
+    })?;
     let mut out = HashMap::new();
     for row in rows {
         let (title, heading, text, vector) = row?;
@@ -224,18 +250,42 @@ fn vectors_by_text(conn: &Connection, id: i64) -> Result<HashMap<[u8; 32], Vec<u
 
 /// Writes a document's chunks and their search rows; a chunk whose text hash is in `kept` takes
 /// that vector, the others wait for the embedder. Returns how many vectors were kept.
-fn insert_chunks(tx: &Connection, id: i64, title: &str, chunks: &[Chunk], kept: &HashMap<[u8; 32], Vec<u8>>) -> Result<usize> {
+fn insert_chunks(
+    tx: &Connection,
+    id: i64,
+    title: &str,
+    chunks: &[Chunk],
+    kept: &HashMap<[u8; 32], Vec<u8>>,
+) -> Result<usize> {
     let mut insert_chunk = tx.prepare("INSERT INTO chunks(doc_id, ord, loc, page_first, page_last, line_first, line_last, heading, text, vector) VALUES (?,?,?,?,?,?,?,?,?,?)")?;
-    let mut insert_fts = tx.prepare("INSERT INTO chunks_fts(rowid, title, heading, text) VALUES (?,?,?,?)")?;
-    let mut insert_cjk = tx.prepare("INSERT INTO chunks_cjk(rowid, title, heading, text) VALUES (?,?,?,?)")?;
+    let mut insert_fts =
+        tx.prepare("INSERT INTO chunks_fts(rowid, title, heading, text) VALUES (?,?,?,?)")?;
+    let mut insert_cjk =
+        tx.prepare("INSERT INTO chunks_cjk(rowid, title, heading, text) VALUES (?,?,?,?)")?;
     let mut reused = 0;
     for (ord, c) in chunks.iter().enumerate() {
         let vector = kept.get(&crate::chunk::text_hash(title, &c.heading, &c.text));
         reused += usize::from(vector.is_some());
-        insert_chunk.execute(params![id, ord as i64, c.loc, c.page_first, c.page_last, c.line_first, c.line_last, c.heading, c.text, vector])?;
+        insert_chunk.execute(params![
+            id,
+            ord as i64,
+            c.loc,
+            c.page_first,
+            c.page_last,
+            c.line_first,
+            c.line_last,
+            c.heading,
+            c.text,
+            vector
+        ])?;
         let rowid = tx.last_insert_rowid();
         insert_fts.execute(params![rowid, title, c.heading, c.text])?;
-        if title.chars().chain(c.heading.chars()).chain(c.text.chars()).any(is_cjk) {
+        if title
+            .chars()
+            .chain(c.heading.chars())
+            .chain(c.text.chars())
+            .any(is_cjk)
+        {
             insert_cjk.execute(params![rowid, title, c.heading, c.text])?;
         }
     }
@@ -244,7 +294,12 @@ fn insert_chunks(tx: &Connection, id: i64, title: &str, chunks: &[Chunk], kept: 
 
 /// Replaces a document's chunks (chunked again from its stored units), keeping the vectors of
 /// chunks whose text is unchanged. Returns how many vectors were kept.
-pub fn replace_chunks(conn: &mut Connection, id: i64, title: &str, chunks: &[Chunk]) -> Result<usize> {
+pub fn replace_chunks(
+    conn: &mut Connection,
+    id: i64,
+    title: &str,
+    chunks: &[Chunk],
+) -> Result<usize> {
     let tx = conn.transaction()?;
     let kept = vectors_by_text(&tx, id)?;
     clear_chunks(&tx, id)?;
@@ -258,8 +313,12 @@ pub fn replace_chunks(conn: &mut Connection, id: i64, title: &str, chunks: &[Chu
 /// A database with no record, or no entry for a kind, takes the current versions as its own: an
 /// older ling-docs wrote it, and its text is not read again for that (§7.5). Returns how many
 /// documents were marked.
-pub fn mark_stale_extractors(conn: &Connection, current: &std::collections::BTreeMap<String, String>) -> Result<usize> {
-    let recorded: Option<std::collections::BTreeMap<String, String>> = get_meta(conn, "extractors")?.and_then(|v| serde_json::from_str(&v).ok());
+pub fn mark_stale_extractors(
+    conn: &Connection,
+    current: &std::collections::BTreeMap<String, String>,
+) -> Result<usize> {
+    let recorded: Option<std::collections::BTreeMap<String, String>> =
+        get_meta(conn, "extractors")?.and_then(|v| serde_json::from_str(&v).ok());
     let mut marked = 0;
     if let Some(recorded) = recorded {
         for (kind, version) in current {
@@ -275,14 +334,28 @@ pub fn mark_stale_extractors(conn: &Connection, current: &std::collections::BTre
 /// Removes a document entirely; its duplicates lose their original and are read again.
 pub fn delete_document(conn: &Connection, id: i64) -> Result<()> {
     clear_document(conn, id)?;
-    conn.execute("UPDATE documents SET dup_of = NULL, status = 'pending' WHERE dup_of = ?", [id])?;
+    conn.execute(
+        "UPDATE documents SET dup_of = NULL, status = 'pending' WHERE dup_of = ?",
+        [id],
+    )?;
     conn.execute("DELETE FROM documents WHERE id = ?", [id])?;
     Ok(())
 }
 
 /// Writes one document's extraction: its units and chunks (without vectors yet), its title and
 /// pages, status `ok`.
-pub fn write_document(conn: &mut Connection, id: i64, title: &str, pages: Option<u32>, needs_ocr: &[u32], units: &[Unit], chunks: &[Chunk], now: i64) -> Result<()> {
+// one call site; a parameter struct would change the API.
+#[allow(clippy::too_many_arguments)]
+pub fn write_document(
+    conn: &mut Connection,
+    id: i64,
+    title: &str,
+    pages: Option<u32>,
+    needs_ocr: &[u32],
+    units: &[Unit],
+    chunks: &[Chunk],
+    now: i64,
+) -> Result<()> {
     let tx = conn.transaction()?;
     // The vectors of chunks whose text comes back unchanged are kept (§7.5).
     let kept = vectors_by_text(&tx, id)?;
@@ -290,11 +363,24 @@ pub fn write_document(conn: &mut Connection, id: i64, title: &str, pages: Option
     {
         let mut insert_unit = tx.prepare("INSERT INTO units(doc_id, ord, loc, page, line_first, line_last, heading, text) VALUES (?,?,?,?,?,?,?,?)")?;
         for (ord, u) in units.iter().enumerate() {
-            insert_unit.execute(params![id, ord as i64, u.loc, u.page, u.line_first, u.line_last, u.heading, u.text])?;
+            insert_unit.execute(params![
+                id,
+                ord as i64,
+                u.loc,
+                u.page,
+                u.line_first,
+                u.line_last,
+                u.heading,
+                u.text
+            ])?;
         }
     }
     insert_chunks(&tx, id, title, chunks, &kept)?;
-    let ocr = needs_ocr.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
+    let ocr = needs_ocr
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     // Freshly extracted: OCR has not seen this version of the file.
     tx.execute("UPDATE documents SET title = ?, pages = ?, needs_ocr = ?, status = 'ok', indexed_at = ?, ocr = '' WHERE id = ?", params![title, pages, ocr, now, id])?;
     tx.commit()?;
@@ -303,33 +389,95 @@ pub fn write_document(conn: &mut Connection, id: i64, title: &str, pages: Option
 
 /// A document's units and chunks after OCR (§20): the text layer's units with the read pages'
 /// units among them, the pages still without text, and the record of what OCR did.
-pub fn write_ocr(conn: &mut Connection, id: i64, title: &str, units: &[Unit], chunks: &[Chunk], needs_ocr: &[u32], record: &str) -> Result<()> {
-    let pages: Option<u32> = conn.query_row("SELECT pages FROM documents WHERE id = ?", [id], |r| r.get(0)).ok().flatten();
-    let indexed: Option<i64> = conn.query_row("SELECT indexed_at FROM documents WHERE id = ?", [id], |r| r.get(0)).ok().flatten();
-    write_document(conn, id, title, pages, needs_ocr, units, chunks, indexed.unwrap_or(0))?;
-    conn.execute("UPDATE documents SET ocr = ? WHERE id = ?", params![record, id])?;
+pub fn write_ocr(
+    conn: &mut Connection,
+    id: i64,
+    title: &str,
+    units: &[Unit],
+    chunks: &[Chunk],
+    needs_ocr: &[u32],
+    record: &str,
+) -> Result<()> {
+    let pages: Option<u32> = conn
+        .query_row("SELECT pages FROM documents WHERE id = ?", [id], |r| {
+            r.get(0)
+        })
+        .ok()
+        .flatten();
+    let indexed: Option<i64> = conn
+        .query_row("SELECT indexed_at FROM documents WHERE id = ?", [id], |r| {
+            r.get(0)
+        })
+        .ok()
+        .flatten();
+    write_document(
+        conn,
+        id,
+        title,
+        pages,
+        needs_ocr,
+        units,
+        chunks,
+        indexed.unwrap_or(0),
+    )?;
+    conn.execute(
+        "UPDATE documents SET ocr = ? WHERE id = ?",
+        params![record, id],
+    )?;
     Ok(())
 }
 
 /// A document's stored units, in order (what `read` serves; OCR merges into them).
 pub fn units(conn: &Connection, id: i64) -> Result<Vec<Unit>> {
     let mut stmt = conn.prepare("SELECT loc, page, line_first, line_last, heading, text FROM units WHERE doc_id = ? ORDER BY ord")?;
-    let rows = stmt.query_map([id], |r| Ok(Unit { loc: r.get(0)?, page: r.get(1)?, line_first: r.get(2)?, line_last: r.get(3)?, heading: r.get(4)?, group: None, text: r.get(5)? }))?;
+    let rows = stmt.query_map([id], |r| {
+        Ok(Unit {
+            loc: r.get(0)?,
+            page: r.get(1)?,
+            line_first: r.get(2)?,
+            line_last: r.get(3)?,
+            heading: r.get(4)?,
+            group: None,
+            text: r.get(5)?,
+        })
+    })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// Documents with pages OCR has not read and no record of OCR yet: id, path, kind, the pages.
+// a one-off row tuple.
+#[allow(clippy::type_complexity)]
 pub fn awaiting_ocr(conn: &Connection) -> Result<Vec<(i64, String, String, Vec<u32>)>> {
     if !has_ocr_column(conn) {
         return Ok(Vec::new());
     }
     let mut stmt = conn.prepare("SELECT id, path, kind, needs_ocr FROM documents WHERE status = 'ok' AND needs_ocr != '' AND ocr = '' ORDER BY id")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))?;
-    Ok(rows.filter_map(|r| r.ok()).map(|(id, path, kind, pages)| (id, path, kind, pages.split(',').filter_map(|p| p.parse().ok()).collect())).collect())
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    })?;
+    Ok(rows
+        .filter_map(|r| r.ok())
+        .map(|(id, path, kind, pages)| {
+            (
+                id,
+                path,
+                kind,
+                pages.split(',').filter_map(|p| p.parse().ok()).collect(),
+            )
+        })
+        .collect())
 }
 
 pub fn set_status(conn: &Connection, id: i64, status: &str) -> Result<()> {
-    conn.execute("UPDATE documents SET status = ? WHERE id = ?", params![status, id])?;
+    conn.execute(
+        "UPDATE documents SET status = ? WHERE id = ?",
+        params![status, id],
+    )?;
     Ok(())
 }
 
@@ -356,7 +504,10 @@ pub struct Counts {
 
 pub fn counts(conn: &Connection) -> Result<Counts> {
     let one = |sql: &str| -> Result<i64> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
-    let ocr: Vec<String> = conn.prepare("SELECT needs_ocr FROM documents WHERE needs_ocr != ''")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let ocr: Vec<String> = conn
+        .prepare("SELECT needs_ocr FROM documents WHERE needs_ocr != ''")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(Counts {
         documents: one("SELECT count(*) FROM documents")?,
         indexed: one("SELECT count(*) FROM documents WHERE status = 'ok'")?,
@@ -378,13 +529,18 @@ fn ocr_counts(conn: &Connection) -> Result<Counts> {
     if !has_ocr_column(conn) {
         return Ok(out);
     }
-    let rows: Vec<(String, String)> = conn.prepare("SELECT ocr, needs_ocr FROM documents WHERE status = 'ok'")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT ocr, needs_ocr FROM documents WHERE status = 'ok'")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
     for (record, needs) in rows {
         if record.is_empty() {
             out.ocr_waiting_documents += i64::from(!needs.is_empty());
             continue;
         }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&record) else { continue };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&record) else {
+            continue;
+        };
         out.ocr_pages += value["read"].as_i64().unwrap_or(0);
         out.ocr_low_pages += value["low"].as_i64().unwrap_or(0);
         out.ocr_failed_documents += i64::from(value["failed"].is_string());
@@ -402,19 +558,55 @@ mod tests {
         let path = dir.path().join("docs/c.db");
         let mut conn = open_rw(&path).unwrap();
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(std::fs::metadata(path.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
         conn.execute("INSERT INTO documents(path, kind, size, mtime_ns, status) VALUES ('a.md', 'markdown', 1, 1, 'pending')", []).unwrap();
         let id = conn.last_insert_rowid();
-        let unit = Unit { loc: "lines 1-1".into(), page: None, line_first: Some(1), line_last: Some(1), heading: String::new(), group: None, text: "咖啡 coffee beans".into() };
-        let chunk = Chunk { loc: "lines 1-1".into(), page_first: None, page_last: None, line_first: Some(1), line_last: Some(1), heading: String::new(), text: unit.text.clone() };
+        let unit = Unit {
+            loc: "lines 1-1".into(),
+            page: None,
+            line_first: Some(1),
+            line_last: Some(1),
+            heading: String::new(),
+            group: None,
+            text: "咖啡 coffee beans".into(),
+        };
+        let chunk = Chunk {
+            loc: "lines 1-1".into(),
+            page_first: None,
+            page_last: None,
+            line_first: Some(1),
+            line_last: Some(1),
+            heading: String::new(),
+            text: unit.text.clone(),
+        };
         write_document(&mut conn, id, "a", None, &[], &[unit], &[chunk], 0).unwrap();
         let n = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
-        assert_eq!(n("SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'bean'"), 1, "porter stems");
-        assert_eq!(n("SELECT count(*) FROM chunks_cjk WHERE chunks_cjk MATCH 'coffee'"), 1);
+        assert_eq!(
+            n("SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'bean'"),
+            1,
+            "porter stems"
+        );
+        assert_eq!(
+            n("SELECT count(*) FROM chunks_cjk WHERE chunks_cjk MATCH 'coffee'"),
+            1
+        );
         assert_eq!(counts(&conn).unwrap().indexed, 1);
         delete_document(&conn, id).unwrap();
-        assert_eq!(n("SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'bean'"), 0);
+        assert_eq!(
+            n("SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'bean'"),
+            0
+        );
         assert_eq!(n("SELECT count(*) FROM units"), 0);
         drop(conn);
         let ro = open_ro(&path).unwrap().unwrap();
@@ -422,16 +614,37 @@ mod tests {
     }
 
     fn unit(text: &str) -> Unit {
-        Unit { loc: "lines 1-1".into(), page: None, line_first: Some(1), line_last: Some(1), heading: String::new(), group: None, text: text.into() }
+        Unit {
+            loc: "lines 1-1".into(),
+            page: None,
+            line_first: Some(1),
+            line_last: Some(1),
+            heading: String::new(),
+            group: None,
+            text: text.into(),
+        }
     }
 
     fn chunk_of(text: &str) -> Chunk {
-        Chunk { loc: "lines 1-1".into(), page_first: None, page_last: None, line_first: Some(1), line_last: Some(1), heading: String::new(), text: text.into() }
+        Chunk {
+            loc: "lines 1-1".into(),
+            page_first: None,
+            page_last: None,
+            line_first: Some(1),
+            line_last: Some(1),
+            heading: String::new(),
+            text: text.into(),
+        }
     }
 
     /// Every chunk's text and whether it has a vector, in order.
     fn embedded(conn: &Connection) -> Vec<(String, bool)> {
-        conn.prepare("SELECT text, vector IS NOT NULL FROM chunks ORDER BY doc_id, ord").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+        conn.prepare("SELECT text, vector IS NOT NULL FROM chunks ORDER BY doc_id, ord")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
     }
 
     #[test]
@@ -441,20 +654,54 @@ mod tests {
         conn.execute("INSERT INTO documents(path, kind, size, mtime_ns, status) VALUES ('a.md', 'markdown', 1, 1, 'pending')", []).unwrap();
         let id = conn.last_insert_rowid();
         let texts = ["alpha one", "beta two", "gamma three"];
-        write_document(&mut conn, id, "a", None, &[], &[unit("x")], &texts.map(chunk_of), 0).unwrap();
-        conn.execute("UPDATE chunks SET vector = X'0000803F'", []).unwrap();
+        write_document(
+            &mut conn,
+            id,
+            "a",
+            None,
+            &[],
+            &[unit("x")],
+            &texts.map(chunk_of),
+            0,
+        )
+        .unwrap();
+        conn.execute("UPDATE chunks SET vector = X'0000803F'", [])
+            .unwrap();
         // Read again (a new extractor, OCR): one chunk's text changed, one is new.
-        let again = [chunk_of("alpha one"), chunk_of("beta TWO"), chunk_of("gamma three"), chunk_of("delta four")];
+        let again = [
+            chunk_of("alpha one"),
+            chunk_of("beta TWO"),
+            chunk_of("gamma three"),
+            chunk_of("delta four"),
+        ];
         write_document(&mut conn, id, "a", None, &[], &[unit("x")], &again, 0).unwrap();
-        assert_eq!(embedded(&conn), vec![("alpha one".into(), true), ("beta TWO".into(), false), ("gamma three".into(), true), ("delta four".into(), false)]);
+        assert_eq!(
+            embedded(&conn),
+            vec![
+                ("alpha one".into(), true),
+                ("beta TWO".into(), false),
+                ("gamma three".into(), true),
+                ("delta four".into(), false)
+            ]
+        );
         // A new title is embedded with every chunk, so all of them change.
         write_document(&mut conn, id, "b", None, &[], &[unit("x")], &again, 0).unwrap();
         assert!(embedded(&conn).iter().all(|(_, has)| !has));
         // Chunked again from the same text: nothing to embed.
-        conn.execute("UPDATE chunks SET vector = X'0000803F'", []).unwrap();
+        conn.execute("UPDATE chunks SET vector = X'0000803F'", [])
+            .unwrap();
         assert_eq!(replace_chunks(&mut conn, id, "b", &again).unwrap(), 4);
         assert!(embedded(&conn).iter().all(|(_, has)| *has));
-        assert_eq!(conn.query_row("SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'delta'", [], |r| r.get::<_, i64>(0)).unwrap(), 1, "search rows follow");
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'delta'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1,
+            "search rows follow"
+        );
     }
 
     #[test]
@@ -464,41 +711,103 @@ mod tests {
         let mut conn = open_rw(&path).unwrap();
         conn.execute("INSERT INTO documents(path, kind, size, mtime_ns, status) VALUES ('a.md', 'markdown', 1, 1, 'pending')", []).unwrap();
         let id = conn.last_insert_rowid();
-        write_document(&mut conn, id, "a", None, &[], &[unit("x")], &[chunk_of("alpha")], 0).unwrap();
-        conn.execute("UPDATE chunks SET vector = X'0000803F'", []).unwrap();
-        let migrations = ["ALTER TABLE documents ADD COLUMN later TEXT NOT NULL DEFAULT ''", "CREATE TABLE extra(x)"];
+        write_document(
+            &mut conn,
+            id,
+            "a",
+            None,
+            &[],
+            &[unit("x")],
+            &[chunk_of("alpha")],
+            0,
+        )
+        .unwrap();
+        conn.execute("UPDATE chunks SET vector = X'0000803F'", [])
+            .unwrap();
+        let migrations = [
+            "ALTER TABLE documents ADD COLUMN later TEXT NOT NULL DEFAULT ''",
+            "CREATE TABLE extra(x)",
+        ];
         assert_eq!(migrate(&conn, 1, &migrations).unwrap(), 3);
-        assert_eq!(conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
         assert_eq!(embedded(&conn), vec![("alpha".into(), true)]);
         assert!(conn.prepare("SELECT later FROM documents").is_ok());
         // From the middle: only the rest runs.
-        conn.execute_batch("PRAGMA user_version = 2; DROP TABLE extra;").unwrap();
+        conn.execute_batch("PRAGMA user_version = 2; DROP TABLE extra;")
+            .unwrap();
         assert_eq!(migrate(&conn, 2, &migrations).unwrap(), 3);
         assert!(conn.prepare("SELECT x FROM extra").is_ok());
         // A migration that fails leaves the database as it was.
         conn.execute_batch("PRAGMA user_version = 2").unwrap();
         assert!(migrate(&conn, 2, &["CREATE TABLE fine(y)", "NOT SQL"]).is_err());
-        assert_eq!(conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
         assert!(conn.prepare("SELECT y FROM fine").is_err());
         // A newer database than this build knows is left alone, not rebuilt.
-        conn.execute_batch(&format!("PRAGMA user_version = {}", SCHEMA_VERSION + 1)).unwrap();
+        conn.execute_batch(&format!("PRAGMA user_version = {}", SCHEMA_VERSION + 1))
+            .unwrap();
         drop(conn);
-        assert!(open_rw(&path).unwrap_err().to_string().contains("newer ling-docs"));
+        assert!(open_rw(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("newer ling-docs"));
     }
 
     #[test]
     fn only_kinds_whose_extractor_changed_are_read_again() {
         let dir = tempfile::tempdir().unwrap();
         let conn = open_rw(&dir.path().join("c.db")).unwrap();
-        for (path, kind, status) in [("a.md", "markdown", "ok"), ("b.pdf", "pdf", "ok"), ("c.pdf", "pdf", "failed: damaged"), ("d.txt", "text", "ok")] {
-            conn.execute("INSERT INTO documents(path, kind, size, mtime_ns, status) VALUES (?, ?, 1, 1, ?)", [path, kind, status]).unwrap();
+        for (path, kind, status) in [
+            ("a.md", "markdown", "ok"),
+            ("b.pdf", "pdf", "ok"),
+            ("c.pdf", "pdf", "failed: damaged"),
+            ("d.txt", "text", "ok"),
+        ] {
+            conn.execute(
+                "INSERT INTO documents(path, kind, size, mtime_ns, status) VALUES (?, ?, 1, 1, ?)",
+                [path, kind, status],
+            )
+            .unwrap();
         }
-        let status = |path: &str| conn.query_row("SELECT status FROM documents WHERE path = ?", [path], |r| r.get::<_, String>(0)).unwrap();
-        let versions = |pdf: &str| -> std::collections::BTreeMap<String, String> { [("markdown", "1"), ("pdf", pdf), ("text", "1")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
+        let status = |path: &str| {
+            conn.query_row("SELECT status FROM documents WHERE path = ?", [path], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap()
+        };
+        let versions = |pdf: &str| -> std::collections::BTreeMap<String, String> {
+            [("markdown", "1"), ("pdf", pdf), ("text", "1")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
         // No record (an older ling-docs wrote it): the current versions are taken as its own.
         assert_eq!(mark_stale_extractors(&conn, &versions("1")).unwrap(), 0);
-        assert_eq!(mark_stale_extractors(&conn, &versions("1")).unwrap(), 0, "the same versions: nothing");
-        assert_eq!(mark_stale_extractors(&conn, &versions("2")).unwrap(), 2, "the PDFs, the failed one too");
-        assert_eq!((status("a.md"), status("b.pdf"), status("c.pdf"), status("d.txt")), ("ok".into(), "pending".into(), "pending".into(), "ok".into()));
+        assert_eq!(
+            mark_stale_extractors(&conn, &versions("1")).unwrap(),
+            0,
+            "the same versions: nothing"
+        );
+        assert_eq!(
+            mark_stale_extractors(&conn, &versions("2")).unwrap(),
+            2,
+            "the PDFs, the failed one too"
+        );
+        assert_eq!(
+            (
+                status("a.md"),
+                status("b.pdf"),
+                status("c.pdf"),
+                status("d.txt")
+            ),
+            ("ok".into(), "pending".into(), "pending".into(), "ok".into())
+        );
     }
 }

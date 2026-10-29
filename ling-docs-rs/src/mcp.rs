@@ -77,7 +77,11 @@ fn pdf_env(settings: &Settings) -> Result<crate::index::Env<'static>> {
     static SYSTEMD: crate::host::SystemdHost = crate::host::SystemdHost;
     static DIRECT: std::sync::OnceLock<crate::host::RlimitHost> = std::sync::OnceLock::new();
     let direct = std::env::var("MIGHTLING_DOCS_TEST_HOST").as_deref() == Ok("direct");
-    let host: &'static dyn crate::host::Host = if direct { DIRECT.get_or_init(crate::host::RlimitHost::in_temp) } else { &SYSTEMD };
+    let host: &'static dyn crate::host::Host = if direct {
+        DIRECT.get_or_init(crate::host::RlimitHost::in_temp)
+    } else {
+        &SYSTEMD
+    };
     let mut env = crate::index::Env::real(host)?;
     env.settings = settings.clone();
     if direct {
@@ -115,7 +119,9 @@ impl Server {
 
     /// The tools this server offers now.
     pub fn tools(&self) -> Value {
-        let collections = crate::search::collections().map(|c| !c.is_empty()).unwrap_or(false);
+        let collections = crate::search::collections()
+            .map(|c| !c.is_empty())
+            .unwrap_or(false);
         tools_list(collections, pdf_available())
     }
 
@@ -144,23 +150,52 @@ impl Server {
                 if query.is_empty() {
                     anyhow::bail!("docs_search needs a query");
                 }
-                let k = args["k"].as_u64().map(|k| k as usize).unwrap_or(crate::search::DEFAULT_K).clamp(1, MAX_K);
-                let filters = Filters { collection: args["collection"].as_str().filter(|c| !c.is_empty()).map(str::to_string), ..Filters::default() };
+                let k = args["k"]
+                    .as_u64()
+                    .map(|k| k as usize)
+                    .unwrap_or(crate::search::DEFAULT_K)
+                    .clamp(1, MAX_K);
+                let filters = Filters {
+                    collection: args["collection"]
+                        .as_str()
+                        .filter(|c| !c.is_empty())
+                        .map(str::to_string),
+                    ..Filters::default()
+                };
                 self.searcher.refresh(&collections)?;
                 self.load_embedder();
-                let answer = self.searcher.search(&query, k, &filters, self.embedder.as_deref(), self.settings.bm25_weight)?;
+                let answer = self.searcher.search(
+                    &query,
+                    k,
+                    &filters,
+                    self.embedder.as_deref(),
+                    self.settings.bm25_weight,
+                )?;
                 Ok(render_search(&answer))
             }
             "pdf_search" => {
-                let cwd = crate::pdf_search::sandbox_cwd(&params["_meta"]).or_else(|| std::env::current_dir().ok()).unwrap_or_else(|| "/".into());
+                let cwd = crate::pdf_search::sandbox_cwd(&params["_meta"])
+                    .or_else(|| std::env::current_dir().ok())
+                    .unwrap_or_else(|| "/".into());
                 self.load_embedder();
                 let settings = self.settings.clone();
-                self.pdf.call(args, &cwd, self.parent, &collections, &settings, &pdf_env, self.embedder.as_deref())
+                self.pdf.call(
+                    args,
+                    &cwd,
+                    self.parent,
+                    &collections,
+                    &settings,
+                    &pdf_env,
+                    self.embedder.as_deref(),
+                )
             }
             "docs_read" => {
                 let doc_id = args["doc_id"].as_str().unwrap_or("");
                 // A pdf_search hit names its cache entry, which no collection list holds.
-                let entry = crate::read::parse_doc_id(doc_id).ok().map(|(name, _)| name).filter(|name| crate::config::is_pdf_cache_name(name));
+                let entry = crate::read::parse_doc_id(doc_id)
+                    .ok()
+                    .map(|(name, _)| name)
+                    .filter(|name| crate::config::is_pdf_cache_name(name));
                 let collections = match &entry {
                     Some(name) => {
                         crate::pdf_search::touch(name);
@@ -174,13 +209,20 @@ impl Server {
                 if let Some(pages) = out.pages {
                     fields.push(("pages", pages.to_string()));
                 }
-                let page = out.loc.strip_prefix("p.").and_then(|p| p.split(|c: char| !c.is_ascii_digit()).next()).and_then(|p| p.parse().ok());
+                let page = out
+                    .loc
+                    .strip_prefix("p.")
+                    .and_then(|p| p.split(|c: char| !c.is_ascii_digit()).next())
+                    .and_then(|p| p.parse().ok());
                 if let Some(cite) = crate::locate::cite(&out.doc_id, &out.path, &out.loc, page) {
                     fields.push(("cite", cite));
                 }
                 let mut text = untrusted::wrap(&out.doc_id, &fields, &out.text);
                 if let Some(next) = &out.next {
-                    text.push_str(&format!("\nMore: docs_read(doc_id=\"{}\", locator=\"{next}\")", out.doc_id));
+                    text.push_str(&format!(
+                        "\nMore: docs_read(doc_id=\"{}\", locator=\"{next}\")",
+                        out.doc_id
+                    ));
                 }
                 Ok(text)
             }
@@ -202,7 +244,9 @@ pub fn render_search(answer: &crate::search::Answer) -> String {
         out.push(format!("Note: {note}."));
     }
     if answer.hits.is_empty() {
-        out.push("No passage matched. Try other words, or the documents' own language.".to_string());
+        out.push(
+            "No passage matched. Try other words, or the documents' own language.".to_string(),
+        );
     }
     let mut used = 0;
     for hit in &answer.hits {
@@ -244,8 +288,12 @@ pub fn serve() -> Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
-        let Some(id) = message.get("id").cloned() else { continue };
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let Some(id) = message.get("id").cloned() else {
+            continue;
+        };
         let method = message.get("method").and_then(Value::as_str).unwrap_or("");
         let result = match method {
             "initialize" => Ok(json!({
@@ -257,14 +305,18 @@ pub fn serve() -> Result<()> {
             "tools/list" => Ok(server.tools()),
             "tools/call" => Ok(match server.call(&message["params"]) {
                 Ok(text) => json!({ "content": [{ "type": "text", "text": text }] }),
-                Err(error) => json!({ "content": [{ "type": "text", "text": format!("{error:#}") }], "isError": true }),
+                Err(error) => {
+                    json!({ "content": [{ "type": "text", "text": format!("{error:#}") }], "isError": true })
+                }
             }),
             "ping" => Ok(json!({})),
             _ => Err(anyhow::anyhow!("method not found: {method}")),
         };
         let response = match result {
             Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-            Err(error) => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": error.to_string() } }),
+            Err(error) => {
+                json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": error.to_string() } })
+            }
         };
         writeln!(stdout, "{response}")?;
         stdout.flush()?;
@@ -284,17 +336,30 @@ mod tests {
         assert_eq!(tools.len(), 3);
         for tool in tools {
             assert_eq!(tool["annotations"]["readOnlyHint"], true, "{tool}");
-            assert!(tool["description"].as_str().unwrap().contains("<untrusted>"));
+            assert!(tool["description"]
+                .as_str()
+                .unwrap()
+                .contains("<untrusted>"));
         }
     }
 
     #[test]
     fn the_tools_follow_what_exists() {
-        let names = |c, p| tools_list(c, p)["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let names = |c, p| {
+            tools_list(c, p)["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["name"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(names(true, false), ["docs_search", "docs_read"]);
         assert_eq!(names(false, true), ["pdf_search", "docs_read"]);
         assert!(names(false, false).is_empty());
-        assert!(tools_list(false, true)["tools"][1]["description"].as_str().unwrap().contains("pdf_search"));
+        assert!(tools_list(false, true)["tools"][1]["description"]
+            .as_str()
+            .unwrap()
+            .contains("pdf_search"));
     }
 
     #[test]

@@ -24,12 +24,24 @@ pub struct Fixture {
 
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@localhost", "-c", "commit.gpgsign=false"])
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@localhost",
+            "-c",
+            "commit.gpgsign=false",
+        ])
         .args(args)
         .current_dir(dir)
         .output()
         .unwrap();
-    assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {:?}: {}",
+        args,
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
@@ -53,16 +65,28 @@ pub fn fixture() -> Fixture {
     git(&root, &["init", "-q"]);
     git(&root, &["add", "-A"]);
     git(&root, &["commit", "-qm", "fixture"]);
-    let repo = Repo { root: root.clone(), main_root: root.clone(), is_git: true };
+    let repo = Repo {
+        root: root.clone(),
+        main_root: root.clone(),
+        is_git: true,
+    };
     let stores = fixture_dir().join("stores");
     let graph_db = dir.path().join("graph.db");
     std::fs::copy(stores.join("graph.db"), &graph_db).unwrap();
     let project = rusqlite::Connection::open(&graph_db)
         .unwrap()
-        .query_row("SELECT name FROM projects WHERE name NOT LIKE '%::%'", [], |r| r.get::<_, String>(0))
+        .query_row(
+            "SELECT name FROM projects WHERE name NOT LIKE '%::%'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
         .unwrap();
     let commit = git(&root, &["rev-parse", "HEAD"]);
-    for (indexer, root_dir, name) in [("scip-python", "shapes", "shapes"), ("rust-analyzer", "geom", "geom"), ("scip-typescript", "tsgeom", "tsgeom")] {
+    for (indexer, root_dir, name) in [
+        ("scip-python", "shapes", "shapes"),
+        ("rust-analyzer", "geom", "geom"),
+        ("scip-typescript", "tsgeom", "tsgeom"),
+    ] {
         let work = dir.path().join(format!("{name}.db"));
         std::fs::copy(stores.join(format!("{name}.db")), &work).unwrap();
         let prefix = format!("{root_dir}/");
@@ -77,10 +101,22 @@ pub fn fixture() -> Fixture {
         };
         store::install(&repo, entry, &work, &stores.join(format!("{name}.scip"))).unwrap();
     }
-    GraphSnapshot { commit: Some(commit), status: "ok".into(), ..GraphSnapshot::default() }.save(&repo.scip_dir()).unwrap();
+    GraphSnapshot {
+        commit: Some(commit),
+        status: "ok".into(),
+        ..GraphSnapshot::default()
+    }
+    .save(&repo.scip_dir())
+    .unwrap();
     let home = dir.path().join("home");
     std::fs::create_dir_all(&home).unwrap();
-    Fixture { dir, repo, graph_db, project, home }
+    Fixture {
+        dir,
+        repo,
+        graph_db,
+        project,
+        home,
+    }
 }
 
 impl Fixture {
@@ -99,7 +135,11 @@ impl Fixture {
             command.env(key, value);
         }
         let out = command.output().unwrap();
-        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
         (out.status.code().unwrap_or(-1), text)
     }
 
@@ -125,8 +165,14 @@ impl Fixture {
             // No systemd bus: as inside Codex's sandbox, and so no test can create a real scope.
             .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
             .env("MIGHTLING_CODE_TOOLS_DIR", self.dir.path().join("no-tools"))
-            .env("MIGHTLING_CODE_INDEXERS_DIR", self.dir.path().join("no-indexers"))
-            .env("MIGHTLING_CODE_SCRATCH_DIR", self.dir.path().join("scratch"))
+            .env(
+                "MIGHTLING_CODE_INDEXERS_DIR",
+                self.dir.path().join("no-indexers"),
+            )
+            .env(
+                "MIGHTLING_CODE_SCRATCH_DIR",
+                self.dir.path().join("scratch"),
+            )
             .env("CBM_CACHE_DIR", self.dir.path().join("cbm-cache"));
         command
     }

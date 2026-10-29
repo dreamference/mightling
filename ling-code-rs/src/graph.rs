@@ -19,15 +19,35 @@ use crate::scip_store::schema_fingerprint;
 use crate::scip_symbol::SymbolName;
 
 /// The schema of codebase-memory-mcp v0.11.0's project database (see [`schema_fingerprint`]).
-pub const SCHEMA_FINGERPRINT: &str = "6a416735d685a1510e5e3b2c4a3d34beb2f3f8b3d916eb10a5fcd66dde0634ae";
+pub const SCHEMA_FINGERPRINT: &str =
+    "6a416735d685a1510e5e3b2c4a3d34beb2f3f8b3d916eb10a5fcd66dde0634ae";
 
 /// Node labels that are definitions a query can name.
-const DEFINITION_LABELS: &[&str] =
-    &["Function", "Method", "Class", "Struct", "Enum", "Interface", "Type", "Macro", "Field", "Variable"];
+const DEFINITION_LABELS: &[&str] = &[
+    "Function",
+    "Method",
+    "Class",
+    "Struct",
+    "Enum",
+    "Interface",
+    "Type",
+    "Macro",
+    "Field",
+    "Variable",
+];
 
 /// Edge types that are references to their target.
 pub const REFERENCE_EDGES: &[&str] = &[
-    "CALLS", "ASYNC_CALLS", "USAGE", "CALL_REFERENCE", "IMPORTS", "INHERITS", "DECORATES", "RAISES", "THROWS", "WRITES",
+    "CALLS",
+    "ASYNC_CALLS",
+    "USAGE",
+    "CALL_REFERENCE",
+    "IMPORTS",
+    "INHERITS",
+    "DECORATES",
+    "RAISES",
+    "THROWS",
+    "WRITES",
 ];
 
 /// Edge types that are calls or uses, for `callers`/`callees`.
@@ -48,7 +68,11 @@ pub struct Node {
 impl Node {
     /// The qualified name without the project prefix.
     pub fn display(&self, project: &str) -> String {
-        self.qualified_name.strip_prefix(project).map(|s| s.trim_start_matches('.')).unwrap_or(&self.qualified_name).to_string()
+        self.qualified_name
+            .strip_prefix(project)
+            .map(|s| s.trim_start_matches('.'))
+            .unwrap_or(&self.qualified_name)
+            .to_string()
     }
 }
 
@@ -81,7 +105,10 @@ pub fn cache_dir() -> PathBuf {
 /// codebase-memory's project name for a root: the path without its leading slash, `/` → `-`,
 /// runs of `-` collapsed (`/tmp/-x/repo` is `tmp-x-repo`).
 pub fn project_name(root: &Path) -> String {
-    let dashed = root.to_string_lossy().trim_start_matches('/').replace('/', "-");
+    let dashed = root
+        .to_string_lossy()
+        .trim_start_matches('/')
+        .replace('/', "-");
     let mut out = String::with_capacity(dashed.len());
     for c in dashed.chars() {
         if !(c == '-' && out.ends_with('-')) {
@@ -97,12 +124,22 @@ fn find_by_root(cache: &Path, root: &Path) -> Option<(PathBuf, String)> {
     let root = root.to_string_lossy();
     for entry in std::fs::read_dir(cache).ok()?.flatten() {
         let path = entry.path();
-        if path.extension().map(|e| e != "db").unwrap_or(true) || path.file_name()? == "_config.db" {
+        if path.extension().map(|e| e != "db").unwrap_or(true) || path.file_name()? == "_config.db"
+        {
             continue;
         }
-        let Ok(conn) = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY) else { continue };
-        let name: Option<String> =
-            conn.query_row("SELECT name FROM projects WHERE root_path = ?1", [root.as_ref()], |r| r.get(0)).optional().ok().flatten();
+        let Ok(conn) = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+            continue;
+        };
+        let name: Option<String> = conn
+            .query_row(
+                "SELECT name FROM projects WHERE root_path = ?1",
+                [root.as_ref()],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten();
         if let Some(name) = name {
             return Some((path, name));
         }
@@ -114,7 +151,8 @@ fn find_by_root(cache: &Path, root: &Path) -> Option<(PathBuf, String)> {
 /// `MIGHTLING_CODE_PROJECT` when set (tests, and any caller that knows better), else
 /// `<cache>/<project>.db` for the main worktree.
 pub fn locate(repo: &Repo) -> (PathBuf, String) {
-    let project = std::env::var("MIGHTLING_CODE_PROJECT").unwrap_or_else(|_| project_name(&repo.main_root));
+    let project =
+        std::env::var("MIGHTLING_CODE_PROJECT").unwrap_or_else(|_| project_name(&repo.main_root));
     if let Ok(path) = std::env::var("MIGHTLING_CODE_GRAPH_DB") {
         return (PathBuf::from(path), project);
     }
@@ -134,8 +172,11 @@ impl GraphStore {
         if !path.is_file() {
             return Ok(None);
         }
-        let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
-            .with_context(|| format!("opening {}", path.display()))?;
+        let conn = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .with_context(|| format!("opening {}", path.display()))?;
         conn.busy_timeout(Duration::from_secs(2))?;
         let fingerprint = schema_fingerprint(&conn)?;
         if fingerprint != SCHEMA_FINGERPRINT {
@@ -146,25 +187,42 @@ impl GraphStore {
                 &fingerprint[..12]
             );
         }
-        let known: Option<String> =
-            conn.query_row("SELECT name FROM projects WHERE name = ?1", [&project], |r| r.get(0)).optional()?;
+        let known: Option<String> = conn
+            .query_row(
+                "SELECT name FROM projects WHERE name = ?1",
+                [&project],
+                |r| r.get(0),
+            )
+            .optional()?;
         if known.is_none() {
             return Ok(None);
         }
-        Ok(Some(GraphStore { conn, project, path }))
+        Ok(Some(GraphStore {
+            conn,
+            project,
+            path,
+        }))
     }
 
     /// `store_meta.mutation_gen`: changes whenever codebase-memory commits a re-index.
     pub fn mutation_gen(&self) -> String {
         self.conn
-            .query_row("SELECT v FROM store_meta WHERE k = 'mutation_gen'", [], |r| r.get(0))
+            .query_row(
+                "SELECT v FROM store_meta WHERE k = 'mutation_gen'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap_or_default()
     }
 
     /// When the project was last indexed.
     pub fn indexed_at(&self) -> String {
         self.conn
-            .query_row("SELECT indexed_at FROM projects WHERE name = ?1", [&self.project], |r| r.get(0))
+            .query_row(
+                "SELECT indexed_at FROM projects WHERE name = ?1",
+                [&self.project],
+                |r| r.get(0),
+            )
             .unwrap_or_default()
     }
 
@@ -183,18 +241,31 @@ impl GraphStore {
     /// Definitions named by the query's segments (§7.4 step 1): by `name`, then filtered by the
     /// qualified name's path.
     pub fn candidates(&self, query: &[String]) -> Result<Vec<Node>> {
-        let Some(last) = query.last() else { return Ok(Vec::new()) };
+        let Some(last) = query.last() else {
+            return Ok(Vec::new());
+        };
         let mut stmt = self.conn.prepare_cached(
             "SELECT id, label, name, qualified_name, file_path, start_line, end_line FROM nodes
              WHERE project = ?1 AND name = ?2 AND file_path NOT LIKE '<%' ORDER BY file_path, start_line",
         )?;
-        let nodes: Vec<Node> = stmt.query_map(params![self.project, last], Self::node_from_row)?.collect::<rusqlite::Result<_>>()?;
+        let nodes: Vec<Node> = stmt
+            .query_map(params![self.project, last], Self::node_from_row)?
+            .collect::<rusqlite::Result<_>>()?;
         Ok(nodes
             .into_iter()
             .filter(|n| DEFINITION_LABELS.contains(&n.label.as_str()))
             .filter(|n| {
-                let segments: Vec<String> = n.display(&self.project).split('.').map(str::to_string).collect();
-                SymbolName { segments, trait_impl: None, kind: crate::scip_symbol::Kind::Term }.matches(query)
+                let segments: Vec<String> = n
+                    .display(&self.project)
+                    .split('.')
+                    .map(str::to_string)
+                    .collect();
+                SymbolName {
+                    segments,
+                    trait_impl: None,
+                    kind: crate::scip_symbol::Kind::Term,
+                }
+                .matches(query)
             })
             .collect())
     }
@@ -210,7 +281,11 @@ impl GraphStore {
     }
 
     fn edges(&self, node: i64, types: &[&str], incoming: bool) -> Result<Vec<Edge>> {
-        let (this_end, other_end) = if incoming { ("target_id", "source_id") } else { ("source_id", "target_id") };
+        let (this_end, other_end) = if incoming {
+            ("target_id", "source_id")
+        } else {
+            ("source_id", "target_id")
+        };
         let sql = format!(
             "SELECT n.id, n.label, n.name, n.qualified_name, n.file_path, n.start_line, n.end_line, e.type, e.properties
              FROM edges e JOIN nodes n ON n.id = e.{other_end} WHERE e.{this_end} = ?1"
@@ -229,9 +304,21 @@ impl GraphStore {
                 continue;
             }
             let props: serde_json::Value = serde_json::from_str(&properties).unwrap_or_default();
-            let line = props.get("line").and_then(serde_json::Value::as_u64).map(|l| l as u32).filter(|l| *l > 0);
-            let candidates = props.get("candidates").and_then(serde_json::Value::as_u64).unwrap_or(1) as u32;
-            out.push(Edge { kind, other, line, candidates });
+            let line = props
+                .get("line")
+                .and_then(serde_json::Value::as_u64)
+                .map(|l| l as u32)
+                .filter(|l| *l > 0);
+            let candidates = props
+                .get("candidates")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(1) as u32;
+            out.push(Edge {
+                kind,
+                other,
+                line,
+                candidates,
+            });
         }
         Ok(out)
     }
@@ -242,8 +329,13 @@ impl GraphStore {
             "SELECT id, label, name, qualified_name, file_path, start_line, end_line FROM nodes
              WHERE project = ?1 AND file_path = ?2 ORDER BY start_line, end_line DESC",
         )?;
-        let nodes: Vec<Node> = stmt.query_map(params![self.project, file], Self::node_from_row)?.collect::<rusqlite::Result<_>>()?;
-        Ok(nodes.into_iter().filter(|n| DEFINITION_LABELS.contains(&n.label.as_str()) && n.label != "Variable").collect())
+        let nodes: Vec<Node> = stmt
+            .query_map(params![self.project, file], Self::node_from_row)?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(nodes
+            .into_iter()
+            .filter(|n| DEFINITION_LABELS.contains(&n.label.as_str()) && n.label != "Variable")
+            .collect())
     }
 
     /// The innermost definition of a file enclosing a line.
@@ -254,7 +346,9 @@ impl GraphStore {
                AND label IN ('Function', 'Method', 'Class', 'Struct', 'Enum', 'Interface', 'Type', 'Macro')
              ORDER BY (end_line - start_line) LIMIT 1",
         )?;
-        Ok(stmt.query_row(params![self.project, file, line], Self::node_from_row).optional()?)
+        Ok(stmt
+            .query_row(params![self.project, file, line], Self::node_from_row)
+            .optional()?)
     }
 
     /// FTS5 over names, qualified names and bodies, ranked by BM25 (`search`).
@@ -269,8 +363,17 @@ impl GraphStore {
              FROM (SELECT rowid AS id, rank FROM nodes_fts WHERE nodes_fts MATCH ?1 ORDER BY rank LIMIT ?3) f
              JOIN nodes n ON n.id = f.id WHERE n.project = ?2 AND n.file_path NOT LIKE '<%' ORDER BY f.rank",
         )?;
-        let nodes = stmt.query_map(params![query, self.project, (limit * 4) as i64], Self::node_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(nodes.into_iter().filter(|n| !matches!(n.label.as_str(), "File" | "Folder" | "Project")).take(limit).collect())
+        let nodes = stmt
+            .query_map(
+                params![query, self.project, (limit * 4) as i64],
+                Self::node_from_row,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(nodes
+            .into_iter()
+            .filter(|n| !matches!(n.label.as_str(), "File" | "Folder" | "Project"))
+            .take(limit)
+            .collect())
     }
 
     /// Every file codebase-memory hashed, with its stamp.
@@ -281,7 +384,14 @@ impl GraphStore {
             "SELECT rel_path, sha256, mtime_ns, size FROM file_hashes WHERE project = ?1 AND rel_path NOT LIKE '.codebase-memory/%'",
         )?;
         let rows = stmt.query_map([&self.project], |r| {
-            Ok((r.get::<_, String>(0)?, FileStamp { sha256: r.get(1)?, mtime_ns: r.get(2)?, size: r.get::<_, i64>(3)?.max(0) as u64 }))
+            Ok((
+                r.get::<_, String>(0)?,
+                FileStamp {
+                    sha256: r.get(1)?,
+                    mtime_ns: r.get(2)?,
+                    size: r.get::<_, i64>(3)?.max(0) as u64,
+                },
+            ))
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
@@ -291,7 +401,9 @@ impl GraphStore {
         let mut stmt = self.conn.prepare_cached(
             "SELECT rel_path FROM index_coverage WHERE project = ?1 AND kind IN ('not_indexed_dir', 'not_indexed_file')",
         )?;
-        let paths = stmt.query_map([&self.project], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<BTreeSet<_>>>()?;
+        let paths = stmt
+            .query_map([&self.project], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<BTreeSet<_>>>()?;
         Ok(paths)
     }
 }
@@ -379,7 +491,10 @@ mod tests {
         };
         assert_eq!(n.display("a-b"), "pkg.run");
         assert_eq!(n.display("other"), "a-b.pkg.run");
-        assert_eq!(fts_query("  foo_bar::baz(\"qux\") "), "\"foo_bar\"* \"baz\"* \"qux\"*");
+        assert_eq!(
+            fts_query("  foo_bar::baz(\"qux\") "),
+            "\"foo_bar\"* \"baz\"* \"qux\"*"
+        );
         assert_eq!(fts_query("..."), "");
     }
 
@@ -390,8 +505,16 @@ mod tests {
         let conn = Connection::open(&db_path).unwrap();
         create_schema(&conn);
         let proj = project_name(dir.path());
-        conn.execute("INSERT INTO store_meta VALUES ('mutation_gen', 'gen-7')", []).unwrap();
-        conn.execute("INSERT INTO projects VALUES (?1, ?2, '2026-10-28T00:00:00Z')", params![&proj, dir.path().to_string_lossy()]).unwrap();
+        conn.execute(
+            "INSERT INTO store_meta VALUES ('mutation_gen', 'gen-7')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO projects VALUES (?1, ?2, '2026-10-28T00:00:00Z')",
+            params![&proj, dir.path().to_string_lossy()],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO nodes VALUES (1, ?1, 'Function', 'caller', ?2, 'src/lib.rs', 5, 25, '{}')",
             params![&proj, format!("{proj}.src.caller")],
@@ -407,7 +530,8 @@ mod tests {
             params![&proj, format!("{proj}.src.local_var")],
         )
         .unwrap();
-        conn.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')", []).unwrap();
+        conn.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')", [])
+            .unwrap();
         conn.execute(
             "INSERT INTO edges VALUES (1, ?1, 1, 2, 'CALLS', '{\"line\": 12, \"candidates\": 2}')",
             params![&proj],
@@ -424,27 +548,57 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(find_by_root(dir.path(), dir.path()), Some((db_path.clone(), proj.clone())));
+        assert_eq!(
+            find_by_root(dir.path(), dir.path()),
+            Some((db_path.clone(), proj.clone()))
+        );
 
-        let store = GraphStore { conn, project: proj, path: db_path };
+        let store = GraphStore {
+            conn,
+            project: proj,
+            path: db_path,
+        };
         assert_eq!(store.mutation_gen(), "gen-7");
         assert_eq!(store.indexed_at(), "2026-10-28T00:00:00Z");
         assert_eq!(store.candidates(&["callee".into()]).unwrap().len(), 1);
-        assert_eq!(store.candidates(&["src".into(), "callee".into()]).unwrap().len(), 1);
-        assert!(store.candidates(&["other".into(), "callee".into()]).unwrap().is_empty());
+        assert_eq!(
+            store
+                .candidates(&["src".into(), "callee".into()])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(store
+            .candidates(&["other".into(), "callee".into()])
+            .unwrap()
+            .is_empty());
 
         let incoming = store.incoming(2, &["CALLS"]).unwrap();
         assert_eq!(incoming.len(), 1);
-        assert_eq!((incoming[0].other.name.as_str(), incoming[0].line, incoming[0].candidates), ("caller", Some(12), 2));
+        assert_eq!(
+            (
+                incoming[0].other.name.as_str(),
+                incoming[0].line,
+                incoming[0].candidates
+            ),
+            ("caller", Some(12), 2)
+        );
 
         let outgoing = store.outgoing(1, &["CALLS"]).unwrap();
         assert_eq!(outgoing.len(), 1);
         assert_eq!(outgoing[0].other.name, "callee");
 
         let outline = store.outline("src/lib.rs").unwrap();
-        assert_eq!(outline.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), vec!["caller", "callee"], "Variable excluded from outline");
+        assert_eq!(
+            outline.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+            vec!["caller", "callee"],
+            "Variable excluded from outline"
+        );
 
-        assert_eq!(store.enclosing("src/lib.rs", 12).unwrap().unwrap().name, "caller");
+        assert_eq!(
+            store.enclosing("src/lib.rs", 12).unwrap().unwrap().name,
+            "caller"
+        );
         assert!(store.enclosing("src/lib.rs", 1).unwrap().is_none());
 
         assert_eq!(store.search("call", 10).unwrap().len(), 2);
@@ -454,6 +608,9 @@ mod tests {
         assert_eq!(hashes.len(), 1);
         assert!(hashes.contains_key("src/lib.rs"));
 
-        assert_eq!(store.not_indexed().unwrap(), BTreeSet::from(["vendor".to_string()]));
+        assert_eq!(
+            store.not_indexed().unwrap(),
+            BTreeSet::from(["vendor".to_string()])
+        );
     }
 }

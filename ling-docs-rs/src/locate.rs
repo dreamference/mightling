@@ -31,7 +31,11 @@ pub fn link(doc_id: &str, page: Option<u32>) -> Option<String> {
 /// The Markdown a model cites a passage with: `[acme-msa.pdf, p.7](docs:documents/42#page=7)`.
 pub fn cite(doc_id: &str, rel: &str, loc: &str, page: Option<u32>) -> Option<String> {
     let target = link(doc_id, page)?;
-    let name = rel.rsplit('/').next().unwrap_or(rel).replace(['[', ']'], "");
+    let name = rel
+        .rsplit('/')
+        .next()
+        .unwrap_or(rel)
+        .replace(['[', ']'], "");
     let loc = loc.split(" .. ").next().unwrap_or(loc);
     Some(format!("[{name}, {loc}]({target})"))
 }
@@ -41,9 +45,17 @@ pub fn parse(text: &str) -> Result<(String, i64)> {
     let text = text.trim();
     let text = text.strip_prefix("docs:").unwrap_or(text);
     let text = text.split('#').next().unwrap_or(text);
-    let (collection, id) = text.rsplit_once(['/', ':']).ok_or_else(|| anyhow!("`{text}` names no document (they look like documents/42)"))?;
-    let id: i64 = id.parse().map_err(|_| anyhow!("`{text}` names no document (they look like documents/42)"))?;
-    if collection.is_empty() || !collection.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
+    let (collection, id) = text
+        .rsplit_once(['/', ':'])
+        .ok_or_else(|| anyhow!("`{text}` names no document (they look like documents/42)"))?;
+    let id: i64 = id
+        .parse()
+        .map_err(|_| anyhow!("`{text}` names no document (they look like documents/42)"))?;
+    if collection.is_empty()
+        || !collection
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
         bail!("`{text}` names no collection");
     }
     Ok((collection.to_string(), id))
@@ -65,12 +77,27 @@ pub struct Located {
 /// The file a document id or link names, under its collection's root.
 pub fn locate(collections: &[Collection], text: &str) -> Result<Located> {
     let (name, id) = parse(text)?;
-    let collection = collections.iter().find(|c| c.name == name && c.enabled).ok_or_else(|| anyhow!("no collection named `{name}`"))?;
-    let conn = store::open_ro(&crate::config::db_path(&name))?.ok_or_else(|| anyhow!("the collection `{name}` has not been indexed yet"))?;
-    let (rel, kind, title): (String, String, String) =
-        conn.query_row("SELECT path, kind, title FROM documents WHERE id = ?", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(|_| anyhow!("no document {name}:{id}"))?;
-    let root = collection.root.canonicalize().map_err(|_| anyhow!("{} is not there", collection.root.display()))?;
-    let path = root.join(&rel).canonicalize().map_err(|_| anyhow!("{rel} is no longer in `{name}`"))?;
+    let collection = collections
+        .iter()
+        .find(|c| c.name == name && c.enabled)
+        .ok_or_else(|| anyhow!("no collection named `{name}`"))?;
+    let conn = store::open_ro(&crate::config::db_path(&name))?
+        .ok_or_else(|| anyhow!("the collection `{name}` has not been indexed yet"))?;
+    let (rel, kind, title): (String, String, String) = conn
+        .query_row(
+            "SELECT path, kind, title FROM documents WHERE id = ?",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|_| anyhow!("no document {name}:{id}"))?;
+    let root = collection
+        .root
+        .canonicalize()
+        .map_err(|_| anyhow!("{} is not there", collection.root.display()))?;
+    let path = root
+        .join(&rel)
+        .canonicalize()
+        .map_err(|_| anyhow!("{rel} is no longer in `{name}`"))?;
     if !path.starts_with(&root) {
         bail!("{rel} now leads out of `{name}`");
     }
@@ -78,7 +105,14 @@ pub fn locate(collections: &[Collection], text: &str) -> Result<Located> {
     if !meta.is_file() {
         bail!("{rel} is not a file");
     }
-    Ok(Located { doc_id: format!("{name}:{id}"), path, rel, kind, title, size: meta.len() })
+    Ok(Located {
+        doc_id: format!("{name}:{id}"),
+        path,
+        rel,
+        kind,
+        title,
+        size: meta.len(),
+    })
 }
 
 #[cfg(test)]
@@ -87,15 +121,42 @@ mod tests {
 
     #[test]
     fn links_and_ids_parse_and_name_no_path() {
-        assert_eq!(parse("docs:documents/42#page=7").unwrap(), ("documents".to_string(), 42));
-        assert_eq!(parse("documents:42").unwrap(), ("documents".to_string(), 42));
-        assert_eq!(parse("design-notes/3").unwrap(), ("design-notes".to_string(), 3));
-        for bad in ["docs:../etc/1", "docs:/etc/passwd", "documents", "a b/1", "docs:documents/x"] {
+        assert_eq!(
+            parse("docs:documents/42#page=7").unwrap(),
+            ("documents".to_string(), 42)
+        );
+        assert_eq!(
+            parse("documents:42").unwrap(),
+            ("documents".to_string(), 42)
+        );
+        assert_eq!(
+            parse("design-notes/3").unwrap(),
+            ("design-notes".to_string(), 3)
+        );
+        for bad in [
+            "docs:../etc/1",
+            "docs:/etc/passwd",
+            "documents",
+            "a b/1",
+            "docs:documents/x",
+        ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
-        assert_eq!(link("documents:42", Some(7)).as_deref(), Some("docs:documents/42#page=7"));
+        assert_eq!(
+            link("documents:42", Some(7)).as_deref(),
+            Some("docs:documents/42#page=7")
+        );
         assert_eq!(link("pdf-0123456789ab:1", Some(2)), None);
-        assert_eq!(cite("documents:42", "contracts/acme [v2].pdf", "p.7 .. p.8", Some(7)).as_deref(), Some("[acme v2.pdf, p.7](docs:documents/42#page=7)"));
+        assert_eq!(
+            cite(
+                "documents:42",
+                "contracts/acme [v2].pdf",
+                "p.7 .. p.8",
+                Some(7)
+            )
+            .as_deref(),
+            Some("[acme v2.pdf, p.7](docs:documents/42#page=7)")
+        );
     }
 
     #[test]
@@ -117,8 +178,17 @@ mod tests {
 
         // Point CODEX_HOME at our temp dir's db parent via `MIGHTLING_DOCS_DIR`.
         // Since `locate()` calls `config::db_path(name)`, test `parse`/`cite`/`link` edge cases without touching global env:
-        assert_eq!(link("documents:42", None).as_deref(), Some("docs:documents/42"));
-        assert_eq!(cite("documents:42", "sub/notes.md", "lines 1-10", None).as_deref(), Some("[notes.md, lines 1-10](docs:documents/42)"));
-        assert_eq!(cite("pdf-0123456789ab:1", "paper.pdf", "p.1", Some(1)), None);
+        assert_eq!(
+            link("documents:42", None).as_deref(),
+            Some("docs:documents/42")
+        );
+        assert_eq!(
+            cite("documents:42", "sub/notes.md", "lines 1-10", None).as_deref(),
+            Some("[notes.md, lines 1-10](docs:documents/42)")
+        );
+        assert_eq!(
+            cite("pdf-0123456789ab:1", "paper.pdf", "p.1", Some(1)),
+            None
+        );
     }
 }

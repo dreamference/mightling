@@ -97,7 +97,13 @@ pub fn rrf<K: Clone + Eq + std::hash::Hash>(rankings: &[(&[K], f64)], top: usize
             *entry += weight / (RRF_K + rank as f64 + 1.0);
         }
     }
-    let mut out: Vec<(K, f64)> = order.into_iter().map(|k| { let s = score[&k]; (k, s) }).collect();
+    let mut out: Vec<(K, f64)> = order
+        .into_iter()
+        .map(|k| {
+            let s = score[&k];
+            (k, s)
+        })
+        .collect();
     out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     out.truncate(top);
     out
@@ -158,7 +164,9 @@ pub struct Opened {
 
 fn stamp(path: &std::path::Path) -> (u64, i64) {
     use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(path).map(|m| (m.size(), m.mtime_nsec() + m.mtime() * 1_000_000_000)).unwrap_or((0, 0))
+    std::fs::metadata(path)
+        .map(|m| (m.size(), m.mtime_nsec() + m.mtime() * 1_000_000_000))
+        .unwrap_or((0, 0))
 }
 
 /// The collections to search, kept open between queries (the MCP server keeps one).
@@ -171,7 +179,10 @@ pub struct Searcher {
 
 impl Default for Searcher {
     fn default() -> Self {
-        Searcher { opened: Vec::new(), merge_adjacent: true }
+        Searcher {
+            opened: Vec::new(),
+            merge_adjacent: true,
+        }
     }
 }
 
@@ -183,14 +194,23 @@ impl Searcher {
         for collection in collections {
             let path = crate::config::db_path(&collection.name);
             let now = stamp(&path);
-            if let Some(index) = self.opened.iter().position(|o| o.collection.name == collection.name && o.stamp == now) {
+            if let Some(index) = self
+                .opened
+                .iter()
+                .position(|o| o.collection.name == collection.name && o.stamp == now)
+            {
                 let mut opened = self.opened.swap_remove(index);
                 opened.collection = collection.clone();
                 kept.push(opened);
                 continue;
             }
             if let Some(conn) = store::open_ro(&path)? {
-                kept.push(Opened { collection: collection.clone(), conn, vectors: None, stamp: now });
+                kept.push(Opened {
+                    collection: collection.clone(),
+                    conn,
+                    vectors: None,
+                    stamp: now,
+                });
             }
         }
         self.opened = kept;
@@ -202,10 +222,24 @@ impl Searcher {
     }
 
     /// Searches every opened collection (or the one the filters name).
-    pub fn search(&mut self, query: &str, k: usize, filters: &Filters, embedder: Option<&dyn Embed>, bm25_weight: f64) -> Result<Answer> {
+    pub fn search(
+        &mut self,
+        query: &str,
+        k: usize,
+        filters: &Filters,
+        embedder: Option<&dyn Embed>,
+        bm25_weight: f64,
+    ) -> Result<Answer> {
         let mut answer = Answer::default();
         let (words, runs) = query_terms(query);
-        let chosen: Vec<usize> = (0..self.opened.len()).filter(|i| filters.collection.as_ref().is_none_or(|c| *c == self.opened[*i].collection.name)).collect();
+        let chosen: Vec<usize> = (0..self.opened.len())
+            .filter(|i| {
+                filters
+                    .collection
+                    .as_ref()
+                    .is_none_or(|c| *c == self.opened[*i].collection.name)
+            })
+            .collect();
         if chosen.is_empty() {
             answer.notes.push(match &filters.collection {
                 Some(name) => format!("no indexed collection named `{name}`"),
@@ -213,15 +247,33 @@ impl Searcher {
             });
             return Ok(answer);
         }
-        let allowed: HashMap<usize, Option<HashSet<i64>>> = chosen.iter().map(|i| Ok((*i, allowed_docs(&self.opened[*i].conn, filters)?))).collect::<Result<_>>()?;
-        let depth = if filters.path_glob.is_some() || filters.kind.is_some() || filters.modified_after.is_some() { DEPTH * 10 } else { DEPTH };
+        let allowed: HashMap<usize, Option<HashSet<i64>>> = chosen
+            .iter()
+            .map(|i| Ok((*i, allowed_docs(&self.opened[*i].conn, filters)?)))
+            .collect::<Result<_>>()?;
+        let depth = if filters.path_glob.is_some()
+            || filters.kind.is_some()
+            || filters.modified_after.is_some()
+        {
+            DEPTH * 10
+        } else {
+            DEPTH
+        };
         let keep = |i: usize, doc: i64| allowed[&i].as_ref().is_none_or(|set| set.contains(&doc));
 
         // Keyword lists, merged across collections by BM25 score (lower is better in SQLite).
         let mut lexical: Vec<(Key, f64)> = Vec::new();
         let mut trigram: Vec<(Key, f64)> = Vec::new();
-        let words_query = words.iter().map(|w| format!("\"{w}\"")).collect::<Vec<_>>().join(" OR ");
-        let grams_query = grams(&runs).iter().map(|g| format!("\"{}\"", g.replace('"', "\"\""))).collect::<Vec<_>>().join(" OR ");
+        let words_query = words
+            .iter()
+            .map(|w| format!("\"{w}\""))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let grams_query = grams(&runs)
+            .iter()
+            .map(|g| format!("\"{}\"", g.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" OR ");
         for &i in &chosen {
             let conn = &self.opened[i].conn;
             if !words_query.is_empty() {
@@ -246,7 +298,10 @@ impl Searcher {
         let keyword: Vec<Key> = match (lexical.is_empty(), trigram.is_empty()) {
             (_, true) => lexical,
             (true, false) => trigram,
-            (false, false) => rrf(&[(&lexical[..], 1.0), (&trigram[..], 1.0)], DEPTH).into_iter().map(|(k, _)| k).collect(),
+            (false, false) => rrf(&[(&lexical[..], 1.0), (&trigram[..], 1.0)], DEPTH)
+                .into_iter()
+                .map(|(k, _)| k)
+                .collect(),
         };
 
         // Dense list, merged across collections by cosine.
@@ -300,10 +355,19 @@ impl Searcher {
                 [id],
                 |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u32>>(3)?, r.get::<_, Option<u32>>(4)?, r.get::<_, Option<u32>>(5)?, r.get::<_, String>(6)?, r.get::<_, String>(7)?, r.get::<_, String>(8)?)),
             );
-            let Ok((doc, ord, loc, page, line_first, line_last, text, rel, heading)) = row else { continue };
+            let Ok((doc, ord, loc, page, line_first, line_last, text, rel, heading)) = row else {
+                continue;
+            };
             // Adjacent to a result already taken: joined to it.
             let merge = self.merge_adjacent;
-            if let Some(entry) = out.iter_mut().find(|(h, d, last, c)| merge && h.chunk_ids.len() < MERGE_MAX && *c == *i && *d == doc && (ord == *last + 1 || ord + 1 == first_ord(h, *last)) && crate::chunk::same_message(&h.loc, &loc)) {
+            if let Some(entry) = out.iter_mut().find(|(h, d, last, c)| {
+                merge
+                    && h.chunk_ids.len() < MERGE_MAX
+                    && *c == *i
+                    && *d == doc
+                    && (ord == *last + 1 || ord + 1 == first_ord(h, *last))
+                    && crate::chunk::same_message(&h.loc, &loc)
+            }) {
                 let (hit, _, last, _) = entry;
                 if ord == *last + 1 {
                     hit.text = join_overlapping(&hit.text, &text);
@@ -371,14 +435,20 @@ pub fn join_overlapping(first: &str, second: &str) -> String {
 fn bm25(conn: &Connection, table: &str, query: &str, depth: usize) -> Result<Vec<(i64, i64, f64)>> {
     let sql = format!("SELECT f.rowid, c.doc_id, bm25({table}, 2.0, 1.0, 1.0) AS s FROM {table} f JOIN chunks c ON c.id = f.rowid WHERE {table} MATCH ? ORDER BY s LIMIT ?");
     let mut stmt = conn.prepare_cached(&sql)?;
-    let rows = stmt.query_map(rusqlite::params![query, depth as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    let rows = stmt.query_map(rusqlite::params![query, depth as i64], |r| {
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+    })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 fn load_vectors(conn: &Connection, dim: usize) -> Result<Vec<(i64, Vec<f32>)>> {
     let mut stmt = conn.prepare("SELECT id, vector FROM chunks WHERE vector IS NOT NULL")?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
-    Ok(rows.filter_map(|r| r.ok()).map(|(id, b)| (id, from_blob(&b))).filter(|(_, v)| v.len() == dim).collect())
+    Ok(rows
+        .filter_map(|r| r.ok())
+        .map(|(id, b)| (id, from_blob(&b)))
+        .filter(|(_, v)| v.len() == dim)
+        .collect())
 }
 
 fn chunk_docs_if(conn: &Connection, wanted: bool) -> Result<HashMap<i64, i64>> {
@@ -399,9 +469,20 @@ fn allowed_docs(conn: &Connection, filters: &Filters) -> Result<Option<HashSet<i
         Some(pattern) => Some(globset::Glob::new(pattern)?.compile_matcher()),
         None => None,
     };
-    let kind = filters.kind.as_ref().map(|k| k.trim_start_matches('.').to_lowercase());
-    let mut stmt = conn.prepare("SELECT id, path, kind, mtime_ns FROM documents WHERE status = 'ok'")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))?;
+    let kind = filters
+        .kind
+        .as_ref()
+        .map(|k| k.trim_start_matches('.').to_lowercase());
+    let mut stmt =
+        conn.prepare("SELECT id, path, kind, mtime_ns FROM documents WHERE status = 'ok'")?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, i64>(3)?,
+        ))
+    })?;
     let mut set = HashSet::new();
     for row in rows.flatten() {
         let (id, path, doc_kind, mtime_ns) = row;
@@ -409,12 +490,16 @@ fn allowed_docs(conn: &Connection, filters: &Filters) -> Result<Option<HashSet<i
             continue;
         }
         if let Some(kind) = &kind {
-            let by_ext = crate::discover::Kind::of(&format!("x.{kind}")).map(|k| k.as_str().to_string());
+            let by_ext =
+                crate::discover::Kind::of(&format!("x.{kind}")).map(|k| k.as_str().to_string());
             if doc_kind != *kind && by_ext.as_deref() != Some(doc_kind.as_str()) {
                 continue;
             }
         }
-        if filters.modified_after.is_some_and(|t| mtime_ns / 1_000_000_000 < t) {
+        if filters
+            .modified_after
+            .is_some_and(|t| mtime_ns / 1_000_000_000 < t)
+        {
             continue;
         }
         set.insert(id);
@@ -426,10 +511,23 @@ fn allowed_docs(conn: &Connection, filters: &Filters) -> Result<Option<HashSet<i
 pub fn snippet(text: &str, words: &[String]) -> String {
     let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let lower = flat.to_lowercase();
-    let at = words.iter().filter_map(|w| lower.find(w.as_str())).min().unwrap_or(0);
+    let at = words
+        .iter()
+        .filter_map(|w| lower.find(w.as_str()))
+        .min()
+        .unwrap_or(0);
     // `lower` may differ in byte length from `flat` for a few scripts; fall back to the start.
-    let at = if flat.is_char_boundary(at) && lower.len() == flat.len() { at } else { 0 };
-    let start = flat[..at].char_indices().rev().nth(120).map(|(i, _)| i).unwrap_or(0);
+    let at = if flat.is_char_boundary(at) && lower.len() == flat.len() {
+        at
+    } else {
+        0
+    };
+    let start = flat[..at]
+        .char_indices()
+        .rev()
+        .nth(120)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
     let mut out: String = flat[start..].chars().take(300).collect();
     if start + out.len() < flat.len() {
         out.push('…');
@@ -442,7 +540,10 @@ pub fn snippet(text: &str, words: &[String]) -> String {
 
 /// Opens the collections to search: every enabled one in `docs.toml`.
 pub fn collections() -> Result<Vec<Collection>> {
-    Ok(crate::collections::DocsToml::load()?.enabled().cloned().collect())
+    Ok(crate::collections::DocsToml::load()?
+        .enabled()
+        .cloned()
+        .collect())
 }
 
 /// The absolute path of a document of a collection.
@@ -468,19 +569,31 @@ mod tests {
     fn weighted_fusion_keeps_the_dense_order_unless_keywords_agree() {
         let dense = [1, 2, 3, 4];
         let keyword = [4, 9];
-        let fused: Vec<i32> = rrf(&[(&dense[..], 1.0), (&keyword[..], 0.25)], 10).into_iter().map(|(k, _)| k).collect();
+        let fused: Vec<i32> = rrf(&[(&dense[..], 1.0), (&keyword[..], 0.25)], 10)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
         // A keyword-only hit stays below every dense hit at a quarter weight…
         assert_eq!(fused.last(), Some(&9));
-        let equal: Vec<i32> = rrf(&[(&dense[..], 1.0), (&keyword[..], 1.0)], 10).into_iter().map(|(k, _)| k).collect();
+        let equal: Vec<i32> = rrf(&[(&dense[..], 1.0), (&keyword[..], 1.0)], 10)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
         // …and with equal weights it passes the dense tail.
-        assert!(equal.iter().position(|k| *k == 9) < equal.iter().position(|k| *k == 3), "{equal:?}");
+        assert!(
+            equal.iter().position(|k| *k == 9) < equal.iter().position(|k| *k == 3),
+            "{equal:?}"
+        );
     }
 
     #[test]
     fn overlap_is_dropped_when_chunks_are_joined() {
         let a = "one\ntwo\nthe shared tail line here";
         let b = "the shared tail line here\nthree";
-        assert_eq!(join_overlapping(a, b), "one\ntwo\nthe shared tail line here\nthree");
+        assert_eq!(
+            join_overlapping(a, b),
+            "one\ntwo\nthe shared tail line here\nthree"
+        );
         assert_eq!(span("p.1", "p.2"), "p.1 .. p.2");
         assert_eq!(span("p.1 .. p.2", "p.2 .. p.3"), "p.1 .. p.3");
         assert_eq!(span("lines 1-40", "lines 35-80"), "lines 1-80");
@@ -488,7 +601,11 @@ mod tests {
 
     #[test]
     fn a_snippet_is_centred_on_a_query_word() {
-        let text = format!("{} the notice period is ninety days {}", "x ".repeat(200), "y ".repeat(200));
+        let text = format!(
+            "{} the notice period is ninety days {}",
+            "x ".repeat(200),
+            "y ".repeat(200)
+        );
         let s = snippet(&text, &["notice".to_string()]);
         assert!(s.contains("notice period is ninety days"), "{s}");
         assert!(s.chars().count() <= 302);
@@ -509,13 +626,37 @@ mod tests {
 
         assert!(allowed_docs(&conn, &Filters::default()).unwrap().is_none());
 
-        let by_glob = allowed_docs(&conn, &Filters { path_glob: Some("contracts/**".into()), ..Default::default() }).unwrap().unwrap();
+        let by_glob = allowed_docs(
+            &conn,
+            &Filters {
+                path_glob: Some("contracts/**".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(by_glob, HashSet::from([1]));
 
-        let by_ext = allowed_docs(&conn, &Filters { kind: Some(".md".into()), ..Default::default() }).unwrap().unwrap();
+        let by_ext = allowed_docs(
+            &conn,
+            &Filters {
+                kind: Some(".md".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(by_ext, HashSet::from([2]));
 
-        let by_time = allowed_docs(&conn, &Filters { modified_after: Some(1000), ..Default::default() }).unwrap().unwrap();
+        let by_time = allowed_docs(
+            &conn,
+            &Filters {
+                modified_after: Some(1000),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(by_time, HashSet::from([1]));
     }
 }

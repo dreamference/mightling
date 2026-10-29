@@ -26,16 +26,29 @@ pub const QUIET: Duration = Duration::from_secs(15);
 /// …or has kept changing this long.
 pub const LONGEST: Duration = Duration::from_secs(120);
 
-const MASK: u32 = libc::IN_CLOSE_WRITE | libc::IN_MOVED_TO | libc::IN_MOVED_FROM | libc::IN_DELETE | libc::IN_CREATE | libc::IN_DELETE_SELF | libc::IN_ONLYDIR;
+const MASK: u32 = libc::IN_CLOSE_WRITE
+    | libc::IN_MOVED_TO
+    | libc::IN_MOVED_FROM
+    | libc::IN_DELETE
+    | libc::IN_CREATE
+    | libc::IN_DELETE_SELF
+    | libc::IN_ONLYDIR;
 
 /// The kernel's watch limit for this user, when it can be read.
 pub fn max_user_watches() -> Option<usize> {
-    std::fs::read_to_string("/proc/sys/fs/inotify/max_user_watches").ok()?.trim().parse().ok()
+    std::fs::read_to_string("/proc/sys/fs/inotify/max_user_watches")
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 /// The watches this session may take.
 pub fn budget() -> usize {
-    max_user_watches().map(|n| n / 4).unwrap_or(8192).min(MAX_WATCHES)
+    max_user_watches()
+        .map(|n| n / 4)
+        .unwrap_or(8192)
+        .min(MAX_WATCHES)
 }
 
 /// An inotify instance over the collections' folders.
@@ -60,7 +73,13 @@ impl Watcher {
     /// None where inotify is unavailable; the periodic scan then does all the work.
     pub fn new(budget: usize) -> Option<Watcher> {
         let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
-        (fd >= 0).then(|| Watcher { fd, watches: HashMap::new(), budget, dirty: HashMap::new(), over_budget: 0 })
+        (fd >= 0).then(|| Watcher {
+            fd,
+            watches: HashMap::new(),
+            budget,
+            dirty: HashMap::new(),
+            over_budget: 0,
+        })
     }
 
     pub fn watched(&self) -> usize {
@@ -72,12 +91,16 @@ impl Watcher {
             self.over_budget += 1;
             return false;
         }
-        let Ok(path) = CString::new(dir.as_os_str().as_bytes()) else { return false };
-        let wd = unsafe { libc::inotify_add_watch(self.fd, path.as_ptr(), MASK | libc::IN_DONT_FOLLOW) };
+        let Ok(path) = CString::new(dir.as_os_str().as_bytes()) else {
+            return false;
+        };
+        let wd =
+            unsafe { libc::inotify_add_watch(self.fd, path.as_ptr(), MASK | libc::IN_DONT_FOLLOW) };
         if wd < 0 {
             return false;
         }
-        self.watches.insert(wd, (collection.to_string(), dir.to_path_buf()));
+        self.watches
+            .insert(wd, (collection.to_string(), dir.to_path_buf()));
         true
     }
 
@@ -92,12 +115,19 @@ impl Watcher {
                 }
                 continue;
             }
-            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
             for entry in entries.flatten() {
-                let Ok(kind) = entry.file_type() else { continue };
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
                 let path = entry.path();
                 let name = entry.file_name().to_string_lossy().into_owned();
-                if kind.is_dir() && discover::entered(&name, &path) && !secret.iter().any(|s| path.starts_with(s)) {
+                if kind.is_dir()
+                    && discover::entered(&name, &path)
+                    && !secret.iter().any(|s| path.starts_with(s))
+                {
                     stack.push(path);
                 }
             }
@@ -124,7 +154,8 @@ impl Watcher {
         let now = Instant::now();
         let mut buf = vec![0u8; 64 * 1024];
         loop {
-            let n = unsafe { libc::read(self.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+            let n =
+                unsafe { libc::read(self.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
             if n <= 0 {
                 break;
             }
@@ -132,9 +163,13 @@ impl Watcher {
             let header = std::mem::size_of::<libc::inotify_event>();
             while at + header <= n as usize {
                 // SAFETY: the kernel writes whole events; the header is read unaligned.
-                let event: libc::inotify_event = unsafe { std::ptr::read_unaligned(buf[at..].as_ptr() as *const libc::inotify_event) };
+                let event: libc::inotify_event = unsafe {
+                    std::ptr::read_unaligned(buf[at..].as_ptr() as *const libc::inotify_event)
+                };
                 let name_bytes = &buf[at + header..at + header + event.len as usize];
-                let name = String::from_utf8_lossy(name_bytes.split(|b| *b == 0).next().unwrap_or(&[])).into_owned();
+                let name =
+                    String::from_utf8_lossy(name_bytes.split(|b| *b == 0).next().unwrap_or(&[]))
+                        .into_owned();
                 at += header + event.len as usize;
                 if event.mask & libc::IN_Q_OVERFLOW != 0 {
                     // Lost events: every collection is scanned.
@@ -144,7 +179,9 @@ impl Watcher {
                     }
                     continue;
                 }
-                let Some((collection, dir)) = self.watches.get(&event.wd).cloned() else { continue };
+                let Some((collection, dir)) = self.watches.get(&event.wd).cloned() else {
+                    continue;
+                };
                 if event.mask & libc::IN_IGNORED != 0 {
                     self.watches.remove(&event.wd);
                     continue;
@@ -159,12 +196,21 @@ impl Watcher {
                         self.add_tree(&collection, &dir.join(&name), &home);
                     }
                     self.mark(&collection, now);
-                } else if event.mask & libc::IN_DELETE_SELF != 0 || (!name.starts_with('.') && Kind::of(&name).is_some()) {
+                } else if event.mask & libc::IN_DELETE_SELF != 0
+                    || (!name.starts_with('.') && Kind::of(&name).is_some())
+                {
                     self.mark(&collection, now);
                 }
             }
         }
-        let due: Vec<String> = self.dirty.iter().filter(|(_, (first, last))| now.duration_since(*last) >= QUIET || now.duration_since(*first) >= LONGEST).map(|(c, _)| c.clone()).collect();
+        let due: Vec<String> = self
+            .dirty
+            .iter()
+            .filter(|(_, (first, last))| {
+                now.duration_since(*last) >= QUIET || now.duration_since(*first) >= LONGEST
+            })
+            .map(|(c, _)| c.clone())
+            .collect();
         for collection in &due {
             self.dirty.remove(collection);
         }
@@ -172,7 +218,10 @@ impl Watcher {
     }
 
     fn mark(&mut self, collection: &str, now: Instant) {
-        self.dirty.entry(collection.to_string()).and_modify(|e| e.1 = now).or_insert((now, now));
+        self.dirty
+            .entry(collection.to_string())
+            .and_modify(|e| e.1 = now)
+            .or_insert((now, now));
     }
 }
 
@@ -188,9 +237,15 @@ mod tests {
         std::fs::create_dir_all(root.join("sub")).unwrap();
         std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
         std::fs::create_dir_all(root.join(".hidden")).unwrap();
-        let Some(mut watcher) = Watcher::new(100) else { return };
+        let Some(mut watcher) = Watcher::new(100) else {
+            return;
+        };
         watcher.watch(&[Collection::new("documents", root.clone())], &home);
-        assert_eq!(watcher.watched(), 2, "the root and sub/, not node_modules or .hidden");
+        assert_eq!(
+            watcher.watched(),
+            2,
+            "the root and sub/, not node_modules or .hidden"
+        );
         // A file the index does not read, and one in a hidden folder: nothing.
         std::fs::write(root.join("movie.mkv"), b"x").unwrap();
         std::fs::write(root.join(".hidden/a.md"), b"x").unwrap();
@@ -206,7 +261,9 @@ mod tests {
         assert_eq!(watcher.watched(), 3, "the new folder is watched");
         // Once quiet, it is due, once.
         let (first, _) = watcher.dirty["documents"];
-        watcher.dirty.insert("documents".into(), (first - QUIET, Instant::now() - QUIET));
+        watcher
+            .dirty
+            .insert("documents".into(), (first - QUIET, Instant::now() - QUIET));
         assert_eq!(watcher.poll(&home), ["documents"]);
         assert!(watcher.poll(&home).is_empty());
     }
@@ -219,7 +276,9 @@ mod tests {
         for i in 0..5 {
             std::fs::create_dir_all(root.join(format!("d{i}"))).unwrap();
         }
-        let Some(mut watcher) = Watcher::new(3) else { return };
+        let Some(mut watcher) = Watcher::new(3) else {
+            return;
+        };
         watcher.watch(&[Collection::new("documents", root)], &home);
         assert_eq!(watcher.watched(), 3);
         assert!(watcher.over_budget >= 1);

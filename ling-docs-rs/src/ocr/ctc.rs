@@ -25,7 +25,8 @@ fn splitlines(text: &str) -> Vec<String> {
                 }
                 out.push(std::mem::take(&mut line));
             }
-            '\n' | '\x0b' | '\x0c' | '\x1c' | '\x1d' | '\x1e' | '\u{85}' | '\u{2028}' | '\u{2029}' => out.push(std::mem::take(&mut line)),
+            '\n' | '\x0b' | '\x0c' | '\x1c' | '\x1d' | '\x1e' | '\u{85}' | '\u{2028}'
+            | '\u{2029}' => out.push(std::mem::take(&mut line)),
             c => line.push(c),
         }
     }
@@ -43,14 +44,22 @@ pub fn decode(probs: &[f32], steps: usize, classes: &[String]) -> (String, f32) 
     let mut previous = usize::MAX;
     for t in 0..steps {
         let row = &probs[t * n..(t + 1) * n];
-        let (best, p) = row.iter().enumerate().fold((0usize, f32::MIN), |acc, (i, &v)| if v > acc.1 { (i, v) } else { acc });
+        let (best, p) =
+            row.iter().enumerate().fold(
+                (0usize, f32::MIN),
+                |acc, (i, &v)| if v > acc.1 { (i, v) } else { acc },
+            );
         if best != 0 && best != previous {
             text.push_str(&classes[best]);
             confs.push(p);
         }
         previous = best;
     }
-    let conf = if confs.is_empty() { 0.0 } else { confs.iter().sum::<f32>() / confs.len() as f32 };
+    let conf = if confs.is_empty() {
+        0.0
+    } else {
+        confs.iter().sum::<f32>() / confs.len() as f32
+    };
     (text, conf)
 }
 
@@ -68,7 +77,10 @@ mod tests {
             row[i] = p;
             row
         };
-        let probs: Vec<f32> = [(1, 0.9), (1, 0.8), (0, 0.99), (1, 0.7), (2, 0.6), (4, 0.5)].iter().flat_map(|&(i, p)| one_hot(i, p)).collect();
+        let probs: Vec<f32> = [(1, 0.9), (1, 0.8), (0, 0.99), (1, 0.7), (2, 0.6), (4, 0.5)]
+            .iter()
+            .flat_map(|&(i, p)| one_hot(i, p))
+            .collect();
         let (text, conf) = decode(&probs, 6, &classes);
         assert_eq!(text, "aab ");
         assert!((conf - (0.9 + 0.7 + 0.6 + 0.5) / 4.0).abs() < 1e-6);

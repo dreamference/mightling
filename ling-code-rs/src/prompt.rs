@@ -53,13 +53,17 @@ const SUBMODULES_LINE_MAX: usize = 110;
 /// answer says, with what to do about it. Names that would not fit the block's budget give way
 /// to their count.
 pub fn submodules_line(decisions: &[crate::submodules::Submodule]) -> String {
-    let Some(names) = crate::submodules::not_indexed_line(decisions) else { return String::new() };
+    let Some(names) = crate::submodules::not_indexed_line(decisions) else {
+        return String::new();
+    };
     let line = format!("\nSubmodules not indexed: {names}; use `rg` there.");
     if line.len() <= SUBMODULES_LINE_MAX {
         return line;
     }
     let count = decisions.iter().filter(|s| !s.indexed).count();
-    format!("\nSubmodules not indexed: {count} (`ling-code submodules` lists them); use `rg` there.")
+    format!(
+        "\nSubmodules not indexed: {count} (`ling-code submodules` lists them); use `rg` there."
+    )
 }
 
 /// Which block applies to `repo`, if any; with `tools`, the one that names the `code_*` tools.
@@ -70,9 +74,16 @@ pub fn block(repo: &Repo, tools: bool) -> Option<String> {
     if ready(repo) {
         let settings = crate::config::Settings::load(&repo.root);
         let decisions = crate::submodules::evaluate(repo, &settings);
-        return Some(format!("{}{}", if tools { READY_TOOLS } else { READY }, submodules_line(&decisions)));
+        return Some(format!(
+            "{}{}",
+            if tools { READY_TOOLS } else { READY },
+            submodules_line(&decisions)
+        ));
     }
-    repo.state_dir().join("code_index.building").exists().then(|| BUILDING.to_string())
+    repo.state_dir()
+        .join("code_index.building")
+        .exists()
+        .then(|| BUILDING.to_string())
 }
 
 #[cfg(test)]
@@ -98,10 +109,18 @@ mod tests {
             inherits_trust: false,
         };
         let short = super::submodules_line(&[left_out("codex"), left_out("vendor/x")]);
-        assert!(short.contains("codex/ (other organisation), vendor/x/ (other organisation)"), "{short}");
-        let many: Vec<_> = (0..40).map(|n| left_out(&format!("vendor/third_party/some-long-library-name-{n}"))).collect();
+        assert!(
+            short.contains("codex/ (other organisation), vendor/x/ (other organisation)"),
+            "{short}"
+        );
+        let many: Vec<_> = (0..40)
+            .map(|n| left_out(&format!("vendor/third_party/some-long-library-name-{n}")))
+            .collect();
         let long = super::submodules_line(&many);
-        assert!(long.contains("Submodules not indexed: 40 (`ling-code submodules` lists them)"), "{long}");
+        assert!(
+            long.contains("Submodules not indexed: 40 (`ling-code submodules` lists them)"),
+            "{long}"
+        );
         for line in [&short, &long] {
             assert!(line.len() <= super::SUBMODULES_LINE_MAX, "{line}");
         }
@@ -110,9 +129,15 @@ mod tests {
             assert!(ready / 4 < 300, "{ready} chars");
             // Each block starts from when to use the index, and the launcher tells the two apart
             // by these words (ling-rs/src/code_index.rs, `named_in`).
-            assert!(block.contains("Make it your first step whenever you need to find code"), "{block}");
+            assert!(
+                block.contains("Make it your first step whenever you need to find code"),
+                "{block}"
+            );
         }
-        assert!(super::READY_TOOLS.contains("`code_*` tools") && !super::READY.contains("`code_*` tools"));
+        assert!(
+            super::READY_TOOLS.contains("`code_*` tools")
+                && !super::READY.contains("`code_*` tools")
+        );
         assert!(super::BUILDING.contains("is being built"));
         assert!(super::BUILDING.len() / 4 < 250);
     }

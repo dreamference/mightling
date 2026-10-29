@@ -27,15 +27,27 @@ impl Repo {
         if let Ok(root) = std::env::var("MIGHTLING_CODE_ROOT") {
             let root = PathBuf::from(root);
             let is_git = git(&root, &["rev-parse", "--git-dir"]).is_ok();
-            return Ok(Repo { main_root: root.clone(), root, is_git });
+            return Ok(Repo {
+                main_root: root.clone(),
+                root,
+                is_git,
+            });
         }
         match git(cwd, &["rev-parse", "--show-toplevel"]) {
             Ok(top) => {
                 let root = PathBuf::from(top.trim());
                 let main_root = main_worktree(&root).unwrap_or_else(|| root.clone());
-                Ok(Repo { root, main_root, is_git: true })
+                Ok(Repo {
+                    root,
+                    main_root,
+                    is_git: true,
+                })
             }
-            Err(_) => Ok(Repo { root: cwd.to_path_buf(), main_root: cwd.to_path_buf(), is_git: false }),
+            Err(_) => Ok(Repo {
+                root: cwd.to_path_buf(),
+                main_root: cwd.to_path_buf(),
+                is_git: false,
+            }),
         }
     }
 
@@ -62,7 +74,9 @@ impl Repo {
         if !self.is_git {
             return Vec::new();
         }
-        let Ok(out) = git(&self.root, &["submodule", "status"]) else { return Vec::new() };
+        let Ok(out) = git(&self.root, &["submodule", "status"]) else {
+            return Vec::new();
+        };
         out.lines()
             .filter_map(|line| line.get(1..)?.split_whitespace().nth(1).map(str::to_string))
             .collect()
@@ -73,13 +87,19 @@ impl Repo {
         if !self.is_git {
             return None;
         }
-        git(&self.root, &["rev-parse", "HEAD"]).ok().map(|s| s.trim().to_string())
+        git(&self.root, &["rev-parse", "HEAD"])
+            .ok()
+            .map(|s| s.trim().to_string())
     }
 }
 
 /// The main worktree of a linked worktree: the parent of the shared `.git` directory.
 fn main_worktree(root: &Path) -> Option<PathBuf> {
-    let common = git(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).ok()?;
+    let common = git(
+        root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .ok()?;
     let common = PathBuf::from(common.trim());
     // A submodule's common dir is `<super>/.git/modules/<name>`: it is its own main worktree.
     if common.file_name()? == ".git" {
@@ -98,17 +118,28 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
     // `ling_safegit` pins every key that makes git run a program.
     let mut all = vec!["--no-optional-locks"];
     all.extend_from_slice(args);
-    let output = ling_safegit::run(ling_safegit::command(dir, &all), std::time::Duration::from_secs(600))
-        .with_context(|| format!("running git {}", args.join(" ")))?;
+    let output = ling_safegit::run(
+        ling_safegit::command(dir, &all),
+        std::time::Duration::from_secs(600),
+    )
+    .with_context(|| format!("running git {}", args.join(" ")))?;
     if !output.status.success() {
-        bail!("git {}: {}", args.join(" "), String::from_utf8_lossy(&output.stderr).trim());
+        bail!(
+            "git {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Like [`git`], splitting NUL-terminated output (for `-z`).
 pub fn git_z(dir: &Path, args: &[&str]) -> Result<Vec<String>> {
-    Ok(git(dir, args)?.split('\0').filter(|s| !s.is_empty()).map(str::to_string).collect())
+    Ok(git(dir, args)?
+        .split('\0')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect())
 }
 
 /// Whether process `pid` is running. Only a Unix can be asked here; indexing, the one thing that
@@ -147,12 +178,20 @@ pub const BUILT_ON_LINUX: &str = "the index is built on Linux nodes only for now
 
 /// `` `command` `` where indexing runs, for a hint in brackets; else [`BUILT_ON_LINUX`].
 pub fn index_command(indexing: bool, command: &str) -> String {
-    if indexing { format!("`{command}`") } else { BUILT_ON_LINUX.to_string() }
+    if indexing {
+        format!("`{command}`")
+    } else {
+        BUILT_ON_LINUX.to_string()
+    }
 }
 
 /// `` run `command` `` where indexing runs, for a hint after a semicolon; else [`BUILT_ON_LINUX`].
 pub fn run_index_command(indexing: bool, command: &str) -> String {
-    if indexing { format!("run `{command}`") } else { BUILT_ON_LINUX.to_string() }
+    if indexing {
+        format!("run `{command}`")
+    } else {
+        BUILT_ON_LINUX.to_string()
+    }
 }
 
 /// What a query answers when the repository has no index yet; `search` adds where to look meanwhile.
@@ -162,7 +201,10 @@ pub fn no_index_yet(indexing: bool, search: bool) -> String {
         (true, true) => ", and use rg meanwhile",
         (true, false) => "; search the files meanwhile",
     };
-    format!("no code index for this repository yet; {}{meanwhile}", run_index_command(indexing, "ling-code index"))
+    format!(
+        "no code index for this repository yet; {}{meanwhile}",
+        run_index_command(indexing, "ling-code index")
+    )
 }
 
 #[cfg(test)]
@@ -180,10 +222,22 @@ mod hint_tests {
 
     #[test]
     fn where_indexing_runs_the_hints_name_the_command() {
-        assert_eq!(index_command(true, "ling-code index --exact"), "`ling-code index --exact`");
-        assert_eq!(run_index_command(true, "ling-code index"), "run `ling-code index`");
-        assert_eq!(no_index_yet(true, true), "no code index for this repository yet; run `ling-code index`, and use rg meanwhile");
-        assert_eq!(no_index_yet(true, false), "no code index for this repository yet; run `ling-code index`");
+        assert_eq!(
+            index_command(true, "ling-code index --exact"),
+            "`ling-code index --exact`"
+        );
+        assert_eq!(
+            run_index_command(true, "ling-code index"),
+            "run `ling-code index`"
+        );
+        assert_eq!(
+            no_index_yet(true, true),
+            "no code index for this repository yet; run `ling-code index`, and use rg meanwhile"
+        );
+        assert_eq!(
+            no_index_yet(true, false),
+            "no code index for this repository yet; run `ling-code index`"
+        );
     }
 
     #[test]
@@ -217,7 +271,10 @@ pub fn home() -> PathBuf {
 }
 
 /// [`home`] on given values: the first that is set and not empty, else `/`.
-pub fn home_from(home: Option<std::ffi::OsString>, userprofile: Option<std::ffi::OsString>) -> PathBuf {
+pub fn home_from(
+    home: Option<std::ffi::OsString>,
+    userprofile: Option<std::ffi::OsString>,
+) -> PathBuf {
     home.filter(|home| !home.is_empty())
         .or_else(|| userprofile.filter(|home| !home.is_empty()))
         .map_or_else(|| PathBuf::from("/"), PathBuf::from)
@@ -230,8 +287,17 @@ mod home_tests {
     #[test]
     fn the_home_folder_falls_back_to_userprofile() {
         use std::ffi::OsString;
-        assert_eq!(home_from(None, Some(OsString::from(r"C:\Users\Jane Doe"))), PathBuf::from(r"C:\Users\Jane Doe"));
-        assert_eq!(home_from(Some(OsString::from("/home/u")), Some(OsString::from(r"C:\x"))), PathBuf::from("/home/u"));
+        assert_eq!(
+            home_from(None, Some(OsString::from(r"C:\Users\Jane Doe"))),
+            PathBuf::from(r"C:\Users\Jane Doe")
+        );
+        assert_eq!(
+            home_from(
+                Some(OsString::from("/home/u")),
+                Some(OsString::from(r"C:\x"))
+            ),
+            PathBuf::from("/home/u")
+        );
         assert_eq!(home_from(Some(OsString::new()), None), PathBuf::from("/"));
     }
 }
