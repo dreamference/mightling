@@ -284,6 +284,12 @@ impl Policy {
         };
         let mut object = object.clone();
         object.remove("jsonrpc");
+        // The app-server also reads a list of params, field by field in declaration order, so a
+        // list would carry `sandbox` or `baseInstructions` past every rule below, which read only an
+        // object's fields. Absent or null is left to the app-server, which refuses what needs params.
+        if object.get("params").is_some_and(|params| !params.is_object() && !params.is_null()) {
+            return Err("a message's params must be a JSON object".to_string());
+        }
         let method = object.get("method").and_then(Value::as_str).map(str::to_string);
         let key = object.get("id").map(|id| id.to_string());
         match (method, key) {
