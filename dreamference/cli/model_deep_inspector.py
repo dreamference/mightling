@@ -194,7 +194,7 @@ class ModelDeepInspector:
         for category, prompt in WORKLOAD_PROBES:
             before = cls._spec_counters(vllm_host)
             if before is None:
-                return []
+                continue
             try:
                 requests.post(
                     api_base,
