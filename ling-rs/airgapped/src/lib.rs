@@ -111,11 +111,12 @@ pub struct Resolved {
 
 /// The value of the top-level `mightling_airgapped` key in TOML text, before the first table
 /// header, as a TOML parser reads it: the key bare or quoted, the value a string of any of the
-/// four kinds with its escapes read. What comes before the key is followed as TOML, so a string
-/// or an array spanning lines neither hides the key nor lends it a line of its own. Text this
-/// cannot follow is not TOML, and a plain `mightling_airgapped = <value>` line is then still
-/// read. This keeps a TOML parser out of the sandbox helper. A leading byte order mark is skipped: Windows PowerShell's `-Encoding
-/// UTF8` writes one, and the key must not be missed behind it.
+/// four kinds with its escapes read, or a boolean, read as Python's configuration reads it (`true`
+/// is `on`). What comes before the key is followed as TOML, so a string or an array spanning
+/// lines neither hides the key nor lends it a line of its own. Text this cannot follow is not
+/// TOML, and a plain `mightling_airgapped = <value>` line is then still read. This keeps a TOML
+/// parser out of the sandbox helper. A leading byte order mark is skipped: Windows PowerShell's
+/// `-Encoding UTF8` writes one, and the key must not be missed behind it.
 pub fn toml_value(text: &str) -> Option<String> {
     let text = text.trim_start_matches('\u{feff}');
     top_level_value(text).unwrap_or_else(|| line_value(text))
@@ -161,7 +162,7 @@ fn line_value(text: &str) -> Option<String> {
     None
 }
 
-/// A value that is not a string, read up to its comment, quotes trimmed.
+/// A value that is not a string, read up to its comment, quotes trimmed; a boolean as a level.
 fn bare_value(value: &str) -> String {
     let value = value
         .lines()
@@ -172,7 +173,11 @@ fn bare_value(value: &str) -> String {
         .unwrap_or("")
         .trim();
     let value = value.trim_matches(|quote| quote == '"' || quote == '\'');
-    value.to_string()
+    match value {
+        "true" => Level::On.name().to_string(),
+        "false" => Level::Off.name().to_string(),
+        _ => value.to_string(),
+    }
 }
 
 fn skip_space(text: &str) -> &str {
@@ -1038,6 +1043,28 @@ mod tests {
             toml_value("mightling_airgapped = \"on\n").as_deref(),
             Some("on")
         );
+    }
+
+    #[test]
+    fn a_boolean_is_read_as_pythons_configuration_reads_it() {
+        // Python takes `true` for `on`; the launcher took it for no level and stayed off.
+        assert_eq!(
+            toml_value("mightling_airgapped = true\n").as_deref(),
+            Some("on")
+        );
+        assert_eq!(
+            toml_value("mightling_airgapped = false # x\n").as_deref(),
+            Some("off")
+        );
+        let resolved = resolve_from(
+            None,
+            None,
+            &[config(
+                "/repo/dreamference.toml",
+                "mightling_airgapped = true\n",
+            )],
+        );
+        assert_eq!(resolved.level, Level::On);
     }
 
     #[test]
