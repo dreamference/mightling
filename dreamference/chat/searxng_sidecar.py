@@ -1,4 +1,5 @@
-"""The SearXNG container behind `ling-search`, the MCP server's web search and image search:
+"""The SearXNG container behind `ling-search`, the MCP server's web search and image search.
+
 `ling-admin searxng start`.
 
 Until 2026-10-01 it was started by hand, from a `docker run` line in an error message, which put
@@ -28,9 +29,9 @@ class SearxngSidecar:
 
     @classmethod
     def config_dir(cls) -> str:
-        """Returns:
-        str: `~/.config/searxng`, mounted as the container's `/etc/searxng`. Its
-        `settings.yml`, written by `SearxngSettings`, enables the JSON API and picks the
+        """`~/.config/searxng`, mounted as the container's `/etc/searxng`.
+
+        Its `settings.yml`, written by `SearxngSettings`, enables the JSON API and picks the
         engines.
         """
         return os.path.expanduser("~/.config/searxng")
@@ -46,11 +47,23 @@ class SearxngSidecar:
             host's resolver.
         """
         from dreamference.node.node_settings import NodeSettings
-        return ["docker", "run", "-d", "--name", SEARXNG_CONTAINER_NAME,
-                "--restart", "unless-stopped", "--network", SIDECAR_NETWORK,
-                "-p", f"{NodeSettings.search_bind_address()}:{SEARXNG_HOST_PORT}:8080",
-                "-v", f"{cls.config_dir()}:/etc/searxng",
-                SEARXNG_IMAGE]
+
+        return [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            SEARXNG_CONTAINER_NAME,
+            "--restart",
+            "unless-stopped",
+            "--network",
+            SIDECAR_NETWORK,
+            "-p",
+            f"{NodeSettings.search_bind_address()}:{SEARXNG_HOST_PORT}:8080",
+            "-v",
+            f"{cls.config_dir()}:/etc/searxng",
+            SEARXNG_IMAGE,
+        ]
 
     @classmethod
     def apply_settings(cls, say: Callable[[str], None] | None = None) -> str:
@@ -89,28 +102,59 @@ class SearxngSidecar:
         Returns:
             bool: True if the file was written.
         """
-        script = ("cat > /etc/searxng/settings.yml.new && chmod 644 /etc/searxng/settings.yml.new && "
-                  "chown \"$(stat -c %u:%g /etc/searxng)\" /etc/searxng/settings.yml.new && "
-                  "mv /etc/searxng/settings.yml.new /etc/searxng/settings.yml")
+        script = (
+            "cat > /etc/searxng/settings.yml.new && chmod 644 /etc/searxng/settings.yml.new && "
+            'chown "$(stat -c %u:%g /etc/searxng)" /etc/searxng/settings.yml.new && '
+            "mv /etc/searxng/settings.yml.new /etc/searxng/settings.yml"
+        )
         result = subprocess.run(
-            ["docker", "run", "--rm", "-i", "--network", "none", "--user", "0", "--entrypoint", "sh",
-             "-v", f"{config_dir}:/etc/searxng", SEARXNG_IMAGE, "-c", script],
-            input=text, capture_output=True, text=True, timeout=300, check=False,
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-i",
+                "--network",
+                "none",
+                "--user",
+                "0",
+                "--entrypoint",
+                "sh",
+                "-v",
+                f"{config_dir}:/etc/searxng",
+                SEARXNG_IMAGE,
+                "-c",
+                script,
+            ],
+            input=text,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
         )
         return result.returncode == 0
 
     @classmethod
     def extra_networks(cls) -> list[str]:
-        """Lists the user-defined networks the existing container is attached to (the retired Onyx
-        web chat's, on an older install), so a replacement can rejoin them.
+        """Lists the user-defined networks the existing container is attached to.
+
+        They include the retired Onyx web chat's, on an older install, so a replacement can rejoin
+        them.
 
         Returns:
             List[str]: Network names, without the default bridge and the sidecar network.
         """
         result = subprocess.run(
-            ["docker", "inspect", SEARXNG_CONTAINER_NAME, "--format",
-             "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}"],
-            capture_output=True, text=True, timeout=30, check=False,
+            [
+                "docker",
+                "inspect",
+                SEARXNG_CONTAINER_NAME,
+                "--format",
+                "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         if result.returncode != 0:
             return []
@@ -118,14 +162,24 @@ class SearxngSidecar:
 
     @classmethod
     def published_address(cls) -> str:
-        """Returns:
-        str: The host address the existing container publishes its port on (`127.0.0.1`,
-        `0.0.0.0`), or "" when there is no container or no published port.
+        """The published address.
+
+        Returns:
+            str: The host address the existing container publishes its port on (`127.0.0.1`,
+            `0.0.0.0`), or "" when there is no container or no published port.
         """
         result = subprocess.run(
-            ["docker", "inspect", SEARXNG_CONTAINER_NAME, "--format",
-             '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostIp}} {{end}}{{end}}'],
-            capture_output=True, text=True, timeout=30, check=False,
+            [
+                "docker",
+                "inspect",
+                SEARXNG_CONTAINER_NAME,
+                "--format",
+                "{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostIp}} {{end}}{{end}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         if result.returncode != 0:
             return ""
@@ -151,14 +205,20 @@ class SearxngSidecar:
             bool: True if the container is running once this returns.
         """
         from dreamference.node.node_settings import NodeSettings
+
         settings = cls.apply_settings(say)
         mode = SidecarNetwork.network_mode(SEARXNG_CONTAINER_NAME)
         on_bridge = bool(mode) and SidecarNetwork.created_on_default_bridge(SEARXNG_CONTAINER_NAME)
         published = cls.published_address() if mode and not on_bridge else ""
         if mode and not on_bridge and published in ("", NodeSettings.search_bind_address()):
             verb = "restart" if settings == WRITTEN else "start"
-            started = subprocess.run(["docker", verb, SEARXNG_CONTAINER_NAME],
-                                     capture_output=True, text=True, timeout=60, check=False)
+            started = subprocess.run(
+                ["docker", verb, SEARXNG_CONTAINER_NAME],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
             return started.returncode == 0
 
         if not SidecarNetwork.ensure():
@@ -166,17 +226,31 @@ class SearxngSidecar:
             return False
         rejoin = cls.extra_networks() if mode else []
         if mode and on_bridge:
-            print("🔁 Recreating SearXNG off Docker's default bridge, whose DNS is a copy taken at start...")
+            print(
+                "🔁 Recreating SearXNG off Docker's default bridge, whose DNS is a copy taken at start..."
+            )
         elif mode:
             print(f"🔁 Recreating SearXNG to publish it on {NodeSettings.search_bind_address()}...")
         if mode:
-            subprocess.run(["docker", "rm", "-f", SEARXNG_CONTAINER_NAME],
-                           capture_output=True, text=True, timeout=60, check=False)
-        result = subprocess.run(cls.run_command(), capture_output=True, text=True, timeout=600, check=False)
+            subprocess.run(
+                ["docker", "rm", "-f", SEARXNG_CONTAINER_NAME],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        result = subprocess.run(
+            cls.run_command(), capture_output=True, text=True, timeout=600, check=False
+        )
         if result.returncode != 0:
             print(f"⚠️  {result.stderr.strip()[:200]}")
             return False
         for network in rejoin:
-            subprocess.run(["docker", "network", "connect", network, SEARXNG_CONTAINER_NAME],
-                           capture_output=True, text=True, timeout=30, check=False)
+            subprocess.run(
+                ["docker", "network", "connect", network, SEARXNG_CONTAINER_NAME],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
         return True

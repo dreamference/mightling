@@ -45,8 +45,10 @@ class NightShiftSettings:
     """Resolved Night Shift settings, defaults filled in."""
 
     def __init__(self, table: dict[str, Any] | None = None) -> None:
-        """Args:
-        table: The `[night]` table; None reads it from the config file.
+        """Sets up the night shift settings.
+
+        Args:
+            table: The `[night]` table; None reads it from the config file.
         """
         if table is None:
             table = self.read_table()
@@ -116,8 +118,10 @@ class NightShiftSettings:
         )
 
     def refine_enabled(self) -> bool:
-        """Whether night tasks are refined first: `[night] refine`, then `mightling_refine` through its
-        own tiers (`DREAMFERENCE_MIGHTLING_REFINE`, the config file, the default).
+        """Whether night tasks are refined first.
+
+        `[night] refine`, then `mightling_refine` through its own tiers
+        (`DREAMFERENCE_MIGHTLING_REFINE`, the config file, the default).
 
         Returns:
             bool: True when each new task gets a study step before the one that does it.
@@ -129,8 +133,10 @@ class NightShiftSettings:
         return DreamferenceConfig().mightling_refine
 
     def refine_version_in_force(self) -> str:
-        """Which refine texts night tasks get: `[night] refine_version`, then `mightling_refine_version`
-        through its own tiers (`DREAMFERENCE_MIGHTLING_REFINE_VERSION`, the config file, the default).
+        """Which refine texts night tasks get.
+
+        `[night] refine_version`, then `mightling_refine_version` through its own tiers
+        (`DREAMFERENCE_MIGHTLING_REFINE_VERSION`, the config file, the default).
 
         Returns:
             str: "v1" or "v2".

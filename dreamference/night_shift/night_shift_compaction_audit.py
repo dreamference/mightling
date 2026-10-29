@@ -29,17 +29,25 @@ EXIT_MARKER: Final[re.Pattern] = re.compile(r"Process exited with code (-?\d+)")
 LEDGER_FIRST_LINE: Final[str] = "Ledger built from the tool history by rule"
 # A "summary" that is the model's text-format tool call, which Codex keeps as the summary (§11.2).
 STRAY_TOOL_CALL: Final[str] = "<tool_call>"
-PATCH_HEADER: Final[re.Pattern] = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
+PATCH_HEADER: Final[re.Pattern] = re.compile(
+    r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE
+)
 # Where a shell command writes: `> path`, `>> path`, `tee [-a] path`, and `sed -i … path`.
 REDIRECT: Final[re.Pattern] = re.compile(r"(?:>>?|\btee(?:\s+-a)?)\s+([^\s;&|<>()'\"`]+)")
-SED_IN_PLACE: Final[re.Pattern] = re.compile(r"\bsed\s+-i\S*\s+(?:'[^']*'|\"[^\"]*\"|\S+)\s+([^\s;&|<>()'\"`]+)")
+SED_IN_PLACE: Final[re.Pattern] = re.compile(
+    r"\bsed\s+-i\S*\s+(?:'[^']*'|\"[^\"]*\"|\S+)\s+([^\s;&|<>()'\"`]+)"
+)
 PATH_WORD: Final[re.Pattern] = re.compile(r"[\w./-]*[/.][\w./-]+")
 # A file name: a path ending in an extension (`sympy/solvers/solveset.py`, `tests/test_x.py::name`).
-EXTENSIONS: Final[str] = ("py|pyi|rs|ts|tsx|js|jsx|mjs|go|java|kt|c|h|cc|cpp|hpp|cs|rb|php|swift|sh|sql|"
-                          "md|rst|txt|toml|json|yaml|yml|cfg|ini|html|css")
+EXTENSIONS: Final[str] = (
+    "py|pyi|rs|ts|tsx|js|jsx|mjs|go|java|kt|c|h|cc|cpp|hpp|cs|rb|php|swift|sh|sql|"
+    "md|rst|txt|toml|json|yaml|yml|cfg|ini|html|css"
+)
 FILE_WORD: Final[re.Pattern] = re.compile(rf"[\w./-]*\w\.(?:{EXTENSIONS})\b(?:::[\w\[\]-]+)?")
 # A script that writes a file it names: `open(p, "w")`, `.write_text(`, `.write_bytes(`.
-WRITES_FILE: Final[re.Pattern] = re.compile(r"open\([^)]*['\"][wa]\+?['\"]|\.write_(?:text|bytes)\(")
+WRITES_FILE: Final[re.Pattern] = re.compile(
+    r"open\([^)]*['\"][wa]\+?['\"]|\.write_(?:text|bytes)\("
+)
 QUOTED_FILE: Final[re.Pattern] = re.compile(rf"['\"]([\w./-]+\.(?:{EXTENSIONS}))['\"]")
 ERROR_NAME: Final[re.Pattern] = re.compile(r"\b([A-Z]\w*(?:Error|Exception|Failure))\b")
 LEADING_CD: Final[re.Pattern] = re.compile(r"^cd\s+\S+\s*&&\s*")
@@ -56,8 +64,9 @@ TEST_SUMMARY_PREFIXES: Final[tuple] = ("test result: ", "Tests: ")
 TEST_DURATION: Final[str] = " in "
 TEST_COUNT: Final[re.Pattern] = re.compile(r"\d+ (?:passed|failed|errors?|skipped)")
 # Basenames too common to show that a summary meant this file.
-GENERIC_NAMES: Final[frozenset] = frozenset({"__init__.py", "setup.py", "test.py", "main.py", "mod.rs",
-                                              "lib.rs", "index.js", "README.md"})
+GENERIC_NAMES: Final[frozenset] = frozenset(
+    {"__init__.py", "setup.py", "test.py", "main.py", "mod.rs", "lib.rs", "index.js", "README.md"}
+)
 
 
 class NightShiftCompactionAudit:
@@ -84,8 +93,11 @@ class NightShiftCompactionAudit:
         """
         now = time.time() if now is None else now
         since = cls._since(night_dir, now)
-        findings = [finding for path in cls.rollouts(sessions_dir, since, now)
-                    for finding in cls.audit_rollout(path)]
+        findings = [
+            finding
+            for path in cls.rollouts(sessions_dir, since, now)
+            for finding in cls.audit_rollout(path)
+        ]
         cls._save_state(night_dir, now)
         return cls.render(findings, since)
 
@@ -126,12 +138,22 @@ class NightShiftCompactionAudit:
         meta: dict[str, Any] = {}
         spans = list(cls.spans(cls._records(path), meta))
         session = str(meta.get("id") or path.stem.rsplit("-", 5)[-5:][0])[:8]
-        return [cls.judge(span, session, str(meta.get("cwd", "?")), str(meta.get("timestamp", ""))[:16],
-                          number, len(spans))
-                for number, span in enumerate(spans, start=1)]
+        return [
+            cls.judge(
+                span,
+                session,
+                str(meta.get("cwd", "?")),
+                str(meta.get("timestamp", ""))[:16],
+                number,
+                len(spans),
+            )
+            for number, span in enumerate(spans, start=1)
+        ]
 
     @classmethod
-    def spans(cls, records: Iterator[dict[str, Any]], meta: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    def spans(
+        cls, records: Iterator[dict[str, Any]], meta: dict[str, Any]
+    ) -> Iterator[dict[str, Any]]:
         """Splits a rollout at its compactions.
 
         Args:
@@ -153,7 +175,9 @@ class NightShiftCompactionAudit:
             elif kind[0] == COMPACTED:
                 if pending:
                     yield pending
-                pending = cls._span([calls[call_id] for call_id in order], str(payload.get("message", "")))
+                pending = cls._span(
+                    [calls[call_id] for call_id in order], str(payload.get("message", ""))
+                )
                 calls, order = {}, []
             elif kind == MESSAGE and pending and LEDGER_FIRST_LINE in json.dumps(payload):
                 pending["ledger"] = json.dumps(payload)
@@ -163,8 +187,9 @@ class NightShiftCompactionAudit:
             yield pending
 
     @classmethod
-    def judge(cls, span: dict[str, Any], session: str, cwd: str, started: str, number: int,
-              total: int) -> dict[str, Any]:
+    def judge(
+        cls, span: dict[str, Any], session: str, cwd: str, started: str, number: int, total: int
+    ) -> dict[str, Any]:
         """Checks which of a span's identifiers its summary, or the ledger after it, still names.
 
         Args:
@@ -181,7 +206,10 @@ class NightShiftCompactionAudit:
         failed = span["failed"]
         groups = {
             "files changed": (cls.workspace_files(span["changed"], cwd), cls.names_path),
-            "failed commands": (list(failed), lambda text, item: cls.names_failure(text, failed[item])),
+            "failed commands": (
+                list(failed),
+                lambda text, item: cls.names_failure(text, failed[item]),
+            ),
             "last test result": ([span["last_test"]] if span["last_test"] else [], cls.names_test),
         }
         kept: dict[str, tuple[int, int]] = {}
@@ -192,9 +220,17 @@ class NightShiftCompactionAudit:
             kept[name] = (len(items) - len(missing), len(items))
             lost[name] = missing
             covered += sum(1 for item in missing if span["ledger"] and names(span["ledger"], item))
-        return {"session": session, "cwd": cwd, "started": started, "number": number, "total": total,
-                "kept": kept, "lost": lost, "ledger_covered": covered,
-                "stray_tool_call": STRAY_TOOL_CALL in span["summary"]}
+        return {
+            "session": session,
+            "cwd": cwd,
+            "started": started,
+            "number": number,
+            "total": total,
+            "kept": kept,
+            "lost": lost,
+            "ledger_covered": covered,
+            "stray_tool_call": STRAY_TOOL_CALL in span["summary"],
+        }
 
     @classmethod
     def workspace_files(cls, paths: list[str], cwd: str) -> list[str]:
@@ -212,8 +248,11 @@ class NightShiftCompactionAudit:
             list[str]: The files, without duplicates.
         """
         root = cwd.rstrip("/") + "/"
-        kept = [path[len(root):] if path.startswith(root) else path
-                for path in paths if not path.startswith("/") or path.startswith(root)]
+        kept = [
+            path[len(root) :] if path.startswith(root) else path
+            for path in paths
+            if not path.startswith("/") or path.startswith(root)
+        ]
         return list(dict.fromkeys(path for path in kept if path))
 
     @classmethod
@@ -244,7 +283,9 @@ class NightShiftCompactionAudit:
         Returns:
             bool: True when any is named.
         """
-        return any(cls.names_path(text, key) if FILE_WORD.fullmatch(key) else key in text for key in keys)
+        return any(
+            cls.names_path(text, key) if FILE_WORD.fullmatch(key) else key in text for key in keys
+        )
 
     @classmethod
     def names_test(cls, text: str, summary: str) -> bool:
@@ -280,30 +321,54 @@ class NightShiftCompactionAudit:
                 totals[name][0] += kept
                 totals[name][1] += of
         kept_text = "; ".join(f"{name}: {kept} of {of}" for name, (kept, of) in totals.items())
-        lines = [f"{len(findings)} compaction(s) in {sessions} session(s) since "
-                 f"{datetime.fromtimestamp(since):%Y-%m-%d %H:%M}. What the summaries still named: {kept_text}."]
-        losing = [finding for finding in findings if finding["stray_tool_call"] or any(finding["lost"].values())]
+        lines = [
+            f"{len(findings)} compaction(s) in {sessions} session(s) since "
+            f"{datetime.fromtimestamp(since):%Y-%m-%d %H:%M}. What the summaries still named: {kept_text}."
+        ]
+        losing = [
+            finding
+            for finding in findings
+            if finding["stray_tool_call"] or any(finding["lost"].values())
+        ]
         lines += [cls._finding_line(finding) for finding in losing[:MAX_REPORT_LINES]]
         if len(losing) > MAX_REPORT_LINES:
-            lines.append(f"… and {len(losing) - MAX_REPORT_LINES} more compaction(s) that lost something.")
+            lines.append(
+                f"… and {len(losing) - MAX_REPORT_LINES} more compaction(s) that lost something."
+            )
         return lines
 
     @classmethod
     def _finding_line(cls, finding: dict[str, Any]) -> str:
-        parts = ["the summary is a stray tool call, not a summary"] if finding["stray_tool_call"] else []
+        parts = (
+            ["the summary is a stray tool call, not a summary"]
+            if finding["stray_tool_call"]
+            else []
+        )
         for name, items in finding["lost"].items():
             if items:
                 shown = ", ".join(f"`{item}`" for item in items[:MAX_NAMED_LOSSES])
-                more = f" and {len(items) - MAX_NAMED_LOSSES} more" if len(items) > MAX_NAMED_LOSSES else ""
+                more = (
+                    f" and {len(items) - MAX_NAMED_LOSSES} more"
+                    if len(items) > MAX_NAMED_LOSSES
+                    else ""
+                )
                 parts.append(f"{name} lost: {shown}{more}")
         covered = finding["ledger_covered"]
         ledger = f"; the ledger named {covered} of them" if covered else ""
-        return (f"Session {finding['session']} ({finding['cwd']}, {finding['started']}), compaction "
-                f"{finding['number']} of {finding['total']}: " + "; ".join(parts) + ledger + ".")
+        return (
+            f"Session {finding['session']} ({finding['cwd']}, {finding['started']}), compaction "
+            f"{finding['number']} of {finding['total']}: " + "; ".join(parts) + ledger + "."
+        )
 
     @classmethod
     def _span(cls, calls: list[dict[str, str]], summary: str) -> dict[str, Any]:
-        span: dict[str, Any] = {"summary": summary, "changed": [], "failed": {}, "last_test": None, "ledger": ""}
+        span: dict[str, Any] = {
+            "summary": summary,
+            "changed": [],
+            "failed": {},
+            "last_test": None,
+            "ledger": "",
+        }
         for call in calls:
             for path in cls._changed_paths(call["command"]):
                 if path not in span["changed"]:
@@ -316,8 +381,13 @@ class NightShiftCompactionAudit:
         return span
 
     @classmethod
-    def _collect_call(cls, kind: tuple[Any, Any], payload: dict[str, Any], calls: dict[str, dict[str, str]],
-                      order: list[str]) -> None:
+    def _collect_call(
+        cls,
+        kind: tuple[Any, Any],
+        payload: dict[str, Any],
+        calls: dict[str, dict[str, str]],
+        order: list[str],
+    ) -> None:
         if kind[0] != RESPONSE_ITEM:
             return
         call_id = str(payload.get("call_id", ""))
@@ -361,8 +431,11 @@ class NightShiftCompactionAudit:
 
     @classmethod
     def _changed_paths(cls, command: str) -> list[str]:
-        written = [path for path in REDIRECT.findall(command) + SED_IN_PLACE.findall(command)
-                   if PATH_WORD.fullmatch(path) and HAS_LETTER.search(path)]
+        written = [
+            path
+            for path in REDIRECT.findall(command) + SED_IN_PLACE.findall(command)
+            if PATH_WORD.fullmatch(path) and HAS_LETTER.search(path)
+        ]
         if WRITES_FILE.search(command):
             written += [path for path in QUOTED_FILE.findall(command) if PATH_WORD.fullmatch(path)]
         paths = [path.strip() for path in PATCH_HEADER.findall(command) + written]
@@ -372,14 +445,18 @@ class NightShiftCompactionAudit:
     def _test_summary(cls, output: str) -> str | None:
         for line in reversed(output.splitlines()):
             line = line.strip().strip("=").strip()
-            if (TEST_DURATION in line and TEST_COUNT.search(line)) or line.startswith(TEST_SUMMARY_PREFIXES):
+            if (TEST_DURATION in line and TEST_COUNT.search(line)) or line.startswith(
+                TEST_SUMMARY_PREFIXES
+            ):
                 return line
         return None
 
     @classmethod
     def _first_line(cls, command: str) -> str:
-        line = LEADING_CD.sub("", next((line.strip() for line in command.splitlines() if line.strip()), ""))
-        return line if len(line) <= MAX_COMMAND_CHARS else line[:MAX_COMMAND_CHARS - 1] + "…"
+        line = LEADING_CD.sub(
+            "", next((line.strip() for line in command.splitlines() if line.strip()), "")
+        )
+        return line if len(line) <= MAX_COMMAND_CHARS else line[: MAX_COMMAND_CHARS - 1] + "…"
 
     @classmethod
     def _records(cls, path: Path) -> Iterator[dict[str, Any]]:

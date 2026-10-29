@@ -1,4 +1,5 @@
-"""A TCP relay from the benchmark network's gateway to another node's model server
+"""A TCP relay from the benchmark network's gateway to another node's model server.
+
 (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3, specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
 
 An instance's container is on an internal Docker network whose only reachable address is the
@@ -19,9 +20,11 @@ class SweBenchRelay:
     """One listening socket on the gateway, forwarding to one model server."""
 
     def __init__(self, listen_address: str, target: tuple[str, int]) -> None:
-        """Args:
-        listen_address: The gateway's address.
-        target: The other node's model server, `(address, port)`.
+        """Sets up the swe bench relay.
+
+        Args:
+            listen_address: The gateway's address.
+            target: The other node's model server, `(address, port)`.
         """
         self.listen_address = listen_address
         self.target = target

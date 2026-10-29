@@ -47,8 +47,7 @@ USERNS_SYSCTL: Final[str] = "/proc/sys/kernel/apparmor_restrict_unprivileged_use
 
 
 class DesktopInstaller:
-    """Verifies and provisions what the Mightling desktop app is built and run with.
-    """
+    """Verifies and provisions what the Mightling desktop app is built and run with."""
 
     @classmethod
     def missing_prerequisites(cls, build: bool = False) -> list[str]:
@@ -85,7 +84,9 @@ class DesktopInstaller:
         if node is None:
             return None
         try:
-            result = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=30, check=False)
+            result = subprocess.run(
+                [node, "--version"], capture_output=True, text=True, timeout=30, check=False
+            )
         except (OSError, subprocess.SubprocessError):
             return None
         parts = result.stdout.strip().lstrip("v").split(".")
@@ -137,7 +138,9 @@ class DesktopInstaller:
         try:
             result = subprocess.run(
                 f"curl --proto '=https' --tlsv1.2 -sSf {RUSTUP_URL} | sh -s -- -y --no-modify-path",
-                shell=True, timeout=1800, check=False,
+                shell=True,
+                timeout=1800,
+                check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             print(f"❌ rustup failed: {exc}")
@@ -151,10 +154,11 @@ class DesktopInstaller:
 
     @classmethod
     def userns_allowed(cls) -> bool:
-        """Reports whether a program started from this shell may create a user namespace, which is
-        what Chromium's sandbox does first. Under a terminal with a permissive AppArmor profile
-        (PyCharm's) it may; from a plain terminal or the launcher it may not, until a profile
-        names the binary.
+        """Reports whether a program started from this shell may create a user namespace.
+
+        Which is what Chromium's sandbox does first. Under a terminal with a permissive AppArmor
+        profile (PyCharm's) it may; from a plain terminal or the launcher it may not, until a
+        profile names the binary.
 
         Returns:
             bool: True if `unshare -U true` succeeds.
@@ -164,8 +168,15 @@ class DesktopInstaller:
         try:
             # `aa-exec -p unconfined` asks as an unconfined program would, which is how the
             # launcher starts the app; without aa-exec, this shell's own confinement answers.
-            command = ["aa-exec", "-p", "unconfined", "--", "unshare", "-U", "true"] if shutil.which("aa-exec") else ["unshare", "-U", "true"]
-            return subprocess.run(command, capture_output=True, timeout=10, check=False).returncode == 0
+            command = (
+                ["aa-exec", "-p", "unconfined", "--", "unshare", "-U", "true"]
+                if shutil.which("aa-exec")
+                else ["unshare", "-U", "true"]
+            )
+            return (
+                subprocess.run(command, capture_output=True, timeout=10, check=False).returncode
+                == 0
+            )
         except (OSError, subprocess.SubprocessError):
             return True
 
@@ -184,10 +195,11 @@ class DesktopInstaller:
 
     @classmethod
     def covering_profile(cls, binary: str) -> str | None:
-        """Finds a profile file that attaches to the binary: the `.deb`'s (`mightling`), a checkout's
-        (`mightling-desktop-dev`) or an unpacked build's (`mightling-unpacked`). A profile
-        attaches by the quoted absolute path, which is how all three name it; the files are
-        world-readable, so no root is needed to look.
+        """Finds a profile file that attaches to the binary.
+
+        The `.deb`'s (`mightling`), a checkout's (`mightling-desktop-dev`) or an unpacked build's
+        (`mightling-unpacked`). A profile attaches by the quoted absolute path, which is how all
+        three name it; the files are world-readable, so no root is needed to look.
 
         Args:
             binary (str): The Electron binary's absolute path.
@@ -215,9 +227,10 @@ class DesktopInstaller:
 
     @classmethod
     def uncovered(cls, binaries: list[str]) -> list[str]:
-        """The binaries that would be refused their sandbox when started from the launcher or a
-        plain terminal: none where the kernel does not restrict user namespaces, else those no
-        profile names.
+        """Lists the binaries that would be refused their sandbox when started from the launcher.
+
+        The same holds for a plain terminal: none where the kernel does not restrict user
+        namespaces, else those no profile names.
 
         Args:
             binaries (List[str]): Absolute paths, whether or not they exist yet.
@@ -231,8 +244,10 @@ class DesktopInstaller:
 
     @classmethod
     def apparmor_profile(cls, binaries: list[str]) -> str:
-        """The AppArmor profile text that grants `userns` to the given binaries: the shape of the
-        `.deb`'s profile (desktop/electron/linux/postinst) and of Ubuntu's own sandbox profiles.
+        """The AppArmor profile text that grants `userns` to the given binaries.
+
+        The shape of the `.deb`'s profile (desktop/electron/linux/postinst) and of Ubuntu's own
+        sandbox profiles.
 
         Args:
             binaries (List[str]): Absolute paths of the Electron binaries a checkout runs.
@@ -270,20 +285,35 @@ class DesktopInstaller:
         if not binaries:
             return cls.userns_allowed()
         if not shutil.which("sudo") or not shutil.which("apparmor_parser"):
-            print("⚠️  Chromium's sandbox needs a user namespace, and this machine refuses one without an")
+            print(
+                "⚠️  Chromium's sandbox needs a user namespace, and this machine refuses one without an"
+            )
             print("   AppArmor profile; sudo or apparmor_parser is missing, so write it yourself:")
             print(cls.apparmor_profile(binaries))
             return False
-        print("📦 Installing the AppArmor profile the desktop app's sandbox needs (sudo will ask for your password):")
-        print(f"   sudo tee {APPARMOR_PROFILE_PATH} && sudo apparmor_parser -r -T -W {APPARMOR_PROFILE_PATH}")
+        print(
+            "📦 Installing the AppArmor profile the desktop app's sandbox needs (sudo will ask for your password):"
+        )
+        print(
+            f"   sudo tee {APPARMOR_PROFILE_PATH} && sudo apparmor_parser -r -T -W {APPARMOR_PROFILE_PATH}"
+        )
         try:
-            written = subprocess.run(["sudo", "tee", APPARMOR_PROFILE_PATH], input=cls.apparmor_profile(binaries),
-                                     text=True, capture_output=True, timeout=300, check=False)
+            written = subprocess.run(
+                ["sudo", "tee", APPARMOR_PROFILE_PATH],
+                input=cls.apparmor_profile(binaries),
+                text=True,
+                capture_output=True,
+                timeout=300,
+                check=False,
+            )
             if written.returncode != 0:
                 print("❌ The profile was not written.")
                 return False
-            loaded = subprocess.run(["sudo", "apparmor_parser", "-r", "-T", "-W", APPARMOR_PROFILE_PATH],
-                                    timeout=300, check=False)
+            loaded = subprocess.run(
+                ["sudo", "apparmor_parser", "-r", "-T", "-W", APPARMOR_PROFILE_PATH],
+                timeout=300,
+                check=False,
+            )
         except (OSError, subprocess.SubprocessError) as exc:
             print(f"❌ Could not install the profile: {exc}")
             return False
@@ -301,16 +331,25 @@ class DesktopInstaller:
         """
         missing = cls.missing_prerequisites(build)
         if not missing:
-            print("✅ The desktop build toolchain is complete (Node and npm" + (" and dpkg)." if build else ")."))
+            print(
+                "✅ The desktop build toolchain is complete (Node and npm"
+                + (" and dpkg)." if build else ").")
+            )
             return True, missing
 
         print("⚠️  The Mightling desktop toolchain is incomplete:")
         if "node" in missing:
-            print(f"   • Node.js {MIN_NODE_VERSION[0]}.{MIN_NODE_VERSION[1]} or later is needed (Electron, Vite and Forge run on it).")
+            print(
+                f"   • Node.js {MIN_NODE_VERSION[0]}.{MIN_NODE_VERSION[1]} or later is needed (Electron, Vite and Forge run on it)."
+            )
         if "npm" in missing:
             print("   • npm is needed to install the app's packages.")
         if "dpkg" in missing:
-            print("   • dpkg and dpkg-deb are needed to make the .deb (a Debian or Ubuntu system has both).")
+            print(
+                "   • dpkg and dpkg-deb are needed to make the .deb (a Debian or Ubuntu system has both)."
+            )
         if "node" in missing or "npm" in missing:
-            print("💡 Install Node.js from your distribution or nodejs.org, then `ling-admin desktop install`.")
+            print(
+                "💡 Install Node.js from your distribution or nodejs.org, then `ling-admin desktop install`."
+            )
         return False, missing

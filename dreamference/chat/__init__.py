@@ -1,5 +1,6 @@
-"""The services around the agent that are not the agent: the desktop app, the sidecars and the
-Google service.
+"""The services around the agent that are not the agent.
+
+The desktop app, the sidecars and the Google service.
 
 The desktop app is a window onto `ling app-server` (`desktop_installer`, `desktop_runner`).
 `searxng_sidecar` and `sidecar_network` start the search container `ling-search` and the MCP server

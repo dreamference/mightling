@@ -38,15 +38,14 @@ class SweBenchEvaluator:
 
     @classmethod
     def validation_dir(cls) -> Path:
-        """Returns:
-        Path: Where the harness runs for validation.
-        """
+        """Where the harness runs for validation."""
         return swe_bench_settings.CACHE_DIR / "validation"
 
     @classmethod
     def disk_problem(cls, settings: "swe_bench_settings.SweBenchSettings") -> str | None:
-        """Checks the disk reserve: images are about 2.2 GB each unpacked and share the one
-        filesystem with the model caches.
+        """Checks the disk reserve.
+
+        Images are about 2.2 GB each unpacked and share the one filesystem with the model caches.
 
         Args:
             settings: Benchmark settings.
@@ -55,19 +54,27 @@ class SweBenchEvaluator:
             Optional[str]: Why nothing more may be pulled or started, or None.
         """
         from dreamference.night_shift.night_shift_host import GIB, NightShiftHost
+
         reserve = NightShiftHost.parse_size(settings.disk_reserve)
         swe_bench_settings.CACHE_DIR.mkdir(parents=True, exist_ok=True)
         free = shutil.disk_usage(swe_bench_settings.CACHE_DIR).free
         if free < reserve:
-            return (f"{free / GIB:.0f} GiB of disk is free and the reserve is {reserve / GIB:.0f} "
-                    "(free some with `ling-admin swe-bench clean --images`)")
+            return (
+                f"{free / GIB:.0f} GiB of disk is free and the reserve is {reserve / GIB:.0f} "
+                "(free some with `ling-admin swe-bench clean --images`)"
+            )
         return None
 
     # -- validation ----------------------------------------------------------------------------
 
     @classmethod
-    def validate(cls, dataset: str, instance_ids: list[str],
-                 settings: "swe_bench_settings.SweBenchSettings", force: bool = False) -> dict[str, str | None]:
+    def validate(
+        cls,
+        dataset: str,
+        instance_ids: list[str],
+        settings: "swe_bench_settings.SweBenchSettings",
+        force: bool = False,
+    ) -> dict[str, str | None]:
         """Validates instances on this machine and records each result.
 
         Args:
@@ -117,21 +124,39 @@ class SweBenchEvaluator:
         to_grade = sorted(images)
         for run_id, model in ((VALIDATE_GOLD_RUN, "gold"), (VALIDATE_NOOP_RUN, NOOP_MODEL)):
             for instance_id in to_grade:  # the harness returns a cached verdict if one is on disk
-                shutil.rmtree(work / HARNESS_LOG_DIR / run_id / model / instance_id, ignore_errors=True)
+                shutil.rmtree(
+                    work / HARNESS_LOG_DIR / run_id / model / instance_id, ignore_errors=True
+                )
         dataset_file = work / "dataset.jsonl"
         SweBenchHarness.write_dataset_file(dataset_file, (rows[i] for i in to_grade), images)
         noop_file = work / "noop.jsonl"
-        noop_file.write_text("".join(
-            json.dumps({"instance_id": i, "model_name_or_path": NOOP_MODEL, "model_patch": NOOP_PATCH}) + "\n"
-            for i in to_grade))
+        noop_file.write_text(
+            "".join(
+                json.dumps(
+                    {"instance_id": i, "model_name_or_path": NOOP_MODEL, "model_patch": NOOP_PATCH}
+                )
+                + "\n"
+                for i in to_grade
+            )
+        )
         for run_id, predictions in ((VALIDATE_GOLD_RUN, None), (VALIDATE_NOOP_RUN, noop_file)):
-            SweBenchHarness.evaluate(work, dataset_file, run_id, to_grade, predictions,
-                                     settings.eval_workers, settings.eval_timeout_s, settings.eval_memory)
+            SweBenchHarness.evaluate(
+                work,
+                dataset_file,
+                run_id,
+                to_grade,
+                predictions,
+                settings.eval_workers,
+                settings.eval_timeout_s,
+                settings.eval_memory,
+            )
         for instance_id in to_grade:
             gold = SweBenchHarness.instance_report(work, VALIDATE_GOLD_RUN, "gold", instance_id)
             noop = SweBenchHarness.instance_report(work, VALIDATE_NOOP_RUN, NOOP_MODEL, instance_id)
             problem = cls.validation_problem(gold, noop)
-            SweBenchImages.record_validation(instance_id, images[instance_id], digests[instance_id], problem)
+            SweBenchImages.record_validation(
+                instance_id, images[instance_id], digests[instance_id], problem
+            )
             outcome[instance_id] = problem
         return outcome
 
@@ -154,7 +179,9 @@ class SweBenchEvaluator:
         return problem
 
     @classmethod
-    def validation_problem(cls, gold: dict[str, Any] | None, noop: dict[str, Any] | None) -> str | None:
+    def validation_problem(
+        cls, gold: dict[str, Any] | None, noop: dict[str, Any] | None
+    ) -> str | None:
         """Decides from the two verdicts whether an instance is usable here.
 
         Args:
@@ -189,21 +216,26 @@ class SweBenchEvaluator:
             the eval script resets the test files, and in a series other than the plain one
             what was done to the patches.
         """
-        grader = {"harness": SweBenchHarness.installed_version(),
-                  "dataset_revision": manifest.get("dataset_revision"),
-                  "image_source": manifest.get("image_source"),
-                  "eval_reset": EVAL_RESET}
+        grader = {
+            "harness": SweBenchHarness.installed_version(),
+            "dataset_revision": manifest.get("dataset_revision"),
+            "image_source": manifest.get("image_source"),
+            "eval_reset": EVAL_RESET,
+        }
         if variant == DROP_TEST_HUNKS:
             grader["patch"] = "test files dropped"
         return grader
 
     @classmethod
-    def grading_number(cls, store: SweBenchRunStore, grader: dict[str, Any],
-                       variant: str | None = None) -> int:
-        """Picks the grading to continue or start. A grading names a grader, not a set of patches:
-        the number goes up when the harness, the dataset snapshot or the image source changed,
-        or when an instance already graded now has a different image, because the harness caches
-        verdicts by run id and instance id and would otherwise return the old one.
+    def grading_number(
+        cls, store: SweBenchRunStore, grader: dict[str, Any], variant: str | None = None
+    ) -> int:
+        """Picks the grading to continue or start.
+
+        A grading names a grader, not a set of patches: the number goes up when the harness, the
+        dataset snapshot or the image source changed, or when an instance already graded now has a
+        different image, because the harness caches verdicts by run id and instance id and would
+        otherwise return the old one.
 
         Args:
             store: The run.
@@ -229,8 +261,13 @@ class SweBenchEvaluator:
         return numbers[-1]
 
     @classmethod
-    def grade(cls, store: SweBenchRunStore, settings: "swe_bench_settings.SweBenchSettings",
-              only: list[str] | None = None, variant: str | None = None) -> dict[str, dict[str, Any]]:
+    def grade(
+        cls,
+        store: SweBenchRunStore,
+        settings: "swe_bench_settings.SweBenchSettings",
+        only: list[str] | None = None,
+        variant: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
         """Grades the run's predictions that the current grading has not graded yet.
 
         Args:
@@ -251,7 +288,9 @@ class SweBenchEvaluator:
         number = cls.grading_number(store, grader, variant)
         record = store.grading(number, variant)
         record["grader"] = grader
-        images = {instance_id: entry["image"] for instance_id, entry in manifest.get("images", {}).items()}
+        images = {
+            instance_id: entry["image"] for instance_id, entry in manifest.get("images", {}).items()
+        }
         pending: list[dict[str, Any]] = []
         dropped: dict[str, list[str]] = {}
         # A patch with no test file is the patch the plain grading graded: its verdict is taken
@@ -267,11 +306,14 @@ class SweBenchEvaluator:
             if instance_id in record["results"] or (only is not None and instance_id not in only):
                 continue
             if variant == DROP_TEST_HUNKS:
-                patch, dropped[instance_id] = SweBenchPatchFilter.drop_test_hunks(prediction["model_patch"])
+                patch, dropped[instance_id] = SweBenchPatchFilter.drop_test_hunks(
+                    prediction["model_patch"]
+                )
                 prediction = dict(prediction, model_patch=patch)
                 if not dropped[instance_id] and "resolved" in (plain.get(instance_id) or {}):
-                    record["results"][instance_id] = dict(plain[instance_id], dropped=[],
-                                                          reused=f"plain grading {plain_number}")
+                    record["results"][instance_id] = dict(
+                        plain[instance_id], dropped=[], reused=f"plain grading {plain_number}"
+                    )
                     continue
             if not prediction["model_patch"].strip():
                 # The harness starts no container for an empty patch; it is unresolved by definition.
@@ -285,13 +327,20 @@ class SweBenchEvaluator:
             return record["results"]
 
         work = store.grading_dir(number, variant)
-        rows = {row["instance_id"]: row for row in SweBenchHarness.rows(manifest.get("dataset", "verified"))}
+        rows = {
+            row["instance_id"]: row
+            for row in SweBenchHarness.rows(manifest.get("dataset", "verified"))
+        }
         digests: dict[str, str | None] = {}
         gradable: list[dict[str, Any]] = []
         for prediction in pending:
             instance_id = prediction["instance_id"]
             image = images.get(instance_id)
-            disk = cls.disk_problem(settings) if image and SweBenchDocker.image_digest(image) is None else None
+            disk = (
+                cls.disk_problem(settings)
+                if image and SweBenchDocker.image_digest(image) is None
+                else None
+            )
             if disk:
                 print(f"⚠️  {instance_id} is not graded yet: {disk}")
                 continue
@@ -310,9 +359,19 @@ class SweBenchEvaluator:
         dataset_file = work / "dataset.jsonl"
         SweBenchHarness.write_dataset_file(dataset_file, (rows[i] for i in ids), images)
         predictions_file = work / "to-grade.jsonl"
-        predictions_file.write_text("".join(json.dumps(prediction) + "\n" for prediction in gradable))
-        SweBenchHarness.evaluate(work, dataset_file, run_id, ids, predictions_file,
-                                 settings.eval_workers, settings.eval_timeout_s, settings.eval_memory)
+        predictions_file.write_text(
+            "".join(json.dumps(prediction) + "\n" for prediction in gradable)
+        )
+        SweBenchHarness.evaluate(
+            work,
+            dataset_file,
+            run_id,
+            ids,
+            predictions_file,
+            settings.eval_workers,
+            settings.eval_timeout_s,
+            settings.eval_memory,
+        )
         for prediction in gradable:
             instance_id, model = prediction["instance_id"], prediction["model_name_or_path"]
             report = SweBenchHarness.instance_report(work, run_id, model, instance_id)
@@ -323,7 +382,9 @@ class SweBenchEvaluator:
             record["results"][instance_id] = {
                 "resolved": bool(report.get("resolved")),
                 "applied": bool(report.get("patch_successfully_applied")),
-                "test_patch_failed": SweBenchHarness.test_patch_failed(work, run_id, model, instance_id),
+                "test_patch_failed": SweBenchHarness.test_patch_failed(
+                    work, run_id, model, instance_id
+                ),
                 "digest": digests[instance_id],
             }
             counts = cls.test_counts(report)
@@ -336,9 +397,10 @@ class SweBenchEvaluator:
 
     @classmethod
     def test_counts(cls, report: dict[str, Any] | None) -> dict[str, int] | None:
-        """Counts the two test lists of a harness verdict (survey 2026-10-13 §3.2): the tests the
-        fix must make pass (FAIL_TO_PASS) and the tests that passed before and must still pass
-        (PASS_TO_PASS). Only counts are kept; the names stay in the harness's logs.
+        """Counts the two test lists of a harness verdict (survey 2026-10-13 §3.2).
+
+        The tests the fix must make pass (FAIL_TO_PASS) and the tests that passed before and must
+        still pass (PASS_TO_PASS). Only counts are kept; the names stay in the harness's logs.
 
         Args:
             report: The harness's report for one instance, as `instance_report` returns it.
@@ -358,11 +420,20 @@ class SweBenchEvaluator:
         return counts
 
     @classmethod
-    def logged_test_counts(cls, store: SweBenchRunStore, number: int, variant: str | None,
-                           result: dict[str, Any], instance_id: str, model: str) -> dict[str, int] | None:
-        """A recorded verdict's test counts: from the grading record when it has them, otherwise
-        read back from the harness's report in the grading's directory, so a grading made
-        before the counts were recorded needs no regrade. Reads files only.
+    def logged_test_counts(
+        cls,
+        store: SweBenchRunStore,
+        number: int,
+        variant: str | None,
+        result: dict[str, Any],
+        instance_id: str,
+        model: str,
+    ) -> dict[str, int] | None:
+        """A recorded verdict's test counts.
+
+        From the grading record when it has them, otherwise read back from the harness's report in
+        the grading's directory, so a grading made before the counts were recorded needs no regrade.
+        Reads files only.
 
         Args:
             store: The run.
@@ -376,7 +447,9 @@ class SweBenchEvaluator:
             Optional[Dict[str, int]]: As `test_counts`; None when no test results are on disk.
         """
         if "p2p_failed" in result:
-            return {key: int(result.get(key) or 0) for key in ("f2p", "f2p_failed", "p2p", "p2p_failed")}
+            return {
+                key: int(result.get(key) or 0) for key in ("f2p", "f2p_failed", "p2p", "p2p_failed")
+            }
         reused = str(result.get("reused") or "")
         if reused.startswith("plain grading "):
             # A regrade that took the plain grading's verdict: its logs are there.
@@ -385,12 +458,16 @@ class SweBenchEvaluator:
             except ValueError:
                 return None
         run_id = f"{store.name}-{variant}-{number}" if variant else f"{store.name}-{number}"
-        report = SweBenchHarness.instance_report(store.grading_dir(number, variant), run_id, model, instance_id)
+        report = SweBenchHarness.instance_report(
+            store.grading_dir(number, variant), run_id, model, instance_id
+        )
         return cls.test_counts(report)
 
     @classmethod
     def results(cls, store: SweBenchRunStore, variant: str | None = None) -> tuple:
-        """Args:
+        """The results.
+
+        Args:
             store: The run.
             variant: The grading series; None for the plain one.
 

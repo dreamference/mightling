@@ -1,5 +1,6 @@
-"""The code index as an arm of the benchmark: `swe-bench run --code-index universal`
-(specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §13).
+"""The code index as an arm of the benchmark.
+
+`swe-bench run --code-index universal` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §13).
 
 Without it the agent in a container navigates with `grep` and `find` only: the runtime carries
 `ling` and nothing of `ling-code`. With it, each instance's repository is indexed **on the
@@ -55,9 +56,17 @@ MIGHTLING_CODE_OVERRIDE_ENV: Final[str] = "DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE
 # the launcher has them (`ling-rs/src/code_index.rs`, `MCP_SERVER` and `FORWARDED_ENV`).
 MCP_SERVER: Final[str] = "ling_code"
 MCP_FORWARDED_ENV: Final[list[str]] = [
-    "MIGHTLING_CODE_ROOT", "MIGHTLING_CODE_STATE_DIR", "MIGHTLING_CODE_GRAPH_DB", "MIGHTLING_CODE_PROJECT",
-    "MIGHTLING_CODE_TOOLS_DIR", "MIGHTLING_CODE_INDEXERS_DIR", "MIGHTLING_CODE_LAYERS", "CODEX_HOME", "DREAMFERENCE_CONFIG_PATH",
-    "DREAMFERENCE_VLLM_HOST"]
+    "MIGHTLING_CODE_ROOT",
+    "MIGHTLING_CODE_STATE_DIR",
+    "MIGHTLING_CODE_GRAPH_DB",
+    "MIGHTLING_CODE_PROJECT",
+    "MIGHTLING_CODE_TOOLS_DIR",
+    "MIGHTLING_CODE_INDEXERS_DIR",
+    "MIGHTLING_CODE_LAYERS",
+    "CODEX_HOME",
+    "DREAMFERENCE_CONFIG_PATH",
+    "DREAMFERENCE_VLLM_HOST",
+]
 
 # Where the relocated `ling-code` and the instance's index are mounted in the container.
 CODE_MOUNT: Final[str] = "/opt/ling-code"
@@ -73,15 +82,19 @@ class SweBenchCodeIndex:
 
     # Seam: tests replace it so nothing in the suite runs the real `ling-code` or `patchelf`.
     execute: Callable[..., subprocess.CompletedProcess] = staticmethod(
-        lambda command, **kwargs: subprocess.run(command, capture_output=True, text=True,
-                                                 stdin=subprocess.DEVNULL, **kwargs))
+        lambda command, **kwargs: subprocess.run(
+            command, capture_output=True, text=True, stdin=subprocess.DEVNULL, **kwargs
+        )
+    )
 
     @classmethod
     def host_binary(cls) -> str | None:
-        """Returns:
-        Optional[str]: The installed `ling-code` (beside `ling`), or None if absent; or
-        the one `DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE` names, to measure a build of it that
-        is not installed (the arm then differs from the plain one in `ling-code` alone).
+        """The host binary.
+
+        Returns:
+            Optional[str]: The installed `ling-code` (beside `ling`), or None if absent; or
+            the one `DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE` names, to measure a build of it that
+            is not installed (the arm then differs from the plain one in `ling-code` alone).
         """
         override = os.environ.get(MIGHTLING_CODE_OVERRIDE_ENV)
         if override:
@@ -96,19 +109,26 @@ class SweBenchCodeIndex:
 
     @classmethod
     def runtime_dir(cls) -> Path:
-        """Returns:
-        Path: The relocated `ling-code`, kept apart from `ling`'s runtime so that
-        runtime's hash, which a run's manifest pins, does not change when this one appears.
-        A build named by `DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE` gets a directory of its own,
-        so preparing it never replaces the one a running arm has mounted.
+        """The runtime dir.
+
+        Returns:
+            Path: The relocated `ling-code`, kept apart from `ling`'s runtime so that
+            runtime's hash, which a run's manifest pins, does not change when this one appears.
+            A build named by `DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE` gets a directory of its own,
+            so preparing it never replaces the one a running arm has mounted.
         """
-        name = "runtime-code-override" if os.environ.get(MIGHTLING_CODE_OVERRIDE_ENV) else "runtime-code"
+        name = (
+            "runtime-code-override"
+            if os.environ.get(MIGHTLING_CODE_OVERRIDE_ENV)
+            else "runtime-code"
+        )
         return swe_bench_settings.CACHE_DIR / name
 
     @classmethod
     def ensure_runtime(cls, patchelf: str) -> str | None:
-        """Builds the relocated `ling-code` unless the one on disk was made from the installed
-        binary. Same treatment as `ling`: the instance images have an older glibc.
+        """Builds the relocated `ling-code` unless the one on disk was made from the installed binary.
+
+        Same treatment as `ling`: the instance images have an older glibc.
 
         Args:
             patchelf: The `patchelf` executable.
@@ -117,6 +137,7 @@ class SweBenchCodeIndex:
             Optional[str]: The SHA-256 of the installed `ling-code`, or None on failure.
         """
         import hashlib
+
         binary = cls.host_binary()
         if binary is None:
             print("❌ ling-code is not installed: run `ling-admin codex build` first.")
@@ -138,8 +159,16 @@ class SweBenchCodeIndex:
                 shutil.copy(os.path.realpath(library), staging / "lib" / os.path.basename(library))
             copy = staging / "bin" / "ling-code"
             shutil.copy(binary, copy)
-            patched = cls.execute([patchelf, "--set-interpreter", f"{CODE_MOUNT}/lib/{os.path.basename(loader)}",
-                                   "--set-rpath", f"{CODE_MOUNT}/lib", str(copy)])
+            patched = cls.execute(
+                [
+                    patchelf,
+                    "--set-interpreter",
+                    f"{CODE_MOUNT}/lib/{os.path.basename(loader)}",
+                    "--set-rpath",
+                    f"{CODE_MOUNT}/lib",
+                    str(copy),
+                ]
+            )
             if patched.returncode != 0:
                 raise ValueError(patched.stderr.strip()[-300:])
         except (OSError, subprocess.CalledProcessError, ValueError) as error:
@@ -155,7 +184,9 @@ class SweBenchCodeIndex:
 
     @classmethod
     def index_dir(cls, row: dict[str, Any], arm: str = "universal") -> Path:
-        """Args:
+        """The index dir.
+
+        Args:
             row: The instance's dataset row.
             arm: `universal` or `exact`: each has a cache of its own.
 
@@ -163,12 +194,17 @@ class SweBenchCodeIndex:
             Path: Where its index is cached, keyed by arm, repository and base commit.
         """
         repo = str(row["repo"]).replace("/", "__")
-        return swe_bench_settings.CACHE_DIR / ("index-exact" if arm == "exact" else "index") \
+        return (
+            swe_bench_settings.CACHE_DIR
+            / ("index-exact" if arm == "exact" else "index")
             / f"{repo}@{str(row['base_commit'])[:16]}"
+        )
 
     @classmethod
     def record(cls, row: dict[str, Any], arm: str = "universal") -> dict[str, Any] | None:
-        """Args:
+        """Records.
+
+        Args:
             row: The instance's dataset row.
             arm: `universal` or `exact`.
 
@@ -207,7 +243,9 @@ class SweBenchCodeIndex:
         if created.returncode != 0 or not container:
             print(f"⚠️  {row['instance_id']}: could not create a container to copy /testbed from")
             return False
-        copied = SweBenchDocker.run(["cp", "-q", f"{container}:/testbed", str(checkout)], timeout=900)
+        copied = SweBenchDocker.run(
+            ["cp", "-q", f"{container}:/testbed", str(checkout)], timeout=900
+        )
         SweBenchDocker.run(["rm", "-f", container], timeout=120)
         if copied.returncode != 0:
             print(f"⚠️  {row['instance_id']}: could not copy /testbed out of {image}")
@@ -215,7 +253,9 @@ class SweBenchCodeIndex:
         return True
 
     @classmethod
-    def ensure(cls, row: dict[str, Any], image: str, arm: str = "universal") -> dict[str, Any] | None:
+    def ensure(
+        cls, row: dict[str, Any], image: str, arm: str = "universal"
+    ) -> dict[str, Any] | None:
         """Builds the instance's index on the host unless one is cached.
 
         Args:
@@ -255,21 +295,34 @@ class SweBenchCodeIndex:
             MIGHTLING_CODE_INDEXERS_DIR=str(directory / "no-indexers"),
         )
         try:
-            indexed = cls.execute([binary, "index", "--wait"], cwd=str(checkout), env=environment,
-                                  timeout=INDEX_TIMEOUT_S)
+            indexed = cls.execute(
+                [binary, "index", "--wait"],
+                cwd=str(checkout),
+                env=environment,
+                timeout=INDEX_TIMEOUT_S,
+            )
             output, code = (indexed.stdout or "") + (indexed.stderr or ""), indexed.returncode
         except subprocess.TimeoutExpired:
             output, code = "timed out", 124
         (directory / "index.log").write_text(output)
-        graphs = sorted(path.name for path in (directory / "cbm").glob("*.db") if path.name != "_config.db")
+        graphs = sorted(
+            path.name for path in (directory / "cbm").glob("*.db") if path.name != "_config.db"
+        )
         shutil.rmtree(checkout, ignore_errors=True)  # queries read the container's own /testbed
         if code != 0 or not graphs:
-            print(f"⚠️  {row['instance_id']}: ling-code index failed ({code}); see {directory / 'index.log'}")
+            print(
+                f"⚠️  {row['instance_id']}: ling-code index failed ({code}); see {directory / 'index.log'}"
+            )
             return None
         import hashlib
+
         record = {
-            "instance_id": row["instance_id"], "repo": row["repo"], "base_commit": row["base_commit"],
-            "layers": ["universal"], "graph_db": graphs[0], "project": graphs[0][:-len(".db")],
+            "instance_id": row["instance_id"],
+            "repo": row["repo"],
+            "base_commit": row["base_commit"],
+            "layers": ["universal"],
+            "graph_db": graphs[0],
+            "project": graphs[0][: -len(".db")],
             "seconds": round(time.time() - started, 1),
             "bytes": sum(path.stat().st_size for path in directory.rglob("*") if path.is_file()),
             "tool_hash": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
@@ -294,12 +347,15 @@ class SweBenchCodeIndex:
             Optional[Dict[str, Any]]: The record; None only when /testbed could not be copied.
         """
         import hashlib
+
         directory = cls.index_dir(row, "exact")
         shutil.rmtree(directory, ignore_errors=True)
         for sub in ("state", "cbm"):
             (directory / sub).mkdir(parents=True)
         settings = directory / "settings.toml"
-        settings.write_text(f'mightling_code_layers = "exact"\ncode_index_small_ceiling_mb = {EXACT_RUN_CEILING_MB}\n')
+        settings.write_text(
+            f'mightling_code_layers = "exact"\ncode_index_small_ceiling_mb = {EXACT_RUN_CEILING_MB}\n'
+        )
         checkout = directory / "testbed"
         started = time.time()
         if not cls.copy_testbed(row, image, checkout):
@@ -315,37 +371,60 @@ class SweBenchCodeIndex:
         runs: dict[str, Any] = {}
         for attempt in range(1, EXACT_ATTEMPTS + 1):
             try:
-                indexed = cls.execute([binary, "index", "--wait"], cwd=str(checkout), env=environment,
-                                      timeout=INDEX_TIMEOUT_S)
+                indexed = cls.execute(
+                    [binary, "index", "--wait"],
+                    cwd=str(checkout),
+                    env=environment,
+                    timeout=INDEX_TIMEOUT_S,
+                )
                 logs.append((indexed.stdout or "") + (indexed.stderr or ""))
             except subprocess.TimeoutExpired:
                 logs.append("timed out")
             try:
-                runs = json.loads((directory / "state" / "scip" / "manifest.json").read_text()).get("runs", {})
+                runs = json.loads((directory / "state" / "scip" / "manifest.json").read_text()).get(
+                    "runs", {}
+                )
             except (OSError, ValueError):
                 runs = {}
-            if not any(str(entry.get("status", "")).startswith("deferred") for entry in runs.values()):
+            if not any(
+                str(entry.get("status", "")).startswith("deferred") for entry in runs.values()
+            ):
                 break
             if attempt < EXACT_ATTEMPTS:
                 cls.sleep(EXACT_RETRY_PAUSE_S)
-        (directory / "index.log").write_text("\n".join(f"--- attempt {i + 1}\n{log}" for i, log in enumerate(logs)))
+        (directory / "index.log").write_text(
+            "\n".join(f"--- attempt {i + 1}\n{log}" for i, log in enumerate(logs))
+        )
         shutil.rmtree(checkout, ignore_errors=True)  # queries read the container's own /testbed
-        stores = sorted(key for key, entry in runs.items()
-                        if entry.get("store") and (directory / "state" / "scip" / str(entry["store"])).is_file())
+        stores = sorted(
+            key
+            for key, entry in runs.items()
+            if entry.get("store") and (directory / "state" / "scip" / str(entry["store"])).is_file()
+        )
         failed = {key: str(entry.get("status")) for key, entry in runs.items() if key not in stores}
         record = {
-            "instance_id": row["instance_id"], "repo": row["repo"], "base_commit": row["base_commit"],
-            "layers": ["exact"], "stores": stores, "failed": failed,
-            "peak_mb": max((int(entry.get("peak_rss_mb") or 0) for entry in runs.values()), default=0),
+            "instance_id": row["instance_id"],
+            "repo": row["repo"],
+            "base_commit": row["base_commit"],
+            "layers": ["exact"],
+            "stores": stores,
+            "failed": failed,
+            "peak_mb": max(
+                (int(entry.get("peak_rss_mb") or 0) for entry in runs.values()), default=0
+            ),
             "seconds": round(time.time() - started, 1),
             "bytes": sum(path.stat().st_size for path in directory.rglob("*") if path.is_file()),
             "tool_hash": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
         }
         if not stores:
-            print(f"⚠️  {row['instance_id']}: no SCIP store was built; the agent will have the text search alone "
-                  f"(see {directory / 'index.log'})")
+            print(
+                f"⚠️  {row['instance_id']}: no SCIP store was built; the agent will have the text search alone "
+                f"(see {directory / 'index.log'})"
+            )
         elif failed:
-            print(f"⚠️  {row['instance_id']}: {len(failed)} indexer run(s) did not finish: {', '.join(sorted(failed))}")
+            print(
+                f"⚠️  {row['instance_id']}: {len(failed)} indexer run(s) did not finish: {', '.join(sorted(failed))}"
+            )
         (directory / RECORD_NAME).write_text(json.dumps(record, indent=2) + "\n")
         return dict(record, cached=False)
 
@@ -353,7 +432,9 @@ class SweBenchCodeIndex:
     sleep: Callable[[float], None] = staticmethod(time.sleep)
 
     @classmethod
-    def container_arguments(cls, row: dict[str, Any], record: dict[str, Any], arm: str = "universal") -> dict[str, Any]:
+    def container_arguments(
+        cls, row: dict[str, Any], record: dict[str, Any], arm: str = "universal"
+    ) -> dict[str, Any]:
         """Says how a container is given the index.
 
         Args:
@@ -367,7 +448,10 @@ class SweBenchCodeIndex:
         """
         if arm == "exact":
             return {
-                "mounts": [f"{cls.runtime_dir()}:{CODE_MOUNT}:ro", f"{cls.index_dir(row, 'exact')}:{INDEX_MOUNT}:ro"],
+                "mounts": [
+                    f"{cls.runtime_dir()}:{CODE_MOUNT}:ro",
+                    f"{cls.index_dir(row, 'exact')}:{INDEX_MOUNT}:ro",
+                ],
                 "env": {
                     "MIGHTLING_CODE_BIN": f"{CODE_MOUNT}/bin/ling-code",
                     "MIGHTLING_CODE_STATE_DIR": f"{INDEX_MOUNT}/state",
@@ -378,7 +462,10 @@ class SweBenchCodeIndex:
                 "config": cls.mcp_overrides(),
             }
         return {
-            "mounts": [f"{cls.runtime_dir()}:{CODE_MOUNT}:ro", f"{cls.index_dir(row)}:{INDEX_MOUNT}:ro"],
+            "mounts": [
+                f"{cls.runtime_dir()}:{CODE_MOUNT}:ro",
+                f"{cls.index_dir(row)}:{INDEX_MOUNT}:ro",
+            ],
             "env": {
                 # The launcher appends `ling-code prompt-block` to the prompt when this names a file.
                 "MIGHTLING_CODE_BIN": f"{CODE_MOUNT}/bin/ling-code",
@@ -408,16 +495,16 @@ class SweBenchCodeIndex:
         """
         key = f"mcp_servers.{MCP_SERVER}"
         forwarded = ", ".join(json.dumps(name) for name in MCP_FORWARDED_ENV)
-        return [f"{key}.command={json.dumps(f'{CODE_MOUNT}/bin/ling-code')}",
-                f'{key}.args=["mcp"]',
-                f"{key}.env_vars=[{forwarded}]",
-                f"{key}.required=true",
-                f"{key}.startup_timeout_sec=120"]
+        return [
+            f"{key}.command={json.dumps(f'{CODE_MOUNT}/bin/ling-code')}",
+            f'{key}.args=["mcp"]',
+            f"{key}.env_vars=[{forwarded}]",
+            f"{key}.required=true",
+            f"{key}.startup_timeout_sec=120",
+        ]
 
     @classmethod
     def cached(cls) -> list[str]:
-        """Returns:
-        List[str]: The names of the cached indexes.
-        """
+        """The names of the cached indexes."""
         root = swe_bench_settings.CACHE_DIR / "index"
         return sorted(entry.name for entry in root.iterdir()) if root.is_dir() else []

@@ -32,14 +32,17 @@ class SweBenchGateHold:
     # Seam the tests replace.
     gate = ModelGate
 
-    def __init__(self, store: SweBenchRunStore, vllm_host: str, subnet: str | None,
-                 label: str | None = None) -> None:
-        """Args:
-        store: The run.
-        vllm_host: This machine's model server, where the gate answers.
-        subnet: The run's internal network; None leaves the gate open (nothing could tell
-            the run's requests from the others).
-        label: What the refusal calls the run (e.g. `night 1`); defaults to its name.
+    def __init__(
+        self, store: SweBenchRunStore, vllm_host: str, subnet: str | None, label: str | None = None
+    ) -> None:
+        """Sets up the swe bench gate hold.
+
+        Args:
+            store: The run.
+            vllm_host: This machine's model server, where the gate answers.
+            subnet: The run's internal network; None leaves the gate open (nothing could tell
+                the run's requests from the others).
+            label: What the refusal calls the run (e.g. `night 1`); defaults to its name.
         """
         self.store = store
         self.vllm_host = vllm_host
@@ -100,59 +103,85 @@ class SweBenchGateHold:
         self.tick()
 
     def progress(self) -> dict[str, Any]:
-        """Returns:
-        Dict[str, Any]: `done`, `total` and `eta_s` (None until an instance has finished):
-        the instances left times the median instance's time, over the parallelism.
+        """The progress.
+
+        Returns:
+            Dict[str, Any]: `done`, `total` and `eta_s` (None until an instance has finished):
+            the instances left times the median instance's time, over the parallelism.
         """
         if self.total is None:
             return {"done": None, "total": None, "eta_s": None}
         wanted = set(self.instances)
         finished = [i for i in self.store.finished() if i in wanted]
         states = self.store.states()
-        walls = [states[i]["wall_s"] for i in finished if isinstance(states.get(i, {}).get("wall_s"), (int, float))]
+        walls = [
+            states[i]["wall_s"]
+            for i in finished
+            if isinstance(states.get(i, {}).get("wall_s"), (int, float))
+        ]
         left = max(0, self.total - len(finished))
         eta = left * statistics.median(walls) / self.parallel if walls else None
-        return {"done": len(finished), "total": self.total, "eta_s": None if eta is None else int(eta)}
+        return {
+            "done": len(finished),
+            "total": self.total,
+            "eta_s": None if eta is None else int(eta),
+        }
 
     def tick(self) -> None:
         """Refreshes the run's record, asks the gate what it does, and notes a pause."""
         with self._lock:
             now = time.time()
             if self.subnet:
-                record = {"run": self.store.name, "id": self.id, "label": self.label,
-                          "networks": [self.subnet], "heartbeat": now, "pid": os.getpid(),
-                          "started": self.started, **self.progress()}
+                record = {
+                    "run": self.store.name,
+                    "id": self.id,
+                    "label": self.label,
+                    "networks": [self.subnet],
+                    "heartbeat": now,
+                    "pid": os.getpid(),
+                    "started": self.started,
+                    **self.progress(),
+                }
                 self.gate.write_run(record)
             self.live = self.gate.probe(self.vllm_host)
-            self.enforced = bool(self.live and self.live.get("id") == self.id
-                                 and self.live.get("state") in ("closed", "paused"))
+            self.enforced = bool(
+                self.live
+                and self.live.get("id") == self.id
+                and self.live.get("state") in ("closed", "paused")
+            )
             self.ever_enforced = self.ever_enforced or self.enforced
             pause = self.gate.pause_record() or {}
             since, until = pause.get("since"), pause.get("until")
-            if isinstance(since, (int, float)) and isinstance(until, (int, float)) \
-                    and until > self.started and since <= now:
+            if (
+                isinstance(since, (int, float))
+                and isinstance(until, (int, float))
+                and until > self.started
+                and since <= now
+            ):
                 self._pauses[float(since)] = float(until)
             self._persist(now)
 
     def priority(self) -> bool:
-        """Returns:
-        bool: Whether the gate is refusing everyone but this run right now (in force and not
-        paused): the run then neither waits for open sessions nor for other requests.
+        """The priority.
+
+        Returns:
+            bool: Whether the gate is refusing everyone but this run right now (in force and not
+            paused): the run then neither waits for open sessions nor for other requests.
         """
         live = self.live or {}
         return self.enforced and live.get("state") == "closed"
 
     def paused(self) -> bool:
-        """Returns:
-        bool: Whether a pause is letting other requests through right now.
-        """
+        """Whether a pause is letting other requests through right now."""
         return self.enforced and (self.live or {}).get("state") == "paused"
 
     # -- the run's record of it ----------------------------------------------------------------
 
     @classmethod
     def read(cls, store: SweBenchRunStore) -> dict[str, Any]:
-        """Args:
+        """Reads.
+
+        Args:
             store: A run.
 
         Returns:
@@ -165,7 +194,10 @@ class SweBenchGateHold:
             record = {}
         if not isinstance(record, dict):
             record = {}
-        return {"sessions": list(record.get("sessions") or []), "pauses": list(record.get("pauses") or [])}
+        return {
+            "sessions": list(record.get("sessions") or []),
+            "pauses": list(record.get("pauses") or []),
+        }
 
     def _persist(self, now: float, final: bool = False) -> None:
         if not self.store.manifest_path.is_file():
@@ -175,10 +207,15 @@ class SweBenchGateHold:
         else:
             gate = "in force" if self.ever_enforced else "absent"
         session = {"start": self.started, "end": now, "gate": gate, "ended": final}
-        pauses = [{"start": max(since, self.started), "end": min(until, now)}
-                  for since, until in sorted(self._pauses.items()) if min(until, now) > max(since, self.started)]
-        record = {"sessions": self._earlier["sessions"] + [session],
-                  "pauses": self._earlier["pauses"] + pauses}
+        pauses = [
+            {"start": max(since, self.started), "end": min(until, now)}
+            for since, until in sorted(self._pauses.items())
+            if min(until, now) > max(since, self.started)
+        ]
+        record = {
+            "sessions": self._earlier["sessions"] + [session],
+            "pauses": self._earlier["pauses"] + pauses,
+        }
         path = self.store.directory / GATE_RECORD
         path.parent.mkdir(parents=True, exist_ok=True)
         staging = path.with_name(f".{GATE_RECORD}.{os.getpid()}.tmp")

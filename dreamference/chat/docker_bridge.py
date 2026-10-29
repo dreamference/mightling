@@ -51,10 +51,17 @@ class DockerBridge:
         try:
             result = subprocess.run(
                 [
-                    "docker", "network", "inspect", "bridge",
-                    "--format", "{{(index .IPAM.Config 0).Gateway}}",
+                    "docker",
+                    "network",
+                    "inspect",
+                    "bridge",
+                    "--format",
+                    "{{(index .IPAM.Config 0).Gateway}}",
                 ],
-                capture_output=True, text=True, timeout=15, check=False,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
             )
             gateway = result.stdout.strip()
             if gateway:

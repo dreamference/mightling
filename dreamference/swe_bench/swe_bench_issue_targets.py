@@ -1,4 +1,5 @@
-"""What an issue names, and the example it shows, as the `issue-v1` hooks' conditions
+"""What an issue names, and the example it shows, as the `issue-v1` hooks' conditions.
+
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §20).
 
 Extraction is by rule from the issue's text, with no model call: repository paths, dotted module
@@ -25,25 +26,66 @@ MAX_DEFINITIONS: Final[int] = 3
 MAX_NAMES: Final[int] = 40
 
 CODE_SUFFIXES: Final[str] = r"py|pyx|pxd|pyi|c|h|cc|cpp|js|ts"
-PATH: Final[re.Pattern] = re.compile(r"(?<![\w.-])((?:[A-Za-z]:)?[\w./\\-]*[\w-]\.(?:" + CODE_SUFFIXES + r"))(?![\w/])")
+PATH: Final[re.Pattern] = re.compile(
+    r"(?<![\w.-])((?:[A-Za-z]:)?[\w./\\-]*[\w-]\.(?:" + CODE_SUFFIXES + r"))(?![\w/])"
+)
 TRACEBACK_FILE: Final[re.Pattern] = re.compile(r'File "([^"]+)", line \d+')
-FENCE: Final[re.Pattern] = re.compile(r"^[ \t]*```[ \t]*([\w+-]*)[^\n]*\n(.*?)^[ \t]*```", re.S | re.M)
+FENCE: Final[re.Pattern] = re.compile(
+    r"^[ \t]*```[ \t]*([\w+-]*)[^\n]*\n(.*?)^[ \t]*```", re.S | re.M
+)
 INLINE: Final[re.Pattern] = re.compile(r"`([^`\n]+)`")
-DOTTED: Final[re.Pattern] = re.compile(r"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+)(?!\w|\.\w)")
-CALLED: Final[re.Pattern] = re.compile(r"(?<![\w.])((?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z_][A-Za-z0-9_]*)\(")
+DOTTED: Final[re.Pattern] = re.compile(
+    r"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+)(?!\w|\.\w)"
+)
+CALLED: Final[re.Pattern] = re.compile(
+    r"(?<![\w.])((?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z_][A-Za-z0-9_]*)\("
+)
 IDENTIFIER: Final[re.Pattern] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 CALL: Final[re.Pattern] = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
-DEFINITION: Final[re.Pattern] = re.compile(r"^\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)")
+DEFINITION: Final[re.Pattern] = re.compile(
+    r"^\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)"
+)
 
-PYTHON_LANGS: Final[frozenset] = frozenset({"", "python", "py", "python3", "py3", "pycon", "ipython", "pytb"})
-SHELL_LANGS: Final[frozenset] = frozenset({"bash", "sh", "shell", "console", "shell-session", "zsh", "shellsession"})
+PYTHON_LANGS: Final[frozenset] = frozenset(
+    {"", "python", "py", "python3", "py3", "pycon", "ipython", "pytb"}
+)
+SHELL_LANGS: Final[frozenset] = frozenset(
+    {"bash", "sh", "shell", "console", "shell-session", "zsh", "shellsession"}
+)
 # Shell lines that set things up rather than show the problem.
-SETUP_PROGRAMS: Final[frozenset] = frozenset({
-    "pip", "pip3", "conda", "git", "cd", "export", "source", "mkdir", "cp", "mv", "rm", "ls", "echo", "cat",
-    "apt", "apt-get", "virtualenv", "touch", "wget", "curl", "docker", "brew", "set", "unset", "which", "tree",
-})
+SETUP_PROGRAMS: Final[frozenset] = frozenset(
+    {
+        "pip",
+        "pip3",
+        "conda",
+        "git",
+        "cd",
+        "export",
+        "source",
+        "mkdir",
+        "cp",
+        "mv",
+        "rm",
+        "ls",
+        "echo",
+        "cat",
+        "apt",
+        "apt-get",
+        "virtualenv",
+        "touch",
+        "wget",
+        "curl",
+        "docker",
+        "brew",
+        "set",
+        "unset",
+        "which",
+        "tree",
+    }
+)
 # Names that say nothing about the repository.
-COMMON_NAMES: Final[frozenset] = frozenset("""
+COMMON_NAMES: Final[frozenset] = frozenset(
+    """
 print len str int float bool list dict set tuple range repr type isinstance issubclass open format getattr setattr
 hasattr delattr sorted reversed min max sum abs any all enumerate zip map filter super round id vars dir help input
 iter next exit quit object Exception ValueError TypeError KeyError IndexError AttributeError RuntimeError
@@ -51,11 +93,33 @@ NotImplementedError AssertionError ImportError OSError StopIteration Warning Dep
 bytes bytearray frozenset complex divmod pow hash callable chr ord hex oct bin eval exec compile globals locals
 staticmethod classmethod property self cls None True False and not for while with assert lambda return yield
 import from def class pass raise try except finally else elif del global nonlocal await async
-""".split())
+""".split()
+)
 # Dotted words in prose that are not code: domains and file types.
-NOT_CODE: Final[frozenset] = frozenset({"com", "org", "net", "html", "txt", "rst", "md", "pdf", "png", "yml",
-                                        "yaml", "json", "toml", "cfg", "ini", "zip", "gz"})
-TEST_PATH: Final[re.Pattern] = re.compile(r"(^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_tests?\.py$|(^|/)conftest\.py$")
+NOT_CODE: Final[frozenset] = frozenset(
+    {
+        "com",
+        "org",
+        "net",
+        "html",
+        "txt",
+        "rst",
+        "md",
+        "pdf",
+        "png",
+        "yml",
+        "yaml",
+        "json",
+        "toml",
+        "cfg",
+        "ini",
+        "zip",
+        "gz",
+    }
+)
+TEST_PATH: Final[re.Pattern] = re.compile(
+    r"(^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_tests?\.py$|(^|/)conftest\.py$"
+)
 
 
 class SweBenchIssueTargets:
@@ -65,7 +129,9 @@ class SweBenchIssueTargets:
 
     @classmethod
     def split(cls, text: str) -> tuple[str, list[tuple[str, str]]]:
-        """Args:
+        """Splits.
+
+        Args:
             text: The issue.
 
         Returns:
@@ -117,8 +183,13 @@ class SweBenchIssueTargets:
             for match in DOTTED.finditer(source):
                 name = match.group(1)
                 last = name.split(".")[-1]
-                if not re.search(r"\.(" + CODE_SUFFIXES + r")$", name) and name not in dotted \
-                        and len(last) >= 3 and last not in NOT_CODE and name.split(".")[0] not in COMMON_NAMES:
+                if (
+                    not re.search(r"\.(" + CODE_SUFFIXES + r")$", name)
+                    and name not in dotted
+                    and len(last) >= 3
+                    and last not in NOT_CODE
+                    and name.split(".")[0] not in COMMON_NAMES
+                ):
                     dotted.append(name)
         for source in (inline, prose):
             for match in CALLED.finditer(source):
@@ -129,17 +200,22 @@ class SweBenchIssueTargets:
             code = code.strip().rstrip("()")
             if IDENTIFIER.fullmatch(code) and code not in names:
                 names.append(code)
-        names = [name for name in names if len(name) >= 3 and name not in COMMON_NAMES and not name.startswith("__")]
+        names = [
+            name
+            for name in names
+            if len(name) >= 3 and name not in COMMON_NAMES and not name.startswith("__")
+        ]
         return {"paths": paths, "dotted": dotted, "names": names}
 
     @classmethod
     def examples(cls, text: str) -> list[dict[str, Any]]:
-        """The runnable examples the issue shows. A Python example is a fenced block that parses
-        as Python, calls something and is more than one bare expression (which is more likely
-        printed output), or a run of `>>>` lines (fenced or not); a shell example
-        is a command in a shell block or after a `$ ` prompt that is not setup (`pip install`,
-        `cd`, `git clone`). A traceback, program output or Python 2 code is not an example:
-        when unsure there is none, so the stop is never held for it.
+        """The runnable examples the issue shows.
+
+        A Python example is a fenced block that parses as Python, calls something and is more than
+        one bare expression (which is more likely printed output), or a run of `>>>` lines (fenced
+        or not); a shell example is a command in a shell block or after a `$ ` prompt that is not
+        setup (`pip install`, `cd`, `git clone`). A traceback, program output or Python 2 code is
+        not an example: when unsure there is none, so the stop is never held for it.
 
         Args:
             text: The issue.
@@ -159,7 +235,9 @@ class SweBenchIssueTargets:
                 example = None
             if example:
                 found.append(example)
-        prompts = "\n".join(line for line in prose.splitlines() if re.match(r"\s*(>>>|\.\.\.)( |$)", line))
+        prompts = "\n".join(
+            line for line in prose.splitlines() if re.match(r"\s*(>>>|\.\.\.)( |$)", line)
+        )
         example = cls.python_example(prompts) if prompts else None
         if example:
             found.append(example)
@@ -167,7 +245,9 @@ class SweBenchIssueTargets:
 
     @classmethod
     def python_example(cls, body: str) -> dict[str, Any] | None:
-        """Args:
+        """The python example.
+
+        Args:
             body: A code block.
 
         Returns:
@@ -189,15 +269,21 @@ class SweBenchIssueTargets:
                 return None
             if not any(isinstance(node, ast.Call) for node in ast.walk(tree)):
                 return None
-            if len(tree.body) < 2 and not isinstance(tree.body[0], (ast.Import, ast.ImportFrom, ast.Assign)):
+            if len(tree.body) < 2 and not isinstance(
+                tree.body[0], (ast.Import, ast.ImportFrom, ast.Assign)
+            ):
                 # One bare expression: a printed value (`array([[True, False]])`), not a program.
                 return None
             code = lines
         key_lines = []
         for line in code:
             stripped = line.strip()
-            if len(stripped) < 4 or stripped.startswith("#") or "(" not in stripped \
-                    or re.match(r"(import|from)\s", stripped):
+            if (
+                len(stripped) < 4
+                or stripped.startswith("#")
+                or "(" not in stripped
+                or re.match(r"(import|from)\s", stripped)
+            ):
                 continue
             if stripped not in key_lines:
                 key_lines.append(stripped)
@@ -207,20 +293,40 @@ class SweBenchIssueTargets:
         for name in CALL.findall("\n".join(code)):
             if name not in COMMON_NAMES and name not in calls:
                 calls.append(name)
-        return {"kind": "python", "key_lines": key_lines[:8], "calls": calls[:10], "first": key_lines[0][:80]}
+        return {
+            "kind": "python",
+            "key_lines": key_lines[:8],
+            "calls": calls[:10],
+            "first": key_lines[0][:80],
+        }
 
     @classmethod
     def shell_example(cls, body: str, shell_block: bool) -> dict[str, Any] | None:
-        """Args:
+        """The shell example.
+
+        Args:
             body: A code block.
             shell_block: Whether its language is a shell's, where unprompted lines are commands.
 
         Returns:
             Optional[Dict[str, Any]]: The example, or None when it only sets things up.
         """
-        prompted = [line.split("$ ", 1)[1] for line in body.splitlines() if re.match(r"\s*\$ ", line)]
-        lines = prompted if prompted else ([line for line in body.splitlines() if line.strip()
-                                            and not line.strip().startswith("#")] if shell_block else [])
+        prompted = [
+            line.split("$ ", 1)[1] for line in body.splitlines() if re.match(r"\s*\$ ", line)
+        ]
+        lines = (
+            prompted
+            if prompted
+            else (
+                [
+                    line
+                    for line in body.splitlines()
+                    if line.strip() and not line.strip().startswith("#")
+                ]
+                if shell_block
+                else []
+            )
+        )
         commands, first = [], None
         for line in lines:
             words = line.split()
@@ -232,7 +338,10 @@ class SweBenchIssueTargets:
             arguments = [word for word in words[1:] if not word.startswith("-")]
             argument = arguments[0].split("/")[-1].split("::")[0] if arguments else ""
             if program == "python" and words[1:2] == ["-m"] and len(words) > 2:
-                program, argument = words[2], (arguments[1].split("/")[-1] if len(arguments) > 1 else "")
+                program, argument = (
+                    words[2],
+                    (arguments[1].split("/")[-1] if len(arguments) > 1 else ""),
+                )
             if [program, argument] not in commands:
                 commands.append([program, argument])
             first = first or line.strip()[:80]
@@ -242,8 +351,9 @@ class SweBenchIssueTargets:
 
     @classmethod
     def resolve_script(cls, names: list[str]) -> str:
-        """The light index, run in the container: every tracked file, then the `def`/`class` lines
-        of the names in tracked Python files.
+        """The light index, run in the container.
+
+        Every tracked file, then the `def`/`class` lines of the names in tracked Python files.
 
         Args:
             names: Identifiers (validated: letters, digits and `_` only).
@@ -255,13 +365,19 @@ class SweBenchIssueTargets:
         names = [name for name in names if IDENTIFIER.fullmatch(name)][:MAX_NAMES]
         script = 'cd "${TESTBED:-/testbed}" || exit 3\npwd\ngit -c core.quotePath=false ls-files\necho "@@definitions@@"\n'
         if names:
-            pattern = r"^[[:space:]]*(async[[:space:]]+)?(def|class)[[:space:]]+(" + "|".join(names) + r")([^A-Za-z0-9_]|$)"
+            pattern = (
+                r"^[[:space:]]*(async[[:space:]]+)?(def|class)[[:space:]]+("
+                + "|".join(names)
+                + r")([^A-Za-z0-9_]|$)"
+            )
             script += f"git -c core.quotePath=false grep -n -I -E '{pattern}' -- '*.py' || true\n"
         return script
 
     @classmethod
     def parse_listing(cls, output: str) -> tuple[list[str], dict[str, list[str]]]:
-        """Args:
+        """Parses the listing.
+
+        Args:
             output: What `resolve_script` printed.
 
         Returns:
@@ -284,9 +400,11 @@ class SweBenchIssueTargets:
 
     @classmethod
     def resolve_path(cls, path: str, files: list[str]) -> tuple[str | None, str]:
-        """Finds the tracked file a path names: the path itself, or the longest tail of it that
-        names exactly one file (`/usr/lib/python3/site-packages/django/db/models/query.py` is
-        `django/db/models/query.py`). A bare base name must be unique.
+        """Finds the tracked file a path names.
+
+        The path itself, or the longest tail of it that names exactly one file
+        (`/usr/lib/python3/site-packages/django/db/models/query.py` is `django/db/models/query.py`).
+        A bare base name must be unique.
 
         Returns:
             Tuple[Optional[str], str]: The file, or None and why not.
@@ -305,8 +423,10 @@ class SweBenchIssueTargets:
 
     @classmethod
     def resolve_dotted(cls, name: str, files: list[str]) -> tuple[str | None, list[str]]:
-        """Maps a dotted name to a module file: `a.b.c` is `a/b/c.py` or `a/b/c/__init__.py`, or
-        a shorter prefix with the rest naming definitions in it.
+        """Maps a dotted name to a module file.
+
+        `a.b.c` is `a/b/c.py` or `a/b/c/__init__.py`, or a shorter prefix with the rest naming
+        definitions in it.
 
         Returns:
             Tuple[Optional[str], List[str]]: The module file (None when no prefix of two or more
@@ -324,8 +444,9 @@ class SweBenchIssueTargets:
 
     @classmethod
     def conditions(cls, text: str, listing: str, root: str = "/testbed") -> dict[str, Any]:
-        """Builds the hooks' conditions: what must be read before the first edit, and the
-        example to run before stopping.
+        """Builds the hooks' conditions.
+
+        What must be read before the first edit, and the example to run before stopping.
 
         Priority, until `MAX_TARGETS`: paths named in the prose, dotted module names, functions
         and classes, paths in code blocks, then traceback frames (deepest first). A function or
@@ -350,14 +471,31 @@ class SweBenchIssueTargets:
             if path in target_files:
                 return
             target_files.add(path)
-            targets.append({"id": f"file:{path}", "kind": "file", "path": path, "label": path, "from": source,
-                            "text": mentioned})
+            targets.append(
+                {
+                    "id": f"file:{path}",
+                    "kind": "file",
+                    "path": path,
+                    "label": path,
+                    "from": source,
+                    "text": mentioned,
+                }
+            )
 
         def add_definition(name: str, where: list[str], source: str, mentioned: str) -> None:
             if any(t.get("name") == name for t in targets):
                 return
-            targets.append({"id": f"def:{name}", "kind": "definition", "name": name, "files": where,
-                            "label": f"`{name}` ({', '.join(where)})", "from": source, "text": mentioned})
+            targets.append(
+                {
+                    "id": f"def:{name}",
+                    "kind": "definition",
+                    "name": name,
+                    "files": where,
+                    "label": f"`{name}` ({', '.join(where)})",
+                    "from": source,
+                    "text": mentioned,
+                }
+            )
 
         later = []
         for path, source in found["paths"]:
@@ -409,12 +547,20 @@ class SweBenchIssueTargets:
                 dropped.append({"text": target["text"], "why": "its file is already to be read"})
         for target in targets[MAX_TARGETS:]:
             dropped.append({"text": target["text"], "why": f"past the first {MAX_TARGETS}"})
-        return {"version": 1, "set": "issue-v1", "root": root, "targets": targets[:MAX_TARGETS],
-                "examples": cls.examples(text), "dropped": dropped[:40]}
+        return {
+            "version": 1,
+            "set": "issue-v1",
+            "root": root,
+            "targets": targets[:MAX_TARGETS],
+            "examples": cls.examples(text),
+            "dropped": dropped[:40],
+        }
 
     @classmethod
     def names_to_resolve(cls, text: str) -> list[str]:
-        """Args:
+        """The names to resolve.
+
+        Args:
             text: The issue.
 
         Returns:

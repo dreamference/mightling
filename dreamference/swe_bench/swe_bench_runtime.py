@@ -1,4 +1,5 @@
-"""A copy of `ling` that starts inside a SWE-bench instance image
+"""A copy of `ling` that starts inside a SWE-bench instance image.
+
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §12).
 
 The installed binary is linked against this machine's C library (glibc 2.39 on the GB10); the
@@ -44,9 +45,7 @@ class SweBenchRuntime:
 
     @classmethod
     def directory(cls) -> Path:
-        """Returns:
-        Path: The runtime directory under the benchmark's cache.
-        """
+        """The runtime directory under the benchmark's cache."""
         return swe_bench_settings.CACHE_DIR / "runtime"
 
     @classmethod
@@ -68,9 +67,7 @@ class SweBenchRuntime:
 
     @classmethod
     def current_hash(cls) -> str | None:
-        """Returns:
-        Optional[str]: The source hash the existing runtime was built from, if there is one.
-        """
+        """The source hash the existing runtime was built from, if there is one."""
         try:
             return (cls.directory() / STAMP_NAME).read_text().strip() or None
         except OSError:
@@ -103,9 +100,18 @@ class SweBenchRuntime:
                 copy = staging / "bin" / os.path.basename(binary)
                 shutil.copy(binary, copy)
                 subprocess.run(
-                    [patchelf, "--set-interpreter", f"{CONTAINER_MOUNT}/lib/{os.path.basename(loader)}",
-                     "--set-rpath", f"{CONTAINER_MOUNT}/lib", str(copy)],
-                    check=True, capture_output=True, text=True)
+                    [
+                        patchelf,
+                        "--set-interpreter",
+                        f"{CONTAINER_MOUNT}/lib/{os.path.basename(loader)}",
+                        "--set-rpath",
+                        f"{CONTAINER_MOUNT}/lib",
+                        str(copy),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
         except (OSError, subprocess.CalledProcessError, ValueError) as error:
             shutil.rmtree(staging, ignore_errors=True)
             print(f"❌ Could not build the ling runtime for the instance images: {error}")
@@ -129,7 +135,9 @@ class SweBenchRuntime:
             ValueError: When `ldd` names a library this module does not expect, so a new
                 dependency is noticed instead of silently missing in the container.
         """
-        output = subprocess.run(["ldd", mightling_bin], capture_output=True, text=True, check=True).stdout
+        output = subprocess.run(
+            ["ldd", mightling_bin], capture_output=True, text=True, check=True
+        ).stdout
         loader: str | None = None
         names: list[str] = []
         libraries: list[str] = []
@@ -156,8 +164,6 @@ class SweBenchRuntime:
 
     @classmethod
     def installed_mightling(cls) -> str | None:
-        """Returns:
-        Optional[str]: The installed branded `ling`, or None if it has not been built.
-        """
+        """The installed branded `ling`, or None if it has not been built."""
         path = CodexBrandedBuilder.executable_path()
         return path if os.path.exists(path) else None

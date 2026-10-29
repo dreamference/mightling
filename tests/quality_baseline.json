@@ -6,11 +6,7 @@
    "D415": 1,
    "PQ002": 1
   },
-  "dreamference/audit/__init__.py": {
-   "D205": 1
-  },
   "dreamference/audit/docs_egress_audit.py": {
-   "D205": 3,
    "E501": 3,
    "PLR2004": 1,
    "PTH118": 12,
@@ -20,9 +16,7 @@
   "dreamference/audit/egress_audit.py": {
    "BLE001": 1,
    "C901": 3,
-   "D205": 11,
-   "D415": 1,
-   "E501": 16,
+   "E501": 6,
    "PLR0912": 1,
    "PLR0913": 2,
    "PLR0915": 2,
@@ -40,49 +34,34 @@
    "RUF001": 3,
    "RUF005": 3,
    "SIM115": 1,
-   "T201": 26,
-   "ruff-format": 1
-  },
-  "dreamference/audit/egress_verdict.py": {
-   "D205": 1
+   "T201": 26
   },
   "dreamference/audit/preview_page.py": {
    "D105": 2,
    "D107": 1,
-   "D205": 1,
    "E501": 1,
    "PLR2004": 1,
    "RUF100": 1
   },
   "dreamference/audit/strace_parser.py": {
    "C901": 1,
-   "D205": 1,
    "D301": 1,
-   "E501": 3,
    "PLR0912": 1,
    "PLR2004": 20,
    "PTH119": 1,
-   "RUF005": 1,
-   "ruff-format": 1
+   "RUF005": 1
   },
   "dreamference/audit/tui_session.py": {
    "C901": 1,
-   "D205": 4,
    "PLR1702": 3,
    "PLR2004": 3,
    "PTH118": 2,
    "PTH123": 2,
    "PTH207": 1,
-   "RUF001": 1,
-   "ruff-format": 1
-  },
-  "dreamference/chat/__init__.py": {
-   "D205": 1
+   "RUF001": 1
   },
   "dreamference/chat/desktop_installer.py": {
-   "D200": 1,
-   "D205": 4,
-   "E501": 2,
+   "E501": 1,
    "PLR2004": 7,
    "PTH111": 1,
    "PTH113": 2,
@@ -90,16 +69,9 @@
    "PTH118": 2,
    "PTH123": 2,
    "PTH208": 1,
-   "T201": 17,
-   "ruff-format": 1
-  },
-  "dreamference/chat/desktop_protocol_types.py": {
-   "ruff-format": 1
+   "T201": 17
   },
   "dreamference/chat/desktop_runner.py": {
-   "D200": 1,
-   "D205": 8,
-   "E501": 2,
    "PTH100": 1,
    "PTH103": 2,
    "PTH107": 1,
@@ -111,12 +83,10 @@
    "PTH119": 1,
    "PTH120": 3,
    "PTH123": 3,
-   "T201": 22,
-   "ruff-format": 1
+   "T201": 22
   },
   "dreamference/chat/docker_bridge.py": {
-   "PLR2004": 1,
-   "ruff-format": 1
+   "PLR2004": 1
   },
   "dreamference/chat/gmail_client.py": {
    "PTH118": 1,
@@ -133,11 +103,8 @@
    "BLE001": 10,
    "C901": 5,
    "D102": 2,
-   "D200": 1,
-   "D205": 3,
    "D301": 1,
-   "E501": 9,
-   "E701": 3,
+   "E501": 3,
    "E722": 1,
    "PLR0911": 2,
    "PLR0912": 2,
@@ -150,8 +117,7 @@
    "PTH123": 7,
    "RUF100": 1,
    "S110": 5,
-   "SIM105": 4,
-   "ruff-format": 1
+   "SIM105": 4
   },
   "dreamference/chat/google_service.py": {
    "PTH101": 1,
@@ -161,16 +127,13 @@
    "PTH123": 2
   },
   "dreamference/chat/image_search_mcp.py": {
-   "D205": 4,
-   "E501": 6,
    "PLR1702": 1,
    "PLR2004": 8,
    "PTH112": 2,
    "PTH117": 1,
    "PTH118": 2,
    "PTH123": 2,
-   "PTH208": 1,
-   "ruff-format": 1
+   "PTH208": 1
   },
   "dreamference/chat/image_search_service.py": {
    "ANN401": 7,
@@ -178,7 +141,6 @@
    "B905": 3,
    "BLE001": 13,
    "C901": 2,
-   "D205": 4,
    "E501": 1,
    "N818": 1,
    "PLR1702": 1,
@@ -191,12 +153,9 @@
    "PTH202": 1,
    "RUF100": 2,
    "S110": 3,
-   "SIM105": 3,
-   "ruff-format": 1
+   "SIM105": 3
   },
   "dreamference/chat/image_search_sidecar.py": {
-   "D205": 3,
-   "E501": 1,
    "PTH101": 1,
    "PTH103": 2,
    "PTH110": 1,
@@ -204,14 +163,12 @@
    "PTH113": 2,
    "PTH118": 3,
    "PTH123": 2,
-   "PTH208": 1,
-   "ruff-format": 1
+   "PTH208": 1
   },
   "dreamference/chat/matrix_homeserver.py": {
    "C901": 1,
    "D102": 5,
-   "D205": 5,
-   "E501": 2,
+   "E501": 1,
    "PLR0911": 1,
    "PLR0912": 1,
    "PLR2004": 10,
@@ -224,11 +181,9 @@
    "PTH123": 2,
    "RUF005": 1,
    "SIM105": 2,
-   "T201": 27,
-   "ruff-format": 1
+   "T201": 27
   },
   "dreamference/chat/retired_web_chat.py": {
-   "D205": 11,
    "PLR2004": 1,
    "PTH103": 1,
    "PTH111": 2,
@@ -237,23 +192,14 @@
    "PTH118": 1,
    "PTH120": 1,
    "PTH123": 2,
-   "T201": 14,
-   "ruff-format": 1
+   "T201": 14
   },
   "dreamference/chat/searxng_sidecar.py": {
-   "D205": 4,
    "PTH111": 1,
-   "T201": 4,
-   "ruff-format": 1
+   "T201": 4
   },
   "dreamference/chat/sidecar_network.py": {
-   "D205": 2,
-   "PLR2004": 1,
-   "ruff-format": 1
-  },
-  "dreamference/chat/speech_sidecar.py": {
-   "D205": 3,
-   "ruff-format": 1
+   "PLR2004": 1
   },
   "dreamference/cli/__init__.py": {
    "D104": 1
@@ -636,29 +582,19 @@
    "UP035": 2,
    "ruff-format": 1
   },
-  "dreamference/night_shift/__init__.py": {
-   "D205": 1
-  },
   "dreamference/night_shift/night_shift_best_of_n.py": {
    "ANN401": 2,
    "BLE001": 1,
-   "D205": 4,
    "E731": 2,
    "PIE810": 1,
    "PLR0913": 1,
    "PLR2004": 6
   },
   "dreamference/night_shift/night_shift_chooser.py": {
-   "D205": 2,
    "E501": 1,
-   "PLR2004": 3,
-   "ruff-format": 1
-  },
-  "dreamference/night_shift/night_shift_compaction_audit.py": {
-   "ruff-format": 1
+   "PLR2004": 3
   },
   "dreamference/night_shift/night_shift_host.py": {
-   "D205": 8,
    "PLR2004": 7,
    "PTH115": 1,
    "PTH118": 1,
@@ -666,32 +602,26 @@
    "RUF002": 1
   },
   "dreamference/night_shift/night_shift_index.py": {
-   "D205": 2,
    "E501": 1,
    "PLR2004": 2,
    "PTH113": 1,
-   "PTH118": 1,
-   "ruff-format": 1
+   "PTH118": 1
   },
   "dreamference/night_shift/night_shift_queue.py": {
    "ANN401": 2,
-   "D205": 2,
    "PLR2004": 1,
    "PTH105": 1,
    "PTH111": 1,
-   "PTH123": 3,
-   "ruff-format": 1
+   "PTH123": 3
   },
   "dreamference/night_shift/night_shift_remote.py": {
-   "D205": 8,
    "E501": 1,
    "E731": 1,
    "PLR0911": 1,
    "PLR1702": 1,
    "PLR2004": 6,
    "PTH112": 1,
-   "T201": 7,
-   "ruff-format": 1
+   "T201": 7
   },
   "dreamference/night_shift/night_shift_report.py": {
    "C901": 1,
@@ -701,31 +631,24 @@
   "dreamference/night_shift/night_shift_runner.py": {
    "ANN401": 1,
    "C901": 1,
-   "D205": 9,
-   "E501": 1,
    "E731": 1,
    "PLR0913": 2,
    "PLR1702": 1,
    "PLR2004": 1,
-   "T201": 6,
-   "ruff-format": 1
+   "T201": 6
   },
   "dreamference/night_shift/night_shift_scheduler.py": {
-   "D205": 4,
    "PLR2004": 1,
    "PTH111": 2,
-   "T201": 5,
-   "ruff-format": 1
+   "T201": 5
   },
   "dreamference/night_shift/night_shift_settings.py": {
-   "ANN401": 1,
-   "D205": 3
+   "ANN401": 1
   },
   "dreamference/night_shift/night_shift_task_run.py": {
    "ANN401": 1,
    "BLE001": 2,
    "C901": 2,
-   "D205": 5,
    "E501": 1,
    "PLR0911": 2,
    "PLR0912": 1,
@@ -735,11 +658,6 @@
    "PTH111": 1,
    "PTH120": 1,
    "SIM105": 2
-  },
-  "dreamference/night_shift/refine_prompt.py": {
-   "D205": 2,
-   "E501": 6,
-   "ruff-format": 1
   },
   "dreamference/node/__init__.py": {
    "D205": 1,
@@ -1129,88 +1047,63 @@
    "UP045": 2,
    "ruff-format": 1
   },
-  "dreamference/swe_bench/__init__.py": {
-   "D205": 1
-  },
   "dreamference/swe_bench/swe_bench_arm_smoke.py": {
-   "D205": 2,
    "PIE810": 1,
    "PLR0911": 1,
    "PLR2004": 4,
-   "T201": 2,
-   "ruff-format": 1
+   "T201": 2
   },
   "dreamference/swe_bench/swe_bench_code_index.py": {
-   "D205": 7,
-   "E501": 1,
    "PLR2004": 5,
    "PTH105": 1,
    "PTH110": 2,
    "PTH118": 1,
    "PTH119": 2,
    "PTH120": 1,
-   "T201": 8,
-   "ruff-format": 1
+   "T201": 8
   },
   "dreamference/swe_bench/swe_bench_command.py": {
    "ANN401": 1,
-   "D205": 3,
    "E501": 2,
    "PLR0911": 1,
    "PLR2004": 8,
    "T201": 36
   },
-  "dreamference/swe_bench/swe_bench_docker.py": {
-   "D205": 1,
-   "ruff-format": 1
-  },
   "dreamference/swe_bench/swe_bench_evaluator.py": {
    "C901": 2,
-   "D205": 6,
    "PLR0912": 1,
    "PLR0915": 1,
    "PLR2004": 2,
-   "T201": 2,
-   "ruff-format": 1
+   "T201": 2
   },
   "dreamference/swe_bench/swe_bench_gate_hold.py": {
    "ANN401": 1,
    "BLE001": 1,
    "D105": 2,
-   "D205": 5,
    "PLR2004": 2,
    "PTH105": 1,
    "S110": 1,
-   "SIM105": 1,
-   "ruff-format": 1
+   "SIM105": 1
   },
   "dreamference/swe_bench/swe_bench_harness.py": {
-   "D205": 11,
    "PLR0913": 1,
    "PLR2004": 3,
    "PTH105": 1,
    "PTH110": 3,
    "PTH123": 1,
-   "T201": 4,
-   "ruff-format": 1
+   "T201": 4
   },
   "dreamference/swe_bench/swe_bench_hooks.py": {
-   "D205": 4,
-   "E501": 1,
-   "PLR2004": 2,
-   "ruff-format": 1
+   "PLR2004": 2
   },
   "dreamference/swe_bench/swe_bench_images.py": {
-   "D205": 7,
    "PTH105": 1,
-   "T201": 1,
-   "ruff-format": 1
+   "T201": 1
   },
   "dreamference/swe_bench/swe_bench_instance_run.py": {
    "ANN401": 1,
    "BLE001": 1,
    "C901": 3,
-   "D205": 15,
    "E501": 1,
    "PLR0911": 1,
    "PLR0912": 2,
@@ -1225,8 +1118,6 @@
    "BLE001": 2,
    "C901": 2,
    "D102": 2,
-   "D205": 12,
-   "E501": 4,
    "PIE810": 2,
    "PLR0911": 1,
    "PLR1702": 5,
@@ -1238,36 +1129,28 @@
    "PTH119": 1,
    "PTH123": 5,
    "PTH206": 1,
-   "RUF005": 3,
-   "ruff-format": 1
+   "RUF005": 3
   },
   "dreamference/swe_bench/swe_bench_issue_targets.py": {
    "C901": 3,
-   "D205": 11,
-   "E501": 3,
+   "E501": 1,
    "PLR0912": 1,
    "PLR0915": 1,
    "PLR1702": 1,
    "PLR2004": 12,
-   "SIM905": 1,
-   "ruff-format": 1
+   "SIM905": 1
   },
   "dreamference/swe_bench/swe_bench_name_stripper.py": {
-   "D205": 3,
    "PLR2004": 8,
    "PTH113": 1,
-   "PTH123": 1,
-   "ruff-format": 1
+   "PTH123": 1
   },
   "dreamference/swe_bench/swe_bench_patch_filter.py": {
-   "D205": 4,
    "PIE810": 4,
    "PLR2004": 1,
-   "SIM114": 1,
-   "ruff-format": 1
+   "SIM114": 1
   },
   "dreamference/swe_bench/swe_bench_relay.py": {
-   "D205": 2,
    "PLR2004": 1,
    "SIM105": 3
   },
@@ -1275,7 +1158,6 @@
    "ANN401": 11,
    "B905": 1,
    "C901": 3,
-   "D205": 18,
    "E501": 1,
    "E731": 1,
    "PLR2004": 20,
@@ -1283,18 +1165,15 @@
   },
   "dreamference/swe_bench/swe_bench_run_store.py": {
    "C901": 1,
-   "D205": 17,
    "D415": 1,
    "PLR2004": 8,
    "PTH105": 1,
-   "PTH123": 2,
-   "ruff-format": 1
+   "PTH123": 2
   },
   "dreamference/swe_bench/swe_bench_runner.py": {
    "ANN401": 3,
    "BLE001": 1,
    "C901": 2,
-   "D205": 12,
    "E731": 1,
    "PLR0911": 1,
    "PLR0912": 2,
@@ -1305,7 +1184,6 @@
    "T201": 33
   },
   "dreamference/swe_bench/swe_bench_runtime.py": {
-   "D205": 4,
    "PLR2004": 2,
    "PTH105": 1,
    "PTH110": 2,
@@ -1313,11 +1191,9 @@
    "PTH119": 3,
    "PTH120": 1,
    "PTH123": 1,
-   "T201": 1,
-   "ruff-format": 1
+   "T201": 1
   },
   "dreamference/swe_bench/swe_bench_settings.py": {
-   "D205": 3,
    "PTH111": 2,
    "PTH123": 1
   },
@@ -2082,5 +1958,5 @@
   }
  },
  "ruff": "0.16.10",
- "total": 5695
+ "total": 5333
 }

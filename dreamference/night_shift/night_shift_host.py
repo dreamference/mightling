@@ -1,5 +1,7 @@
-"""What the night run needs to know about the machine: the model server, memory, and who else is
-using either (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.2, §5.5).
+"""What the night run needs to know about the machine.
+
+The model server, memory, and who else is using either (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md
+§5.2, §5.5).
 
 Every probe reads; none starts, stops or loads anything. The model server may be SGLang (the
 default) or vLLM, so each metric is read under both engines' names.
@@ -244,9 +246,10 @@ class NightShiftHost:
     def task_budget(
         cls, max_parallel: int, kv_pool: float, task_context: int, compact_at: int | None
     ) -> tuple[int, int | None]:
-        """How many night tasks run at once, and the context each may hold, such that together they
-        fit in the KV pool: `parallel × limit ≤ 90% of the pool`. The limit is enforced by passing
-        it to every `ling exec` of a task as its compaction limit.
+        """How many night tasks run at once, and the context each may hold.
+
+        Such that together they fit in the KV pool: `parallel × limit ≤ 90% of the pool`. The limit
+        is enforced by passing it to every `ling exec` of a task as its compaction limit.
 
         Args:
             max_parallel: The configured upper bound.
@@ -271,8 +274,9 @@ class NightShiftHost:
 
     @classmethod
     def host_safety_ok(cls) -> bool:
-        """Runs the model server's own pre-load host-safety checks (swap, sysctls, earlyoom), which
-        print what is wrong and exit when anything is.
+        """Runs the model server's own pre-load host-safety checks (swap, sysctls, earlyoom).
+
+        Which print what is wrong and exit when anything is.
 
         Returns:
             bool: True when every check passes.
@@ -287,9 +291,7 @@ class NightShiftHost:
 
     @classmethod
     def mem_available_bytes(cls) -> int:
-        """Returns:
-        int: `MemAvailable` from `/proc/meminfo`, in bytes.
-        """
+        """`MemAvailable` from `/proc/meminfo`, in bytes."""
         with Path("/proc/meminfo").open() as handle:
             for line in handle:
                 if line.startswith("MemAvailable:"):
@@ -298,9 +300,7 @@ class NightShiftHost:
 
     @classmethod
     def mem_total_bytes(cls) -> int:
-        """Returns:
-        int: `MemTotal` from `/proc/meminfo`, in bytes.
-        """
+        """`MemTotal` from `/proc/meminfo`, in bytes."""
         with Path("/proc/meminfo").open() as handle:
             for line in handle:
                 if line.startswith("MemTotal:"):
@@ -346,10 +346,12 @@ class NightShiftHost:
 
     @classmethod
     def interactive_mightling_pids(cls, mightling_bin: str) -> list[int]:
-        """Finds `ling` TUI sessions: processes of the `ling` binary that are not one of a night
-        run's own sessions, not a subcommand that runs without a user, and not one of Codex's
-        helper re-executions (its sandbox runs as the same binary under another `argv[0]`). A
-        session started before a build replaced the binary still counts (`executable_of`).
+        """Finds `ling` TUI sessions.
+
+        Processes of the `ling` binary that are not one of a night run's own sessions, not a
+        subcommand that runs without a user, and not one of Codex's helper re-executions (its
+        sandbox runs as the same binary under another `argv[0]`). A session started before a build
+        replaced the binary still counts (`executable_of`).
 
         Args:
             mightling_bin: The installed `ling` executable.
@@ -477,9 +479,10 @@ class NightShiftHost:
 
     @classmethod
     def subcommand(cls, args: list[str]) -> str | None:
-        """Finds the subcommand of a `ling` command line: its first argument that is neither an option
-        nor an option's value. A prompt in that place is returned as it is; after `--` everything is
-        the prompt, so there is no subcommand.
+        """Finds the subcommand of a `ling` command line.
+
+        Its first argument that is neither an option nor an option's value. A prompt in that place
+        is returned as it is; after `--` everything is the prompt, so there is no subcommand.
 
         Args:
             args: The arguments after the program name.
@@ -518,8 +521,9 @@ class NightShiftHost:
 
     @classmethod
     def heavy_jobs(cls) -> list[str]:
-        """Names the heavy work already running that a night run must not join: a `ling` build, a
-        `ling-admin index` run, a `ling-code` index run, or a Codex test run.
+        """Names the heavy work already running that a night run must not join.
+
+        A `ling` build, a `ling-admin index` run, a `ling-code` index run, or a Codex test run.
 
         Returns:
             List[str]: One description per job found; empty when the machine is free.

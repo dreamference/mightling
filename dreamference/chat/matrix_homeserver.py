@@ -1,5 +1,6 @@
-"""The private Matrix homeserver behind `ling chat`'s Matrix adapter: `ling-admin matrix …`
-(specs/DREAMFERENCE_MIGHTLING_CHAT.md §5).
+"""The private Matrix homeserver behind `ling chat`'s Matrix adapter.
+
+`ling-admin matrix …` (specs/DREAMFERENCE_MIGHTLING_CHAT.md §5).
 
 tuwunel runs as the container `dreamference-matrix` on an **internal** Docker network, so it has no
 route to anything but this host: no federation, no URL previews, no push gateway, because nothing
@@ -61,17 +62,22 @@ class MatrixHomeserver:
 
     @classmethod
     def _run(cls, argv: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
-        """Runs a command, capturing its output. A missing program (Tailscale removed since `start`,
-        say) is a failed step, not an exception, so `stop` and `remove` still do the rest.
+        """Runs a command, capturing its output.
+
+        A missing program (Tailscale removed since `start`, say) is a failed step, not an exception,
+        so `stop` and `remove` still do the rest.
         """
         try:
-            return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+            return subprocess.run(
+                argv, capture_output=True, text=True, timeout=timeout, check=False
+            )
         except FileNotFoundError as error:
             return subprocess.CompletedProcess(argv, 127, "", str(error))
 
     @classmethod
-    def _http(cls, method: str, url: str, body: dict[str, Any] | None = None,
-              token: str | None = None) -> tuple[int, dict[str, Any]]:
+    def _http(
+        cls, method: str, url: str, body: dict[str, Any] | None = None, token: str | None = None
+    ) -> tuple[int, dict[str, Any]]:
         """One JSON request to the homeserver through the loopback proxy."""
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(url, data=data, method=method)
@@ -95,6 +101,7 @@ class MatrixHomeserver:
     def chat_dir(cls) -> str:
         """`~/.mightling/chat` (or `$CODEX_HOME/chat`): where the bridge keeps its files."""
         from dreamference.runner.codex_installer import CodexInstaller
+
         return os.path.join(CodexInstaller.home_dir(), "chat")
 
     @classmethod
@@ -126,9 +133,11 @@ class MatrixHomeserver:
 
     @classmethod
     def tailscale_name(cls) -> str | None:
-        """Returns:
-        Optional[str]: This machine's tailnet name (`node.tail1234.ts.net`) when Tailscale is
-        running and signed in, else None.
+        """The tailscale name.
+
+        Returns:
+            Optional[str]: This machine's tailnet name (`node.tail1234.ts.net`) when Tailscale is
+            running and signed in, else None.
         """
         try:
             result = cls._run(["tailscale", "status", "--json"], timeout=30)
@@ -161,7 +170,12 @@ class MatrixHomeserver:
             List[str]: The argv.
         """
         from dreamference.chat.sidecar_network import SIDECAR_NETWORK
-        network = ["--network", SIDECAR_NETWORK] if push else ["--network", MATRIX_NETWORK, "--ip", MATRIX_ADDRESS]
+
+        network = (
+            ["--network", SIDECAR_NETWORK]
+            if push
+            else ["--network", MATRIX_NETWORK, "--ip", MATRIX_ADDRESS]
+        )
         env = {
             "TUWUNEL_SERVER_NAME": server_name,
             "TUWUNEL_DATABASE_PATH": "/var/lib/tuwunel",
@@ -173,10 +187,22 @@ class MatrixHomeserver:
             "TUWUNEL_TRUSTED_SERVERS": "[]",
             "TUWUNEL_URL_PREVIEW_DOMAIN_EXPLICIT_ALLOWLIST": "[]",
         }
-        argv = ["docker", "run", "-d", "--name", MATRIX_CONTAINER, "--restart", "unless-stopped",
-                *network, f"--memory={MEMORY_LIMIT}", f"--memory-swap={MEMORY_LIMIT}",
-                "--stop-timeout", "600",
-                "-v", f"{MATRIX_VOLUME}:/var/lib/tuwunel"]
+        argv = [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            MATRIX_CONTAINER,
+            "--restart",
+            "unless-stopped",
+            *network,
+            f"--memory={MEMORY_LIMIT}",
+            f"--memory-swap={MEMORY_LIMIT}",
+            "--stop-timeout",
+            "600",
+            "-v",
+            f"{MATRIX_VOLUME}:/var/lib/tuwunel",
+        ]
         for key, value in env.items():
             argv += ["-e", f"{key}={value}"]
         return argv + [MATRIX_IMAGE]
@@ -186,8 +212,18 @@ class MatrixHomeserver:
         """Creates the internal network once. Returns True if it exists afterwards."""
         if cls._run(["docker", "network", "inspect", MATRIX_NETWORK], timeout=30).returncode == 0:
             return True
-        created = cls._run(["docker", "network", "create", "--internal", "--subnet", MATRIX_SUBNET,
-                            MATRIX_NETWORK], timeout=60)
+        created = cls._run(
+            [
+                "docker",
+                "network",
+                "create",
+                "--internal",
+                "--subnet",
+                MATRIX_SUBNET,
+                MATRIX_NETWORK,
+            ],
+            timeout=60,
+        )
         return created.returncode == 0
 
     @classmethod
@@ -196,14 +232,24 @@ class MatrixHomeserver:
 
     @classmethod
     def container_running(cls) -> bool:
-        result = cls._run(["docker", "inspect", "-f", "{{.State.Running}}", MATRIX_CONTAINER], timeout=30)
+        result = cls._run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", MATRIX_CONTAINER], timeout=30
+        )
         return result.returncode == 0 and result.stdout.strip() == "true"
 
     @classmethod
     def container_address(cls) -> str | None:
         """The container's address on whichever network it is on."""
-        result = cls._run(["docker", "inspect", "-f",
-                           "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", MATRIX_CONTAINER], timeout=30)
+        result = cls._run(
+            [
+                "docker",
+                "inspect",
+                "-f",
+                "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
+                MATRIX_CONTAINER,
+            ],
+            timeout=30,
+        )
         if result.returncode != 0:
             return None
         addresses = result.stdout.split()
@@ -217,7 +263,9 @@ class MatrixHomeserver:
 
     @classmethod
     def proxy_units(cls, target: str) -> dict[str, str]:
-        """Args:
+        """The proxy units.
+
+        Args:
             target: `address:port` of the container.
 
         Returns:
@@ -245,9 +293,11 @@ class MatrixHomeserver:
         for name, text in cls.proxy_units(target).items():
             with open(os.path.join(directory, name), "w", encoding="utf-8") as handle:
                 handle.write(text)
-        steps = [["systemctl", "--user", "daemon-reload"],
-                 ["systemctl", "--user", "stop", PROXY_SERVICE_UNIT],
-                 ["systemctl", "--user", "enable", "--now", PROXY_SOCKET_UNIT]]
+        steps = [
+            ["systemctl", "--user", "daemon-reload"],
+            ["systemctl", "--user", "stop", PROXY_SERVICE_UNIT],
+            ["systemctl", "--user", "enable", "--now", PROXY_SOCKET_UNIT],
+        ]
         return all(cls._run(step, timeout=60).returncode == 0 for step in steps)
 
     # -- accounts -------------------------------------------------------------------------------
@@ -270,8 +320,12 @@ class MatrixHomeserver:
             Optional[Dict[str, Any]]: The server's answer (`user_id`, `access_token`), or None.
         """
         url = f"{PROXY_URL}/_matrix/client/v3/register"
-        body: dict[str, Any] = {"username": localpart, "password": password, "inhibit_login": False,
-                                "initial_device_display_name": "ling-admin"}
+        body: dict[str, Any] = {
+            "username": localpart,
+            "password": password,
+            "inhibit_login": False,
+            "initial_device_display_name": "ling-admin",
+        }
         status, answer = cls._http("POST", url, body)
         for _ in range(3):
             if status == 200:
@@ -279,7 +333,11 @@ class MatrixHomeserver:
             if status != 401 or "session" not in answer:
                 return None
             completed = answer.get("completed") or []
-            stage = "m.login.registration_token" if "m.login.registration_token" not in completed else "m.login.dummy"
+            stage = (
+                "m.login.registration_token"
+                if "m.login.registration_token" not in completed
+                else "m.login.dummy"
+            )
             auth: dict[str, Any] = {"type": stage, "session": answer["session"]}
             if stage == "m.login.registration_token":
                 auth["token"] = token
@@ -291,7 +349,7 @@ class MatrixHomeserver:
         """A password to type once on a phone: 20 letters and digits in groups of five."""
         alphabet = string.ascii_letters + string.digits
         raw = "".join(secrets.choice(alphabet) for _ in range(20))
-        return "-".join(raw[i:i + 5] for i in range(0, 20, 5))
+        return "-".join(raw[i : i + 5] for i in range(0, 20, 5))
 
     # -- commands -------------------------------------------------------------------------------
 
@@ -303,9 +361,12 @@ class MatrixHomeserver:
             int: The exit code.
         """
         from dreamference.node.node_identity import NodeIdentity
+
         if not NodeIdentity.read():
-            print("❌ The homeserver belongs on a node, which is always on: run this on the machine that serves "
-                  "the model (`ling-admin node enable`).")
+            print(
+                "❌ The homeserver belongs on a node, which is always on: run this on the machine that serves "
+                "the model (`ling-admin node enable`)."
+            )
             return 1
         name = cls.tailscale_name()
         if not name:
@@ -313,13 +374,19 @@ class MatrixHomeserver:
             return 1
         admin = cls._load("matrix-admin.json")
         if admin.get("server_name") and admin["server_name"] != name:
-            print(f"❌ This homeserver is {admin['server_name']}, but Tailscale now names this machine {name}.\n"
-                  "   A Matrix server name cannot change: every account's id ends in it. Rename the machine back in "
-                  "Tailscale, or delete the homeserver and its accounts with `ling-admin matrix remove --yes` and "
-                  "start again.")
+            print(
+                f"❌ This homeserver is {admin['server_name']}, but Tailscale now names this machine {name}.\n"
+                "   A Matrix server name cannot change: every account's id ends in it. Rename the machine back in "
+                "Tailscale, or delete the homeserver and its accounts with `ling-admin matrix remove --yes` and "
+                "start again."
+            )
             return 1
         if not admin:
-            admin = {"server_name": name, "registration_token": secrets.token_hex(32), "push": False}
+            admin = {
+                "server_name": name,
+                "registration_token": secrets.token_hex(32),
+                "push": False,
+            }
             cls._save("matrix-admin.json", admin)
         push = bool(admin.get("push"))
         if not push and not cls.ensure_network():
@@ -330,8 +397,11 @@ class MatrixHomeserver:
         else:
             if push:
                 from dreamference.chat.sidecar_network import SidecarNetwork
+
                 SidecarNetwork.ensure()
-            created = cls._run(cls.run_command(name, admin["registration_token"], push), timeout=600)
+            created = cls._run(
+                cls.run_command(name, admin["registration_token"], push), timeout=600
+            )
             if created.returncode != 0:
                 print(f"❌ The homeserver did not start: {created.stderr.strip()[:500]}")
                 return 1
@@ -340,16 +410,22 @@ class MatrixHomeserver:
             print("❌ Could not start the loopback proxy (systemd user units).")
             return 1
         if not cls.wait_until_answering():
-            print(f"❌ The homeserver is not answering on {PROXY_URL}; `docker logs {MATRIX_CONTAINER}` says why.")
+            print(
+                f"❌ The homeserver is not answering on {PROXY_URL}; `docker logs {MATRIX_CONTAINER}` says why."
+            )
             return 1
         config = cls._load("matrix.json")
         token = config.get("access_token")
         if token:
-            status, _ = cls._http("GET", f"{PROXY_URL}/_matrix/client/v3/account/whoami", token=token)
+            status, _ = cls._http(
+                "GET", f"{PROXY_URL}/_matrix/client/v3/account/whoami", token=token
+            )
             if status != 200:
                 token = None
         if not token:
-            answer = cls.register(BOT_LOCALPART, cls.password() + cls.password(), admin["registration_token"])
+            answer = cls.register(
+                BOT_LOCALPART, cls.password() + cls.password(), admin["registration_token"]
+            )
             if not answer or not answer.get("access_token"):
                 print("❌ Could not create the bot account @mightling.")
                 return 1
@@ -359,11 +435,17 @@ class MatrixHomeserver:
         cls._save("matrix.json", config)
         served = cls._run(["tailscale", "serve", "--bg", "--https=443", PROXY_URL], timeout=60)
         if served.returncode != 0:
-            print("⚠️  `tailscale serve` refused; if HTTPS is off for your tailnet, turn it on once in the Tailscale "
-                  f"admin console (DNS → HTTPS Certificates), then run this again. ({served.stderr.strip()[:300]})")
-        print(f"✅ The Matrix homeserver is running as https://{name} (no route out of this machine).")
+            print(
+                "⚠️  `tailscale serve` refused; if HTTPS is off for your tailnet, turn it on once in the Tailscale "
+                f"admin console (DNS → HTTPS Certificates), then run this again. ({served.stderr.strip()[:300]})"
+            )
+        print(
+            f"✅ The Matrix homeserver is running as https://{name} (no route out of this machine)."
+        )
         if not config["allowed"]:
-            print("   Next: `ling-admin matrix add-user <name>` for your account, then `ling chat start`.")
+            print(
+                "   Next: `ling-admin matrix add-user <name>` for your account, then `ling chat start`."
+            )
         return 0
 
     @classmethod
@@ -379,25 +461,31 @@ class MatrixHomeserver:
         password = cls.password()
         answer = cls.register(localpart, password, admin["registration_token"])
         if not answer or not answer.get("user_id"):
-            print(f"❌ Could not create {localpart} (is the name taken, or the homeserver stopped?).")
+            print(
+                f"❌ Could not create {localpart} (is the name taken, or the homeserver stopped?)."
+            )
             return 1
         config = cls._load("matrix.json")
         allowed = config.setdefault("allowed", [])
         if answer["user_id"] not in allowed:
             allowed.append(answer["user_id"])
         cls._save("matrix.json", config)
-        print(f"✅ Created {answer['user_id']}. Its password, shown this once and stored nowhere:\n\n"
-              f"    {password}\n\n"
-              f"In Element X on your phone (with Tailscale on): sign in to https://{admin['server_name']} as "
-              f"{localpart} with that password, then accept the invite from Mightling. "
-              "`ling chat start` (or a restart of it) opens the room.")
+        print(
+            f"✅ Created {answer['user_id']}. Its password, shown this once and stored nowhere:\n\n"
+            f"    {password}\n\n"
+            f"In Element X on your phone (with Tailscale on): sign in to https://{admin['server_name']} as "
+            f"{localpart} with that password, then accept the invite from Mightling. "
+            "`ling chat start` (or a restart of it) opens the room."
+        )
         return 0
 
     @classmethod
     def stop(cls) -> int:
-        """Turns the homeserver off until the next `start`: `tailscale serve` no longer offers it, the
-        proxy socket is disabled (so a reboot does not listen again) and the container is stopped
-        (`unless-stopped` keeps it stopped). The accounts and messages stay in the volume.
+        """Turns the homeserver off until the next `start`.
+
+        `tailscale serve` no longer offers it, the proxy socket is disabled (so a reboot does not
+        listen again) and the container is stopped (`unless-stopped` keeps it stopped). The accounts
+        and messages stay in the volume.
         """
         cls._run(["tailscale", "serve", "--https=443", "off"], timeout=60)
         cls._run(["systemctl", "--user", "disable", "--now", PROXY_SOCKET_UNIT], timeout=60)
@@ -414,11 +502,17 @@ class MatrixHomeserver:
             print("Matrix: not set up (`ling-admin matrix start`).")
             return 0
         print(f"Server name: {admin['server_name']}")
-        print(f"Container:   {'running' if cls.container_running() else 'stopped'} ({MATRIX_CONTAINER})")
-        print(f"Network:     {'sidecar network, push notifications can leave' if admin.get('push') else 'internal, no route out'}")
+        print(
+            f"Container:   {'running' if cls.container_running() else 'stopped'} ({MATRIX_CONTAINER})"
+        )
+        print(
+            f"Network:     {'sidecar network, push notifications can leave' if admin.get('push') else 'internal, no route out'}"
+        )
         print(f"Tailscale:   {cls.tailscale_name() or 'not running'}")
         print(f"Bot:         {config.get('user_id', 'not created')}")
-        print(f"Allowed:     {', '.join(config.get('allowed', [])) or 'nobody yet (`ling-admin matrix add-user <name>`)'}")
+        print(
+            f"Allowed:     {', '.join(config.get('allowed', [])) or 'nobody yet (`ling-admin matrix add-user <name>`)'}"
+        )
         return 0
 
     @classmethod
@@ -432,15 +526,19 @@ class MatrixHomeserver:
         cls._save("matrix-admin.json", admin)
         cls._run(["docker", "rm", "-f", MATRIX_CONTAINER], timeout=660)
         if on:
-            print("⚠️  Push on: the homeserver can now reach Element's push gateway. A push carries an event id, "
-                  "not the message, but it does say that a message arrived, and when.")
+            print(
+                "⚠️  Push on: the homeserver can now reach Element's push gateway. A push carries an event id, "
+                "not the message, but it does say that a message arrived, and when."
+            )
         return cls.start()
 
     @classmethod
     def remove(cls, confirmed: bool) -> int:
         """Deletes the homeserver, its volume (every account and message) and the bridge's Matrix files."""
         if not confirmed:
-            print("This deletes the homeserver, every account on it and every message. Run it again with --yes.")
+            print(
+                "This deletes the homeserver, every account on it and every message. Run it again with --yes."
+            )
             return 1
         cls._run(["tailscale", "serve", "--https=443", "off"], timeout=60)
         cls._run(["systemctl", "--user", "disable", "--now", PROXY_SOCKET_UNIT], timeout=60)

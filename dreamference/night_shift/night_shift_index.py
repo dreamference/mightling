@@ -1,4 +1,5 @@
-"""Refreshing a repository's code index before its night tasks start
+"""Refreshing a repository's code index before its night tasks start.
+
 (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §6.3).
 
 A night task's `ling exec` starts `ling-code session`, which re-indexes while the task is
@@ -53,8 +54,15 @@ class NightShiftIndex:
         env[NIGHT_RUN_ENV] = "1"
         try:
             process = subprocess.Popen(
-                [binary, "index", "--exact", "--wait"], cwd=repo, env=env, stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+                [binary, "index", "--exact", "--wait"],
+                cwd=repo,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                start_new_session=True,
+            )
         except OSError as error:
             return f"not refreshed: {error}"
         try:
@@ -69,8 +77,9 @@ class NightShiftIndex:
 
     @classmethod
     def summarise(cls, output: str) -> str:
-        """Condenses `ling-code index --wait` output: one `<unit>: <status>` line per run, and
-        `skipped: <why>` lines.
+        """Condenses `ling-code index --wait` output.
+
+        One `<unit>: <status>` line per run, and `skipped: <why>` lines.
 
         Args:
             output: What the command printed.
@@ -108,4 +117,6 @@ class NightShiftIndex:
                 continue
         # The night run started with no index scope active (admission refuses otherwise), so
         # whatever is in the slice now is this run's.
-        subprocess.run(["systemctl", "--user", "stop", INDEX_SLICE], capture_output=True, timeout=60)
+        subprocess.run(
+            ["systemctl", "--user", "stop", INDEX_SLICE], capture_output=True, timeout=60
+        )

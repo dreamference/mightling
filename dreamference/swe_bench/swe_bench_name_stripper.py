@@ -28,10 +28,17 @@ from typing import Final
 
 # The phrase a name is replaced with, by kind: `[file 1]`, `[module 1]`, `[class 1]`, `[function 1]`.
 # A file and its module share a number: `[file 2]` and `[module 2]` are the same file.
-PHRASES: Final[dict] = {"file": "file", "module": "module", "class": "class", "function": "function"}
+PHRASES: Final[dict] = {
+    "file": "file",
+    "module": "module",
+    "class": "class",
+    "function": "function",
+}
 
 # Names too general to replace even in code position: they name no place in the repository.
-GENERIC: Final[frozenset] = frozenset({"__init__", "__call__", "__str__", "__repr__", "self", "cls", "main"})
+GENERIC: Final[frozenset] = frozenset(
+    {"__init__", "__call__", "__str__", "__repr__", "self", "cls", "main"}
+)
 
 # The system word list that tells an English word from a name that can only be code.
 WORD_LIST: Final[str] = "/usr/share/dict/words"
@@ -39,7 +46,9 @@ WORD_LIST: Final[str] = "/usr/share/dict/words"
 DIFF_FILE: Final = re.compile(r"^diff --git a/(\S+) b/", re.M)
 HUNK_CONTEXT: Final = re.compile(r"^@@[^@]*@@\s*(.*)$", re.M)
 DEFINITION: Final = re.compile(r"^\s*(?:async\s+)?(def|class)\s+([A-Za-z_]\w*)")
-CHANGED_DEFINITION: Final = re.compile(r"^[+-](?![+-])\s*(?:async\s+)?(def|class)\s+([A-Za-z_]\w*)", re.M)
+CHANGED_DEFINITION: Final = re.compile(
+    r"^[+-](?![+-])\s*(?:async\s+)?(def|class)\s+([A-Za-z_]\w*)", re.M
+)
 
 
 class SweBenchNameStripper:
@@ -50,9 +59,11 @@ class SweBenchNameStripper:
 
     @classmethod
     def english(cls) -> frozenset[str]:
-        """Returns:
-        FrozenSet[str]: The lowercase words of the system word list; empty when there is none,
-        which `is_english` reads as "every word is English".
+        """The english.
+
+        Returns:
+            FrozenSet[str]: The lowercase words of the system word list; empty when there is none,
+            which `is_english` reads as "every word is English".
         """
         if cls._english is None:
             words: set = set()
@@ -64,7 +75,9 @@ class SweBenchNameStripper:
 
     @classmethod
     def is_english(cls, word: str) -> bool:
-        """Args:
+        """Tells whether it is english.
+
+        Args:
             word: A plain name, letters only.
 
         Returns:
@@ -109,14 +122,19 @@ class SweBenchNameStripper:
                 found.setdefault(name, ("class" if match.group(1) == "class" else "function", name))
         for kind, name in CHANGED_DEFINITION.findall(patch or ""):
             found.setdefault(name, ("class" if kind == "class" else "function", name))
-        triples = [(name, kind, group) for name, (kind, group) in found.items()
-                   if name not in GENERIC and len(name) > 2]
+        triples = [
+            (name, kind, group)
+            for name, (kind, group) in found.items()
+            if name not in GENERIC and len(name) > 2
+        ]
         return sorted(triples, key=lambda triple: (-len(triple[0]), triple[0]))
 
     @classmethod
     def distinctive(cls, name: str) -> bool:
-        """Whether a name can only be code: it has an underscore, a dot, a slash, a digit, or a capital
-        after its first letter (`get_meta`, `QuerySet`, `sql/compiler.py`).
+        """Whether a name can only be code.
+
+        It has an underscore, a dot, a slash, a digit, or a capital after its first letter
+        (`get_meta`, `QuerySet`, `sql/compiler.py`).
 
         Args:
             name: The name.
@@ -147,8 +165,10 @@ class SweBenchNameStripper:
             return re.compile(whole)
         if not cls.is_english(name):
             return re.compile(rf"(?<![\w'\"]){escaped}(?![\w'\"])")
-        return re.compile(rf"(?:(?<=[.`]){escaped}(?![\w])|(?<=, in ){escaped}(?![\w])"
-                          rf"|(?<![\w]){escaped}(?=\(|`|\.py\b))")
+        return re.compile(
+            rf"(?:(?<=[.`]){escaped}(?![\w])|(?<=, in ){escaped}(?![\w])"
+            rf"|(?<![\w]){escaped}(?=\(|`|\.py\b))"
+        )
 
     @classmethod
     def strip(cls, problem_statement: str, patch: str) -> tuple[str, dict[str, str]]:

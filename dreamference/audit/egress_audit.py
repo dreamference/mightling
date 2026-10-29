@@ -1,4 +1,5 @@
 """`ling-admin audit egress`: where does a `ling` session connect?
+
 (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3)
 
 This module provides the EgressAudit class. It runs one real `ling` session under `strace`
@@ -133,13 +134,19 @@ class EgressAudit:
         """
         parsed = urlparse(vllm_host if "://" in vllm_host else f"http://{vllm_host}")
         model_port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        return {model_port: "model server", GMAIL_PORT: "Gmail search service", SEARXNG_PORT: "SearXNG",
-                IMAGE_SEARCH_PORT: "image search service"}
+        return {
+            model_port: "model server",
+            GMAIL_PORT: "Gmail search service",
+            SEARXNG_PORT: "SearXNG",
+            IMAGE_SEARCH_PORT: "image search service",
+        }
 
     @classmethod
     def judge(cls, trace: EgressTrace, allowed: dict[int, str], replied: bool) -> EgressVerdict:
-        """Decides the verdict (§3.2): a pass needs every IP destination on loopback and on the
-        allowlist, no DNS query, and no git command that reaches a network.
+        """Decides the verdict (§3.2).
+
+        A pass needs every IP destination on loopback and on the allowlist, no DNS query, and no git
+        command that reaches a network.
 
         Args:
             trace (EgressTrace): What the session did.
@@ -157,10 +164,14 @@ class EgressAudit:
             if not StraceParser.is_loopback(address):
                 problems.append(f"connected to {target} ({count}x): not on this machine")
             elif int(port) == CHATGPT_BLACKHOLE_PORT:
-                problems.append(f"connected to {target} ({count}x): a call to the upstream vendor's backend that no patch closes "
-                                "(it failed here only because the launcher redirects that URL)")
+                problems.append(
+                    f"connected to {target} ({count}x): a call to the upstream vendor's backend that no patch closes "
+                    "(it failed here only because the launcher redirects that URL)"
+                )
             elif int(port) not in allowed:
-                problems.append(f"connected to {target} ({count}x): a local port that is not on the allowlist")
+                problems.append(
+                    f"connected to {target} ({count}x): a local port that is not on the allowlist"
+                )
         for name, count in sorted(trace.dns_names.items()):
             problems.append(f"asked a resolver for {name} ({count}x)")
         if trace.dns_servers and not trace.dns_names:
@@ -171,17 +182,27 @@ class EgressAudit:
         if problems:
             return EgressVerdict(FAIL, problems)
         if not replied:
-            return EgressVerdict(TRACE_FAILED, ["the session produced no reply, so the trace shows nothing"])
+            return EgressVerdict(
+                TRACE_FAILED, ["the session produced no reply, so the trace shows nothing"]
+            )
         if not trace.processes:
             return EgressVerdict(TRACE_FAILED, ["strace recorded no process: it could not attach"])
         return EgressVerdict(PASS)
 
     @classmethod
-    def trace_session(cls, mightling_bin: str, vllm_host: str, prompt: str, work_dir: str,
-                      session: str = EXEC, app_bin: str | None = None) -> tuple[EgressTrace, bool, str]:
-        """Runs one `ling` session under strace in a throwaway repository with a throwaway
-        `CODEX_HOME`, so no login, history or config of the user's influences the result, and
-        none is touched.
+    def trace_session(
+        cls,
+        mightling_bin: str,
+        vllm_host: str,
+        prompt: str,
+        work_dir: str,
+        session: str = EXEC,
+        app_bin: str | None = None,
+    ) -> tuple[EgressTrace, bool, str]:
+        """Runs one `ling` session under strace in a throwaway repository.
+
+        The session gets a throwaway `CODEX_HOME`, so no login, history or config of the user's
+        influences the result, and none is touched.
 
         An `exec` session writes its reply to a file. A `tui` session is the interface itself on
         a pseudo-terminal (TuiSession): the throwaway home already trusts the throwaway
@@ -217,34 +238,67 @@ class EgressAudit:
         os.makedirs(home)
         with open(os.path.join(repo, "README.md"), "w") as handle:
             handle.write("A throwaway repository for `ling-admin audit egress`.\n")
-        git = ["git", "-c", "user.name=audit", "-c", "user.email=audit@localhost", "-c", "commit.gpgsign=false"]
+        git = [
+            "git",
+            "-c",
+            "user.name=audit",
+            "-c",
+            "user.email=audit@localhost",
+            "-c",
+            "commit.gpgsign=false",
+        ]
         for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "audit"]):
             subprocess.run(git + args, cwd=repo, capture_output=True, check=False)
         config = os.path.join(work_dir, "config.toml")
         with open(config, "w") as handle:
-            handle.write(f"vllm_host = {json.dumps(vllm_host)}\ncode_index_enabled = false\nmightling_docs = false\n")
+            handle.write(
+                f"vllm_host = {json.dumps(vllm_host)}\ncode_index_enabled = false\nmightling_docs = false\n"
+            )
         trace_path = os.path.join(work_dir, "trace.txt")
         reply_path = os.path.join(work_dir, "reply.txt")
         env = dict(os.environ)
-        env.update({"CODEX_HOME": home, "DREAMFERENCE_CONFIG_PATH": config, "DREAMFERENCE_VLLM_HOST": vllm_host})
+        env.update(
+            {
+                "CODEX_HOME": home,
+                "DREAMFERENCE_CONFIG_PATH": config,
+                "DREAMFERENCE_VLLM_HOST": vllm_host,
+            }
+        )
         # The environment wins over the config file: a caller's DREAMFERENCE_MIGHTLING_DOCS must
         # not start a file index over the real home's folders from the throwaway CODEX_HOME.
         env["DREAMFERENCE_MIGHTLING_DOCS"] = "0"
         # The base: the audited session is the same whatever adapter the user starts sessions with.
         from dreamference.runner.codex_installer import ADAPTER_ENV, WORKTREE_ENV
+
         env[ADAPTER_ENV] = ""
         # In place: the audited TUI session never moves into a worktree of the throwaway repository.
         env[WORKTREE_ENV] = "off"
         # `-yy` labels each descriptor with its socket kind and inode, which is what tells a UDP
         # route lookup from a connection (StraceParser).
-        strace = ["strace", "-f", "-qq", "-yy", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path, mightling_bin]
+        strace = [
+            "strace",
+            "-f",
+            "-qq",
+            "-yy",
+            "-e",
+            f"trace={TRACED_SYSCALLS}",
+            "-s",
+            "256",
+            "-o",
+            trace_path,
+            mightling_bin,
+        ]
         if session in (WEB, CLAUDE):
             # Both answer on their own channel: the web server to its client, print mode on stdout.
             replied = (
                 cls._web_session(strace, mightling_bin, repo, env, work_dir, home, prompt)
                 if session == WEB
                 else CompatPrintSession.run(
-                    CompatPrintSession.command(strace, prompt), Path(repo), env, Path(reply_path), SESSION_TIMEOUT_S
+                    CompatPrintSession.command(strace, prompt),
+                    Path(repo),
+                    env,
+                    Path(reply_path),
+                    SESSION_TIMEOUT_S,
                 )
             )
             return cls._read_trace(trace_path), replied, trace_path
@@ -259,7 +313,13 @@ class EgressAudit:
         if session == APP:
             scratch_home = os.path.join(work_dir, "home-dir")
             os.makedirs(scratch_home)
-            env.update({"HOME": scratch_home, "MIGHTLING_APP_AUDIT": str(APP_SESSION_S), "MIGHTLING_BIN": mightling_bin})
+            env.update(
+                {
+                    "HOME": scratch_home,
+                    "MIGHTLING_APP_AUDIT": str(APP_SESSION_S),
+                    "MIGHTLING_BIN": mightling_bin,
+                }
+            )
             # The preview tab under audit (DESKTOP_PARITY §5): the audit's page, which reaches for the internet.
             if cls.preview_url:
                 env["MIGHTLING_APP_AUDIT_PREVIEW"] = cls.preview_url
@@ -270,8 +330,15 @@ class EgressAudit:
         try:
             # Its own process group, so a session that never answers is stopped with everything
             # it started: strace alone, killed, would leave `ling` waiting for the server.
-            process = subprocess.Popen(command, cwd=repo, env=env, stdin=subprocess.DEVNULL,
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            process = subprocess.Popen(
+                command,
+                cwd=repo,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
             try:
                 exited = process.wait(timeout=SESSION_TIMEOUT_S)
             except subprocess.TimeoutExpired:
@@ -286,7 +353,9 @@ class EgressAudit:
             pass
         if session == APP:
             return cls._read_trace(trace_path), exited == 0, trace_path
-        replied = os.path.isfile(reply_path) and bool(open(reply_path, errors="replace").read().strip())
+        replied = os.path.isfile(reply_path) and bool(
+            open(reply_path, errors="replace").read().strip()
+        )
         return cls._read_trace(trace_path), replied, trace_path
 
     @classmethod
@@ -297,19 +366,29 @@ class EgressAudit:
             Optional[str]: Its path, or None when neither exists.
         """
         from dreamference.chat.desktop_runner import DesktopRunner
+
         return DesktopRunner.binary_path() or shutil.which("ling-app")
 
     @classmethod
-    def _web_session(cls, strace: list[str], mightling_bin: str, repo: str, env: dict[str, str], work_dir: str,
-                     home: str, prompt: str) -> bool:
-        """Traces `ling web serve` on a free loopback port while `ling web ask`, untraced, asks it
-        one question through the bridge (specs/DREAMFERENCE_MIGHTLING_ASK.md §13), then, where
-        image search is set up here, a second that calls `image_search` (§9, §19.6). Everything
-        the server starts is traced with it: the app-server it launches on its own socket, `ling
-        prompt show ask --composed` and the tool's MCP server. `HOME` and `XDG_RUNTIME_DIR` are
-        scratch too, so the server finds no advertised node, no user unit and no app-server of the
-        user's to join; the scratch home is a node only for the image search turn
-        (`prepare_image_search`).
+    def _web_session(
+        cls,
+        strace: list[str],
+        mightling_bin: str,
+        repo: str,
+        env: dict[str, str],
+        work_dir: str,
+        home: str,
+        prompt: str,
+    ) -> bool:
+        """Traces `ling web serve` on a free loopback port while `ling web ask`, untraced.
+
+        Asks it one question through the bridge (specs/DREAMFERENCE_MIGHTLING_ASK.md §13), then,
+        where image search is set up here, a second that calls `image_search` (§9, §19.6).
+        Everything the server starts is traced with it: the app-server it launches on its own
+        socket, `ling prompt show ask --composed` and the tool's MCP server. `HOME` and
+        `XDG_RUNTIME_DIR` are scratch too, so the server finds no advertised node, no user unit and
+        no app-server of the user's to join; the scratch home is a node only for the image search
+        turn (`prepare_image_search`).
 
         Args:
             strace (List[str]): The strace command line, ending with the `ling` executable.
@@ -329,30 +408,51 @@ class EgressAudit:
         os.makedirs(user_home)
         env.update({"HOME": user_home, "XDG_RUNTIME_DIR": run_dir})
         image_search = cls.prepare_image_search(user_home)
-        cls.image_turn = "skipped: image search is not set up on this machine (`ling-admin images start`)"
+        cls.image_turn = (
+            "skipped: image search is not set up on this machine (`ling-admin images start`)"
+        )
         if image_search:
             problem = cls.image_tool_problem(user_home, env)
             if problem:
                 image_search = False
-                cls.image_turn = f"not asked: the image_search tool's server would not start: {problem}"
+                cls.image_turn = (
+                    f"not asked: the image_search tool's server would not start: {problem}"
+                )
         port = cls.free_port()
         server_file = os.path.join(home, "web", "server.json")
         try:
-            server = subprocess.Popen(strace + ["web", "serve", "--port", str(port)], cwd=repo, env=env,
-                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                      stderr=subprocess.DEVNULL, start_new_session=True)
+            server = subprocess.Popen(
+                strace + ["web", "serve", "--port", str(port)],
+                cwd=repo,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
         except OSError:
             return False
         replied = False
         try:
             deadline = time.monotonic() + WEB_START_TIMEOUT_S
-            while not os.path.isfile(server_file) and server.poll() is None and time.monotonic() < deadline:
+            while (
+                not os.path.isfile(server_file)
+                and server.poll() is None
+                and time.monotonic() < deadline
+            ):
                 time.sleep(0.2)
             if os.path.isfile(server_file):
                 try:
-                    ask = subprocess.run([mightling_bin, "web", "ask", "--port", str(port), prompt], cwd=repo, env=env,
-                                         stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                                         timeout=SESSION_TIMEOUT_S, check=False)
+                    ask = subprocess.run(
+                        [mightling_bin, "web", "ask", "--port", str(port), prompt],
+                        cwd=repo,
+                        env=env,
+                        stdin=subprocess.DEVNULL,
+                        capture_output=True,
+                        text=True,
+                        timeout=SESSION_TIMEOUT_S,
+                        check=False,
+                    )
                     replied = ask.returncode == 0 and bool(ask.stdout.strip())
                 except (OSError, subprocess.TimeoutExpired):
                     replied = False
@@ -371,8 +471,9 @@ class EgressAudit:
 
     @classmethod
     def write_admin(cls, path: str) -> None:
-        """Writes the `ling-admin` the traced session starts as the `image_search` tool's server: this
-        interpreter running this `dreamference`, the code under audit. Not a link to
+        """Writes the `ling-admin` the traced session starts as the `image_search` tool's server.
+
+        This interpreter running this `dreamference`, the code under audit. Not a link to
         `~/.local/bin/ling-admin`: that runs whichever installation `codex build` last linked, and
         on 2026-10-15 it was main's environment, which has no `images mcp`, so the tool never
         started, the model answered without an image and the sidecar was never asked.
@@ -387,19 +488,24 @@ class EgressAudit:
         root = os.path.dirname(os.path.dirname(os.path.abspath(dreamference.__file__)))
         # `-I`: no PYTHONPATH, no user site and not the working directory, so nothing but `root`
         # decides which `dreamference` runs.
-        code = (f"import sys; sys.path.insert(0, {root!r}); sys.argv[0] = 'ling-admin'; "
-                "from dreamference.cli import main; main()")
+        code = (
+            f"import sys; sys.path.insert(0, {root!r}); sys.argv[0] = 'ling-admin'; "
+            "from dreamference.cli import main; main()"
+        )
         with open(path, "w") as handle:
-            handle.write(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -I -c {shlex.quote(code)} "$@"\n')
+            handle.write(
+                f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -I -c {shlex.quote(code)} "$@"\n'
+            )
         os.chmod(path, 0o755)
 
     @classmethod
     def prepare_image_search(cls, user_home: str) -> bool:
-        """Lays out the scratch home so the traced session is offered `image_search`, as the launcher
-        offers it on a node (`ling-rs/src/images.rs`): a node id, a copy of this machine's image
-        search secret (so the tool reaches the real sidecar) and the `ling-admin` of the code under
-        audit (`write_admin`). Nothing is laid out, and the turn is skipped, where image search was
-        never set up.
+        """Lays out the scratch home so the traced session is offered `image_search`.
+
+        As the launcher offers it on a node (`ling-rs/src/images.rs`): a node id, a copy of this
+        machine's image search secret (so the tool reaches the real sidecar) and the `ling-admin` of
+        the code under audit (`write_admin`). Nothing is laid out, and the turn is skipped, where
+        image search was never set up.
 
         Args:
             user_home (str): The session's scratch `HOME`.
@@ -410,6 +516,7 @@ class EgressAudit:
         import uuid
 
         from dreamference.chat.image_search_sidecar import IMAGE_SEARCH_SECRET_FILE
+
         if not os.path.isfile(IMAGE_SEARCH_SECRET_FILE):
             return False
         config = os.path.join(user_home, ".config", "dreamference")
@@ -429,8 +536,9 @@ class EgressAudit:
 
     @classmethod
     def image_tool_problem(cls, user_home: str, env: dict[str, str]) -> str:
-        """Starts the scratch home's `ling-admin images mcp` as Codex will and asks for its tools, so
-        a server that cannot start is named instead of showing up as an answer without an image.
+        """Starts the scratch home's `ling-admin images mcp` as Codex will and asks for its tools.
+
+        So a server that cannot start is named instead of showing up as an answer without an image.
         `tools/list` makes no connection, so the trace is not touched.
 
         Args:
@@ -441,15 +549,18 @@ class EgressAudit:
             str: "" when the server lists `image_search`, else why not.
         """
         from dreamference.chat.image_search_mcp import ImageSearchMcp
+
         return ImageSearchMcp.probe(os.path.join(user_home, ".local", "bin", "ling-admin"), env)
 
     @classmethod
     def stored_images(cls) -> set:
-        """Returns:
-        set: The image ids in this machine's image search store. Only the service writes there
-        (the service logs no request), so a new one, or one an answer names, shows it was asked.
+        """The image ids in this machine's image search store.
+
+        Only the service writes there (the service logs no request), so a new one, or one an answer
+        names, shows it was asked.
         """
         from dreamference.chat.image_search_sidecar import IMAGE_STORE_DIR
+
         try:
             return {name[:-4] for name in os.listdir(IMAGE_STORE_DIR) if name.endswith(".jpg")}
         except OSError:
@@ -467,29 +578,40 @@ class EgressAudit:
 
         before = cls.stored_images()
         try:
-            ask = subprocess.run([mightling_bin, "web", "ask", "--port", str(port), IMAGE_PROMPT], cwd=repo, env=env,
-                                 stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                                 timeout=SESSION_TIMEOUT_S, check=False)
+            ask = subprocess.run(
+                [mightling_bin, "web", "ask", "--port", str(port), IMAGE_PROMPT],
+                cwd=repo,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=SESSION_TIMEOUT_S,
+                check=False,
+            )
         except (OSError, subprocess.TimeoutExpired):
             return "no answer"
         if ask.returncode != 0 or not ask.stdout.strip():
             return "no answer"
         after = cls.stored_images()
         new = len(after - before)
-        stored = f"; the image search service stored {new} new image{'s' if new != 1 else ''}" if new else ""
+        stored = (
+            f"; the image search service stored {new} new image{'s' if new != 1 else ''}"
+            if new
+            else ""
+        )
         named = re.findall(r"\]\(/images/([0-9a-f]{16})\.jpg\)", ask.stdout)
         if not named:
             return f"answered, without an image{stored}"
         if any(image in after for image in named):
             return f"answered with an image from the image search service ({named[0]}.jpg){stored}"
-        return (f"answered with an image line, but {named[0]}.jpg is not in the image search store: "
-                f"the service did not answer it{stored}")
+        return (
+            f"answered with an image line, but {named[0]}.jpg is not in the image search store: "
+            f"the service did not answer it{stored}"
+        )
 
     @classmethod
     def free_port(cls) -> int:
-        """Returns:
-        int: A loopback port nothing listens on now.
-        """
+        """A loopback port nothing listens on now."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             probe.bind(("127.0.0.1", 0))
             return int(probe.getsockname()[1])
@@ -514,7 +636,9 @@ class EgressAudit:
         from dreamference.runner.codex_installer import CodexInstaller
 
         try:
-            with open(os.path.join(CodexInstaller.home_dir(), "chat", name), encoding="utf-8") as handle:
+            with open(
+                os.path.join(CodexInstaller.home_dir(), "chat", name), encoding="utf-8"
+            ) as handle:
                 value = json.load(handle)
         except (OSError, ValueError):
             return {}
@@ -533,7 +657,9 @@ class EgressAudit:
         """
         names = set()
         try:
-            targets = [entry for entry in os.listdir(cls.SYSTEMD_SYSTEM_DIR) if entry.endswith(".wants")]
+            targets = [
+                entry for entry in os.listdir(cls.SYSTEMD_SYSTEM_DIR) if entry.endswith(".wants")
+            ]
         except OSError:
             return []
         for target in targets:
@@ -542,17 +668,21 @@ class EgressAudit:
             except OSError:
                 continue
             for link in links:
-                if link.startswith(SIGNAL_INSTANCE_PREFIX) and link.endswith(SIGNAL_INSTANCE_SUFFIX):
-                    name = link[len(SIGNAL_INSTANCE_PREFIX):-len(SIGNAL_INSTANCE_SUFFIX)]
+                if link.startswith(SIGNAL_INSTANCE_PREFIX) and link.endswith(
+                    SIGNAL_INSTANCE_SUFFIX
+                ):
+                    name = link[len(SIGNAL_INSTANCE_PREFIX) : -len(SIGNAL_INSTANCE_SUFFIX)]
                     if name:
                         names.add(name)
         return sorted(names)
 
     @classmethod
     def declared_exceptions(cls) -> list[str]:
-        """Names what the user turned on that reaches outside this machine by design, which no traced
-        session shows: the messenger bridges, each off until its own command turns it on
-        (SIGNAL §10, CHAT §10). Off, none of them is named and none adds a destination to the trace.
+        """Names what the user turned on that reaches outside this machine by design.
+
+        Which no traced session shows: the messenger bridges, each off until its own command turns
+        it on (SIGNAL §10, CHAT §10). Off, none of them is named and none adds a destination to the
+        trace.
 
         - Signal: the system unit `mightling-signal.service` (`ling signal setup`), and one line
           for each further bridge, `mightling-signal@<name>.service` (`ling signal setup --name`,
@@ -573,27 +703,42 @@ class EgressAudit:
             return []
         lines: list[str] = []
         if cls._unit_enabled(SIGNAL_UNIT, user=False):
-            lines.append(f"Signal bridge enabled ({SIGNAL_UNIT}): signal-cli connects to Signal's servers, outside this trace. "
-                         "`ling signal remove` turns it off.")
+            lines.append(
+                f"Signal bridge enabled ({SIGNAL_UNIT}): signal-cli connects to Signal's servers, outside this trace. "
+                "`ling signal remove` turns it off."
+            )
         for name in cls._signal_instances():
             unit = f"{SIGNAL_INSTANCE_PREFIX}{name}{SIGNAL_INSTANCE_SUFFIX}"
             if cls._unit_enabled(unit, user=False):
-                lines.append(f"Signal bridge `{name}` enabled ({unit}): signal-cli connects to Signal's servers, outside this trace. "
-                             f"`ling signal remove --name {name}` turns it off.")
+                lines.append(
+                    f"Signal bridge `{name}` enabled ({unit}): signal-cli connects to Signal's servers, outside this trace. "
+                    f"`ling signal remove --name {name}` turns it off."
+                )
         if cls._unit_enabled(CHAT_UNIT, user=True) and cls._chat_file("telegram.json").get("token"):
-            lines.append(f"Telegram bridge enabled ({CHAT_UNIT}): `ling chat serve` connects to Telegram's Bot API, outside this trace. "
-                         "`ling chat telegram off` or `ling chat stop` turns it off.")
+            lines.append(
+                f"Telegram bridge enabled ({CHAT_UNIT}): `ling chat serve` connects to Telegram's Bot API, outside this trace. "
+                "`ling chat telegram off` or `ling chat stop` turns it off."
+            )
         if cls._unit_enabled(MATRIX_PROXY_UNIT, user=True):
             push = bool(cls._chat_file("matrix-admin.json").get("push"))
-            lines.append("Matrix homeserver enabled (`ling-admin matrix`): offered to your tailnet by `tailscale serve`"
-                         + ("; push is on, so push notifications (event ids, no text) can leave this machine" if push else ", with no route out")
-                         + ". `ling-admin matrix stop` turns it off.")
+            lines.append(
+                "Matrix homeserver enabled (`ling-admin matrix`): offered to your tailnet by `tailscale serve`"
+                + (
+                    "; push is on, so push notifications (event ids, no text) can leave this machine"
+                    if push
+                    else ", with no route out"
+                )
+                + ". `ling-admin matrix stop` turns it off."
+            )
         if cls._unit_enabled(REMOTE_TUNNEL_UNIT, user=True):
             from dreamference.remote.remote_settings import RemoteSettings
+
             box = (RemoteSettings.read() or {}).get("dns_name", "the box")
-            lines.append(f"Remote access enabled ({REMOTE_TUNNEL_UNIT}): the node keeps an SSH tunnel to {box}, "
-                         "and NetBird's client reaches its relay and the overlay's peers, outside this trace. "
-                         "`ling-admin remote remove` turns it off.")
+            lines.append(
+                f"Remote access enabled ({REMOTE_TUNNEL_UNIT}): the node keeps an SSH tunnel to {box}, "
+                "and NetBird's client reaches its relay and the overlay's peers, outside this trace. "
+                "`ling-admin remote remove` turns it off."
+            )
         lines += cls.forge_lines()
         return lines
 
@@ -605,23 +750,35 @@ class EgressAudit:
             List[str]: One line when the forge's unit is enabled; empty otherwise.
         """
         from dreamference.forge.forge_settings import UNIT as FORGE_UNIT
+
         if not cls._unit_enabled(FORGE_UNIT, user=True):
             return []
         from dreamference.forge.forge_github_mirror import ForgeGithubMirror
         from dreamference.forge.forge_settings import ROLE_RECORD, ForgeSettings
+
         role = ForgeSettings.role() or "not set up"
-        destinations = ForgeGithubMirror.destinations() if ForgeGithubMirror.settings()["enabled"] else []
+        destinations = (
+            ForgeGithubMirror.destinations() if ForgeGithubMirror.settings()["enabled"] else []
+        )
         if role != ROLE_RECORD:
             destinations = []
-        where = ("its GitHub mirror pushes to " + ", ".join(destinations)
-                 + (" (stopped: /airgapped is on)" if ForgeGithubMirror.airgapped() else "")
-                 if destinations else "no outbound mirror is configured, so it reaches nothing outside the LAN")
-        return [f"Forge enabled ({FORGE_UNIT}, {role}): Forgejo serves the LAN only (browsers through `ling web`'s "
-                f"`/forge/`, which reaches it on loopback); {where}, outside this trace. "
-                "`ling-admin forge off` turns it off."]
+        where = (
+            "its GitHub mirror pushes to "
+            + ", ".join(destinations)
+            + (" (stopped: /airgapped is on)" if ForgeGithubMirror.airgapped() else "")
+            if destinations
+            else "no outbound mirror is configured, so it reaches nothing outside the LAN"
+        )
+        return [
+            f"Forge enabled ({FORGE_UNIT}, {role}): Forgejo serves the LAN only (browsers through `ling web`'s "
+            f"`/forge/`, which reaches it on loopback); {where}, outside this trace. "
+            "`ling-admin forge off` turns it off."
+        ]
 
     @classmethod
-    def render(cls, trace: EgressTrace, verdict: EgressVerdict, allowed: dict[int, str]) -> list[str]:
+    def render(
+        cls, trace: EgressTrace, verdict: EgressVerdict, allowed: dict[int, str]
+    ) -> list[str]:
         """Renders the report: the verdict and anything unexpected first, then everything seen.
 
         Args:
@@ -641,15 +798,30 @@ class EgressAudit:
         for target, count in sorted(trace.destinations.items()):
             port = int(target.rpartition(":")[2])
             address = target.rpartition(":")[0].strip("[]")
-            label = allowed.get(port, "not on the allowlist") if StraceParser.is_loopback(address) else "not on this machine"
+            label = (
+                allowed.get(port, "not on the allowlist")
+                if StraceParser.is_loopback(address)
+                else "not on this machine"
+            )
             lines.append(f"   {target:<24} {count:>4}x  {label}")
-        lookups = ", ".join(f"{target} ({count}x)" for target, count in sorted(trace.route_lookups.items())) or "none"
+        lookups = (
+            ", ".join(
+                f"{target} ({count}x)" for target, count in sorted(trace.route_lookups.items())
+            )
+            or "none"
+        )
         lines.append(f"Route lookups (UDP connect, nothing sent): {lookups}")
-        names = ", ".join(f"{name} ({count}x)" for name, count in sorted(trace.dns_names.items())) or "none"
+        names = (
+            ", ".join(f"{name} ({count}x)" for name, count in sorted(trace.dns_names.items()))
+            or "none"
+        )
         lines.append(f"DNS queries: {names}")
         sockets = ", ".join(sorted(trace.unix_sockets)) or "none"
         lines.append(f"Unix sockets: {sockets}")
-        programs = ", ".join(f"{name} ({count})" for name, count in sorted(trace.processes.items(), key=lambda item: (-item[1], item[0])))
+        programs = ", ".join(
+            f"{name} ({count})"
+            for name, count in sorted(trace.processes.items(), key=lambda item: (-item[1], item[0]))
+        )
         lines.append(f"Processes started: {programs or 'none'}")
         lines.append(f"Networked git commands: {'; '.join(trace.networked_git) or 'none'}")
         return lines
@@ -672,8 +844,11 @@ class EgressAudit:
             INSTALL_DIR,
             CodexBrandedBuilder,
         )
+
         try:
-            version = subprocess.run([mightling_bin, "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
+            version = subprocess.run(
+                [mightling_bin, "--version"], capture_output=True, text=True, timeout=30
+            ).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             version = ""
         binary = os.path.realpath(mightling_bin)
@@ -688,7 +863,9 @@ class EgressAudit:
         # (a build without one patch, say) has none, and must not be credited with the installed one's.
         build_key = ""
         stamp = os.path.join(INSTALL_DIR, BUILD_STAMP_NAME)
-        if binary == os.path.realpath(CodexBrandedBuilder.executable_path()) and os.path.isfile(stamp):
+        if binary == os.path.realpath(CodexBrandedBuilder.executable_path()) and os.path.isfile(
+            stamp
+        ):
             with open(stamp) as handle:
                 build_key = handle.read().strip()
         matches = bool(build_key) and build_key == CodexBrandedBuilder.build_key()
@@ -711,9 +888,18 @@ class EgressAudit:
         }
 
     @classmethod
-    def run(cls, prompt: str | None = None, write_json: bool = False,
-            mightling_bin: str | None = None, vllm_host: str | None = None, tui: bool = False,
-            app: bool = False, app_bin: str | None = None, web: bool = False, compat: bool = False) -> int:
+    def run(
+        cls,
+        prompt: str | None = None,
+        write_json: bool = False,
+        mightling_bin: str | None = None,
+        vllm_host: str | None = None,
+        tui: bool = False,
+        app: bool = False,
+        app_bin: str | None = None,
+        web: bool = False,
+        compat: bool = False,
+    ) -> int:
         """Runs the audit and prints its report.
 
         Args:
@@ -735,6 +921,7 @@ class EgressAudit:
             int: 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
         """
         from dreamference.runner.codex_installer import CodexInstaller
+
         if shutil.which("strace") is None:
             print("⚠️  Egress audit: trace failed")
             print("   - strace is not installed: sudo apt-get install strace")
@@ -749,23 +936,32 @@ class EgressAudit:
             app_bin = app_bin or cls.app_executable()
             if not app_bin:
                 print("⚠️  Egress audit: trace failed")
-                print("   - the desktop app is not built: run `ling-admin desktop build`, or install its .deb.")
+                print(
+                    "   - the desktop app is not built: run `ling-admin desktop build`, or install its .deb."
+                )
                 return 2
             if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
                 print("⚠️  Egress audit: trace failed")
-                print("   - the desktop app needs a display: set DISPLAY, or run this under xvfb-run.")
+                print(
+                    "   - the desktop app needs a display: set DISPLAY, or run this under xvfb-run."
+                )
                 return 2
         missing = TuiSession.missing_modules() if tui else []
         if missing:
             print("⚠️  Egress audit: trace failed")
-            print(f"   - --tui drives the interface with {' and '.join(missing)}, which this environment lacks: "
-                  f"{sys.executable} -m pip install {' '.join(missing)}")
+            print(
+                f"   - --tui drives the interface with {' and '.join(missing)}, which this environment lacks: "
+                f"{sys.executable} -m pip install {' '.join(missing)}"
+            )
             return 2
         if vllm_host is None:
             from dreamference.config import DreamferenceConfig
+
             vllm_host = DreamferenceConfig().vllm_host
         allowed = cls.allowed_ports(vllm_host, session)
-        print(f"🚀 Tracing one {SESSION_NAMES[session]} against {vllm_host} (throwaway repository and CODEX_HOME)...")
+        print(
+            f"🚀 Tracing one {SESSION_NAMES[session]} against {vllm_host} (throwaway repository and CODEX_HOME)..."
+        )
         work_dir = tempfile.mkdtemp(prefix="mightling-audit-")
         page = PreviewPage() if app else None
         try:
@@ -774,13 +970,22 @@ class EgressAudit:
                 page.start()
                 cls.preview_url = page.url
                 allowed = {**allowed, page.port: "the audit's preview page"}
-            trace, replied, _ = cls.trace_session(mightling_bin, vllm_host, prompt or DEFAULT_PROMPT, work_dir, session, app_bin)
+            trace, replied, _ = cls.trace_session(
+                mightling_bin, vllm_host, prompt or DEFAULT_PROMPT, work_dir, session, app_bin
+            )
             verdict = cls.judge(trace, allowed, replied)
             if page and verdict.status == PASS and not page.loaded():
-                verdict = EgressVerdict(TRACE_FAILED, ["the preview tab never loaded the audit's page, so its rules were not exercised"])
+                verdict = EgressVerdict(
+                    TRACE_FAILED,
+                    [
+                        "the preview tab never loaded the audit's page, so its rules were not exercised"
+                    ],
+                )
             if page:
-                print(f"ℹ️  Preview tab: the audit's page {'loaded and ran' if page.loaded() else 'did not load'}; "
-                      "it reached for example.com, .org and .net by picture, script, stylesheet, fetch, prefetch hints and a link")
+                print(
+                    f"ℹ️  Preview tab: the audit's page {'loaded and ran' if page.loaded() else 'did not load'}; "
+                    "it reached for example.com, .org and .net by picture, script, stylesheet, fetch, prefetch hints and a link"
+                )
             for line in cls.render(trace, verdict, allowed):
                 print(line)
             for exception in cls.declared_exceptions():
@@ -791,10 +996,16 @@ class EgressAudit:
                 if tui and cls.tui_stage == "composer":
                     print("💡 The interface opened and took the prompt, but no reply was recorded.")
                 if app:
-                    print("💡 The app did not run its audit session to the end: start it by hand on this display to see why.")
-                print(f"💡 The session needs the model server at {vllm_host}: `ling-admin server start`.")
+                    print(
+                        "💡 The app did not run its audit session to the end: start it by hand on this display to see why."
+                    )
+                print(
+                    f"💡 The session needs the model server at {vllm_host}: `ling-admin server start`."
+                )
             if write_json:
-                print(f"💡 Full result: {cls.write_result(trace, verdict, allowed, cls.build_identity(mightling_bin), session)}")
+                print(
+                    f"💡 Full result: {cls.write_result(trace, verdict, allowed, cls.build_identity(mightling_bin), session)}"
+                )
         finally:
             if page:
                 page.stop()
@@ -803,12 +1014,15 @@ class EgressAudit:
         return verdict.exit_code
 
     @classmethod
-    def after_build(cls, vllm_host: str | None = None, mightling_bin: str | None = None) -> int | None:
-        """The audit `ling-admin codex build` runs once it has installed a new `ling` (§2): a
-        Codex bump is when a new channel would appear, and nobody remembers to re-run a trace by
-        hand. Both kinds of session are traced, `exec` and then the interface, and the
-        compatibility mode's print session when the user's sessions start in that mode; each
-        result is written under `$CODEX_HOME/audit/`.
+    def after_build(
+        cls, vllm_host: str | None = None, mightling_bin: str | None = None
+    ) -> int | None:
+        """The audit `ling-admin codex build` runs once it has installed a new `ling` (§2).
+
+        A Codex bump is when a new channel would appear, and nobody remembers to re-run a trace by
+        hand. Both kinds of session are traced, `exec` and then the interface, and the compatibility
+        mode's print session when the user's sessions start in that mode; each result is written
+        under `$CODEX_HOME/audit/`.
 
         It never fails the build: the binary is installed either way, and the verdict is what
         the user reads. Without a model server it does not wait for one; it says how to run the
@@ -822,44 +1036,70 @@ class EgressAudit:
             Optional[int]: The worst exit code of the sessions traced (0 pass, 1 unexpected
             destination, 2 trace failed), or None when the audit was skipped.
         """
-        later = "run `ling-admin audit egress` and `ling-admin audit egress --tui` to check this build"
+        later = (
+            "run `ling-admin audit egress` and `ling-admin audit egress --tui` to check this build"
+        )
         try:
             if vllm_host is None:
                 from dreamference.config import DreamferenceConfig
+
                 vllm_host = DreamferenceConfig().vllm_host
             if shutil.which("strace") is None:
-                print(f"💡 Egress audit skipped: strace is not installed (sudo apt-get install strace); then {later}.")
+                print(
+                    f"💡 Egress audit skipped: strace is not installed (sudo apt-get install strace); then {later}."
+                )
                 return None
             from dreamference.night_shift import NightShiftHost
+
             if NightShiftHost.served_model(vllm_host, timeout=3.0) is None:
-                print(f"💡 Egress audit skipped: the model server at {vllm_host} is not answering. "
-                      f"After `ling-admin server start`, {later}.")
+                print(
+                    f"💡 Egress audit skipped: the model server at {vllm_host} is not answering. "
+                    f"After `ling-admin server start`, {later}."
+                )
                 return None
             print("🔎 Auditing what the new build does on the network...")
             codes = [cls.run(write_json=True, mightling_bin=mightling_bin, vllm_host=vllm_host)]
             if TuiSession.missing_modules():
-                print("💡 The full-screen interface was not traced (pexpect and pyte are not installed): "
-                      "`ling-admin audit egress --tui` says how to add them.")
+                print(
+                    "💡 The full-screen interface was not traced (pexpect and pyte are not installed): "
+                    "`ling-admin audit egress --tui` says how to add them."
+                )
             else:
-                codes.append(cls.run(write_json=True, mightling_bin=mightling_bin, vllm_host=vllm_host, tui=True))
+                codes.append(
+                    cls.run(
+                        write_json=True, mightling_bin=mightling_bin, vllm_host=vllm_host, tui=True
+                    )
+                )
             # The compatibility mode too, when the user's new sessions start in it.
             codes += CompatPrintSession.after_build(
-                lambda: cls.run(write_json=True, mightling_bin=mightling_bin, vllm_host=vllm_host, compat=True)
+                lambda: cls.run(
+                    write_json=True, mightling_bin=mightling_bin, vllm_host=vllm_host, compat=True
+                )
             )
             worst = 1 if 1 in codes else max(codes)
             if worst == 1:
-                print("❌ This build reaches something it should not: see the destinations above. "
-                      "The build is installed; do not use it for private work until that is explained.")
+                print(
+                    "❌ This build reaches something it should not: see the destinations above. "
+                    "The build is installed; do not use it for private work until that is explained."
+                )
             elif worst == 2:
                 print(f"⚠️  The audit could not show what this build does; {later}.")
             return worst
-        except Exception as error:  # An audit that breaks must not turn a good build into a failed one.
+        except (
+            Exception
+        ) as error:  # An audit that breaks must not turn a good build into a failed one.
             print(f"⚠️  Egress audit did not run ({error}); {later}.")
             return None
 
     @classmethod
-    def write_result(cls, trace: EgressTrace, verdict: EgressVerdict, allowed: dict[int, str],
-                     identity: dict[str, Any], session: str = EXEC) -> str:
+    def write_result(
+        cls,
+        trace: EgressTrace,
+        verdict: EgressVerdict,
+        allowed: dict[int, str],
+        identity: dict[str, Any],
+        session: str = EXEC,
+    ) -> str:
         """Writes the full result as JSON under `$CODEX_HOME/audit/`.
 
         Args:
@@ -873,6 +1113,7 @@ class EgressAudit:
             str: The file written.
         """
         from dreamference.runner.codex_installer import CodexInstaller
+
         directory = os.path.join(CodexInstaller.home_dir(), "audit")
         os.makedirs(directory, exist_ok=True)
         now = datetime.datetime.now().astimezone()

@@ -40,7 +40,11 @@ PROJECT_LABEL: Final[str] = f"label=com.docker.compose.project={ONYX_COMPOSE_PRO
 # Onyx's own images; generic ones it also ran (PostgreSQL, nginx) are left, others may use them.
 ONYX_IMAGE_PREFIX: Final[str] = "onyxdotapp/"
 # Sidecars `ling-admin chat configure` created on Onyx's network.
-FORMER_SIDECARS: Final[tuple] = ("dreamference-image-search", "dreamference-siglip", "dreamference-stt")
+FORMER_SIDECARS: Final[tuple] = (
+    "dreamference-image-search",
+    "dreamference-siglip",
+    "dreamference-stt",
+)
 # Mightling's own containers Onyx's `configure` put on its network (ONYX §6, §8), kept by `chat remove`.
 OWN_CONTAINERS: Final[tuple] = (SEARXNG_CONTAINER_NAME, GOOGLE_CONTAINER_NAME)
 # Where a declined offer is remembered, so it is made once.
@@ -63,39 +67,42 @@ class RetiredWebChat:
 
     @classmethod
     def deployed(cls) -> bool:
-        """Returns:
-        bool: True if an Onyx deployment folder exists: a cheap check before asking Docker.
-        """
+        """True if an Onyx deployment folder exists: a cheap check before asking Docker."""
         return os.path.isdir(ONYX_DEPLOYMENT_DIR)
 
     @classmethod
     def containers(cls) -> list[str]:
-        """Returns:
-        List[str]: The names of the compose project's containers, running or not.
-        """
-        result = _run(["docker", "ps", "-a", "--filter", PROJECT_LABEL, "--format", "{{.Names}}"], timeout=30)
+        """The names of the compose project's containers, running or not."""
+        result = _run(
+            ["docker", "ps", "-a", "--filter", PROJECT_LABEL, "--format", "{{.Names}}"], timeout=30
+        )
         return result.stdout.split() if result.returncode == 0 else []
 
     @classmethod
     def volumes(cls) -> list[str]:
-        """Returns:
-        List[str]: The compose project's volumes: saved chats and accounts among them.
-        """
+        """The compose project's volumes: saved chats and accounts among them."""
         result = _run(["docker", "volume", "ls", "-q", "--filter", PROJECT_LABEL], timeout=30)
         return result.stdout.split() if result.returncode == 0 else []
 
     @classmethod
     def networks(cls) -> list[str]:
-        """Returns:
-        List[str]: The names of the compose project's networks (names, not ids: a container's
-        `NetworkMode` names the network it was created on).
+        """The networks.
+
+        Returns:
+            List[str]: The names of the compose project's networks (names, not ids: a container's
+            `NetworkMode` names the network it was created on).
         """
-        result = _run(["docker", "network", "ls", "--filter", PROJECT_LABEL, "--format", "{{.Name}}"], timeout=30)
+        result = _run(
+            ["docker", "network", "ls", "--filter", PROJECT_LABEL, "--format", "{{.Name}}"],
+            timeout=30,
+        )
         return result.stdout.split() if result.returncode == 0 else []
 
     @classmethod
     def attached(cls, network: str) -> list[str]:
-        """Args:
+        """The attached.
+
+        Args:
             network (str): One of the project's networks.
 
         Returns:
@@ -103,8 +110,17 @@ class RetiredWebChat:
             Mightling's own stopped ones, which it does not (a stopped container holds no
             endpoint, so Docker would remove the network and leave it unable to start).
         """
-        result = _run(["docker", "network", "inspect", network, "--format",
-                       "{{range .Containers}}{{.Name}} {{end}}"], timeout=30)
+        result = _run(
+            [
+                "docker",
+                "network",
+                "inspect",
+                network,
+                "--format",
+                "{{range .Containers}}{{.Name}} {{end}}",
+            ],
+            timeout=30,
+        )
         names = result.stdout.split() if result.returncode == 0 else []
         for name in OWN_CONTAINERS:
             if name not in names and network in cls.container_networks(name):
@@ -113,14 +129,24 @@ class RetiredWebChat:
 
     @classmethod
     def container_networks(cls, name: str) -> list[str]:
-        """Args:
+        """The container networks.
+
+        Args:
             name (str): A container's name.
 
         Returns:
             List[str]: The networks it is on, read from the container, so a stopped one counts.
         """
-        result = _run(["docker", "inspect", name, "--format",
-                       "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}"], timeout=30)
+        result = _run(
+            [
+                "docker",
+                "inspect",
+                name,
+                "--format",
+                "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}",
+            ],
+            timeout=30,
+        )
         return result.stdout.split() if result.returncode == 0 else []
 
     @classmethod
@@ -145,17 +171,17 @@ class RetiredWebChat:
             elif name == GOOGLE_CONTAINER_NAME:
                 GoogleService.stop()
                 if not GoogleService.start():
-                    print(f"⚠️  {GoogleService.problem or 'The Google service was not recreated.'} "
-                          "`ling-admin google start` retries.")
+                    print(
+                        f"⚠️  {GoogleService.problem or 'The Google service was not recreated.'} "
+                        "`ling-admin google start` retries."
+                    )
             else:
                 held.append(name)
         return held
 
     @classmethod
     def images(cls) -> list[str]:
-        """Returns:
-        List[str]: Onyx's own images (`onyxdotapp/*`), as `repository:tag`.
-        """
+        """Onyx's own images (`onyxdotapp/*`), as `repository:tag`."""
         result = _run(["docker", "images", "--format", "{{.Repository}}:{{.Tag}}"], timeout=30)
         if result.returncode != 0:
             return []
@@ -163,9 +189,11 @@ class RetiredWebChat:
 
     @classmethod
     def orphan_sidecars(cls) -> list[str]:
-        """Returns:
-        List[str]: The former web chat's sidecars that still sit on a network other than the
-        sidecar network (Onyx's); `ling-admin images start` and `voice start` replace them.
+        """The orphan sidecars.
+
+        Returns:
+            List[str]: The former web chat's sidecars that still sit on a network other than the
+            sidecar network (Onyx's); `ling-admin images start` and `voice start` replace them.
         """
         orphans = []
         for name in FORMER_SIDECARS:
@@ -176,9 +204,11 @@ class RetiredWebChat:
 
     @classmethod
     def compose_down_command(cls) -> list[str] | None:
-        """Returns:
-        Optional[List[str]]: `docker compose … down` for the deployment, without `-v` (the
-        volumes stay), or None when its compose files are gone.
+        """The compose down command.
+
+        Returns:
+            Optional[List[str]]: `docker compose … down` for the deployment, without `-v` (the
+            volumes stay), or None when its compose files are gone.
         """
         files: list[str] = []
         for name in ONYX_COMPOSE_FILES:
@@ -187,8 +217,17 @@ class RetiredWebChat:
                 files += ["-f", path]
         if not files:
             return None
-        return ["docker", "compose", *files, "-p", ONYX_COMPOSE_PROJECT,
-                "--project-directory", ONYX_DEPLOYMENT_DIR, "down", "--remove-orphans"]
+        return [
+            "docker",
+            "compose",
+            *files,
+            "-p",
+            ONYX_COMPOSE_PROJECT,
+            "--project-directory",
+            ONYX_DEPLOYMENT_DIR,
+            "down",
+            "--remove-orphans",
+        ]
 
     @classmethod
     def remove_containers(cls) -> bool:
@@ -208,8 +247,9 @@ class RetiredWebChat:
 
     @classmethod
     def remove_data(cls) -> bool:
-        """Step 2: deletes the volumes, the sidecars left on Onyx's network, Onyx's images and
-        its networks. Only ever after step 1 and a second yes.
+        """Step 2: deletes the volumes, the sidecars left on Onyx's network.
+
+        Onyx's images and its networks. Only ever after step 1 and a second yes.
 
         Returns:
             bool: True if no volume, Onyx image or Onyx network is left.
@@ -226,27 +266,32 @@ class RetiredWebChat:
         for network in cls.networks():
             held = cls.release_network(network)
             if held:
-                print(f"⚠️  {network} is kept: {', '.join(held)} {'was' if len(held) == 1 else 'were'} created on it.")
+                print(
+                    f"⚠️  {network} is kept: {', '.join(held)} {'was' if len(held) == 1 else 'were'} created on it."
+                )
                 continue
             _run(["docker", "network", "rm", network], timeout=60)
         return not cls.volumes() and not cls.images() and not cls.networks()
 
     @classmethod
     def describe(cls) -> list[str]:
-        """Returns:
-        List[str]: What is left, for `ling-admin chat status` and before each question.
-        """
+        """What is left, for `ling-admin chat status` and before each question."""
         lines = [f"Containers: {', '.join(cls.containers()) or 'none'}"]
         lines.append(f"Volumes (saved chats, accounts): {', '.join(cls.volumes()) or 'none'}")
-        lines.append(f"Sidecars still on Onyx's network: {', '.join(cls.orphan_sidecars()) or 'none'}")
+        lines.append(
+            f"Sidecars still on Onyx's network: {', '.join(cls.orphan_sidecars()) or 'none'}"
+        )
         lines.append(f"Onyx images: {', '.join(cls.images()) or 'none'}")
         lines.append(f"Onyx networks: {', '.join(cls.networks()) or 'none'}")
-        lines.append(f"Deployment folder: {ONYX_DEPLOYMENT_DIR if cls.deployed() else 'none'} (left as it is)")
+        lines.append(
+            f"Deployment folder: {ONYX_DEPLOYMENT_DIR if cls.deployed() else 'none'} (left as it is)"
+        )
         return lines
 
     @classmethod
-    def remove(cls, yes: bool = False, delete_data: bool = False,
-               ask: Callable[[str], bool] | None = None) -> int:
+    def remove(
+        cls, yes: bool = False, delete_data: bool = False, ask: Callable[[str], bool] | None = None
+    ) -> int:
         """`ling-admin chat remove`: step 1, then step 2, each asked unless its flag says so.
 
         Args:
@@ -262,7 +307,9 @@ class RetiredWebChat:
         containers = cls.containers()
         if containers:
             print(f"The retired Onyx web chat's containers: {', '.join(containers)}")
-            if not (yes or ask("Stop and remove them? Saved chats stay in their Docker volumes. [y/N] ")):
+            if not (
+                yes or ask("Stop and remove them? Saved chats stay in their Docker volumes. [y/N] ")
+            ):
                 print("Nothing was removed. `ling-admin chat remove` asks again.")
                 return 0
             if not cls.remove_containers():
@@ -271,21 +318,36 @@ class RetiredWebChat:
             print("✅ The Onyx containers are gone; its volumes and images are kept.")
         else:
             print("No Onyx container is left.")
-        volumes, images, orphans, networks = cls.volumes(), cls.images(), cls.orphan_sidecars(), cls.networks()
+        volumes, images, orphans, networks = (
+            cls.volumes(),
+            cls.images(),
+            cls.orphan_sidecars(),
+            cls.networks(),
+        )
         if not (volumes or images or orphans or networks):
             print("No Onyx data is left either.")
             return 0
-        print(f"Kept: volumes {', '.join(volumes) or 'none'}; images {', '.join(images) or 'none'}; "
-              f"sidecars on Onyx's network {', '.join(orphans) or 'none'}; networks {', '.join(networks) or 'none'}.")
+        print(
+            f"Kept: volumes {', '.join(volumes) or 'none'}; images {', '.join(images) or 'none'}; "
+            f"sidecars on Onyx's network {', '.join(orphans) or 'none'}; networks {', '.join(networks) or 'none'}."
+        )
         if orphans:
-            print("💡 `ling-admin images start` and `ling-admin voice start` run image search and voice "
-                  "without them.")
-        if not (delete_data or ask("Delete these too? The saved chats and Onyx accounts cannot be "
-                                   "recovered. [y/N] ")):
+            print(
+                "💡 `ling-admin images start` and `ling-admin voice start` run image search and voice "
+                "without them."
+            )
+        if not (
+            delete_data
+            or ask(
+                "Delete these too? The saved chats and Onyx accounts cannot be recovered. [y/N] "
+            )
+        ):
             print("Kept. `ling-admin chat remove --delete-data` deletes them later.")
             return 0
         if not cls.remove_data():
-            print("❌ Some volumes, images or networks could not be removed (one may still be in use).")
+            print(
+                "❌ Some volumes, images or networks could not be removed (one may still be in use)."
+            )
             return 1
         print("✅ The Onyx volumes, images and networks are deleted.")
         return 0

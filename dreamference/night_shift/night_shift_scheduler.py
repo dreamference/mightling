@@ -1,5 +1,6 @@
-"""The systemd user timer that starts the night run (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.1):
-`ling-admin night enable|disable|status`.
+"""The systemd user timer that starts the night run.
+
+Spec: specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.1. Commands: `ling-admin night enable|disable|status`.
 
 A user service has neither `~/.local/bin` nor the virtualenv on its PATH, so the unit names
 `ling-admin` by its absolute path and sets a PATH that reaches `ling-search`, `ling-fetch`
@@ -29,22 +30,21 @@ class NightShiftScheduler:
 
     # Seam: tests replace it so nothing in the suite talks to the real systemd.
     systemctl: Callable[[list[str]], subprocess.CompletedProcess] = staticmethod(
-        lambda args: subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True))
+        lambda args: subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
+    )
 
     @classmethod
     def unit_dir(cls) -> Path:
-        """Returns:
-        Path: `~/.config/systemd/user`.
-        """
+        """`~/.config/systemd/user`."""
         return Path(os.path.expanduser("~/.config/systemd/user"))
 
     @classmethod
     def admin_executable(cls) -> str:
-        """Returns:
-        str: The absolute path of this environment's `ling-admin`.
-        """
+        """The absolute path of this environment's `ling-admin`."""
         candidate = Path(sys.executable).parent / "ling-admin"
-        return str(candidate) if candidate.exists() else (shutil.which("ling-admin") or str(candidate))
+        return (
+            str(candidate) if candidate.exists() else (shutil.which("ling-admin") or str(candidate))
+        )
 
     @classmethod
     def render_units(cls, window: str, admin: str) -> tuple:
@@ -59,17 +59,29 @@ class NightShiftScheduler:
         """
         start, end = NightShiftSettings.parse_window(window)
         home = os.path.expanduser("~")
-        path = ":".join([f"{home}/.local/bin", f"{home}/.cargo/bin", str(Path(admin).parent),
-                         "/usr/local/bin", "/usr/bin", "/bin"])
-        timer = (f"{WINDOW_MARKER}{window}\n"
-                 "[Unit]\nDescription=Mightling Night Shift window\n\n"
-                 f"[Timer]\nOnCalendar=*-*-* {start:%H:%M}:00\nPersistent=false\nUnit={UNIT}.service\n\n"
-                 "[Install]\nWantedBy=timers.target\n")
-        service = ("[Unit]\nDescription=Mightling Night Shift run\n\n"
-                   "[Service]\nType=oneshot\n"
-                   f"Environment=PATH={path}\n"
-                   f"WorkingDirectory={home}\n"
-                   f"ExecStart={admin} night run --until {end:%H:%M}\n")
+        path = ":".join(
+            [
+                f"{home}/.local/bin",
+                f"{home}/.cargo/bin",
+                str(Path(admin).parent),
+                "/usr/local/bin",
+                "/usr/bin",
+                "/bin",
+            ]
+        )
+        timer = (
+            f"{WINDOW_MARKER}{window}\n"
+            "[Unit]\nDescription=Mightling Night Shift window\n\n"
+            f"[Timer]\nOnCalendar=*-*-* {start:%H:%M}:00\nPersistent=false\nUnit={UNIT}.service\n\n"
+            "[Install]\nWantedBy=timers.target\n"
+        )
+        service = (
+            "[Unit]\nDescription=Mightling Night Shift run\n\n"
+            "[Service]\nType=oneshot\n"
+            f"Environment=PATH={path}\n"
+            f"WorkingDirectory={home}\n"
+            f"ExecStart={admin} night run --until {end:%H:%M}\n"
+        )
         return timer, service
 
     @classmethod
@@ -98,8 +110,10 @@ class NightShiftScheduler:
                 return False
         print(f"✅ Night Shift enabled: {window} every night.")
         if not cls.lingering():
-            print("⚠️  Lingering is off for this user, so the timer only fires while you are logged in.\n"
-                  f"   To run it after logout: sudo loginctl enable-linger {getpass.getuser()}")
+            print(
+                "⚠️  Lingering is off for this user, so the timer only fires while you are logged in.\n"
+                f"   To run it after logout: sudo loginctl enable-linger {getpass.getuser()}"
+            )
         return True
 
     @classmethod
@@ -128,8 +142,14 @@ class NightShiftScheduler:
         timer_path = cls.unit_dir() / f"{UNIT}.timer"
         lines = []
         if timer_path.exists():
-            window = next((line[len(WINDOW_MARKER):] for line in timer_path.read_text().splitlines()
-                           if line.startswith(WINDOW_MARKER)), "?")
+            window = next(
+                (
+                    line[len(WINDOW_MARKER) :]
+                    for line in timer_path.read_text().splitlines()
+                    if line.startswith(WINDOW_MARKER)
+                ),
+                "?",
+            )
             next_run = cls.systemctl(["list-timers", f"{UNIT}.timer", "--no-legend"]).stdout.strip()
             lines.append(f"Timer: enabled, window {window}")
             if next_run:
@@ -146,17 +166,22 @@ class NightShiftScheduler:
         if not by_repo:
             lines.append("Queue: empty")
         for repo, counts in by_repo.items():
-            lines.append(f"{repo}: " + ", ".join(f"{count} {status}" for status, count in sorted(counts.items())))
+            lines.append(
+                f"{repo}: "
+                + ", ".join(f"{count} {status}" for status, count in sorted(counts.items()))
+            )
         return "\n".join(lines)
 
     @classmethod
     def lingering(cls) -> bool:
-        """Returns:
-        bool: True if systemd keeps this user's services running after logout.
-        """
+        """True if systemd keeps this user's services running after logout."""
         try:
-            result = subprocess.run(["loginctl", "show-user", getpass.getuser(), "-p", "Linger", "--value"],
-                                    capture_output=True, text=True, timeout=10)
+            result = subprocess.run(
+                ["loginctl", "show-user", getpass.getuser(), "-p", "Linger", "--value"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
         except (OSError, subprocess.SubprocessError):
             return False
         return result.stdout.strip() == "yes"

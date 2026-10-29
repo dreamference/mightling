@@ -1,4 +1,5 @@
-"""The `issue-v1` hooks, run inside an instance's container by Codex
+"""The `issue-v1` hooks, run inside an instance's container by Codex.
+
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §20).
 
 `issue-v1` as a task rule only asks; this enforces two of its lines, once each per task:
@@ -36,11 +37,15 @@ LOCK_FILE = "lock"
 
 # The reasons the model is shown. Codex appends ". Command: <the command>" to a denied tool call's
 # reason (core/src/hook_runtime.rs), so the first ends without a full stop.
-EDIT_MESSAGE = ("Not yet: read what the issue names before your first edit. Still unread: {unread}. "
-                "Open each one (cat, sed -n, or grep -n for its definition), then make the edit again")
-STOP_MESSAGE = ("Before you stop: the issue shows an example, and no command since your last edit has "
-                "run it{first}. Run the issue's example now and check that its output is what the issue "
-                "expects; if it is not, fix the code. Then stop.")
+EDIT_MESSAGE = (
+    "Not yet: read what the issue names before your first edit. Still unread: {unread}. "
+    "Open each one (cat, sed -n, or grep -n for its definition), then make the edit again"
+)
+STOP_MESSAGE = (
+    "Before you stop: the issue shows an example, and no command since your last edit has "
+    "run it{first}. Run the issue's example now and check that its output is what the issue "
+    "expects; if it is not, fix the code. Then stop."
+)
 
 # How much of a script the agent runs is read to compare with the example.
 SCRIPT_LIMIT = 200000
@@ -54,7 +59,9 @@ BACKSLASH = "\\"
 DOUBLE_QUOTE = '"'
 QUOTES = "'\""
 REDIRECT = re.compile(r"(?:^|[^0-9&<>])>>?\s*([^\s;|&<>()]+)")
-HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?[^\n]*\n(.*?)\n\s*\1\s*(?:\n|$)", re.S)
+HEREDOC = re.compile(
+    r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?[^\n]*\n(.*?)\n\s*\1\s*(?:\n|$)", re.S
+)
 PATCH_FILE = re.compile(r"^\*\*\* (Update|Delete|Add) File: (.+?)\s*$", re.M)
 
 
@@ -65,7 +72,9 @@ class SweBenchIssueGate:
 
     @classmethod
     def text_of(cls, value: Any) -> str:
-        """Args:
+        """Flattens a hook payload's field to text.
+
+        Args:
             value: A hook payload's `tool_input` or `tool_response`, of any shape.
 
         Returns:
@@ -81,9 +90,11 @@ class SweBenchIssueGate:
 
     @classmethod
     def file_touched(cls, path: str, command: str, output: str) -> bool:
-        """Whether a tool call touched a repository file: its command or output names the path
-        (`cat a/b.py`, `grep -n x a/b.py`, a `grep -rn` hit `./a/b.py:12:`), or its command names
-        the file's directory and then its base name (`cd a && cat b.py`).
+        """Whether a tool call touched a repository file.
+
+        Its command or output names the path (`cat a/b.py`, `grep -n x a/b.py`, a `grep -rn` hit
+        `./a/b.py:12:`), or its command names the file's directory and then its base name (`cd a &&
+        cat b.py`).
 
         Args:
             path: The file, relative to the repository.
@@ -96,13 +107,18 @@ class SweBenchIssueGate:
         if path in command or path in output:
             return True
         directory, name = os.path.split(path)
-        return bool(directory) and directory in command and re.search(r"(^|[\s/'\"])" + re.escape(name) + r"\b", command) is not None
+        return (
+            bool(directory)
+            and directory in command
+            and re.search(r"(^|[\s/'\"])" + re.escape(name) + r"\b", command) is not None
+        )
 
     @classmethod
     def reads(cls, targets: list[dict[str, Any]], command: str, output: str) -> list[str]:
-        """Which targets a tool call read. A file is read when the call touched it
-        (`file_touched`); a definition when the output shows `def <name>` or `class <name>`,
-        or the call touched a file that defines it.
+        """Which targets a tool call read.
+
+        A file is read when the call touched it (`file_touched`); a definition when the output shows
+        `def <name>` or `class <name>`, or the call touched a file that defines it.
 
         Args:
             targets: The conditions' targets.
@@ -118,8 +134,9 @@ class SweBenchIssueGate:
                 hit = cls.file_touched(target["path"], command, output)
             else:
                 pattern = r"\b(def|class)\s+" + re.escape(target["name"]) + r"\b"
-                hit = re.search(pattern, output) is not None or \
-                    any(cls.file_touched(path, command, output) for path in target.get("files", []))
+                hit = re.search(pattern, output) is not None or any(
+                    cls.file_touched(path, command, output) for path in target.get("files", [])
+                )
             if hit:
                 found.append(target["id"])
         return found
@@ -128,7 +145,9 @@ class SweBenchIssueGate:
 
     @classmethod
     def repository_file(cls, path: str, cwd: str, root: str) -> str | None:
-        """Args:
+        """The repository file.
+
+        Args:
             path: A path as a command wrote it.
             cwd: The directory the command ran in.
             root: The repository.
@@ -144,7 +163,7 @@ class SweBenchIssueGate:
         root = os.path.normpath(root)
         if not full.startswith(root + os.sep):
             return None
-        relative = full[len(root) + 1:]
+        relative = full[len(root) + 1 :]
         if relative.split(os.sep)[0] == ".git" or not os.path.isfile(full):
             return None
         return relative
@@ -179,7 +198,9 @@ class SweBenchIssueGate:
 
     @classmethod
     def segments(cls, command: str) -> list[str]:
-        """Args:
+        """The segments.
+
+        Args:
             command: A shell command line.
 
         Returns:
@@ -220,11 +241,12 @@ class SweBenchIssueGate:
 
     @classmethod
     def edit_of(cls, tool_name: str, command: str, cwd: str, root: str) -> dict[str, Any] | None:
-        """Whether a tool call changes a file that exists in the repository: what the first-edit
-        hold and the "after the last edit" rule mean by an edit. Detected: `apply_patch` (the
-        tool, or the command in a shell) updating or deleting a file; in a shell command,
-        `sed -i`/`perl -i` on a file, `>`, `>>` or `tee` onto one, `git apply`, `git am` and
-        `patch`. A new file is not an edit (a script in /tmp or in the repository), and neither
+        """Whether a tool call changes a file that exists in the repository.
+
+        What the first-edit hold and the "after the last edit" rule mean by an edit. Detected:
+        `apply_patch` (the tool, or the command in a shell) updating or deleting a file; in a shell
+        command, `sed -i`/`perl -i` on a file, `>`, `>>` or `tee` onto one, `git apply`, `git am`
+        and `patch`. A new file is not an edit (a script in /tmp or in the repository), and neither
         is `git stash`. Not detected: a program that writes the file itself (`python -c
         "open(...,'w')"`), `cp`, `mv`.
 
@@ -238,8 +260,11 @@ class SweBenchIssueGate:
             Optional[Dict[str, Any]]: `{"kind", "paths"}`, or None when it is not an edit.
         """
         if tool_name == "apply_patch" or "*** Begin Patch" in command:
-            paths = [cls.repository_file(match.group(2), cwd, root)
-                     for match in PATCH_FILE.finditer(command) if match.group(1) != "Add"]
+            paths = [
+                cls.repository_file(match.group(2), cwd, root)
+                for match in PATCH_FILE.finditer(command)
+                if match.group(1) != "Add"
+            ]
             paths = [path for path in paths if path]
             return {"kind": "apply_patch", "paths": paths} if paths else None
         body = HEREDOC.sub("\n", command)
@@ -248,9 +273,13 @@ class SweBenchIssueGate:
             if not words:
                 continue
             program = os.path.basename(words[0])
-            if program in ("sed", "perl") and any(word == "-i" or word.startswith("-i") or word.startswith("--in-place")
-                                                  or (program == "perl" and word.startswith("-") and "i" in word[1:])
-                                                  for word in words[1:]):
+            if program in ("sed", "perl") and any(
+                word == "-i"
+                or word.startswith("-i")
+                or word.startswith("--in-place")
+                or (program == "perl" and word.startswith("-") and "i" in word[1:])
+                for word in words[1:]
+            ):
                 paths = [cls.repository_file(word, cwd, root) for word in words[1:]]
                 paths = [path for path in paths if path]
                 if paths:
@@ -281,9 +310,10 @@ class SweBenchIssueGate:
 
     @classmethod
     def code_matches(cls, code: str, example: dict[str, Any]) -> bool:
-        """Whether code the agent ran is the issue's Python example: one of the example's key
-        lines appears in it (whitespace ignored), or it calls at least half of the example's
-        distinctive functions.
+        """Whether code the agent ran is the issue's Python example.
+
+        One of the example's key lines appears in it (whitespace ignored), or it calls at least half
+        of the example's distinctive functions.
 
         Args:
             code: The code run.
@@ -293,7 +323,11 @@ class SweBenchIssueGate:
             bool: True when it counts as running the example.
         """
         squeezed = cls.squeeze(code)
-        if any(cls.squeeze(line) in squeezed for line in example.get("key_lines", []) if cls.squeeze(line)):
+        if any(
+            cls.squeeze(line) in squeezed
+            for line in example.get("key_lines", [])
+            if cls.squeeze(line)
+        ):
             return True
         calls = set(example.get("calls", []))
         if not calls:
@@ -303,9 +337,10 @@ class SweBenchIssueGate:
 
     @classmethod
     def ran_code(cls, command: str, cwd: str) -> list[str | None]:
-        """The Python code a shell command runs: `-c` arguments, here-documents fed to Python, and
-        the scripts it runs with Python or pytest, read from disk (`None` for a script that
-        cannot be read: what it holds is unknown).
+        """The Python code a shell command runs.
+
+        `-c` arguments, here-documents fed to Python, and the scripts it runs with Python or pytest,
+        read from disk (`None` for a script that cannot be read: what it holds is unknown).
 
         Args:
             command: The shell command.
@@ -316,18 +351,19 @@ class SweBenchIssueGate:
         """
         pieces: list[str | None] = []
         for match in HEREDOC.finditer(command):
-            before = command[:match.start()].split("\n")[-1]
+            before = command[: match.start()].split("\n")[-1]
             if any(PYTHON.search(word) for word in cls.words(before.replace("<", " "))):
                 pieces.append(match.group(2))
         for segment in cls.segments(HEREDOC.sub("\n", command)):
             words = cls.words(segment)
             for index, word in enumerate(words):
                 python = PYTHON.search(word) is not None
-                pytest = PYTEST.search(word) is not None or \
-                    (python and words[index + 1:index + 3] == ["-m", "pytest"])
+                pytest = PYTEST.search(word) is not None or (
+                    python and words[index + 1 : index + 3] == ["-m", "pytest"]
+                )
                 if not python and not pytest:
                     continue
-                rest = words[index + 1:]
+                rest = words[index + 1 :]
                 if python and "-c" in rest and rest.index("-c") + 1 < len(rest):
                     pieces.append(rest[rest.index("-c") + 1])
                     break
@@ -348,10 +384,11 @@ class SweBenchIssueGate:
 
     @classmethod
     def runs_example(cls, command: str, cwd: str, examples: list[dict[str, Any]]) -> bool:
-        """Whether a shell command runs the issue's example. A Python example: some code the
-        command runs matches it (`code_matches`), or the command runs a script that cannot be
-        read (unsure, so it counts). A shell example: the command runs the same program on the
-        same file.
+        """Whether a shell command runs the issue's example.
+
+        A Python example: some code the command runs matches it (`code_matches`), or the command
+        runs a script that cannot be read (unsure, so it counts). A shell example: the command runs
+        the same program on the same file.
 
         Args:
             command: The shell command.
@@ -371,15 +408,18 @@ class SweBenchIssueGate:
             else:
                 normal = re.sub(r"\bpython[0-9.]*\b", "python", command)
                 for program, argument in example.get("commands", []):
-                    if re.search(r"(^|[\s/])" + re.escape(program) + r"\b", normal) and (not argument or argument in normal):
+                    if re.search(r"(^|[\s/])" + re.escape(program) + r"\b", normal) and (
+                        not argument or argument in normal
+                    ):
                         return True
         return False
 
     # -- the events ----------------------------------------------------------------------------
 
     @classmethod
-    def pre_tool_use(cls, state: dict[str, Any], conditions: dict[str, Any],
-                     payload: dict[str, Any]) -> str | None:
+    def pre_tool_use(
+        cls, state: dict[str, Any], conditions: dict[str, Any], payload: dict[str, Any]
+    ) -> str | None:
         """Before a tool call: records it, and decides whether it is the first edit to hold.
 
         Args:
@@ -394,24 +434,36 @@ class SweBenchIssueGate:
         seq = state["seq"]
         targets = conditions.get("targets", [])
         tool_input = payload.get("tool_input")
-        command = tool_input.get("command") if isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str) \
+        command = (
+            tool_input.get("command")
+            if isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str)
             else cls.text_of(tool_input)
+        )
         cwd = payload.get("cwd") or conditions.get("root", "/testbed")
-        edit = cls.edit_of(payload.get("tool_name", ""), command, cwd, conditions.get("root", "/testbed"))
+        edit = cls.edit_of(
+            payload.get("tool_name", ""), command, cwd, conditions.get("root", "/testbed")
+        )
         reads = state.setdefault("reads", {})
         if edit is None:
             for target in cls.reads(targets, command, ""):
                 reads.setdefault(target, seq)
-            if conditions.get("examples") and state.get("edits") and \
-                    cls.runs_example(command, cwd, conditions["examples"]):
+            if (
+                conditions.get("examples")
+                and state.get("edits")
+                and cls.runs_example(command, cwd, conditions["examples"])
+            ):
                 state["last_example_run"] = seq
                 state["example_runs"] = (state.get("example_runs", []) + [seq])[-KEEP:]
             return None
         unread = [target for target in targets if target["id"] not in reads]
         if "first_edit" not in state:
-            state["first_edit"] = {"seq": seq, "kind": edit["kind"], "paths": edit["paths"][:10],
-                                   "read": [t["id"] for t in targets if t["id"] in reads],
-                                   "unread": [t["id"] for t in unread]}
+            state["first_edit"] = {
+                "seq": seq,
+                "kind": edit["kind"],
+                "paths": edit["paths"][:10],
+                "read": [t["id"] for t in targets if t["id"] in reads],
+                "unread": [t["id"] for t in unread],
+            }
         hold = state.get("edit_hold")
         if hold and hold.get("complied") is None:
             # The first edit after the hold: did the agent read what it was told was unread?
@@ -419,17 +471,26 @@ class SweBenchIssueGate:
             hold["complied"] = len(hold["read_after"]) == len(hold["unread"])
             hold["next_edit_seq"] = seq
         if unread and not hold and not state.get("edits"):
-            state["edit_hold"] = {"seq": seq, "kind": edit["kind"], "paths": edit["paths"][:10],
-                                  "unread": [t["id"] for t in unread], "complied": None}
+            state["edit_hold"] = {
+                "seq": seq,
+                "kind": edit["kind"],
+                "paths": edit["paths"][:10],
+                "unread": [t["id"] for t in unread],
+                "complied": None,
+            }
             return EDIT_MESSAGE.format(unread="; ".join(target["label"] for target in unread))
         state["edits"] = state.get("edits", 0) + 1
         state["last_edit"] = seq
-        state["edit_log"] = (state.get("edit_log", []) + [{"seq": seq, "kind": edit["kind"],
-                                                            "paths": edit["paths"][:10]}])[-KEEP:]
+        state["edit_log"] = (
+            state.get("edit_log", [])
+            + [{"seq": seq, "kind": edit["kind"], "paths": edit["paths"][:10]}]
+        )[-KEEP:]
         return None
 
     @classmethod
-    def post_tool_use(cls, state: dict[str, Any], conditions: dict[str, Any], payload: dict[str, Any]) -> None:
+    def post_tool_use(
+        cls, state: dict[str, Any], conditions: dict[str, Any], payload: dict[str, Any]
+    ) -> None:
         """After a tool call: records the targets its command or output read.
 
         Args:
@@ -438,15 +499,22 @@ class SweBenchIssueGate:
             payload: The hook's input.
         """
         tool_input = payload.get("tool_input")
-        command = tool_input.get("command") if isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str) \
+        command = (
+            tool_input.get("command")
+            if isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str)
             else cls.text_of(tool_input)
+        )
         seq = state.get("seq", 0)
         reads = state.setdefault("reads", {})
-        for target in cls.reads(conditions.get("targets", []), command, cls.text_of(payload.get("tool_response"))):
+        for target in cls.reads(
+            conditions.get("targets", []), command, cls.text_of(payload.get("tool_response"))
+        ):
             reads.setdefault(target, seq)
 
     @classmethod
-    def stop(cls, state: dict[str, Any], conditions: dict[str, Any], payload: dict[str, Any]) -> str | None:
+    def stop(
+        cls, state: dict[str, Any], conditions: dict[str, Any], payload: dict[str, Any]
+    ) -> str | None:
         """When the agent stops: decides whether this is the stop to hold.
 
         Args:
@@ -480,8 +548,9 @@ class SweBenchIssueGate:
 
     @classmethod
     def handle(cls, event: str, directory: str, payload: dict[str, Any]) -> str | None:
-        """One hook event, under the state's lock: loads the conditions and the state, decides,
-        and writes the state back.
+        """One hook event, under the state's lock.
+
+        Loads the conditions and the state, decides, and writes the state back.
 
         Args:
             event: `pre-tool-use`, `post-tool-use` or `stop`.
@@ -529,7 +598,9 @@ class SweBenchIssueGate:
 
     @classmethod
     def main(cls, argv: list[str]) -> int:
-        """Args:
+        """The main.
+
+        Args:
             argv: `[event, directory]`.
 
         Returns:

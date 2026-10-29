@@ -1,5 +1,7 @@
-"""Audits of what Mightling does on the network: `ling-admin audit egress` traces one real `ling`
-session and judges where it connected (specs/DREAMFERENCE_MIGHTLING_EGRESS.md).
+"""Audits of what Mightling does on the network.
+
+`ling-admin audit egress` traces one real `ling` session and judges where it connected
+(specs/DREAMFERENCE_MIGHTLING_EGRESS.md).
 """
 
 from dreamference.audit.compat_print_session import CompatPrintSession

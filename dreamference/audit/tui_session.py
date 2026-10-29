@@ -1,4 +1,5 @@
-"""One interactive `ling` session driven on a pseudo-terminal, for `ling-admin audit egress --tui`
+"""One interactive `ling` session driven on a pseudo-terminal, for `ling-admin audit egress --tui`.
+
 (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3.1 step 3).
 
 This module provides the TuiSession class. `ling exec` and the full-screen interface start
@@ -52,22 +53,25 @@ class TuiSession:
 
     @classmethod
     def trust(cls, home: str, repo: str) -> None:
-        """Marks `repo` as trusted in a throwaway `CODEX_HOME`, so the interface opens on its
-        composer instead of on the question whether to trust the directory. The launcher edits
-        this file in place and keeps the table.
+        """Marks `repo` as trusted in a throwaway `CODEX_HOME`.
+
+        So the interface opens on its composer instead of on the question whether to trust the
+        directory. The launcher edits this file in place and keeps the table.
 
         Args:
             home (str): The throwaway `CODEX_HOME`.
             repo (str): The throwaway repository.
         """
         with open(os.path.join(home, "config.toml"), "a") as handle:
-            handle.write(f"[projects.{json.dumps(os.path.realpath(repo))}]\ntrust_level = \"trusted\"\n")
+            handle.write(
+                f'[projects.{json.dumps(os.path.realpath(repo))}]\ntrust_level = "trusted"\n'
+            )
 
     @classmethod
     def reply_in(cls, home: str) -> str | None:
-        """Reads the model's reply from the session file the interface writes, not from the screen:
-        the screen also shows the prompt that was typed, which may itself contain the reply's
-        words.
+        """Reads the model's reply from the session file the interface writes, not from the screen.
+
+        The screen also shows the prompt that was typed, which may itself contain the reply's words.
 
         Args:
             home (str): The session's `CODEX_HOME`.
@@ -93,11 +97,19 @@ class TuiSession:
         return None
 
     @classmethod
-    def run(cls, command: list[str], cwd: str, env: dict[str, str], home: str, prompt: str,
-            timeout: float) -> dict[str, object]:
-        """Runs `command` (strace around `ling`) on a pseudo-terminal: waits for the composer,
-        types `prompt`, waits for the reply, and quits with `/quit`. A session that does not end
-        by itself is stopped with everything it started.
+    def run(
+        cls,
+        command: list[str],
+        cwd: str,
+        env: dict[str, str],
+        home: str,
+        prompt: str,
+        timeout: float,
+    ) -> dict[str, object]:
+        """Runs `command` (strace around `ling`) on a pseudo-terminal.
+
+        Waits for the composer, types `prompt`, waits for the reply, and quits with `/quit`. A
+        session that does not end by itself is stopped with everything it started.
 
         Args:
             command (List[str]): The program and its arguments.
@@ -117,8 +129,13 @@ class TuiSession:
         screen = pyte.Screen(COLS, ROWS)
         stream = pyte.ByteStream(screen)
         deadline = time.monotonic() + timeout
-        child = pexpect.spawn(command[0], command[1:], cwd=cwd, env=dict(env, TERM="xterm-256color"),
-                              dimensions=(ROWS, COLS))
+        child = pexpect.spawn(
+            command[0],
+            command[1:],
+            cwd=cwd,
+            env=dict(env, TERM="xterm-256color"),
+            dimensions=(ROWS, COLS),
+        )
 
         def text() -> str:
             return "\n".join(line.rstrip() for line in screen.display)

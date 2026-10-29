@@ -69,8 +69,7 @@ class NightShiftQueue:
         return cls._read(night_dir / "tasks" / f"{task_id}.json")
 
     @classmethod
-    def update(cls, night_dir: Path, task_id: str,
-               change: Callable[[dict[str, Any]], Any]) -> Any:
+    def update(cls, night_dir: Path, task_id: str, change: Callable[[dict[str, Any]], Any]) -> Any:
         """Changes one task under its lock and writes it back whole.
 
         Args:
@@ -108,8 +107,9 @@ class NightShiftQueue:
         record.setdefault("history", []).append(entry)
 
     @classmethod
-    def transition(cls, night_dir: Path, task_id: str, status: str,
-                   note: str | None = None, **fields: Any) -> str:
+    def transition(
+        cls, night_dir: Path, task_id: str, status: str, note: str | None = None, **fields: Any
+    ) -> str:
         """Moves a task to `status` unless it was cancelled meanwhile.
 
         A `/night drop` of a running task leaves it `cancel-requested`; the runner must not write
@@ -126,6 +126,7 @@ class NightShiftQueue:
         Returns:
             str: The status actually written.
         """
+
         def change(record: dict[str, Any]) -> str:
             for key, value in fields.items():
                 record[key] = value
@@ -135,13 +136,16 @@ class NightShiftQueue:
             if record.get("status") != wanted or note:
                 cls.set_status(record, wanted, note)
             return wanted
+
         return cls.update(night_dir, task_id, change)
 
     @classmethod
     @contextmanager
     def runner_lock(cls, night_dir: Path, holder: str = "a Night Shift run") -> Iterator[bool]:
-        """Holds `runner.lock` for a run, without waiting. A night run and a SWE-bench run take the
-        same lock, so the two never work the model server at once.
+        """Holds `runner.lock` for a run, without waiting.
+
+        A night run and a SWE-bench run take the same lock, so the two never work the model server
+        at once.
 
         Args:
             night_dir: The queue directory.
@@ -211,9 +215,7 @@ class NightShiftQueue:
 
     @classmethod
     def now(cls) -> str:
-        """Returns:
-        str: The local time as RFC 3339 with its offset, the launcher's history format.
-        """
+        """The local time as RFC 3339 with its offset, the launcher's history format."""
         return datetime.now().astimezone().isoformat(timespec="seconds")
 
     @classmethod

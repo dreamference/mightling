@@ -37,12 +37,13 @@ class SpeechSidecar:
 
     @classmethod
     def state(cls) -> str:
-        """Returns:
-        str: `running`, `exited`, another Docker state, or "" when there is no container.
-        """
+        """`running`, `exited`, another Docker state, or "" when there is no container."""
         result = subprocess.run(
             ["docker", "inspect", STT_CONTAINER_NAME, "--format", "{{.State.Status}}"],
-            capture_output=True, text=True, timeout=30, check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         return result.stdout.strip() if result.returncode == 0 else ""
 
@@ -81,32 +82,60 @@ class SpeechSidecar:
             return False
         mode = SidecarNetwork.network_mode(STT_CONTAINER_NAME)
         if mode and mode != SIDECAR_NETWORK:
-            subprocess.run(["docker", "rm", "-f", STT_CONTAINER_NAME], capture_output=True, timeout=60, check=False)
+            subprocess.run(
+                ["docker", "rm", "-f", STT_CONTAINER_NAME],
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
         state = cls.state()
         if not state:
-            result = subprocess.run(cls.run_command(), capture_output=True, text=True, timeout=600, check=False)
+            result = subprocess.run(
+                cls.run_command(), capture_output=True, text=True, timeout=600, check=False
+            )
             if result.returncode != 0:
-                cls.problem = f"Could not start the speech-to-text server: {result.stderr.strip()[:200]}"
+                cls.problem = (
+                    f"Could not start the speech-to-text server: {result.stderr.strip()[:200]}"
+                )
                 return False
         elif state != RUNNING:
-            started = subprocess.run(["docker", "start", STT_CONTAINER_NAME],
-                                     capture_output=True, text=True, timeout=60, check=False)
+            started = subprocess.run(
+                ["docker", "start", STT_CONTAINER_NAME],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
             if started.returncode != 0:
-                cls.problem = f"Could not start {STT_CONTAINER_NAME}: {started.stderr.strip()[:200]}"
+                cls.problem = (
+                    f"Could not start {STT_CONTAINER_NAME}: {started.stderr.strip()[:200]}"
+                )
                 return False
         # The model downloads on demand; fetching it now keeps the first dictation from timing out.
         subprocess.run(
-            ["docker", "exec", *([] if wait_for_model else ["-d"]), STT_CONTAINER_NAME, "curl", "-s", "-X", "POST",
-             f"http://127.0.0.1:8000/v1/models/{STT_MODEL}"],
-            capture_output=True, timeout=900, check=False,
+            [
+                "docker",
+                "exec",
+                *([] if wait_for_model else ["-d"]),
+                STT_CONTAINER_NAME,
+                "curl",
+                "-s",
+                "-X",
+                "POST",
+                f"http://127.0.0.1:8000/v1/models/{STT_MODEL}",
+            ],
+            capture_output=True,
+            timeout=900,
+            check=False,
         )
         return True
 
     @classmethod
     def ensure_on_node(cls) -> bool | None:
-        """Starts the server on a node when it is absent, as `server start` does for the Google
-        service (decided 2026-10-09). Never raises, and the model downloads in the background:
-        the model server must start anyway.
+        """Starts the server on a node when it is absent.
+
+        As `server start` does for the Google service (decided 2026-10-09). Never raises, and the
+        model downloads in the background: the model server must start anyway.
 
         Returns:
             Optional[bool]: None when this machine is not a node or the container exists already
@@ -129,18 +158,25 @@ class SpeechSidecar:
         Returns:
             bool: True if no container is left.
         """
-        subprocess.run(["docker", "rm", "-f", STT_CONTAINER_NAME], capture_output=True, timeout=60, check=False)
+        subprocess.run(
+            ["docker", "rm", "-f", STT_CONTAINER_NAME], capture_output=True, timeout=60, check=False
+        )
         return not cls.state()
 
     @classmethod
     def status_lines(cls) -> list[str]:
-        """Returns:
-        List[str]: The container's state and network, and where the audio goes.
-        """
+        """The container's state and network, and where the audio goes."""
         state = cls.state()
         network = SidecarNetwork.network_mode(STT_CONTAINER_NAME) if state else ""
-        lines = [f"Speech-to-text ({STT_CONTAINER_NAME}): {state or 'absent'}" + (f" on {network}" if network else "")]
-        lines.append(f"Model: {STT_MODEL}, on the CPU, at http://127.0.0.1:{STT_HOST_PORT}/v1/audio/transcriptions")
+        lines = [
+            f"Speech-to-text ({STT_CONTAINER_NAME}): {state or 'absent'}"
+            + (f" on {network}" if network else "")
+        ]
+        lines.append(
+            f"Model: {STT_MODEL}, on the CPU, at http://127.0.0.1:{STT_HOST_PORT}/v1/audio/transcriptions"
+        )
         if not state:
-            lines.append("The microphone in the app and in `ling web` needs it: run `ling-admin voice start`.")
+            lines.append(
+                "The microphone in the app and in `ling web` needs it: run `ling-admin voice start`."
+            )
         return lines

@@ -1,4 +1,5 @@
-"""One SWE-bench instance, from container to prediction
+"""One SWE-bench instance, from container to prediction.
+
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5.1, §12).
 
 The agent runs inside the instance's own image, where the repository sits at `/testbed` with its
@@ -410,37 +411,41 @@ class SweBenchInstanceRun:
         exec_tool: str = "auto",
         turn_end_percent: int | None = None,
     ) -> None:
-        """Args:
-        store: The run's files.
-        row: The instance's dataset row.
-        image: The instance image for this machine.
-        model_name: The run's `model_name_or_path`.
-        settings: Benchmark settings.
-        runtime_dir: The relocated `ling` runtime on the host.
-        model_url: The model server as the container reaches it (the network's gateway).
-        deadline: `time.time()` by which the instance must stop (its timeout, or the run's
-            `--until`).
-        extra_env: More environment for the container (the air-gap level).
-        code_index: How the container is given a code index (`mounts`, `env`, `path`, and
-            the index's `record`); None for the arm without one.
-        extra_mounts: More `docker run -v` values (a custom prompt's file, read-only).
-        issue: In a `--strip-names` run, the issue as the agent sees it: `text`, and the
-            names `replaced` (name to phrase). None gives the agent the dataset's text.
-        refine: Run the refine arm's two steps: study and describe, then fix.
-        task_rules: Names of `TASK_RULES` added to the prompt that fixes the issue.
-        review_turn: Resume the agent's session once more (`REVIEW_PROMPT`) after it stops
-            with a changed tree and before the patch is collected, within the task's time
-            limit.
-        refine_version: Which refine texts the two steps get (`REFINE_PROMPTS`).
-        hooks: Hook sets (`HOOK_SETS`) registered in the instance's `CODEX_HOME`: `issue-v1`
-            holds the first edit until what the issue names has been read, and the first
-            stop until the issue's example has been run (spec §20).
-        apply_patch: The form `--apply-patch` asked for (`auto` when it did not; spec §22).
-        exec_tool: The form `--exec-tool` asked for Code Mode's `exec` (`auto` when it did
-            not; spec §23).
-        turn_end_percent: What `model_post_turn_compact_threshold_percent` gets on every exec
-            command line (the turn-end compaction arm, spec §16): 0 for off, None leaves
-            the key alone.
+        """Sets up the swe bench instance run.
+
+        Args:
+            store: The run's files.
+            row: The instance's dataset row.
+            image: The instance image for this machine.
+            model_name: The run's `model_name_or_path`.
+            settings: Benchmark settings.
+            runtime_dir: The relocated `ling` runtime on the host.
+            model_url: The model server as the container reaches it (the network's gateway).
+            deadline: `time.time()` by which the instance must stop (its timeout, or the run's
+                `--until`).
+            extra_env: More environment for the container (the air-gap level).
+            code_index: How the container is given a code index (`mounts`, `env`, `path`, and
+                the index's `record`); None for the arm without one.
+            extra_mounts: More `docker run -v` values (a custom prompt's file, read-only).
+            issue: In a `--strip-names` run, the issue as the agent sees it: `text`, and the
+                names `replaced` (name to phrase). None gives the agent the dataset's text.
+            refine: Run the refine arm's two steps: study and describe, then fix.
+            task_rules: Names of `TASK_RULES` added to the prompt that fixes the issue.
+            review_turn: Resume the agent's session once more (`REVIEW_PROMPT`) after it stops
+                with a changed tree and before the patch is collected, within the task's time
+                limit.
+            refine_version: Which refine texts the two steps get (`REFINE_PROMPTS`).
+            hooks: Hook sets (`HOOK_SETS`) registered in the instance's `CODEX_HOME`: `issue-v1`
+                holds the first edit until what the issue names has been read, and the first
+                stop until the issue's example has been run (spec §20).
+            restart_after_compactions: Stop the session at this compaction and restart it (spec §21);
+                0 for off.
+            apply_patch: The form `--apply-patch` asked for (`auto` when it did not; spec §22).
+            exec_tool: The form `--exec-tool` asked for Code Mode's `exec` (`auto` when it did
+                not; spec §23).
+            turn_end_percent: What `model_post_turn_compact_threshold_percent` gets on every exec
+                command line (the turn-end compaction arm, spec §16): 0 for off, None leaves
+                the key alone.
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -495,7 +500,9 @@ class SweBenchInstanceRun:
 
     @classmethod
     def container_name(cls, run: str, instance_id: str) -> str:
-        """Args:
+        """The container name.
+
+        Args:
             run: The run's name.
             instance_id: The instance.
 
@@ -529,7 +536,9 @@ class SweBenchInstanceRun:
 
     @classmethod
     def task_rules_text(cls, task_rules: list[str] | None) -> str:
-        """Args:
+        """The task rules text.
+
+        Args:
             task_rules: Names of `TASK_RULES`.
 
         Returns:
@@ -618,12 +627,13 @@ class SweBenchInstanceRun:
 
     @classmethod
     def stopped_mid_work(cls, message: str) -> bool:
-        """Tells whether a turn that changed the tree ended in the middle of the work: the end of
-        its last message announces a next step ("Let me check …", "I'll run the script.")
-        instead of reporting. Only the last `MID_WORK_TAIL` characters count, because both
-        mid-work stops of the 100-task round ended cut off mid-sentence, a few lines after their
-        last announcement, while a summary that mentions a plan does so earlier; and "let me
-        know" announces nothing.
+        """Tells whether a turn that changed the tree ended in the middle of the work.
+
+        The end of its last message announces a next step ("Let me check …", "I'll run the script.")
+        instead of reporting. Only the last `MID_WORK_TAIL` characters count, because both mid-work
+        stops of the 100-task round ended cut off mid-sentence, a few lines after their last
+        announcement, while a summary that mentions a plan does so earlier; and "let me know"
+        announces nothing.
 
         Args:
             message: The agent's last message.
@@ -794,9 +804,11 @@ class SweBenchInstanceRun:
         ), ""
 
     def _refine(self, state: dict[str, Any]) -> tuple:
-        """The refine arm's first step: a session that studies the issue and writes the refined
-        description, under its own time limit. The tree is then put back as it was, and the
-        second step's clock starts. Records the step in `state["refine"]`.
+        """The refine arm's first step.
+
+        A session that studies the issue and writes the refined description, under its own time
+        limit. The tree is then put back as it was, and the second step's clock starts. Records the
+        step in `state["refine"]`.
 
         Returns:
             tuple: `(refined, problem)`, the description (empty when none was written) and why
@@ -853,8 +865,10 @@ class SweBenchInstanceRun:
         return self._restart(state, task_prompt) if outcome == "restart" else outcome
 
     def compactions_recorded(self) -> int:
-        """Counts the compactions in this instance's sessions: the `compacted` records of every
-        rollout under its scratch `codex-home` (what `scripts/context_budget_replay.py` counts).
+        """Counts the compactions in this instance's sessions.
+
+        The `compacted` records of every rollout under its scratch `codex-home` (what
+        `scripts/context_budget_replay.py` counts).
 
         Returns:
             int: The count; a line still being written is skipped.
@@ -877,7 +891,8 @@ class SweBenchInstanceRun:
         return count
 
     def compaction_record(self) -> dict[str, Any]:
-        """What this instance's sessions spent on compaction, in every run so two arms compare
+        """What this instance's sessions spent on compaction, in every run so two arms compare.
+
         (compaction spec §13): the `compacted` records of its rollouts and the seconds they took,
         each from the last rollout line more than `COMPACTION_GAP_S` before it (the compaction
         request's prefill and the summary's decode, as the compaction survey of 2026-10-13 §1
@@ -1029,9 +1044,11 @@ class SweBenchInstanceRun:
             entry["complied"] += 1 if hold.get("complied") else 0
 
     def apply_patch_calls(self) -> int:
-        """Counts the agent's `apply_patch` tool calls in this instance's rollouts: `function_call`
-        records named `apply_patch` (the function form) and `custom_tool_call` ones (freeform).
-        An edit made through the shell is not counted; it is the behaviour the arm measures against.
+        """Counts the agent's `apply_patch` tool calls in this instance's rollouts.
+
+        `function_call` records named `apply_patch` (the function form) and `custom_tool_call` ones
+        (freeform). An edit made through the shell is not counted; it is the behaviour the arm
+        measures against.
 
         Returns:
             int: The count; a line still being written is skipped.
@@ -1039,10 +1056,11 @@ class SweBenchInstanceRun:
         return self.tool_calls("apply_patch")
 
     def exec_calls(self) -> int:
-        """Counts the agent's calls to Code Mode's `exec` in this instance's rollouts. A call the
-        model made to the translated function is recorded as the `custom_tool_call` Codex expects
-        (`ling-rs/tools`), so the count is the same in either form; a shell command that merely
-        mentions `exec` is not a call.
+        """Counts the agent's calls to Code Mode's `exec` in this instance's rollouts.
+
+        A call the model made to the translated function is recorded as the `custom_tool_call` Codex
+        expects (`ling-rs/tools`), so the count is the same in either form; a shell command that
+        merely mentions `exec` is not a call.
 
         Returns:
             int: The count; a line still being written is skipped.
@@ -1050,8 +1068,9 @@ class SweBenchInstanceRun:
         return self.tool_calls("exec")
 
     def tool_calls(self, name: str) -> int:
-        """Counts the `function_call` and `custom_tool_call` records named `name` in this
-        instance's rollouts.
+        """Counts the tool call records named `name` in this instance's rollouts.
+
+        The records are `function_call` and `custom_tool_call`.
 
         Args:
             name: The tool's name.
@@ -1092,9 +1111,11 @@ class SweBenchInstanceRun:
         )
 
     def _restart(self, state: dict[str, Any], task_prompt: str) -> str:
-        """The restart (spec §21): the session was stopped at its N-th compaction. Its diff is written
-        to `restart-diff.patch` in the scratch folder, the tree is reset, and one fresh session gets
-        the task prompt again under `RESTART_PREAMBLE`. Records `state["restart"]`.
+        """The restart (spec §21): the session was stopped at its N-th compaction.
+
+        Its diff is written to `restart-diff.patch` in the scratch folder, the tree is reset, and
+        one fresh session gets the task prompt again under `RESTART_PREAMBLE`. Records
+        `state["restart"]`.
 
         Args:
             state: The instance's state.
@@ -1141,10 +1162,12 @@ class SweBenchInstanceRun:
         return self._exec(fresh, resume=False)
 
     def _review(self, state: dict[str, Any], outcome: str) -> str | None:
-        """The review turn: once the agent's turns have ended normally with a changed tree, one more
-        turn of the same session (a fresh one with the issue and the diff when no session was
-        recorded), under the task's own deadline. Records `state["review"]`: whether it ran or
-        why not, whether it resumed, its outcome, time and tokens, and what it changed.
+        """The review turn.
+
+        Once the agent's turns have ended normally with a changed tree, one more turn of the same
+        session (a fresh one with the issue and the diff when no session was recorded), under the
+        task's own deadline. Records `state["review"]`: whether it ran or why not, whether it
+        resumed, its outcome, time and tokens, and what it changed.
 
         Args:
             state: The instance's state.
@@ -1216,10 +1239,11 @@ class SweBenchInstanceRun:
         return review
 
     def _prepare_gate(self, state: dict[str, Any]) -> None:
-        """Writes the `issue-v1` hooks' conditions, which switches them on: the names the issue
-        holds, resolved in the container (`SweBenchIssueTargets`), and its runnable examples.
-        Records them in `state["hooks"]`. A failed resolution leaves the hooks with nothing to
-        read before the first edit; the example check still applies.
+        """Writes the `issue-v1` hooks' conditions, which switches them on.
+
+        The names the issue holds, resolved in the container (`SweBenchIssueTargets`), and its
+        runnable examples. Records them in `state["hooks"]`. A failed resolution leaves the hooks
+        with nothing to read before the first edit; the example check still applies.
 
         Args:
             state: The instance's state.
@@ -1407,10 +1431,11 @@ class SweBenchInstanceRun:
         return "ok" if code == 0 else "error"
 
     def _nudge_kind(self) -> str | None:
-        """Decides whether a turn that ended normally is resumed, and with which nudge: `stall`
-        when the tree is unchanged and the last message announces work (Night Shift's rule),
-        `completion` when the tree changed and the last message stopped mid-work (failure
-        analysis §5.3: the stall rule alone could not fire once the agent had edited anything).
+        """Decides whether a turn that ended normally is resumed, and with which nudge.
+
+        `stall` when the tree is unchanged and the last message announces work (Night Shift's rule),
+        `completion` when the tree changed and the last message stopped mid-work (failure analysis
+        §5.3: the stall rule alone could not fire once the agent had edited anything).
 
         Returns:
             Optional[str]: `stall`, `completion`, or None for no nudge.

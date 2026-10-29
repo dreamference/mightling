@@ -1,5 +1,6 @@
-"""Best-of-N for a Night Shift task (specs/DREAMFERENCE_BACKLOG.md item 6;
-specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §11.9).
+"""Best-of-N for a Night Shift task (specs/DREAMFERENCE_BACKLOG.md item 6.
+
+Specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §11.9).
 
 A task is attempted N times (`[night] best_of`, 3 by default since the owner's decision of
 2026-10-19 after SWE-bench night 13; a task's own `best_of` outranks it),
@@ -82,19 +83,21 @@ class NightShiftBestOfN:
         model_node: str | None = None,
         window_end: float | None = None,
     ) -> None:
-        """Args:
-        night_dir: The queue directory.
-        task: The task record as queued.
-        settings: Night Shift settings.
-        mightling_bin: The `ling` executable.
-        deadline: `time.time()` by which the first attempt must stop.
-        best_of: How many attempts.
-        model_host: The model server the night run was admitted against; the attempts and the
-            judge use it.
-        context_budget: The task's share of the KV pool (each attempt's compaction limit).
-        model_node: The paired node whose server `model_host` is, when it is not this machine's.
-        window_end: `time.time()` at which the night's window closes; no attempt starts after
-            it, and none runs past it.
+        """Sets up the night shift best of n.
+
+        Args:
+            night_dir: The queue directory.
+            task: The task record as queued.
+            settings: Night Shift settings.
+            mightling_bin: The `ling` executable.
+            deadline: `time.time()` by which the first attempt must stop.
+            best_of: How many attempts.
+            model_host: The model server the night run was admitted against; the attempts and the
+                judge use it.
+            context_budget: The task's share of the KV pool (each attempt's compaction limit).
+            model_node: The paired node whose server `model_host` is, when it is not this machine's.
+            window_end: `time.time()` at which the night's window closes; no attempt starts after
+                it, and none runs past it.
         """
         self.night_dir = night_dir
         self.task = dict(task)
@@ -168,8 +171,9 @@ class NightShiftBestOfN:
         deadline: float,
         **kwargs: Any,
     ) -> Any:
-        """The run the scheduler starts for a task: a plain `NightShiftTaskRun` for one attempt, this
-        class for more.
+        """The run the scheduler starts for a task.
+
+        A plain `NightShiftTaskRun` for one attempt, this class for more.
 
         Args:
             night_dir: The queue directory.
@@ -415,8 +419,10 @@ class NightShiftBestOfN:
 
     @classmethod
     def regression(cls, result: dict[str, Any]) -> int | None:
-        """The regression filter's input from an attempt's result: 0 when its tests passed, 1 when
-        they failed or timed out or the attempt ran out of time, None when it was not tested.
+        """The regression filter's input from an attempt's result.
+
+        0 when its tests passed, 1 when they failed or timed out or the attempt ran out of time,
+        None when it was not tested.
         """
         if result.get("timed_out"):
             return 1

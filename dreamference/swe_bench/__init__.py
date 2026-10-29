@@ -1,6 +1,8 @@
-"""SWE-bench on this machine: `ling-admin swe-bench` runs `ling` over benchmark instances, each
-in its own container with no network but the model server, and has the upstream harness grade
-the patches (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
+"""SWE-bench on this machine.
+
+`ling-admin swe-bench` runs `ling` over benchmark instances, each in its own container with no
+network but the model server, and has the upstream harness grade the patches
+(specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
 """
 
 from dreamference.swe_bench.swe_bench_arm_smoke import SweBenchArmSmoke

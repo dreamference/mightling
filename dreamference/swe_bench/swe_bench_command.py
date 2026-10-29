@@ -1,4 +1,5 @@
-"""`ling-admin swe-bench {setup,build-images,smoke,run,eval,report,status,clean,shard,merge}`
+"""`ling-admin swe-bench {setup,build-images,smoke,run,eval,report,status,clean,shard,merge}`.
+
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §3).
 
 The parser and the dispatch live here so the CLI controller only registers and calls them.
@@ -606,8 +607,10 @@ class SweBenchCommand:
         limit: int | None = None,
         force: bool = False,
     ) -> int:
-        """Prepares everything a run needs except the instance images: the harness's virtualenv,
-        the dataset snapshot, the list of arm64 images and the relocated `ling`.
+        """Prepares everything a run needs except the instance images.
+
+        The harness's virtualenv, the dataset snapshot, the list of arm64 images and the relocated
+        `ling`.
 
         Args:
             dataset: The dataset to download.
@@ -753,9 +756,10 @@ class SweBenchCommand:
 
     @classmethod
     def smoke(cls, idle_minutes: float | None = None, ignore_sessions: bool = False) -> int:
-        """Proves the pipeline end to end (§7.1): the five smoke instances must resolve with their
-        reference patches and must not with a no-op patch, and one of them must go through the
-        agent phase and be graded.
+        """Proves the pipeline end to end (§7.1).
+
+        The five smoke instances must resolve with their reference patches and must not with a no-op
+        patch, and one of them must go through the agent phase and be graded.
 
         Args:
             idle_minutes: Minutes the model must have been idle before the agent step.

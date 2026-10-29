@@ -76,8 +76,7 @@ WEBVIEW_CACHE_DIR_NAME: Final[str] = "Cache"
 
 
 class DesktopRunner:
-    """Builds and runs the Mightling desktop app.
-    """
+    """Builds and runs the Mightling desktop app."""
 
     @classmethod
     def _environment(cls) -> dict:
@@ -96,8 +95,9 @@ class DesktopRunner:
 
     @classmethod
     def _ensure_toolchain(cls, build: bool = False) -> bool:
-        """Checks Node and npm are present (and, for the `.deb`, dpkg); nothing is
-        installed, since all of them come from the system.
+        """Checks Node and npm are present (and, for the `.deb`, dpkg).
+
+        Nothing is installed, since all of them come from the system.
 
         Args:
             build (bool): Whether the `.deb` is to be made.
@@ -131,9 +131,11 @@ class DesktopRunner:
 
     @classmethod
     def packages_current(cls, directory: Path) -> bool:
-        """Whether a project's `node_modules` was installed from its lock file as it is now: a stamp
-        `npm ci` left there holds the lock file's hash. A dependency added since (smol-toml was,
-        and Rolldown then could not resolve it) changes the hash, so the packages are installed again.
+        """Whether a project's `node_modules` was installed from its lock file as it is now.
+
+        A stamp `npm ci` left there holds the lock file's hash. A dependency added since (smol-toml
+        was, and Rolldown then could not resolve it) changes the hash, so the packages are installed
+        again.
 
         Args:
             directory (Path): The npm project.
@@ -163,7 +165,10 @@ class DesktopRunner:
         Returns:
             bool: True when both have their `node_modules`, as their lock files say.
         """
-        for directory, what in ((UI_DIR, "the app window's packages (desktop/ui)"), (ELECTRON_DIR, "the app's packages (desktop/electron: Electron, Forge, Vite)")):
+        for directory, what in (
+            (UI_DIR, "the app window's packages (desktop/ui)"),
+            (ELECTRON_DIR, "the app's packages (desktop/electron: Electron, Forge, Vite)"),
+        ):
             if cls.packages_current(directory):
                 continue
             print(f"📦 Installing {what}...")
@@ -188,12 +193,18 @@ class DesktopRunner:
         Returns:
             int: 1.
         """
-        print("❌ The desktop app is built from the repository's desktop/ project, which a release "
-              "install does not have.")
-        print("💡 Install the app from the release instead: the Mightling .deb on the release page "
-              "puts `ling-app` in your launcher.")
-        print("💡 Running an unpacked build (a zip) instead: run `./install-sandbox-profile.sh` beside its "
-              "binary once, or Chromium's sandbox is refused (\"No usable sandbox!\").")
+        print(
+            "❌ The desktop app is built from the repository's desktop/ project, which a release "
+            "install does not have."
+        )
+        print(
+            "💡 Install the app from the release instead: the Mightling .deb on the release page "
+            "puts `ling-app` in your launcher."
+        )
+        print(
+            "💡 Running an unpacked build (a zip) instead: run `./install-sandbox-profile.sh` beside its "
+            'binary once, or Chromium\'s sandbox is refused ("No usable sandbox!").'
+        )
         return 1
 
     @classmethod
@@ -211,14 +222,16 @@ class DesktopRunner:
 
     @classmethod
     def copy_bundled_binaries(cls) -> bool:
-        """Copies `ling` and `codex-code-mode-host` from the installed build into `resources/`, where
-        Forge packages them beside the app (the Codex app bundles its agent the same way). A
+        """Copies `ling` and `codex-code-mode-host` from the installed build into `resources/`.
+
+        Where Forge packages them beside the app (the Codex app bundles its agent the same way). A
         `rg` on PATH rides along too, for the agent's fuzzy file search.
 
         Returns:
             bool: True when `ling` was copied.
         """
         from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+
         bin_dir = Path(CodexBrandedBuilder.executable_path()).parent
         RESOURCES_DIR.mkdir(parents=True, exist_ok=True)
         for name in BUNDLED_BINARIES:
@@ -234,10 +247,12 @@ class DesktopRunner:
 
     @classmethod
     def run(cls) -> int:
-        """Opens the Mightling desktop window from the checkout: packages the app (`electron-forge
-        package`: Vite builds the main process, the preload and Work's page; `ling` is bundled)
-        and runs the packaged binary, so what opens is what the `.deb` ships. Not
-        `electron-forge start`, whose dev server Work's `app://` page does not use.
+        """Opens the Mightling desktop window from the checkout.
+
+        Packages the app (`electron-forge package`: Vite builds the main process, the preload and
+        Work's page; `ling` is bundled) and runs the packaged binary, so what opens is what the
+        `.deb` ships. Not `electron-forge start`, whose dev server Work's `app://` page does not
+        use.
 
         Returns:
             int: 0 on success, non-zero on failure.
@@ -346,8 +361,9 @@ class DesktopRunner:
 
     @classmethod
     def packaged_binary_path(cls) -> str:
-        """Where `electron-forge package` writes the app's binary on this machine, whether or not it
-        has been written yet: `out/<productName>-linux-<arch>/<executable>`.
+        """Where `electron-forge package` writes the app's binary on this machine.
+
+        Whether or not it has been written yet: `out/<productName>-linux-<arch>/<executable>`.
 
         Returns:
             str: The absolute path.
@@ -361,11 +377,13 @@ class DesktopRunner:
 
     @classmethod
     def dev_binaries(cls) -> list[str]:
-        """The Electron binaries a checkout runs: npm's prebuilt `electron`, and the packaged app
-        `desktop run` and the launcher entry start. All need the AppArmor profile. The packaged
-        path is included before it exists: `desktop install` runs before the first `desktop run`
-        packages the app, and a profile written then without it left the app the launcher starts
-        refused its sandbox ("No usable sandbox!", 2026-10-19).
+        """The Electron binaries a checkout runs.
+
+        Npm's prebuilt `electron`, and the packaged app `desktop run` and the launcher entry start.
+        All need the AppArmor profile. The packaged path is included before it exists: `desktop
+        install` runs before the first `desktop run` packages the app, and a profile written then
+        without it left the app the launcher starts refused its sandbox ("No usable sandbox!",
+        2026-10-19).
 
         Returns:
             List[str]: Absolute paths: npm's `electron` if it is installed, the packaged binary's
@@ -380,9 +398,11 @@ class DesktopRunner:
 
     @classmethod
     def warn_uncovered(cls, binaries: list[str]) -> bool:
-        """Says, with the fix, when a binary about to be started has no AppArmor profile on a machine
-        that needs one. From PyCharm's terminal (a permissive profile) it still starts; from the
-        launcher or a plain terminal Chromium aborts with "No usable sandbox!".
+        """Says, with the fix.
+
+        When a binary about to be started has no AppArmor profile on a machine that needs one. From
+        PyCharm's terminal (a permissive profile) it still starts; from the launcher or a plain
+        terminal Chromium aborts with "No usable sandbox!".
 
         Args:
             binaries (List[str]): The binaries to check.
@@ -393,8 +413,12 @@ class DesktopRunner:
         missing = DesktopInstaller.uncovered(binaries)
         if not missing:
             return True
-        print("⚠️  Chromium's sandbox needs a user namespace, which this machine refuses to a program without an")
-        print(f"   AppArmor profile, and none names {', '.join(missing)}: from the launcher or a plain")
+        print(
+            "⚠️  Chromium's sandbox needs a user namespace, which this machine refuses to a program without an"
+        )
+        print(
+            f"   AppArmor profile, and none names {', '.join(missing)}: from the launcher or a plain"
+        )
         print('   terminal the app would abort at start with "No usable sandbox!".')
         print("💡 `ling-admin desktop install` writes the profile (sudo once).")
         return False
@@ -461,15 +485,19 @@ class DesktopRunner:
 
         subprocess.run(
             ["update-desktop-database", DESKTOP_ENTRY_DIR],
-            capture_output=True, timeout=60, check=False,
+            capture_output=True,
+            timeout=60,
+            check=False,
         )
         print(f"🖥️  Registered Mightling with the desktop environment ({DESKTOP_ENTRY_NAME}).")
         return True
 
     @classmethod
     def install(cls) -> int:
-        """Installs what the desktop app is built and run from, without building it: npm's packages
-        (Electron among them), and the AppArmor profile Chromium's sandbox needs on this machine.
+        """Installs what the desktop app is built and run from, without building it.
+
+        Npm's packages (Electron among them), and the AppArmor profile Chromium's sandbox needs on
+        this machine.
 
         Returns:
             int: 0 if the toolchain is complete afterwards and every binary has its profile.
@@ -483,8 +511,14 @@ class DesktopRunner:
             # The checkout's one file, rewritten with every binary it covered or should: a profile
             # from before that named fewer is replaced, not joined by a second. A binary another
             # profile names (an unpacked build's) is left to it: two attachments would conflict.
-            ours = [binary for binary in binaries
-                    if os.path.basename(DesktopInstaller.covering_profile(binary) or APPARMOR_PROFILE_NAME) == APPARMOR_PROFILE_NAME]
+            ours = [
+                binary
+                for binary in binaries
+                if os.path.basename(
+                    DesktopInstaller.covering_profile(binary) or APPARMOR_PROFILE_NAME
+                )
+                == APPARMOR_PROFILE_NAME
+            ]
             if not DesktopInstaller.install_apparmor_profile(ours):
                 return 1
         if cls.binary_path():
@@ -499,10 +533,13 @@ class DesktopRunner:
             int: 0 if the app could be built and launched right now, 1 otherwise.
         """
         from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+
         ling = CodexBrandedBuilder.executable_path()
         built = os.path.isfile(ling)
-        print(f"{'✅' if built else '❌'} ling, which the app bundles for Work and Ask"
-              f"{f' ({ling})' if built else ' — build it with: ling-admin codex build'}")
+        print(
+            f"{'✅' if built else '❌'} ling, which the app bundles for Work and Ask"
+            f"{f' ({ling})' if built else ' — build it with: ling-admin codex build'}"
+        )
         complete, _ = DesktopInstaller.report()
         covered = cls.warn_uncovered(cls.dev_binaries()) if cls.has_source() else True
         return 0 if built and complete and covered else 1

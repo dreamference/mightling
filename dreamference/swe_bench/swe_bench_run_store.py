@@ -28,29 +28,31 @@ _PREDICTIONS_LOCK: Final[threading.Lock] = threading.Lock()
 # A command that asks the index something. Naming the binary is not enough: in the first run
 # with the index, the one command that mentioned it was `ls /opt/ling-code/bin`.
 MIGHTLING_CODE_QUERY: Final[re.Pattern] = re.compile(
-    r"\bling-code\s+(def|refs|callers|callees|impl|impact|show|outline|search|status)\b")
+    r"\bling-code\s+(def|refs|callers|callees|impl|impact|show|outline|search|status)\b"
+)
 
 # The same questions asked through the tools the launcher gives the model since 2026-10-02
 # (`code_def`, `code_search`, … served by `ling-code mcp`).
 MIGHTLING_CODE_TOOL: Final[re.Pattern] = re.compile(
-    r"^code_(def|refs|callers|callees|impl|impact|show|outline|search|status)$")
+    r"^code_(def|refs|callers|callees|impl|impact|show|outline|search|status)$"
+)
 
 
 class SweBenchRunStore:
     """Reads and writes a run directory."""
 
     def __init__(self, name: str) -> None:
-        """Args:
-        name: The run's name.
+        """Sets up the swe bench run store.
+
+        Args:
+            name: The run's name.
         """
         self.name = name
         self.directory: Path = swe_bench_settings.RESULTS_DIR / "runs" / name
 
     @classmethod
     def runs(cls) -> list[str]:
-        """Returns:
-        List[str]: The names of the runs on disk, oldest first.
-        """
+        """The names of the runs on disk, oldest first."""
         root = swe_bench_settings.RESULTS_DIR / "runs"
         if not root.is_dir():
             return []
@@ -59,9 +61,7 @@ class SweBenchRunStore:
 
     @classmethod
     def latest(cls) -> str | None:
-        """Returns:
-        Optional[str]: The most recently started run, if any.
-        """
+        """The most recently started run, if any."""
         runs = cls.runs()
         return runs[-1] if runs else None
 
@@ -73,9 +73,7 @@ class SweBenchRunStore:
         return self.directory / "manifest.json"
 
     def manifest(self) -> dict[str, Any] | None:
-        """Returns:
-        Optional[Dict[str, Any]]: The manifest, or None when the run does not exist.
-        """
+        """The manifest, or None when the run does not exist."""
         return self._read(self.manifest_path)
 
     def write_manifest(self, manifest: dict[str, Any]) -> None:
@@ -96,7 +94,9 @@ class SweBenchRunStore:
     # -- instances -----------------------------------------------------------------------------
 
     def state(self, instance_id: str) -> dict[str, Any] | None:
-        """Args:
+        """The state.
+
+        Args:
             instance_id: The instance.
 
         Returns:
@@ -115,9 +115,7 @@ class SweBenchRunStore:
         self._write(self.directory / "instances" / f"{instance_id}.json", state)
 
     def states(self) -> dict[str, dict[str, Any]]:
-        """Returns:
-        Dict[str, Dict[str, Any]]: Every instance state on disk, by instance id.
-        """
+        """Every instance state on disk, by instance id."""
         directory = self.directory / "instances"
         if not directory.is_dir():
             return {}
@@ -129,13 +127,13 @@ class SweBenchRunStore:
         return found
 
     def finished(self) -> list[str]:
-        """Returns:
-        List[str]: Instances whose prediction is written, in the order they finished.
-        """
+        """Instances whose prediction is written, in the order they finished."""
         return [prediction["instance_id"] for prediction in self.predictions()]
 
     def log_path(self, instance_id: str) -> Path:
-        """Args:
+        """The log path.
+
+        Args:
             instance_id: The instance.
 
         Returns:
@@ -144,9 +142,10 @@ class SweBenchRunStore:
         return self.directory / "logs" / f"{instance_id}.jsonl"
 
     def log_stats(self, instance_id: str, start: int = 0, end: int | None = None) -> dict[str, int]:
-        """Counts what the agent did, from `ling exec`'s events: its commands and tool calls, how
-        many of them asked `ling-code` something (as a shell command or as a `code_*` tool),
-        and the tokens of every turn.
+        """Counts what the agent did, from `ling exec`'s events.
+
+        Its commands and tool calls, how many of them asked `ling-code` something (as a shell
+        command or as a `code_*` tool), and the tokens of every turn.
 
         Args:
             instance_id: The instance.
@@ -158,8 +157,13 @@ class SweBenchRunStore:
             Dict[str, int]: `commands`, `puffin_code_calls`, `input_tokens`,
             `cached_input_tokens`, `output_tokens`; zeros when there is no log.
         """
-        stats = {"commands": 0, "puffin_code_calls": 0, "input_tokens": 0, "cached_input_tokens": 0,
-                 "output_tokens": 0}
+        stats = {
+            "commands": 0,
+            "puffin_code_calls": 0,
+            "input_tokens": 0,
+            "cached_input_tokens": 0,
+            "output_tokens": 0,
+        }
         try:
             data = self.log_path(instance_id).read_bytes()[start:end]
             lines = data.decode(errors="replace").splitlines()
@@ -189,11 +193,12 @@ class SweBenchRunStore:
         return stats
 
     def compactions(self, instance_id: str) -> dict[str, Any] | None:
-        """The compactions of an instance's sessions, from the rollouts kept in its scratch
-        `codex-home` (compaction survey 2026-10-13 §1, §3.5): one per `compacted` record. A
-        compaction's time is the gap between its record and the last earlier record more than
-        2 s before it, which covers the compaction request's prefill and the summary's decode
-        (an upper bound by a second or two).
+        """The compactions of an instance's sessions.
+
+        From the rollouts kept in its scratch `codex-home` (compaction survey 2026-10-13 §1, §3.5):
+        one per `compacted` record. A compaction's time is the gap between its record and the last
+        earlier record more than 2 s before it, which covers the compaction request's prefill and
+        the summary's decode (an upper bound by a second or two).
 
         Args:
             instance_id: The instance.
@@ -204,7 +209,11 @@ class SweBenchRunStore:
         """
         from datetime import datetime
 
-        paths = sorted((self.directory / "scratch" / instance_id / "codex-home" / "sessions").rglob("rollout*.jsonl"))
+        paths = sorted(
+            (self.directory / "scratch" / instance_id / "codex-home" / "sessions").rglob(
+                "rollout*.jsonl"
+            )
+        )
         if not paths:
             return None
         seconds: list[float | None] = []
@@ -223,11 +232,16 @@ class SweBenchRunStore:
                     continue
                 try:
                     stamp: float | None = datetime.fromisoformat(
-                        str(record["timestamp"]).replace("Z", "+00:00")).timestamp()
+                        str(record["timestamp"]).replace("Z", "+00:00")
+                    ).timestamp()
                 except (ValueError, KeyError):
                     stamp = None  # counted, but not timed
                 if record.get("type") == "compacted":
-                    before = None if stamp is None else next((t for t in reversed(earlier) if stamp - t > 2), None)
+                    before = (
+                        None
+                        if stamp is None
+                        else next((t for t in reversed(earlier) if stamp - t > 2), None)
+                    )
                     seconds.append(None if before is None else stamp - before)
                 if stamp is not None:
                     earlier.append(stamp)
@@ -241,9 +255,10 @@ class SweBenchRunStore:
         return self.directory / "predictions.jsonl"
 
     def predictions(self) -> list[dict[str, Any]]:
-        """Returns:
-        List[Dict[str, Any]]: The predictions written so far. A torn last line (the run was
-        killed mid-write) is ignored, so its instance simply runs again.
+        """The predictions written so far.
+
+        A torn last line (the run was killed mid-write) is ignored, so its instance simply runs
+        again.
         """
         try:
             lines = self.predictions_path.read_text().splitlines()
@@ -260,16 +275,19 @@ class SweBenchRunStore:
         return predictions
 
     def append_prediction(self, instance_id: str, model_name: str, patch: str) -> None:
-        """Appends one prediction. An instance whose agent failed or changed nothing is written
-        with an empty patch, so it is unresolved and never missing from the denominator.
+        """Appends one prediction.
+
+        An instance whose agent failed or changed nothing is written with an empty patch, so it is
+        unresolved and never missing from the denominator.
 
         Args:
             instance_id: The instance.
             model_name: The run's `model_name_or_path`.
             patch: The collected patch; may be empty.
         """
-        line = json.dumps({"instance_id": instance_id, "model_name_or_path": model_name,
-                           "model_patch": patch})
+        line = json.dumps(
+            {"instance_id": instance_id, "model_name_or_path": model_name, "model_patch": patch}
+        )
         with _PREDICTIONS_LOCK:
             torn = False
             try:
@@ -287,7 +305,9 @@ class SweBenchRunStore:
 
     @classmethod
     def eval_directory_name(cls, variant: str | None = None) -> str:
-        """Args:
+        """The eval directory name.
+
+        Args:
             variant: A grading series other than the plain one (`drop-test-hunks`), or None.
 
         Returns:
@@ -296,7 +316,9 @@ class SweBenchRunStore:
         return f"eval-{variant}" if variant else "eval"
 
     def gradings(self, variant: str | None = None) -> list[int]:
-        """Args:
+        """The gradings.
+
+        Args:
             variant: The grading series; None for the plain one.
 
         Returns:
@@ -305,11 +327,16 @@ class SweBenchRunStore:
         directory = self.directory / self.eval_directory_name(variant)
         if not directory.is_dir():
             return []
-        return sorted(int(entry.name) for entry in directory.iterdir()
-                      if entry.is_dir() and entry.name.isdigit())
+        return sorted(
+            int(entry.name)
+            for entry in directory.iterdir()
+            if entry.is_dir() and entry.name.isdigit()
+        )
 
     def grading_dir(self, number: int, variant: str | None = None) -> Path:
-        """Args:
+        """The grading dir.
+
+        Args:
             number: The grading number.
             variant: The grading series; None for the plain one.
 
@@ -319,7 +346,9 @@ class SweBenchRunStore:
         return self.directory / self.eval_directory_name(variant) / str(number)
 
     def grading(self, number: int, variant: str | None = None) -> dict[str, Any]:
-        """Args:
+        """The grading.
+
+        Args:
             number: The grading number.
             variant: The grading series; None for the plain one.
 
@@ -332,11 +361,15 @@ class SweBenchRunStore:
         record.setdefault("results", {})
         return record
 
-    def write_grading(self, number: int, record: dict[str, Any], variant: str | None = None) -> None:
-        """Args:
-        number: The grading number.
-        record: The grading record, as `grading()` returns it.
-        variant: The grading series; None for the plain one.
+    def write_grading(
+        self, number: int, record: dict[str, Any], variant: str | None = None
+    ) -> None:
+        """Writes the grading.
+
+        Args:
+            number: The grading number.
+            record: The grading record, as `grading()` returns it.
+            variant: The grading series; None for the plain one.
         """
         self._write(self.grading_dir(number, variant) / "grading.json", record)
 

@@ -82,7 +82,10 @@ class ImageSearchSidecar:
         """
         result = subprocess.run(
             ["docker", "inspect", container, "--format", "{{.State.Status}}"],
-            capture_output=True, text=True, timeout=30, check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         return result.stdout.strip() if result.returncode == 0 else ""
 
@@ -123,7 +126,9 @@ class ImageSearchSidecar:
 
         try:
             os.makedirs(IMAGE_STORE_DIR, exist_ok=True)
-            shutil.copyfile(image_search_service.__file__, os.path.join(IMAGE_SEARCH_DATA_DIR, STAGED_SERVICE))
+            shutil.copyfile(
+                image_search_service.__file__, os.path.join(IMAGE_SEARCH_DATA_DIR, STAGED_SERVICE)
+            )
         except OSError as exc:
             cls.problem = f"Could not stage the image search service: {exc}"
             return False
@@ -141,13 +146,17 @@ class ImageSearchSidecar:
             str: The first id in `/v1/models`, or `fallback`.
         """
         try:
-            with urllib.request.urlopen(f"{vllm_host.rstrip('/')}/v1/models", timeout=5) as response:
+            with urllib.request.urlopen(
+                f"{vllm_host.rstrip('/')}/v1/models", timeout=5
+            ) as response:
                 return str(json.load(response)["data"][0]["id"])
         except (OSError, ValueError, KeyError, IndexError, TypeError):
             return fallback
 
     @classmethod
-    def run_command(cls, secret: str, vision_url: str, vision_model: str, siglip: bool) -> list[str]:
+    def run_command(
+        cls, secret: str, vision_url: str, vision_model: str, siglip: bool
+    ) -> list[str]:
         """Builds the `docker run` command for the service.
 
         Args:
@@ -210,16 +219,27 @@ class ImageSearchSidecar:
             bool: True if it is running once this returns.
         """
         if cls._off_network(SIGLIP_CONTAINER_NAME):
-            subprocess.run(["docker", "rm", "-f", SIGLIP_CONTAINER_NAME],
-                           capture_output=True, timeout=60, check=False)
+            subprocess.run(
+                ["docker", "rm", "-f", SIGLIP_CONTAINER_NAME],
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
         state = cls.state(SIGLIP_CONTAINER_NAME)
         if state == RUNNING:
             return True
         if state:
-            started = subprocess.run(["docker", "start", SIGLIP_CONTAINER_NAME],
-                                     capture_output=True, text=True, timeout=60, check=False)
+            started = subprocess.run(
+                ["docker", "start", SIGLIP_CONTAINER_NAME],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
             return started.returncode == 0
-        result = subprocess.run(cls.siglip_command(), capture_output=True, text=True, timeout=300, check=False)
+        result = subprocess.run(
+            cls.siglip_command(), capture_output=True, text=True, timeout=300, check=False
+        )
         return result.returncode == 0
 
     @classmethod
@@ -234,7 +254,9 @@ class ImageSearchSidecar:
         """
         for attempt in range(max(1, wait_seconds)):
             try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{IMAGE_SEARCH_HOST_PORT}/health", timeout=2):
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{IMAGE_SEARCH_HOST_PORT}/health", timeout=2
+                ):
                     return True
             except OSError:
                 if attempt + 1 < wait_seconds:
@@ -256,6 +278,7 @@ class ImageSearchSidecar:
         """
         try:
             from dreamference.hardware import resolve_model_hf_repo
+
             fallback = resolve_model_hf_repo(model) or model
         except (ImportError, KeyError, ValueError):
             fallback = model
@@ -263,8 +286,9 @@ class ImageSearchSidecar:
 
     @classmethod
     def start(cls, vllm_host: str, model: str, siglip: bool = True, wait: bool = True) -> bool:
-        """Makes the service run on the sidecar network, recreated so the staged file and the
-        served model take effect.
+        """Makes the service run on the sidecar network.
+
+        Recreated so the staged file and the served model take effect.
 
         Args:
             vllm_host (str): The model server's base URL on the host.
@@ -284,10 +308,18 @@ class ImageSearchSidecar:
             cls.problem = f"Could not create the Docker network {SIDECAR_NETWORK}."
             return False
         with_siglip = siglip and cls.start_siglip()
-        subprocess.run(["docker", "rm", "-f", IMAGE_SEARCH_CONTAINER_NAME],
-                       capture_output=True, timeout=60, check=False)
+        subprocess.run(
+            ["docker", "rm", "-f", IMAGE_SEARCH_CONTAINER_NAME],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
         command = cls.run_command(
-            secret, DockerBridge.container_vllm_url(vllm_host), cls.vision_model(vllm_host, model), with_siglip)
+            secret,
+            DockerBridge.container_vllm_url(vllm_host),
+            cls.vision_model(vllm_host, model),
+            with_siglip,
+        )
         result = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
         if result.returncode != 0:
             cls.problem = f"Could not start the image search service: {result.stderr.strip()[:200]}"
@@ -299,10 +331,11 @@ class ImageSearchSidecar:
 
     @classmethod
     def ensure_on_node(cls, vllm_host: str, model: str) -> bool | None:
-        """Starts the service on a node when it is absent, as `server start` does for the Google
-        service (decided 2026-10-09). Never raises and never waits for its health: the model
-        server must start anyway. SigLIP is left to `ling-admin images start`, since its image
-        is large and has no arm64 build upstream.
+        """Starts the service on a node when it is absent.
+
+        As `server start` does for the Google service (decided 2026-10-09). Never raises and never
+        waits for its health: the model server must start anyway. SigLIP is left to `ling-admin
+        images start`, since its image is large and has no arm64 build upstream.
 
         Args:
             vllm_host (str): The model server's base URL on the host.
@@ -330,7 +363,9 @@ class ImageSearchSidecar:
             bool: True if neither container is left.
         """
         for container in (IMAGE_SEARCH_CONTAINER_NAME, SIGLIP_CONTAINER_NAME):
-            subprocess.run(["docker", "rm", "-f", container], capture_output=True, timeout=60, check=False)
+            subprocess.run(
+                ["docker", "rm", "-f", container], capture_output=True, timeout=60, check=False
+            )
         return not cls.state() and not cls.state(SIGLIP_CONTAINER_NAME)
 
     @classmethod
@@ -341,7 +376,10 @@ class ImageSearchSidecar:
             List[str]: One line per fact: each container, its network, the store and the setup.
         """
         lines = []
-        for label, container in (("Image search", IMAGE_SEARCH_CONTAINER_NAME), ("SigLIP pre-filter", SIGLIP_CONTAINER_NAME)):
+        for label, container in (
+            ("Image search", IMAGE_SEARCH_CONTAINER_NAME),
+            ("SigLIP pre-filter", SIGLIP_CONTAINER_NAME),
+        ):
             state = cls.state(container)
             network = SidecarNetwork.network_mode(container) if state else ""
             where = f" on {network}" if network else ""
@@ -356,10 +394,12 @@ class ImageSearchSidecar:
 
     @classmethod
     def tool_line(cls) -> str:
-        """Says whether sessions get the `image_search` tool. Where it is set up, the `ling-admin`
-        sessions start is asked for its tools (`ImageSearchMcp.probe`, no connection made): the
-        launcher declares it whenever the link exists, and a link to an installation without
-        `images mcp` drops the tool from every session without a word.
+        """Says whether sessions get the `image_search` tool.
+
+        Where it is set up, the `ling-admin` sessions start is asked for its tools
+        (`ImageSearchMcp.probe`, no connection made): the launcher declares it whenever the link
+        exists, and a link to an installation without `images mcp` drops the tool from every session
+        without a word.
 
         Returns:
             str: One line for `ling-admin images status`.
@@ -367,11 +407,15 @@ class ImageSearchSidecar:
         if not os.path.isfile(IMAGE_SEARCH_SECRET_FILE):
             return "Tool: not set up (run `ling-admin images start`)"
         if not os.path.isfile(SESSION_ADMIN_LINK):
-            return f"Tool: not offered: {SESSION_ADMIN_LINK} is missing (run `ling-admin codex build`)"
+            return (
+                f"Tool: not offered: {SESSION_ADMIN_LINK} is missing (run `ling-admin codex build`)"
+            )
         from dreamference.chat.image_search_mcp import ImageSearchMcp
 
         problem = ImageSearchMcp.probe(SESSION_ADMIN_LINK)
         if problem:
-            return (f"Tool: offered but broken: {problem}; {SESSION_ADMIN_LINK} points at "
-                    f"{os.path.realpath(SESSION_ADMIN_LINK)} (run `ling-admin codex build` from this installation)")
+            return (
+                f"Tool: offered but broken: {problem}; {SESSION_ADMIN_LINK} points at "
+                f"{os.path.realpath(SESSION_ADMIN_LINK)} (run `ling-admin codex build` from this installation)"
+            )
         return "Tool: image_search is offered to ling sessions on this machine"

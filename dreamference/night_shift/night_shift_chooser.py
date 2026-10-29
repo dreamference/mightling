@@ -98,21 +98,36 @@ class NightShiftChooser:
         Returns:
             List[Dict[str, str]]: The system and user messages.
         """
-        return [{"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": USER_TEMPLATE.format(
+        return [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": USER_TEMPLATE.format(
                     issue=cls.clip(issue, MAX_ISSUE_CHARS),
-                    a=cls.clip(a, MAX_PATCH_CHARS), b=cls.clip(b, MAX_PATCH_CHARS))}]
+                    a=cls.clip(a, MAX_PATCH_CHARS),
+                    b=cls.clip(b, MAX_PATCH_CHARS),
+                ),
+            },
+        ]
 
     @classmethod
-    def pairings(cls, ids: list[str], scores: dict[str, float], played: set, counts: dict[str, int],
-                 rng: random.Random) -> list[tuple[str, str]]:
-        """The next round of V1's tournament: random disjoint pairs while some candidate has fewer
-        than two comparisons, then a Swiss round (neighbours in score, within a window of 8). A pair
-        is never played twice.
+    def pairings(
+        cls,
+        ids: list[str],
+        scores: dict[str, float],
+        played: set,
+        counts: dict[str, int],
+        rng: random.Random,
+    ) -> list[tuple[str, str]]:
+        """The next round of V1's tournament.
+
+        Random disjoint pairs while some candidate has fewer than two comparisons, then a Swiss
+        round (neighbours in score, within a window of 8). A pair is never played twice.
 
         Returns:
             List[Tuple[str, str]]: The round's pairs; empty when the tournament is over.
         """
+
         def unplayed(a: str, b: str) -> bool:
             return frozenset((a, b)) not in played
 
@@ -122,7 +137,9 @@ class NightShiftChooser:
             for a in order:
                 if a in used or counts[a] >= MIN_COMPARISONS:
                     continue
-                partner = next((b for b in order if b != a and b not in used and unplayed(a, b)), None)
+                partner = next(
+                    (b for b in order if b != a and b not in used and unplayed(a, b)), None
+                )
                 if partner is not None:
                     round_pairs.append((a, partner))
                     used.update((a, partner))
@@ -133,16 +150,27 @@ class NightShiftChooser:
         for position, a in enumerate(ranked):
             if a in used:
                 continue
-            partner = next((b for b in ranked[position + 1:position + 1 + SWISS_WINDOW]
-                            if b not in used and unplayed(a, b)), None)
+            partner = next(
+                (
+                    b
+                    for b in ranked[position + 1 : position + 1 + SWISS_WINDOW]
+                    if b not in used and unplayed(a, b)
+                ),
+                None,
+            )
             if partner is not None:
                 round_pairs.append((a, partner))
                 used.update((a, partner))
         return round_pairs
 
     @classmethod
-    def tournament(cls, candidates: Sequence[ChooserCandidate], compare: Compare,
-                   rng: random.Random, swiss_rounds: int = 1) -> dict[str, float]:
+    def tournament(
+        cls,
+        candidates: Sequence[ChooserCandidate],
+        compare: Compare,
+        rng: random.Random,
+        swiss_rounds: int = 1,
+    ) -> dict[str, float]:
         """V1's pairwise tournament over the candidates.
 
         Args:
@@ -186,10 +214,16 @@ class NightShiftChooser:
         return scores
 
     @classmethod
-    def choose(cls, candidates: Sequence[ChooserCandidate], compare: Compare,
-               rng: random.Random, swiss_rounds: int = 1) -> dict[str, Any]:
-        """The chooser: the regression filter, then the pairwise judge over the survivors. It is given
-        no verdict on the issue.
+    def choose(
+        cls,
+        candidates: Sequence[ChooserCandidate],
+        compare: Compare,
+        rng: random.Random,
+        swiss_rounds: int = 1,
+    ) -> dict[str, Any]:
+        """The chooser: the regression filter, then the pairwise judge over the survivors.
+
+        It is given no verdict on the issue.
 
         Returns:
             Dict[str, Any]: `stage` (`none`, `only candidate`, `regression filter`, `judge`, or
@@ -198,23 +232,40 @@ class NightShiftChooser:
         if not candidates:
             return {"stage": "none", "survivors": [], "points": {}, "chosen": []}
         if len(candidates) == 1:
-            return {"stage": "only candidate", "survivors": [candidates[0].id], "points": {},
-                    "chosen": [candidates[0].id]}
+            return {
+                "stage": "only candidate",
+                "survivors": [candidates[0].id],
+                "points": {},
+                "chosen": [candidates[0].id],
+            }
         survivors = [c for c in candidates if not c.breaks]
         if len(survivors) == 1:
-            return {"stage": "regression filter", "survivors": [survivors[0].id], "points": {},
-                    "chosen": [survivors[0].id]}
+            return {
+                "stage": "regression filter",
+                "survivors": [survivors[0].id],
+                "points": {},
+                "chosen": [survivors[0].id],
+            }
         stage = "judge" if survivors else "judge, all broke"
         pool = survivors or list(candidates)
         points = cls.tournament(pool, compare, rng, swiss_rounds)
         top = max(points.values())
-        return {"stage": stage, "survivors": [c.id for c in survivors], "points": points,
-                "chosen": sorted(i for i, p in points.items() if p == top)}
+        return {
+            "stage": stage,
+            "survivors": [c.id for c in survivors],
+            "points": points,
+            "chosen": sorted(i for i, p in points.items() if p == top),
+        }
 
     @classmethod
-    def server_judge(cls, server: str, issue: str, seed: int | None = None,
-                     timeout: float = JUDGE_TIMEOUT_S,
-                     log: list[dict[str, Any]] | None = None) -> Compare:
+    def server_judge(
+        cls,
+        server: str,
+        issue: str,
+        seed: int | None = None,
+        timeout: float = JUDGE_TIMEOUT_S,
+        log: list[dict[str, Any]] | None = None,
+    ) -> Compare:
         """A judge that asks the model server, as Night Shift runs it.
 
         The server is the night run's own (loopback or a paired node by name), reached without any
@@ -237,7 +288,9 @@ class NightShiftChooser:
 
         def request(path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
             data = None if payload is None else json.dumps(payload).encode()
-            req = urllib.request.Request(base + path, data=data, headers={"Content-Type": "application/json"})
+            req = urllib.request.Request(
+                base + path, data=data, headers={"Content-Type": "application/json"}
+            )
             with opener.open(req, timeout=timeout) as response:
                 return json.loads(response.read())
 
@@ -246,9 +299,13 @@ class NightShiftChooser:
             try:
                 if "id" not in model:
                     model["id"] = str(((request("/models").get("data") or [{}])[0]).get("id") or "")
-                payload: dict[str, Any] = {"model": model["id"], "max_tokens": JUDGE_MAX_TOKENS,
-                                           "temperature": JUDGE_TEMPERATURE, "top_p": JUDGE_TOP_P,
-                                           "messages": cls.messages(issue, a.patch, b.patch)}
+                payload: dict[str, Any] = {
+                    "model": model["id"],
+                    "max_tokens": JUDGE_MAX_TOKENS,
+                    "temperature": JUDGE_TEMPERATURE,
+                    "top_p": JUDGE_TOP_P,
+                    "messages": cls.messages(issue, a.patch, b.patch),
+                }
                 if seed is not None:
                     payload["seed"] = seed
                 choice = (request("/chat/completions", payload).get("choices") or [{}])[0]

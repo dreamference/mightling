@@ -189,8 +189,9 @@ class SweBenchReport:
         finished: list[str],
         resolved: list[str],
     ) -> dict[str, Any]:
-        """The compactions of a run's finished instances (compaction survey 2026-10-13 §3.5): how
-        many, what they cost in time, and the resolve rate by how often a session compacted.
+        """The compactions of a run's finished instances (compaction survey 2026-10-13 §3.5).
+
+        How many, what they cost in time, and the resolve rate by how often a session compacted.
 
         Args:
             store: The run.
@@ -223,8 +224,9 @@ class SweBenchReport:
 
     @classmethod
     def compaction_lines(cls, compactions: dict[str, Any]) -> list[str]:
-        """The report's compaction lines: the count, its time and share of agent time, and the
-        resolve rate by compaction count.
+        """The report's compaction lines.
+
+        The count, its time and share of agent time, and the resolve rate by compaction count.
 
         Args:
             compactions: The summary's `compactions` entry.
@@ -266,10 +268,11 @@ class SweBenchReport:
         results: dict[str, Any],
         graded: list[str],
     ) -> dict[str, Any]:
-        """Splits the unresolved verdicts by what went wrong (survey 2026-10-13 §3.2): a patch that
-        broke a test that passed before (PASS_TO_PASS) is a different failure from one that did
-        not fix the issue (FAIL_TO_PASS), with a different remedy. "Resolved" already requires
-        both lists to pass, so this only splits the unresolved.
+        """Splits the unresolved verdicts by what went wrong (survey 2026-10-13 §3.2).
+
+        A patch that broke a test that passed before (PASS_TO_PASS) is a different failure from one
+        that did not fix the issue (FAIL_TO_PASS), with a different remedy. "Resolved" already
+        requires both lists to pass, so this only splits the unresolved.
 
         Each unresolved instance gets one cause, the first that applies: `empty` (no patch),
         `not_applied` (the patch did not apply), `test_patch` (the instance's test patch did not
@@ -329,8 +332,9 @@ class SweBenchReport:
 
     @classmethod
     def causes_lines(cls, causes: dict[str, Any], graded: int) -> list[str]:
-        """The report's lines for the split of the unresolved: the patches that broke a passing
-        test, apart from those that did not fix the issue.
+        """The report's lines for the split of the unresolved.
+
+        The patches that broke a passing test, apart from those that did not fix the issue.
 
         Args:
             causes: The summary's `causes` entry.
@@ -370,8 +374,10 @@ class SweBenchReport:
 
     @classmethod
     def nudge_counts(cls, states: dict[str, Any], finished: Any) -> dict[str, int]:
-        """Counts the nudges that fired, by kind: `stall` (the tree unchanged and the last message
-        announcing work) and `completion` (the tree changed and the turn ended mid-work).
+        """Counts the nudges that fired, by kind.
+
+        `stall` (the tree unchanged and the last message announcing work) and `completion` (the tree
+        changed and the turn ended mid-work).
 
         Args:
             states: The instances' states.
@@ -399,8 +405,10 @@ class SweBenchReport:
         states: dict[str, Any],
         finished: Any,
     ) -> dict[str, Any] | None:
-        """The refine arm's two steps, counted apart: their time, their tokens, and how often the
-        first step changed the tree it was told not to change.
+        """The refine arm's two steps, counted apart.
+
+        Their time, their tokens, and how often the first step changed the tree it was told not to
+        change.
 
         Args:
             store: The run.
@@ -441,8 +449,10 @@ class SweBenchReport:
         states: dict[str, Any],
         finished: Any,
     ) -> dict[str, Any] | None:
-        """What the review turn did (spec §19): where it ran and why not elsewhere, how often it
-        changed the patch and by how many lines, its time limits reached, its time and tokens.
+        """What the review turn did (spec §19).
+
+        Where it ran and why not elsewhere, how often it changed the patch and by how many lines,
+        its time limits reached, its time and tokens.
 
         Args:
             store: The run.
@@ -486,9 +496,11 @@ class SweBenchReport:
     def restart_summary(
         cls, manifest: dict[str, Any], states: dict[str, Any], finished: Any
     ) -> dict[str, Any] | None:
-        """The restart arm's measures (spec §21): which finished instances restarted, after how many
-        compactions and how far into the task, so two reports give the survey's measure (resolved
-        among restarted tasks against the same tasks in the record arm).
+        """The restart arm's measures (spec §21).
+
+        Which finished instances restarted, after how many compactions and how far into the task, so
+        two reports give the survey's measure (resolved among restarted tasks against the same tasks
+        in the record arm).
 
         Returns:
             Optional[Dict[str, Any]]: None for a run without the arm.
@@ -550,8 +562,10 @@ class SweBenchReport:
     def apply_patch_summary(
         cls, manifest: dict[str, Any], states: dict[str, Any], finished: Any
     ) -> dict[str, Any]:
-        """The apply_patch arm's measures (spec §22): the form the run asked for and, over the
-        finished instances with a record, how many called the tool at all and how many calls.
+        """The apply_patch arm's measures (spec §22).
+
+        The form the run asked for and, over the finished instances with a record, how many called
+        the tool at all and how many calls.
 
         Returns:
             Dict[str, Any]: `form`, `instances`, `recorded`, `users` (ids that called it), `calls`.
@@ -562,8 +576,10 @@ class SweBenchReport:
     def exec_tool_summary(
         cls, manifest: dict[str, Any], states: dict[str, Any], finished: Any
     ) -> dict[str, Any]:
-        """The Code Mode arm's measures (spec §23), as `apply_patch_summary` gives them for
-        `apply_patch`: the form `exec` was offered in and how much the agent called it.
+        """The Code Mode arm's measures (spec §23).
+
+        As `apply_patch_summary` gives them for `apply_patch`: the form `exec` was offered in and
+        how much the agent called it.
 
         Returns:
             Dict[str, Any]: `form`, `instances`, `recorded`, `users` (ids that called it), `calls`.
@@ -574,8 +590,10 @@ class SweBenchReport:
     def tool_summary(
         cls, key: str, manifest: dict[str, Any], states: dict[str, Any], finished: Any
     ) -> dict[str, Any]:
-        """A tool arm's measures: the form the manifest's `key` names and, over the finished
-        instances whose state has a `key` record, how many called the tool and how many calls.
+        """A tool arm's measures.
+
+        The form the manifest's `key` names and, over the finished instances whose state has a `key`
+        record, how many called the tool and how many calls.
 
         Returns:
             Dict[str, Any]: `form`, `instances`, `recorded`, `users` (ids that called it), `calls`.
@@ -596,7 +614,8 @@ class SweBenchReport:
     def drop_compaction_summary(
         cls, manifest: dict[str, Any], states: dict[str, Any], finished: Any
     ) -> dict[str, Any]:
-        """What the finished instances spent on compaction, and what drop-first compaction did
+        """What the finished instances spent on compaction, and what drop-first compaction did.
+
         (compaction spec §13), from each state's `compaction` record. The survey's acceptance rule
         for the drop arm reads it: resolved not lower, compaction time down.
 
@@ -908,8 +927,10 @@ class SweBenchReport:
     def hooks_summary(
         cls, manifest: dict[str, Any], states: dict[str, Any], finished: Any
     ) -> dict[str, Any] | None:
-        """What the hooks did (spec §20): where they ran at all, what the edit hold and the stop
-        hold held, and whether the agent then did what it was told.
+        """What the hooks did (spec §20).
+
+        Where they ran at all, what the edit hold and the stop hold held, and whether the agent then
+        did what it was told.
 
         Args:
             manifest: The run's manifest.
@@ -961,8 +982,9 @@ class SweBenchReport:
 
     @classmethod
     def hooks_lines(cls, hooks: dict[str, Any] | None) -> list[str]:
-        """Says whether hooks were on and, when they were, what they held and whether the agent
-        complied.
+        """Says whether hooks were on and, when they were.
+
+        What they held and whether the agent complied.
 
         Args:
             hooks: The summary's `hooks` entry; None when the run had none.
@@ -1185,7 +1207,8 @@ class SweBenchReport:
 
     @classmethod
     def write(cls, store: SweBenchRunStore, variant: str | None = None) -> str | None:
-        """Renders a run's report and writes it to `report.md` in the run directory
+        """Renders a run's report and writes it to `report.md` in the run directory.
+
         (`report-<variant>.md` for another grading series).
 
         Args:
@@ -1296,8 +1319,9 @@ class SweBenchReport:
     def arms(
         cls, name: str, ours: dict[str, Any], other: str, theirs: dict[str, Any], both: list[str]
     ) -> list[str]:
-        """Sets two runs side by side on the instances both graded: the rates, the cost, the code
-        index, and one row per instance.
+        """Sets two runs side by side on the instances both graded.
+
+        The rates, the cost, the code index, and one row per instance.
 
         Args:
             name: The first run's name.
@@ -1471,9 +1495,11 @@ class SweBenchReport:
     def gate_lines(
         cls, store: SweBenchRunStore, states: dict[str, Any], instances: list[str]
     ) -> list[str]:
-        """What the model gate did during a run (§18): whether it refused other requests, and the
-        pauses that let them through, with the instances that ran during one, whose times are
-        not comparable with the rest. Nothing for a run made before the gate existed.
+        """What the model gate did during a run (§18).
+
+        Whether it refused other requests, and the pauses that let them through, with the instances
+        that ran during one, whose times are not comparable with the rest. Nothing for a run made
+        before the gate existed.
 
         Args:
             store: The run.
@@ -1534,7 +1560,9 @@ class SweBenchReport:
 
     @classmethod
     def duration(cls, seconds: float) -> str:
-        """Args:
+        """The duration.
+
+        Args:
             seconds: A duration.
 
         Returns:

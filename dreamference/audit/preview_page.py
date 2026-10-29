@@ -1,4 +1,5 @@
-"""The page the desktop app's audit session opens in a preview tab
+"""The page the desktop app's audit session opens in a preview tab.
+
 (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §5, Phase 3 item 4).
 
 This module provides the PreviewPage class: a loopback HTTP server, for the length of one

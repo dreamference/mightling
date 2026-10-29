@@ -1,5 +1,7 @@
-"""Instance images for this machine's architecture, and the list of instances that are known to
-grade correctly in them (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5.3, §12).
+"""Instance images for this machine's architecture.
+
+And the list of instances that are known to grade correctly in them
+(specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5.3, §12).
 
 On arm64 Verified's images come from the community repository `greynewell/swe-bench-arm64`, whose
 tags are the instance ids with `__` written `-`. A dataset nobody publishes arm64 images for
@@ -32,16 +34,20 @@ class SweBenchImages:
 
     @classmethod
     def _fetch_tags(cls) -> list[str]:
-        """Lists every tag of the community repository through the registry's own API (Docker
-        Hub's web API stops anonymous paging at 1,000 tags; the repository has 1,721).
+        """Lists every tag of the community repository through the registry's own API.
+
+        Docker Hub's web API stops anonymous paging at 1,000 tags; the repository has 1,721.
         """
         repo = swe_bench_settings.COMMUNITY_IMAGE_REPO
         with urllib.request.urlopen(
-                f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull",
-                timeout=30) as response:
+            f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull",
+            timeout=30,
+        ) as response:
             token = json.load(response)["token"]
-        request = urllib.request.Request(f"https://registry-1.docker.io/v2/{repo}/tags/list?n=10000",
-                                         headers={"Authorization": f"Bearer {token}"})
+        request = urllib.request.Request(
+            f"https://registry-1.docker.io/v2/{repo}/tags/list?n=10000",
+            headers={"Authorization": f"Bearer {token}"},
+        )
         with urllib.request.urlopen(request, timeout=60) as response:
             return list(json.load(response)["tags"])
 
@@ -50,9 +56,7 @@ class SweBenchImages:
 
     @classmethod
     def tags_path(cls) -> Path:
-        """Returns:
-        Path: The cached tag list.
-        """
+        """The cached tag list."""
         return swe_bench_settings.CACHE_DIR / "community-tags.json"
 
     @classmethod
@@ -148,29 +152,24 @@ class SweBenchImages:
 
     @classmethod
     def validated_path(cls) -> Path:
-        """Returns:
-        Path: `validated-<arch>.json` in the cache.
-        """
+        """`validated-<arch>.json` in the cache."""
         architecture = swe_bench_settings.SweBenchSettings.architecture()
         return swe_bench_settings.CACHE_DIR / f"validated-{architecture}.json"
 
     @classmethod
     def validated(cls) -> dict[str, dict[str, Any]]:
-        """Returns:
-        Dict[str, Dict[str, Any]]: Validated instance id to `{image, digest, source, at}`.
-        """
+        """Validated instance id to `{image, digest, source, at}`."""
         return cls._read_validated().get("instances", {})
 
     @classmethod
     def rejected(cls) -> dict[str, str]:
-        """Returns:
-        Dict[str, str]: Instances that failed validation here, with the reason.
-        """
+        """Instances that failed validation here, with the reason."""
         return cls._read_validated().get("rejected", {})
 
     @classmethod
-    def record_validation(cls, instance_id: str, image: str | None, digest: str | None,
-                          problem: str | None) -> None:
+    def record_validation(
+        cls, instance_id: str, image: str | None, digest: str | None, problem: str | None
+    ) -> None:
         """Records one instance's validation result, replacing an earlier one.
 
         Args:
@@ -184,7 +183,8 @@ class SweBenchImages:
         record.setdefault("rejected", {}).pop(instance_id, None)
         if problem is None:
             record["instances"][instance_id] = {
-                "image": image, "digest": digest,
+                "image": image,
+                "digest": digest,
                 "source": "built" if image and cls.is_built(image) else "community",
                 "harness": swe_bench_settings.HARNESS_VERSION,
                 "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -209,11 +209,16 @@ class SweBenchImages:
 
     @classmethod
     def local_images(cls) -> list[dict[str, str]]:
-        """Returns:
-        List[Dict[str, str]]: The benchmark's images present locally, as `{image, size}`.
-        """
-        result = SweBenchDocker.run(["images", swe_bench_settings.COMMUNITY_IMAGE_REPO,
-                                     "--format", "{{.Repository}}:{{.Tag}}\t{{.Size}}"], timeout=60)
+        """The benchmark's images present locally, as `{image, size}`."""
+        result = SweBenchDocker.run(
+            [
+                "images",
+                swe_bench_settings.COMMUNITY_IMAGE_REPO,
+                "--format",
+                "{{.Repository}}:{{.Tag}}\t{{.Size}}",
+            ],
+            timeout=60,
+        )
         images = []
         for line in result.stdout.splitlines():
             name, _, size = line.partition("\t")

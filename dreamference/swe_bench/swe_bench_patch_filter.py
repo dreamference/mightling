@@ -1,4 +1,5 @@
-"""Test files taken out of a collected patch, for the regrade-only arm
+"""Test files taken out of a collected patch, for the regrade-only arm.
+
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md §6.2).
 
 `swe-bench eval --drop-test-hunks` grades a copy of a run's predictions with every file section
@@ -15,7 +16,9 @@ from typing import Final
 TEST_DIRECTORIES: Final[frozenset] = frozenset({"tests", "testing"})
 
 # A test module by its file name.
-TEST_FILE_NAMES: Final[re.Pattern] = re.compile(r"^(test_.*\.py|.*_test\.py|tests\.py|conftest\.py)$")
+TEST_FILE_NAMES: Final[re.Pattern] = re.compile(
+    r"^(test_.*\.py|.*_test\.py|tests\.py|conftest\.py)$"
+)
 
 DIFF_HEADER: Final[str] = "diff --git "
 
@@ -42,7 +45,9 @@ class SweBenchPatchFilter:
 
     @classmethod
     def is_test_path(cls, path: str) -> bool:
-        """Args:
+        """Tells whether it is test path.
+
+        Args:
             path: A repository-relative path.
 
         Returns:
@@ -52,7 +57,9 @@ class SweBenchPatchFilter:
         parts = PurePosixPath(path).parts
         if not parts:
             return False
-        return any(part in TEST_DIRECTORIES for part in parts[:-1]) or bool(TEST_FILE_NAMES.match(parts[-1]))
+        return any(part in TEST_DIRECTORIES for part in parts[:-1]) or bool(
+            TEST_FILE_NAMES.match(parts[-1])
+        )
 
     @classmethod
     def drop_test_hunks(cls, patch: str) -> tuple[str, list[str]]:
@@ -115,10 +122,17 @@ class SweBenchPatchFilter:
         Returns:
             list[str]: The assertions it removes and the skips it adds, as `- `/`+ ` lines.
         """
-        removed = [line[1:].strip() for line in body if line.startswith("-") and not line.startswith("---")]
-        added = [line[1:].strip() for line in body if line.startswith("+") and not line.startswith("+++")]
+        removed = [
+            line[1:].strip() for line in body if line.startswith("-") and not line.startswith("---")
+        ]
+        added = [
+            line[1:].strip() for line in body if line.startswith("+") and not line.startswith("+++")
+        ]
         lost: list[str] = []
-        for kept, gone, rule, sign in ((added, removed, ASSERTION, "-"), (removed, added, SKIP, "+")):
+        for kept, gone, rule, sign in (
+            (added, removed, ASSERTION, "-"),
+            (removed, added, SKIP, "+"),
+        ):
             left = list(kept)
             for line in gone:
                 comment = line.startswith(("#", "//")) and not line.startswith("#[")
@@ -132,7 +146,9 @@ class SweBenchPatchFilter:
 
     @classmethod
     def sections(cls, patch: str) -> list[str]:
-        """Args:
+        """The sections.
+
+        Args:
             patch: A unified diff in `git diff`'s format.
 
         Returns:
@@ -152,7 +168,9 @@ class SweBenchPatchFilter:
 
     @classmethod
     def paths(cls, section: str) -> list[str]:
-        """Args:
+        """The paths.
+
+        Args:
             section: One file section of a `git diff`.
 
         Returns:
@@ -179,9 +197,9 @@ class SweBenchPatchFilter:
         if not found:
             # A mode change or an empty new file has no `---`/`+++` lines: read the header,
             # `diff --git a/<path> b/<path>`, where both paths are the same.
-            header = lines[0][len(DIFF_HEADER):]
+            header = lines[0][len(DIFF_HEADER) :]
             half = (len(header) - 1) // 2
-            if header.startswith("a/") and header[half + 1:].startswith("b/"):
+            if header.startswith("a/") and header[half + 1 :].startswith("b/"):
                 found.append(header[2:half])
         return found
 

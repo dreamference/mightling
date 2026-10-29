@@ -158,8 +158,12 @@ class HardenedFetcher:
             except ValueError:
                 raise FetchRejected(f"{host} resolved to non-address {address!r}")
             if (
-                parsed.is_private or parsed.is_loopback or parsed.is_link_local
-                or parsed.is_multicast or parsed.is_reserved or parsed.is_unspecified
+                parsed.is_private
+                or parsed.is_loopback
+                or parsed.is_link_local
+                or parsed.is_multicast
+                or parsed.is_reserved
+                or parsed.is_unspecified
             ):
                 raise FetchRejected(f"{host} resolves to non-public address {address}")
             pinned = pinned or address
@@ -246,7 +250,8 @@ class HardenedFetcher:
         else:
             conn = http.client.HTTPConnection(pinned_ip, port, timeout=timeout)
         conn.request(
-            "GET", path,
+            "GET",
+            path,
             headers={"Host": host, "User-Agent": "puffin-image-search/1.0", "Accept": "image/*"},
         )
         return conn.getresponse()
@@ -294,14 +299,17 @@ def phash64(image: Any) -> int:
     size = 32
     gray = image.convert("L").resize((size, size))
     pixels = list(gray.getdata())
-    rows = [pixels[i * size:(i + 1) * size] for i in range(size)]
+    rows = [pixels[i * size : (i + 1) * size] for i in range(size)]
 
-    cos = [[math.cos((2 * x + 1) * u * math.pi / (2 * size)) for x in range(size)]
-           for u in range(8)]
-    row_dct = [[sum(rows[y][x] * cos[u][x] for x in range(size)) for u in range(8)]
-               for y in range(size)]
-    coeffs = [[sum(row_dct[y][u] * cos[v][y] for y in range(size)) for u in range(8)]
-              for v in range(8)]
+    cos = [
+        [math.cos((2 * x + 1) * u * math.pi / (2 * size)) for x in range(size)] for u in range(8)
+    ]
+    row_dct = [
+        [sum(rows[y][x] * cos[u][x] for x in range(size)) for u in range(8)] for y in range(size)
+    ]
+    coeffs = [
+        [sum(row_dct[y][u] * cos[v][y] for y in range(size)) for u in range(8)] for v in range(8)
+    ]
 
     flat = [coeffs[v][u] for v in range(8) for u in range(8)][1:]
     ordered = sorted(flat)
@@ -400,8 +408,7 @@ class ImageStore:
             ).fetchone()
         return {"source_url": row[0], "title": row[1]} if row else None
 
-    def persist(self, source_url: str, payload: bytes, title: str,
-                phash: int | None) -> str:
+    def persist(self, source_url: str, payload: bytes, title: str, phash: int | None) -> str:
         """Writes an image to disk and records its metadata.
 
         Args:
@@ -434,9 +441,12 @@ class ImageStore:
             self._db.commit()
         return file_id
 
-    def collect_garbage(self, now: float | None = None,
-                        max_age: int = GC_MAX_AGE_SECONDS,
-                        max_bytes: int = GC_MAX_VOLUME_BYTES) -> int:
+    def collect_garbage(
+        self,
+        now: float | None = None,
+        max_age: int = GC_MAX_AGE_SECONDS,
+        max_bytes: int = GC_MAX_VOLUME_BYTES,
+    ) -> int:
         """Deletes expired images, then trims oldest-first to the volume cap.
 
         Args:
@@ -451,7 +461,8 @@ class ImageStore:
         removed = 0
         with self._lock:
             rows = self._db.execute(
-                "SELECT file_id, created FROM images ORDER BY created ASC").fetchall()
+                "SELECT file_id, created FROM images ORDER BY created ASC"
+            ).fetchall()
         survivors = []
         for file_id, created in rows:
             if now - created > max_age:
@@ -495,8 +506,10 @@ class SearxngClient:
     """Queries SearXNG on the sidecar network for image results."""
 
     def __init__(self, base_url: str):
-        """Args:
-        base_url (str): SearXNG base URL, e.g. ``http://dreamference-searxng:8080``.
+        """Sets up the searxng client.
+
+        Args:
+            base_url (str): SearXNG base URL, e.g. ``http://dreamference-searxng:8080``.
         """
         self.base_url = base_url.rstrip("/")
         self.host = urllib.parse.urlparse(self.base_url).hostname or ""
@@ -512,8 +525,7 @@ class SearxngClient:
                 ``thumb_url`` is resolved against the SearXNG base because results routinely
                 carry it as SearXNG's own relative ``/image_proxy`` route.
         """
-        params = urllib.parse.urlencode(
-            {"q": query, "categories": "images", "format": "json"})
+        params = urllib.parse.urlencode({"q": query, "categories": "images", "format": "json"})
         request = urllib.request.Request(f"{self.base_url}/search?{params}")
         with urllib.request.urlopen(request, timeout=15) as response:
             data = json.loads(response.read().decode())
@@ -523,11 +535,13 @@ class SearxngClient:
             if not image_url.startswith("http"):
                 continue
             thumb = item.get("thumbnail_src") or image_url
-            candidates.append({
-                "image_url": image_url,
-                "thumb_url": urllib.parse.urljoin(self.base_url + "/", thumb),
-                "title": (item.get("title") or "image").strip(),
-            })
+            candidates.append(
+                {
+                    "image_url": image_url,
+                    "thumb_url": urllib.parse.urljoin(self.base_url + "/", thumb),
+                    "title": (item.get("title") or "image").strip(),
+                }
+            )
         return candidates
 
 
@@ -535,9 +549,11 @@ class SiglipClient:
     """Scores thumbnails against the query through the Infinity embeddings sidecar."""
 
     def __init__(self, base_url: str, model: str = ""):
-        """Args:
-        base_url (str): The Infinity server, e.g. ``http://dreamference-siglip:9100``.
-        model (str): Model id to name in requests; Infinity defaults to its only model.
+        """Sets up the siglip client.
+
+        Args:
+            base_url (str): The Infinity server, e.g. ``http://dreamference-siglip:9100``.
+            model (str): Model id to name in requests; Infinity defaults to its only model.
         """
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -576,9 +592,7 @@ class SiglipClient:
             List[float]: One score per thumbnail, in order.
         """
         text_vec = self._embed([query], "text")[0]
-        uris = [
-            "data:image/jpeg;base64," + base64.b64encode(t).decode() for t in thumbnails
-        ]
+        uris = ["data:image/jpeg;base64," + base64.b64encode(t).decode() for t in thumbnails]
         image_vecs = self._embed(uris, "image")
 
         def cosine(a: list[float], b: list[float]) -> float:
@@ -593,9 +607,11 @@ class VisionRanker:
     """Re-ranks the shortlist with the served multimodal model."""
 
     def __init__(self, base_url: str, model: str):
-        """Args:
-        base_url (str): OpenAI-compatible base URL including ``/v1``.
-        model (str): Served model id.
+        """Sets up the vision ranker.
+
+        Args:
+            base_url (str): OpenAI-compatible base URL including ``/v1``.
+            model (str): Served model id.
         """
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -612,31 +628,38 @@ class VisionRanker:
                 if the model's answer is not the strict JSON asked for -- ranking is an
                 improvement, never a gate.
         """
-        content: list[dict[str, Any]] = [{
-            "type": "text",
-            "text": (
-                f"You are filtering image search results for the query {query!r}. "
-                f"Of these {len(thumbnails)} images, which actually show what the query asks "
-                "for? Answer with ONLY a JSON array of the matching image numbers, best "
-                "first, e.g. [2,0]. Numbers are 0-based. EXCLUDE any image that does not "
-                "clearly match -- an empty array [] is a valid answer. Never pad the array "
-                "with unrelated images."
-            ),
-        }]
+        content: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": (
+                    f"You are filtering image search results for the query {query!r}. "
+                    f"Of these {len(thumbnails)} images, which actually show what the query asks "
+                    "for? Answer with ONLY a JSON array of the matching image numbers, best "
+                    "first, e.g. [2,0]. Numbers are 0-based. EXCLUDE any image that does not "
+                    "clearly match -- an empty array [] is a valid answer. Never pad the array "
+                    "with unrelated images."
+                ),
+            }
+        ]
         for thumb in thumbnails:
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": "data:image/jpeg;base64," + base64.b64encode(thumb).decode()},
-            })
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64," + base64.b64encode(thumb).decode()
+                    },
+                }
+            )
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
-            data=json.dumps({
-                "model": self.model,
-                "messages": [{"role": "user", "content": content}],
-                "max_tokens": 200,
-                "temperature": 0,
-            }).encode(),
+            data=json.dumps(
+                {
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": content}],
+                    "max_tokens": 200,
+                    "temperature": 0,
+                }
+            ).encode(),
             headers={"Content-Type": "application/json"},
         )
         fallback = list(range(len(thumbnails)))
@@ -665,15 +688,22 @@ class ImageSearchService:
     full image cannot be fetched simply drops out.
     """
 
-    def __init__(self, store: ImageStore, searxng: SearxngClient,
-                 siglip: SiglipClient | None, ranker: VisionRanker | None,
-                 fetcher: Any = HardenedFetcher):
-        """Args:
-        store (ImageStore): Persistence for winners.
-        searxng (SearxngClient): Candidate source.
-        siglip (Optional[SiglipClient]): Pre-filter; skipped when None or failing.
-        ranker (Optional[VisionRanker]): Vision re-rank; skipped when None or failing.
-        fetcher (Any): The hardened downloader; injectable for tests.
+    def __init__(
+        self,
+        store: ImageStore,
+        searxng: SearxngClient,
+        siglip: SiglipClient | None,
+        ranker: VisionRanker | None,
+        fetcher: Any = HardenedFetcher,
+    ):
+        """Sets up the image search service.
+
+        Args:
+            store (ImageStore): Persistence for winners.
+            searxng (SearxngClient): Candidate source.
+            siglip (Optional[SiglipClient]): Pre-filter; skipped when None or failing.
+            ranker (Optional[VisionRanker]): Vision re-rank; skipped when None or failing.
+            fetcher (Any): The hardened downloader; injectable for tests.
         """
         self.store = store
         self.searxng = searxng
@@ -707,8 +737,7 @@ class ImageSearchService:
         for cand in candidates:
             row = self.store.lookup_source(cand["image_url"])
             if row:
-                cand = dict(cand, file_id=row["file_id"],
-                            title=row["title"] or cand["title"])
+                cand = dict(cand, file_id=row["file_id"], title=row["title"] or cand["title"])
             entries.append(cand)
 
         winners = self._run_funnel(query_text, entries, count)
@@ -760,8 +789,9 @@ class ImageSearchService:
                     return merged
         return merged
 
-    def _run_funnel(self, query: str, candidates: list[dict[str, str]],
-                    need: int) -> list[dict[str, str]]:
+    def _run_funnel(
+        self, query: str, candidates: list[dict[str, str]], need: int
+    ) -> list[dict[str, str]]:
         """Thumbnails, SigLIP, pHash collapse, speculative prefetch, vision rank, persist.
 
         Args:
@@ -785,7 +815,8 @@ class ImageSearchService:
         # candidates have their bytes on disk already and prefetch nothing.
         futures = {
             id(c): self._pool.submit(self._fetch_full, c["image_url"])
-            for c, _ in kept if "file_id" not in c
+            for c, _ in kept
+            if "file_id" not in c
         }
         order = list(range(len(kept)))
         # Even a single candidate goes to the vision pass: it filters as well as orders, and
@@ -826,8 +857,9 @@ class ImageSearchService:
                 future.cancel()
         return winners
 
-    def _fetch_thumbnails(self, candidates: list[dict[str, str]]
-                          ) -> list[tuple[dict[str, str], bytes]]:
+    def _fetch_thumbnails(
+        self, candidates: list[dict[str, str]]
+    ) -> list[tuple[dict[str, str], bytes]]:
         """Fetches candidate thumbnails in parallel, dropping the unfetchable.
 
         Args:
@@ -857,7 +889,9 @@ class ImageSearchService:
                 return payload
             try:
                 return self.fetcher.fetch(
-                    cand["thumb_url"], THUMB_MAX_BYTES, THUMB_TIMEOUT_SECONDS,
+                    cand["thumb_url"],
+                    THUMB_MAX_BYTES,
+                    THUMB_TIMEOUT_SECONDS,
                     allow_hosts=allow,
                 )
             except Exception:
@@ -901,8 +935,9 @@ class ImageSearchService:
         except Exception:
             return None
 
-    def _prefilter(self, query: str, thumbs: list[tuple[dict[str, str], bytes]],
-                   keep: int = RANK_CANDIDATES) -> list[tuple[dict[str, str], bytes]]:
+    def _prefilter(
+        self, query: str, thumbs: list[tuple[dict[str, str], bytes]], keep: int = RANK_CANDIDATES
+    ) -> list[tuple[dict[str, str], bytes]]:
         """Keeps the SigLIP top candidates, or the first few when SigLIP is unavailable.
 
         Args:
@@ -923,8 +958,7 @@ class ImageSearchService:
         return [thumbs[i] for _, i in ranked[:keep]]
 
     @staticmethod
-    def _collapse(thumbs: list[tuple[dict[str, str], bytes]]
-                  ) -> list[tuple[dict[str, str], bytes]]:
+    def _collapse(thumbs: list[tuple[dict[str, str], bytes]]) -> list[tuple[dict[str, str], bytes]]:
         """Merges visual near-duplicates by perceptual hash.
 
         Args:
@@ -946,8 +980,7 @@ class ImageSearchService:
                 kept.append((cand, thumb))
                 hashes.append(-1)
                 continue
-            if any(h >= 0 and hamming(h, candidate_hash) <= PHASH_HAMMING_MAX
-                   for h in hashes):
+            if any(h >= 0 and hamming(h, candidate_hash) <= PHASH_HAMMING_MAX for h in hashes):
                 continue
             kept.append((cand, thumb))
             hashes.append(candidate_hash)
@@ -1018,8 +1051,10 @@ def serve(port: int = SERVICE_PORT, secret: str | None = None) -> None:
                 host = urllib.parse.urlparse(row["source_url"]).hostname or ""
                 if host.startswith("www."):
                     host = host[4:]
-                self._reply(200, {"source_url": row["source_url"],
-                                  "title": row["title"] or "", "host": host})
+                self._reply(
+                    200,
+                    {"source_url": row["source_url"], "title": row["title"] or "", "host": host},
+                )
                 return
             match = re.fullmatch(r"/images/([0-9a-f]{16})\.jpg", parsed.path)
             if match:

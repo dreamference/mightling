@@ -30,16 +30,24 @@ from dreamference.audit.egress_trace import EgressTrace
 DNS_PORT: Final[int] = 53
 
 # git subcommands that reach a network (`push` beyond the spec's list: it is one too).
-NETWORKED_GIT: Final[frozenset] = frozenset({"ls-remote", "fetch", "clone", "pull", "push", "remote-https", "remote-http"})
+NETWORKED_GIT: Final[frozenset] = frozenset(
+    {"ls-remote", "fetch", "clone", "pull", "push", "remote-https", "remote-http"}
+)
 
 # git's own options that take their value as the next word.
-GIT_OPTIONS_WITH_VALUE: Final[frozenset] = frozenset({"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"})
+GIT_OPTIONS_WITH_VALUE: Final[frozenset] = frozenset(
+    {"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
+)
 
 # `1234 connect(…` (with `-o`), `[pid 1234] connect(…` (on a terminal) or `connect(…` (no -f).
 LINE: Final[re.Pattern] = re.compile(r"^(?:\[pid\s+(\d+)\]\s+|(\d+)\s+)?([a-z_0-9]+)\((.*)$")
 
-INET: Final[re.Pattern] = re.compile(r'sa_family=AF_INET, sin_port=htons\((\d+)\), sin_addr=inet_addr\("([^"]+)"\)')
-INET6: Final[re.Pattern] = re.compile(r'sa_family=AF_INET6, sin6_port=htons\((\d+)\),.*?inet_pton\(AF_INET6, "([^"]+)"')
+INET: Final[re.Pattern] = re.compile(
+    r'sa_family=AF_INET, sin_port=htons\((\d+)\), sin_addr=inet_addr\("([^"]+)"\)'
+)
+INET6: Final[re.Pattern] = re.compile(
+    r'sa_family=AF_INET6, sin6_port=htons\((\d+)\),.*?inet_pton\(AF_INET6, "([^"]+)"'
+)
 UNIX: Final[re.Pattern] = re.compile(r'sa_family=AF_UNIX, sun_path=(@?)"((?:[^"\\]|\\.)*)"')
 
 # A descriptor as `-yy` prints it: `23<UDPv6:[10868489]>`, or once connected
@@ -52,10 +60,22 @@ LABEL_PEER: Final[re.Pattern] = re.compile(r"->\[?([0-9A-Fa-f:.]+?)\]?:(\d+)$")
 UDP_KINDS: Final[frozenset] = frozenset({"UDP", "UDPv6", "UDPLITE", "UDPLITEv6"})
 
 # `1234 <... execve resumed>) = 0`: the result of a call another process's line interrupted.
-RESUMED_EXECVE: Final[re.Pattern] = re.compile(r"^(?:\[pid\s+(\d+)\]\s+|(\d+)\s+)?<\.\.\. execve resumed>.*\)\s*=\s*(-?\d+)")
+RESUMED_EXECVE: Final[re.Pattern] = re.compile(
+    r"^(?:\[pid\s+(\d+)\]\s+|(\d+)\s+)?<\.\.\. execve resumed>.*\)\s*=\s*(-?\d+)"
+)
 
 SIMPLE_ESCAPES: Final[dict[str, int]] = {
-    "n": 10, "t": 9, "r": 13, "v": 11, "f": 12, "a": 7, "b": 8, "e": 27, "\\": 92, '"': 34, "'": 39,
+    "n": 10,
+    "t": 9,
+    "r": 13,
+    "v": 11,
+    "f": 12,
+    "a": 7,
+    "b": 8,
+    "e": 27,
+    "\\": 92,
+    '"': 34,
+    "'": 39,
 }
 
 
@@ -103,9 +123,15 @@ class StraceParser:
         return trace
 
     @classmethod
-    def _read_socket_call(cls, pid: str, syscall: str, rest: str, trace: EgressTrace,
-                          resolver_sockets: dict[tuple[str, str], str],
-                          udp_routes: dict[str, str] | None = None) -> None:
+    def _read_socket_call(
+        cls,
+        pid: str,
+        syscall: str,
+        rest: str,
+        trace: EgressTrace,
+        resolver_sockets: dict[tuple[str, str], str],
+        udp_routes: dict[str, str] | None = None,
+    ) -> None:
         udp_routes = {} if udp_routes is None else udp_routes
         fd, kind, inner = cls.fd_label(rest.split(",", 1)[0].strip())
         udp = kind in UDP_KINDS
@@ -138,12 +164,17 @@ class StraceParser:
             cls._udp_payload(inner, trace, udp_routes)
         unix = UNIX.search(rest)
         if unix:
-            path = ("@" if unix.group(1) else "") + cls.unescape(unix.group(2)).decode("utf-8", "replace")
+            path = ("@" if unix.group(1) else "") + cls.unescape(unix.group(2)).decode(
+                "utf-8", "replace"
+            )
             trace.unix_sockets[path] = trace.unix_sockets.get(path, 0) + 1
         if syscall == "connect":
             return
         # A payload sent to a resolver, named in the call or connected earlier, is a DNS query.
-        to_resolver = (destination is not None and destination[1] == DNS_PORT) or (pid, fd) in resolver_sockets
+        to_resolver = (destination is not None and destination[1] == DNS_PORT) or (
+            pid,
+            fd,
+        ) in resolver_sockets
         if to_resolver:
             for payload in cls.strings_in(rest):
                 name = cls.dns_query_name(payload)
@@ -192,7 +223,9 @@ class StraceParser:
         name = os.path.basename(program)
         trace.processes[name] = trace.processes.get(name, 0) + 1
         if name == "git" or name.startswith("git-"):
-            subcommand = name[len("git-"):] if name.startswith("git-") else cls.git_subcommand(argv[1:])
+            subcommand = (
+                name[len("git-") :] if name.startswith("git-") else cls.git_subcommand(argv[1:])
+            )
             # `git ls-remote --get-url` only prints a URL after rewriting it; it contacts nothing.
             if subcommand == "ls-remote" and "--get-url" in argv:
                 return
@@ -201,8 +234,9 @@ class StraceParser:
 
     @classmethod
     def git_subcommand(cls, args: list[str]) -> str | None:
-        """Finds the subcommand of a git command line: the first word that is neither one of git's
-        own options nor an option's value.
+        """Finds the subcommand of a git command line.
+
+        The first word that is neither one of git's own options nor an option's value.
 
         Args:
             args (List[str]): The arguments after `git`.
@@ -291,7 +325,7 @@ class StraceParser:
             end = index + 1
             while end < len(text) and text[end] != '"':
                 end += 2 if text[end] == "\\" else 1
-            strings.append(cls.unescape(text[index + 1:end]))
+            strings.append(cls.unescape(text[index + 1 : end]))
             index = end + 1
         return strings
 
@@ -318,10 +352,10 @@ class StraceParser:
                 end = index + 1
                 while end < len(literal) and end < index + 4 and literal[end] in "01234567":
                     end += 1
-                out.append(int(literal[index + 1:end], 8) & 0xFF)
+                out.append(int(literal[index + 1 : end], 8) & 0xFF)
                 index = end
-            elif following == "x" and re.match(r"[0-9a-fA-F]{1,2}", literal[index + 2:index + 4]):
-                digits = re.match(r"[0-9a-fA-F]{1,2}", literal[index + 2:index + 4]).group(0)
+            elif following == "x" and re.match(r"[0-9a-fA-F]{1,2}", literal[index + 2 : index + 4]):
+                digits = re.match(r"[0-9a-fA-F]{1,2}", literal[index + 2 : index + 4]).group(0)
                 out.append(int(digits, 16))
                 index += 2 + len(digits)
             else:
@@ -351,7 +385,7 @@ class StraceParser:
                 break
             if length > 63 or index + 1 + length > len(payload):
                 return None
-            label = payload[index + 1:index + 1 + length]
+            label = payload[index + 1 : index + 1 + length]
             if not re.fullmatch(rb"[A-Za-z0-9_\-]+", label):
                 return None
             labels.append(label.decode("ascii"))

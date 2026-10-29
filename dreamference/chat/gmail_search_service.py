@@ -80,8 +80,13 @@ CREDENTIALS_NAME: Final[str] = "credentials.json"
 # model, not a secret-management system.
 KEY_NAME: Final[str] = "credentials.key"
 
-GOOGLE_OAUTH_CLIENT_ID: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_ID", "44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com")
-GOOGLE_OAUTH_CLIENT_SECRET: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_SECRET", "-gMLuQyDiI0XrQS_vx_mhuYF")
+GOOGLE_OAUTH_CLIENT_ID: Final[str] = os.environ.get(
+    "GOA_GOOGLE_CLIENT_ID",
+    "44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com",
+)
+GOOGLE_OAUTH_CLIENT_SECRET: Final[str] = os.environ.get(
+    "GOA_GOOGLE_CLIENT_SECRET", "-gMLuQyDiI0XrQS_vx_mhuYF"
+)
 GMAIL_SCOPE: Final[str] = "https://mail.google.com/"
 EMAIL_SCOPE: Final[str] = "https://www.googleapis.com/auth/userinfo.email"
 GOOGLE_OAUTH_SCOPES: Final[str] = EMAIL_SCOPE + " " + GMAIL_SCOPE
@@ -105,7 +110,7 @@ APP_NAMES: Final[dict[str, str]] = {
 # grant used to be saved, listed as connected, and fail on every search.
 MISSING_GMAIL_SCOPE: Final[str] = (
     "Google did not grant Gmail access for {email}. Connect it again and leave the box "
-    "\"Read, compose, send and permanently delete all your email from Gmail\" ticked."
+    '"Read, compose, send and permanently delete all your email from Gmail" ticked.'
 )
 # What Google grants an access token for when its reply does not say.
 TOKEN_LIFETIME_SECONDS: Final[int] = 3599
@@ -124,7 +129,9 @@ GNOME_HINT_NAME: Final[str] = "gnome-accounts.json"
 # port are not an authorisation boundary -- the shared secret is.
 AUTH_HEADER: Final[str] = "X-Mightling-Gmail-Token"
 # The answer to every authenticated request when the service was started without a secret.
-NO_SECRET_ERROR: Final[str] = "No shared secret: recreate it with ling-admin google stop, then google start"
+NO_SECRET_ERROR: Final[str] = (
+    "No shared secret: recreate it with ling-admin google stop, then google start"
+)
 
 IMAP_HOST: Final[str] = "imap.gmail.com"
 IMAP_PORT: Final[int] = 993
@@ -211,8 +218,7 @@ PAGE_STYLE: Final[str] = (
 
 
 class GmailSearchService:
-    """Serves Gmail search and message retrieval over HTTP for Mightling's apps.
-    """
+    """Serves Gmail search and message retrieval over HTTP for Mightling's apps."""
 
     # ------------------------------------------------------------------ storage
 
@@ -338,44 +344,67 @@ class GmailSearchService:
         import time
         import urllib.parse
         import urllib.request
+
         stored = cls._raw(directory)
         valid = []
         for address, acc in stored.get("accounts", {}).items():
             sealed = acc.get("access_token")
-            if not sealed: continue
+            if not sealed:
+                continue
 
             if float(acc.get("expires_at", 0)) - time.time() < 60:
                 sealed_refresh = acc.get("refresh_token")
-                if not sealed_refresh: continue
+                if not sealed_refresh:
+                    continue
                 refresh = cls._unseal(sealed_refresh, directory)
-                if not refresh: continue
+                if not refresh:
+                    continue
 
-                req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
-                    "client_id": GOOGLE_OAUTH_CLIENT_ID,
-                    "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
-                    "refresh_token": refresh,
-                    "grant_type": "refresh_token"
-                }).encode("utf-8"), headers={"Content-Type": "application/x-www-form-urlencoded"})
+                req = urllib.request.Request(
+                    "https://oauth2.googleapis.com/token",
+                    data=urllib.parse.urlencode(
+                        {
+                            "client_id": GOOGLE_OAUTH_CLIENT_ID,
+                            "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+                            "refresh_token": refresh,
+                            "grant_type": "refresh_token",
+                        }
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
                 try:
                     with urllib.request.urlopen(req, timeout=10) as res:
                         data = json.load(res)
                         if "access_token" in data:
-                            cls.save_token(address, data["access_token"], data.get("expires_in", 3599), directory, refresh_token=refresh)
-                            valid.append({"email": address, "access_token": data["access_token"],
-                                          "scopes": cls.account_scopes(acc)})
+                            cls.save_token(
+                                address,
+                                data["access_token"],
+                                data.get("expires_in", 3599),
+                                directory,
+                                refresh_token=refresh,
+                            )
+                            valid.append(
+                                {
+                                    "email": address,
+                                    "access_token": data["access_token"],
+                                    "scopes": cls.account_scopes(acc),
+                                }
+                            )
                 except Exception:
                     pass
             else:
                 token = cls._unseal(sealed, directory)
                 if token:
-                    valid.append({"email": address, "access_token": token, "scopes": cls.account_scopes(acc)})
+                    valid.append(
+                        {"email": address, "access_token": token, "scopes": cls.account_scopes(acc)}
+                    )
         return valid
-
 
     @classmethod
     def delete_token(cls, address: str, directory: str | None = None) -> bool:
         import json
         import os
+
         path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
         stored = cls._raw(directory)
         accounts = stored.get("accounts", {})
@@ -490,8 +519,9 @@ class GmailSearchService:
 
     @classmethod
     def status(cls) -> dict[str, Any]:
-        """Says which accounts are connected and what each was granted. Unauthenticated: addresses
-        and scope names only, never mail or files.
+        """Says which accounts are connected and what each was granted.
+
+        Unauthenticated: addresses and scope names only, never mail or files.
 
         Returns:
             dict[str, Any]: `connected` and `email` (comma-separated, as the web UI reads them) and
@@ -500,8 +530,15 @@ class GmailSearchService:
         creds = cls.credentials()
         connected = len(creds) > 0
         email = ", ".join(c["email"] for c in creds) if connected else None
-        accounts = [{"email": c["email"], "scopes": c.get("scopes") or [GMAIL_SCOPE]} for c in creds]
-        return {"configured": connected, "connected": connected, "email": email, "accounts": accounts}
+        accounts = [
+            {"email": c["email"], "scopes": c.get("scopes") or [GMAIL_SCOPE]} for c in creds
+        ]
+        return {
+            "configured": connected,
+            "connected": connected,
+            "email": email,
+            "accounts": accounts,
+        }
 
     # ------------------------------------------------------------------ IMAP
 
@@ -609,12 +646,20 @@ class GmailSearchService:
                 Drive to an account that has Gmail keeps Gmail.
         """
         scopes = EMAIL_SCOPE + " " + APP_SCOPES.get(app, GMAIL_SCOPE)
-        return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
-            "client_id": GOOGLE_OAUTH_CLIENT_ID, "redirect_uri": HOST_ORIGIN + "/",
-            "response_type": "code", "scope": scopes, "access_type": "offline", "prompt": "consent",
-            "include_granted_scopes": "true", "code_challenge": challenge,
-            "code_challenge_method": "S256", "state": state,
-        })
+        return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(
+            {
+                "client_id": GOOGLE_OAUTH_CLIENT_ID,
+                "redirect_uri": HOST_ORIGIN + "/",
+                "response_type": "code",
+                "scope": scopes,
+                "access_type": "offline",
+                "prompt": "consent",
+                "include_granted_scopes": "true",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "state": state,
+            }
+        )
 
     @classmethod
     def missing_scope_message(cls, app: str, address: str) -> str:
@@ -813,7 +858,9 @@ class GmailSearchService:
         return answer
 
     @classmethod
-    def _fetch_headers(cls, connection: imaplib.IMAP4_SSL, uids: list[bytes]) -> list[dict[str, str]]:
+    def _fetch_headers(
+        cls, connection: imaplib.IMAP4_SSL, uids: list[bytes]
+    ) -> list[dict[str, str]]:
         """Fetches just the headers a result list needs.
 
         `BODY.PEEK` rather than `BODY` throughout: a search tool that silently marked twenty
@@ -830,7 +877,8 @@ class GmailSearchService:
         for uid in uids:
             try:
                 status, data = connection.uid(
-                    "FETCH", uid.decode("ascii"),
+                    "FETCH",
+                    uid.decode("ascii"),
                     "(X-GM-MSGID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])",
                 )
             except (imaplib.IMAP4.error, OSError):
@@ -843,12 +891,14 @@ class GmailSearchService:
                     prefix, headers = item[0], item[1]
                     break
             message = email.message_from_bytes(headers)
-            results.append({
-                "id": cls._message_id(prefix),
-                "from": cls._decode_header(message.get("From", "")),
-                "subject": cls._decode_header(message.get("Subject", "")),
-                "date": cls._decode_header(message.get("Date", "")),
-            })
+            results.append(
+                {
+                    "id": cls._message_id(prefix),
+                    "from": cls._decode_header(message.get("From", "")),
+                    "subject": cls._decode_header(message.get("Subject", "")),
+                    "date": cls._decode_header(message.get("Date", "")),
+                }
+            )
         return results
 
     @classmethod
@@ -901,8 +951,9 @@ class GmailSearchService:
 
     @classmethod
     def workspace(cls, path: str, query: dict[str, list[str]]) -> dict[str, Any]:
-        """Answers the read-only Drive and Calendar endpoints (specs/DREAMFERENCE_MIGHTLING_APPS.md §9,
-        §9a): `/drive/search`, `/drive/file/<id>`, `/calendar/events`, `/calendar/event/<calendar>/<id>`.
+        """Answers the read-only Drive and Calendar endpoints.
+
+        Spec: specs/DREAMFERENCE_MIGHTLING_APPS.md §9, §9a. The paths are `/drive/search`, `/drive/file/<id>`, `/calendar/events`, `/calendar/event/<calendar>/<id>`.
 
         Args:
             path (str): The request path.
@@ -911,6 +962,7 @@ class GmailSearchService:
         Returns:
             Dict[str, Any]: The reader's answer, or `error`.
         """
+
         def arg(name: str, default: str = "") -> str:
             return (query.get(name) or [default])[0]
 
@@ -926,7 +978,11 @@ class GmailSearchService:
         segments = [urllib.parse.unquote(part) for part in path.split("/")[2:]]
         if path == "/drive/search":
             terms = arg("q")
-            return GoogleWorkspaceReader.drive_search(accounts, terms, number("limit", 10)) if terms else {"error": "q is required"}
+            return (
+                GoogleWorkspaceReader.drive_search(accounts, terms, number("limit", 10))
+                if terms
+                else {"error": "q is required"}
+            )
         if path.startswith("/drive/file/") and len(segments) == 2:
             return GoogleWorkspaceReader.drive_read(accounts, segments[1])
         if path == "/calendar/events":
@@ -934,7 +990,12 @@ class GmailSearchService:
             start = arg("from") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
             end = arg("to") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + 7 * 86400))
             return GoogleWorkspaceReader.calendar_events(
-                accounts, start, end, arg("calendar"), arg("q"), number("limit", 25),
+                accounts,
+                start,
+                end,
+                arg("calendar"),
+                arg("q"),
+                number("limit", 25),
             )
         if path.startswith("/calendar/event/") and len(segments) == 3:
             return GoogleWorkspaceReader.calendar_event(accounts, segments[1], segments[2])
@@ -985,6 +1046,7 @@ class GmailSearchService:
                 except Exception:
                     pass
         return {"error": "Message not found"}
+
     @classmethod
     def _close(cls, connection: imaplib.IMAP4_SSL) -> None:
         """Ends a connection without letting its failure surface as the request's failure.
@@ -1064,12 +1126,13 @@ class GmailSearchService:
     @classmethod
     def post_refusal(cls, origin: str | None) -> str | None:
         """Decides whether a POST may change the service's state, judged by the page that sent it.
+
         `/disconnect` and the two OAuth steps take no shared secret, because the pages that call
-        them (the web chat's Connect card and this service's own setup page) cannot hold one; so
-        the browser's `Origin` header is what keeps another website, or a DNS-rebinding page
-        that resolves to 127.0.0.1, from disconnecting an account or connecting its own. A
-        request with no `Origin` comes from a program (the launcher, `ling-admin`), which a
-        browser never sends a cross-site POST as.
+        them (the web chat's Connect card and this service's own setup page) cannot hold one; so the
+        browser's `Origin` header is what keeps another website, or a DNS-rebinding page that
+        resolves to 127.0.0.1, from disconnecting an account or connecting its own. A request with
+        no `Origin` comes from a program (the launcher, `ling-admin`), which a browser never sends a
+        cross-site POST as.
 
         Args:
             origin (Optional[str]): The request's `Origin` header.
@@ -1135,10 +1198,14 @@ class GmailSearchService:
                     app (str): `gmail`, `drive` or `calendar`: which scope the consent asks for.
                 """
                 name = APP_NAMES[app]
-                full_access = "" if app == "gmail" else (
-                    f'<p class="note">ⓘ Google will describe {name} access as full access ("see, edit, create and '
-                    'delete"): GNOME\'s client may ask for nothing narrower. Mightling only reads; it has no way to '
-                    'change or delete anything.</p>'
+                full_access = (
+                    ""
+                    if app == "gmail"
+                    else (
+                        f'<p class="note">ⓘ Google will describe {name} access as full access ("see, edit, create and '
+                        "delete\"): GNOME's client may ask for nothing narrower. Mightling only reads; it has no way to "
+                        "change or delete anything.</p>"
+                    )
                 )
                 self._html(
                     f"""
@@ -1173,7 +1240,6 @@ class GmailSearchService:
                     """
                 )
 
-
             def do_POST(self) -> None:
                 parsed = urllib.parse.urlparse(self.path)
                 refused = cls.post_refusal(self.headers.get("Origin"))
@@ -1185,17 +1251,25 @@ class GmailSearchService:
                     app = app if app in APP_SCOPES else "gmail"
                     state = secrets.token_urlsafe(32)
                     verifier = secrets.token_urlsafe(32)
-                    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).decode("ascii").rstrip("=")
-                    OAUTH_STATES[state] = {"code_verifier": verifier, "time": time.time(), "app": app}
+                    challenge = (
+                        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+                        .decode("ascii")
+                        .rstrip("=")
+                    )
+                    OAUTH_STATES[state] = {
+                        "code_verifier": verifier,
+                        "time": time.time(),
+                        "app": app,
+                    }
                     self._reply(200, {"auth_url": cls.auth_url(app, state, challenge)})
                     return
 
-
                 if parsed.path == "/disconnect":
-                    content_length = int(self.headers.get('Content-Length', 0))
-                    post_data = self.rfile.read(content_length).decode('utf-8')
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    post_data = self.rfile.read(content_length).decode("utf-8")
                     try:
                         import json
+
                         data = json.loads(post_data)
                         email = data.get("email")
                         if email:
@@ -1208,8 +1282,8 @@ class GmailSearchService:
                     self._reply(400, {"error": "Invalid request"})
                     return
                 if parsed.path == "/api/google/oauth/complete":
-                    content_length = int(self.headers.get('Content-Length', 0))
-                    post_data = self.rfile.read(content_length).decode('utf-8')
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    post_data = self.rfile.read(content_length).decode("utf-8")
                     try:
                         data = json.loads(post_data)
                         url = data.get("url", "")
@@ -1219,18 +1293,27 @@ class GmailSearchService:
                             state = q["state"][0]
                             if state in OAUTH_STATES:
                                 verifier = OAUTH_STATES[state]["code_verifier"]
-                                req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
-                                    "client_id": GOOGLE_OAUTH_CLIENT_ID,
-                                    "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
-                                    "code": code,
-                                    "code_verifier": verifier,
-                                    "redirect_uri": HOST_ORIGIN + "/",
-                                    "grant_type": "authorization_code"
-                                }).encode("utf-8"), headers={"Content-Type": "application/x-www-form-urlencoded"})
+                                req = urllib.request.Request(
+                                    "https://oauth2.googleapis.com/token",
+                                    data=urllib.parse.urlencode(
+                                        {
+                                            "client_id": GOOGLE_OAUTH_CLIENT_ID,
+                                            "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+                                            "code": code,
+                                            "code_verifier": verifier,
+                                            "redirect_uri": HOST_ORIGIN + "/",
+                                            "grant_type": "authorization_code",
+                                        }
+                                    ).encode("utf-8"),
+                                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                                )
                                 with urllib.request.urlopen(req, timeout=10) as res:
                                     tdata = json.load(res)
 
-                                req2 = urllib.request.Request("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {tdata['access_token']}"})
+                                req2 = urllib.request.Request(
+                                    "https://www.googleapis.com/oauth2/v3/userinfo",
+                                    headers={"Authorization": f"Bearer {tdata['access_token']}"},
+                                )
                                 with urllib.request.urlopen(req2, timeout=10) as res2:
                                     user_data = json.load(res2)
                                     email_addr = user_data.get("email", "")
@@ -1261,27 +1344,39 @@ class GmailSearchService:
                     if state in OAUTH_STATES:
                         verifier = OAUTH_STATES[state]["code_verifier"]
                         import json
-                        req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
-                            "client_id": GOOGLE_OAUTH_CLIENT_ID,
-                            "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
-                            "code": code,
-                            "code_verifier": verifier,
-                            "redirect_uri": HOST_ORIGIN + "/",
-                            "grant_type": "authorization_code"
-                        }).encode("utf-8"), headers={"Content-Type": "application/x-www-form-urlencoded"})
+
+                        req = urllib.request.Request(
+                            "https://oauth2.googleapis.com/token",
+                            data=urllib.parse.urlencode(
+                                {
+                                    "client_id": GOOGLE_OAUTH_CLIENT_ID,
+                                    "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+                                    "code": code,
+                                    "code_verifier": verifier,
+                                    "redirect_uri": HOST_ORIGIN + "/",
+                                    "grant_type": "authorization_code",
+                                }
+                            ).encode("utf-8"),
+                            headers={"Content-Type": "application/x-www-form-urlencoded"},
+                        )
                         try:
                             with urllib.request.urlopen(req, timeout=10) as res:
                                 data = json.load(res)
 
                             # identify user
-                            req2 = urllib.request.Request("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {data['access_token']}"})
+                            req2 = urllib.request.Request(
+                                "https://www.googleapis.com/oauth2/v3/userinfo",
+                                headers={"Authorization": f"Bearer {data['access_token']}"},
+                            )
                             with urllib.request.urlopen(req2, timeout=10) as res2:
                                 user_data = json.load(res2)
                                 email_addr = user_data.get("email", "")
 
                             app = OAUTH_STATES[state].get("app", "gmail")
                             if email_addr and "access_token" in data:
-                                self._html(cls.grant_page(app, cls.accept_grant(app, data, email_addr)))
+                                self._html(
+                                    cls.grant_page(app, cls.accept_grant(app, data, email_addr))
+                                )
                                 return
                         except Exception as e:
                             self._html(f"<h2>Error</h2><p>{html.escape(str(e))}</p>")

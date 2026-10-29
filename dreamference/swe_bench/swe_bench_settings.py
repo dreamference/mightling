@@ -1,5 +1,7 @@
-"""Where `ling-admin swe-bench` keeps its files, what it pins, and the `[swe_bench]` table of
-`dreamference.toml` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §4, §12).
+"""Where `ling-admin swe-bench` keeps its files, what it pins.
+
+And the `[swe_bench]` table of `dreamference.toml` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §4,
+§12).
 
 The directories are module-level constants on purpose: the test suite re-points every such
 attribute into a scratch home, and a path computed inside a function would escape that and let
@@ -117,8 +119,10 @@ class SweBenchSettings:
     """Resolved `[swe_bench]` settings, defaults filled in."""
 
     def __init__(self, table: dict[str, Any] | None = None) -> None:
-        """Args:
-        table: The `[swe_bench]` table; None reads it from the config file.
+        """Sets up the swe bench settings.
+
+        Args:
+            table: The `[swe_bench]` table; None reads it from the config file.
         """
         if table is None:
             table = self.read_table()
@@ -166,9 +170,7 @@ class SweBenchSettings:
 
     @classmethod
     def architecture(cls) -> str:
-        """Returns:
-        str: The machine's architecture as Docker names it (`arm64`, `amd64`).
-        """
+        """The machine's architecture as Docker names it (`arm64`, `amd64`)."""
         machine = platform.machine().lower()
         return {"aarch64": "arm64", "x86_64": "amd64"}.get(machine, machine)
 

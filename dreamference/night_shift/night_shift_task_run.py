@@ -96,27 +96,29 @@ class NightShiftTaskRun:
         window_end: float | None = None,
         attempt: int | None = None,
     ) -> None:
-        """Args:
-        night_dir: The queue directory.
-        task: The task record as queued.
-        settings: Night Shift settings.
-        mightling_bin: The `ling` executable.
-        deadline: `time.time()` by which the task must stop (task timeout or window end).
-        model_host: The model server the night run was admitted against. Named to every
-            `ling exec`, so the agent talks to that server and the launcher never browses
-            the network for a node from a worktree (specs/DREAMFERENCE_MIGHTLING_NODE.md §6.1).
-        context_budget: The task's share of the KV pool (`NightShiftHost.task_budget`), passed to
-            every `ling exec` as its compaction limit. None falls back to `[night] compact_at`.
-        model_node: The paired node whose model server `model_host` is, when it is not this
-            machine's (a replica lane); recorded in the result.
-        window_end: `time.time()` at which the night's window closes. With refine mode the
-            step that does the task gets a full task timeout of its own after the study step,
-            as in SWE-bench's `--refine` arm, but never past the window.
-        attempt: The attempt's number when this run is one attempt of a best-of-N task
-            (`NightShiftBestOfN`): its worktree, branch and logs carry `-a<k>`, it starts a
-            session of its own, it never writes the task's record, and where a single run
-            would commit it stages its change and leaves the worktree for the chooser
-            (`outcome`).
+        """Sets up the night shift task run.
+
+        Args:
+            night_dir: The queue directory.
+            task: The task record as queued.
+            settings: Night Shift settings.
+            mightling_bin: The `ling` executable.
+            deadline: `time.time()` by which the task must stop (task timeout or window end).
+            model_host: The model server the night run was admitted against. Named to every
+                `ling exec`, so the agent talks to that server and the launcher never browses
+                the network for a node from a worktree (specs/DREAMFERENCE_MIGHTLING_NODE.md §6.1).
+            context_budget: The task's share of the KV pool (`NightShiftHost.task_budget`), passed to
+                every `ling exec` as its compaction limit. None falls back to `[night] compact_at`.
+            model_node: The paired node whose model server `model_host` is, when it is not this
+                machine's (a replica lane); recorded in the result.
+            window_end: `time.time()` at which the night's window closes. With refine mode the
+                step that does the task gets a full task timeout of its own after the study step,
+                as in SWE-bench's `--refine` arm, but never past the window.
+            attempt: The attempt's number when this run is one attempt of a best-of-N task
+                (`NightShiftBestOfN`): its worktree, branch and logs carry `-a<k>`, it starts a
+                session of its own, it never writes the task's record, and where a single run
+                would commit it stages its change and leaves the worktree for the chooser
+                (`outcome`).
         """
         self.model_host = model_host
         self.model_node = model_node
@@ -186,8 +188,9 @@ class NightShiftTaskRun:
         return f"mightling-night-{self.task_id}"
 
     def run(self) -> str:
-        """Runs the task through every step of §5.3, rereading its record between steps so a
-        `/night drop` takes effect at the next one.
+        """Runs the task through every step of §5.3.
+
+        Rereading its record between steps so a `/night drop` takes effect at the next one.
 
         Returns:
             str: The status written.
@@ -335,11 +338,12 @@ class NightShiftTaskRun:
         return str(check()) if callable(check) else "v1"
 
     def _refine(self) -> str | None:
-        """Refine mode's first step (specs/DREAMFERENCE_MIGHTLING_REFINE.md §5.3): a session that studies
-        the task and answers with a refined description, under the task's own deadline and no
-        limit of its own. Whatever it changed in the worktree is then put back (it is told not to
-        change anything; whether it did is measured and recorded), and the step that does the
-        task gets a fresh task timeout, within the window.
+        """Refine mode's first step (specs/DREAMFERENCE_MIGHTLING_REFINE.md §5.3).
+
+        A session that studies the task and answers with a refined description, under the task's own
+        deadline and no limit of its own. Whatever it changed in the worktree is then put back (it
+        is told not to change anything; whether it did is measured and recorded), and the step that
+        does the task gets a fresh task timeout, within the window.
 
         Returns:
             Optional[str]: The description (empty when the step wrote none), or None when the
@@ -661,8 +665,9 @@ class NightShiftTaskRun:
         append: bool = True,
         extra_env: dict[str, str] | None = None,
     ) -> Any:
-        """Runs `command` under the task's scope until it exits, the deadline passes, `timeout`
-        seconds pass or the runner asks it to stop; then SIGTERM, and SIGKILL 30 s later.
+        """Runs `command` under the task's scope until it exits, the deadline passes.
+
+        `timeout` seconds pass or the runner asks it to stop; then SIGTERM, and SIGKILL 30 s later.
 
         Args:
             command: The command line.
@@ -868,10 +873,11 @@ class NightShiftTaskRun:
     def airgapped_level(
         cls, worktree: Path, session: str | None, codex_home: Path, repo: Path | None = None
     ) -> str:
-        """Resolves the `/airgapped` level for a command run in `worktree`, in the launcher's order
-        (ling-rs/airgapped): the session's file, the environment variable, then the strictest
-        of the configuration files (a repository's file may tighten the user's level and never
-        loosen it), then `off`.
+        """Resolves the `/airgapped` level for a command run in `worktree`, in the launcher's order.
+
+        (ling-rs/airgapped): the session's file, the environment variable, then the strictest of the
+        configuration files (a repository's file may tighten the user's level and never loosen it),
+        then `off`.
 
         The main checkout's `dreamference.toml` is read beside the worktree's: it is usually
         untracked, so a worktree has no copy of it, and a level the user set there for this

@@ -17,8 +17,9 @@ class SweBenchDocker:
     """Thin wrappers over the `docker` command line."""
 
     @classmethod
-    def run(cls, args: list[str], timeout: float | None = None,
-            input_text: str | None = None) -> subprocess.CompletedProcess:
+    def run(
+        cls, args: list[str], timeout: float | None = None, input_text: str | None = None
+    ) -> subprocess.CompletedProcess:
         """Runs `docker <args>` to completion.
 
         Args:
@@ -31,10 +32,18 @@ class SweBenchDocker:
             reported as return code 124.
         """
         try:
-            return subprocess.run(["docker", *args], capture_output=True, text=True, timeout=timeout,
-                                  input=input_text, stdin=None if input_text is not None else subprocess.DEVNULL)
+            return subprocess.run(
+                ["docker", *args],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                input=input_text,
+                stdin=None if input_text is not None else subprocess.DEVNULL,
+            )
         except subprocess.TimeoutExpired as error:
-            return subprocess.CompletedProcess(["docker", *args], 124, error.stdout or "", "timed out")
+            return subprocess.CompletedProcess(
+                ["docker", *args], 124, error.stdout or "", "timed out"
+            )
         except OSError as error:
             return subprocess.CompletedProcess(["docker", *args], 127, "", str(error))
 
@@ -49,8 +58,13 @@ class SweBenchDocker:
         Returns:
             subprocess.Popen: The running client.
         """
-        return subprocess.Popen(["docker", *args], stdin=subprocess.DEVNULL, stdout=stdout,
-                                stderr=subprocess.STDOUT, start_new_session=True)
+        return subprocess.Popen(
+            ["docker", *args],
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
 
     @classmethod
     def image_digest(cls, image: str) -> str | None:
@@ -63,7 +77,9 @@ class SweBenchDocker:
             Optional[str]: Its repository digest (or image id when it has none); None if the
             image is not present locally.
         """
-        result = cls.run(["image", "inspect", image, "--format", "{{json .RepoDigests}} {{.Id}}"], timeout=60)
+        result = cls.run(
+            ["image", "inspect", image, "--format", "{{json .RepoDigests}} {{.Id}}"], timeout=60
+        )
         if result.returncode != 0:
             return None
         digests, _, image_id = result.stdout.strip().rpartition(" ")
@@ -83,7 +99,9 @@ class SweBenchDocker:
         Returns:
             str | None: The value of its `PATH` variable; None when the image is absent or sets none.
         """
-        result = cls.run(["image", "inspect", image, "--format", "{{json .Config.Env}}"], timeout=60)
+        result = cls.run(
+            ["image", "inspect", image, "--format", "{{json .Config.Env}}"], timeout=60
+        )
         if result.returncode != 0:
             return None
         try:
@@ -138,8 +156,10 @@ class SweBenchDocker:
 
     @classmethod
     def subnet(cls, name: str) -> str | None:
-        """The internal network's subnet: every instance container's address is in it, which is
-        how the model gate tells the run's requests from everyone else's.
+        """The internal network's subnet.
+
+        Every instance container's address is in it, which is how the model gate tells the run's
+        requests from everyone else's.
 
         Args:
             name: The network's name.

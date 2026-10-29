@@ -119,17 +119,13 @@ class SweBenchRunner:
 
     @classmethod
     def smoke_path(cls) -> Path:
-        """Returns:
-        Path: The record of the last passed smoke on this machine.
-        """
+        """The record of the last passed smoke on this machine."""
         architecture = swe_bench_settings.SweBenchSettings.architecture()
         return swe_bench_settings.CACHE_DIR / f"smoke-{architecture}.json"
 
     @classmethod
     def smoke_passed(cls) -> bool:
-        """Returns:
-        bool: True when a smoke passed here with the harness version now pinned.
-        """
+        """True when a smoke passed here with the harness version now pinned."""
         import json
 
         try:
@@ -150,8 +146,9 @@ class SweBenchRunner:
         limit: int | None,
         subset: str | None,
     ) -> list[str]:
-        """Chooses the instances a new run covers, in a fixed order (sorted by instance id), so two
-        runs with the same arguments cover the same instances.
+        """Chooses the instances a new run covers, in a fixed order (sorted by instance id).
+
+        So two runs with the same arguments cover the same instances.
 
         Args:
             dataset: The dataset.
@@ -206,8 +203,9 @@ class SweBenchRunner:
 
     @classmethod
     def model_name(cls, served_model: str) -> str:
-        """Builds the predictions' `model_name_or_path`, so a result stays attributable to the build
-        and the model that produced it.
+        """Builds the predictions' `model_name_or_path`.
+
+        So a result stays attributable to the build and the model that produced it.
 
         Args:
             served_model: The served model's id.
@@ -268,10 +266,12 @@ class SweBenchRunner:
 
     @classmethod
     def wait_for_index_runs(cls, limit_s: int | None = None, poll_s: int | None = None) -> bool:
-        """Waits for an active index run (a `mightling-index-*` scope: `ling-code` or `ling-docs`
-        indexing started by a session) to end, for up to `limit_s`, polling every `poll_s`. Any
-        other heavy job, or an index scope still active at the limit, is left to admission, which
-        refuses as before. Prints one line when it starts waiting and one when it goes on.
+        """Waits for an active index run (a `mightling-index-*` scope.
+
+        `ling-code` or `ling-docs` indexing started by a session) to end, for up to `limit_s`,
+        polling every `poll_s`. Any other heavy job, or an index scope still active at the limit, is
+        left to admission, which refuses as before. Prints one line when it starts waiting and one
+        when it goes on.
 
         Args:
             limit_s: How long to wait at most; `INDEX_WAIT_S` by default.
@@ -443,8 +443,9 @@ class SweBenchRunner:
 
     @classmethod
     def prompt_file(cls, name: str) -> Path | None:
-        """The file a custom prompt is read from: `$CODEX_HOME/system-prompts/<name>.md`. The built-in
-        prompts are in the binary and have none.
+        """The file a custom prompt is read from: `$CODEX_HOME/system-prompts/<name>.md`.
+
+        The built-in prompts are in the binary and have none.
 
         Args:
             name: The prompt's name.
@@ -460,8 +461,9 @@ class SweBenchRunner:
 
     @classmethod
     def prompt_digest(cls, name: str) -> str | None:
-        """The SHA-256 of a custom prompt's file, so the manifest names the text a run measured; None
-        for a built-in prompt, which `runtime_hash` already covers.
+        """The SHA-256 of a custom prompt's file, so the manifest names the text a run measured.
+
+        None for a built-in prompt, which `runtime_hash` already covers.
 
         Args:
             name: The prompt's name.
@@ -1057,10 +1059,11 @@ class SweBenchRunner:
         settings: "swe_bench_settings.SweBenchSettings",
         parallel: int,
     ) -> Any:
-        """This machine's model server and every paired node serving the same model
+        """This machine's model server and every paired node serving the same model.
+
         (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3). The containers all run here; a replica only
-        answers some of their model requests, each lane holding as many instances as its own KV
-        pool allows.
+        answers some of their model requests, each lane holding as many instances as its own KV pool
+        allows.
 
         Args:
             vllm_host: This machine's model server.
@@ -1262,9 +1265,10 @@ class SweBenchRunner:
         lanes: list[dict[str, Any]] | None = None,
         hold: SweBenchGateHold | None = None,
     ) -> str | None:
-        """Starts instances while the machine is quiet, memory and disk admit one more and `--until`
-        has not passed; waits for the running ones. With `lanes`, an instance goes to the first
-        model server with room and nothing in its way.
+        """Starts instances while the machine is quiet.
+
+        Memory and disk admit one more and `--until` has not passed; waits for the running ones.
+        With `lanes`, an instance goes to the first model server with room and nothing in its way.
 
         With `hold` in force (§18) this machine's server refuses everyone else, so open sessions
         and other requests no longer hold a start back; during a pause they do again, as before
@@ -1426,8 +1430,10 @@ class SweBenchRunner:
     def by_repository(
         cls, instance_ids: list[str], rows: dict[str, dict[str, Any]]
     ) -> dict[Any, list[str]]:
-        """Groups instances by repository, keeping their order: with `--eval --remove-images` a
-        repository's instances are run and graded together, so its images can go before the next.
+        """Groups instances by repository, keeping their order.
+
+        With `--eval --remove-images` a repository's instances are run and graded together, so its
+        images can go before the next.
 
         Returns:
             Dict[str, List[str]]: Repository to its instances.
@@ -1608,9 +1614,7 @@ class SweBenchRunner:
 
     @classmethod
     def default_name(cls) -> str:
-        """Returns:
-        str: `<date>-a`, or the next free letter.
-        """
+        """`<date>-a`, or the next free letter."""
         today = datetime.now().strftime("%Y-%m-%d")
         existing = set(SweBenchRunStore.runs())
         for letter in "abcdefghijklmnopqrstuvwxyz":
@@ -1620,7 +1624,9 @@ class SweBenchRunner:
 
     @classmethod
     def until_time(cls, until: str | None) -> datetime | None:
-        """Args:
+        """Parses the time a run may last until.
+
+        Args:
             until: `HH:MM`, or None.
 
         Returns:

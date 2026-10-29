@@ -1,6 +1,7 @@
-"""The texts of refine mode (specs/DREAMFERENCE_MIGHTLING_REFINE.md): a first session studies a task and
-writes a refined description without changing anything, then a fresh session does the task with
-that description.
+"""The texts of refine mode (specs/DREAMFERENCE_MIGHTLING_REFINE.md).
+
+A first session studies a task and writes a refined description without changing anything, then a
+fresh session does the task with that description.
 
 One text serves the product and the benchmark. The pieces below are the ones in
 `ling-rs/prompts/refine.md`, which the launcher composes from for `ling exec` and the
@@ -17,10 +18,14 @@ in the study's six sections and the fix rules only, and is chosen by `mightling_
 import re
 from typing import Final
 
-STUDY_INTRO: Final[str] = """This is the first of two steps. Do not fix anything yet: study the {subject} below and write a precise
+STUDY_INTRO: Final[
+    str
+] = """This is the first of two steps. Do not fix anything yet: study the {subject} below and write a precise
 description of the problem for the second step, which will make the fix."""
 
-STUDY_SECTIONS: Final[str] = """1. Intent: what the reporter is trying to achieve, from the title and their use case, not only
+STUDY_SECTIONS: Final[
+    str
+] = """1. Intent: what the reporter is trying to achieve, from the title and their use case, not only
    from the example they give.
 2. Requirements: the behaviour the fix must produce, as observable results ("for input X the
    result is Y"). Never "it no longer raises": say what it returns or prints.
@@ -40,7 +45,9 @@ Keep it factual: say what you checked in the code and what you are inferring."""
 # contradicts and lists it with its new value instead; the intent says what the request changes;
 # an open choice gets one answer; a check must be one the bug fails; and every claim is
 # checked against the repository before the description is final.
-STUDY_SECTIONS_V2: Final[str] = """1. Intent: what the reporter is trying to achieve, from the title and their use case, not only
+STUDY_SECTIONS_V2: Final[
+    str
+] = """1. Intent: what the reporter is trying to achieve, from the title and their use case, not only
    from the example they give. Say whether it changes behaviour observable today, and which
    outputs, side effects the request implies included.
 2. Requirements: the behaviour the fix must produce, as observable results ("for input X the
@@ -65,7 +72,9 @@ code path named, the current behaviour, any "already fixed upstream". Delete wha
 confirm; mark an inference as one."""
 
 # The study step's code-index sentence: it is there to find every path, not one.
-STUDY_CODE_INDEX: Final[str] = """- Find the code with the `code_*` tools: `code_search` with the {subject}'s words, then
+STUDY_CODE_INDEX: Final[
+    str
+] = """- Find the code with the `code_*` tools: `code_search` with the {subject}'s words, then
   `code_callers` and `code_refs` to find every other path that produces the same behaviour."""
 
 # The product's study prompt. The description comes back as the session's final message, so the
@@ -83,7 +92,9 @@ Write the description as your final message, in six sections:
 Task:
 {task}"""
 
-FIX_RULES: Final[str] = """- A first step studied the {subject} and wrote the refined description that follows it. Use it to
+FIX_RULES: Final[
+    str
+] = """- A first step studied the {subject} and wrote the refined description that follows it. Use it to
   see the whole problem, but the {subject} is authoritative: where the two disagree, follow the {subject}.
 - Fix the cause, not the symptom: no guard (a length check, a try/except, an early return) that
   only hides the reported failure.
@@ -91,7 +102,9 @@ FIX_RULES: Final[str] = """- A first step studied the {subject} and wrote the re
   gives its expected result."""
 
 # refine-v2's rules: v1's, and what the description lists as expected to change is changed.
-FIX_RULES_V2: Final[str] = """- A first step studied the {subject} and wrote the refined description that follows it. Use it to
+FIX_RULES_V2: Final[
+    str
+] = """- A first step studied the {subject} and wrote the refined description that follows it. Use it to
   see the whole problem, but the {subject} is authoritative: where the two disagree, follow the {subject}.
 - Fix the cause, not the symptom: no guard (a length check, a try/except, an early return) that
   only hides the reported failure.
@@ -100,7 +113,9 @@ FIX_RULES_V2: Final[str] = """- A first step studied the {subject} and wrote the
 - Before you stop, run every acceptance check in the refined description and confirm that each
   gives its expected result."""
 
-REFINED_HEADING: Final[str] = "Refined description (written by the first step; it may be incomplete or wrong):"
+REFINED_HEADING: Final[str] = (
+    "Refined description (written by the first step; it may be incomplete or wrong):"
+)
 
 # What the second step is told when the first wrote nothing.
 NO_REFINED: Final[str] = "(The first step wrote no description: work from the {subject} alone.)"
@@ -126,7 +141,9 @@ PIECES: Final[dict[str, str]] = {
 }
 
 # Night Shift's study step works in the task's own worktree, which the runner puts back afterwards.
-NIGHT_WRITES: Final[str] = "every change there is discarded when this step ends. Put scratch files in /tmp."
+NIGHT_WRITES: Final[str] = (
+    "every change there is discarded when this step ends. Put scratch files in /tmp."
+)
 
 # The versions of the texts, by the name the settings use: v1 is the measured one, whose SWE-bench
 # prompts are pinned; v2 differs in the study's sections and the fix rules only.
@@ -156,7 +173,9 @@ class RefinePrompt:
 
     @classmethod
     def pieces_of(cls, version: str) -> dict[str, str]:
-        """Args:
+        """The pieces of.
+
+        Args:
             version: A key of `VERSIONS`.
 
         Returns:
@@ -170,8 +189,14 @@ class RefinePrompt:
         return VERSIONS[version]
 
     @classmethod
-    def compose_study(cls, task: str, writes: str, code_index: bool = False, subject: str = "task",
-                      version: str = "v1") -> str:
+    def compose_study(
+        cls,
+        task: str,
+        writes: str,
+        code_index: bool = False,
+        subject: str = "task",
+        version: str = "v1",
+    ) -> str:
         """Builds the product's study prompt.
 
         Args:
@@ -186,11 +211,13 @@ class RefinePrompt:
         """
         hint = cls.subject(STUDY_CODE_INDEX, subject) + "\n" if code_index else ""
         # `{task}` last: a task's own text is never searched for placeholders.
-        return (STUDY_TEMPLATE.replace("{intro}", cls.subject(STUDY_INTRO, subject))
-                .replace("{writes}", writes)
-                .replace("{code_index}", hint)
-                .replace("{sections}", cls.pieces_of(version)["sections"])
-                .replace("{task}", task))
+        return (
+            STUDY_TEMPLATE.replace("{intro}", cls.subject(STUDY_INTRO, subject))
+            .replace("{writes}", writes)
+            .replace("{code_index}", hint)
+            .replace("{sections}", cls.pieces_of(version)["sections"])
+            .replace("{task}", task)
+        )
 
     @classmethod
     def fix_block(cls, refined: str, subject: str = "task", version: str = "v1") -> str:
@@ -205,12 +232,16 @@ class RefinePrompt:
             str: The block.
         """
         refined = refined.strip() or cls.subject(NO_REFINED, subject)
-        return (FIX_TEMPLATE.replace("{rules}", cls.subject(cls.pieces_of(version)["rules"], subject))
-                .replace("{heading}", REFINED_HEADING)
-                .replace("{refined}", refined))
+        return (
+            FIX_TEMPLATE.replace("{rules}", cls.subject(cls.pieces_of(version)["rules"], subject))
+            .replace("{heading}", REFINED_HEADING)
+            .replace("{refined}", refined)
+        )
 
     @classmethod
-    def compose_fix(cls, task_prompt: str, refined: str, subject: str = "task", version: str = "v1") -> str:
+    def compose_fix(
+        cls, task_prompt: str, refined: str, subject: str = "task", version: str = "v1"
+    ) -> str:
         """Builds the product's second prompt: the task as it would have been given, then the block.
 
         Args:

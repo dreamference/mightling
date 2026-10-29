@@ -1,5 +1,7 @@
-"""`ling-admin audit egress --docs`: the local file index's scenario
-(specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §10.2, specs/DREAMFERENCE_MIGHTLING_EGRESS.md).
+"""`ling-admin audit egress --docs`.
+
+The local file index's scenario (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §10.2,
+specs/DREAMFERENCE_MIGHTLING_EGRESS.md).
 
 This module provides the DocsEgressAudit class. It indexes a fixture folder with `ling-docs` and
 runs a search, both under `strace -f`, in a throwaway home, and passes only if the trace shows no
@@ -73,10 +75,11 @@ class DocsEgressAudit:
 
     @classmethod
     def make_fixture(cls, home: str) -> str:
-        """Writes the fixture folder: `~/Documents` (a default collection) with a Markdown note, a
-        text file, a PDF, a PDF page without a text layer (for OCR), a saved web page, a Word file
-        and an e-mail with a CSV attachment (every parser the index has), plus a file of a type the
-        index never opens.
+        """Writes the fixture folder.
+
+        `~/Documents` (a default collection) with a Markdown note, a text file, a PDF, a PDF page
+        without a text layer (for OCR), a saved web page, a Word file and an e-mail with a CSV
+        attachment (every parser the index has), plus a file of a type the index never opens.
 
         Args:
             home (str): The throwaway home.
@@ -227,8 +230,9 @@ class DocsEgressAudit:
 
     @classmethod
     def write_result(cls, trace: EgressTrace, verdict: EgressVerdict, ling_docs: str) -> str:
-        """Writes the full result as JSON under `$CODEX_HOME/audit/`, as `<timestamp>-docs.json`
-        beside the session audit's `<timestamp>-<session>.json`.
+        """Writes the full result as JSON under `$CODEX_HOME/audit/`.
+
+        As `<timestamp>-docs.json` beside the session audit's `<timestamp>-<session>.json`.
 
         Args:
             trace (EgressTrace): What the two commands did.
