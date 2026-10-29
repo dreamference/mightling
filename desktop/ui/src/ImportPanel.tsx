@@ -4,7 +4,7 @@
 // completion as notifications), and the imports done before (`externalAgentConfig/import/readHistories`).
 // What is written goes to `~/.mightling` and the project's own files, as the server decides.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { TYPE_LABELS, caveat, itemKey, resultLines, scopeOf, startsTicked } from "./imports";
 import type { ExternalAgentConfigImportHistory } from "./protocol/v2/ExternalAgentConfigImportHistory";
@@ -36,12 +36,15 @@ export function ImportPanel(props: { client: RpcClient; listen: Listen; cwd: str
   }, [client, cwd, notice]);
   useEffect(detect, [detect]);
 
+  // Imports that ended, so one whose end came before the request's answer is not shown running for ever.
+  const finished = useRef(new Set<string>());
   // The import's progress and its end, as the server reports them.
   useEffect(() => listen((notification) => {
     if (notification.method !== "externalAgentConfig/import/progress" && notification.method !== "externalAgentConfig/import/completed") return;
     if (running && notification.params.importId !== running) return;
     setResults(notification.params.itemTypeResults);
     if (notification.method === "externalAgentConfig/import/completed") {
+      finished.current.add(notification.params.importId);
       setRunning(null);
       onImported();
       detect();
@@ -54,7 +57,8 @@ export function ImportPanel(props: { client: RpcClient; listen: Listen; cwd: str
     setResults(null);
     try {
       const answer = await client.request("externalAgentConfig/import", { migrationItems: chosen, providerId: "mightling_desktop" });
-      setRunning((answer as { importId?: string }).importId ?? "import");
+      const id = (answer as { importId?: string }).importId ?? "import";
+      if (!finished.current.has(id)) setRunning(id);
     } catch (error) {
       notice(error);
     }
