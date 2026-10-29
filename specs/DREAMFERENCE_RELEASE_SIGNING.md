@@ -186,14 +186,18 @@ From then on:
   install.sh, which verifies.
 
 `SIGNED_SINCE = 1.5.0` is set in both clients. A release with a tag that does not parse as a
-version is treated as new, so it must be signed. If 1.5.0 ships without a signature, for example
+version is treated as new, so it must be signed. The latest release must be signed whatever its
+tag: install.sh and install.ps1 take the pre-signing branch only for a release named with
+`--version` / `-Version`, because whoever can mark a release latest without the key could tag it
+v1.4.9 (found 2026-10-29). If 1.5.0 ships without a signature, for example
 because the secret was removed, the release job fails before publishing.
 
 ## 8. Tests
 
 - `tests/test_release_install.py` runs the real install.sh against the stand-in release server,
   with session keys made by `ssh-keygen` (the release key's private half is never used in tests).
-  Cases: a signed release installs; an unsigned 1.5.0, 9.9.9 or `nightly` is refused; a missing
+  Cases: a signed release installs; an unsigned 1.5.0 or 9.9.9 is refused, and so is an unsigned
+  latest release (1.4.1, 1.5.0 or `nightly`); a missing
   `.sig` is refused; an unsigned 1.4.1 installs with the warning; `SHA256SUMS` changed after
   signing fails; a release signed by another key fails; binaries swapped together with their sums
   file fail against the signed `SHA256SUMS`; a key transition endorsed by the current key installs;

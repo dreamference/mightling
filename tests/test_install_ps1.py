@@ -242,6 +242,18 @@ def test_an_unsigned_release_since_signing_began_installs_nothing():
     assert block[unsigned:].split("\n", 2)[1].strip().startswith('Fail "release $Tag is not signed')
 
 
+def test_an_unsigned_latest_release_installs_nothing_whatever_its_tag():
+    # As install.sh: the tag of the latest release is only a name, so an unsigned one is refused
+    # before the pre-signing branch can read it; only a release named with -Version may predate it.
+    block = signature_block()
+    latest = block.index("} elseif (-not $Version) {")
+    assert latest < block.index("} elseif (Test-SigningRequired $Tag) {")
+    assert (
+        'Fail "the latest release ($Tag) is not signed'
+        in block[latest:].split("} elseif (Test-SigningRequired", 1)[0]
+    )
+
+
 def test_the_per_target_checksums_are_tied_to_the_signed_sha256sums():
     block = signature_block()
     assert "$Signed[$SumsName]" in block

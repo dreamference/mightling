@@ -1286,10 +1286,22 @@ def test_the_installer_trusts_the_keys_ling_update_compiles_in():
 
 
 def test_an_unsigned_release_from_the_cut_over_on_is_refused(tmp_path, release_server):
-    for tag in ("v1.5.0", "v9.9.9", "nightly"):
-        result = run_install(tmp_path, release_server(binaries(signed=False), tag=tag), "--role", "client")
+    for tag in ("v1.5.0", "v9.9.9"):
+        server = release_server(binaries(signed=False), tag=tag)
+        result = run_install(tmp_path, server, "--role", "client", "--version", tag)
         assert result.returncode == 1, tag
         assert f"release {tag} is not signed" in result.stderr
+        assert nothing_installed(tmp_path)
+
+
+def test_an_unsigned_latest_release_is_refused_whatever_its_tag(tmp_path, release_server):
+    # The tag is only a name: whoever can mark a release latest without the signing key could tag
+    # it v1.4.9 and have it installed on its checksums alone (found 2026-10-29).
+    for tag in ("v1.4.1", "v1.5.0", "nightly"):
+        result = run_install(tmp_path, release_server(binaries(signed=False), tag=tag), "--role", "client")
+        assert result.returncode == 1, tag
+        assert f"the latest release ({tag}) is not signed" in result.stderr
+        assert "Pass --version" in result.stderr
         assert nothing_installed(tmp_path)
 
 
