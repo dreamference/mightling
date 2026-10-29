@@ -427,6 +427,22 @@ def test_node_sync_sends_a_release_hosted_drafter_as_a_hub_folder(monkeypatch):
     assert sorted(path.name for path in members[1:]) == sorted(pin["sha256"] for pin in source["files"].values())
 
 
+def test_node_sync_does_not_send_a_pinned_snapshot_whose_blob_is_missing(tmp_path, monkeypatch):
+    # A download that broke off leaves the snapshot's link and no blob: the node would get a checkpoint without it.
+    import dreamference.hardware.model_matrix_registry as registry
+    from dreamference.node.node_model_sync import NodeModelSync
+    monkeypatch.setattr(registry.ModelMatrixRegistry, "pinned_revision", classmethod(lambda cls, repo: "a" * 40))
+    folder = tmp_path / NodeModelSync.folder_name("org/model")
+    snapshot = folder / "snapshots" / ("a" * 40)
+    snapshot.mkdir(parents=True)
+    (folder / "blobs").mkdir()
+    (folder / "blobs" / ("1" * 64)).write_bytes(b"config")
+    (snapshot / "config.json").symlink_to(Path("../..") / "blobs" / ("1" * 64))
+    assert NodeModelSync.members(tmp_path, "org/model") is not None
+    (snapshot / "model.safetensors").symlink_to(Path("../..") / "blobs" / ("2" * 64))
+    assert NodeModelSync.members(tmp_path, "org/model") is None
+
+
 def test_an_engine_asset_applies_only_to_its_engine_and_feature(monkeypatch):
     # The sparse head is ling-engine's, and only a build that reads it (its recipe lists the feature) fetches
     # it: SGLang's recipe, or a ling-engine recipe without the feature (79c38c7, 1.7.2), gets nothing.

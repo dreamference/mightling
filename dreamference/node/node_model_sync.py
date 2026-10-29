@@ -89,7 +89,8 @@ class NodeModelSync:
             list[Path] | None: For a pinned repository, its snapshot of that commit and the
             blobs the snapshot links to; for one no recipe pins, its whole cache folder. None when
             what would be sent is not here (for a pinned one, a cache holding only another
-            revision, which is not the checkpoint the recipe was measured on).
+            revision, which is not the checkpoint the recipe was measured on, or a snapshot
+            linking to a blob that is missing, as a download that broke off leaves it).
         """
         from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
         folder = hub / cls.folder_name(repo)
@@ -104,6 +105,8 @@ class NodeModelSync:
         for link in snapshot.rglob("*"):
             if link.is_symlink():
                 target = link.resolve()
+                if not target.exists():
+                    return None
                 if target.parent == blobs_dir:
                     blobs.add(folder / "blobs" / target.name)
         return [snapshot, *sorted(blobs)]
