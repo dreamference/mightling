@@ -161,9 +161,12 @@ class SweBenchHarness:
         path = cls.snapshot_path(dataset)
         meta_path = path.with_suffix(".meta.json")
         if path.exists() and meta_path.exists() and not force:
-            meta = json.loads(meta_path.read_text())
+            try:
+                meta = json.loads(meta_path.read_text())
+            except (OSError, ValueError):
+                meta = None  # cut short or unreadable: fetched again
             pinned = swe_bench_settings.SweBenchSettings.revision(dataset)
-            if not pinned or meta.get("revision") == pinned:
+            if isinstance(meta, dict) and (not pinned or meta.get("revision") == pinned):
                 return meta
             # A snapshot of another revision than the pin: fetched again, never used as it is.
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -180,8 +183,13 @@ class SweBenchHarness:
         meta["dataset"] = swe_bench_settings.SweBenchSettings.dataset_id(dataset)
         staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         staging.write_text("\n".join(lines[1:]) + "\n")
+        # The old meta goes first, so a stop between the two leaves a snapshot that is fetched
+        # again, never new rows under the old revision.
+        meta_path.unlink(missing_ok=True)
         os.replace(staging, path)
-        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+        meta_staging = meta_path.with_name(f".{meta_path.name}.{os.getpid()}.tmp")
+        meta_staging.write_text(json.dumps(meta, indent=2) + "\n")
+        meta_staging.replace(meta_path)
         return meta
 
     @classmethod

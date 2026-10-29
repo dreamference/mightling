@@ -208,6 +208,29 @@ def test_the_download_asks_for_the_pinned_revision_and_replaces_a_snapshot_of_an
     )
 
 
+def test_a_snapshot_whose_meta_cannot_be_read_is_downloaded_again(monkeypatch):
+    calls = []
+
+    def fake(command, **kwargs):
+        calls.append(list(command))
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            json.dumps({"revision": "r2", "rows": 1}) + '\n{"instance_id": "a__b-1"}\n',
+            "",
+        )
+
+    monkeypatch.setattr(SweBenchHarness, "execute", staticmethod(fake))
+    path = SweBenchHarness.snapshot_path("verified")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"instance_id": "old"}\n')
+    path.with_suffix(".meta.json").write_text('{"revision": "r1", "ro')  # cut short
+    meta = SweBenchHarness.download_dataset("verified")
+    assert len(calls) == 1 and meta["revision"] == "r2"
+    assert json.loads(path.with_suffix(".meta.json").read_text())["revision"] == "r2"
+    assert sorted(p.name for p in path.parent.iterdir() if p.name.endswith(".tmp")) == []
+
+
 def test_the_dockerfile_loses_its_amd64_pin_and_gains_the_agent_layer():
     out, problem = SweBenchImageBuilder.arm64_dockerfile(DOCKERFILE_C)
     assert problem is None
