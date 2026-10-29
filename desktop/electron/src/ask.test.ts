@@ -144,6 +144,14 @@ describe("Ask folders", () => {
     expect(await composePrompt(ling, "ask", root, process.env)).toBe(`COMPOSED ask IN ${root}`);
     await expect(composePrompt(path.join(dir, "missing"), "ask", root, process.env)).rejects.toThrow();
   });
+
+  it("keep a character the composed prompt's output splits between two writes", async () => {
+    const dir = scratch("compose-split");
+    // "é" is two bytes in UTF-8: the first ends one write, the second starts the next.
+    const ling = nodeScript(dir, "ling", `process.stdout.write(Buffer.from([0x63, 0x61, 0x66, 0xc3]), () => setTimeout(() => process.stdout.write(Buffer.from([0xa9, 0x0a])), 50));
+`);
+    expect(await composePrompt(ling, "ask", path.join(dir, "ask"), process.env)).toBe("café\n");
+  });
 });
 
 describe("an Ask thread in the app", () => {
