@@ -19,6 +19,8 @@ off.
 | Signal, only after `ling signal setup` | Your Note to Self messages and Mightling's replies, end-to-end encrypted; setup itself downloads signal-cli and a Java runtime, pinned | Signal's servers; GitHub for the downloads |
 | Telegram, only after `ling chat telegram setup` | What you send the bot and its answers, unencrypted | Telegram's servers |
 | Matrix, only after `ling-admin matrix start` | Your chat with the homeserver on the node, over your tailnet; with push on, push notifications (no text) | Your phone through Tailscale; with push on, the push gateway |
+| [Remote access](remote.md), only after `ling-admin remote setup` | Traffic between your devices, encrypted end to end; setup downloads NetBird, and a public certificate, if you ask for one, is requested through your Cloudflare DNS | Your relay box; GitHub for the downloads; Let's Encrypt and Cloudflare for a certificate |
+| Sync, only after `ling sync enable` | Your threads, between your own paired devices | Your node, over your network or the overlay |
 
 Apart from these, Mightling does not send your repositories, prompts or chats anywhere. The only content that leaves the machine is what these features need: a search query,
 a URL, a mailbox read.

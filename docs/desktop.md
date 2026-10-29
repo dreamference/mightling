@@ -328,8 +328,8 @@ accent, background and text colours of the theme in front; each theme keeps its 
 - **`!` commands:** `!git status` in the composer runs the command in your own shell, in the
   thread's folder and with no sandbox, as in the Codex app, and shows its output in the thread. It
   is refused at `/airgapped on`, since nothing would keep it off the network.
-- **One app:** opening `ling app` again brings the running window forward; `mightling://thread/<id>`
-  links open Work on that thread.
+- **One app:** opening `ling app` again brings the running window forward; `ling://thread/<id>`
+  links (and the older `mightling://` ones) open Work on that thread.
 - **Local or Worktree** under the composer of a new thread in a git project. **Local**, the
   default as in Codex's app, edits your checkout in place, so your editor sees every change.
   **Worktree** gives the thread its own checkout from the branch you pick; the thread's header says
