@@ -1138,12 +1138,15 @@ const WRAPPER_DIST: &str = r#"wrapper_dist() { name=$(sed -n 's#^distributionUrl
 /// and so writes into it: the files git tracks (no build output, no secrets the user left
 /// untracked), or, outside git, everything but the usual build and dependency directories.
 fn copy_sources(repo: &Repo, root_dir: &Path, copy: &Path) -> String {
-    let (root, copy) = (
+    // The file list goes through a file, not a pipe: `/bin/sh` has no `pipefail`, so a failing
+    // `git ls-files` would leave an empty copy and a run that indexes nothing.
+    let (root, files, copy) = (
         sh_quote(&root_dir.to_string_lossy()),
+        sh_quote(&format!("{}.files", copy.to_string_lossy())),
         sh_quote(&copy.to_string_lossy()),
     );
     let list = if repo.is_git {
-        format!("git -C {root} ls-files -z | tar -C {root} --null -T - -cf -")
+        format!("git -C {root} ls-files -z > {files} && tar -C {root} --null -T {files} -cf -")
     } else {
         format!("tar -C {root} --exclude=./target --exclude=./build --exclude=./bin --exclude=./obj --exclude=./node_modules --exclude=./.gradle -cf - .")
     };
@@ -1996,5 +1999,26 @@ mod tests {
             ..fake_tools(Path::new("/x"))
         };
         assert!(no_scip.unavailable("scip-go").unwrap().contains("scip CLI"));
+    }
+
+    #[test]
+    fn a_copy_whose_file_list_fails_fails_instead_of_coming_out_empty() {
+        let (dir, repo) = make_repo(&[("a.py", "x = 1\n")]);
+        let copy = dir.path().join("copy");
+        let ok = |root: &Path| {
+            Command::new("/bin/sh")
+                .args(["-c", &copy_sources(&repo, root, &copy)])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        };
+        assert!(ok(&repo.root));
+        assert!(copy.join("a.py").is_file());
+        // `git ls-files` fails here (not a repository); /bin/sh has no pipefail.
+        let plain = dir.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("b.py"), "y = 2\n").unwrap();
+        assert!(!ok(&plain));
     }
 }
