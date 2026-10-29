@@ -398,6 +398,17 @@ def test_a_users_own_line_naming_the_same_tag_is_never_removed():
     assert "AAAAown" in path.read_text()
 
 
+def test_the_forced_command_names_an_admin_path_with_a_space_as_one_word(monkeypatch, tmp_path):
+    import shlex
+
+    admin = str(tmp_path / "my home" / "ling-admin")
+    monkeypatch.setattr(NodeServe, "admin_executable", classmethod(lambda cls: admin))
+    assert NodeServe.authorize("ssh-ed25519 AAAAfirst a")
+    line = NodeServe.authorized_keys().read_text()
+    forced = line.partition('command="')[2].partition('"')[0]
+    assert shlex.split(forced)[0] == admin
+
+
 @pytest.mark.parametrize("key", ["", "ssh-ed25519", "not a key at all"])
 def test_authorising_something_that_is_not_a_public_key_writes_nothing(key, capsys):
     assert not NodeServe.authorize(key)

@@ -94,7 +94,7 @@ class NodeServe:
         try:
             tag = cls.key_tag(public_key)
             line = NodePairing.authorized_line(
-                public_key, f"{cls.admin_executable()} node serve-job --key {tag}")
+                public_key, f"{shlex.quote(cls.admin_executable())} node serve-job --key {tag}")
         except (ValueError, IndexError):
             print("❌ That is not a public key.")
             return False

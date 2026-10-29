@@ -21,6 +21,7 @@ release too).
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -294,7 +295,7 @@ class LegacyNameMigration:
                 if old_admin:
                     sibling = Path(old_admin.group(1)).with_name("ling-admin")
                     admin = str(sibling) if sibling.exists() else admin
-                    body = body.replace(old_admin.group(1), admin, 1)
+                    body = body.replace(old_admin.group(1), shlex.quote(admin), 1)
                 body = body[: -len(LEGACY_KEY_COMMENT)] + KEY_COMMENT
                 changed += 1
                 line = body + ("\n" if line.endswith("\n") else "")
