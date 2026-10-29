@@ -560,11 +560,14 @@ def test_a_serialization_that_fails_midway_leaves_no_tensors_file(tmp_path, monk
         "subprocess.run", lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr="")
     )
 
+    written = []
+
     class Serializer:
         def __init__(self, path):
             self.path = path
 
         def write_module(self, model):
+            written.append(Path(self.path).name)
             Path(self.path).write_bytes(b"half a checkpoint")
             raise RuntimeError("out of memory")
 
@@ -586,6 +589,9 @@ def test_a_serialization_that_fails_midway_leaves_no_tensors_file(tmp_path, monk
     ModelDownloader.tensorize_model(model_key, force=True)
     assert ModelDownloader.is_model_tensorized(model_key) is False
     assert not (ModelDownloader.get_tensorized_dir(model_key) / "model.tensors").exists()
+    # A kill midway skips every except, so the file being written must not have the final name.
+    assert written and "model.tensors" not in written
+    assert not list(ModelDownloader.get_tensorized_dir(model_key).iterdir())
 
 
 def test_a_cached_model_is_sized_by_its_blobs_not_also_by_its_snapshot_links(monkeypatch):

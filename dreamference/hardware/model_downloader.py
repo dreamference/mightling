@@ -234,6 +234,7 @@ class ModelDownloader:
             return False
         tdir.mkdir(parents=True, exist_ok=True)
         tensors_file = tdir / "model.tensors"
+        staging = tdir / "model.tensors.partial"
 
         print(f"⚡ Converting '{model_key}' to tensorize format and saving to {tensors_file}...")
 
@@ -337,9 +338,12 @@ class ModelDownloader:
                         nn.Parameter(torch.tensor((1,), device="meta"), requires_grad=False)
                     )
                     progress.update(task, description="Serializing to .tensors format")
-                    serializer = TensorSerializer(str(tensors_file))
+                    # Written under another name and renamed whole: a kill midway (the host's OOM
+                    # killer skips every except) must not leave a file that reads as tensorized.
+                    serializer = TensorSerializer(str(staging))
                     serializer.write_module(model)
                     serializer.close()
+                    staging.replace(tensors_file)
                     del model
                     progress.update(task, description="Tensorization complete", completed=True)
                 serialization_success = True
@@ -367,6 +371,7 @@ class ModelDownloader:
         if not serialization_success:
             # A failed attempt may have left part of the file, which would read as tensorized.
             tensors_file.unlink(missing_ok=True)
+            staging.unlink(missing_ok=True)
             print(f"⚠️  'tensorizer' not installed — skipping tensorize step (normal download will be used).")
             return True
 
