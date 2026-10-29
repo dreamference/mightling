@@ -3289,6 +3289,7 @@ class DreamferenceCLIController:
                 subprocess.run(cmd, check=True)
             except subprocess.CalledProcessError as e:
                 print(f"❌ Benchmark failed: {e}")
+                sys.exit(1)
             except KeyboardInterrupt:
                 print("\n⏹️  Benchmark cancelled.")
 

@@ -134,3 +134,19 @@ def test_logs_mcp_prints_its_heading_without_markup(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "MCP server lifecycle (most recent first)" in out and "[bold]" not in out
     assert "search" in out and "Service initialized as client" in out
+
+
+def test_a_failed_benchmark_exits_with_an_error(capsys):
+    # `vllm bench serve` failing was printed and the command still exited 0, so a script or a
+    # night job took the failed run for a finished one.
+    import subprocess
+
+    import pytest
+
+    failed = subprocess.CalledProcessError(1, ["docker", "exec"])
+    with patch("dreamference.hardware.resolve_model_hf_repo", return_value="org/model"), \
+            patch.object(subprocess, "run", side_effect=failed) as run:
+        with pytest.raises(SystemExit) as exit_info:
+            DreamferenceCLIController.run_cli(["benchmark_server", "--dataset-path", "/data/sonnet.txt"])
+    assert run.call_count == 1 and exit_info.value.code == 1
+    assert "Benchmark failed" in capsys.readouterr().out
