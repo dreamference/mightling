@@ -260,7 +260,8 @@ impl Connection {
         }
         let loaded: BTreeSet<String> = ids.into_iter().collect();
         let mut attached = self.shared.attached.lock().unwrap_or_else(|p| p.into_inner());
-        attached.retain(|id, _| loaded.contains(id));
+        // A folder excluded since it was attached lets its thread go too.
+        attached.retain(|id, cwd| loaded.contains(id) && leaves(settings, &json!({ "cwd": cwd })));
         attached.keys().cloned().collect()
     }
 
@@ -488,8 +489,15 @@ pub async fn run(codex_home: PathBuf, hub: Arc<HubClient>) {
     let looker = {
         let host = host.clone();
         async move {
+            // The last `[sync]` that read: a broken file never means nothing is excluded.
+            let mut settings = None;
             loop {
-                host.look(&sockets, &Settings::load()).await;
+                if let Ok(read) = Settings::load_checked() {
+                    settings = Some(read);
+                }
+                if let Some(settings) = &settings {
+                    host.look(&sockets, settings).await;
+                }
                 tokio::time::sleep(LOOK_EVERY).await;
             }
         }

@@ -227,7 +227,13 @@ impl Agent {
                         }
                         self.state.threads.remove(&state.thread);
                     }
-                    Err(err) => report.errors.push(err),
+                    Err(err) => {
+                        // Not held yet, so the next cycle withdraws it again.
+                        if let Some(entry) = self.state.rollouts.get_mut(&local.rollout) {
+                            entry.held = None;
+                        }
+                        report.errors.push(err);
+                    }
                 }
                 continue;
             }
