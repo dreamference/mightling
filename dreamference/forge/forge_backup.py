@@ -82,14 +82,15 @@ class ForgeBackup:
         return ForgeSettings.share_dir() / "backups"
 
     @classmethod
-    def repository_refs(cls, root: Path) -> dict[str, dict[str, str]]:
+    def repository_refs(cls, root: Path) -> dict[str, dict[str, str]] | None:
         """Read every ref of every repository in a repositories folder.
 
         Args:
             root: A repositories folder (`<owner>/<name>.git` below it).
 
         Returns:
-            dict[str, dict[str, str]]: `owner/name` → ref → object.
+            dict[str, dict[str, str]] | None: `owner/name` → ref → object, or None when git could
+            not read a repository (its refs would read as none, like a repository with no commit).
         """
         found: dict[str, dict[str, str]] = {}
         for repository in sorted(root.glob("*/*.git")) if root.is_dir() else []:
@@ -99,6 +100,8 @@ class ForgeBackup:
                 text=True,
                 check=False,
             )
+            if result.returncode != 0:
+                return None
             refs = dict(
                 line.split(REF_SEPARATOR, 1)
                 for line in result.stdout.splitlines()
@@ -134,11 +137,15 @@ class ForgeBackup:
         if result.returncode != 0 or not produced.is_file():
             print(f"❌ forgejo dump failed: {(result.stderr or result.stdout).strip()[-300:]}")
             return None
+        refs = cls.repository_refs(data / "git" / "repositories")
+        if refs is None:
+            produced.unlink()
+            print("❌ git could not read a repository, so the set would have no refs to check.")
+            return None
         folder = cls.local_dir() / name
         (folder / "bundles").mkdir(parents=True, exist_ok=True)
         Path(cls.local_dir()).chmod(0o700)
         shutil.move(str(produced), folder / "dump.tar.gz")
-        refs = cls.repository_refs(data / "git" / "repositories")
         cls.snapshot_database(data / DATABASE_RELATIVE, folder / "forgejo.db")
         manifest = {"set": name, "node": cls.node_id(), "taken": int(time.time()), "refs": refs}
         (folder / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True))
@@ -516,6 +523,8 @@ class ForgeBackup:
             list[str]: Every difference (`owner/name: ref`), empty when every ref matches.
         """
         actual = cls.repository_refs(repositories)
+        if actual is None:
+            return [f"{repositories}: git could not read a repository"]
         differences = []
         for full_name, refs in manifest.get("refs", {}).items():
             have = actual.get(full_name, {})

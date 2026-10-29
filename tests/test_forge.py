@@ -1219,3 +1219,13 @@ def test_a_forge_that_breaks_off_a_reply_is_no_answer_not_a_crash(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: Opener())
     assert ForgeContainer.api("GET", "/version", None) == (0, None)
+
+
+def test_a_repository_git_cannot_read_does_not_match_the_manifest(tmp_path, monkeypatch):
+    if GIT is None:
+        pytest.skip("no git")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    (tmp_path / "repos" / "o" / "new.git").mkdir(parents=True)
+    # A repository with no commit yet has no refs; one git cannot read has none either.
+    manifest = {"refs": {"o/new": {}}}
+    assert ForgeBackup.compare(manifest, tmp_path / "repos"), "an unreadable repository passed"
