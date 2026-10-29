@@ -93,7 +93,7 @@ def _index_one(workspace_root: Path, abs_path: Path) -> tuple[IndexedFile, str] 
         idx_file = IndexedFile(
             rel_path=rel_path,
             abs_path=str(abs_path),
-            size_bytes=len(content.encode("utf-8")),
+            size_bytes=len(raw),  # on disk: `content` has lost any undecodable bytes
             symbols=file_symbols,
             tokens=tokens
         )

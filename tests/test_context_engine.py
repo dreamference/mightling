@@ -280,3 +280,12 @@ def test_a_search_returns_top_k_files_even_when_a_scored_path_is_no_longer_index
                                                 size_bytes=1, symbols=[], tokens=[])}
     engine.tf_idf_index = {"alpha": {"gone.py": 5.0, "a.py": 1.0}}
     assert [r["rel_path"] for r in engine.search_code("alpha", top_k=1)] == ["a.py"]
+
+
+def test_a_file_size_is_its_size_on_disk_not_after_a_lossy_decode(tmp_path):
+    # `size_bytes` was measured on the text after undecodable bytes were dropped.
+    from dreamference.context_engine.context_engine import _index_one
+
+    (tmp_path / "latin.py").write_bytes(b"name = 'caf\xe9'\n")
+    idx_file, _ = _index_one(tmp_path, tmp_path / "latin.py")
+    assert idx_file.size_bytes == 14
