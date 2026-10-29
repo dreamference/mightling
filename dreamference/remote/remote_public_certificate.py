@@ -118,14 +118,19 @@ class RemotePublicCertificate:
         )
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
-                return response.status, json.loads(response.read() or b"{}")
+                return response.status, cls._object(json.loads(response.read() or b"{}"))
         except urllib.error.HTTPError as error:
             try:
-                return error.code, json.loads(error.read() or b"{}")
+                return error.code, cls._object(json.loads(error.read() or b"{}"))
             except ValueError:
                 return error.code, {}
         except (OSError, ValueError) as error:
             return 0, {"errors": [{"message": type(error).__name__}]}
+
+    @staticmethod
+    def _object(value: Any) -> dict[str, Any]:
+        """A reply that is not a JSON object (a list, a string) is an empty one."""
+        return value if isinstance(value, dict) else {}
 
     @classmethod
     def _served_der(cls, host: str, port: int, server_name: str) -> bytes | None:
@@ -478,7 +483,7 @@ class RemotePublicCertificate:
             status, body = cls._cloudflare("GET", f"/zones?name={urllib.parse.quote(name)}")
             zones = body.get("result") if status == HTTP_OK else None
             if isinstance(zones, list) and zones:
-                return str(zones[0].get("id"))
+                return str(zones[0].get("id")) if isinstance(zones[0], dict) else None
         return None
 
     @classmethod
@@ -503,6 +508,7 @@ class RemotePublicCertificate:
         if not isinstance(existing, list):
             LOG.error(f"❌ Cloudflare did not list the CAA records of {dns_name} ({status}).")
             return False
+        existing = [record for record in existing if isinstance(record, dict)]
 
         def key(data: dict[str, Any]) -> tuple[int, str, str]:
             return int(data.get("flags", 0)), str(data.get("tag")), str(data.get("value"))
@@ -518,7 +524,7 @@ class RemotePublicCertificate:
                 {"type": "CAA", "name": dns_name, "data": data, "ttl": 300},
             )
             if status != HTTP_OK:
-                errors = [e.get("message") for e in body.get("errors") or []]
+                errors = [e.get("message") for e in body.get("errors") or [] if isinstance(e, dict)]
                 LOG.error(f"❌ Cloudflare refused a CAA record for {dns_name} ({status}): {errors}")
                 return False
         return True

@@ -171,6 +171,23 @@ def test_an_unreachable_or_garbled_cloudflare_is_status_zero_naming_only_the_err
     assert status == 0 and "secret" not in json.dumps(body)
 
 
+def test_a_cloudflare_reply_that_is_not_an_object_is_an_empty_body_not_a_crash(monkeypatch):
+    _token()
+
+    class Reply(io.BytesIO):
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda r, timeout: Reply(b'["x"]'))
+    assert RemotePublicCertificate._cloudflare("GET", "/zones") == (200, {})
+    assert RemotePublicCertificate.zone_id(BOX) is None
+
+
 def test_a_server_that_cannot_be_reached_has_no_served_certificate(monkeypatch):
     def refuse(address, timeout):
         raise ConnectionRefusedError()
@@ -456,6 +473,24 @@ def test_records_already_right_are_left_alone(monkeypatch):
     calls = _cloudflare(monkeypatch, zone=True, existing=existing)
     assert RemotePublicCertificate.ensure_caa(BOX, [ACCOUNT]) is True
     assert [m for m, *_ in calls] == ["GET", "GET"]
+
+
+def test_wrong_records_are_deleted_and_the_right_ones_posted(monkeypatch):
+    stale = [
+        {"id": "old1", "data": {"flags": 0, "tag": "issue", "value": "evil-ca.example"}},
+        "junk entry",
+    ]
+    calls = _cloudflare(monkeypatch, zone=True, existing=stale)
+    assert RemotePublicCertificate.ensure_caa(BOX, [ACCOUNT]) is True
+    methods = [(m, p.rsplit("/", 1)[-1]) for m, p, _ in calls[2:]]
+    assert methods[0] == ("DELETE", "old1") and [m for m, _ in methods[1:]] == ["POST", "POST"]
+
+
+def test_a_refused_caa_record_is_false_and_the_log_names_the_messages(monkeypatch, caplog):
+    _cloudflare(monkeypatch, zone=True, existing=[], post_status=403)
+    with caplog.at_level("ERROR"):
+        assert RemotePublicCertificate.ensure_caa(BOX, [ACCOUNT]) is False
+    assert "refused a CAA record" in caplog.text and "['no']" in caplog.text
 
 
 # -- the served certificate
