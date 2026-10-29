@@ -322,6 +322,18 @@ describe("git on a checkout the agent wrote the config of", () => {
     run(r, "checkout", "-q", "--detach");
     await expect(git.pullRequestUrl(r)).rejects.toThrow();
   });
+
+  it("compares a feature branch with the remote's default, else main, else master (DESKTOP_PARITY §2.5)", async () => {
+    const r = repo();
+    run(r, "branch", "-M", "master");
+    run(r, "checkout", "-q", "-b", "feat/x");
+    expect(await git.baseBranch(r)).toBe("master");
+    run(r, "branch", "main", "master");
+    expect(await git.baseBranch(r)).toBe("main");
+    run(r, "update-ref", "refs/remotes/origin/trunk", "HEAD");
+    run(r, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk");
+    expect(await git.baseBranch(r)).toBe("origin/trunk");
+  });
 });
 
 describe("editors", () => {
