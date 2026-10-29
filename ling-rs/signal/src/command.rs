@@ -54,10 +54,12 @@ pub fn parse(text: &str, approval_pending: bool) -> Input {
         "/help" => return Input::Help,
         _ => {}
     }
-    if lower == "/night" || lower.starts_with("/night ") {
+    // Any white space after the command, not only a space: a phone's return key, a pasted tab.
+    let after = |command: &str| lower.strip_prefix(command).filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace));
+    if after("/night").is_some() {
         return Input::Night(trimmed["/night".len()..].trim().to_string());
     }
-    if let Some(number) = lower.strip_prefix("/use ")
+    if let Some(number) = after("/use").filter(|rest| !rest.is_empty())
         && let Ok(n) = number.trim().parse::<usize>()
         && n >= 1
     {
@@ -81,6 +83,15 @@ mod tests {
         assert_eq!(parse("/use 0", false), Input::Question("/use 0".to_string()));
         assert_eq!(parse("/new thread please", false), Input::Question("/new thread please".to_string()));
         assert_eq!(parse("what does /stop do?", false), Input::Question("what does /stop do?".to_string()));
+    }
+
+    #[test]
+    fn a_line_break_or_tab_after_the_command_is_a_space() {
+        // A phone keyboard's return key, or a pasted tab, between the command and its words.
+        assert_eq!(parse("/night\nadd fix the tests", false), Input::Night("add fix the tests".to_string()));
+        assert_eq!(parse("/night\tlist", false), Input::Night("list".to_string()));
+        assert_eq!(parse("/use\n2", false), Input::Use(2));
+        assert_eq!(parse("/nightly", false), Input::Question("/nightly".to_string()));
     }
 
     #[test]
