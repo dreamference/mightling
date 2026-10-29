@@ -3,6 +3,7 @@
 import io
 import json
 import pathlib
+import re
 import subprocess
 import tarfile
 
@@ -125,8 +126,8 @@ def test_the_relay_has_its_own_account_and_its_own_caa_record(monkeypatch):
     token = pathlib.Path(remote_settings.CLOUDFLARE_TOKEN_FILE).expanduser()
     token.parent.mkdir(parents=True, exist_ok=True)
     token.write_text(SECRET_TOKEN)
-    binary = RemotePublicCertificate.folder() / "bin" / "lego"
     token.chmod(0o600)
+    binary = RemotePublicCertificate.folder() / "bin" / "lego"
     monkeypatch.setattr(RemotePublicCertificate, "lego", classmethod(lambda cls: binary))
     seen = []
 
@@ -186,6 +187,11 @@ def test_the_box_gets_the_relays_certificate_key_and_unit_and_nothing_else(monke
         assert tar.extractfile("relay.key").read() == b"KEY"
         assert f"rels://{RELAY}:33080".encode() in tar.extractfile("mightling-relay.service").read()
     text = script.decode()
+    folder = re.fullmatch(r"umask 077; mkdir (\S+) && cat > \1/stage\.tgz", copy[-1]).group(1)
+    assert (
+        folder.startswith("/tmp/mightling-remote-stage-")
+        and f"tar -xzf {folder}/stage.tgz " in text
+    )
     assert "systemctl restart mightling-relay.service" in text
     for other in ("haproxy", "ufw", "firewall", "sshd", "authorized_keys", "apt"):
         assert other not in text, other

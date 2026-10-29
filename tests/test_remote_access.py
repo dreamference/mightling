@@ -374,7 +374,7 @@ def test_haproxy_passes_only_the_boxs_own_name_to_the_tunnel():
 @pytest.mark.parametrize("script", ["install", "remove"])
 def test_the_box_scripts_are_valid_bash(script, tmp_path):
     text = (
-        RemoteBox.install_script("amd64", "apt")
+        RemoteBox.install_script("amd64", "apt", "/tmp/mightling-remote-stage-x")
         if script == "install"
         else RemoteBox.remove_script()
     )
@@ -384,7 +384,7 @@ def test_the_box_scripts_are_valid_bash(script, tmp_path):
 
 
 def test_the_install_script_checks_the_binary_and_records_what_it_added():
-    text = RemoteBox.install_script("arm64", "dnf")
+    text = RemoteBox.install_script("arm64", "dnf", "/tmp/mightling-remote-stage-x")
     assert (
         f"echo '{remote_settings.RELAY_BINARY_SHA256['arm64']}  '" in text
         and "sha256sum -c" in text
@@ -405,7 +405,7 @@ def test_a_rerun_keeps_haproxy_recorded_as_installed_by_us(tmp_path):
     `setup` after `--box-only` rewrote the manifest as `haproxy=present`, so `remove` would have
     left the package it installed.
     """
-    text = RemoteBox.install_script("amd64", "apt")
+    text = RemoteBox.install_script("amd64", "apt", "/tmp/mightling-remote-stage-x")
     start = text.index("manifest=")
     block = text[start : text.index("fi\n", start) + 3].replace(
         remote_settings.BOX_RELAY_DIR, str(tmp_path)
@@ -505,7 +505,9 @@ def test_deploy_copies_one_archive_then_runs_one_root_script(monkeypatch):
         copy[0][:5] == ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"]
         and copy[0][5] == BOX
     )
-    assert copy[0][6].endswith("cat > /tmp/mightling-remote-stage.tgz")
+    folder = _private_stage(copy[0][6])
+    assert f"tar -xzf {folder}/stage.tgz " in install[1].decode()
+    assert f"rm -rf {folder}" in install[1].decode()
     with tarfile.open(fileobj=io.BytesIO(copy[1]), mode="r:gz") as archive:
         names = set(archive.getnames())
         assert archive.extractfile("relay.env").read() == b"NB_AUTH_SECRET=s3cret\n"
@@ -522,6 +524,26 @@ def test_deploy_copies_one_archive_then_runs_one_root_script(monkeypatch):
         "sshd-tunnel.conf",
     }
     assert "sudo -n bash -s" in install[0][6]
+
+
+def _private_stage(command: str) -> str:
+    """The folder an upload command stages into, checked to be new, random and the user's own."""
+    found = re.fullmatch(
+        r"umask 077; mkdir (/tmp/mightling-remote-stage-[0-9a-f]{32}) && cat > \1/stage\.tgz",
+        command,
+    )
+    assert found, command
+    return found.group(1)
+
+
+def test_each_upload_stages_in_a_new_folder_only_its_user_may_enter():
+    """A fixed name in /tmp let another user on the box plant or swap the archive root installs."""
+    first, second = RemoteBox.stage_folder(), RemoteBox.stage_folder()
+    assert first != second
+    assert _private_stage(RemoteBox.upload_command(first)) == first
+    assert "-p" not in RemoteBox.upload_command(first), (
+        "a folder that already exists stops the copy"
+    )
 
 
 def test_the_relay_unit_runs_unprivileged_with_its_own_tls_and_stun():

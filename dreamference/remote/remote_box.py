@@ -20,6 +20,7 @@ public port goes through `_handshake`.
 import hashlib
 import io
 import logging
+import secrets
 import shlex
 import socket
 import ssl
@@ -45,7 +46,9 @@ from dreamference.remote.remote_settings import (
 # the rest (specs/DREAMFERENCE_PYTHON_QUALITY.md §3.9).
 LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
-STAGE: str = "/tmp/mightling-remote-stage.tgz"
+# Each upload stages in a new folder under this prefix, made by its user with a random name: a
+# fixed name in /tmp would let another user on the box plant or swap what root installs.
+STAGE_PREFIX: str = "/tmp/mightling-remote-stage-"
 # A server name that is not the box's: haproxy must refuse it (`check_public_port`).
 OTHER_NAME: str = "not-this-box.invalid"
 RELAY_USER: str = "mightling-relay"
@@ -282,13 +285,35 @@ class RemoteBox:
             ]
         )
 
+    @staticmethod
+    def stage_folder() -> str:
+        """A new folder name to stage one upload in.
+
+        Returns:
+            str: `STAGE_PREFIX` and 32 random hex digits.
+        """
+        return f"{STAGE_PREFIX}{secrets.token_hex(16)}"
+
+    @staticmethod
+    def upload_command(folder: str) -> str:
+        """The command that receives the archive on standard input.
+
+        Args:
+            folder: From `stage_folder`; `mkdir` without `-p`, so one that exists stops the copy.
+
+        Returns:
+            str: Makes the folder, private to the SSH user, and writes `stage.tgz` into it.
+        """
+        return f"umask 077; mkdir {shlex.quote(folder)} && cat > {shlex.quote(folder)}/stage.tgz"
+
     @classmethod
-    def install_script(cls, arch: str, packages: str) -> str:
+    def install_script(cls, arch: str, packages: str, folder: str) -> str:
         """The root script that installs the box's half.
 
         Args:
             arch: The box's architecture.
             packages: `apt` or `dnf`.
+            folder: Where the archive was staged (`upload_command`).
 
         Returns:
             str: The root script that installs the staged files. It fails at the first error.
@@ -309,7 +334,7 @@ class RemoteBox:
             [
                 "set -eu",
                 "stage=$(mktemp -d)",
-                f'tar -xzf {STAGE} -C "$stage" && rm -f {STAGE}',
+                f'tar -xzf {shlex.quote(folder)}/stage.tgz -C "$stage" && rm -rf {shlex.quote(folder)}',
                 f"echo '{RELAY_BINARY_SHA256[arch]}  '\"$stage\"/netbird-relay | sha256sum -c --quiet -",
                 f"install -d -m 0755 {BOX_RELAY_DIR}",
                 # A rerun (a redeploy, or `setup` after `--box-only`) finds haproxy installed by the
@@ -481,14 +506,14 @@ class RemoteBox:
                 "sshd-tunnel.conf": cls.sshd_drop_in().encode(),
             }
         )
-        copied = cls._run(
-            cls.ssh(destination, f"umask 077; cat > {shlex.quote(STAGE)}"), input_bytes=archive
-        )
+        folder = cls.stage_folder()
+        copied = cls._run(cls.ssh(destination, cls.upload_command(folder)), input_bytes=archive)
         if copied.returncode != 0:
             LOG.error(f"❌ Could not copy the files to {dns_name}: {copied.stderr.strip()[:300]}")
             return False
         installed = cls._run(
-            cls.ssh(destination, AS_ROOT), input_bytes=cls.install_script(arch, packages).encode()
+            cls.ssh(destination, AS_ROOT),
+            input_bytes=cls.install_script(arch, packages, folder).encode(),
         )
         if installed.returncode != 0 or READY_MARK not in installed.stdout:
             LOG.error(
@@ -528,14 +553,13 @@ class RemoteBox:
                 RELAY_UNIT: cls.relay_unit(dns_name).encode(),
             }
         )
-        copied = cls._run(
-            cls.ssh(destination, f"umask 077; cat > {shlex.quote(STAGE)}"), input_bytes=archive
-        )
+        folder = cls.stage_folder()
+        copied = cls._run(cls.ssh(destination, cls.upload_command(folder)), input_bytes=archive)
         if copied.returncode != 0:
             LOG.error(f"❌ Could not copy the files to {dns_name}: {copied.stderr.strip()[:300]}")
             return False
         done = cls._run(
-            cls.ssh(destination, AS_ROOT), input_bytes=cls.update_relay_script().encode()
+            cls.ssh(destination, AS_ROOT), input_bytes=cls.update_relay_script(folder).encode()
         )
         if done.returncode != 0 or READY_MARK not in done.stdout:
             LOG.error(
@@ -545,8 +569,11 @@ class RemoteBox:
         return True
 
     @classmethod
-    def update_relay_script(cls) -> str:
+    def update_relay_script(cls, folder: str) -> str:
         """The root script behind `update_relay`.
+
+        Args:
+            folder: Where the archive was staged (`upload_command`).
 
         Returns:
             str: Installs the staged certificate, key and unit, restarts the relay unit alone and
@@ -556,7 +583,7 @@ class RemoteBox:
             [
                 "set -eu",
                 "stage=$(mktemp -d)",
-                f'tar -xzf {STAGE} -C "$stage" && rm -f {STAGE}',
+                f'tar -xzf {shlex.quote(folder)}/stage.tgz -C "$stage" && rm -rf {shlex.quote(folder)}',
                 f'install -m 0644 -o {RELAY_USER} "$stage"/relay.crt {BOX_RELAY_DIR}/relay.crt',
                 f'install -m 0600 -o {RELAY_USER} "$stage"/relay.key {BOX_RELAY_DIR}/relay.key',
                 f'install -m 0644 "$stage"/{RELAY_UNIT} /etc/systemd/system/{RELAY_UNIT}',
