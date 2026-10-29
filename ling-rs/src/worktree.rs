@@ -490,7 +490,7 @@ pub fn command(codex_home: &Path, cwd: &Path, line: &str, in_session: bool) -> (
             Err(message) => (vec![message], 1),
         },
         ["discard"] => match session_at(codex_home, cwd) {
-            Some(session) => discard(&session, true),
+            Some(session) => discard(&session, in_session),
             None => (vec![format!("{} is edited in place: there is no worktree to discard.", cwd.display())], 1),
         },
         ["discard", id] => match find(codex_home, cwd, id) {
@@ -1095,6 +1095,11 @@ mod tests {
         session.pid = std::os::unix::process::parent_id();
         session.write().unwrap_or_default();
         let (lines, code) = command(&home, &repo, &format!("discard {}", session.id), false);
+        assert_eq!(code, 1);
+        assert!(lines[0].contains("is still running"), "{lines:?}");
+        assert!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default().contains("changed"));
+        // Nor from a shell standing in its folder.
+        let (lines, code) = command(&home, &session.checkout, "discard", false);
         assert_eq!(code, 1);
         assert!(lines[0].contains("is still running"), "{lines:?}");
         assert!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default().contains("changed"));
