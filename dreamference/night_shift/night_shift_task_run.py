@@ -79,6 +79,10 @@ class NightShiftTaskRun:
     # the suite may create a real systemd scope.
     USE_SCOPE: bool = True
 
+    # How often a running `ling exec` is checked against its deadline and the stop event. Tests
+    # shorten it: at 2 s every task cut off in the suite waited up to 2 s more.
+    WAIT_POLL_S: float = 2.0
+
     # Whether the test run goes through `ling sandbox`. Tests switch it off unless they supply a
     # stand-in for `ling`: nothing in the suite may run the installed binary or bubblewrap.
     USE_SANDBOX: bool = True
@@ -729,7 +733,7 @@ class NightShiftTaskRun:
             try:
                 while True:
                     try:
-                        return process.wait(timeout=2)
+                        return process.wait(timeout=self.WAIT_POLL_S)
                     except subprocess.TimeoutExpired:
                         if time.time() >= limit or self.stop_event.is_set():
                             self._terminate(process, unit)
