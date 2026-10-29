@@ -709,9 +709,12 @@ class NodeProvisioner:
         try:
             with urllib.request.urlopen(f"http://{host}:{port}/v1/models", timeout=5) as response:
                 data = json.load(response).get("data") or []
-        except (OSError, ValueError):
+            model = data[0].get("id") if data else None
+        except (OSError, ValueError, AttributeError, LookupError):
+            # The node answers over the network: a list of another shape used to raise out of the
+            # whole run.
             return None
-        return data[0].get("id") if data else None
+        return model
 
     def _wait_for_model(self, host: str, port: int) -> str | None:
         deadline = time.monotonic() + int(
@@ -745,7 +748,7 @@ class NodeProvisioner:
                 f"http://{host}:{SEARXNG_PORT}/search?q=ling&format=json", timeout=30
             ) as response:
                 json.load(response)
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, AttributeError) as error:
             return f"failed: {error}"
         return "ok"
 
