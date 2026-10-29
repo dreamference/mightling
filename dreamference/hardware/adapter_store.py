@@ -115,7 +115,9 @@ class AdapterStore:
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as error:
-            raise ValueError(f"{path} could not be read, so it was not changed ({error})") from error
+            raise ValueError(
+                f"{path} could not be read, so it was not changed ({error})"
+            ) from error
         if not isinstance(record, dict) or not isinstance(record.get("adapters"), dict):
             raise ValueError(f"{path} is not an installed set, so it was not changed")
         return cls.entries()
