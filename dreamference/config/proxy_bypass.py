@@ -43,6 +43,9 @@ class ProxyBypass:
             host = urlsplit(text).hostname
         except ValueError:
             return None
+        # A comma or a space is no part of a host name; kept, it would be read back as several entries.
+        if host and any(c == "," or c.isspace() for c in host):
+            return None
         return host or None
 
     @classmethod
