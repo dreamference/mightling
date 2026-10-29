@@ -89,15 +89,20 @@ class ForgePhone:
             bool: Whether the account and the token file exist now.
         """
         status, _ = ForgeContainer.api("GET", f"/users/{PHONE_ACCOUNT}", admin)
-        if status == HTTPStatus.NOT_FOUND:
+        created = status == HTTPStatus.NOT_FOUND
+        if created:
             # The password is generated and dropped: the account signs in by token only.
             if ForgeAccounts.create_user(PHONE_ACCOUNT, admin=False) is None:
                 print(f"❌ Could not create the forge's `{PHONE_ACCOUNT}` account.")
                 return False
         elif status != HTTPStatus.OK:
             return False
-        if cls.token_path().exists():
-            return True
+        # A token file older than the account (a forge built afresh) or one the forge refuses opens
+        # nothing; one the forge did not answer for is kept.
+        if not created and cls.token_path().exists():
+            status, _ = ForgeContainer.api("GET", "/user", cls.token_path().read_text().strip())
+            if status != HTTPStatus.UNAUTHORIZED:
+                return True
         token = ForgeAccounts.generate_token(
             PHONE_ACCOUNT, f"ling-web-{int(time.time())}", TOKEN_SCOPES
         )

@@ -1258,3 +1258,26 @@ def test_the_app_ini_is_on_disk_before_it_replaces_the_old_one(tmp_path, monkeyp
     assert events[:2] == ["fsync", "replace"], (
         "an empty app.ini after a power cut means new secrets"
     )
+
+
+@pytest.mark.parametrize(
+    "account, answer, kept",
+    [(404, 200, False), (200, 401, False), (200, 200, True), (200, 0, True)],
+)
+def test_a_phone_token_the_forge_does_not_know_is_replaced(
+    account, answer, kept, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    ForgePhone.write_token("o" * 40)
+
+    def api(cls, method, path, token, body=None, timeout=30):
+        return (account, None) if path == "/users/mightling-phone" else (answer, None)
+
+    monkeypatch.setattr(ForgeContainer, "api", classmethod(api))
+    monkeypatch.setattr(ForgeAccounts, "create_user", classmethod(lambda cls, user, admin: "pw"))
+    monkeypatch.setattr(
+        ForgeAccounts, "generate_token", classmethod(lambda cls, user, name, scopes: "n" * 40)
+    )
+    assert ForgePhone.ensure_account("t")
+    # A new account (a forge built afresh) or a refused token: the old file opens nothing.
+    assert ForgePhone.token_path().read_text() == ("o" if kept else "n") * 40 + "\n"
