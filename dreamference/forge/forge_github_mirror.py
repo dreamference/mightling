@@ -50,6 +50,9 @@ RATE_LIMIT_MARKERS: Final[tuple[str, ...]] = (
     "error: 429",
     "returned error: 403",
 )
+# A 403 that refuses the token or its rights is not throttling: it fails the branch, so a token
+# without write access is reported instead of retried every tick.
+REFUSAL_MARKERS: Final[tuple[str, ...]] = ("denied", "not granted")
 # The forge's anonymity hook quotes the offending line; only `added:<line>:<file>` is kept.
 ANONYMITY_REFUSAL: Final[str] = "anonymity"
 HOOK_QUOTE: Final[re.Pattern[str]] = re.compile(r"(added:\d+:\S*?):\s.*")
@@ -330,7 +333,10 @@ class ForgeGithubMirror:
             if result.returncode == 0:
                 pushed += 1
                 continue
-            if any(marker in result.stderr.lower() for marker in RATE_LIMIT_MARKERS):
+            stderr = result.stderr.lower()
+            if any(marker in stderr for marker in RATE_LIMIT_MARKERS) and not any(
+                marker in stderr for marker in REFUSAL_MARKERS
+            ):
                 return {
                     "pushed": pushed,
                     "failures": failures,
