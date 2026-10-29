@@ -617,6 +617,12 @@ class NodeJob:
         for hidden in ("/tmp", "/run", "/var/tmp", "/dev/shm", home):
             argv += ["--tmpfs", hidden]
         argv += ["--bind", str(tree), str(tree)]
+        # The worktree's `.git` pointer read-only: the host runs `git` in the tree afterwards
+        # (`_commit`, Night Shift's runner), and a pointer the job rewrote to a git directory of its
+        # own would have that git run the job's hooks on the host, outside this sandbox.
+        dot_git = tree / ".git"
+        if dot_git.exists():
+            argv += ["--ro-bind", str(dot_git), str(dot_git)]
         for path in writable:
             argv += ["--bind", str(path), str(path)]
         for path in readable:
