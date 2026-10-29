@@ -71,7 +71,12 @@ export function serve(root: string): void {
         headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=604800, immutable" },
       });
     }
-    const relative = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
+    let relative: string;
+    try {
+      relative = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
+    } catch {
+      return new Response("not found", { status: 404 });
+    }
     const file = path.resolve(base, relative);
     if (file !== base && !file.startsWith(base + path.sep)) return new Response("not found", { status: 404 });
     try {
