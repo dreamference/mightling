@@ -406,7 +406,9 @@ class ModelDownloader:
         folder_name = "models--" + repo_id.replace("/", "--")
         cache_dir = cls.get_hf_cache_dir() / folder_name / "snapshots"
         revision = revision or ModelMatrixRegistry.pinned_revision(model_key)
-        if any((cache_dir.parent / "blobs").glob("*.incomplete")):
+        blobs = cache_dir.parent / "blobs"
+        # `<blob>.<id>.incomplete` is a blob still being fetched, unless that blob has since landed.
+        if any(not (blobs / part.name.split(".")[0]).exists() for part in blobs.glob("*.incomplete")):
             return False
         if revision:
             return cls._snapshot_complete(cache_dir / revision)

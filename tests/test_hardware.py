@@ -625,8 +625,11 @@ def test_an_interrupted_download_is_not_taken_for_a_downloaded_model():
     (snapshot / shards[1]).write_bytes(b"\0")
     assert ModelDownloader.is_model_downloaded(model_key, revision) is True
     # A blob still being written is a download that has not finished.
-    (root / "blobs" / "0123abcd.incomplete").write_bytes(b"\0")
+    (root / "blobs" / "0123abcd.8d80c8fe.incomplete").write_bytes(b"\0")
     assert ModelDownloader.is_model_downloaded(model_key, revision) is False
+    # One left behind by a download of the same blob that then finished is not.
+    (root / "blobs" / "0123abcd").write_bytes(b"\0")
+    assert ModelDownloader.is_model_downloaded(model_key, revision) is True
 
 
 def test_a_model_tensorized_at_one_pin_is_not_loaded_once_the_pin_moves(tmp_path, monkeypatch):
