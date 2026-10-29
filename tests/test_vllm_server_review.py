@@ -150,3 +150,29 @@ def test_the_gate_pipe_keeps_going_while_a_read_ends_inside_the_id(tmp_path):
     # The third read ends inside the id again, so it alone has nothing to send yet.
     assert Sink.sent == b'data: {"model": "my-adapter-xyz1", "x": 1}\n\n'
 
+
+def test_a_failed_engine_call_closes_its_connection(tmp_path, monkeypatch):
+    import asyncio
+
+    from dreamference.vllm_server.model_gate_adapters import ModelGateAdapters
+
+    closed = []
+
+    class Writer:
+        def write(self, data):
+            pass
+
+        async def drain(self):
+            raise ConnectionResetError
+
+        def close(self):
+            closed.append(True)
+
+    async def connect(host, port):
+        return object(), Writer()
+
+    monkeypatch.setattr(asyncio, "open_connection", connect)
+    adapters = ModelGateAdapters(str(tmp_path), ("127.0.0.1", 1))
+    assert asyncio.run(adapters.engine_call("GET", "/v1/models", None)) == (0, b"")
+    assert closed == [True]
+
