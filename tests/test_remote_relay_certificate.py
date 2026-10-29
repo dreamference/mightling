@@ -435,3 +435,57 @@ def test_turning_the_control_planes_certificate_off_keeps_the_relays_renewal(mon
 )  # fmt: skip
 def test_a_relay_name_that_is_not_an_ascii_host_name_is_refused(name):
     assert RemoteRelayCertificate.valid_name(name, BOX) is False
+
+
+def test_management_that_does_not_restart_puts_the_node_cas_relay_back(monkeypatch):
+    _set_up()
+    _relay_files()
+    updates = _box(monkeypatch)
+    pointed = []
+    monkeypatch.setattr(
+        RemoteControlPlane,
+        "rewrite_config",
+        classmethod(lambda cls, d: pointed.append(RemoteSettings.relay_name(d)) or True),
+    )
+    node_ca = (_node_ca("node-crt"), pathlib.Path(_node_ca("node-crt").with_suffix(".key")))
+    monkeypatch.setattr(
+        "dreamference.remote.remote_relay_certificate.RemoteCertificateAuthority.issue",
+        classmethod(lambda cls, label, names: node_ca),
+    )
+    RemoteSettings.write_private("server/tls.crt", "x")
+    RemoteSettings.write_private("server/tls.key", "y")
+    monkeypatch.setattr(RemotePublicCertificate, "serve", classmethod(lambda cls, *a: False))
+    assert not RemoteRelayCertificate.switch(RemoteSettings.read(), RELAY)
+    assert updates[0][1] == "relay-crt" and updates[-1][1] == "node-crt"
+    assert pointed == [RELAY, BOX], "management is pointed back at the box's own name"
+    assert "relay_name" not in RemoteSettings.read()
+
+
+@pytest.mark.parametrize("staging", [True, False])
+def test_the_relays_addresses_come_before_the_challenge(monkeypatch, staging):
+    _set_up()
+    steps = []
+    monkeypatch.setattr(
+        RemoteRelayCertificate,
+        "ensure_addresses",
+        classmethod(lambda cls, *a: steps.append("addresses") or True),
+    )
+    monkeypatch.setattr(
+        RemoteRelayCertificate,
+        "obtain",
+        classmethod(lambda cls, n, staging=False: steps.append("challenge") and False),
+    )
+    assert RemoteAccess.certificate_relay(staging=staging, name=RELAY) == 1
+    assert steps == ["addresses", "challenge"]
+
+
+def test_no_challenge_runs_when_the_relays_addresses_cannot_be_made(monkeypatch):
+    _set_up()
+    monkeypatch.setattr(
+        RemoteRelayCertificate, "ensure_addresses", classmethod(lambda cls, *a: False)
+    )
+    monkeypatch.setattr(
+        RemoteRelayCertificate, "obtain", classmethod(lambda cls, *a, **k: pytest.fail("challenge"))
+    )
+    assert RemoteAccess.certificate_relay(staging=True, name=RELAY) == 1
+    assert "relay_name" not in RemoteSettings.read()
