@@ -1323,6 +1323,27 @@ def test_the_node_refuses_a_malformed_task_and_answers_only_about_tasks_from_oth
         assert NightShiftRemote.serve(operation, ["../../x"]) == 2
 
 
+def test_a_task_sent_again_after_an_unanswered_submit_is_not_failed_by_its_own_first_copy(two_nodes, monkeypatch):
+    import base64
+    from dreamference.night_shift import NightShiftRemote
+    task = queue(two_nodes["night"], two_nodes["repo"], task_id="20261001-0100-e10")
+    path = two_nodes["night"] / "tasks" / f"{task['id']}.json"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), on="spark-2")))
+    NightShiftRemote.hand_off(two_nodes["night"], NightShiftQueue.tasks(two_nodes["night"]), [])
+    # The node queued it, but its answer was lost (ssh 255): the next night sends it again.
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), status="queued")))
+    notes = []
+    NightShiftRemote.hand_off(two_nodes["night"], NightShiftQueue.tasks(two_nodes["night"]), notes)
+    assert NightShiftQueue.read(two_nodes["night"], task["id"])["status"] == "sent", notes
+    there = NightShiftQueue.read(NightShiftQueue.night_dir(), task["id"])
+    assert there["status"] == "queued" and len(there["history"]) == 1
+    # A different task under the same id is still refused.
+    payload = [request.split()[1] for request in two_nodes["requests"] if request.startswith("night-submit")][-1]
+    request = json.loads(base64.urlsafe_b64decode(payload))
+    changed = base64.urlsafe_b64encode(json.dumps(dict(request, task="Something else")).encode()).decode()
+    assert NightShiftRemote.serve("night-submit", [changed]) == 2
+
+
 def test_a_task_from_another_machine_runs_in_the_job_sandbox_with_its_own_home(setup, tmp_path):
     from dreamference.night_shift import NightShiftRemote
     task = {"id": "20261001-0100-f00", "repo": str(setup["repo"]), "base": "a" * 40, "task": "x",
@@ -1490,8 +1511,9 @@ def test_remote_bring_back_fetch_failure_and_accept_duplicates(two_nodes, monkey
     )
     req = {"id": task_id, "repo": slug, "base": head, "task": "Fix bug"}
     assert NightShiftRemote.accept(req)["status"] == "queued"
+    assert NightShiftRemote.accept(req)["note"] == "this node already holds it"
     with pytest.raises(ValueError, match="already exists on this node"):
-        NightShiftRemote.accept(req)
+        NightShiftRemote.accept(dict(req, task="Fix another bug"))
 
     race_id = "20261001-0300-c02"
     monkeypatch.setattr(
