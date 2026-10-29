@@ -93,3 +93,13 @@ def test_no_path_of_the_code_points_into_the_real_home():
             for attribute, value in vars(owner).items()
             if isinstance(value, (str, Path)) and _under_real_home(value)]
     assert left == []
+
+
+def test_the_runtime_folder_is_the_tests_own():
+    # The fleet's run folders once piled up in the real /run/user/<uid>.
+    from dreamference.node.fleet_session import FleetSession
+
+    runtime = os.environ["XDG_RUNTIME_DIR"]
+    assert not runtime.startswith("/run/user/") and Path(runtime).stat().st_mode & 0o777 == 0o700
+    run_dir = FleetSession.new_run_dir()
+    assert run_dir.parent == Path(runtime)

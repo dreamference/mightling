@@ -385,6 +385,13 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     for name in ("NO_PROXY", "no_proxy"):
         monkeypatch.setenv(name, "")
         monkeypatch.delenv(name)
+    # The fleet's run folders, the image-search socket and the rest go under $XDG_RUNTIME_DIR: the
+    # real one is the user's /run/user/<uid>, where a test that stubs the provisioner left an empty
+    # `mightling-fleet-*` folder behind on every run (2026-10-29). Each test gets its own, private
+    # as the real one is. A short path: a Unix socket's must stay under 108 bytes.
+    runtime = tmp_path_factory.mktemp("run")
+    runtime.chmod(0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
 
     # HOME alone does not reach paths a module resolved at import, like VLLM_CACHE_HOME: a test
     # that ran start_server stamped the real ~/.cache/dreamference/vllm/.compile_signature with a
