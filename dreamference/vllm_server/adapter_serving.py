@@ -16,8 +16,6 @@ import secrets
 from pathlib import Path
 from typing import Any, ClassVar, Final
 
-from rich.console import Console
-
 from dreamference.hardware.adapter_installer import AdapterInstaller
 from dreamference.hardware.adapter_store import AdapterStore
 from dreamference.hardware.adapter_verifier import AdapterVerifier
@@ -30,7 +28,16 @@ FILE_MODE: Final[int] = 0o600
 GIB: Final[float] = float(1024**3)
 DEFAULT_MAX_LOADED: Final[int] = 8
 
-console = Console()
+
+def say(message: str) -> None:
+    """Prints one line with Rich's markup.
+
+    Rich is imported here, not at the top: every `ling-admin` command imports this module
+    (tests/test_cli_startup.py).
+    """
+    from rich.console import Console
+
+    Console().print(message)
 
 
 class AdapterServing:
@@ -78,7 +85,7 @@ class AdapterServing:
             if problem is None:
                 chosen.append(entry)
             else:
-                console.print(f"⚠️  The adapter {name} is not served: {problem}")
+                say(f"⚠️  The adapter {name} is not served: {problem}")
         return chosen
 
     @classmethod
@@ -246,12 +253,12 @@ class AdapterServing:
             docker_image, SGLangRuntimePatcher.for_launch(recipe, lora=True)
         )
         if problem:
-            console.print(f"⚠️  Adapters are not served at this start: {problem}.")
+            say(f"⚠️  Adapters are not served at this start: {problem}.")
             cls.clear()
             return False
         cls.publish(ModelMatrixRegistry.resolve_hf_repo(model_key), adapters, lora)
         names = ", ".join(str(entry["name"]) for entry in adapters)
-        console.print(f"🧩 Adapters served behind the gate: {names}")
+        say(f"🧩 Adapters served behind the gate: {names}")
         return True
 
     @classmethod

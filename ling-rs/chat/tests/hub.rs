@@ -61,6 +61,10 @@ fn scratch(tag: &str) -> std::path::PathBuf {
 }
 
 fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubConfig)) -> Rig {
+    rig_with(tag, script, Box::new(move || airgapped), tweak)
+}
+
+fn rig_with(tag: &str, script: Script, airgap: Box<dyn Fn() -> bool + Send>, tweak: impl FnOnce(&mut HubConfig)) -> Rig {
     let dir = scratch(tag);
     let (agent, mut commands) = AgentHandle::channel();
     let log = Log::default();
@@ -157,7 +161,7 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
     let mut config = HubConfig::new(dir.clone());
     config.draft_interval = Duration::from_millis(10);
     tweak(&mut config);
-    let mut hub = Hub::new(config, agent, Box::new(move || airgapped));
+    let mut hub = Hub::new(config, agent, airgap);
     let (tg_tx, telegram) = mpsc::unbounded_channel();
     let (mx_tx, matrix) = mpsc::unbounded_channel();
     hub.add_adapter("telegram", tg_tx);
@@ -852,6 +856,35 @@ async fn no_file_is_offered_at_air_gap_on() {
     }
 }
 
+/// CHAT §3: the air gap is read at every message, not only once a minute, and again before an
+/// offered file leaves for an off-node messenger.
+#[tokio::test]
+async fn the_air_gap_is_read_at_every_message_and_before_a_file_is_sent() {
+    let gap = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let read = gap.clone();
+    let mut rig = rig_with("airgap-flip", default_script(), Box::new(move || read.load(std::sync::atomic::Ordering::SeqCst)), |_| {});
+    rig.inbound.send(text(CHAT, "make a report")).unwrap();
+    settle().await;
+    let items = json!([{ "type": "agentMessage", "id": "m", "text": "Done: report.md.", "phase": "final_answer" }]);
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": items } }))).unwrap();
+    let id = loop {
+        if let Outbound::Approval { id, .. } = next_settled(&mut rig.telegram).await {
+            break id;
+        }
+    };
+    gap.store(true, std::sync::atomic::Ordering::SeqCst);
+    rig.inbound.send(text(CHAT, "and another")).unwrap();
+    let notice = next_settled(&mut rig.telegram).await;
+    assert!(matches!(notice, Outbound::Notice { ref text, .. } if text.contains("air gap is on")), "{notice:?}");
+    rig.inbound.send(Inbound::Answer { chat: CHAT.into(), approval: id, choice: 0 }).unwrap();
+    settle().await;
+    assert_eq!(rig.log.params("turn/start").len(), 1, "nothing relayed with the gap on");
+    assert!(rig.log.params("madeFile").is_empty(), "no file leaves with the gap on");
+    while let Ok(out) = rig.telegram.try_recv() {
+        assert!(!matches!(out, Outbound::File { .. }), "{out:?}");
+    }
+}
+
 /// Night Shift from the phone (MOONSHOT §3.5): `/night add` confirms the repository first, the
 /// task carries the thread's last exchange, and nothing is queued before the press.
 #[tokio::test]
@@ -907,6 +940,19 @@ async fn night_add_confirms_first_and_carries_the_threads_context() {
     assert!(status.contains("• 20261021-1300-abc — queued [app] Fix the parser"), "{status}");
 }
 
+/// In a Telegram group a command carries the bot's name: `/night@Bot status` is `/night status`.
+#[tokio::test]
+async fn night_with_the_bots_name_reads_its_verb() {
+    let mut rig = rig("night-bot", default_script(), false, |_| {});
+    rig.inbound.send(text(CHAT, "/night@MightlingBot status")).unwrap();
+    let status = loop {
+        if let Outbound::Notice { text, .. } = next_settled(&mut rig.telegram).await {
+            break text;
+        }
+    };
+    assert!(status.starts_with("Night Shift:"), "{status}");
+}
+
 /// The morning report is pushed to Signal and Matrix chats by default, never twice, and the first
 /// look after a fresh start sends nothing old.
 #[tokio::test]
@@ -930,6 +976,60 @@ async fn the_morning_report_is_pushed_once_to_the_messengers_named() {
     assert_eq!(std::fs::read_to_string(rig.dir.join("night-report-seen")).unwrap(), "2026-10-21.md");
 }
 
+
+/// A node with no report yet at the first look still gets the first one pushed when it comes.
+#[tokio::test]
+async fn the_first_report_is_pushed_when_there_was_none_at_the_first_look() {
+    let dir = scratch("reports-none");
+    let (agent, mut commands) = AgentHandle::channel();
+    let looks = Arc::new(Mutex::new(0u32));
+    let counted = looks.clone();
+    tokio::spawn(async move {
+        let script = default_script();
+        while let Some(command) = commands.recv().await {
+            match command {
+                AgentCommand::Request { method, params, reply } => {
+                    let _ = reply.send(script(&method, &params));
+                }
+                AgentCommand::Web { path, reply, .. } => {
+                    let answer = if path.starts_with("/api/night/reports") {
+                        let mut n = counted.lock().unwrap();
+                        *n += 1;
+                        if *n == 1 {
+                            json!({ "reports": [], "latest": null })
+                        } else if path.ends_with("after=") {
+                            json!({ "reports": [{ "name": "2026-10-22.md", "text": "## app\n- done" }], "latest": "2026-10-22.md" })
+                        } else {
+                            json!({ "reports": [], "latest": "2026-10-22.md" })
+                        }
+                    } else {
+                        json!({})
+                    };
+                    let _ = reply.send(Ok(answer));
+                }
+                _ => {}
+            }
+        }
+    });
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+    let mut hub = Hub::new(HubConfig::new(dir), agent, Box::new(|| false));
+    hub.add_adapter("matrix", out_tx);
+    hub.on_inbound(text("matrix:!r:x", "hello")).await;
+    hub.push_reports().await;
+    hub.push_reports().await;
+    hub.push_reports().await;
+    let mut pushed = Vec::new();
+    while let Ok(out) = out_rx.try_recv() {
+        if let Outbound::Message { markdown, .. } = out
+            && markdown.contains("Night Shift's report")
+        {
+            pushed.push(markdown);
+        }
+    }
+    assert_eq!(*looks.lock().unwrap(), 3);
+    assert_eq!(pushed.len(), 1, "the first report, once: {pushed:?}");
+    assert!(pushed[0].starts_with("**Night Shift's report** (2026-10-22)"), "{pushed:?}");
+}
 
 /// Sync's notices go to Signal and Matrix chats by default, once each, nothing old after a fresh
 /// start, and never to Telegram unless named.

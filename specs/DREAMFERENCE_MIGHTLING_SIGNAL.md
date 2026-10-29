@@ -132,9 +132,12 @@ Wants=network-online.target
 
 [Service]
 User=mightling-signal
+Group=mightling-signal
 StateDirectory=mightling-signal
 StateDirectoryMode=0700
-ExecStart=/usr/local/lib/mightling/ling-signal serve --state /var/lib/mightling-signal
+RuntimeDirectory=mightling-signal
+RuntimeDirectoryMode=0755
+ExecStart=/usr/local/lib/mightling/ling-signal serve --state /var/lib/mightling-signal --runtime /run/mightling-signal
 Environment="JAVA_TOOL_OPTIONS=-Xmx256m -XX:+UseSerialGC"
 MemoryMax=768M
 NoNewPrivileges=yes
@@ -143,15 +146,20 @@ ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
+ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
 LockPersonality=yes
 Restart=on-failure
 RestartSec=10
+RestartPreventExitStatus=78
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+Further instances use the template `mightling-signal@.service` (§18). The block is pinned by `unit.rs` (`UNIT_BEFORE_SEVERAL_ACCOUNTS`).
 
 **On these settings:**
 - **Memory:** `MemoryMax=768M` with a 256 MB heap keeps the JVM inside a fixed budget. Unified memory makes a runaway JVM a host problem (`docs/dev/host-safety.md`). The real footprint is measured in Phase 0 and the cap set from it.
@@ -180,7 +188,7 @@ WantedBy=multi-user.target
 4. **Bind the owner.** Setup prints a six-digit code: "send it from your phone to +1 555…". The first message that is exactly the code, within ten minutes, binds the owner:
    - the bridge records its `sourceUuid` (ACI) and the identity key's fingerprint from `listIdentities`;
    - it marks that identity verified (`trust --verified-safety-number`);
-   - it answers "Paired. Ask me anything.".
+   - it answers "Paired. Ask me anything; /help lists what else I understand.".
 
    Other senders during that window are ignored, as always. If no code arrives in time, setup says so and leaves the bridge stopped.
 5. **Disappearing messages.** Setup sets the conversation's timer to the owner's choice (`[signal] disappearing`, default one week; `updateContact --expiration`). Code, mail snippets and file contents shown on the phone then do not stay there forever.
@@ -259,7 +267,7 @@ Every `receive` envelope passes these checks, in order. The first that fails dro
    - linked mode: a `syncMessage.sentMessage` to the owner's own account.
 2. **From the owner:** `sourceUuid` equals the recorded ACI. A phone number is never trusted on its own, since numbers move between people.
 3. **From a trusted identity:** the owner's current identity key, from signal-cli's trust state, equals the recorded fingerprint. If it does not, §5.3.
-4. **Not stale:** the message timestamp is within 24 hours. An old message delivered late after downtime is answered with "This arrived N hours late; send it again if you still want it", not acted on.
+4. **Not stale:** the message timestamp is within 24 hours. An old message delivered late after downtime is answered with "Your message arrived N hours late, so I didn't act on it; send it again if you still want it", not acted on.
 5. **Not seen before:** the timestamp is not already in the last 1,000 handled. Signal retries can deliver a message twice.
 
 **Dropped messages are counted, never stored or answered.** `ling signal status` shows "12 messages from strangers ignored since …". Their content is not logged.
@@ -357,7 +365,7 @@ The bridge holds one WebSocket to `ling web` (`/ws`) with the bridge envelope th
 
 **Connection loss:** if `ling web` is down or the socket closes, the bridge reconnects with backoff (1, 2, 5, 10, 30 s). After ten seconds down it tells the owner once: "Mightling's web server on <node> isn't answering; I'll keep trying."
 
-**Model server down:** a turn that fails with a connection error to the model server is answered with "The model server on <node> isn't running (`ling-admin server start` on the node)."
+**Model server down:** a turn that fails with a connection error to the model server is answered with "The model server on <node> isn't answering (`ling-admin server start` on the node)."
 
 ---
 
@@ -411,8 +419,8 @@ Signal shows plain text with style ranges: bold, italic, strikethrough, monospac
 
 - **When it is checked:** every five seconds the bridge asks `ling web` for the user-level level (`GET /api/airgapped`, behind the device cookie like every route). The bridge cannot read the user's configuration itself, because `ProtectHome=yes` and its own uid keep it out of the home folder. `ling web` resolves the level with the same crate the sandbox helper uses (`ling-rs/airgapped`): `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the strictest of the file `DREAMFERENCE_CONFIG_PATH` names and the user-level file. No session's level is consulted.
 - **At `on`:** it starts no turn and sends nothing. It answers nothing, because answering would itself be a send.
-- **When the level drops back to `off`:** it says once "Mightling was air-gapped from <time> to <time>; messages from then were not read. Send again what you need."
-- **Session-level air gap:** a thread whose own level is `on` (set with `/airgapped on` in the app) is not used by the bridge. `/use` refuses it, saying why.
+- **When the level drops back to `off`:** it says once "Mightling was air-gapped for <duration>; nothing was sent or answered in that time.", adding " N message(s) from then were not read; send again what you need." when any arrived.
+- **Session-level air gap (NOT MET, open as of 2026-10-29):** the bridge has no check yet: `/use` resumes any recent thread and turns never ask a thread's own level, and `ling web` answers `/api/airgapped` for the user level only. The requirement stands: a thread whose own level is `on` (set with `/airgapped on` in the app) is not used by the bridge. `/use` refuses it, saying why.
 
 **Why the check runs in the bridge:** air-gap `on` promises that nothing of the session leaves the machine. Signal is a way out, so the bridge must ask the same question the sandbox helper asks.
 
@@ -788,7 +796,7 @@ A failed setup leaves no half instance behind: the instance's unit, state and ac
 
 ### 18.5 What else changes
 
-- **The egress audit:** `ling-admin audit egress` (and the Rust `ling audit egress`) name every enabled `mightling-signal.service` and `mightling-signal@*.service`, one declared exception per instance. `audit egress --signal` traces every enabled instance's processes, or one with `--signal <name>`; the Signal host list is unchanged (§10). Today both audits hold the single unit name (`dreamference/audit/egress_audit.py`, `SIGNAL_UNIT`).
+- **The egress audit:** `ling-admin audit egress` (and the Rust `ling audit egress`) name every enabled `mightling-signal.service` and `mightling-signal@*.service`, one declared exception per instance. `audit egress --signal`, when built (§16), traces every enabled instance's processes, or one with `--signal <name>`; the Signal host list is unchanged (§10). Today both audits hold the single unit name (`dreamference/audit/egress_audit.py`, `SIGNAL_UNIT`).
 - **The air gap:** each instance asks its own `ling web` (§11), so it follows its own Linux user's level. Nothing else changes.
 - **Host safety:** the four-instance cap and the memory rule of decision 7; each unit keeps `MemoryMax=768M`.
 - **The Signal account's device limit** (§4.2 item 6) is per account and unaffected: one instance takes one linked device of its own account.

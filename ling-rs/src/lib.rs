@@ -936,13 +936,19 @@ pub fn configured_vllm_host() -> Option<String> {
 /// Whether a model server URL names this machine: the Gmail service and the other node-only
 /// pieces are asked for only then.
 pub fn host_is_local(host: &str) -> bool {
-    let rest = host.trim().trim_start_matches("http://").trim_start_matches("https://");
+    let host = host.trim();
+    let rest = ["http://", "https://"]
+        .iter()
+        .find(|scheme| host.get(..scheme.len()).is_some_and(|start| start.eq_ignore_ascii_case(scheme)))
+        .map_or(host, |scheme| &host[scheme.len()..]);
     let name = if let Some(bracketed) = rest.strip_prefix('[') {
         bracketed.split(']').next().unwrap_or_default()
     } else {
         rest.split(['/', ':']).next().unwrap_or_default()
     };
-    matches!(name.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0")
+    // Any loopback address (127.0.1.1 is how Debian names the machine itself), or the any-address.
+    name.eq_ignore_ascii_case("localhost")
+        || name.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified())
 }
 
 /// Whether to advertise Gmail to the model: `DREAMFERENCE_MIGHTLING_GMAIL`, then `mightling_gmail` in the
@@ -988,7 +994,8 @@ fn parse_gmail_status(body: &serde_json::Value) -> Option<String> {
 
 fn vllm_host_from_toml(text: &str) -> Option<String> {
     let parsed: toml::Table = toml::from_str(text).ok()?;
-    parsed.get("vllm_host")?.as_str().map(str::to_string)
+    // A blank value is no host, as a blank DREAMFERENCE_VLLM_HOST is: the next tier decides.
+    parsed.get("vllm_host")?.as_str().filter(|host| !host.trim().is_empty()).map(str::to_string)
 }
 
 /// `DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then `~/.config/dreamference/config.toml`.
@@ -1374,6 +1381,32 @@ pub(crate) fn write_atomically(path: &Path, contents: &[u8]) -> anyhow::Result<(
         let _ = std::fs::remove_file(&staging);
     })?;
     Ok(())
+}
+
+/// Writes a file the user keeps, such as Dreamference's configuration, whole as
+/// [`write_atomically`] does, but through a link (a dotfiles folder keeps its link) and with the
+/// file's mode kept: that file can hold a token, and a new file would take the umask's mode.
+pub(crate) fn write_through(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let permissions = std::fs::metadata(&target).ok().map(|meta| meta.permissions());
+    let name = target
+        .file_name()
+        .context("a config path has no file name")?
+        .to_string_lossy();
+    let staging = target.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let written = std::fs::File::create(&staging)
+        .and_then(|mut file| {
+            // The mode first, so the contents are never readable by more than the file was.
+            if let Some(permissions) = permissions {
+                file.set_permissions(permissions)?;
+            }
+            file.write_all(contents)
+        })
+        .and_then(|()| std::fs::rename(&staging, &target));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&staging);
+    }
+    written.with_context(|| format!("could not write {}", target.display()))
 }
 
 /// Applies the launcher's settings to the text of a `config.toml`.
@@ -2073,6 +2106,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_users_config_is_written_through_its_link_whole_and_keeps_its_mode() {
+        use std::io::Read;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mightling-through-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("dotfiles")).unwrap_or_default();
+        let (target, link) = (dir.join("dotfiles").join("config.toml"), dir.join("config.toml"));
+        std::fs::write(&target, "hf_token = \"t\"\n").unwrap_or_default();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap_or_default();
+        std::os::unix::fs::symlink(&target, &link).unwrap_or_default();
+        let mut before = std::fs::File::open(&link).expect("open");
+        write_through(&link, b"hf_token = \"t\"\nmightling_prompt = \"terse\"\n").expect("write");
+        assert!(std::fs::symlink_metadata(&link).is_ok_and(|meta| meta.file_type().is_symlink()));
+        assert_eq!(std::fs::read_to_string(&target).unwrap_or_default(), "hf_token = \"t\"\nmightling_prompt = \"terse\"\n");
+        let mode = std::fs::metadata(&target).map(|meta| meta.permissions().mode() & 0o777).unwrap_or_default();
+        assert_eq!(mode, 0o600);
+        // A reader that opened the file before still sees the old one, whole.
+        let mut old = String::new();
+        before.read_to_string(&mut old).unwrap_or_default();
+        assert_eq!(old, "hf_token = \"t\"\n");
+        assert_eq!(std::fs::read_dir(dir.join("dotfiles")).map(Iterator::count).unwrap_or_default(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn user_choices_in_config_are_kept() {
         // Preferences only: the update check reaches api.github.com and is forced off instead
@@ -2116,10 +2175,10 @@ mod tests {
 
     #[test]
     fn only_a_loopback_host_is_this_machine() {
-        for host in ["http://localhost:8000", "http://127.0.0.1:8000/", "http://[::1]:8000", "localhost"] {
+        for host in ["http://localhost:8000", "http://127.0.0.1:8000/", "http://[::1]:8000", "localhost", "HTTP://LocalHost:8000", "http://127.0.1.1:8000", "https://[::1]:8000/v1"] {
             assert!(host_is_local(host), "{host}");
         }
-        for host in ["http://192.168.50.105:8000", "http://gx10-1a2b.local:8000", "http://[fd00::2]:8000", ""] {
+        for host in ["http://192.168.50.105:8000", "http://gx10-1a2b.local:8000", "http://[fd00::2]:8000", "", "http://127.example.com:8000", "http://localhost.example.com"] {
             assert!(!host_is_local(host), "{host}");
         }
     }
@@ -2205,5 +2264,7 @@ mod tests {
             Some("http://gb10:9000".into())
         );
         assert_eq!(vllm_host_from_toml("model = \"x\"\n"), None);
+        assert_eq!(vllm_host_from_toml("vllm_host = \"\"\n"), None);
+        assert_eq!(vllm_host_from_toml("vllm_host = \"  \"\n"), None);
     }
 }

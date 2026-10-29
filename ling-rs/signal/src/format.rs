@@ -144,7 +144,8 @@ pub fn render(markdown: &str) -> Styled {
 }
 
 fn fence_of(line: &str) -> Option<&'static str> {
-    if line.starts_with("```") {
+    // A backtick in what follows the opening backticks makes it inline code (```ls```), not a fence.
+    if line.starts_with("```") && !line.trim_start_matches('`').contains('`') {
         Some("```")
     } else if line.starts_with("~~~") {
         Some("~~~")
@@ -434,10 +435,13 @@ pub const MAX_PARTS: usize = 8;
 
 /// An answer as the messages that carry it.
 pub fn reply(markdown: &str) -> Reply {
-    let parts = split(&render(markdown), PART_LIMIT);
+    const NOTE: &str = "\n\n(The full answer is attached: answer.md)";
+    let styled = render(markdown);
+    let parts = split(&styled, PART_LIMIT);
     if parts.len() > MAX_PARTS {
-        let mut first = parts.into_iter().next().unwrap_or_default();
-        first.text.push_str("\n\n(The full answer is attached: answer.md)");
+        // The first part is cut again with room for the note, so it stays within the limit.
+        let mut first = split(&styled, PART_LIMIT - utf16_len(NOTE)).into_iter().next().unwrap_or_default();
+        first.text.push_str(NOTE);
         return Reply { parts: vec![first], attachment: Some(markdown.to_string()) };
     }
     Reply { parts, attachment: None }
@@ -520,6 +524,15 @@ mod tests {
     }
 
     #[test]
+    fn backticks_around_code_on_one_line_are_not_a_fence() {
+        // The model writes ```ls -la``` inline: nothing after it may vanish into a block.
+        let s = render("```ls -la``` lists it\n**more**");
+        assert!(s.text.contains("ls -la"), "{:?}", s.text);
+        assert!(s.text.ends_with("\nmore"), "{:?}", s.text);
+        assert!(s.styles.iter().any(|st| st.kind == StyleKind::Bold && covered(&s, st) == "more"), "{:?}", s.styles);
+    }
+
+    #[test]
     fn ranges_count_utf16_units() {
         // 😀 is two UTF-16 units; 漢 is one.
         let s = render("😀 **漢字** `x`");
@@ -589,5 +602,13 @@ mod tests {
         let short = reply("hello **there**");
         assert_eq!(short.parts.len(), 1);
         assert!(short.attachment.is_none());
+    }
+
+    #[test]
+    fn the_note_on_a_long_answer_keeps_its_message_within_the_limit() {
+        let r = reply(&"word ".repeat(5000));
+        assert!(r.attachment.is_some());
+        assert!(r.parts[0].text.ends_with("answer.md)"));
+        assert!(utf16_len(&r.parts[0].text) <= PART_LIMIT, "{} units", utf16_len(&r.parts[0].text));
     }
 }

@@ -149,7 +149,7 @@ Rejected, with the reason:
   - it also runs on `ling-code index`;
   - it never runs inside a query. A query answers at once from the snapshots, covers the files changed since them with a text search (§7.3), and queues a re-index request for the session process (§4) when any file is changed.
   - **The agent's own edits are the normal case, not the exception.** Between two launches the graph sees nothing the session wrote, and a file the agent created is in neither layer. §7.3's changed set is what covers that gap; the re-index only turns its `heuristic` rows back into `exact` ones.
-  - codebase-memory's watcher stays off (`watcher_enabled = false`, `auto_watch = false`) unless `mightling_code_watch = true`.
+  - codebase-memory's watcher is not used: ling-code runs it only as the `index_repository` CLI, and re-indexing goes through the session's request queue. (An opt-in key `mightling_code_watch` is not built.)
 - **Scope, written by the session process:**
   - **Submodules follow §4.3.** The session process keeps a managed block in `<repo>/.cbmignore` listing every submodule §4.3 excludes, rewritten from the policy before every run, and adds `.cbmignore` to `.git/info/exclude`, so the file never shows up in `git status`.
   - **Ignore rules inside submodules.** codebase-memory applies the superproject's `.gitignore` inside a submodule, which git does not. When a submodule is included, the router reports every excluded subtree from `index_coverage` in `ling-code status`, so the gap is visible rather than silent.
@@ -344,7 +344,7 @@ So:
 - **Need, and the first run:** `need = 1.2 × peak_rss_mb` from the manifest for this indexer and repository. With no record yet, a floor by kind stands in: 512 MiB for the universal indexer (142 MiB measured), 3 GiB for a static one (2.1 GiB measured), 8 GiB for an executing one. A run the budget cannot cover is not started: `status: "deferred: memory"`, `ling-code status` says so, and queries keep answering from the last snapshot plus §7.3's text search.
 - **At most one executing run on the host**, not one per repository: a lock in `$XDG_RUNTIME_DIR/mightling-index/` held for the run's life. Universal and static runs may start beside it when the budget admits them; the slice's CPU limit is shared between them.
 - **If the host crosses the line anyway, the indexer dies first.** Every indexer is started through `choom -n 1000`, so earlyoom and the kernel, which both pick by `oom_score`, choose an index run before the model server.
-- **Cap-bounded peaks are marked.** When a run's peak ends within 10% of its cap (`peak_cap_bounded: true`), the recorded peak is a lower bound: the cgroup was reclaiming against the cap. The next admitted run gets `min(ceiling, 1.5 × peak)` if available, so the first uncapped run raises the record. An OOM-killed run records its cap as the lower bound, so the next attempt is not doomed the same way.
+- **Cap-bounded peaks are marked.** When a run's peak ends within 10% of its cap (`peak_cap_bounded: true`), the recorded peak is a lower bound: the cgroup was reclaiming against the cap. The next admitted run's cap is `min(ceiling, budget)` as always; the record rises with the first run that is not bounded. An OOM-killed run records its cap as the lower bound, so the next attempt is not doomed the same way.
 - **What this means for Codex today:** recorded peak ≥ 21.5 GiB, cap-bounded, so admission needs `cap ≥ 25.8 GiB`, i.e. `MemAvailable ≥ ~36 GiB` with no other index run holding part of the budget. With Qwen3.8 resident the machine has 35–38 GiB available, so a run is admitted only at the quiet end of that range; with the model server stopped (~100 GiB available) always. Scheduled runs therefore prefer `ling-admin server stop`, idle periods with no server, and the Night Shift window. While no fresh exact index exists, the router serves the last snapshot, with changed files tagged `heuristic (stale)`.
 - **The conversion is admitted too:** `expt-convert` peaked at 2.7 GB on Codex and runs in the indexer's scope, under the same cap, right after it.
 - **Partitioning, as an option to measure, not a plan:** index the workspace in passes over subsets of `[workspace] members`, merged in the store. The caveat stands: `codex-cli`'s dependency closure is most of the workspace, so the passes that matter may peak almost as high as the whole.
@@ -395,7 +395,7 @@ The source and commit are stated once in the header. `--json` gives the same dat
 - **Grouping first, rows second:** above the cap, the answer opens with a per-file summary sorted by count, limited to 15 files. The rows follow, taken from those files.
 - **The header always states what was cut:** `refs Config::load (312 results in 41 files; showing 40; next: --offset 40)`.
 - **Narrowing flags:** `--path <glob>`; `--kind def|read|write|import` from SCIP roles where the indexer distinguishes them (scip-python marks imports as reads, so `--kind import` is unavailable for Python and says so); `--exact-only`; `--offset N`, a cursor invalidated with an error, not silently shifted, if the index changes between pages (detected by the graph's `store_meta.mutation_gen` and the store's run id).
-- **The prompt block is budgeted too:** the `# Code navigation` block of §8 rides on every turn and is kept under 250 tokens.
+- **The prompt block is budgeted too:** the `# Code navigation` block of §8 rides on every turn and is kept under 300 tokens (the tools variant, with a submodules line, is about 290; `blocks_stay_under_300_tokens` checks it).
 
 ### 7.3 Freshness and merging
 
@@ -590,7 +590,7 @@ If the router shows that the graph's edges are wrong in concentrated places, the
   - no test creates a real `systemd-run` scope or freezes a real unit: `mightling-index-*` scope creation is behind a seam the tests replace, the way `tests/conftest.py` refuses real mutating `docker` commands.
 - **Sandbox sides (§4):** `ling-code refs` run under Codex's `read-only` sandbox answers from both stores and writes nothing; under `workspace-write` a stale answer appends exactly one request line, and the session process coalesces ten such lines into one run.
 - **scip-python's environment:** a fixture repository whose `.venv/bin/python3` and `sitecustomize.py` write marker files is indexed without either marker appearing.
-- **Prompt:** the `# Code navigation` block is full when the index is ready, reduced while building, absent without a repository, and under 250 tokens.
+- **Prompt:** the `# Code navigation` block is full when the index is ready, reduced while building, absent without a repository, and under 300 tokens.
 - **Submodules (§4.3)**, on fixture repositories built in the test's temporary directory with local bare remotes and fixed author addresses:
   - same namespace and our authors: indexed (`yours`); same namespace and a foreign author: not indexed (`third-party`); another owner: not indexed (`other organisation`), even with our authors; a relative URL with our authors: indexed while it stays under the owner, not indexed (`other organisation`) when `../../` leaves it;
   - a shallow single-commit submodule is decided by that commit; a fork with 3 of our commits on 50 upstream ones is `third-party`;
@@ -601,7 +601,7 @@ If the router shows that the graph's edges are wrong in concentrated places, the
   - `include` and `exclude` in each direction, `exclude` winning over `include`, and `auto` restoring the tests; the choice survives the next launch, which rewrites `.cbmignore` from it (the clobber of the old flag, as a regression test);
   - under Codex's `read-only` and `workspace-write` sandboxes, `include` fails with the message of §4.3 and writes nothing; a `.cbmignore` or `dreamference.toml` edited inside the repository changes nothing after the next run;
   - codebase-memory's incremental run both **adds** a newly included submodule's files and **drops** a newly excluded one's (§14.1 measured the drop, not the add);
-  - every answer carries the `submodules not indexed` line while one is left out, and the prompt block names it, still under 250 tokens with five excluded submodules of long paths;
+  - every answer carries the `submodules not indexed` line while one is left out, and the prompt block names it, still under 300 tokens with five excluded submodules of long paths;
   - `code_index_submodule_max_files` in a file inside the repository is ignored, both as `./dreamference.toml` and when `DREAMFERENCE_CONFIG_PATH` points at it;
   - **this repository**, read-only: `fano` is `yours` and `codex` is `third-party` (skipped where the submodules are not checked out).
 - **The separate binary (§4.2):**
@@ -739,7 +739,7 @@ Not run: `ling-code submodules include` typed inside Codex's own sandbox (the re
 |---|---|
 | Router merging, de-duplication, ambiguity, a changed set requesting a re-index | covered |
 | Recorded fixtures, schema fingerprints (a changed schema is refused) | covered |
-| Direct reads during a write (busy timeout); `mutation_gen` retry | busy wait covered; the retry is implemented, not tested |
+| Direct reads during a write (busy timeout); `mutation_gen` retry | busy wait and the retry covered |
 | Join by location, 0-/1-based lines | covered through the fixtures |
 | Changed since the snapshot: edited, new, committed, stale for SCIP but fresh for the graph, deleted, `not checked`, lost commit, read-only sandbox | covered |
 | Hostile build script, no writable bind outside scratch, tmpfs before binds | covered |
@@ -757,7 +757,7 @@ Not run: `ling-code submodules include` typed inside Codex's own sandbox (the re
 | A Python file at a root: detection, the cap, the path-less document | covered; one real run of a root file that imports a package and another root file, installed and read back through the store |
 | Session: lock, parent exit, junk requests, no systemd bus | covered |
 | Admission: floor, headroom of live scopes, racing admissions, one executing run, slice limits, `choom` | covered with a fake host |
-| Scheduler: coalescing, idle gauges of both engines, freeze and thaw | gauges, freeze, thaw and never freezing a short run covered; coalescing implemented, not tested |
+| Scheduler: coalescing, idle gauges of both engines, freeze and thaw | gauges, freeze, thaw and never freezing a short run covered; coalescing covered |
 | Model load: no start while loading, stopped not frozen, `server start` stops the scopes | covered |
 | Worktrees | covered |
 | Output budget, stable pages, refused stale cursor, answer size | covered |

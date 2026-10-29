@@ -6,12 +6,16 @@ prior to launching the model server. It prioritizes local cache to minimize HF A
 """
 
 import contextlib
+import json
 import os
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional
 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+# `docker -v` ends the host path at the first colon, so no host path may hold one.
+VOLUME_SEPARATOR = ":"
 
 class ModelDownloader:
     """
@@ -73,8 +77,12 @@ class ModelDownloader:
         Returns:
             List[str]: `-v` options, with the host directories created if missing.
         """
-        home = cls.get_hf_home()
-        hub = cls.get_hf_cache_dir()
+        # Docker reads a relative path as a volume name, not a host folder.
+        home = cls.get_hf_home().absolute()
+        hub = cls.get_hf_cache_dir().absolute()
+        for path in (home, hub):
+            if VOLUME_SEPARATOR in str(path):
+                raise ValueError(f"{path} cannot be mounted into the container: rename it")
         home.mkdir(parents=True, exist_ok=True)
         args = ["-v", f"{home}:{cls.CONTAINER_HF_HOME}"]
         if hub != home / "hub":
@@ -132,15 +140,17 @@ class ModelDownloader:
             model_key (str): Model key or repo ID.
 
         Returns:
-            Optional[Path]: Output directory path.
+            Optional[Path]: Output directory path; under the pinned commit for a pinned model, so
+            a checkpoint serialized at an earlier pin is never loaded for the current one.
         """
         if not model_key:
             return None
         repo_id = ModelMatrixRegistry.resolve_hf_repo(model_key)
         if not repo_id:
             return None
-        folder_name = repo_id.replace("/", "--")
-        return cls.TENSORIZER_CACHE_HOME / folder_name
+        folder = cls.TENSORIZER_CACHE_HOME / repo_id.replace("/", "--")
+        revision = ModelMatrixRegistry.pinned_revision(model_key)
+        return folder / revision if revision else folder
 
     @classmethod
     def get_tensorized_path(cls, model_key: str) -> Optional[Path]:
@@ -224,6 +234,7 @@ class ModelDownloader:
             return False
         tdir.mkdir(parents=True, exist_ok=True)
         tensors_file = tdir / "model.tensors"
+        staging = tdir / "model.tensors.partial"
 
         print(f"⚡ Converting '{model_key}' to tensorize format and saving to {tensors_file}...")
 
@@ -327,9 +338,12 @@ class ModelDownloader:
                         nn.Parameter(torch.tensor((1,), device="meta"), requires_grad=False)
                     )
                     progress.update(task, description="Serializing to .tensors format")
-                    serializer = TensorSerializer(str(tensors_file))
+                    # Written under another name and renamed whole: a kill midway (the host's OOM
+                    # killer skips every except) must not leave a file that reads as tensorized.
+                    serializer = TensorSerializer(str(staging))
                     serializer.write_module(model)
                     serializer.close()
+                    staging.replace(tensors_file)
                     del model
                     progress.update(task, description="Tensorization complete", completed=True)
                 serialization_success = True
@@ -355,6 +369,9 @@ class ModelDownloader:
                 pass
 
         if not serialization_success:
+            # A failed attempt may have left part of the file, which would read as tensorized.
+            tensors_file.unlink(missing_ok=True)
+            staging.unlink(missing_ok=True)
             print(f"⚠️  'tensorizer' not installed — skipping tensorize step (normal download will be used).")
             return True
 
@@ -380,7 +397,8 @@ class ModelDownloader:
                 the recipe was measured on.
 
         Returns:
-            bool: True if snapshot directory exists and is non-empty.
+            bool: True if the snapshot is non-empty, holds every shard its index names, and no
+            blob of the repository is still being written.
         """
         if not model_key:
             return False
@@ -393,12 +411,34 @@ class ModelDownloader:
         folder_name = "models--" + repo_id.replace("/", "--")
         cache_dir = cls.get_hf_cache_dir() / folder_name / "snapshots"
         revision = revision or ModelMatrixRegistry.pinned_revision(model_key)
+        blobs = cache_dir.parent / "blobs"
+        # `<blob>.<id>.incomplete` is a blob still being fetched, unless that blob has since landed.
+        if any(not (blobs / part.name.split(".")[0]).exists() for part in blobs.glob("*.incomplete")):
+            return False
         if revision:
-            pinned = cache_dir / revision
-            return pinned.is_dir() and any(pinned.iterdir())
-        if cache_dir.exists() and any(cache_dir.iterdir()):
-            return True
-        return False
+            return cls._snapshot_complete(cache_dir / revision)
+        return cache_dir.is_dir() and any(cls._snapshot_complete(s) for s in cache_dir.iterdir())
+
+    @classmethod
+    def _snapshot_complete(cls, snapshot: Path) -> bool:
+        """Whether a snapshot holds a whole checkpoint, as far as the files in it tell.
+
+        Args:
+            snapshot (Path): A snapshot folder in the hub cache.
+
+        Returns:
+            bool: True if it is non-empty and every shard a `*.index.json` names is present.
+        """
+        if not snapshot.is_dir() or not any(snapshot.iterdir()):
+            return False
+        for index in snapshot.glob("*.index.json"):
+            try:
+                weight_map = json.loads(index.read_text()).get("weight_map", {})
+            except (OSError, ValueError, AttributeError):
+                return False
+            if not all((snapshot / shard).is_file() for shard in set(weight_map.values())):
+                return False
+        return True
 
     @classmethod
     def download_model(
@@ -549,7 +589,10 @@ class ModelDownloader:
             if not cache_dir.exists():
                 return "0 B"
             
-            total_size = sum(f.stat().st_size for f in cache_dir.rglob("*") if f.is_file())
+            # Snapshots are links into blobs/: count each blob once.
+            total_size = sum(
+                f.stat().st_size for f in cache_dir.rglob("*") if f.is_file() and not f.is_symlink()
+            )
             for unit in ["B", "KB", "MB", "GB"]:
                 if total_size < 1024:
                     return f"{total_size:.1f} {unit}"
@@ -644,7 +687,12 @@ class ModelDownloader:
             shutil.rmtree(cache_dir, ignore_errors=True)
         if cache_dir.exists():
             print(f"⚠️  Some files in {cache_dir} could not be removed (written as root by a container).")
-            print(f"💡 Remove them with: sudo rm -rf {cache_dir}")
+            # `rm -rf` on a link removes the link alone and leaves the files.
+            if cache_dir.is_symlink():
+                command = f"sudo find {cache_dir}/ -mindepth 1 -delete"
+            else:
+                command = f"sudo rm -rf {cache_dir}"
+            print(f"💡 Remove them with: {command}")
             return False
         return True
 

@@ -84,6 +84,9 @@ pub const NONTHINKING: &str = "nonthinking";
 
 /// The prefix of the error Codex makes of a `response.incomplete` event (codex-api's SSE parser).
 const INCOMPLETE_PREFIX: &str = "Incomplete response returned";
+/// The largest `max_pattern_size` a file may set. The detector keeps three rings of this many
+/// entries for every watched response, and no reply repeats a pattern of more pieces than this.
+const MAX_PATTERN_SIZE: usize = 65_536;
 
 /// The developer message after a loop: the turn goes on with it.
 pub const LOOP_NUDGE: &str = "You were repeating yourself, so your last output was stopped. Do not repeat it. \
@@ -186,6 +189,7 @@ pub fn settings_for(surface: Surface, table: Option<&toml::Table>, env: &dyn Fn(
             }
         };
         size("max_pattern_size", &mut t.max_pattern_size);
+        t.max_pattern_size = t.max_pattern_size.min(MAX_PATTERN_SIZE);
         size("min_pattern_size", &mut t.min_pattern_size);
         size("min_count", &mut t.min_count);
         size("max_run", &mut t.max_run);
@@ -829,6 +833,14 @@ mod tests {
         assert_eq!(exec.sampling.as_deref(), Some(NONTHINKING));
         let env = |name: &str| (name == BUDGET_ENV).then(|| "2048".to_string());
         assert_eq!(settings_for(Surface::Phone, Some(&table), &env).budget, Some(2_048));
+    }
+
+    #[test]
+    fn a_huge_pattern_size_in_the_file_is_capped_so_the_detector_can_be_built() {
+        let table: toml::Table = format!("max_pattern_size = {}\n", i64::MAX).parse().expect("toml");
+        let thresholds = settings_for(Surface::Work, Some(&table), &no_env).thresholds;
+        assert_eq!(thresholds.max_pattern_size, MAX_PATTERN_SIZE);
+        assert!(Detector::new(thresholds).push("x").is_none());
     }
 
     #[test]

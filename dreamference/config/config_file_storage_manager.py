@@ -2,25 +2,32 @@
 Configuration File Serialization & Storage Manager.
 
 This module provides the ConfigFileStorageManager class handling loading and saving
-Dreamference configuration dictionaries to YAML or JSON formats.
+Dreamference configuration dictionaries to TOML, YAML or JSON files.
 """
 
+import functools
+import importlib
 import json
 import os
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Dict
 
-try:
-    import yaml
-except ImportError:
-    yaml = None
 
-try:
-    import toml
-except ImportError:
-    toml = None
+@functools.cache
+def optional_module(name: str) -> ModuleType | None:
+    """`yaml` or `toml` when installed, else None (the file is then read and written as JSON).
+
+    Imported at the first file of that kind, not at the top: every `ling-admin` command imports
+    this module, and most never read a YAML file (tests/test_cli_startup.py).
+    """
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        return None
+
 
 class ConfigFileStorageManager:
     """
@@ -57,7 +64,7 @@ class ConfigFileStorageManager:
         try:
             return tomllib.loads(text)
         except tomllib.TOMLDecodeError:
-            if toml is None:
+            if (toml := optional_module("toml")) is None:
                 raise
             return toml.loads(text)
 
@@ -81,7 +88,7 @@ class ConfigFileStorageManager:
         text = path.read_text(encoding="utf-8-sig")
         if path.suffix == ".toml":
             loaded = cls._load_toml(text)
-        elif yaml and path.suffix in (".yaml", ".yml"):
+        elif path.suffix in (".yaml", ".yml") and (yaml := optional_module("yaml")):
             loaded = yaml.safe_load(text) or {}
         else:
             loaded = json.loads(text) or {}
@@ -129,9 +136,9 @@ class ConfigFileStorageManager:
             with open(os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666), "w", encoding="utf-8") as f:
                 if mode is not None:
                     os.fchmod(f.fileno(), mode)
-                if toml and path.suffix == ".toml":
+                if path.suffix == ".toml" and (toml := optional_module("toml")):
                     toml.dump(data, f)
-                elif yaml and path.suffix in (".yaml", ".yml"):
+                elif path.suffix in (".yaml", ".yml") and (yaml := optional_module("yaml")):
                     yaml.dump(data, f, default_flow_style=False)
                 else:
                     json.dump(data, f, indent=2)
