@@ -5,7 +5,7 @@ import os from "node:os";
 import { nodeScript } from "./test-ling";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { addRepeating, addTask, dropTask, listRepeating, nightStatus, nodeName, readReport, readReports, readTasks } from "./night";
 import { taskDetails, transcriptOf } from "./night";
@@ -26,6 +26,29 @@ describe("Night Shift for the Scheduled view", () => {
     expect(readReport(dir, "2026-10-17.md")).toContain("a: done");
     expect(() => readReport(dir, "../tasks/a.json")).toThrow("not a report");
     expect(readTasks(path.join(dir, "none"))).toEqual([]);
+  });
+
+  // Past the limit the newest are read, by when their file last changed, whatever order the folder lists them in.
+  it("reads the newest tasks when there are more than it reads", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-many-"));
+    fs.mkdirSync(path.join(dir, "tasks"));
+    const write = (id: string) => fs.writeFileSync(path.join(dir, "tasks", `${id}.json`), JSON.stringify({ id, status: "done", history: [] }));
+    write("old");
+    fs.utimesSync(path.join(dir, "tasks", "old.json"), new Date("2020-01-01"), new Date("2020-01-01"));
+    for (let i = 0; i < 1000; i++) write(`t${i}`);
+    const list = fs.readdirSync.bind(fs);
+    const spy = vi.spyOn(fs, "readdirSync").mockImplementation(((place: fs.PathLike) => {
+      const names = (list(place) as string[]).filter((name) => name !== "old.json");
+      return [...names, "old.json"];
+    }) as typeof fs.readdirSync);
+    try {
+      const ids = readTasks(dir).map((entry) => entry.id);
+      expect(ids).toHaveLength(1000);
+      expect(ids).not.toContain("old");
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("queues and drops through ling night, never writing a task itself", async () => {

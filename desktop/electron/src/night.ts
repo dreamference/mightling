@@ -43,8 +43,13 @@ export function readTasks(nightDir: string): NightTask[] {
   } catch {
     return [];
   }
+  // Past 1000 the newest are read, by when their file last changed: the folder lists them in no order.
+  if (names.length > 1000) {
+    const changed = new Map(names.map((name) => [name, fs.statSync(path.join(dir, name), { throwIfNoEntry: false })?.mtimeMs ?? 0]));
+    names = names.sort((a, b) => (changed.get(b) ?? 0) - (changed.get(a) ?? 0)).slice(0, 1000);
+  }
   const tasks: NightTask[] = [];
-  for (const name of names.slice(-1000)) {
+  for (const name of names) {
     try {
       const value = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")) as Record<string, unknown>;
       const history = Array.isArray(value.history) ? (value.history as { at?: unknown }[]) : [];
