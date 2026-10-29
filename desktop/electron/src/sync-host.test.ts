@@ -121,6 +121,12 @@ const THREADS = [
   { id: "t-3", cwd: "/home/user/secret/repo" },
   { id: "t-4", cwd: "/home/user/other" },
 ];
+/** Threads the server knows but does not list (older ones, and a throwaway): only `thread/read` tells where they work. */
+const UNLISTED = [
+  { id: "t-5", cwd: "/home/user/secret/old" },
+  { id: "t-6", cwd: "/home/user/proj" },
+  { id: "t-eph", cwd: "/home/user/proj", ephemeral: true },
+];
 
 /**
  * A stand-in `ling` app-server: answers the requests the host makes (a turn started is announced
@@ -178,6 +184,11 @@ function handle(message) {
       return out({ id: message.id, result: { data: loaded, nextCursor: null } });
     case "model/list":
       return out({ id: message.id, result: { data: [{ id: "m-1", model: "m-1", hidden: false }, { id: "m-hidden", model: "m-hidden", hidden: true }], nextCursor: null } });
+    case "thread/read": {
+      const thread = ${JSON.stringify([...THREADS, ...UNLISTED])}.find((thread) => thread.id === params.threadId);
+      if (!thread) return out({ id: message.id, error: { code: -32600, message: "no such thread" } });
+      return out({ id: message.id, result: { thread } });
+    }
     case "thread/resume":
       if (!loaded.includes(params.threadId)) loaded.push(params.threadId);
       return out({ id: message.id, result: { thread: { id: params.threadId, cwd: "/home/user/proj" } } });
@@ -380,11 +391,12 @@ describe("the sync host", () => {
     // Answered already: the policy has no request 7 waiting.
     r.hub.push({ id: 2, kind: "approve", thread: "t-1", request: 7, decision: "accept", by: "the phone" });
     await until(() => r.hub.ack(2) !== undefined);
-    expect(r.hub.ack(2)).toMatchObject({ id: 2, ok: false, error: "no server request 7 is waiting for an answer" });
-    // Never asked at all.
+    expect(r.hub.ack(2)).toMatchObject({ id: 2, ok: false, error: "that approval is not waiting any more" });
+    // Never asked at all: refused here, before the policy is asked.
     r.hub.push({ id: 3, kind: "approve", thread: "t-1", request: 41, decision: "decline", by: "the phone" });
     await until(() => r.hub.ack(3) !== undefined);
-    expect(r.hub.ack(3)).toMatchObject({ ok: false, error: "no server request 41 is waiting for an answer" });
+    expect(r.hub.ack(3)).toMatchObject({ ok: false, error: "that approval is not waiting any more" });
+    expect(r.received().filter((message) => message.id === 41)).toHaveLength(0);
     // A question for the user is answered on the device.
     r.hub.push({ id: 4, kind: "approve", thread: "t-1", request: 8, decision: "accept", by: "the phone" });
     await until(() => r.hub.ack(4) !== undefined);
@@ -429,6 +441,65 @@ describe("the sync host", () => {
     r.hub.push({ id: 5, kind: "send", thread: "t-1", text: "hello", by: "the phone" });
     await until(() => r.hub.ack(5) !== undefined);
     expect(own().slice(4).map((message) => message.method)).toEqual(["turn/start"]);
+  });
+
+  it("leaves a thread kept on this device alone, and answers an approval about the thread it was asked in", async () => {
+    const r = await rig("kept", { exclude: ["/home/user/secret"] });
+    r.host.start();
+    await until(() => offered(r.hub));
+    const own = () => r.received().filter((message) => typeof message.id === "string" && message.id.startsWith(HOST_ID_PREFIX) && !["thread/list", "thread/loaded/list", "model/list"].includes(message.method));
+    const acked = async (id: number) => {
+      await until(() => r.hub.ack(id) !== undefined);
+      return r.hub.ack(id);
+    };
+    const KEPT = "this thread is kept on this device";
+
+    // t-3 works under an excluded folder: no message, whether it is held or not.
+    r.hub.push({ id: 1, kind: "send", thread: "t-3", text: "hello", by: "the phone" });
+    expect(await acked(1)).toEqual({ id: 1, ok: false, error: KEPT, thread: "t-3" });
+    // A thread not listed is read first; under an excluded folder it is not resumed.
+    r.hub.push({ id: 2, kind: "send", thread: "t-5", text: "hello", by: "the phone" });
+    expect(await acked(2)).toMatchObject({ ok: false, error: KEPT });
+    // A thread the server does not know is unknown, so kept too while folders are excluded.
+    r.hub.push({ id: 3, kind: "send", thread: "t-nowhere", text: "hello", by: "the phone" });
+    expect(await acked(3)).toMatchObject({ ok: false, error: KEPT });
+    expect(own().map((message) => [message.method, message.params.threadId])).toEqual([["thread/read", "t-5"], ["thread/read", "t-nowhere"]]);
+    // One not listed in a published folder is read, then resumed and sent to.
+    r.hub.push({ id: 4, kind: "send", thread: "t-6", text: "hello", by: "the phone" });
+    expect(await acked(4)).toEqual({ id: 4, ok: true, thread: "t-6" });
+    expect(own().slice(2).map((message) => [message.method, message.params.threadId])).toEqual([["thread/read", "t-6"], ["thread/resume", "t-6"], ["turn/start", "t-6"]]);
+
+    // No stop in an excluded thread or a throwaway, even with a turn running.
+    r.emit({ method: "thread/started", params: { thread: { id: "t-eph", cwd: "/home/user/proj", ephemeral: true } } });
+    r.emit({ method: "turn/started", params: { threadId: "t-eph", turn: { id: "turn-e" } } });
+    r.emit({ method: "turn/started", params: { threadId: "t-3", turn: { id: "turn-s" } } });
+    // Two server requests of an excluded thread and one about no thread, then one the hub may see.
+    r.emit({ id: 11, method: "item/commandExecution/requestApproval", params: { threadId: "t-3", turnId: "turn-s", itemId: "c" } });
+    r.emit({ id: 12, method: "item/fileChange/requestApproval", params: { threadId: "t-eph", turnId: "turn-e", itemId: "f" } });
+    r.emit({ id: 13, method: "item/commandExecution/requestApproval", params: {} });
+    r.emit({ id: 14, method: "item/commandExecution/requestApproval", params: { threadId: "t-1", turnId: "turn-9", itemId: "c" } });
+    await until(() => r.hub.events.some((event) => event.message.id === 14));
+    expect(r.hub.events.some((event) => [11, 12, 13].includes(event.message.id))).toBe(false);
+    r.hub.push({ id: 5, kind: "stop", thread: "t-eph", by: "the phone" });
+    expect(await acked(5)).toEqual({ id: 5, ok: false, error: KEPT, thread: "t-eph" });
+    r.hub.push({ id: 6, kind: "stop", thread: "t-3", by: "the phone" });
+    expect(await acked(6)).toMatchObject({ ok: false, error: KEPT });
+    expect(r.received().filter((message) => message.method === "turn/interrupt")).toHaveLength(0);
+
+    // The hub naming a published thread does not make an excluded thread's request answerable.
+    r.hub.push({ id: 7, kind: "approve", thread: "t-1", request: 11, decision: "accept", by: "the phone" });
+    expect(await acked(7)).toEqual({ id: 7, ok: false, error: KEPT, thread: "t-3" });
+    r.hub.push({ id: 8, kind: "approve", request: 12, decision: "accept", by: "the phone" });
+    expect(await acked(8)).toMatchObject({ ok: false, error: KEPT, thread: "t-eph" });
+    r.hub.push({ id: 9, kind: "approve", thread: "t-1", request: 13, decision: "accept", by: "the phone" });
+    expect(await acked(9)).toMatchObject({ ok: false, error: KEPT });
+    expect(r.received().filter((message) => [11, 12, 13].includes(message.id))).toHaveLength(0);
+    // A published thread's request is answered, acked and told about its own thread, whatever the hub named.
+    r.hub.push({ id: 10, kind: "approve", thread: "t-4", request: 14, decision: "decline", by: "the phone" });
+    expect(await acked(10)).toEqual({ id: 10, ok: true, thread: "t-1" });
+    expect(r.received()).toContainEqual({ id: 14, result: { decision: "decline" } });
+    expect(r.told).toContainEqual({ text: "Declined from the phone", thread: "t-1" });
+    expect(r.told.some((told) => ["t-3", "t-5", "t-eph", "t-nowhere"].includes(told.thread ?? ""))).toBe(false);
   });
 
   it("starts a thread only in a folder it offered, and acks the new thread", async () => {

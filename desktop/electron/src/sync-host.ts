@@ -44,6 +44,9 @@ export const FOLLOWED: ReadonlySet<string> = new Set([
 /** The server requests another device may answer: the two approvals (`sync_live::ANSWERABLE`). */
 export const ANSWERABLE: ReadonlySet<string> = new Set(["item/commandExecution/requestApproval", "item/fileChange/requestApproval"]);
 
+/** The refusal of a command about a thread kept on this device (`[sync] exclude`, a throwaway), the same in `sync_live`'s host. */
+const KEPT = "this thread is kept on this device";
+
 /** The largest event posted whole (`sync_live::EVENT_CAP`); a bigger one goes as the stub the hub would keep. */
 export const EVENT_CAP = 256 << 10;
 /** The most event bytes in one post; the rest go in the next (the hub takes 16 MiB). */
@@ -522,6 +525,15 @@ export class SyncHost {
     return cwd !== undefined && !this.excluded(cwd);
   }
 
+  /** Whether a command must leave a thread alone: one not published. A thread not seen yet is read first (`thread/read` loads nothing). */
+  private async kept(thread: string): Promise<boolean> {
+    if (!this.cwds.has(thread) && !this.ephemeral.has(thread)) {
+      const read = await this.call("thread/read", { threadId: thread }).catch((): Json => ({}));
+      if (isObject(read.thread) && text(read.thread.id) === thread) this.note(read.thread);
+    }
+    return !this.published(thread);
+  }
+
   private publish(thread: string, message: unknown): void {
     if (!this.config || !this.published(thread)) return;
     let json = JSON.stringify(message);
@@ -615,6 +627,7 @@ export class SyncHost {
       case "send": {
         const message = typeof command.text === "string" ? command.text : "";
         if (!thread || message.trim() === "") return refuse("a message names its thread and has text");
+        if (await this.kept(thread)) return refuse(KEPT);
         if (!this.holding.has(thread)) {
           await this.call("thread/resume", { threadId: thread });
           this.holding.add(thread);
@@ -633,16 +646,21 @@ export class SyncHost {
         if (decision !== "accept" && decision !== "decline") return refuse("an approval is accept or decline");
         const key = JSON.stringify(request);
         const waiting = this.asked.get(key);
-        if (waiting && !ANSWERABLE.has(waiting.method)) return refuse(`${waiting.method} is answered on this device`);
-        if (waiting && thread && waiting.thread !== thread) return refuse("that request is about another thread");
-        // A request not waiting is the policy's to refuse, exactly as a window's answer would be.
+        // Only what this device asked and still waits is answered, about the thread it asked in (never
+        // the hub's word for it); the policy then checks the answer again, as it does a window's.
+        if (!waiting) return refuse("that approval is not waiting any more");
+        if (!ANSWERABLE.has(waiting.method)) return refuse(`${waiting.method} is answered on this device`);
+        const about = waiting.thread;
+        const ack = (error: string): Ack => ({ id: command.id, ok: false, error, ...(about ? { thread: about } : {}) });
+        if (!about || (await this.kept(about))) return ack(KEPT);
         await this.server.send({ id: request, result: { decision } });
         this.asked.delete(key);
-        this.told(decision === "accept" ? `Approved from ${by}` : `Declined from ${by}`, waiting?.thread ?? thread);
-        return { id: command.id, ok: true, ...(thread ? { thread } : {}) };
+        this.told(decision === "accept" ? `Approved from ${by}` : `Declined from ${by}`, about);
+        return { id: command.id, ok: true, thread: about };
       }
       case "stop": {
         if (!thread) return refuse("a stop names its thread");
+        if (await this.kept(thread)) return refuse(KEPT);
         const running = this.turns.get(thread);
         if (running === undefined) return refuse("no turn is running in this thread");
         await this.call("turn/interrupt", { threadId: thread, turnId: running });
