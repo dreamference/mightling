@@ -185,6 +185,18 @@ def test_pairing_through_a_browse_fails_when_the_new_key_gets_no_answer(
     pairing["info"] = answer(255, "", "Connection refused")
     assert not NodePairing.add("spark-1", user="owner")
     assert "did not answer through the new key: Connection refused" in capsys.readouterr().out
+    assert not NodePairing.record_path(NODE).exists()
+
+
+@pytest.mark.parametrize("info", [answer(0, "not json"), answer(0, json.dumps({"version": "1"}))])
+def test_pairing_through_a_browse_is_undone_when_the_new_key_gets_no_node_id_back(
+    advertised, pairing, info, capsys
+):
+    # As in a pairing over a session: only the node's own id through the new key confirms it.
+    pairing["info"] = info
+    assert not NodePairing.add("spark-1", user="owner")
+    assert "pairing removed" in capsys.readouterr().out
+    assert not NodePairing.record_path(NODE).exists()
 
 
 def test_pairing_through_a_browse_stops_when_the_node_does_not_authorise_the_key(

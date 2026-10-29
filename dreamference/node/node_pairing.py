@@ -449,14 +449,17 @@ class NodePairing:
         answer = cls.run(record, "info")
         if answer.returncode != 0:
             print(f"❌ The node did not answer through the new key: {answer.stderr.strip()[-200:]}")
+            cls.record_path(record["node"]).unlink(missing_ok=True)
             return False
         try:
             info = json.loads(answer.stdout)
         except ValueError:
             info = {}
-        if info.get("node") and info["node"] != record["node"]:
+        if not isinstance(info, dict) or info.get("node") != record["node"]:
             print(
                 "❌ The machine that answered is not the node that was advertised; pairing removed."
+                if isinstance(info, dict) and info.get("node")
+                else "❌ The node did not report its id through the new key; pairing removed."
             )
             cls.record_path(record["node"]).unlink(missing_ok=True)
             return False
