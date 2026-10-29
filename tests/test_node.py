@@ -2862,3 +2862,12 @@ def test_job_sender_jobs_logs_cancel_and_fetch_branches(tmp_path, monkeypatch, c
     assert NodeJobSender.fetch(job_id) == 0
     assert f"job-fetched {job_id}" in sent_reqs
 
+
+
+def test_a_service_file_value_with_a_line_break_is_read_back_whole():
+    text = NodeServiceFile.render(8000, "node-a", "1.0\nbeta")
+
+    records = NodeServiceFile.parse(text)
+
+    assert records["version"] == "1.0\nbeta"
+    assert records["node"] == "node-a"
