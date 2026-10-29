@@ -228,7 +228,7 @@ class RemoteEnrolment:
                     )
                     return
                 try:
-                    length = min(int(self.headers.get("Content-Length") or 0), MAX_BODY)
+                    length = max(0, min(int(self.headers.get("Content-Length") or 0), MAX_BODY))
                     request = json.loads(self.rfile.read(length) or b"{}")
                 except (ValueError, OSError):
                     request = {}

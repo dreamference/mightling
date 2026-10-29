@@ -180,6 +180,15 @@ def test_a_body_that_is_not_a_json_object_is_one_wrong_attempt_not_a_crash(head,
     assert listener.finish() == "enrolled:laptop"
 
 
+def test_a_negative_content_length_does_not_lift_the_body_limit():
+    listener = _Listener()
+    body = json.dumps(_good()).encode().rjust(module.MAX_BODY + 500, b" ")
+    status, _ = listener.raw("Content-Length: -1\r\n", body)
+    assert status == 401 and listener.minted == [], "a body past the cap is not read"
+    assert listener.post(_good())[0] == 200
+    assert listener.finish() == "enrolled:laptop"
+
+
 def test_a_body_past_the_limit_is_cut_not_read_whole():
     listener = _Listener()
     body = json.dumps(_good()).encode().rjust(module.MAX_BODY + 500, b" ")
