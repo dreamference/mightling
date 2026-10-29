@@ -505,8 +505,9 @@ impl Context {
             .rsplit_once(':')
             .and_then(|(p, l)| Some((p, l.parse::<u32>().ok()?)))
         {
-            if self.repo.abs(path).is_file() {
-                return self.resolve_location(path, line);
+            let path = crate::output::repository_relative(path, &self.repo.root);
+            if self.repo.abs(&path).is_file() {
+                return self.resolve_location(&path, line);
             }
         }
         let segments = query_segments(query);
@@ -1400,6 +1401,8 @@ impl Context {
 
     /// `outline <file>`.
     pub fn outline(&self, file: &str) -> Result<Answer> {
+        // As `--path` takes it: `./x` and an absolute path name the same file as `x`.
+        let file = &crate::output::repository_relative(file, &self.repo.root);
         let mut answer = self.new_answer("outline", file);
         answer.tagged = false;
         self.note_missing_layers(&mut answer);

@@ -394,6 +394,32 @@ fn search_outline_show() {
 }
 
 #[test]
+fn a_file_named_from_the_working_directory_or_absolutely_answers() {
+    // The model often passes `./x` or the absolute path it sees; `--path` already took both.
+    let f = fixture();
+    let absolute = f.repo.root.join("shapes/report.py");
+    for file in ["./shapes/report.py", absolute.to_str().unwrap()] {
+        let (_, out) = f.run(&["outline", file]);
+        assert!(
+            out.contains("shapes/report.py:6  function shapes.report.summary (to 9)"),
+            "{file}: {out}"
+        );
+    }
+    let absolute = f.repo.root.join("shapes/geometry.py:12");
+    for location in ["./shapes/geometry.py:12", absolute.to_str().unwrap()] {
+        let (_, out) = f.run(&["refs", location]);
+        assert!(
+            out.contains("refs shapes.geometry.Circle.area"),
+            "{location}: {out}"
+        );
+        assert!(
+            out.contains("exact shapes/report.py:9"),
+            "{location}: {out}"
+        );
+    }
+}
+
+#[test]
 fn search_reaches_into_bodies() {
     // `max` and `shape` occur only inside `largest`'s body: the graph's full-text table (names
     // and documentation) finds nothing for them, and before 2026-10-02 neither did `search`.
