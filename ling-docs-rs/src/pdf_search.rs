@@ -29,7 +29,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::collections::{Collection, SECRET_DIRS};
+use crate::collections::{secret_paths, Collection};
 use crate::config::{self, Settings};
 use crate::embed::Embed;
 use crate::index::{self, Background, Env, FileIndexed, Outcome};
@@ -138,9 +138,8 @@ pub fn resolve_local(
     let home = user_home
         .canonicalize()
         .unwrap_or_else(|_| user_home.to_path_buf());
-    if let Some(secret) = SECRET_DIRS
-        .iter()
-        .map(|d| home.join(d))
+    if let Some(secret) = secret_paths(&home)
+        .into_iter()
         .find(|s| resolved.starts_with(s))
     {
         return Err(format!(

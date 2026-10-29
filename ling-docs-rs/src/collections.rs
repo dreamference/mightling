@@ -323,6 +323,24 @@ pub fn is_project_knowledge(root: &Path, codex_home: &Path) -> bool {
         && id_ok
 }
 
+/// Every secret folder under `home`, as named and, when it is a link (`~/.ssh` kept in a dotfiles
+/// folder), as resolved: the folder a link points to is as secret as the link.
+pub fn secret_paths(home: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for dir in SECRET_DIRS {
+        let named = home.join(dir);
+        if let Ok(resolved) = named.canonicalize() {
+            if resolved != named && !out.contains(&resolved) {
+                out.push(resolved);
+            }
+        }
+        if !out.contains(&named) {
+            out.push(named);
+        }
+    }
+    out
+}
+
 /// The secret folders a walk of `root` skips: all of them, except the one holding a project's knowledge folder when `root` is one.
 pub fn secret_dirs(root: &Path, home: &Path) -> Vec<PathBuf> {
     secret_dirs_in(root, home, &config::home())
@@ -331,9 +349,8 @@ pub fn secret_dirs(root: &Path, home: &Path) -> Vec<PathBuf> {
 /// [`secret_dirs`] with the agent's home named.
 pub fn secret_dirs_in(root: &Path, home: &Path, codex_home: &Path) -> Vec<PathBuf> {
     let knowledge = is_project_knowledge(root, codex_home);
-    SECRET_DIRS
-        .iter()
-        .map(|d| home.join(d))
+    secret_paths(home)
+        .into_iter()
         .filter(|s| !(knowledge && root.starts_with(s)))
         .collect()
 }
@@ -357,8 +374,7 @@ pub fn validate_root_in(root: &Path, user_home: &Path, codex_home: &Path) -> Res
     if is_project_knowledge(root, codex_home) {
         return Ok(());
     }
-    for secret in SECRET_DIRS {
-        let secret = home.join(secret);
+    for secret in secret_paths(&home) {
         if root.starts_with(&secret) {
             bail!(
                 "{} is inside {}, which is never indexed",
@@ -484,6 +500,30 @@ mod tests {
         assert!(docs
             .add(&home.join("notes"), Some("Bad Name"), &home)
             .is_err());
+    }
+
+    #[test]
+    fn a_secret_folder_kept_elsewhere_through_a_link_is_still_secret() {
+        // `~/.ssh` and `~/.config` as links into a dotfiles folder: the folders they point to are
+        // as secret as the links, and are neither a collection nor walked.
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        for dir in ["dotfiles/ssh", "dotfiles/config/app", "Documents"] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+        std::os::unix::fs::symlink(home.join("dotfiles/ssh"), home.join(".ssh")).unwrap();
+        std::os::unix::fs::symlink(home.join("dotfiles/config"), home.join(".config")).unwrap();
+        let codex = home.join(".mightling");
+        let mut docs = DocsToml::default();
+        assert!(validate_root_in(&home.join("dotfiles/ssh"), &home, &codex).is_err());
+        assert!(docs
+            .add(&home.join("dotfiles/config/app"), None, &home)
+            .is_err());
+        assert!(docs.add(&home.join(".ssh"), None, &home).is_err());
+        let skipped = secret_dirs_in(&home.join("dotfiles"), &home, &codex);
+        assert!(skipped.contains(&home.join("dotfiles/ssh")));
+        assert!(skipped.contains(&home.join("dotfiles/config")));
+        assert!(docs.add(&home.join("Documents"), None, &home).is_ok());
     }
 
     #[test]
