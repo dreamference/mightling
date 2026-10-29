@@ -223,8 +223,14 @@ impl Ocr {
         // reloads a model now and then (a fraction of a second) rather than holding them all.
         self.models
             .retain(|file, _| *file == det || *file == rec || *file == CLS);
-        let img = preprocess(img);
-        let img = pad_for_detection(&img);
+        let Some(img) = detection_input(img) else {
+            return Ok(PageText {
+                lines: Vec::new(),
+                confidence: 0.0,
+                route: "none: too thin to read".into(),
+                tesseract_script: None,
+            });
+        };
         let quads = self.detect(det, &img)?;
         let mut crops: Vec<Image> = quads.iter().map(|q| crop(&img, q)).collect();
         self.classify(&mut crops)?;
@@ -378,15 +384,38 @@ fn preprocess(img: &Image) -> Image {
     img
 }
 
-/// RapidOCR's `apply_vertical_padding`: a very flat or very low image gets black bands.
-fn pad_for_detection(img: &Image) -> Image {
+/// The largest image detection is given: twice the largest page [`preprocess`] makes. A strip a
+/// few pixels high, brought up to `MIN_SIDE` and then padded, would be far larger (a 2000 × 1
+/// strip, 60000 × 15000) and the worker killed over its memory cap.
+const MAX_DETECTION_PIXELS: usize = 2 * MAX_SIDE * MAX_SIDE;
+
+/// What detection reads of an image: [`preprocess`], then [`pad_for_detection`]; none when that
+/// is over [`MAX_DETECTION_PIXELS`].
+fn detection_input(img: &Image) -> Option<Image> {
+    let img = preprocess(img);
+    let height = img.height + 2 * vertical_pad(&img);
+    if img.width.saturating_mul(height) > MAX_DETECTION_PIXELS {
+        return None;
+    }
+    Some(pad_for_detection(&img))
+}
+
+/// The band [`pad_for_detection`] adds above and below.
+fn vertical_pad(img: &Image) -> usize {
     let (h, w) = (img.height, img.width);
     if h <= MIN_HEIGHT || w as f64 / h as f64 > WIDTH_HEIGHT_RATIO {
         let new_h = (((w as f64 / WIDTH_HEIGHT_RATIO) as usize).max(MIN_HEIGHT) * 2) as f64;
-        let pad = ((new_h - h as f64).abs() / 2.0) as usize;
-        return img.pad_vertical(pad, pad);
+        return ((new_h - h as f64).abs() / 2.0) as usize;
     }
-    img.clone()
+    0
+}
+
+/// RapidOCR's `apply_vertical_padding`: a very flat or very low image gets black bands.
+fn pad_for_detection(img: &Image) -> Image {
+    match vertical_pad(img) {
+        0 => img.clone(),
+        pad => img.pad_vertical(pad, pad),
+    }
 }
 
 /// `get_rotate_crop_image`: a line's box straightened; a tall result turned a quarter.
@@ -470,6 +499,15 @@ mod tests {
             "the height brought to 2 × max(900 / 8, 30)"
         );
         assert_eq!(pad_for_detection(&Image::new(500, 400)).height, 400);
+    }
+
+    #[test]
+    fn a_strip_too_thin_to_read_is_not_blown_up_for_detection() {
+        assert!(detection_input(&Image::new(2000, 1)).is_none());
+        let strip = detection_input(&Image::new(2000, 30)).unwrap();
+        assert_eq!((strip.width, strip.height), (2000, 500));
+        let page = detection_input(&Image::new(1700, 2200)).unwrap();
+        assert_eq!((page.width, page.height), (1536, 1984));
     }
 
     #[test]
