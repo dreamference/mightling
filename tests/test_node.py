@@ -521,6 +521,9 @@ def test_the_node_commands_reach_the_advertiser(machine, monkeypatch, capsys):
     monkeypatch.setattr(
         NodeAdvertiser, "disable", classmethod(lambda cls: calls.append(("disable",)) or True)
     )
+    from dreamference.forge.forge_service import ForgeService
+
+    monkeypatch.setattr(ForgeService, "rebind", classmethod(lambda cls: calls.append(("rebind",))))
     for argv, code in (
         (["node", "enable", "--no-web"], 0),
         (["node", "disable"], 0),
@@ -531,7 +534,7 @@ def test_the_node_commands_reach_the_advertiser(machine, monkeypatch, capsys):
         with pytest.raises(SystemExit) as exit_info:
             main()
         assert exit_info.value.code == code
-    assert calls == [("enable", True), ("disable",)]
+    assert calls == [("enable", True), ("disable",), ("rebind",)]
     assert "Node id:" in capsys.readouterr().out
 
 

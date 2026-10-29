@@ -103,6 +103,18 @@ class ForgeBind:
         return found
 
     @classmethod
+    def advertised_addresses(cls) -> list[str]:
+        """Return the LAN addresses the forge listens on now: none while the node is not advertised.
+
+        Returns:
+            list[str]: `lan_addresses()` once `node enable` has run and `node disable` has not,
+            else an empty list (loopback only).
+        """
+        from dreamference.node.node_settings import NodeSettings
+
+        return cls.lan_addresses() if NodeSettings.advertised() else []
+
+    @classmethod
     def publish_arguments(
         cls, addresses: list[str], host_port: int, container_port: int
     ) -> list[str]:

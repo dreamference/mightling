@@ -60,6 +60,42 @@ def test_the_forge_binds_loopback_and_the_lan_never_bridges_or_overlays():
     assert ForgeBind.lan_addresses(interfaces, avahi_text=deny) == []
 
 
+def test_the_forge_follows_the_node_off_the_lan_and_back(monkeypatch, capsys):
+    from dreamference.node.node_settings import NodeSettings
+
+    advertised = [False]
+    monkeypatch.setattr(NodeSettings, "advertised", classmethod(lambda cls: advertised[0]))
+    monkeypatch.setattr(
+        ForgeBind, "lan_addresses", classmethod(lambda cls, *a, **k: [f"{LAN}.50.10"])
+    )
+    monkeypatch.setattr(ForgeAppIni, "write", classmethod(lambda cls, *a: None))
+    monkeypatch.setattr(ForgeAnonymity, "write_patterns", classmethod(lambda cls, *a: None))
+    monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: True))
+    restarts = []
+    monkeypatch.setattr(
+        ForgeService, "restart", classmethod(lambda cls: restarts.append(1) or True)
+    )
+    ForgeSettings.update_state(role="record")
+
+    def published():
+        argv = ForgeService.run_arguments()
+        return [argv[i + 1] for i, word in enumerate(argv[:-1]) if word == "-p"]
+
+    assert published() and all(p.startswith("127.0.0.1:") for p in published()), (
+        "a node that is not advertised keeps its forge on loopback"
+    )
+    assert not ForgeService.rebind() and not restarts
+    advertised[0] = True
+    assert ForgeService.rebind() and restarts == [1]
+    assert any(p.startswith(f"{LAN}.50.10:") for p in published())
+    assert not ForgeService.rebind() and restarts == [1]
+    advertised[0] = False
+    assert ForgeService.rebind() and restarts == [1, 1], (
+        "`node disable` takes the forge off the LAN"
+    )
+    assert "loopback only" in capsys.readouterr().out
+
+
 def test_every_publish_names_an_address():
     arguments = ForgeBind.publish_arguments([f"{LAN}.50.10"], 3200, 3000)
     assert arguments == ["-p", "127.0.0.1:3200:3000", "-p", f"{LAN}.50.10:3200:3000"]
@@ -1233,6 +1269,9 @@ def test_the_node_list_shows_each_nodes_forge_role(monkeypatch):
 
 
 def test_the_forge_is_published_again_when_the_advertised_addresses_change(monkeypatch, capsys):
+    from dreamference.node.node_settings import NodeSettings
+
+    monkeypatch.setattr(NodeSettings, "advertised", classmethod(lambda cls: True))
     monkeypatch.setattr(ForgeService, "housekeeping", classmethod(lambda cls: None))
     monkeypatch.setattr(ForgeService, "host_name", classmethod(lambda cls: "gx10-1a2b"))
     monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: True))
