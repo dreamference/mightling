@@ -375,3 +375,16 @@ def test_a_secret_another_start_created_first_is_the_one_kept(monkeypatch, store
     monkeypatch.setattr(image_search_sidecar.secrets_module, "token_urlsafe", racing)
     assert ImageSearchSidecar.secret() == "theirs"
     assert (store / "secret").read_text() == "theirs"
+
+
+def test_a_request_whose_params_are_a_list_does_not_stop_the_server():
+    # JSON-RPC allows positional params; one such message must not end the session's tool.
+    server = ImageSearchMcp(search=lambda body: (200, {}), air_gapped=lambda: False)
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": ["x"]},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+    ]
+    out = io.StringIO()
+    server.run(io.StringIO("".join(json.dumps(m) + "\n" for m in messages)), out)
+    replies = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert [reply["id"] for reply in replies] == [1, 2]
