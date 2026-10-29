@@ -410,7 +410,8 @@ class NightShiftAutofill:
         for task in NightShiftQueue.tasks(night_dir):
             if task.get("status") in ("done", "no-change", "failed", "stalled", "cancelled"):
                 continue
-            match = re.match(r"\[autofill:(.+?)\]", str(task.get("task", "")))
+            # The whole first line: a parametrized test's key holds `]` itself.
+            match = re.match(r"\[autofill:(.+)\]$", str(task.get("task", "")).split("\n", 1)[0])
             if match:
                 keys.add(match.group(1))
         return keys

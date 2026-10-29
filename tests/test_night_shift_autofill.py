@@ -174,6 +174,17 @@ def test_sensitive_findings_are_skipped(tmp_path: Path) -> None:
     assert chosen == [fine] and len(skipped) == 6
 
 
+def test_a_queued_parametrized_test_is_not_queued_again(tmp_path: Path) -> None:
+    night = tmp_path / "night"
+    (night / "tasks").mkdir(parents=True)
+    key = "ci-test:tests/test_a.py::test_b[x-1]"
+    candidate = AutofillCandidate(key, "ci", "t", "d", None, "a")
+    task = NightShiftAutofill.task_text(candidate)
+    (night / "tasks" / "t1.json").write_text(json.dumps({"id": "t1", "status": "queued", "task": task}))
+    assert NightShiftAutofill.queued_keys(night) == {key}
+    assert NightShiftAutofill.pick(night, [candidate], 5, TODAY) == ([], [])
+
+
 def test_dedupe_against_the_ledger_and_the_queue_and_cooldown_ends(tmp_path: Path) -> None:
     night = tmp_path / "night"
     (night / "tasks").mkdir(parents=True)
