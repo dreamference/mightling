@@ -411,3 +411,103 @@ def test_the_probe_drops_pythonpath_as_codex_does(tmp_path, monkeypatch):
     assert seen.read_text().strip() == "unset"
     assert ImageSearchMcp.probe(str(admin), {"PATH": os.environ["PATH"], "PYTHONPATH": "/x"})
     assert seen.read_text().strip() == "unset"
+
+
+# -- what IMAGE_SEARCH §3 and §5 state about the containers and the tool ----------------------------
+
+
+def test_the_service_runs_as_the_user_from_a_stock_image_and_boots_without_failing():
+    run = ImageSearchSidecar.run_command("http://host:8000/v1", "m", siglip=True)
+    assert run[run.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
+    assert "MIGHTLING_DATA_DIR=/config/data" in run
+    image, shell, flag, script = run[-4:]
+    assert (image, shell, flag) == ("python:3-slim", "sh", "-c")
+    # Pillow goes to /tmp (the root filesystem is not the user's), is installed only when the
+    # image lacks it, and a failed install still starts the service: the funnel runs without it.
+    assert "PIP_TARGET=/tmp/pylib" in script and "import PIL" in script
+    assert "|| true;" in script and script.endswith("python3 /config/service.py")
+
+
+def test_siglip_runs_infinity_with_its_weights_in_a_named_volume():
+    run = ImageSearchSidecar.siglip_command()
+    assert run[run.index("--network") + 1] == SIDECAR_NETWORK
+    assert "dreamference-siglip-cache:/app/.cache" in run
+    assert run[-6:] == ["michaelf34/infinity:latest-cpu", "v2", "--model-id", "google/siglip-base-patch16-224",
+                        "--port", "9100"]
+
+
+def test_the_vision_ranker_asks_for_the_first_served_model(monkeypatch):
+    class Answer(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    asked = []
+
+    def urlopen(url, timeout):
+        asked.append(url)
+        return Answer(json.dumps({"data": [{"id": "served/first"}, {"id": "other"}]}).encode())
+
+    monkeypatch.setattr(image_search_sidecar.urllib.request, "urlopen", urlopen)
+    assert ImageSearchSidecar.served_model("http://host:8000/", "fallback") == "served/first"
+    assert asked == ["http://host:8000/v1/models"]
+
+    def refuse(url, timeout):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(image_search_sidecar.urllib.request, "urlopen", refuse)
+    assert ImageSearchSidecar.served_model("http://host:8000", "fallback") == "fallback"
+
+
+def test_the_live_search_posts_to_the_loopback_service_with_the_secret(monkeypatch, store):
+    store.mkdir(parents=True)
+    (store / "secret").write_text("s3cret\n")
+    sent = []
+
+    class Answer(io.BytesIO):
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def urlopen(request, timeout):
+        sent.append(request)
+        return Answer(b'{"response": "ok"}')
+
+    monkeypatch.setattr(image_search_mcp.urllib.request, "urlopen", urlopen)
+    assert ImageSearchMcp.live_search({"queries": ["x"], "count": 4}) == (200, {"response": "ok"})
+    (request,) = sent
+    assert request.full_url == "http://127.0.0.1:8768/search" and request.get_method() == "POST"
+    assert request.get_header("X-mightling-image-token") == ImageSearchMcp.secret()
+    assert json.loads(request.data) == {"queries": ["x"], "count": 4}
+
+
+def test_the_configured_air_gap_is_read_on_every_call(monkeypatch):
+    from dreamference.config import DreamferenceConfig
+
+    level = {"now": "on"}
+    monkeypatch.setattr(DreamferenceConfig, "resolve_airgapped_level", classmethod(lambda cls, cwd=None: level["now"]))
+    monkeypatch.setattr(ImageSearchMcp, "sealed_by", classmethod(lambda cls, pid: False))
+    assert ImageSearchMcp.live_air_gapped() is True
+    level["now"] = "off"
+    assert ImageSearchMcp.live_air_gapped() is False
+
+    def boom(body):
+        raise AssertionError("searched while air-gapped")
+
+    server = ImageSearchMcp(search=boom)
+    level["now"] = "on"
+    assert server.call(TOOL_NAME, {"queries": ["x"]})["isError"] is True
+
+
+def test_a_call_without_a_count_asks_for_four():
+    sent = []
+    server = ImageSearchMcp(search=lambda body: (sent.append(body), (200, {"response": ""}))[1],
+                            air_gapped=lambda: False)
+    server.call(TOOL_NAME, {"queries": ["x"]})
+    assert sent == [{"queries": ["x"], "count": 4}]
