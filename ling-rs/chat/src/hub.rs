@@ -1335,7 +1335,7 @@ impl Hub {
         let Some((adapter, rest)) = chat.split_once(':') else { return };
         let mut path = format!("/api/repos/current?bridge={}&chat={}", query_escape(adapter), query_escape(rest));
         if adapter == "telegram"
-            && let Some(repo) = self.active_repo_for_telegram_chat(chat).await
+            && let Some(repo) = self.active_repo_for_chat(chat).await
         {
             path.push_str(&format!("&repo={}", query_escape(&repo.to_string())));
         }
@@ -1755,7 +1755,7 @@ impl Hub {
                     self.launch_pair_decide(id, false);
                     "Declined."
                 }
-                (Local::RepoConfirm { .. }, Reply::Approve) if adapter_of(&pending.chat) == "telegram" && self.airgapped => {
+                (Local::RepoConfirm { .. }, Reply::Approve) if off_node(adapter_of(&pending.chat)) && self.airgapped => {
                     "Not sent: the air gap is on."
                 }
                 (Local::RepoConfirm { action, thread, confirm, repo, notified }, Reply::Approve) => {
