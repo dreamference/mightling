@@ -376,8 +376,17 @@ fn device_of_kind(state: &Path, token: &str, kind: DeviceKind) -> Option<Device>
 
 /// `ling web revoke <device>`: by id or by exact name. Returns the devices removed.
 pub fn revoke_device(state: &Path, which: &str) -> std::io::Result<Vec<Device>> {
+    revoke_devices_where(state, |d| d.id == which || d.name == which)
+}
+
+/// Revokes the one device with id `id`; a device merely named so stays.
+pub fn revoke_device_by_id(state: &Path, id: &str) -> std::io::Result<Vec<Device>> {
+    revoke_devices_where(state, |d| d.id == id)
+}
+
+fn revoke_devices_where(state: &Path, matches: impl Fn(&Device) -> bool) -> std::io::Result<Vec<Device>> {
     change_devices(state, |devices| {
-        let (gone, kept): (Vec<Device>, Vec<Device>) = std::mem::take(devices).into_iter().partition(|d| d.id == which || d.name == which);
+        let (gone, kept): (Vec<Device>, Vec<Device>) = std::mem::take(devices).into_iter().partition(matches);
         *devices = kept;
         let any = !gone.is_empty();
         (gone, any)
@@ -566,6 +575,15 @@ mod tests {
             });
             assert_eq!(taken, 1);
         }
+    }
+
+    #[test]
+    fn revoking_by_id_leaves_a_device_named_like_that_id() {
+        let state = scratch("revoke-by-id");
+        let (phone, _) = add_device(&state, "phone").unwrap();
+        let (_, agent_token) = add_device_of(&state, &phone, DeviceKind::Sync).unwrap();
+        assert_eq!(revoke_device_by_id(&state, &phone).unwrap().len(), 1);
+        assert!(sync_device_for_token(&state, &agent_token).is_some(), "the agent named after the phone's id is still paired");
     }
 
     #[test]

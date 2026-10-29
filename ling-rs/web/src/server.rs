@@ -1083,7 +1083,7 @@ async fn devices_revoke(State(server): State<Arc<Server>>, headers: HeaderMap, F
     let notice = if !known {
         Some("No paired device has that id.".to_string())
     } else {
-        match auth::revoke_device(state, id) {
+        match auth::revoke_device_by_id(state, id) {
             Ok(_) => None,
             Err(err) => Some(format!("Could not revoke it: {err}")),
         }
