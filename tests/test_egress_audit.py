@@ -1029,3 +1029,12 @@ def test_an_interrupted_sendmmsg_on_a_route_lookup_socket_reaches_it_once(resume
                  'msg_len=1}], 1, 0) = 1\n')
     trace = StraceParser.parse(text)
     assert trace.destinations == {"198.51.100.7:443": 1}
+
+
+@pytest.mark.parametrize(
+    "vllm_host, port",
+    [("localhost:8001", 8001), ("http://localhost:8001", 8001), ("https://localhost", 443), ("localhost", 80)],
+)
+def test_the_model_servers_port_is_allowed_with_or_without_a_scheme(vllm_host, port):
+    # Without `http://`, urlparse would read `localhost` as the scheme and find no port.
+    assert EgressAudit.allowed_ports(vllm_host)[port] == "model server"
