@@ -136,8 +136,10 @@ impl ChatReposSettings {
         let Ok(root) = text.parse::<toml::Table>() else { return settings };
         let Some(table) = root.get("chat_repos").and_then(toml::Value::as_table) else { return settings };
 
-        if let Some(enabled) = table.get("enabled").and_then(toml::Value::as_bool) {
-            settings.enabled = enabled;
+        // A value the user wrote but not as a boolean (`"false"`, `0`) turns repositories off rather
+        // than leaving the default on; only `true` or `"true"` keeps them on.
+        if let Some(enabled) = table.get("enabled") {
+            settings.enabled = enabled.as_bool().unwrap_or_else(|| enabled.as_str().is_some_and(|s| s.trim().eq_ignore_ascii_case("true")));
         }
         if let Some(items) = table.get("bridges").and_then(toml::Value::as_array) {
             let parsed: Option<Vec<String>> = items
@@ -5684,6 +5686,17 @@ mod tests {
         assert_eq!(custom.work_answer_seconds, 600);
         assert_eq!(custom.work_tool_calls, 50);
         assert_eq!(custom.work_command_seconds, 120);
+    }
+
+    /// An `enabled` the user wrote but not as a boolean is read as off, not as the default on.
+    #[test]
+    fn an_enabled_that_is_not_a_boolean_turns_repositories_off() {
+        for value in ["\"false\"", "\"no\"", "0", "\"\""] {
+            let settings = ChatReposSettings::from_toml(&format!("[chat_repos]\nenabled = {value}\n"));
+            assert!(!settings.enabled, "enabled = {value}");
+        }
+        assert!(ChatReposSettings::from_toml("[chat_repos]\nenabled = \"true\"\n").enabled);
+        assert!(ChatReposSettings::from_toml("[chat_repos]\nmax_checkouts = 3\n").enabled);
     }
 
     /// A checkout whose `.git/config` and `.gitattributes` name a program for every hook that
