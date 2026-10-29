@@ -598,3 +598,17 @@ def test_status_names_the_server_the_bot_and_who_is_allowed(machine, capsys):
 def test_remove_still_finishes_when_the_files_are_already_gone(machine):
     assert MatrixHomeserver.remove(True) == 0
     assert machine.argv("docker", "rm", "-f", mh.MATRIX_CONTAINER)
+
+
+def test_a_bot_token_the_homeserver_did_not_answer_for_is_kept(machine):
+    # Only a 401 says the token is gone; a reply that never came must not re-register the bot,
+    # which the homeserver refuses since the name is taken.
+    assert MatrixHomeserver.start() == 0
+    answer = machine.request
+
+    def unreachable_whoami(method, url, body=None, token=None):
+        return (0, {}) if url.endswith("/whoami") else answer(method, url, body, token)
+
+    machine.request = unreachable_whoami
+    assert MatrixHomeserver.start() == 0
+    assert machine.registered == [mh.BOT_LOCALPART]
