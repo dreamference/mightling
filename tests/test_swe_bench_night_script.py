@@ -1370,3 +1370,111 @@ def test_a_night_runs_verified_unless_told_otherwise(tmp_path):
 def test_three_arms_end_the_night_before_any_round(tmp_path):
     status, recorded, folder = night(tmp_path, "default tests-v2 issue-v1")
     assert status == 2 and runs(recorded) == [] and (folder / "failed").exists()
+
+
+@pytest.mark.parametrize(
+    "production", [{}, {"LOCAL_PROD_STOP": "m0-prod8000", "LOCAL_RESTORE_ENGINE": "none"}]
+)
+def test_local_arms_serve_each_arm_on_this_machine_and_bring_production_back(tmp_path, production):
+    # LOCAL_ARMS=1 (the 1.8.0 bar night): the same on-sglang/on-engine arms, served by the local helper (a
+    # stand-in here, recording into the night's call log) instead of over ssh; never the remote helper.
+    calls = tmp_path / "calls.txt"
+    helper = tmp_path / "local_arm.sh"
+    helper.write_text(
+        "#!/bin/bash\n"
+        f'echo "helper $* [$PROD_STOP|$RESTORE_ENGINE|$DREAMFERENCE_VLLM_HOST]" >> "{calls}"\n'
+        'case "$1" in serve) echo "ready $2 image-of-$2" ;; restore) echo restored ;; esac\n'
+    )
+    helper.chmod(helper.stat().st_mode | stat.S_IXUSR)
+    stand_ins = tmp_path / "stand-ins"
+    stand_ins.mkdir()
+    ssh = stand_ins / "ssh"
+    ssh.write_text(f'#!/bin/bash\necho "ssh $*" >> "{calls}"\nexit 1\n')
+    ssh.chmod(ssh.stat().st_mode | stat.S_IXUSR)
+    status, recorded, folder = night(
+        tmp_path,
+        "default+on-sglang default+on-engine",
+        LOCAL_ARMS="1",
+        LOCAL_ARM_HELPER=str(helper),
+        REMOTE="",
+        **production,
+    )
+    assert status == 0 and (folder / "done").exists(), recorded
+    assert not any(line.startswith("ssh ") for line in recorded)
+    order = [
+        line.split(" [")[0] if line.startswith("helper ") else line.split(" --")[0]
+        for line in recorded
+        if line.startswith(("helper ", "swe-bench run ", "swe-bench eval "))
+    ]
+    assert order == [
+        "helper serve sglang",
+        "swe-bench run",
+        "helper serve engine",
+        "swe-bench run",
+        # Production back once both rounds have run, before the regrades; the EXIT trap's is cleared.
+        "helper restore",
+        "swe-bench eval n4-default-on-sglang",
+        "swe-bench eval n4-default-on-engine",
+    ]
+    settings = f"[{production.get('LOCAL_PROD_STOP', '')}|{production.get('LOCAL_RESTORE_ENGINE', 'sglang')}|]"
+    assert all(line.endswith(settings) for line in recorded if line.startswith("helper "))
+    with pathlib.Path(SCRIPT).open() as script:
+        body = script.read()
+    assert '--setenv=LOCAL_ARMS="$LOCAL_ARMS"' in body
+    assert '--setenv=LOCAL_PROD_STOP="$LOCAL_PROD_STOP"' in body
+
+
+def test_without_local_arms_an_engine_arm_still_needs_its_remote_machine(tmp_path):
+    status, recorded, folder = night(
+        tmp_path, "default+on-sglang default+on-engine", LOCAL_ARMS="0", REMOTE=""
+    )
+    assert status == 1 and not runs(recorded) and (folder / "failed").exists()
+
+
+def test_local_arms_pass_each_arms_engine_flags_and_keep_its_step_trace(tmp_path):
+    # The fair-pairing night's shape: the same engine twice, one flag apart; each engine round writes a step
+    # trace, kept in the night's folder once production is back.
+    calls, traces = tmp_path / "calls.txt", tmp_path / "traces"
+    helper = tmp_path / "local_arm.sh"
+    helper.write_text(
+        "#!/bin/bash\n"
+        f'echo "helper $* [$ENGINE_ARGS|$ENGINE_ENV]" >> "{calls}"\n'
+        'case "$1" in serve) echo "ready $2 image"\n'
+        '    t="${ENGINE_ENV#LING_STEP_TRACE=/root/.cache/dreamference/night-traces/}"\n'
+        f'    [ -n "$ENGINE_ENV" ] && echo "{{}}" > "{traces}/$t" ;;\n'
+        "restore) echo restored ;; esac\n"
+    )
+    helper.chmod(helper.stat().st_mode | stat.S_IXUSR)
+    status, recorded, folder = night(
+        tmp_path,
+        "default+on-engine+engine-fair-pairing-0 default+on-engine+engine-fair-pairing-1",
+        LOCAL_ARMS="1",
+        LOCAL_ARM_HELPER=str(helper),
+        LOCAL_STEP_TRACE="1",
+        TRACE_HOST=str(traces),
+    )
+    assert status == 0 and (folder / "done").exists(), recorded
+    served = [line for line in recorded if line.startswith("helper serve")]
+    trace = "LING_STEP_TRACE=/root/.cache/dreamference/night-traces"
+    assert served == [
+        f"helper serve engine [--fair-pairing 0|{trace}/n4-default-on-engine-engine-fair-pairing-0.jsonl]",
+        f"helper serve engine [--fair-pairing 1|{trace}/n4-default-on-engine-engine-fair-pairing-1.jsonl]",
+    ]
+    assert all("--fair-pairing" not in line for line in runs(recorded))
+    kept = sorted(path.name for path in (folder / "step-trace").iterdir())
+    assert kept == [
+        "n4-default-on-engine-engine-fair-pairing-0.jsonl",
+        "n4-default-on-engine-engine-fair-pairing-1.jsonl",
+    ]
+
+
+def test_engine_flags_without_local_arms_end_the_night_before_any_round(tmp_path):
+    status, recorded, folder = night(
+        tmp_path, "default+on-engine+engine-fair-pairing-1 default+on-sglang", REMOTE="node-b"
+    )
+    assert status == 2 and not runs(recorded) and (folder / "failed").exists()
+
+
+def test_a_misspelt_engine_flag_ends_the_night_before_any_round(tmp_path):
+    status, recorded, _ = night(tmp_path, "default+on-engine+engine-fair default", LOCAL_ARMS="1")
+    assert status == 2 and not runs(recorded)
