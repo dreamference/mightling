@@ -711,6 +711,20 @@ def test_a_boolean_or_a_byte_order_mark_still_reads_as_airgapped():
     assert not ForgeGithubMirror.airgapped()
 
 
+@pytest.mark.parametrize("where", ["user default", "environment"])
+def test_the_airgapped_default_set_by_the_command_stops_the_mirror(monkeypatch, where):
+    """`/airgapped default on` writes the user-level file the resolver reads, not Codex's."""
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_CONFIG_PATH", raising=False)
+    if where == "environment":
+        monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
+    else:
+        user = Path("~/.config/dreamference/config.toml").expanduser()
+        user.parent.mkdir(parents=True, exist_ok=True)
+        user.write_text('mightling_airgapped = "on"\n')
+    assert ForgeGithubMirror.airgapped()
+
+
 # -- the phone account (§2.7) ------------------------------------------------------------------------
 
 
