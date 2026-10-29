@@ -931,4 +931,10 @@ fn a_submodule_whose_path_has_a_space_is_left_out_of_the_superprojects_roots() {
     assert_eq!(f.repo.submodules(), ["my lib"]);
     let roots: Vec<String> = plan::detect(&f.repo).into_iter().map(|t| t.root).collect();
     assert!(roots.iter().all(|r| !r.starts_with("my lib")), "{roots:?}");
+    // Its name holds the space too; it is still evaluated and shown, not silently dropped.
+    let listed: Vec<(String, String)> = decisions(&f.repo)
+        .into_iter()
+        .map(|s| (s.name, s.path))
+        .collect();
+    assert_eq!(listed, [("my lib".to_string(), "my lib".to_string())]);
 }
