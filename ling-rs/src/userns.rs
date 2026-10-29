@@ -412,6 +412,51 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_startup_message_is_the_specs_word_for_word() {
+        // specs/DREAMFERENCE_MIGHTLING_NO_SUDO.md §6.1, on a client with no profile for bwrap.
+        let lines = startup_lines(&refused(), &ubuntu_2404(vec![]), false);
+        let lines: Vec<&str> = lines.iter().map(|line| line.trim_start()).collect();
+        assert_eq!(
+            lines,
+            [
+                "⚠️ ling's sandbox cannot start on this machine: /usr/bin/bwrap is refused a user namespace (bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted).",
+                "Each command the agent runs fails in the sandbox and then asks to run outside it; approving runs it with all your access. /airgapped on is refused.",
+                "The fix, once per machine, by an administrator: an AppArmor profile that lets /usr/bin/bwrap alone create its namespaces:",
+                r"printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile puffin-bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' | sudo tee /etc/apparmor.d/puffin-bwrap >/dev/null && sudo apparmor_parser -r /etc/apparmor.d/puffin-bwrap",
+            ]
+        );
+    }
+
+    #[test]
+    fn no_answer_turns_the_sandbox_off_or_offers_full_access() {
+        // §6.1: never the sysctl, never --no-sandbox, never Full Access, whatever the machine.
+        let profile = |name: &str| PathBuf::from(format!("/etc/apparmor.d/{name}"));
+        let hosts = [
+            ubuntu_2404(vec![]),
+            Host { admin: true, ..ubuntu_2404(vec![]) },
+            ubuntu_2404(vec![profile("bwrap-userns-restrict")]),
+            ubuntu_2404(vec![profile("bwrap-userns-restrict"), profile("puffin-bwrap")]),
+            ubuntu_2404(vec![profile("a"), profile("b")]),
+            Host { restricted: Some(false), ..Host::default() },
+            Host { restricted: None, ..Host::default() },
+        ];
+        for sandbox in [refused(), Sandbox::Missing] {
+            for host in &hosts {
+                let mut said = startup_lines(&sandbox, host, false);
+                said.extend(airgapped_conflict(&sandbox, host, Level::On));
+                said.extend(on_refusal(&sandbox, host).unwrap_or_default());
+                assert!(said.len() >= 3, "{sandbox:?} {host:?}: {said:?}");
+                for line in &said {
+                    let lower = line.to_lowercase();
+                    for forbidden in ["sysctl -w", "apparmor_restrict_unprivileged_userns=0", "--no-sandbox", "full access", "full-access", "--dangerously-bypass", "--yolo"] {
+                        assert!(!lower.contains(forbidden), "{forbidden} in {line}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn nothing_is_said_where_the_sandbox_works_or_the_session_has_none() {
         assert!(startup_lines(&Sandbox::Works, &Host::default(), false).is_empty());
         assert!(startup_lines(&Sandbox::Unknown, &Host::default(), false).is_empty());
@@ -505,6 +550,17 @@ pub(crate) mod tests {
         let lines = crate::airgapped::command(None::<String>, "on");
         fake(None);
         assert!(lines[0].starts_with("Airgapped not changed: /usr/bin/bwrap is refused"), "{lines:?}");
+    }
+
+    // §6.2: `ling airgapped default on` answers as `/airgapped on` does, and changes nothing.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_default_is_not_set_to_on_without_the_sandbox() {
+        fake(Some(refused()));
+        let lines = crate::airgapped::command(None::<String>, "default on");
+        fake(None);
+        assert!(lines[0].starts_with("Airgapped not changed: /usr/bin/bwrap is refused"), "{lines:?}");
+        assert_eq!(lines.last().map(String::as_str), Some("Then restart ling."));
     }
 
     #[test]
