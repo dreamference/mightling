@@ -76,7 +76,7 @@ The `ling` agent does **not** use it: it uses `ling-code` (built in `DREAMFERENC
 
 Each symbol records `name` (unqualified), `file_path`, `line_start`, `line_end` and `docstring`. There is no parent class and no separate method type: methods are `function`s. Files that don't parse yield no symbols, silently. Other languages yield no symbols, but are still tokenized, full-text indexed and embedded.
 
-**Tokenization** (`TFIDFCalculator.tokenize`): it takes `[A-Za-z0-9_]+` runs, splits camelCase (`getUserName` → `get`, `user`, `name`) and snake_case, and lowercases.
+**Tokenization** (`TFIDFCalculator.tokenize`): it takes `[A-Za-z0-9_]+` runs, splits camelCase (`getUserName` → `get`, `user`, `name`) and snake_case, keeps the whole word beside its parts (once, and only when it has more than one), and lowercases.
 
 ---
 

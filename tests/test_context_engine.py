@@ -306,3 +306,12 @@ def test_a_broken_sentence_transformers_install_means_keyword_search_only(monkey
     monkeypatch.setattr(embedding_calculator.importlib, "import_module", broken)
     assert embedding_calculator.EmbeddingCalculator.embed_texts(["x"]) is None
     assert embedding_calculator.EmbeddingCalculator._unavailable
+
+
+def test_a_plain_word_is_one_token_and_a_compound_keeps_its_whole_form_once():
+    # The whole word was appended beside its parts even when it had only one part, so `foo` gave
+    # `foo` twice and plain words weighed double against the parts of compound names.
+    from dreamference.context_engine.tfidf_calculator import TFIDFCalculator
+
+    assert TFIDFCalculator.tokenize("foo") == ["foo"]
+    assert TFIDFCalculator.tokenize("getUser get_user") == ["get", "user", "getuser", "get", "user", "get_user"]

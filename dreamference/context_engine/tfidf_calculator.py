@@ -35,7 +35,9 @@ class TFIDFCalculator:
             # Split snake_case at underscores and CamelCase at lower-to-upper changes
             sub_words = re.sub('([a-z0-9])([A-Z])', r'\1 \2', word.replace("_", " ")).lower().split()
             tokens.extend(sub_words)
-            tokens.append(word.lower())
+            # The whole word only when it differs from its one part: `foo` was counted twice.
+            if sub_words != [word.lower()]:
+                tokens.append(word.lower())
         return [t for t in tokens if len(t) > 1]
 
     @classmethod
