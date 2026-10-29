@@ -369,3 +369,20 @@ def test_ling_admin_night_every_takes_the_new_cadences_one_at_a_time(
     ]
     assert [entry["cadence"] for entry in listed] == ["days", "every", "monthly"]
     assert run("night", "every", "drop", listed[0]["id"]) == 0
+
+
+def test_a_template_dropped_while_its_task_is_being_queued_stays_dropped(tmp_path: Path) -> None:
+    night = tmp_path / "night"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    template = NightShiftRecurring.add(night, repo, "Update the changelog", "daily")
+
+    def dropped_meanwhile(args: list[str], **options: Any) -> "subprocess.CompletedProcess[str]":
+        # `ling night repeat drop` runs while `ling night add` is still at work.
+        assert NightShiftRecurring.drop(night, template["id"])
+        return subprocess.CompletedProcess(args, 0, stdout="Queued 20261023-2200 on branch x.", stderr="")
+
+    said = NightShiftRecurring.queue_due(night, "/opt/ling", date(2026, 10, 23), run=dropped_meanwhile)
+    assert any("queued for tonight" in line for line in said)
+    assert NightShiftRecurring.templates(night) == []
+    assert not list(NightShiftRecurring.folder(night).glob("*.tmp"))
