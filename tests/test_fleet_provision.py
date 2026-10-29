@@ -970,3 +970,22 @@ def test_a_dry_run_with_empty_release_version_prints_error_and_does_not_crash(fl
     assert "nothing, --from release= needs a version" in out
 
 
+
+
+def test_a_second_edit_to_an_already_changed_file_makes_a_new_bundle_of_this_checkout(tmp_path, monkeypatch):
+    # `git status` names the file the same way before and after the edit; its content must count.
+    from dreamference.node import fleet_bundle as bundle_module
+    from dreamference.node.fleet_bundle import FleetBundle
+
+    edit = {"text": "+first edit\n"}
+
+    def git(cls, argv, *args, **kwargs):
+        out = {"rev-parse": "abc123\n", "status": " M dreamference/x.py\n"}.get(argv[0], edit["text"])
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+    monkeypatch.setattr(bundle_module.SafeGit, "run", classmethod(git))
+    binary = tmp_path / "ling"
+    binary.write_bytes(b"ling")
+    before = FleetBundle._digest([binary])
+    edit["text"] = "+second edit\n"
+    assert FleetBundle._digest([binary]) != before

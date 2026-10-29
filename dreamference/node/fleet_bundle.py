@@ -300,7 +300,8 @@ class FleetBundle:
 
     @classmethod
     def _digest(cls, paths: List[Path]) -> str:
-        """The bundle's name: a digest of the binaries' sizes and times, cheap to recompute."""
+        """The bundle's name: a digest of the binaries' sizes and times and of the checkout's
+        changes, cheap to recompute."""
         digest = hashlib.sha256()
         for path in paths:
             stat = path.stat()
@@ -310,6 +311,11 @@ class FleetBundle:
 
             head = SafeGit.run(["rev-parse", "HEAD"], REPO_ROOT).stdout.strip()
             dirty = SafeGit.run(["status", "--porcelain", "dreamference"], REPO_ROOT).stdout
+            # The status names a changed file the same way after every further edit: its diff
+            # is what changes. install.sh goes into the bundle too.
+            dirty += SafeGit.run(
+                ["diff", "HEAD", "--binary", "--", "dreamference", "install.sh"], REPO_ROOT
+            ).stdout
             digest.update(f"{head}:{hashlib.sha256(dirty.encode()).hexdigest()}".encode())
         except OSError:
             pass
