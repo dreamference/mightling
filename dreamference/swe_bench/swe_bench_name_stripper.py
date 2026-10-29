@@ -37,7 +37,8 @@ GENERIC: Final[frozenset] = frozenset({"__init__", "__call__", "__str__", "__rep
 # The system word list that tells an English word from a name that can only be code.
 WORD_LIST: Final[str] = "/usr/share/dict/words"
 
-DIFF_FILE: Final = re.compile(r"^diff --git a/(\S+) b/", re.M)
+# A path may hold spaces (git writes them unquoted), so the last ` b/` ends it.
+DIFF_FILE: Final = re.compile(r"^diff --git a/(.+) b/", re.M)
 HUNK_CONTEXT: Final = re.compile(r"^@@[^@]*@@\s*(.*)$", re.M)
 DEFINITION: Final = re.compile(r"^\s*(?:async\s+)?(def|class)\s+([A-Za-z_]\w*)")
 CHANGED_DEFINITION: Final = re.compile(r"^[+-](?![+-])\s*(?:async\s+)?(def|class)\s+([A-Za-z_]\w*)", re.M)

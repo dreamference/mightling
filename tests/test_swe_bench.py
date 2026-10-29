@@ -2632,6 +2632,12 @@ def test_the_names_come_from_the_gold_patch_alone(english):
     assert names.index("acme/db/sql/compiler.py") < names.index("compiler.py")
 
 
+def test_a_patched_path_with_a_space_still_names_its_file(english):
+    patch = "diff --git a/acme/my docs/build.py b/acme/my docs/build.py\n--- a/acme/my docs/build.py\n"
+    found = {name: kind for name, kind, _ in SweBenchNameStripper.names(patch)}
+    assert found["acme/my docs/build.py"] == found["build.py"] == "file"
+
+
 def test_strip_replaces_each_name_with_one_numbered_phrase(english):
     issue = (
         "SQLUpdateCompiler.pre_sql_setup() selects the wrong ids; see acme/db/sql/compiler.py, "
