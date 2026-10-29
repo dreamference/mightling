@@ -697,3 +697,18 @@ def test_a_safetensors_header_that_is_not_an_object_is_refused_as_not_safetensor
     weights.write_bytes(struct.pack("<Q", len(text)) + text)
     with pytest.raises(ValueError, match="is not a safetensors file"):
         AdapterVerifier.check_tensors(weights, {"q_proj"})
+
+
+def test_an_install_by_repository_checks_the_disk_before_fetching(keys, remote, monkeypatch):
+    import types
+
+    source, fetched = remote
+    make_adapter(source, keys)
+    monkeypatch.setattr(
+        "dreamference.hardware.adapter_installer.shutil.disk_usage",
+        lambda path: types.SimpleNamespace(total=4 << 40, used=4 << 40, free=1 << 30),
+    )
+    with pytest.raises(ValueError, match=r"the disk has 1\.0 GiB free"):
+        AdapterInstaller.install(None, f"{ADAPTER_REPO}@{COMMIT}", served(base_snapshot()))
+    assert fetched == []
+    assert AdapterStore.entries() == {}
