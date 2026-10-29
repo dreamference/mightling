@@ -139,6 +139,10 @@ LAUNCHER_POOL_SHARE_PERCENT: Final[int] = 60
 class NightShiftHost:
     """Read-only probes of the model server and the host."""
 
+    # Model servers are on this machine or another node of the same network, never behind the
+    # proxy; only the local server is in NO_PROXY (EGRESS §11), so the probes skip proxies.
+    urlopen = staticmethod(urllib.request.build_opener(urllib.request.ProxyHandler({})).open)
+
     @classmethod
     def served_model(cls, host: str, timeout: float = 3.0) -> tuple[str, int] | None:
         """Asks the model server what it serves.
@@ -152,7 +156,7 @@ class NightShiftHost:
             does not answer.
         """
         try:
-            with urllib.request.urlopen(
+            with cls.urlopen(
                 f"{host.rstrip('/')}/v1/models", timeout=timeout
             ) as response:
                 data = json.load(response)
@@ -175,7 +179,7 @@ class NightShiftHost:
             cache, 0 if unknown); None if `/metrics` does not answer.
         """
         try:
-            with urllib.request.urlopen(f"{host.rstrip('/')}/metrics", timeout=timeout) as response:
+            with cls.urlopen(f"{host.rstrip('/')}/metrics", timeout=timeout) as response:
                 text = response.read().decode("utf-8", "replace")
         except OSError:
             return None

@@ -24,7 +24,7 @@ def refusing(url, timeout=None):
 
 def test_the_served_model_is_its_id_and_context_length(monkeypatch):
     body = json.dumps({"data": [{"id": "qwen", "max_model_len": 131072}]}).encode()
-    monkeypatch.setattr(night_shift_host.urllib.request, "urlopen", answering(body))
+    monkeypatch.setattr(NightShiftHost, "urlopen", staticmethod(answering(body)))
     assert NightShiftHost.served_model("http://model/") == ("qwen", 131072)
 
 
@@ -39,12 +39,12 @@ def test_the_served_model_is_its_id_and_context_length(monkeypatch):
     ],
 )
 def test_a_model_server_that_answers_nonsense_serves_nothing(monkeypatch, body):
-    monkeypatch.setattr(night_shift_host.urllib.request, "urlopen", answering(body))
+    monkeypatch.setattr(NightShiftHost, "urlopen", staticmethod(answering(body)))
     assert NightShiftHost.served_model("http://model") is None
 
 
 def test_a_model_server_that_does_not_answer_serves_nothing_and_has_no_metrics(monkeypatch):
-    monkeypatch.setattr(night_shift_host.urllib.request, "urlopen", refusing)
+    monkeypatch.setattr(NightShiftHost, "urlopen", staticmethod(refusing))
     assert NightShiftHost.served_model("http://model") is None
     assert NightShiftHost.metrics("http://model") is None
 
@@ -59,7 +59,7 @@ def test_metrics_add_running_and_queued_requests_and_read_the_kv_pool(monkeypatc
         b"sglang:num_queue_reqs NaNish\n"
         b"garbage line\n"
     )
-    monkeypatch.setattr(night_shift_host.urllib.request, "urlopen", answering(text))
+    monkeypatch.setattr(NightShiftHost, "urlopen", staticmethod(answering(text)))
     assert NightShiftHost.metrics("http://model") == {
         "running": 5.0,
         "served": 1000.0,
@@ -156,3 +156,32 @@ def test_heavy_work_is_still_reported_when_systemctl_cannot_be_run(monkeypatch, 
 
     monkeypatch.setattr(subprocess, "run", fail)
     assert not [job for job in NightShiftHost.heavy_jobs() if "is active (" in job]
+
+
+def test_another_nodes_model_server_is_asked_directly_not_through_the_proxy(monkeypatch):
+    import http.server
+    import threading
+
+    class Metrics(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b"sglang:num_running_reqs 2\nsglang:max_total_num_tokens 500000\n"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Metrics)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        # A proxy that is not there, and the node is not in NO_PROXY (only the local server is).
+        for name in ("no_proxy", "NO_PROXY"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+        monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+        assert NightShiftHost.metrics(f"http://127.0.0.1:{server.server_port}") is not None
+    finally:
+        server.shutdown()
+        server.server_close()
