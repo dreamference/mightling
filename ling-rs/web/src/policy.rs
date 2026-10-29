@@ -964,4 +964,13 @@ mod tests {
         assert!(!busy.is_busy());
         assert!(!busy.observe("item/started", Some(&t1)));
     }
+
+    #[test]
+    fn a_closed_thread_is_no_longer_busy() {
+        let mut busy = BusyTracker::default();
+        let t1 = serde_json::json!({"threadId": "t1"});
+        assert!(busy.observe("turn/started", Some(&t1)));
+        assert!(busy.observe("thread/closed", Some(&t1)));
+        assert!(!busy.is_busy());
+    }
 }
