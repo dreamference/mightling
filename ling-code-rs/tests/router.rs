@@ -978,3 +978,29 @@ fn a_graph_node_that_ends_before_it_starts_does_not_break_a_location_query() {
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("shapes/report.py:9"), "{out}");
 }
+
+#[test]
+fn text_rows_for_a_graph_only_answer_keep_a_path_with_a_colon() {
+    let f = fixture();
+    rusqlite::Connection::open(f.repo.scip_dir().join("scip-python-shapes.db"))
+        .unwrap()
+        .execute_batch("CREATE TABLE extra (x);")
+        .unwrap();
+    f.write("shapes/a:b.py", "from shapes.geometry import make_circle\n");
+    f.commit("a file the graph has hashed but has no edge from");
+    let stamp = ling_code::manifest::FileStamp::of(&f.repo.root.join("shapes/a:b.py")).unwrap();
+    rusqlite::Connection::open(&f.graph_db)
+        .unwrap()
+        .execute(
+            "INSERT INTO file_hashes VALUES (?1, 'shapes/a:b.py', ?2, ?3, ?4)",
+            rusqlite::params![f.project, stamp.sha256, stamp.mtime_ns, stamp.size as i64],
+        )
+        .unwrap();
+    let dir = f.repo.scip_dir();
+    let mut graph = ling_code::manifest::GraphSnapshot::load(&dir).unwrap();
+    graph.commit = Some(git(&f.repo.root, &["rev-parse", "HEAD"]));
+    graph.save(&dir).unwrap();
+    let (_, out) = f.run(&["refs", "make_circle"]);
+    assert!(out.contains("changed since snapshot: 0 files"), "{out}");
+    assert!(out.contains("heuristic (text) shapes/a:b.py:1"), "{out}");
+}

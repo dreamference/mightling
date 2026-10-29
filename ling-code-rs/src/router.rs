@@ -777,6 +777,7 @@ impl Context {
                 &[
                     "grep",
                     "-n",
+                    "-z",
                     "-I",
                     "-w",
                     "-F",
@@ -796,7 +797,8 @@ impl Context {
         let mut rows = Vec::new();
         let mut matches = 0;
         for line in String::from_utf8_lossy(&output.stdout).lines() {
-            let mut parts = line.splitn(3, ':');
+            // `-z`: NUL after the path and the line number, so a path may hold a `:`.
+            let mut parts = line.splitn(3, '\0');
             let (Some(path), Some(Ok(number))) =
                 (parts.next(), parts.next().map(str::parse::<u32>))
             else {
