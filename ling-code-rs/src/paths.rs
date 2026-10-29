@@ -95,18 +95,33 @@ impl Repo {
 
 /// The main worktree of a linked worktree: the parent of the shared `.git` directory.
 fn main_worktree(root: &Path) -> Option<PathBuf> {
-    let common = git(
+    let dirs = git(
         root,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+            "--absolute-git-dir",
+        ],
     )
     .ok()?;
-    let common = PathBuf::from(common.trim());
+    let mut dirs = dirs.lines().map(|line| PathBuf::from(line.trim()));
+    let (common, own) = (dirs.next()?, dirs.next()?);
     // A submodule's common dir is `<super>/.git/modules/<name>`: it is its own main worktree.
-    if common.file_name()? == ".git" {
-        common.parent().map(Path::to_path_buf)
-    } else {
-        None
+    if common.file_name()? != ".git" {
+        return None;
     }
+    // A linked worktree's own git dir names the worktree back (`gitdir`, written by `git worktree
+    // add`). Git does not check that at discovery, so without it a `.git` file copied into any
+    // folder would borrow the main repository's trust.
+    let real = |path: &Path| std::fs::canonicalize(path).ok();
+    if real(&own) != real(&common) {
+        let named = std::fs::read_to_string(own.join("gitdir")).ok()?;
+        if real(&own.join(named.trim())) != real(&root.join(".git")) {
+            return None;
+        }
+    }
+    common.parent().map(Path::to_path_buf)
 }
 
 /// Runs git in `dir` without optional locks and returns its standard output.
