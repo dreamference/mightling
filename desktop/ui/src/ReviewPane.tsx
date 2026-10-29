@@ -512,13 +512,16 @@ export function ReviewPane(props: ReviewPaneProps) {
 
   const generate = async () => {
     if (!root) return;
+    // The message is for the thread and folder it was asked in: another one in front keeps its own box.
+    const asked = owner;
     setBusy("message");
     try {
       const source = includeUnstaged || stagedCount === 0
         ? (await bridge.git.diff(root, "staged")).diff + (await bridge.git.diff(root, "unstaged")).diff
         : (await bridge.git.diff(root, "staged")).diff;
       if (!source.trim()) throw new Error("there is nothing to describe");
-      setMessage(await props.generateMessage(root, source));
+      const written = await props.generateMessage(root, source);
+      if (shownOwner.current === asked) setMessage(written);
     } catch (failure) {
       notice(failure);
     } finally {
@@ -614,8 +617,9 @@ export function ReviewPane(props: ReviewPaneProps) {
             <label><input type="checkbox" checked={includeUnstaged} onChange={(event) => setIncludeUnstaged(event.target.checked)} /> Include unstaged</label>
             <span className="spacer" />
             <button className="primary" disabled={!canCommit || busy !== null} onClick={() => void step("commit", async () => {
+              const asked = owner;
               await bridge.git.commit(root, message, includeUnstaged);
-              setMessage("");
+              if (shownOwner.current === asked) setMessage("");
             })}>Commit</button>
           </div>
           <div className="commit-actions">
