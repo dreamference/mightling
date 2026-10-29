@@ -41,6 +41,11 @@ def night(tmp_path, arms, ling=None, **extra):
         f'  *" stop "*) echo "$*" >> "{tmp_path / "systemctl.txt"}" ;; esac\nexit 0\n'
     )
     (stand_ins / "systemctl").chmod(0o755)
+    # Nor do ssh and the overlay's DNS reach another machine: ssh records its call and fails.
+    (stand_ins / "ssh").write_text(f'#!/bin/bash\necho "$*" >> "{tmp_path / "ssh.txt"}"\nexit 255\n')
+    (stand_ins / "getent").write_text("#!/bin/bash\nexit 2\n")
+    for name in ("ssh", "getent"):
+        (stand_ins / name).chmod(0o755)
     env = {
         **os.environ,
         "WT": ROOT,
@@ -851,7 +856,10 @@ def test_the_night_folder_reaches_the_helper_and_the_unit(tmp_path):
         'case "$*" in *"serve sglang"*) echo "ready sglang" ;; *"serve engine"*) echo "ready ling-engine" ;;'
         " *) echo restored ;; esac\n"
     )
-    for path in (fake, ssh):
+    # The overlay's DNS does not know the name, so no query leaves the machine.
+    getent = bindir / "getent"
+    getent.write_text("#!/bin/bash\nexit 2\n")
+    for path in (fake, ssh, getent):
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
     task_list = tmp_path / "list.txt"
     task_list.write_text("acme__widget-1\n")
@@ -1161,6 +1169,8 @@ def test_each_round_of_a_pinned_night_checks_the_build(tmp_path):
 def test_a_model_server_arm_with_no_remote_machine_named_ends_the_night_before_its_round(tmp_path):
     status, recorded, folder = night(tmp_path, "default+on-sglang default+on-engine", REMOTE="")
     assert status == 1 and not runs(recorded) and (folder / "failed").exists()
+    # With no machine named, nothing is restored over ssh either.
+    assert not (tmp_path / "ssh.txt").exists()
 
 
 TARGET = "/sgl-workspace/sglang/python/sglang/srt/entrypoints/openai/serving_responses.py"

@@ -280,6 +280,8 @@ remote_serve() {
 # Production back on REMOTE, both arms stopped; `remote_restore keep`: the arms stopped and the GPU lock kept.
 remote_restore() {
     if [ "$LOCAL_ARMS" = 1 ]; then local_arm restore ${1:-}; return; fi
+    # No machine named (the night ended before serving): nothing to restore, and `ssh ""` must not run.
+    [ -n "$REMOTE" ] || return 0
     remote_names
     timeout 30m ssh -o BatchMode=yes "$REMOTE_SSH" ${REMOTE_AB_DIR:+AB_DIR=$REMOTE_AB_DIR} bash -s -- restore ${1:-} < "$WT/scripts/engine_ab_remote.sh" 2>&1 | tail -2 | sed 's/^/   /'
     unset DREAMFERENCE_VLLM_HOST
