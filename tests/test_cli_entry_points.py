@@ -205,3 +205,14 @@ def test_codex_stop_reports_a_daemon_that_did_not_stop(capsys):
     call.assert_called_once_with(["/opt/ling/bin/ling", "app-server", "daemon", "stop"])
     assert exit_info.value.code == 3
     assert "daemon stopped" not in capsys.readouterr().out
+
+
+def test_a_global_hf_token_reaches_the_subcommands_that_also_take_one():
+    # Each subcommand's own --hf-token defaulted to None, which overwrote the token given before
+    # the subcommand: `ling-admin --hf-token T server start` started anonymously.
+    parser = DreamferenceCLIController.build_parser()
+    for command in (["init"], ["server", "start"], ["adapter", "install", "rust", "--repo", "o/r"]):
+        assert parser.parse_args(["--hf-token", "T", *command]).hf_token == "T", command
+        assert parser.parse_args([*command, "--hf-token", "U"]).hf_token == "U", command
+        assert parser.parse_args(command).hf_token is None, command
+    assert parser.parse_args(["--hf-token", "T", "run", "hello"]).hf_token == "T"

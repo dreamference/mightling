@@ -1304,7 +1304,7 @@ class DreamferenceCLIController:
         init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
         init_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
         init_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
-        init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+        init_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
 
         # Command: ling-admin run
         run_parser = subparsers.add_parser("run", help="Run an autonomous coding task")
@@ -1312,7 +1312,7 @@ class DreamferenceCLIController:
         run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         run_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
         run_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
-        run_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+        run_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
         run_parser.add_argument(
             "--compat",
@@ -1408,7 +1408,7 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
         start_server_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
-        start_server_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+        start_server_parser.add_argument("--hf-token", default=argparse.SUPPRESS, help="HuggingFace API access token")
         start_server_parser.add_argument("--num-scheduler-steps", type=int, default=None, help="Multi-step scheduling iterations per step")
         start_server_parser.add_argument("--attention-backend", default=None, help="Attention backend (FLASHINFER, FLASH_ATTN, auto)")
         start_server_parser.add_argument("--kv-cache-dtype", default=None, help="KV cache precision (auto, fp8)")
