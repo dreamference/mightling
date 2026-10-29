@@ -796,6 +796,79 @@ mod tests {
         assert!(!management_connected(down));
         assert!(!management_connected(r#"{"daemonStatus": "NeedsLogin"}"#));
         assert!(!management_connected(""));
+        // Pretty-printed, as `netbird status --json` prints it.
+        assert!(management_connected(
+            "{\n  \"management\": {\n    \"url\": \"https://b:443\",\n    \"connected\" :  true\n  }\n}"
+        ));
+    }
+
+    #[test]
+    fn a_pin_names_the_remembered_node_only_by_its_whole_name_address_or_a_long_id_prefix() {
+        for pin in ["gx10-1a2b.local", "  GX10-1A2B  ", "192.168.50.105", "7C1E"] {
+            assert_eq!(
+                remote_node_pinned(Some(pin), false, Some(node())),
+                Some(node()),
+                "{pin}"
+            );
+        }
+        // Three characters of the id, or a part of the name, are another host.
+        for (pin, address) in [("7c1", "7c1.local"), ("gx10", "gx10.local")] {
+            let other = remote_node_pinned(Some(pin), false, Some(node())).unwrap();
+            assert_eq!((other.address.as_str(), other.node.as_str()), (address, ""));
+        }
+        // A node with no id is never named by a prefix of nothing.
+        let unnamed = Node {
+            node: String::new(),
+            ..node()
+        };
+        assert_eq!(
+            remote_node_pinned(Some("abcd"), false, Some(unnamed)).map(|n| n.address),
+            Some("abcd.local".to_string())
+        );
+        // An IPv6 pin is an address, bracketed in its URLs.
+        let v6 = remote_node_pinned(Some("fd00::7"), false, None).unwrap();
+        assert_eq!(v6.model_url(), "http://[fd00::7]:8000");
+        assert_eq!(url_host("[fd00::7]"), "[fd00::7]");
+    }
+
+    #[test]
+    fn the_file_reader_takes_escapes_and_line_ends_and_refuses_what_render_never_writes() {
+        let parsed = Node::parse(
+            "{\r\n  \"address\": \"10.0.0.2\",\r\n  \"name\": \"caf\\u00e9\",\r\n  \"model_port\": 70000,\r\n}\r\n",
+        )
+        .unwrap();
+        assert_eq!(parsed.name, "café");
+        assert_eq!(
+            parsed.model_port, DEFAULT_MODEL_PORT,
+            "a port out of range is the default"
+        );
+        assert_eq!(
+            Node::parse("{\"address\": \"  10.0.0.3 \"}").map(|n| n.address),
+            Some("10.0.0.3".to_string())
+        );
+        for text in [
+            "{\"address\": \"a\", \"tags\": [\"x\"]}",
+            "{\"address\": \"a\\u00\"}",
+            "{\"address\": \"a\"",
+            "{address: \"a\"}",
+        ] {
+            assert_eq!(Node::parse(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_missing_or_unreadable_node_file_remembers_nothing() {
+        let dir = std::env::temp_dir().join(format!("ling-node-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(NODE_FILE);
+        assert_eq!(remembered_at(&path), None);
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(remembered_at(&path), None);
+        std::fs::write(&path, node().render()).unwrap();
+        assert_eq!(remembered_at(&path), Some(node()));
+        assert_eq!(remembered_at(&dir), None, "a folder is not the file");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
