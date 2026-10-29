@@ -97,6 +97,32 @@ _NON_CONTENT_TAGS: Final[tuple] = (
 )
 
 
+class _Session(requests.Session):
+    """
+    One call's session, which never sends the user's `~/.netrc` logins.
+
+    requests adds the .netrc login for the request's host and again for every redirect target,
+    so a page could send the agent to a host the user keeps a password for (over plain http
+    too) and have it read what that login sees. `ling-fetch` never reads .netrc. `trust_env`
+    stays on: it also brings the proxy and CA bundle settings, which both copies follow.
+    """
+
+    def prepare_request(self, request: requests.Request) -> requests.PreparedRequest:
+        # Any auth set here skips the .netrc lookup. A login written in the URL itself is the
+        # caller's and is still sent; otherwise the auth is one that changes nothing.
+        if request.auth is None:
+            login = requests.utils.get_auth_from_url(request.url or "")
+            request.auth = login if any(login) else (lambda prepared: prepared)
+        return super().prepare_request(request)
+
+    def rebuild_auth(self, prepared_request: requests.PreparedRequest, response: requests.Response) -> None:
+        # requests' own, less the .netrc lookup for the new host.
+        if "Authorization" in prepared_request.headers and self.should_strip_auth(
+            response.request.url, prepared_request.url
+        ):
+            del prepared_request.headers["Authorization"]
+
+
 class WebTools:
     """
     Fetch and search primitives exposed to the agent over MCP.
@@ -157,7 +183,7 @@ class WebTools:
             requests.Response: The response, with `_body` holding at most MAX_DOWNLOAD_BYTES.
         """
         started = time.monotonic()
-        response = requests.get(
+        response = _Session().get(
             url,
             headers={"User-Agent": USER_AGENT, "Accept-Language": "en"},
             timeout=REQUEST_TIMEOUT_S,
@@ -327,7 +353,7 @@ class WebTools:
 
         endpoint = f"{SEARXNG_URL.rstrip('/')}/search"
         try:
-            response = requests.get(
+            response = _Session().get(
                 endpoint,
                 params={
                     "q": query,

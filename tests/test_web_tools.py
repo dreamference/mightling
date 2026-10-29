@@ -34,10 +34,10 @@ class Page:
 
 @pytest.fixture
 def online(monkeypatch):
-    """The air gap is off and `requests.get` is a mock."""
+    """The air gap is off and every request's `get` is a mock."""
     monkeypatch.setattr(WebTools, "airgapped_level", classmethod(lambda cls: "off"))
     get = MagicMock()
-    monkeypatch.setattr(web_tools.requests, "get", get)
+    monkeypatch.setattr(web_tools._Session, "get", get)
     return get
 
 
@@ -178,3 +178,59 @@ def test_a_body_sent_a_byte_at_a_time_ends_at_the_deadline(monkeypatch):
     with pytest.raises(requests.Timeout):
         WebTools._download(f"http://127.0.0.1:{port}/")
     assert time.monotonic() - started < 10
+
+
+@pytest.fixture
+def loopback(monkeypatch):
+    """The air gap is off and no proxy stands between a fetch and a stand-in on loopback."""
+    monkeypatch.setattr(WebTools, "airgapped_level", classmethod(lambda cls: "off"))
+    for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_fetch_sends_no_netrc_credentials_to_a_page_or_where_it_redirects(loopback, tmp_path):
+    # requests adds the user's ~/.netrc login for the request's host and again for every redirect
+    # target, so a page could send the agent to a host the user keeps a password for and have it
+    # read what that login sees. ling-fetch never reads .netrc.
+    import http.server
+    import os
+    import threading
+    from pathlib import Path
+
+    netrc = Path(os.environ["HOME"]) / ".netrc"
+    netrc.write_text("machine localhost login user password secret\n")
+    netrc.chmod(0o600)
+    seen: list = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append((self.path, self.headers.get("Authorization")))
+            if self.path == "/start":
+                self.send_response(302)
+                self.send_header("Location", f"http://localhost:{port}/final")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        assert WebTools.fetch(f"http://127.0.0.1:{port}/start")["text"] == "ok"
+        assert WebTools.fetch(f"http://localhost:{port}/final")["text"] == "ok"
+        # A login written in the URL is the caller's own, and still goes.
+        assert WebTools.fetch(f"http://me:pw@localhost:{port}/final")["text"] == "ok"
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert seen == [
+        ("/start", None), ("/final", None), ("/final", None), ("/final", "Basic bWU6cHc=")
+    ]

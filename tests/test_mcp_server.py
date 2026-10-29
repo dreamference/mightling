@@ -76,7 +76,7 @@ def test_web_search_reports_engines_that_all_failed_rather_than_no_results():
         "results": [], "answers": [],
         "unresponsive_engines": [["duckduckgo", "HTTP connection error"], ["brave", "HTTP connection error"]],
     }
-    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response):
+    with patch("dreamference.mcp_server.web_tools._Session.get", return_value=response):
         outcome = WebTools.search("python asyncio")
     assert "duckduckgo: HTTP connection error" in outcome["error"]
     # The hint sends the model to a known page and to the user, never to repair the container:
@@ -86,7 +86,7 @@ def test_web_search_reports_engines_that_all_failed_rather_than_no_results():
 
     response.json.return_value = {"results": [{"title": "t", "url": "u", "content": "c", "engine": "brave"}],
                                   "unresponsive_engines": [["duckduckgo", "timeout"]]}
-    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response):
+    with patch("dreamference.mcp_server.web_tools._Session.get", return_value=response):
         outcome = WebTools.search("python asyncio")
     assert outcome["result_count"] == 1 and "error" not in outcome
 
@@ -161,7 +161,7 @@ def test_web_search_sends_the_category_time_range_and_detected_language():
 
     response = MagicMock()
     response.json.return_value = {"results": [], "answers": [], "unresponsive_engines": []}
-    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response) as get:
+    with patch("dreamference.mcp_server.web_tools._Session.get", return_value=response) as get:
         WebTools.search("climate summit", categories="social", time_range="week")
         WebTools.search("climate summit", time_range="fortnight")
     first, second = (call.kwargs["params"] for call in get.call_args_list)

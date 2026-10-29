@@ -177,7 +177,7 @@ def test_at_on_the_mcp_web_tools_send_nothing(monkeypatch):
     from dreamference.mcp_server.web_tools import AIRGAPPED_ON_MESSAGE, WebTools
 
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
-    with patch("dreamference.mcp_server.web_tools.requests.get") as get:
+    with patch("dreamference.mcp_server.web_tools._Session.get") as get:
         found = WebTools.search("python asyncio")
         page = WebTools.fetch("https://example.com")
     get.assert_not_called()
@@ -196,7 +196,7 @@ def test_a_leftover_duckduckgo_level_searches_as_off(monkeypatch):
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "duckduckgo")
     response = MagicMock()
     response.json.return_value = {"results": [{"title": "t", "url": "u", "content": "c", "engine": "bing"}]}
-    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response) as get:
+    with patch("dreamference.mcp_server.web_tools._Session.get", return_value=response) as get:
         assert WebTools.search("python asyncio")["result_count"] == 1
     params = get.call_args.kwargs["params"]
     assert params["categories"] == "general" and "engines" not in params
@@ -209,7 +209,7 @@ def test_at_off_the_mcp_search_asks_the_category_as_before(monkeypatch):
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "off")
     response = MagicMock()
     response.json.return_value = {"results": []}
-    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response) as get:
+    with patch("dreamference.mcp_server.web_tools._Session.get", return_value=response) as get:
         WebTools.search("python asyncio")
     params = get.call_args.kwargs["params"]
     assert params["categories"] == "general" and "engines" not in params
