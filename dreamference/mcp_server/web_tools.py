@@ -30,8 +30,11 @@ nothing is sent, at `off` nothing changes.
 """
 
 import codecs
+import contextlib
 import os
 import re
+import threading
+import time
 from typing import Any, Dict, Final, List
 from urllib.parse import urlparse
 
@@ -69,6 +72,10 @@ SEARCH_UNAVAILABLE_HINT: Final[str] = (
     "unavailable at the moment."
 )
 REQUEST_TIMEOUT_S: Final[float] = 25.0
+# The most one fetch may take. REQUEST_TIMEOUT_S applies to each read, so without a total a server
+# that sends a byte every few seconds held the call, and the MCP server waiting on it, for as long as
+# it liked. ling-web-rs's REQUEST_DEADLINE is the same.
+REQUEST_DEADLINE_S: Final[float] = 120.0
 # Hard ceiling on what a single fetch will pull down, before any text extraction. A model cannot
 # use more than this anyway, and without it one link to a large binary stalls the whole session.
 MAX_DOWNLOAD_BYTES: Final[int] = 5 * 1024 * 1024
@@ -139,7 +146,9 @@ class WebTools:
         Retrieves a URL with a size ceiling and a timeout.
 
         Streamed rather than read whole, so the ceiling is enforced while the body arrives instead
-        of after it has already been buffered.
+        of after it has already been buffered. The body ends at REQUEST_DEADLINE_S from the start;
+        the status line and headers do not (requests gives no hold on the socket before them), so
+        a server sending those a byte at a time still holds the call.
 
         Args:
             url (str): URL to retrieve.
@@ -147,6 +156,7 @@ class WebTools:
         Returns:
             requests.Response: The response, with `_body` holding at most MAX_DOWNLOAD_BYTES.
         """
+        started = time.monotonic()
         response = requests.get(
             url,
             headers={"User-Agent": USER_AGENT, "Accept-Language": "en"},
@@ -154,13 +164,34 @@ class WebTools:
             stream=True,
         )
         response.raise_for_status()
+        # At REQUEST_DEADLINE_S the socket is shut down from another thread, which wakes a read
+        # blocked on it; a check between chunks would not, as one chunk can take a byte per read.
+        expired = threading.Event()
+
+        def expire() -> None:
+            expired.set()
+            with contextlib.suppress(Exception):
+                response.raw.shutdown()
+
+        remaining = max(0.0, REQUEST_DEADLINE_S - (time.monotonic() - started))
+        watchdog = threading.Timer(remaining, expire)
+        watchdog.daemon = True
+        watchdog.start()
         chunks: List[bytes] = []
         total = 0
-        for chunk in response.iter_content(8192):
-            chunks.append(chunk)
-            total += len(chunk)
-            if total >= MAX_DOWNLOAD_BYTES:
-                break
+        try:
+            for chunk in response.iter_content(8192):
+                chunks.append(chunk)
+                total += len(chunk)
+                if total >= MAX_DOWNLOAD_BYTES or expired.is_set():
+                    break
+        except Exception:
+            if not expired.is_set():
+                raise
+        finally:
+            watchdog.cancel()
+        if expired.is_set():
+            raise requests.Timeout(f"the page took longer than {REQUEST_DEADLINE_S:.0f} s to arrive")
         response._body = b"".join(chunks)  # type: ignore[attr-defined]
         return response
 

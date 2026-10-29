@@ -143,3 +143,38 @@ def test_search_keeps_at_most_max_results(online):
     outcome = WebTools.search("python", max_results=2)
     assert [r["title"] for r in outcome["results"]] == ["0", "1"]
     assert outcome["results"][0] == {"title": "0", "url": "u0", "snippet": "", "engine": ""}
+
+
+def test_a_body_sent_a_byte_at_a_time_ends_at_the_deadline(monkeypatch):
+    # A stand-in on loopback that sends a byte every 50 ms for at most 30 s: each read returns well
+    # within REQUEST_TIMEOUT_S, so only the total deadline (2 s here) ends the download.
+    import socket
+    import threading
+    import time
+
+    listener = socket.create_server(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+
+    def serve():
+        connection, _ = listener.accept()
+        with connection, listener:
+            connection.recv(65536)
+            try:
+                connection.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+                    b"Content-Length: 5000000\r\n\r\n"
+                )
+                for _ in range(600):
+                    time.sleep(0.05)
+                    connection.sendall(b"a")
+            except OSError:
+                pass
+
+    threading.Thread(target=serve, daemon=True).start()
+    for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(web_tools, "REQUEST_DEADLINE_S", 2.0)
+    started = time.monotonic()
+    with pytest.raises(requests.Timeout):
+        WebTools._download(f"http://127.0.0.1:{port}/")
+    assert time.monotonic() - started < 10
