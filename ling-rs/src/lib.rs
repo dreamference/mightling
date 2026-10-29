@@ -925,11 +925,11 @@ pub fn vllm_host() -> String {
 
 /// `DREAMFERENCE_VLLM_HOST`, then `vllm_host` in a configuration file; `None` when neither is set.
 ///
-/// A repository's own `./dreamference.toml` may name only a server on this machine: a clone could
-/// otherwise send every prompt, and whatever the agent reads, to a machine of its choosing, and
-/// drive the session with that machine's answers. Codex keeps `model_providers` out of a
-/// project's `.codex/config.toml` for the same reason. Another host there is reported once and
-/// the user's own file decides.
+/// A repository's own `./dreamference.toml` may name no model server at all, not even one on this
+/// machine (owner decision 2026-10-29): a clone could otherwise send every prompt, and whatever
+/// the agent reads, to a machine or a port of its choosing, and drive the session with that
+/// server's answers. Codex keeps `model_providers` out of a project's `.codex/config.toml` for the
+/// same reason. A host there is reported once and the user's own file decides.
 pub fn configured_vllm_host() -> Option<String> {
     if let Ok(host) = std::env::var("DREAMFERENCE_VLLM_HOST")
         && !host.is_empty()
@@ -956,6 +956,11 @@ pub fn configured_vllm_host() -> Option<String> {
     host
 }
 
+/// The keys of `dreamference.toml` that choose a host, port, URL or other network address: a
+/// repository's own file may set none of them. Kept equal to `NETWORK_KEYS` in
+/// `dreamference/config/dreamference_config.py` and `ling-code-rs/src/config.rs` by a test there.
+pub const NETWORK_KEYS: &[&str] = &["vllm_host"];
+
 /// [`configured_vllm_host`]'s file tiers, given the file chosen, whether it is the repository's
 /// own, and the user's file. Returns the host and the line to print when one was ignored.
 fn vllm_host_from_files(
@@ -970,20 +975,16 @@ fn vllm_host_from_files(
     if !from_repository {
         return (host, None);
     }
-    let user_host = user.and_then(vllm_host_from_toml);
-    match host {
-        Some(host) if host_is_local(&host) => (Some(host), None),
-        // Debug-quoted: the value is the repository's, and could hold terminal escapes.
-        Some(host) => (
-            user_host,
-            Some(format!(
-                "Ignored vllm_host {host:?} in {}: a repository's file may name only a model server on this \
-                 machine. Name another in ~/.config/dreamference/config.toml or DREAMFERENCE_VLLM_HOST.",
-                path.display()
-            )),
-        ),
-        None => (user_host, None),
-    }
+    // The line names the file and the key, never the value: it is the repository's, and could
+    // hold terminal escapes.
+    let notice = host.map(|_| {
+        format!(
+            "Ignored vllm_host in {}: a repository's own file may not choose a network address. Set it in \
+             ~/.config/dreamference/config.toml or DREAMFERENCE_VLLM_HOST instead.",
+            path.display()
+        )
+    });
+    (user.and_then(vllm_host_from_toml), notice)
 }
 
 /// Whether a model server URL names this machine: the Gmail service and the other node-only
@@ -2357,31 +2358,22 @@ mod tests {
     }
 
     #[test]
-    fn a_repository_file_names_only_a_model_server_on_this_machine() {
+    fn a_repository_file_names_no_model_server() {
         let repository = Path::new("dreamference.toml");
         let user = "vllm_host = \"http://gb10:9000\"\n";
-        // Another machine there: the user's file decides, and the line says what was ignored.
-        let (host, notice) = vllm_host_from_files(
-            Some((repository, "vllm_host = \"http://attacker.example:8000\"\n")),
-            true,
-            Some(user),
-        );
-        assert_eq!(host, Some("http://gb10:9000".into()));
-        let notice = notice.expect("an ignored host is reported");
-        assert!(notice.contains("\"http://attacker.example:8000\"") && notice.contains("dreamference.toml"), "{notice}");
-        let (host, _) = vllm_host_from_files(Some((repository, "vllm_host = \"http://attacker.example\"\n")), true, None);
-        assert_eq!(host, None);
-        let (host, _) = vllm_host_from_files(
-            Some((repository, "vllm_host = \"http://localhost:x@attacker.example\"\n")),
-            true,
-            Some(user),
-        );
-        assert_eq!(host, Some("http://gb10:9000".into()));
-        // A server on this machine stands, as does a repository file without the key.
-        assert_eq!(
-            vllm_host_from_files(Some((repository, "vllm_host = \"http://localhost:8001\"\n")), true, Some(user)),
-            (Some("http://localhost:8001".into()), None)
-        );
+        // Any host there, even one on this machine: the user's file decides, and the line names
+        // the file and the key, not the repository's value.
+        for host in ["http://attacker.example:8000", "http://localhost:8001", "http://127.0.0.1:18000"] {
+            let (chosen, notice) =
+                vllm_host_from_files(Some((repository, &format!("vllm_host = \"{host}\"\n"))), true, Some(user));
+            assert_eq!(chosen, Some("http://gb10:9000".into()));
+            let notice = notice.expect("an ignored host is reported");
+            assert!(notice.contains("Ignored vllm_host in dreamference.toml"), "{notice}");
+            assert!(!notice.contains(host), "{notice}");
+            let (chosen, _) = vllm_host_from_files(Some((repository, &format!("vllm_host = \"{host}\"\n"))), true, None);
+            assert_eq!(chosen, None);
+        }
+        // A repository file without the key says nothing.
         assert_eq!(
             vllm_host_from_files(Some((repository, "model = \"x\"\n")), true, Some(user)),
             (Some("http://gb10:9000".into()), None)
@@ -2392,6 +2384,7 @@ mod tests {
             (Some("http://gb10:9000".into()), None)
         );
         assert_eq!(vllm_host_from_files(None, false, None), (None, None));
+        assert_eq!(NETWORK_KEYS, ["vllm_host"]);
     }
 
     #[test]
