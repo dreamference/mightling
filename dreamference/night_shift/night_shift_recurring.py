@@ -358,7 +358,7 @@ class NightShiftRecurring:
             repo = Path(str(template.get("repo", "")))
             if not repo.is_dir():
                 template["last_error"] = f"{repo} is not there"
-                cls._write(night_dir, template)
+                cls._write(night_dir, template, existing_only=True)
                 said.append(f"Repeating task {template['id']} not queued: {repo} is not there.")
                 continue
             args = [mightling_bin, "night", "add"]
@@ -376,7 +376,7 @@ class NightShiftRecurring:
                 )
             except (OSError, subprocess.SubprocessError) as error:
                 template["last_error"] = str(error)[:REASON_CHARS]
-                cls._write(night_dir, template)
+                cls._write(night_dir, template, existing_only=True)
                 said.append(f"Repeating task {template['id']} not queued: {error}.")
                 continue
             # `ling night add` says what it did: a refusal (no git repository, no commit yet) is printed
@@ -386,12 +386,12 @@ class NightShiftRecurring:
                     :REASON_CHARS
                 ]
                 template["last_error"] = reason
-                cls._write(night_dir, template)
+                cls._write(night_dir, template, existing_only=True)
                 said.append(f"Repeating task {template['id']} not queued: {reason}")
                 continue
             template["last_queued"] = today.isoformat()
             template["last_error"] = None
-            cls._write(night_dir, template)
+            cls._write(night_dir, template, existing_only=True)
             shown = str(template["task"])[:SHOWN_TASK_CHARS]
             said.append(
                 f"Repeating task {template['id']} queued for tonight in {repo.name}: {shown}"
@@ -399,11 +399,17 @@ class NightShiftRecurring:
         return said
 
     @classmethod
-    def _write(cls, night_dir: Path, template: dict[str, Any]) -> None:
-        """Writes a template whole, through a temporary file renamed over the old one."""
+    def _write(cls, night_dir: Path, template: dict[str, Any], existing_only: bool = False) -> None:
+        """Writes a template whole, through a temporary file renamed over the old one.
+
+        With ``existing_only``, a template dropped meanwhile is not written back.
+        """
         folder = cls.folder(night_dir)
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"{template['id']}.json"
         temporary = path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(template, indent=2) + "\n")
+        if existing_only and not path.exists():
+            temporary.unlink(missing_ok=True)
+            return
         temporary.replace(path)
