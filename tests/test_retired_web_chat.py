@@ -10,6 +10,10 @@ from dreamference.chat.retired_web_chat import RetiredWebChat
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK
 
 
+def _image_id(name):
+    return "id-" + name.replace("/", "-").replace(":", "-")
+
+
 class FakeDocker:
     """The retired deployment as Docker would report it, shrinking as commands remove things."""
 
@@ -36,7 +40,8 @@ class FakeDocker:
         elif argv[:3] == ["docker", "network", "ls"]:
             out = "\n".join(self.networks)
         elif argv[:2] == ["docker", "images"]:
-            out = "\n".join(self.images)
+            with_id = "{{.ID}}" in argv[-1]
+            out = "\n".join(f"{i} {_image_id(i)}" if with_id else i for i in self.images)
         elif argv[:2] == ["docker", "inspect"] and "NetworkSettings" in argv[-1]:
             if argv[2] not in self.sidecars:
                 return subprocess.CompletedProcess(argv, 1, "", "no such container\n")
@@ -63,7 +68,10 @@ class FakeDocker:
         elif argv[:3] == ["docker", "volume", "rm"]:
             self.volumes = [v for v in self.volumes if v not in argv[3:]]
         elif argv[:2] == ["docker", "rmi"]:
-            self.images = [i for i in self.images if i not in argv[2:]]
+            self.images = [i for i in self.images if _image_id(i) not in argv[2:]
+                           and (i not in argv[2:] or i.endswith(":<none>"))]
+            if any(arg.endswith(":<none>") for arg in argv[2:]):
+                return subprocess.CompletedProcess(argv, 1, "", "invalid reference format\n")
         elif argv[:3] == ["docker", "network", "rm"]:
             if any(n in argv[3:] for n in self.on_network.values()) or (self.on_network and "onyx_default" in argv[3:]):
                 return subprocess.CompletedProcess(argv, 1, "", "error: network has active endpoints\n")
@@ -213,3 +221,12 @@ def test_stopped_containers_of_mightlings_own_are_released_too(deployment, monke
     assert ["docker", "network", "disconnect", "onyx_default", "dreamference-searxng"] in fake.commands
     assert ["docker", "rm", "-f", GOOGLE_CONTAINER_NAME] in fake.commands and recreated == [True]
     assert fake.networks == []
+
+
+def test_an_onyx_image_that_lost_its_tag_is_removed_by_its_id(deployment):
+    # A newer pull leaves the old image listed as `repo:<none>`, which `docker rmi` refuses.
+    _, fake = deployment
+    fake.images.append("onyxdotapp/onyx-backend:<none>")
+    assert RetiredWebChat.remove(ask=lambda question: True) == 0
+    assert fake.images == ["postgres:15.2-alpine"]
+    assert RetiredWebChat.remove_data()
