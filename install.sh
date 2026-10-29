@@ -746,6 +746,7 @@ if [ "$INSTALL_UPDATES" = 1 ]; then
                 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -y full-upgrade \
                 >> "$LOG" 2>&1 < /dev/null; then
             step done "system packages upgraded ($(printf '%s' "$UPGRADES" | wc -w | tr -d ' '))"
+            REBOOT=1
         else
             step failed "system packages: \`$UPDATE_COMMANDS\` failed, see $LOG"
         fi
@@ -753,11 +754,11 @@ if [ "$INSTALL_UPDATES" = 1 ]; then
     if [ -n "$FIRMWARE" ]; then
         if $SUDO fwupdmgr update -y --no-reboot-check >> "$LOG" 2>&1 < /dev/null; then
             step done "firmware staged; it is written during the next reboot"
+            REBOOT=1
         else
             step failed "firmware: \`$FIRMWARE_COMMANDS\` failed, see $LOG"
         fi
     fi
-    REBOOT=1
 elif [ -n "$UPGRADES" ] || [ -n "$FIRMWARE" ]; then
     detail=""
     if [ -n "$UPGRADES" ]; then
