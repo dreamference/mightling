@@ -1,7 +1,7 @@
-# The air-gap level's resolution, with no dependency beyond the standard library, so the sandbox
-# helper (patch 0019), the launcher and the web commands all decide it the same way. The web crate
-# carries a byte-identical copy of src/lib.rs (ling-web-rs/src/airgapped.rs; a test compares
-# them), because it is built on its own, outside the Codex workspace.
+# The air-gap level's one reader (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §6.5), with no
+# dependency beyond the standard library, so the sandbox helper (patch 0019), the launcher and the
+# web and docs commands (by path dependency) all decide it the same way; Python and the desktop app
+# ask `ling airgapped --json`. Its conformance cases are cases.json.
 [package]
 name = "ling-airgapped"
 version = "0.1.0"
