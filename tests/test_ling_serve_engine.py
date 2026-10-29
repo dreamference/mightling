@@ -432,7 +432,98 @@ def test_ling_serve_plan_runs_plan_only_in_the_image_and_reads_its_json_line(mon
         and "--rm" in cmd
         and cmd[cmd.index(QWEN38_LING_IMAGE) + 1] == "--model"
     )
-    assert "--sessions" not in cmd and "--max-context" in cmd
+    assert "--max-context" in cmd
+    # The plan is asked of the launch the server will get: a paged engine ("kv-pages" in the pinned
+    # recipe's features) is asked with the recipe's sessions, the pool and image input off; an engine
+    # before the pool with none of them, so a pin moving across LING_ENGINE_KV_PAGES_SINCE changes both.
+    paged = "kv-pages" in (recipe.get("engine_features") or [])
+    assert ("--sessions" in cmd) == paged
+    assert ("--kv-pages" in cmd) == paged
+    assert ("--vision" in cmd and cmd[cmd.index("--vision") + 1] == "off") == paged
+
+
+def _plan_only_stdout(monkeypatch, stdout: str) -> dict | None:
+    """Runs ling_serve_plan against a stubbed `docker run` that prints `stdout`."""
+    import subprocess
+
+    monkeypatch.setattr(
+        "dreamference.vllm_server.vllm_server_manager.subprocess.run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=""),
+    )
+    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    return VLLMServerManager.ling_serve_plan(QWEN38_LING_IMAGE, DEFAULT_MODEL_ALIAS, recipe)
+
+
+def test_ling_serve_plan_returns_a_paged_engines_line_whole(monkeypatch):
+    # ling-engine P4d (BATCHING §5.6) adds the pool to the line; the four keys the check reads are
+    # unchanged, and the rest is kept for whoever reports the plan.
+    import json
+
+    p4d = {
+        "kv_pages": True,
+        "sessions": 4,
+        "batch": 4,
+        "max_context": 262144,
+        "planned_bytes": 94_000_000_000,
+        "kv_pool_bytes": 66_000_000_000,
+        "kv_pool_pages": 15_800,
+        "host_reserve_bytes": 16_000_000_000,
+    }
+    assert _plan_only_stdout(monkeypatch, f"loading\n{json.dumps(p4d)}\n") == p4d
+
+
+def test_ling_serve_plan_is_none_when_the_line_lacks_a_key_the_check_reads(monkeypatch):
+    line = '{"kv_pages":true,"sessions":4,"batch":4,"max_context":262144,"kv_pool_bytes":1}\n'
+    assert _plan_only_stdout(monkeypatch, line) is None
+    # A key present but not an integer is as good as missing.
+    line = '{"sessions":4,"batch":4,"max_context":262144,"planned_bytes":"94 GB"}\n'
+    assert _plan_only_stdout(monkeypatch, line) is None
+
+
+# ling-serve keeps 16 GB of the host's MemAvailable for the host (ling-engine BATCHING §5.6, the
+# default --host-reserve-mb), so the plan it reports is about MemAvailable - 16 GB. The pre-load check
+# adds the load peak and the side services to it: a plan that takes all the engine may take therefore
+# starts only when those two together stay under the engine's 16 GB.
+ENGINE_HOST_RESERVE_GB = 16.0
+
+
+@pytest.mark.parametrize(
+    ("transient_gb", "side_gb", "starts"),
+    [(8.0, 2.0, True), (12.0, 3.9, True), (14.0, 4.0, False), (16.5, 0.0, False)],
+)
+def test_the_pre_load_check_on_a_full_plan_turns_on_the_engines_16_gb_reserve(
+    monkeypatch, capsys, transient_gb, side_gb, starts
+):
+    mgr = VLLMServerManager()
+    available_gb = 110.0  # _stub_start's telemetry
+    planned_gb = available_gb - ENGINE_HOST_RESERVE_GB
+    calls: dict = {
+        "plan": {
+            "sessions": 4,
+            "batch": 4,
+            "max_context": 262144,
+            "planned_bytes": int(planned_gb * 1e9),
+        }
+    }
+    _stub_start(monkeypatch, mgr, calls)
+    monkeypatch.setattr(mgr, "load_transient_gb", lambda model, weights_gb: (transient_gb, "test"))
+    monkeypatch.setattr(
+        mgr, "side_service_allowance", lambda: [("the forge, mightling-forge", side_gb)] if side_gb else []
+    )
+    assert (transient_gb + side_gb < ENGINE_HOST_RESERVE_GB) == starts
+    if starts:
+        with pytest.raises(TypeError):  # past the check; the launch itself is stubbed out
+            mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
+        assert calls["engine"] == ENGINE_LING
+        assert "Not enough memory" not in capsys.readouterr().out
+    else:
+        with pytest.raises(SystemExit):
+            mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
+        out = capsys.readouterr().out
+        assert "Not enough memory to start ling-serve." in out
+        assert f"Plan:        {planned_gb:.2f} GB" in out
+        assert f"Required:    {planned_gb + transient_gb + side_gb:.2f} GB" in out
+        assert ("the forge, mightling-forge" in out) == bool(side_gb)
 
 
 def test_ling_serve_plan_is_none_when_the_engine_refuses_or_the_image_lacks_the_flag(monkeypatch):

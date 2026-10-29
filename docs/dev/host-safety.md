@@ -18,7 +18,24 @@ Between the two, `start_server()` runs the memory gates. The weights must fit be
 
 Host RAM exhaustion and GPU VRAM exhaustion are indistinguishable on GB10; the watchdog exists to make that distinction. Preserve both layers when touching `start_server()`. The SGLang engine runs from the same `docker run` prefix (`_docker_run_prefix`), so the layer is engine-independent.
 
-When ling-engine is the engine (`launch_overrides['engine'] = 'ling'`, not launched by `ling-admin` yet), its footprint includes, besides the weights, the two sessions at full context and the checkpoint store, the prefix KV store's arena (ling-engine BACKLOG 35): one allocation made once at start, `min(--prefix-kv-mb, free device memory - LING_PREFIX_KV_RESERVE_MB)` (4,096 MB and 16 GB by default), off below 512 MB, never grown while serving. The container cap that `_docker_run_prefix` sizes from the memory fraction must count it, and `check_host_safety()` needs nothing new: the arena is decided before the server answers, inside the load the watchdog already covers.
+When ling-engine is the engine (`launch_overrides['engine'] = 'ling'`, the default since 1.8.0), its footprint includes, besides the weights, the sessions (or, on a paged engine, the KV page pool) and the checkpoint store, the prefix KV store's arena (ling-engine BACKLOG 35): one allocation made once at start, `min(--prefix-kv-mb, free device memory - LING_PREFIX_KV_RESERVE_MB)` (4,096 MB and 16 GB by default), off below 512 MB, never grown while serving. The container cap that `_docker_run_prefix` sizes from the memory fraction must count it, and `check_host_safety()` needs nothing new: the arena is decided before the server answers, inside the load the watchdog already covers.
+
+### ling-serve's plan is the pre-load check (1.8.0)
+
+ling-serve sizes its sessions, context and KV pool from MemAvailable when it starts (ling-engine BATCHING §5.6), so the recipe's 0.50 arena is not what it takes, and for it the arena gate above is skipped. `start_server()` asks the engine instead: once the checkpoint is on disk, `VLLMServerManager.ling_serve_plan()` runs the pinned image with the launch's own arguments and `--plan-only` (`docker run --rm`, nothing loaded, 120 s timeout) and reads the last JSON line of its output. The check is then `plan + load peak + side services <= MemAvailable`; a refusal prints `Plan:`, `Load peak:`, each side service, `Required:`, `Available:` and `Missing:`. With no plan (an image older than the flag, a non-zero exit, a timeout, a line without the four keys) it warns `ling-serve gave no plan` and falls back to the arena.
+
+This is a second gate in `start_server()`, not a change to `check_host_safety()`: that function takes no arguments and is also called by the tensorizer (`model_downloader.py`) and Night Shift's host probe, neither of which has an engine, an image or a recipe. The watchdog covers the ling-serve load as it covers any other.
+
+The line, from P4d on (earlier engines print only the first four keys; extra keys are returned untouched):
+
+```json
+{"kv_pages": true, "sessions": 4, "batch": 4, "max_context": 262144, "planned_bytes": 94000000000,
+ "kv_pool_bytes": 66000000000, "kv_pool_pages": 15800, "host_reserve_bytes": 16000000000}
+```
+
+`sessions`, `batch`, `max_context` and `planned_bytes` must be integers; they are all the check reads. The plan is asked of the launch the server will get, so a paged recipe (`"kv-pages"` in `engine_features`) is planned with `--sessions`, `--batch`, `--kv-pages` and `--vision off`.
+
+The 16 GB arithmetic: ling-serve keeps `--host-reserve-mb` (16 GB by default) of MemAvailable for the host, so a plan that takes everything it may is about MemAvailable - 16 GB. Adding the load peak (`max(4 GB, 0.15 x weights)` or the recipe's `load_transient_gb`) and the side services (the forge, 1 GiB) means such a plan starts only while those two stay under 16 GB, which they do for the default model (an estimated 20 GB of weights, so the 4 GB floor, plus the forge: about 5.1 GB). `test_the_pre_load_check_on_a_full_plan_turns_on_the_engines_16_gb_reserve` pins this. Measured on the bar night: {{TBD: node-b MemAvailable before start, the plan's sessions x context, planned_bytes, pool pages, the check's margin}}.
 
 ### ling-serve froze node-b (2026-10-27)
 

@@ -443,7 +443,9 @@ QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ()
 # fit where the flat KV cannot (~19 GB each). A ling-engine recipe lists "kv-pages" in `engine_features`
 # exactly when its `engine_commit` descends from it (tests/test_hardware.py checks that against the
 # submodule), and only then does the launch pass `--sessions`/`--batch` and `--kv-pages` (an engine
-# before it either exits 2 on `--kv-pages` or, flat, would allocate four full contexts).
+# before it either exits 2 on `--kv-pages` or, flat, would allocate four full contexts). P4d makes the
+# pool ling-serve's default (`--no-kv-pages` gives the flat slots) and still accepts a bare `--kv-pages`,
+# so this commit stays the boundary: the launch passes the flag to every paged engine, before P4d and after.
 LING_ENGINE_KV_PAGES_SINCE: Final[str] = "f180b44a40369d7dd03f9ae97e7fa8be4ece1380"
 
 # The sessions and the batch the recipe asks of a paged engine (1.8.0: four conversations at the full
