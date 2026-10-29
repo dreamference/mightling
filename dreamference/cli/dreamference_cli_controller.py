@@ -2392,7 +2392,8 @@ class DreamferenceCLIController:
                     pass
 
                 # Check if model is MoE via HF config
-                is_moe = "Unknown"
+                unknown = "Unknown"
+                is_moe = unknown
                 try:
                     hf_resp = requests.get(f"https://huggingface.co/{model_name}/raw/main/config.json", timeout=3)
                     if hf_resp.status_code == 200:
@@ -2403,6 +2404,9 @@ class DreamferenceCLIController:
                         else:
                             is_moe = "No"
                 except Exception:
+                    pass
+                # No config read (no network, or a 404 for an alias or a private repo): the name.
+                if is_moe == unknown:
                     name_lower = model_name.lower()
                     if any(x in name_lower for x in ["moe", "mixtral", "deepseek-coder-v2", "deepseek-v3", "deepseek-r1"]):
                         is_moe = "Yes (heuristic)"

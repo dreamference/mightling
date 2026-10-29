@@ -251,3 +251,12 @@ def test_main_model_inspect_gives_nvidia_smi_a_timeout(monkeypatch, capsys):
     _, runs = _inspect_main_model(monkeypatch, capsys, "org/m")
     smi = [kwargs for cmd, kwargs in runs if cmd[0] == "nvidia-smi"]
     assert smi and all(kwargs.get("timeout") for kwargs in smi)
+
+
+def test_main_model_inspect_guesses_moe_from_the_name_when_hugging_face_has_no_config(
+    monkeypatch, capsys
+):
+    # The name heuristic ran only when the request raised: a 404 (an alias, a private repo)
+    # left the architecture "Unknown" for a Mixtral.
+    out, _ = _inspect_main_model(monkeypatch, capsys, "org/Mixtral-8x7B-Instruct")
+    assert "Yes (heuristic) (MoE)" in out
