@@ -1184,7 +1184,12 @@ async fn upload(State(server): State<Arc<Server>>, Query(query): Query<HashMap<S
             return text(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not write the attachment: {err}\n"));
         }
     }
-    let _ = file.flush().await;
+    // A write's error (a full disk) comes back from the next call on the file, here the flush.
+    if let Err(err) = file.flush().await {
+        drop(file);
+        let _ = tokio::fs::remove_file(&path).await;
+        return text(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not write the attachment: {err}\n"));
+    }
     drop(file);
     let mut answer = json!({ "path": path.to_string_lossy(), "bytes": written });
     if query.get("read").map(String::as_str) == Some("1") {

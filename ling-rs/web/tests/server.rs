@@ -423,6 +423,47 @@ async fn a_loopback_server_issues_no_pairing_code_from_the_devices_page() {
     assert!(!server.config.state_dir.join("pairing").exists() || std::fs::read_dir(server.config.state_dir.join("pairing")).unwrap().next().is_none());
 }
 
+/// An attachment the disk took only part of is an error, not a saved file: run in a child process
+/// of this test binary whose files may not grow past 1 MiB, as a full disk refuses a write.
+#[test]
+fn an_upload_the_disk_could_not_hold_is_refused_and_removed() {
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "an_upload_into_a_full_disk", "--ignored", "--nocapture"])
+        .env("LW_UPLOAD_FULL_DISK", "1")
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&child.stdout);
+    assert!(child.status.success() && out.contains("1 passed"), "{out}{}", String::from_utf8_lossy(&child.stderr));
+}
+
+#[tokio::test]
+#[ignore = "run by an_upload_the_disk_could_not_hold_is_refused_and_removed"]
+async fn an_upload_into_a_full_disk() {
+    if std::env::var_os("LW_UPLOAD_FULL_DISK").is_none() {
+        return;
+    }
+    let scratch = scratch("upload-full");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let cookie = sign_in(&server).await;
+    let root = server.ask_root();
+    let folder = ling_web_server::ask::new_folder(&root).unwrap();
+    ling_web_server::ask::link_thread(&root, "thr-1", &folder).unwrap();
+    // SAFETY: this process runs this one test; past the limit a write fails with EFBIG.
+    unsafe {
+        libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+        let limit = libc::rlimit { rlim_cur: 1 << 20, rlim_max: libc::RLIM_INFINITY };
+        assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &limit), 0);
+    }
+    let upload = request("POST", "/api/upload?thread=thr-1&name=big.bin&kind=file")
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::COOKIE, &cookie)
+        .body(Body::from(vec![0u8; 2 << 20]))
+        .unwrap();
+    let (status, _, body) = call(&server, upload).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert!(!folder.join("big.bin").exists());
+}
+
 #[tokio::test]
 async fn uploads_go_to_an_ask_threads_folder_within_the_caps() {
     let scratch = scratch("upload");
