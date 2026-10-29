@@ -657,6 +657,24 @@ def test_a_github_rate_limit_backs_off_to_the_next_tick(monkeypatch, tmp_path):
     assert "rate limit" in outcome["backoff"] and not outcome["failures"]
 
 
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "remote: Permission to o/r.git denied to dgxcoder.\nfatal: unable to access "
+        "'https://github.com/o/r/': The requested URL returned error: 403",
+        "remote: Write access to repository not granted.\nfatal: unable to access "
+        "'https://github.com/o/r/': The requested URL returned error: 403",
+    ],
+)
+def test_a_403_that_refuses_the_token_is_a_failure_not_a_rate_limit(monkeypatch, tmp_path, stderr):
+    def refused(cls, work, arguments, environment=None, timeout=0):
+        return subprocess.CompletedProcess(arguments, 128, "", stderr)
+
+    monkeypatch.setattr(ForgeRepositories, "git", classmethod(refused))
+    outcome = ForgeGithubMirror.push_each(tmp_path, ["push"], ["a:b", "c:d"], None)
+    assert not outcome["backoff"] and set(outcome["failures"]) == {"b", "d"}
+
+
 def _one_repository_run(monkeypatch, result):
     ForgeSettings.update_state(role="record")
     ForgeGithubMirror.save_settings(True, "dgxcoder")
