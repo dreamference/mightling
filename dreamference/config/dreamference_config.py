@@ -292,7 +292,7 @@ class DreamferenceConfig:
         env_tensorizer = os.getenv("DREAMFERENCE_USE_TENSORIZER")
         if use_tensorizer is not None:
             self.use_tensorizer: bool = use_tensorizer
-        elif env_tensorizer is not None:
+        elif env_tensorizer:  # empty is unset, as for the other switches
             self.use_tensorizer = env_tensorizer.lower() in ("1", "true", "yes")
         else:
             self.use_tensorizer = bool(self.file_data.get("use_tensorizer", DEFAULT_USE_TENSORIZER))

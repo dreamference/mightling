@@ -110,6 +110,9 @@ def test_boolean_switches_take_the_argument_over_the_environment_over_the_file(
     assert (
         getattr(DreamferenceConfig(config_file=str(path), **{attribute: False}), attribute) is False
     )
+    # An empty variable is unset, as for every other switch: the file still decides.
+    monkeypatch.setenv(variable, "")
+    assert getattr(DreamferenceConfig(config_file=str(path)), attribute) is True
 
 
 def test_the_user_level_file_named_by_the_environment_is_read_once(tmp_path, monkeypatch):
