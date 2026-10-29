@@ -89,4 +89,24 @@ mod tests {
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn the_digest_unit_is_hourly_and_bounded_like_the_check() {
+        let units = files(&["/opt/x/ling".to_string(), "monitor".to_string()]);
+        let text = |name: &str| units.iter().find(|(n, _)| *n == name).unwrap().1.clone();
+        assert!(text(DIGEST_TIMER).contains("OnCalendar=hourly"));
+        let digest = text(DIGEST_SERVICE);
+        assert!(digest.contains("ExecStart=/opt/x/ling monitor digest\n"));
+        for bound in ["MemoryMax=512M", "Nice=10", "IOSchedulingClass=idle"] {
+            assert!(digest.contains(bound), "{bound}");
+        }
+        // Both timers install under timers.target; only user units are written.
+        for name in [CHECK_TIMER, DIGEST_TIMER] {
+            assert!(text(name).contains("WantedBy=timers.target"));
+        }
+        assert_eq!(
+            unit_dir(Path::new("/home/u")),
+            PathBuf::from("/home/u/.config/systemd/user")
+        );
+    }
 }

@@ -29,7 +29,8 @@ pub const VERDICTS: &[&str] = &["accept", "reject", "reverted", "shadow_miss"];
 /// Seconds `ling exec` may run, default and maximum.
 pub const DEFAULT_AGENT_TIMEOUT_S: u64 = 1_500;
 pub const MAX_AGENT_TIMEOUT_S: u64 = 3_600;
-/// Characters of diff returned at most (about 5,000 tokens).
+/// Characters of diff returned at most (about 5,000 tokens, under the spec's 8,000); a larger
+/// diff fails the task as `too_large` and is saved to `diff.patch` in the task's folder (§4.2).
 pub const MAX_DIFF_CHARS: usize = 20_000;
 /// Characters of the agent's last message returned at most.
 pub const MAX_NOTE_CHARS: usize = 1_500;
@@ -46,7 +47,8 @@ pub struct TaskEnv {
     /// `$CODEX_HOME` (default `~/.mightling`).
     pub codex_home: PathBuf,
     pub max_parallel: usize,
-    /// The model server's host for `DREAMFERENCE_VLLM_HOST` (default: this machine).
+    /// The node `ling exec` uses, passed as `MIGHTLING_NODE` (§5.1): a name or id, never an
+    /// address. Unset, `ling` finds the model server through the launcher's own tiers.
     pub node: Option<String>,
     pub ling_bin: String,
 }
@@ -137,6 +139,7 @@ pub struct TaskResult {
     pub reverted: Vec<String>,
     pub changed_lines: usize,
     pub diff: String,
+    /// The diff was over `MAX_DIFF_CHARS`: `diff` is empty and a note names the file holding it.
     pub diff_truncated: bool,
     pub acceptance: Option<RunTestResult>,
     pub gates: Vec<Gate>,
@@ -601,16 +604,11 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
         last_message.display().to_string(),
         prompt,
     ];
-    let host = std::env::var("DREAMFERENCE_VLLM_HOST")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .or_else(|| env.node.clone())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
     let agent_timeout = req.timeout_s.unwrap_or(DEFAULT_AGENT_TIMEOUT_S).clamp(60, MAX_AGENT_TIMEOUT_S);
     let spec = RunSpec {
         argv,
         cwd: wt.clone(),
-        env: vec![("DREAMFERENCE_VLLM_HOST".into(), host)],
+        env: node_env(env),
         timeout_s: agent_timeout,
         batch: true,
     };
@@ -684,13 +682,12 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
         nargs.extend(touched.iter().map(String::as_str));
         r.changed_lines =
             parse_numstat(&tri!(git(runner, &wt, &nargs))).iter().map(|n| n.added + n.deleted).sum();
-        let (text, cut) = if diff.chars().count() > MAX_DIFF_CHARS {
-            (diff.chars().take(MAX_DIFF_CHARS).collect::<String>(), true)
+        if diff.chars().count() > MAX_DIFF_CHARS {
+            tri!(std::fs::write(task_dir.join("diff.patch"), &diff).map_err(|e| e.to_string()));
+            r.diff_truncated = true;
         } else {
-            (diff.clone(), false)
-        };
-        r.diff = text;
-        r.diff_truncated = cut;
+            r.diff = diff.clone();
+        }
         if req.class == "T2" {
             if let Some(why) = weakened_tests(&diff) {
                 violations.push("weakened_tests".to_string());
@@ -721,6 +718,13 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
     let limit = size_limit(&req.class);
     if r.changed_lines > limit {
         let note = format!("{} changed lines, the limit for {} is {limit}", r.changed_lines, req.class);
+        return Ok(log_and_return(&ledger, &repo_hash, env, finish(fail(r, "too_large", &note))));
+    }
+    if r.diff_truncated {
+        let note = format!(
+            "the diff is over {MAX_DIFF_CHARS} characters; it is not returned, the full diff is at {}",
+            task_dir.join("diff.patch").display()
+        );
         return Ok(log_and_return(&ledger, &repo_hash, env, finish(fail(r, "too_large", &note))));
     }
 
@@ -764,6 +768,15 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
     r.reason = "ok".to_string();
     r.notes.push("the diff is not applied or committed; review it, then record the verdict with task_verdict".to_string());
     Ok(log_and_return(&ledger, &repo_hash, env, finish(r)))
+}
+
+/// The environment `ling exec` gets beyond the server's own: `MIGHTLING_NODE` when the plugin's
+/// `node` is set (§5.1), else nothing, so a client keeps the launcher's tiers and a node its loopback.
+fn node_env(env: &TaskEnv) -> Vec<(String, String)> {
+    env.node
+        .iter()
+        .map(|n| ("MIGHTLING_NODE".to_string(), n.clone()))
+        .collect()
 }
 
 fn log_and_return(ledger: &Ledger, repo: &str, env: &TaskEnv, r: TaskResult) -> TaskResult {
@@ -819,6 +832,8 @@ mod tests {
         /// `git status --ignored` output, before and after the model.
         ignored: RefCell<String>,
         ignored_after: String,
+        /// The extra environment `ling exec` got.
+        exec_env: RefCell<Vec<(String, String)>>,
     }
 
     impl Runner for World {
@@ -852,7 +867,7 @@ mod tests {
             if j.starts_with("ling exec ") {
                 assert!(spec.batch, "the model runs in the batch slice");
                 assert!(j.contains("-s workspace-write"));
-                assert!(spec.env.iter().any(|(k, _)| k == "DREAMFERENCE_VLLM_HOST"));
+                *self.exec_env.borrow_mut() = spec.env.clone();
                 for (p, c) in &self.writes {
                     let full = self.wt.join(p);
                     std::fs::create_dir_all(full.parent().unwrap()).unwrap();
@@ -919,6 +934,7 @@ mod tests {
             sandbox_ok: true,
             ignored: RefCell::new("!! .mypy_cache/\0".into()),
             ignored_after: "!! .mypy_cache/\0".into(),
+            exec_env: RefCell::new(vec![]),
         }
     }
 
@@ -954,6 +970,24 @@ mod tests {
         let text = std::fs::read_to_string(env.state_dir().join("ledger.jsonl")).unwrap();
         assert!(!text.contains("Set x to 1") && !text.contains("x = 1"));
         assert!(!env.state_dir().join("running").join(format!("{}.pid", r.id)).exists(), "slot released");
+    }
+
+    #[test]
+    fn the_plugin_node_reaches_ling_exec_as_mightling_node_and_never_as_an_address() {
+        let (wt, mut env) = setup("node");
+        let w = world(&wt);
+        assert!(execute(&request(&wt, "T3"), &w, &env).unwrap().pass);
+        assert!(
+            w.exec_env.borrow().is_empty(),
+            "unset: the launcher's tiers decide"
+        );
+        env.node = Some("node-a".into());
+        let w = world(&wt);
+        assert!(execute(&request(&wt, "T3"), &w, &env).unwrap().pass);
+        assert_eq!(
+            *w.exec_env.borrow(),
+            vec![("MIGHTLING_NODE".to_string(), "node-a".to_string())]
+        );
     }
 
     #[test]
@@ -1059,6 +1093,19 @@ mod tests {
         let mut w = world(&wt);
         w.numstat = "100\t60\tsrc/a.py\n".into();
         assert_eq!(execute(&request(&wt, "T2"), &w, &env).unwrap().reason, "too_large");
+        // A diff over the cap is refused with its path, not returned cut (§4.2).
+        let (wt, env) = setup("bigdiff");
+        let mut w = world(&wt);
+        w.diff = format!(
+            "diff --git a/src/a.py b/src/a.py\n{}",
+            "+x = 1\n".repeat(MAX_DIFF_CHARS / 7 + 1)
+        );
+        let r = execute(&request(&wt, "T3"), &w, &env).unwrap();
+        assert_eq!((r.pass, r.reason.as_str(), r.diff_truncated), (false, "too_large", true));
+        assert!(r.diff.is_empty() && r.acceptance.is_none(), "refused before the acceptance test");
+        let saved = env.state_dir().join("tasks").join(&r.id).join("diff.patch");
+        assert_eq!(std::fs::read_to_string(&saved).unwrap(), w.diff);
+        assert!(r.notes.iter().any(|n| n.contains(&saved.display().to_string())), "{:?}", r.notes);
         // 160 lines is under T3's 400.
         let (wt, env) = setup("acc");
         let mut w = world(&wt);

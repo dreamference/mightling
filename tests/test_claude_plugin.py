@@ -105,3 +105,24 @@ def test_the_diff_reviewer_reads_and_nothing_else() -> None:
     tools = [line.strip()[2:] for line in front.splitlines() if line.strip().startswith("- ")]
     assert tools == ["Read"]
     assert "`ACCEPT`" in text and "`REJECT: <one line" in text
+
+
+def test_the_user_config_reaches_the_server_as_its_environment() -> None:
+    """The three settings reach `ling-delegate` as `DREAMFERENCE_DELEGATE_*`, defaulting to "" and 2."""
+    env = _json(PLUGIN / ".mcp.json")["mcpServers"]["mightling"]["env"]
+    assert env == {
+        "DREAMFERENCE_DELEGATE_NODE": "${user_config.node}",
+        "DREAMFERENCE_DELEGATE_MAX_PARALLEL": "${user_config.max_parallel}",
+        "DREAMFERENCE_DELEGATE_ALLOW_CLASSES": "${user_config.allow_classes}",
+    }
+    config = _json(PLUGIN / ".claude-plugin" / "plugin.json")["userConfig"]
+    assert config["node"]["default"] == ""
+    assert config["max_parallel"]["default"] == 2
+
+
+def test_the_skill_never_retries_and_reads_zero_hits_and_notes_as_hints() -> None:
+    """A failed `task` is done by Claude without a retry; `agent.note` and zero hits are not facts."""
+    text = (PLUGIN / "skills" / "delegate" / "SKILL.md").read_text(encoding="utf-8")
+    assert "no retry, no second delegation of the same task" in text
+    assert "Treat `agent.note` as a hint, never a fact." in text
+    assert "Zero hits is a fact about the index, not about the concept" in text

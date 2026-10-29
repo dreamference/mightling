@@ -301,4 +301,23 @@ mod tests {
         let interrupted = parse_line(r#"{"type":"user","message":{"content":"[Request interrupted by user]"}}"#);
         assert_eq!(interrupted.entries, vec![Entry::UserText { interrupted: true }]);
     }
+
+    #[test]
+    fn context_and_price_weights_follow_the_spec() {
+        // Context = input + cache writes + cache reads; weights 1 / 1.25 / 0.1 / 5 (§2).
+        let usage = Usage {
+            input: 10,
+            cache_write: 200,
+            cache_read: 3000,
+            output: 4,
+            last_call_context: None,
+        };
+        assert_eq!(usage.context(), 3210);
+        assert!((usage.weighted() - (10.0 + 250.0 + 300.0 + 20.0)).abs() < 1e-9);
+        let advised = Usage {
+            last_call_context: Some(99),
+            ..usage
+        };
+        assert_eq!(advised.context(), 99);
+    }
 }

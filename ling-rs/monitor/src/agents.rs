@@ -816,4 +816,87 @@ mod tests {
         assert_eq!(table.read_new(&found, None).len(), 1, "the completed line is read once");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    fn bash(command: &str) -> ToolUse {
+        ToolUse {
+            id: "".into(),
+            name: "Bash".into(),
+            command: Some(command.into()),
+            file_path: None,
+            background: false,
+        }
+    }
+
+    #[test]
+    fn a_test_run_is_pytest_as_a_word_dash_m_pytest_cargo_test_or_npm_test() {
+        for yes in [
+            "pytest -q",
+            "cd x && .venv/bin/pytest tests",
+            "python -m pytest tests/",
+            "cargo test --offline",
+            "npm test",
+            "ctest -j4",
+        ] {
+            assert!(is_test_command(yes), "{yes}");
+        }
+        for no in [
+            "grep -rn pytest.fail tests/",
+            "cat pytest.ini",
+            "cargo build",
+            "git log --oneline",
+        ] {
+            assert!(!is_test_command(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn waits_are_classed_by_the_command_pattern() {
+        assert_eq!(
+            WaitKind::of(&bash("gh run watch 1 --exit-status")),
+            WaitKind::Ci
+        );
+        assert_eq!(WaitKind::of(&bash("sleep 300")), WaitKind::Shell);
+        assert_eq!(WaitKind::of(&bash("timeout 60 ./x")), WaitKind::Shell);
+        assert_eq!(WaitKind::of(&bash("ls")), WaitKind::Tool);
+        let agent = ToolUse {
+            name: "Agent".into(),
+            command: None,
+            ..bash("")
+        };
+        assert_eq!(WaitKind::of(&agent), WaitKind::Subagent);
+    }
+
+    #[test]
+    fn a_file_that_shrank_or_was_replaced_is_read_again_from_the_start() {
+        let dir = std::env::temp_dir().join(format!("ling-monitor-shrink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("p")).unwrap();
+        let file = dir.join("p/sess.jsonl");
+        let first = format!(
+            "{}\n{}\n",
+            response("2026-10-26T10:00:00Z", "m1", 1, 1, 1, None),
+            response("2026-10-26T10:01:00Z", "m2", 1, 1, 1, None)
+        );
+        std::fs::write(&file, &first).unwrap();
+        let mut table = Table::default();
+        let found = sources(&dir);
+        assert_eq!(table.read_new(&found, None).len(), 2);
+        assert_eq!(
+            table.read_new(&found, None).len(),
+            0,
+            "nothing appended, nothing read"
+        );
+        // Replaced by a shorter file: read again from its start.
+        std::fs::write(
+            &file,
+            format!(
+                "{}\n",
+                response("2026-10-26T11:00:00Z", "m9", 1, 1, 1, None)
+            ),
+        )
+        .unwrap();
+        assert_eq!(table.read_new(&found, None).len(), 1);
+        assert_eq!(table.read_new(&found, None).len(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

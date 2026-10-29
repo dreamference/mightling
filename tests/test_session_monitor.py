@@ -72,3 +72,40 @@ def test_alert_templates_never_carry_the_task_description():
     # D13: an alert names the agent's ordinal, type and id, never its `.meta.json` description.
     checks = (CRATE / "src" / "checks.rs").read_text()
     assert ".description" not in checks.split("#[cfg(test)]")[0]
+
+
+def test_the_readers_only_open_inputs_for_reading_and_state_is_written_through_a_rename():
+    # §7.1: every input is opened read-only; the monitor never locks, rotates, renames or writes it (D6).
+    agents = (CRATE / "src" / "agents.rs").read_text().split("#[cfg(test)]")[0]
+    for forbidden in (
+        "OpenOptions",
+        "fs::write",
+        "remove_file",
+        "fs::rename",
+        "File::create",
+        "flock",
+        "set_permissions",
+    ):
+        assert forbidden not in agents, forbidden
+    assert "File::open" in agents
+    # §7.5: the summary and the state are written to a temporary file and renamed.
+    summary = (CRATE / "src" / "summary.rs").read_text().split("#[cfg(test)]")[0]
+    assert "fs::rename(&tmp, path)" in summary
+    cli = (CRATE / "src" / "cli.rs").read_text().split("#[cfg(test)]")[0]
+    assert cli.count("write_atomic(") >= 3  # summary.md, summary.json, state.json
+
+
+def test_the_state_lives_under_the_dreamference_share_folder_and_the_units_are_user_units():
+    # §7.6: ~/.local/share/dreamference/monitor/, two user units named mightling-monitor*.
+    config = (CRATE / "src" / "config.rs").read_text()
+    assert '".local/share/dreamference/monitor"' in config
+    units = (CRATE / "src" / "units.rs").read_text()
+    for name in (
+        "mightling-monitor.service",
+        "mightling-monitor.timer",
+        "mightling-monitor-digest.service",
+        "mightling-monitor-digest.timer",
+    ):
+        assert f'"{name}"' in units, name
+    assert '".config/systemd/user"' in units
+    assert '"--user"' in (CRATE / "src" / "cli.rs").read_text()
