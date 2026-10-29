@@ -599,6 +599,8 @@ Every field resolves in `DreamferenceConfig.__init__`, highest priority first:
    2. `DREAMFERENCE_CONFIG_PATH`;
    3. `./dreamference.toml` or `./dreamference.json`;
    4. `~/.config/dreamference/config.toml`.
+
+   `vllm_host` from `./dreamference.toml` or `./dreamference.json` counts only when it names this machine (`localhost`, a loopback address or the any-address, no user info), the launcher's rule (MIGHTLING_CODEX §4): another host there is ignored with one line on stderr and `vllm_host` in the user's file decides (since 2026-10-29). Without it, a clone chose the model server for every `ling-admin` command, and the agent runner passed that host to `ling` as `DREAMFERENCE_VLLM_HOST`, which the launcher trusts.
 4. **Built-in defaults**: the module-level `DEFAULT_*` constants.
 
 ### 5.1. Config File Example
