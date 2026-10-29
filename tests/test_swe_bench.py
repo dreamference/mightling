@@ -2262,6 +2262,13 @@ def test_the_dataset_file_for_the_harness_names_this_machines_images(tmp_path):
     assert entry["image"] == "repo:acme-widget-1" and entry["problem_statement"]
 
 
+def test_a_default_run_name_skips_a_run_folder_that_has_no_manifest(bench):
+    first = SweBenchRunner.default_name()
+    assert first.endswith("-a")
+    SweBenchRunStore(first).directory.mkdir(parents=True)  # a run that ended before its manifest
+    assert SweBenchRunner.default_name() == first[:-1] + "b"
+
+
 def test_selection_is_sorted_limited_and_rejects_unknown_ids(bench, tmp_path):
     assert SweBenchRunner.select("verified", None, 2, None) == ["acme__widget-1", "acme__widget-2"]
     subset = tmp_path / "ids.txt"

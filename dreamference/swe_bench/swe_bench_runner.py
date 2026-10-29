@@ -1605,13 +1605,13 @@ class SweBenchRunner:
     @classmethod
     def default_name(cls) -> str:
         """Returns:
-        str: `<date>-a`, or the next free letter.
+        str: `<date>-a`, or the next free letter: no run's folder, with or without a manifest.
         """
         today = datetime.now().strftime("%Y-%m-%d")
-        existing = set(SweBenchRunStore.runs())
         for letter in "abcdefghijklmnopqrstuvwxyz":
-            if f"{today}-{letter}" not in existing:
-                return f"{today}-{letter}"
+            name = f"{today}-{letter}"
+            if not SweBenchRunStore(name).directory.exists():
+                return name
         return f"{today}-{int(time.time())}"
 
     @classmethod
