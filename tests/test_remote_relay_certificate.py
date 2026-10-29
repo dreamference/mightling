@@ -426,3 +426,12 @@ def test_turning_the_control_planes_certificate_off_keeps_the_relays_renewal(mon
     monkeypatch.setattr(RemotePublicCertificate, "serve", classmethod(lambda cls, *a: True))
     assert RemoteAccess.certificate_off() == 0
     assert RemoteSettings.read()["public_certificate"] is False
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["-relay.example.org", "relay-.example.org", "rélay.example.org", "relay.exa_mple.org",
+     "١٢٣.example.org", "a" * 64 + ".example.org", "re.lay..example.org"],
+)  # fmt: skip
+def test_a_relay_name_that_is_not_an_ascii_host_name_is_refused(name):
+    assert RemoteRelayCertificate.valid_name(name, BOX) is False

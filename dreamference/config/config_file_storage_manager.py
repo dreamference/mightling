@@ -6,6 +6,7 @@ Dreamference configuration dictionaries to YAML or JSON formats.
 """
 
 import json
+import tomllib
 from pathlib import Path
 from typing import Dict, Any
 
@@ -38,16 +39,38 @@ class ConfigFileStorageManager:
         if not path.exists():
             return {}
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                if toml and path.suffix == ".toml":
-                    return toml.load(f)
+            # `utf-8-sig`: an editor that saves a byte order mark (Notepad does) would otherwise make
+            # TOML read the first key as "\ufeffkey", so that setting, often the air-gap level, was
+            # silently ignored, and make JSON refuse the whole file.
+            with open(path, "r", encoding="utf-8-sig") as f:
+                if path.suffix == ".toml":
+                    loaded = cls._load_toml(f.read())
                 elif yaml and path.suffix in (".yaml", ".yml"):
-                    return yaml.safe_load(f) or {}
+                    loaded = yaml.safe_load(f) or {}
                 else:
-                    return json.load(f) or {}
+                    loaded = json.load(f) or {}
+            if not isinstance(loaded, dict):
+                # A file that is only a list or a word has no settings; every caller reads a mapping.
+                raise ValueError("not a table of settings; ignoring it")
+            return loaded
         except Exception as e:
             print(f"⚠️ Error reading Mightling config file ({path}): {e}")
             return {}
+
+    @staticmethod
+    def _load_toml(text: str) -> dict[str, Any]:
+        """Reads TOML text: with tomllib, and with the older `toml` package only for text it refuses.
+
+        tomllib reads every valid TOML file, as the Rust readers do; the older `toml` package refuses
+        some (a mixed-type array anywhere) and misreads others (an escaped quoted key, a string that
+        starts with escaped quotes), so it is only the fallback.
+        """
+        try:
+            return tomllib.loads(text)
+        except tomllib.TOMLDecodeError:
+            if toml is None:
+                raise
+            return toml.loads(text)
 
     @classmethod
     def save_config_dict(cls, path: Path, data: Dict[str, Any]) -> Path:

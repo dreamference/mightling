@@ -2862,3 +2862,44 @@ def test_job_sender_jobs_logs_cancel_and_fetch_branches(tmp_path, monkeypatch, c
     assert NodeJobSender.fetch(job_id) == 0
     assert f"job-fetched {job_id}" in sent_reqs
 
+
+
+def test_a_service_file_value_with_a_line_break_is_read_back_whole():
+    text = NodeServiceFile.render(8000, "node-a", "1.0\nbeta")
+
+    records = NodeServiceFile.parse(text)
+
+    assert records["version"] == "1.0\nbeta"
+    assert records["node"] == "node-a"
+
+
+def test_a_nodes_records_cannot_name_a_different_address_or_port():
+    line = (
+        "=;eth0;IPv4;spark;_mightling-node._tcp;local;spark.local;10.0.0.5;8000;"
+        '"node=n1" "address=10.9.9.9" "port=22" "host=other.local" "name=other" "interface=lo"'
+    )
+
+    (node,) = NodeBrowser.parse(line)
+
+    assert (node["address"], node["port"], node["host"]) == ("10.0.0.5", "8000", "spark.local")
+    assert (node["name"], node["interface"], node["node"]) == ("spark", "eth0", "n1")
+
+
+def test_a_semicolon_inside_a_nodes_records_does_not_cut_them_short():
+    line = (
+        "=;eth0;IPv4;spark;_mightling-node._tcp;local;spark.local;10.0.0.5;8000;"
+        '"node=n1" "version=1.0;beta" "remote=a;b"'
+    )
+
+    (node,) = NodeBrowser.parse(line)
+
+    assert (node["version"], node["remote"]) == ("1.0;beta", "a;b")
+
+
+def test_a_forced_command_ending_in_a_backslash_is_refused():
+    from dreamference.node import NodePairing
+
+    # sshd reads a backslash before the closing quote as an escaped quote, so the restrictions
+    # that follow would become part of the command.
+    with pytest.raises(ValueError):
+        NodePairing.authorized_line(PUBLIC_KEY, "/x node serve-job --key a\\")

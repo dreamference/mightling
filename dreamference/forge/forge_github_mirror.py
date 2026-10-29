@@ -130,10 +130,11 @@ class ForgeGithubMirror:
 
         path = Path("~/.mightling/config.toml").expanduser()
         try:
-            value = tomllib.loads(path.read_text()).get("mightling_airgapped")
+            value = tomllib.loads(path.read_text(encoding="utf-8-sig")).get("mightling_airgapped")
         except (OSError, ValueError):
             return False
-        return str(value).strip().lower() == AIRGAPPED_ON
+        # `true` is `on`, as the Rust resolver and the configuration's own reader take it.
+        return value is True or str(value).strip().lower() == AIRGAPPED_ON
 
     @classmethod
     def destinations(cls) -> list[str]:

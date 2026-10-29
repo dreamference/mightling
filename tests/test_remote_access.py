@@ -880,8 +880,9 @@ def test_setup_again_keeps_the_secret_and_does_not_rejoin(seams, monkeypatch):
 
 @pytest.mark.parametrize(
     "name",
-    ["", "relay", "http://relay.example.org", "relay.example.org:443", "user@relay.example.org"],
-)
+    ["", "relay", "http://relay.example.org", "relay.example.org:443", "user@relay.example.org",
+     "a.example.org\tb", "*.example.org", "a,b.example.org", "rélay.example.org", "-a.example.org"],
+)  # fmt: skip
 def test_setup_wants_a_dns_name(seams, name):
     assert RemoteAccess.setup(name, yes=True) == 2
     assert seams == []
@@ -2094,3 +2095,22 @@ def test_a_code_ends_with_a_status_and_a_word_for_every_outcome(
     _code_ready(monkeypatch, outcome)
     assert RemoteAccess.code() == status
     assert words in capsys.readouterr().out
+
+
+def test_a_value_that_holds_another_placeholder_stays_inside_its_quotes(tmp_path):
+    bundle = {
+        "management_url": "https://remote.example.org:443",
+        "setup_key": "k@PEER@",
+        "overlay_name": "mightling-ab.netbird.selfhosted",
+        "ca": "",
+    }
+    script = RemoteJoinScript.script(bundle, peer="p@SSH_USER@", ssh_user="u; touch PWN #")
+    assignments = [line for line in script.splitlines() if re.match(r"(KEY|PEER|SSH_USER)=", line)]
+    probe = "\n".join([*assignments, 'printf "%s\\n" "$KEY" "$PEER" "$SSH_USER"'])
+
+    done = subprocess.run(
+        ["bash", "-c", probe], cwd=tmp_path, capture_output=True, text=True, check=False
+    )
+
+    assert not (tmp_path / "PWN").exists()
+    assert done.stdout.splitlines() == ["k@PEER@", "p@SSH_USER@", "u; touch PWN #"]

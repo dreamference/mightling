@@ -47,18 +47,21 @@ class NodeBrowser:
         best: Dict[str, Dict[str, str]] = {}
         order: List[str] = []
         for line in output.splitlines():
-            fields = line.split(";")
+            fields = line.split(";", 9)
             if len(fields) < 10 or fields[0] != "=" or fields[4] != service_type:
                 continue
             interface = fields[1]
             if interface == "lo" or interface.startswith(("docker", "br-", "veth")):
                 continue
-            entry = {"interface": interface, "name": fields[3], "host": fields[6],
-                     "address": cls.scoped(fields[7], interface), "port": fields[8]}
+            entry: dict[str, str] = {}
             for record in fields[9].split('" "'):
                 key, _, value = record.strip('"').partition("=")
                 if key:
                     entry[key] = value
+            # What the browse line says about the node wins over what the node says about itself:
+            # a node's own record cannot name another machine's address or port.
+            entry.update({"interface": interface, "name": fields[3], "host": fields[6],
+                          "address": cls.scoped(fields[7], interface), "port": fields[8]})
             identity = entry.get("node", entry["name"])
             if identity not in best:
                 order.append(identity)

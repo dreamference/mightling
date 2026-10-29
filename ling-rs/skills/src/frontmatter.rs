@@ -103,13 +103,16 @@ fn from_yaml(root: &Value) -> Frontmatter {
     }
 }
 
-/// The repair path: top-level `name:` and `description:` lines, taken verbatim.
+/// The repair path: top-level `name:` and `description:` lines. A line that is YAML on its own is
+/// read as YAML reads it (quotes, escapes, a comment, `True`), so a broken line elsewhere does not
+/// change what the others say; one that is not, like an unquoted colon, is taken verbatim.
 fn from_lines(yaml: &str) -> Option<Frontmatter> {
     let value_of = |key: &str| {
-        yaml.lines()
-            .find_map(|line| line.strip_prefix(key)?.strip_prefix(':'))
-            .map(|value| value.trim().trim_matches(['"', '\'']).to_string())
-            .filter(|value| !value.is_empty())
+        let value = yaml.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix(':'))?;
+        let line: Option<Value> = serde_yaml::from_str(&format!("{key}: {value}")).ok();
+        text(line.as_ref().and_then(|line| line.get(key))).or_else(|| {
+            Some(value.trim().trim_matches(['"', '\'']).to_string()).filter(|value| !value.is_empty())
+        })
     };
     Some(Frontmatter {
         name: value_of("name"),
@@ -216,6 +219,22 @@ mod tests {
     fn an_unquoted_colon_in_a_description_is_repaired() {
         let parsed = parse("---\nname: notes\ndescription: Use when: the user asks for notes\n---\n");
         assert_eq!(parsed.map(|parsed| parsed.description).as_deref(), Ok("Use when: the user asks for notes"));
+    }
+
+    #[test]
+    fn a_repaired_file_reads_its_other_lines_as_yaml_does() {
+        // An unquoted colon sends the block to the repair, which read `True` and a commented
+        // `true` as false: a skill its author kept from the model became one it could start.
+        for flag in ["True", "TRUE", "true # manual only"] {
+            let text =
+                format!("---\nname: deploy\ndescription: Deploy: the site\ndisable-model-invocation: {flag}\n---\n");
+            assert_eq!(parse(&text).map(|parsed| parsed.manual_only), Ok(true), "{flag}");
+        }
+        let parsed = parse("---\nname: 'notes' # mine\ndescription: '\"'\ncompatibility: needs: a shell\n---\n");
+        assert_eq!(
+            parsed.map(|parsed| (parsed.name, parsed.description)),
+            Ok((Some("notes".to_string()), "\"".to_string()))
+        );
     }
 
     #[test]

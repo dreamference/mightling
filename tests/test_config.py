@@ -173,3 +173,58 @@ def test_a_default_host_and_agent_are_not_fossilised_into_the_config(tmp_path):
     config.save_config()
     assert ConfigFileStorageManager.load_config_dict(cfg_file) == {
         "vllm_host": "http://spark-2.local:8000", "agent_runner": "cline"}
+
+
+def test_a_valid_toml_file_the_old_reader_refused_still_turns_the_air_gap_on(tmp_path, monkeypatch):
+    # Valid TOML that the `toml` package refused (a mixed-type array), misread (an escaped
+    # quoted key) or missed (a byte order mark): each read as `off`, the Rust resolver as `on`.
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    for text in (
+        'x = [1, "a"]\nmightling_airgapped = "on"\n',
+        '"\\u006dightling_airgapped" = "on"\n',
+        '\ufeffmightling_airgapped = "on"\n',
+    ):
+        path = tmp_path / "dreamference.toml"
+        path.write_text(text, encoding="utf-8")
+        monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(path))
+        assert DreamferenceConfig.resolve_airgapped_level() == "on", text
+
+
+def test_a_config_file_saved_with_a_byte_order_mark_is_read_whole(tmp_path):
+    # Windows editors put U+FEFF first. TOML then read the first key as "\ufeffmightling_airgapped",
+    # so the level the file sets was ignored (the air gap silently off), and JSON refused the file.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    texts = {
+        "marked.toml": 'mightling_airgapped = "on"\nmodel = "m"\n',
+        "marked.json": '{"mightling_airgapped": "on", "model": "m"}',
+        "marked.yaml": "mightling_airgapped: 'on'\nmodel: m\n",
+    }
+    for name, text in texts.items():
+        path = tmp_path / name
+        path.write_bytes(b"\xef\xbb\xbf" + text.encode())
+        assert ConfigFileStorageManager.load_config_dict(path) == {"mightling_airgapped": "on", "model": "m"}, name
+    assert DreamferenceConfig(config_file=str(tmp_path / "marked.toml")).mightling_airgapped == "on"
+
+
+def test_a_config_file_that_is_not_a_table_of_settings_is_ignored(tmp_path):
+    # A YAML file holding one word or a JSON list came back as a str or a list, and the first
+    # `.get` on it raised AttributeError out of DreamferenceConfig().
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    for name, text in {"word.yaml": "just a word\n", "list.yml": "- a\n- b\n", "list.json": "[1, 2]"}.items():
+        path = tmp_path / name
+        path.write_text(text)
+        assert ConfigFileStorageManager.load_config_dict(path) == {}, name
+        assert DreamferenceConfig(config_file=str(path)).model
+
+
+def test_toml_strings_with_escaped_quotes_are_read_as_written(tmp_path):
+    # The `toml` package read `"\"\"no"` as `no` and a lone `"\""` as an empty string.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    path = tmp_path / "quotes.toml"
+    path.write_text('a = "\\"\\"no::,off1,"\nb = "\\""\n')
+    assert ConfigFileStorageManager.load_config_dict(path) == {"a": '""no::,off1,', "b": '"'}
+    DreamferenceConfig(config_file=str(path), hf_token='""token').save_config()
+    assert DreamferenceConfig(config_file=str(path)).hf_token == '""token'

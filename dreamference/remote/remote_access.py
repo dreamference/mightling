@@ -34,7 +34,11 @@ from dreamference.remote.remote_enrolment import RemoteEnrolment
 from dreamference.remote.remote_join_script import RemoteJoinScript
 from dreamference.remote.remote_node_peer import RemoteNodePeer
 from dreamference.remote.remote_public_certificate import RemotePublicCertificate
-from dreamference.remote.remote_relay_certificate import RECORD_KEYS, RemoteRelayCertificate
+from dreamference.remote.remote_relay_certificate import (
+    DNS_LABEL,
+    RECORD_KEYS,
+    RemoteRelayCertificate,
+)
 from dreamference.remote.remote_settings import (
     BOX_PUBLIC_PORT,
     CODE_MINUTES,
@@ -58,6 +62,7 @@ DOT = "."
 ERROR = "error"
 YES = "yes"
 ED25519 = "ssh-ed25519 "
+MAX_DNS_NAME = 253
 PACKAGE_TOOLS = ("apt", "dnf")
 
 
@@ -222,7 +227,12 @@ class RemoteAccess:
         """
         dns_name = dns_name.strip().lower().rstrip(".")
         scope = (ca_scope or RemoteSettings.default_ca_scope(dns_name)).strip().lower().strip(".")
-        if not dns_name or DOT not in dns_name or any(c in dns_name for c in "/: @"):
+        labels = dns_name.split(DOT)
+        if (
+            len(labels) < 2  # noqa: PLR2004 - a label and a domain
+            or len(dns_name) > MAX_DNS_NAME
+            or not all(DNS_LABEL.fullmatch(label) for label in labels)
+        ):
             print(
                 f"❌ {dns_name!r} is not a DNS name. Give the box's public name, e.g. remote.example.org."
             )
