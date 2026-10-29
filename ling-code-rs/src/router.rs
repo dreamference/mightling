@@ -394,6 +394,20 @@ impl Context {
         }
     }
 
+    /// Answers with `read`, and once more from a context loaded again if the read failed or
+    /// codebase-memory committed a re-index while it ran (§7.5). The shell query and the MCP tools
+    /// both answer through here. Returns the context the answer came from.
+    pub fn answer_with<T>(self, read: impl Fn(&Context) -> Result<T>) -> Result<(Context, T)> {
+        match read(&self) {
+            Ok(answer) if !self.graph_changed_since_load() => Ok((self, answer)),
+            _ => {
+                let context = Context::load(self.repo, self.settings)?;
+                let answer = read(&context)?;
+                Ok((context, answer))
+            }
+        }
+    }
+
     /// Whether any layer can answer at all.
     pub fn has_index(&self) -> bool {
         self.graph.is_some() || !self.stores.is_empty()

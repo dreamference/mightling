@@ -146,21 +146,25 @@ fn call(repo: &Repo, settings: &Settings, params: &Value) -> Result<String> {
             false,
         ));
     }
-    let (mut answer, body) = match name {
-        "def" => (context.def(&text("name"))?, None),
-        "refs" => (context.refs(&text("name"))?, None),
-        "callers" => (context.callers(&text("name"))?, None),
-        "callees" => (context.callees(&text("name"))?, None),
-        "impl" => (context.implementations(&text("name"))?, None),
-        "impact" => (
-            context.impact(&text("name"), crate::router::IMPACT_DEPTH)?,
-            None,
-        ),
-        "outline" => (context.outline(&text("file"))?, None),
-        "search" => (context.search(&text("words"))?, None),
-        "show" => context.show(&text("name"))?,
-        other => anyhow::bail!("unknown tool {other}"),
-    };
+    // One retry if codebase-memory committed a re-index while this answer was read (§7.5), as the
+    // shell query does.
+    let (_, (mut answer, body)) = context.answer_with(|context| {
+        Ok(match name {
+            "def" => (context.def(&text("name"))?, None),
+            "refs" => (context.refs(&text("name"))?, None),
+            "callers" => (context.callers(&text("name"))?, None),
+            "callees" => (context.callees(&text("name"))?, None),
+            "impl" => (context.implementations(&text("name"))?, None),
+            "impact" => (
+                context.impact(&text("name"), crate::router::IMPACT_DEPTH)?,
+                None,
+            ),
+            "outline" => (context.outline(&text("file"))?, None),
+            "search" => (context.search(&text("words"))?, None),
+            "show" => context.show(&text("name"))?,
+            other => anyhow::bail!("unknown tool {other}"),
+        })
+    })?;
     let page = Page {
         limit: args["limit"]
             .as_u64()

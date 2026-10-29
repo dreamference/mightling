@@ -259,7 +259,7 @@ fn run(command: Command) -> anyhow::Result<ExitCode> {
 
 fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<ExitCode> {
     let limit_default = settings.row_limit;
-    let mut context = Context::load(repo.clone(), settings.clone())?;
+    let context = Context::load(repo, settings)?;
     if !context.has_index() {
         if context
             .repo
@@ -277,13 +277,8 @@ fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<Ex
         return Ok(ExitCode::from(3));
     }
     // One retry if codebase-memory committed a re-index while this answer was read (§7.5).
-    let (mut answer, body, page) = match compute(&context, &command) {
-        Ok(result) if !context.graph_changed_since_load() => result,
-        _ => {
-            context = Context::load(repo, settings)?;
-            compute(&context, &command)?
-        }
-    };
+    let (context, (mut answer, body, page)) =
+        context.answer_with(|context| compute(context, &command))?;
     let page_options = Page {
         limit: page.limit.unwrap_or(if body.is_some() {
             output::SHOW_LINES

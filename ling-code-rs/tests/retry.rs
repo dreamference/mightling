@@ -5,6 +5,8 @@
 
 mod common;
 
+use std::cell::Cell;
+
 use common::fixture;
 use ling_code::config::Settings;
 use ling_code::router::Context;
@@ -58,4 +60,46 @@ fn a_new_mutation_generation_asks_for_one_more_answer() {
     // The answer read again starts from the new generation, so it is not retried a second time.
     let reloaded = Context::load(f.repo.clone(), Settings::default()).unwrap();
     assert!(!reloaded.graph_changed_since_load());
+
+    // The answer path the shell query and the MCP tools share: an untouched graph is read once.
+    let reads = Cell::new(0);
+    let (_, answered) = reloaded
+        .answer_with(|_| {
+            reads.set(reads.get() + 1);
+            Ok(reads.get())
+        })
+        .unwrap();
+    assert_eq!(answered, 1);
+
+    // A re-index committed during the first read: answered again, once, from a context loaded again.
+    reads.set(0);
+    let context = Context::load(f.repo.clone(), Settings::default()).unwrap();
+    let (answered_from, answered) = context
+        .answer_with(|_| {
+            reads.set(reads.get() + 1);
+            if reads.get() == 1 {
+                rusqlite::Connection::open(&f.graph_db)
+                    .unwrap()
+                    .execute(
+                        "UPDATE store_meta SET v = 'during-answer' WHERE k = 'mutation_gen'",
+                        [],
+                    )
+                    .unwrap();
+            }
+            Ok(reads.get())
+        })
+        .unwrap();
+    assert_eq!(answered, 2);
+    assert!(!answered_from.graph_changed_since_load());
+
+    // A failed read is tried again too, once; a second failure is the answer.
+    reads.set(0);
+    let failed = answered_from.answer_with(|_| -> anyhow::Result<()> {
+        reads.set(reads.get() + 1);
+        anyhow::bail!("read {}", reads.get())
+    });
+    assert_eq!(
+        failed.err().map(|error| error.to_string()),
+        Some("read 2".into())
+    );
 }
