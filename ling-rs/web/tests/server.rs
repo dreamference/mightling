@@ -840,6 +840,163 @@ async fn a_watch_device_reads_and_follows_threads_and_changes_nothing() {
     serving.await.unwrap().unwrap();
 }
 
+/// Every route that takes a request other than a read, as `(method, route, a URI it answers)`; `ANY`
+/// stands for a route that takes every method. A new route of the kind fails the test below until
+/// it is listed here, and so is decided for a `watch` device.
+const ROUTES_THAT_CHANGE: &[(&str, &str, &str)] = &[
+    ("POST", "/api/upload", "/api/upload?kind=file&name=a.txt"),
+    ("POST", "/api/transcribe", "/api/transcribe"),
+    ("POST", "/api/docs/{action}", "/api/docs/add"),
+    ("POST", "/api/night/add", "/api/night/add"),
+    ("POST", "/api/telegram/check", "/api/telegram/check"),
+    ("POST", "/api/telegram/launch-pair", "/api/telegram/launch-pair"),
+    ("POST", "/api/telegram/pending-pairs/approve", "/api/telegram/pending-pairs/approve"),
+    ("POST", "/api/telegram/pending-pairs/decline", "/api/telegram/pending-pairs/decline"),
+    ("ANY", "/forge", "/forge"),
+    ("ANY", "/forge/", "/forge/"),
+    ("ANY", "/forge/{*path}", "/forge/user/logout"),
+    ("POST", "/pair", "/pair"),
+    ("POST", "/devices/pair", "/devices/pair"),
+    ("POST", "/devices/revoke", "/devices/revoke"),
+    ("POST", "/devices/scope", "/devices/scope"),
+    ("POST", "/api/sync/pair", "/api/sync/pair"),
+    ("PUT", "/api/sync/rollouts/{rollout}", "/api/sync/rollouts/01a0f1ae-2da4-7942-99ae-c3151dc137cc?offset=0"),
+    ("POST", "/api/sync/threads/{thread}/meta", "/api/sync/threads/01a0f1ae-2da4-7942-99ae-c3151dc137cc/meta"),
+    ("POST", "/api/sync/threads/{thread}/delete", "/api/sync/threads/01a0f1ae-2da4-7942-99ae-c3151dc137cc/delete"),
+    ("POST", "/api/sync/threads/{thread}/withdraw", "/api/sync/threads/01a0f1ae-2da4-7942-99ae-c3151dc137cc/withdraw"),
+    ("POST", "/api/sync/forget", "/api/sync/forget"),
+    ("POST", "/api/sync/host", "/api/sync/host"),
+    ("POST", "/api/sync/commands", "/api/sync/commands"),
+    ("POST", "/api/repos/open", "/api/repos/open"),
+    ("POST", "/api/repos/off", "/api/repos/off"),
+    ("POST", "/api/repos/commit", "/api/repos/commit"),
+    ("POST", "/api/repos/push", "/api/repos/push"),
+    ("POST", "/api/repos/update", "/api/repos/update"),
+    ("POST", "/api/repos/merge", "/api/repos/merge"),
+    ("POST", "/api/repos/pr", "/api/repos/pr"),
+    ("POST", "/api/repos/main", "/api/repos/main"),
+    ("POST", "/api/repos/budget", "/api/repos/budget"),
+    ("POST", "/api/repos/access", "/api/repos/access"),
+];
+
+/// The `(method, route)` pairs other than reads in the router's tables, read from their source:
+/// `router()` in server.rs and the `routes()` it merges.
+fn routes_that_change_in_the_source() -> std::collections::BTreeSet<(String, String)> {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = std::collections::BTreeSet::new();
+    for (file, table) in [("server.rs", "pub fn router("), ("sync_hub.rs", "pub fn routes("), ("chat_repos.rs", "pub fn routes(")] {
+        let source = std::fs::read_to_string(src.join(file)).unwrap();
+        let start = source.find(table).unwrap_or_else(|| panic!("{file}: no {table}"));
+        let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
+        if file == "server.rs" {
+            let merged: Vec<&str> = body.match_indices(".merge(").map(|(at, _)| &body[at..at + body[at..].find('\n').unwrap()]).collect();
+            assert_eq!(merged, [".merge(crate::sync_hub::routes())", ".merge(crate::chat_repos::routes())"], "a new table must be read here too");
+            assert!(!body.contains(".nest("), "a nested router must be read here too");
+        }
+        let mut rest = body;
+        while let Some(at) = rest.find(".route(") {
+            rest = &rest[at + ".route(".len()..];
+            let mut depth = 1;
+            let end = rest
+                .char_indices()
+                .find(|&(_, c)| {
+                    depth += match c {
+                        '(' => 1,
+                        ')' => -1,
+                        _ => 0,
+                    };
+                    depth == 0
+                })
+                .unwrap()
+                .0;
+            let call = &rest[..end];
+            let path = call.split('"').nth(1).unwrap().to_string();
+            for (word, method) in [("post(", "POST"), ("put(", "PUT"), ("delete(", "DELETE"), ("patch(", "PATCH"), ("options(", "OPTIONS"), ("any(", "ANY")] {
+                let named = call.match_indices(word).any(|(at, _)| !call[..at].ends_with(|c: char| c.is_alphanumeric() || c == '_'));
+                if named {
+                    found.insert((method.to_string(), path.clone()));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// A `watch` device (SYNC §5.1, O4) is refused at the router on every request but a read, on every
+/// route that takes one and on a path that does not exist, before any handler runs: only the Mini
+/// App's launch check passes. A `control` device and a sync agent's secret are not touched by it.
+#[tokio::test]
+async fn a_watch_device_is_refused_everything_but_a_read_at_the_router() {
+    let listed: std::collections::BTreeSet<(String, String)> =
+        ROUTES_THAT_CHANGE.iter().map(|(method, route, _)| (method.to_string(), route.to_string())).collect();
+    assert_eq!(routes_that_change_in_the_source(), listed, "list a new route in ROUTES_THAT_CHANGE and decide it for a watch device");
+    assert_eq!(server::WATCH_MAY_SEND, ["/api/telegram/check"]);
+
+    let scratch = scratch("watch-router");
+    let config = config(&scratch.dir, 3100, Vec::new());
+    let chat = config.codex_home.join("chat");
+    std::fs::create_dir_all(&chat).unwrap();
+    std::fs::write(chat.join("telegram.json"), r#"{"token":"7:tok","consented":1,"users":[42]}"#).unwrap();
+    let server = Server::new(config).unwrap();
+    let (_, watch) = auth::add_device(&server.config.state_dir, "phone").unwrap();
+    auth::set_scope(&server.config.state_dir, "phone", auth::Scope::Watch).unwrap();
+    let watch = format!("{}={watch}", auth::DEVICE_COOKIE);
+    let (_, control) = auth::add_device(&server.config.state_dir, "laptop").unwrap();
+    let control = format!("{}={control}", auth::DEVICE_COOKIE);
+    let refused = json!({ "error": "This device may watch threads only." });
+    let send = |method: &str, uri: &str, cookie: &str| {
+        request(method, uri)
+            .header(header::ORIGIN, ORIGIN)
+            .header(header::COOKIE, cookie)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap()
+    };
+
+    let mut sent = 0;
+    for (method, _, uri) in ROUTES_THAT_CHANGE.iter().copied().chain([("POST", "", "/no-such-route"), ("DELETE", "", "/api/night/status")]) {
+        let methods: &[&str] = if method == "ANY" { &["POST", "PUT", "DELETE", "PATCH"] } else { &[method] };
+        for method in methods {
+            let (status, _, body) = call(&server, send(method, uri, &watch)).await;
+            if server::WATCH_MAY_SEND.contains(&uri) {
+                assert_eq!(status, StatusCode::OK, "{method} {uri}: {body}");
+                continue;
+            }
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}: {body}");
+            assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), refused, "{method} {uri}");
+            sent += 1;
+        }
+    }
+    assert!(sent > ROUTES_THAT_CHANGE.len());
+
+    // Reads pass, and so does the launch check, which answers for a watch device's Mini App.
+    let (status, _, _) = call(&server, request("GET", "/api/night/status").header(header::COOKIE, &watch).body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let check = request("POST", "/api/telegram/check")
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::COOKIE, &watch)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "initData": telegram_launch("7:tok", 42, now) }).to_string()))
+        .unwrap();
+    let (status, _, body) = call(&server, check).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["ok"], true, "{body}");
+
+    // A control device and a sync agent's secret are passed on to the route.
+    let (_, _, body) = call(&server, send("POST", "/api/repos/budget", &control)).await;
+    assert!(!body.contains("may watch threads only"), "{body}");
+    let (sync_id, secret) = auth::add_device_of(&server.config.state_dir, "laptop-sync", auth::DeviceKind::Sync).unwrap();
+    auth::set_scope(&server.config.state_dir, &sync_id, auth::Scope::Watch).unwrap();
+    let upload = request("PUT", "/api/sync/rollouts/01a0f1ae-2da4-7942-99ae-c3151dc137cc?offset=0")
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+        .body(Body::from("{}\n"))
+        .unwrap();
+    let (_, _, body) = call(&server, upload).await;
+    assert!(!body.contains("may watch threads only"), "{body}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn with_nothing_listening_the_server_starts_the_app_server_and_reports_why_it_failed() {
     let scratch = scratch("spawn");
@@ -1307,6 +1464,23 @@ async fn a_mini_app_first_launch_pairs_only_on_the_front_and_only_after_the_bot_
     assert!(headers.get(header::SET_COOKIE).is_none());
     let (status, _, _) = call(&server, post_pair(&valid_init, front_host, front_origin)).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "claimed initData must not pair twice");
+
+    // Launch pairing is for a first launch: a request already carrying a credential (this device,
+    // or the owner's session) is refused, so a paired device never asks for a second one.
+    let owner = sign_in(&server).await;
+    for cookie in [&device_cookie, &owner] {
+        let mut post = post_pair(&telegram_launch("7:tok", 42, now.saturating_sub(9)), front_host, front_origin);
+        post.headers_mut().insert(header::COOKIE, cookie.parse().unwrap());
+        let (status, headers, body) = call(&server, post).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(body.contains("already paired") && headers.get(header::SET_COOKIE).is_none(), "{body}");
+        let mut poll = poll_pair(&pending_id, &valid_init, front_host);
+        poll.headers_mut().insert(header::COOKIE, cookie.parse().unwrap());
+        let (status, _, body) = call(&server, poll).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(body.contains("already paired"), "{body}");
+    }
+    assert!(call(&server, poll_pair(&pending_id, &valid_init, front_host)).await.0 == StatusCode::NOT_FOUND);
 
     // The approved device is listed as `telegram-app` with Browser kind and Control scope.
     let devices = auth::load_devices(&server.config.state_dir);
