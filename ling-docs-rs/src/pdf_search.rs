@@ -612,8 +612,8 @@ mod tests {
         let on = "mightling_airgapped = \"on\"\n".to_string();
         let off = "mightling_airgapped = \"off\"\n".to_string();
         assert!(configured_on(None, &[off.clone(), on.clone()]), "strictest file wins");
-        assert!(!configured_on(None, &[off.clone()]));
-        assert!(!configured_on(Some("off".into()), &[on.clone()]), "the environment wins");
+        assert!(!configured_on(None, std::slice::from_ref(&off)));
+        assert!(!configured_on(Some("off".into()), std::slice::from_ref(&on)), "the environment wins");
         assert!(configured_on(Some("ON".into()), &[]));
         assert!(configured_on(Some("bogus".into()), &[on]), "an invalid value is passed over");
         let dir = tempfile::tempdir().unwrap();
