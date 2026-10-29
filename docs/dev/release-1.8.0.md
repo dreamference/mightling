@@ -1,9 +1,10 @@
 # The 1.8.0 cut: ling-serve becomes the default engine
 
 1.8.0 serves the default model with ling-engine's `ling-serve`, four conversations at once at the full
-262,144-token context, with SGLang one flag away. Mightling's side is in the tree and **switched off**;
-this is the checklist for switching it on once the engine's paged memory (P4b-P4d,
-ling-engine `specs/DREAMFERENCE_LING_ENGINE_BATCHING.md` §5.3) has landed.
+262,144-token context, with SGLang one flag away. Mightling's side is in the tree; the switch (step 6) is
+made on the branch `prep/1.8.0` (2026-10-29), which is merged only once the bar below has passed on the
+pinned engine. This is the checklist, for the engine's paged memory (P4b-P4d,
+ling-engine `specs/DREAMFERENCE_LING_ENGINE_BATCHING.md` §5.3).
 
 ## What is already in the tree (1.7.x, inert)
 
@@ -33,9 +34,10 @@ All three, on the engine commit that will be pinned, before the switch:
 3. A night with no loss (a SWE-bench or Night Shift night on the new default, no regression against the same night
    on SGLang). Nothing ships before it.
 
-The other conditions the owner set on 2026-10-26 and that the switch also needs: images read (vision on, and the
-image carries its libraries: see the note in `scripts/build_ling_serve_image.sh`), adapters served or the loss
-accepted in writing (`lora` is SGLang's recipe only: a user serving adapters stays on `--engine sglang`), and the
+The other conditions the owner set on 2026-10-26 and that the switch also needs: images read and adapters served
+were moved to 1.8.1 (decided 2026-10-28/29): 1.8.0 starts ling-serve with `--vision off` (the recipe's
+`"vision": False`) and serves adapters only on SGLang (a start without `--engine` moves to SGLang while an adapter
+is installed; `--engine ling` is refused), both named in the release notes' known issues; and the
 live long-context test of [models-and-engines.md](models-and-engines.md#ling-serve-beside-sglang-opt-in-172)
 (a ~205K-token needle, decode at that length, the start inside the container's cap) repeated with four sessions.
 Eight sessions only after the engine's eight-session reproduction and the owner's say.
@@ -66,7 +68,8 @@ Eight sessions only after the engine's eight-session reproduction and the owner'
    and the PSI watchdog bound the load), then the three bars above.
 5. **The night.** Run it on the pinned image with the default switched on a branch; compare with the same night
    on SGLang. A loss stops the cut: leave the switch off and ship the rest.
-6. **The switch** (one line): in `dreamference/hardware/model_matrix_registry.py`
+6. **The switch** (one line), **done on `prep/1.8.0` (e2fdb895, 2026-10-29)**: in
+   `dreamference/hardware/model_matrix_registry.py`
 
    ```python
    QWEN38_DEFAULT_ENGINE: Final[str] = ENGINE_LING   # was ENGINE_SGLANG
@@ -76,9 +79,12 @@ Eight sessions only after the engine's eight-session reproduction and the owner'
    `ModelMatrixRegistry.engines()` lists `ling` first, `server start` without `--engine` serves ling-serve,
    `--engine sglang` serves SGLang with its runtime patches, template patches and adapters unchanged.
    Then update `test_sglang_stays_the_default_and_ling_serve_is_opt_in` and the notes in the matrix entry
-   (the tests that name the default engine), and the user docs (`docs/`) that say SGLang is the default.
+   (the tests that name the default engine), and the user docs (`docs/`) that say SGLang is the default
+   (done: the tests in e2fdb895, `docs/models.md` and `docs/architecture.md` restored from `docs/1.8.0`).
 7. **Cut.** Version bump and release notes as every release (releases are automatic once main is green). The
-   release notes say: the default engine changed, four sessions, the rollback below, adapters on SGLang only.
+   release notes (`specs/DREAMFERENCE_RELEASE_1.8.0.md`) say: the default engine changed, four sessions, the
+   rollback below, images and adapters on SGLang until 1.8.1, fair pairing only if the pinned image has it
+   (off by default); `specs/DREAMFERENCE_RELEASE_1.8.1.md` holds what moves to 1.8.1.
 
 ## Rollback
 

@@ -5,14 +5,16 @@ description between the two rules still holds `{{TBD` placeholders for every fig
 `scripts/release_notes.py` from publishing it: remove each placeholder with a measured number (or the
 sentence that needs it), then change this status. Nothing here is true of a release until the owner's
 bar of 2026-10-28 has passed (docs/dev/release-1.8.0.md): the combined rate of four conversations,
-identical output paged against flat, and a night with no loss on the new default. The cut also needs
-`QWEN38_DEFAULT_ENGINE = ENGINE_LING` in `dreamference/hardware/model_matrix_registry.py`, the engine
-pin moved (`scripts/pin_ling_serve_image.py`), and the version set as for 1.7.2.
+identical output paged against flat, and a night with no loss on the new default. The switch itself
+(`QWEN38_DEFAULT_ENGINE = ENGINE_LING` in `dreamference/hardware/model_matrix_registry.py`, ling-serve
+started with `--vision off`) and the engine pin (`scripts/pin_ling_serve_image.py`) are on the branch
+`prep/1.8.0`; the cut still needs the version set as for 1.7.2.
 
-**Still to fill in before the cut:** the engine commit and image digest; the measured figures below;
-the share-scope and HTTP 503 statements, confirmed against the pinned engine;
-whether images and adapters are served (the `--engine sglang` paragraphs say what to keep if not); the
-upgrade note's sizes; the known issues the bar night finds.
+**Still to fill in before the cut:** the measured figures below (the bar night, on the pinned image);
+the share-scope and HTTP 503 statements, confirmed against the pinned engine; the fair-pairing
+paragraph, kept only if the pinned image contains it; the upgrade note's sizes; the known issues the
+bar night finds. Decided (2026-10-29): image input and LoRA adapters stay on SGLang until 1.8.1
+(`--engine sglang` for both); ling-serve reads no images and serves no adapters in 1.8.0.
 
 ---
 
@@ -57,6 +59,12 @@ answer after a shared beginning arrives in {{TBD}} s, against {{TBD}} s when it 
 short follow-up runs ahead of a long first read, and while others decode the long read goes in small
 chunks. A conversation used in the last 30 seconds is not evicted for a new one.
 
+{{TBD FAIR_PAIRING: keep this paragraph only if the pinned ling-serve image contains fair pairing
+(scratchpad report release-180-prep.md says), otherwise delete it: "**Fair pairing, included and off.**
+ling-serve can give every decoding conversation the same share of passes (`--fair-pairing 1`, or
+`LING_FAIR_PAIRING=1` in the server's environment). It ships switched off in 1.8.0, so the scheduling
+is the bar night's; it is meant to be on by default from 1.8.1, once its own test night passes."}}
+
 **A smaller image.** ling-serve's Docker image is under 1 GB, against SGLang's 34 GB; a node pulls it
 at the first `ling-admin server start` after the upgrade.
 
@@ -64,8 +72,16 @@ at the first `ling-admin server start` after the upgrade.
 
 ## Known issues
 
-{{TBD from the bar night. If images or adapters are not served by ling-serve: "ling-serve does not read
-images / serve LoRA adapters; `--engine sglang` does." Carry over any 1.7.2 limit that remains.}}
+- **No image input on ling-serve.** ling-serve starts with `--vision off` in 1.8.0, and an image arrives
+  as the text `[image]`; `ling`, the desktop app and the phone bridges learn this from the server and
+  send text. For images, `ling-admin server start --engine sglang`. ling-serve reads images from 1.8.1.
+- **No LoRA adapters on ling-serve.** While an adapter is installed, `server start` serves the model
+  with SGLang and says so (an explicit `--engine ling` is refused); ling-serve serves adapters from
+  1.8.1.
+- **No `--api-key` on ling-serve**: `server start --api-key` without `--engine sglang` is refused and
+  names the flag.
+
+{{TBD from the bar night; carry over any 1.7.2 limit that remains.}}
 
 ---
 
@@ -76,5 +92,5 @@ then restarts the server with ling-serve and pulls its image (under 1 GB; the 34
 on disk until you remove it, and is used again with `--engine sglang`). A node that set
 `server_engine = "ling"` is unchanged; one that set `"sglang"` stays on SGLang. Then `ling web start`
 (it restarts the server) and, if a phone bridge is on, `ling chat start` (or `ling signal setup
---refresh` for Signal). A node that serves LoRA adapters should set `server_engine = "sglang"` before
-the restart.
+--refresh` for Signal). A node with LoRA adapters installed stays on SGLang by itself until 1.8.1;
+`server_engine = "sglang"` keeps it there afterwards too.
