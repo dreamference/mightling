@@ -744,6 +744,19 @@ fn fetch_stops_downloading_at_the_size_cap() {
 }
 
 #[test]
+fn a_page_cut_at_the_size_cap_is_marked_truncated() {
+    // Little text, but the end of the page never arrived.
+    let mut body = b"<html><body><p>start</p><script>".to_vec();
+    body.resize(6 * 1024 * 1024, b'a');
+    body.extend_from_slice(b"</script><p>end</p></body></html>");
+    let server = Server::start(move |_| response("200 OK", "text/html", &body, ""));
+    let output = fetch(&[&server.base, "--json"], &[]);
+    let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(!printed["text"].as_str().unwrap().contains("end"));
+    assert_eq!(printed["truncated"], true);
+}
+
+#[test]
 fn fetch_uses_the_environment_proxy_except_for_no_proxy_hosts() {
     let proxy = Server::start(|_| response("200 OK", "text/plain", b"via proxy", ""));
     let output = fetch(
