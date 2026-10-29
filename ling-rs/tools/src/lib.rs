@@ -110,7 +110,9 @@ pub fn flatten_with(tools: Vec<Value>, exec_as_function: bool, custom_tools_drop
             if function["type"] != "function" {
                 continue;
             }
-            let shown = if taken.contains(&name) { format!("{namespace}__{name}") } else { name.clone() };
+            // The map outlives the request: a name another session's server already holds is taken too.
+            let held = map.get(&name).is_some_and(|owner| owner.0 != namespace || owner.1 != name);
+            let shown = if taken.contains(&name) || held { format!("{namespace}__{name}") } else { name.clone() };
             if !exec_visible
                 && let Some(description) = function["description"].as_str()
                 && let Some(end) = description.find(CODE_MODE_SUFFIX)
@@ -222,6 +224,17 @@ mod tests {
             ]}),
             json!({"type": "web_search"}),
         ]
+    }
+
+    #[test]
+    fn two_sessions_with_one_tool_name_on_different_servers_keep_their_own_server() {
+        // One process serves several sessions, and the map from shown names is the process's.
+        let tools = |server: &str| vec![json!({"type": "namespace", "name": server, "tools": [{"type": "function", "name": "shared_lookup"}]})];
+        assert_eq!(flatten(tools("mcp__first"))[0]["name"], "shared_lookup");
+        assert_eq!(flatten(tools("mcp__second"))[0]["name"], "mcp__second__shared_lookup");
+        assert_eq!(flatten(tools("mcp__first"))[0]["name"], "shared_lookup");
+        assert_eq!(resolve(None, "shared_lookup".to_string()), (Some("mcp__first".to_string()), "shared_lookup".to_string()));
+        assert_eq!(resolve(None, "mcp__second__shared_lookup".to_string()), (Some("mcp__second".to_string()), "shared_lookup".to_string()));
     }
 
     #[test]
