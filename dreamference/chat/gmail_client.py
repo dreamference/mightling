@@ -33,6 +33,11 @@ NOT_RUNNING_ERROR: Final[Dict[str, str]] = {
     "error": "Gmail service is not running.",
     "hint": "Start it with: ling-admin google start",
 }
+# Accounts are searched one after another, so with several a search can outlast the timeout.
+SLOW_ERROR: Final[Dict[str, str]] = {
+    "error": "Gmail service did not answer in time.",
+    "hint": "Try a narrower query, or again in a moment",
+}
 NOT_SET_UP_ERROR: Final[Dict[str, str]] = {
     "error": "Gmail has not been set up.",
     "hint": "Run: ling-admin google start, then connect Gmail with /apps in ling",
@@ -111,7 +116,11 @@ class GmailClient:
             except ValueError:
                 body = {}
             return {"error": body.get("error") or f"Gmail service answered HTTP {error.code}."}
-        except (urllib.error.URLError, ConnectionError, TimeoutError):
+        except TimeoutError:
+            return dict(SLOW_ERROR)
+        except urllib.error.URLError as error:
+            return dict(SLOW_ERROR if isinstance(error.reason, TimeoutError) else NOT_RUNNING_ERROR)
+        except ConnectionError:
             return dict(NOT_RUNNING_ERROR)
         except ValueError:
             return {"error": "Gmail service returned something that is not JSON."}
