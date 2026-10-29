@@ -143,7 +143,11 @@ impl ChatReposSettings {
         // A value the user wrote but not as a boolean (`"false"`, `0`) turns repositories off rather
         // than leaving the default on; only `true` or `"true"` keeps them on.
         if let Some(enabled) = table.get("enabled") {
-            settings.enabled = enabled.as_bool().unwrap_or_else(|| enabled.as_str().is_some_and(|s| s.trim().eq_ignore_ascii_case("true")));
+            settings.enabled = enabled.as_bool().unwrap_or_else(|| {
+                enabled
+                    .as_str()
+                    .is_some_and(|s| s.trim().eq_ignore_ascii_case("true"))
+            });
         }
         if let Some(items) = table.get("bridges").and_then(toml::Value::as_array) {
             let parsed: Option<Vec<String>> = items
@@ -1109,7 +1113,12 @@ impl ChatRepos {
     }
 
     /// Sets `current_repo[chat_key] = repo` in `$CODEX_HOME/chat-repos/current.json`.
-    pub fn set_current_repo(&self, codex_home: &Path, chat_key: &str, repo: &str) -> std::io::Result<()> {
+    pub fn set_current_repo(
+        &self,
+        codex_home: &Path,
+        chat_key: &str,
+        repo: &str,
+    ) -> std::io::Result<()> {
         let _io_guard = self.index_io_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut current = load_current_repos(codex_home);
         current.insert(chat_key.to_string(), repo.to_string());
@@ -1998,10 +2007,14 @@ fn decode_chunked(mut input: &[u8]) -> Result<Vec<u8>, String> {
     let truncated = || "truncated chunked HTTP body from forge".to_string();
     let mut out = Vec::new();
     loop {
-        let end = input.windows(2).position(|w| w == b"\r\n").ok_or_else(truncated)?;
+        let end = input
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or_else(truncated)?;
         let header = String::from_utf8_lossy(&input[..end]);
         let size_hex = header.split(';').next().unwrap_or("").trim();
-        let size = usize::from_str_radix(size_hex, 16).map_err(|_| "invalid chunk size from forge".to_string())?;
+        let size = usize::from_str_radix(size_hex, 16)
+            .map_err(|_| "invalid chunk size from forge".to_string())?;
         input = &input[end + 2..];
         if size == 0 {
             return Ok(out);
@@ -2583,8 +2596,8 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
                 }
             }
             fresh_worktree = !wt_dir.join(".git").exists();
-            if fresh_worktree {
-                if let Err(err) = ensure_worktree(
+            if fresh_worktree
+                && let Err(err) = ensure_worktree(
                     &server,
                     &base_git,
                     &wt_dir,
@@ -2593,9 +2606,8 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
                     branch.as_deref(),
                 )
                 .await
-                {
-                    return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }));
-                }
+            {
+                return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }));
             }
             (false, existing.thread.clone(), wt_dir, branch)
         } else {
@@ -2749,9 +2761,10 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
     };
 
     let chat_key = record.chat_key();
-    if let Err(e) = server
-        .chat_repos
-        .set_current_repo(&server.config.codex_home, &chat_key, &record.repo)
+    if let Err(e) =
+        server
+            .chat_repos
+            .set_current_repo(&server.config.codex_home, &chat_key, &record.repo)
     {
         return json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2813,9 +2826,11 @@ async fn repo_off(State(server): State<Arc<Server>>, headers: HeaderMap, body: B
         // git status may take seconds on a large checkout: off the async workers.
         let counter = Arc::clone(&server);
         let dir = rec.dir.clone();
-        let uncommitted = tokio::task::spawn_blocking(move || count_porcelain_lines_sync(&counter, Path::new(&dir)))
-            .await
-            .unwrap_or(0);
+        let uncommitted = tokio::task::spawn_blocking(move || {
+            count_porcelain_lines_sync(&counter, Path::new(&dir))
+        })
+        .await
+        .unwrap_or(0);
         server.chat_repos.record_event_for_record(
             &rec,
             rec.app_threads.last().map(String::as_str),
@@ -3467,7 +3482,13 @@ async fn ahead_behind(server: &Server, worktree_dir: &Path, base_branch: &str) -
 }
 
 async fn uncommitted_stats(server: &Server, worktree_dir: &Path) -> Result<Vec<Value>, String> {
-    let numstat = run_git_checked(server, Some(worktree_dir), &["diff", "--numstat", "-z", "--no-renames", "HEAD", "--"], false).await?;
+    let numstat = run_git_checked(
+        server,
+        Some(worktree_dir),
+        &["diff", "--numstat", "-z", "--no-renames", "HEAD", "--"],
+        false,
+    )
+    .await?;
     let mut entries = parse_numstat(&numstat);
     let mut seen: std::collections::HashSet<String> = entries
         .iter()
@@ -3636,7 +3657,14 @@ async fn repo_diff(
                 Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
             };
             let range = format!("{mb}..HEAD");
-            match run_git_diff_capped(&server, &worktree_dir, &["diff", &range, "--", &literal_pathspec(rel)], true).await {
+            match run_git_diff_capped(
+                &server,
+                &worktree_dir,
+                &["diff", &range, "--", &literal_pathspec(rel)],
+                true,
+            )
+            .await
+            {
                 Ok(text) => text,
                 Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
             }
@@ -3655,7 +3683,14 @@ async fn repo_diff(
             Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
         };
         let range = format!("{mb}..HEAD");
-        match run_git_checked(&server, Some(&worktree_dir), &["diff", "--numstat", "-z", "--no-renames", &range, "--"], false).await {
+        match run_git_checked(
+            &server,
+            Some(&worktree_dir),
+            &["diff", "--numstat", "-z", "--no-renames", &range, "--"],
+            false,
+        )
+        .await
+        {
             Ok(out) => json_response(StatusCode::OK, Value::Array(parse_numstat(&out))),
             Err(err) => json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
         }
@@ -3667,15 +3702,31 @@ fn literal_pathspec(rel: &str) -> String {
     format!(":(literal){rel}")
 }
 
-async fn uncommitted_file_diff(server: &Server, worktree_dir: &Path, rel: &str) -> Result<String, String> {
-    let tracked_diff = run_git_diff_capped(server, worktree_dir, &["diff", "HEAD", "--", &literal_pathspec(rel)], true).await?;
+async fn uncommitted_file_diff(
+    server: &Server,
+    worktree_dir: &Path,
+    rel: &str,
+) -> Result<String, String> {
+    let tracked_diff = run_git_diff_capped(
+        server,
+        worktree_dir,
+        &["diff", "HEAD", "--", &literal_pathspec(rel)],
+        true,
+    )
+    .await?;
     if !tracked_diff.is_empty() {
         return Ok(tracked_diff);
     }
     let untracked = run_git_checked(
         server,
         Some(worktree_dir),
-        &["ls-files", "--others", "--exclude-standard", "--", &literal_pathspec(rel)],
+        &[
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--",
+            &literal_pathspec(rel),
+        ],
         false,
     )
     .await?;
@@ -3773,7 +3824,20 @@ async fn read_owner_git_identity(server: &Server) -> Result<(String, String), St
         }
         let file_str = file.to_string_lossy().into_owned();
         if name.is_none()
-            && let Ok(out) = run_git(server, None, &["config", "--includes", "--file", &file_str, "--get", "user.name"], false).await
+            && let Ok(out) = run_git(
+                server,
+                None,
+                &[
+                    "config",
+                    "--includes",
+                    "--file",
+                    &file_str,
+                    "--get",
+                    "user.name",
+                ],
+                false,
+            )
+            .await
             && out.status.success()
         {
             let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -3782,7 +3846,20 @@ async fn read_owner_git_identity(server: &Server) -> Result<(String, String), St
             }
         }
         if email.is_none()
-            && let Ok(out) = run_git(server, None, &["config", "--includes", "--file", &file_str, "--get", "user.email"], false).await
+            && let Ok(out) = run_git(
+                server,
+                None,
+                &[
+                    "config",
+                    "--includes",
+                    "--file",
+                    &file_str,
+                    "--get",
+                    "user.email",
+                ],
+                false,
+            )
+            .await
             && out.status.success()
         {
             let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -4037,7 +4114,15 @@ async fn repo_commit(State(server): State<Arc<Server>>, headers: HeaderMap, body
     let numstat = match run_git_checked(
         &server,
         Some(&worktree_dir),
-        &["show", "--first-parent", "--numstat", "-z", "--no-renames", "--format=", "HEAD"],
+        &[
+            "show",
+            "--first-parent",
+            "--numstat",
+            "-z",
+            "--no-renames",
+            "--format=",
+            "HEAD",
+        ],
         false,
     )
     .await
@@ -4525,9 +4610,12 @@ async fn find_or_create_open_pr(
         let list_path = format!("/api/v1/repos/{repo_name}/pulls?state=open&limit=50&page={page}");
         let (status, body) = forge_get(base_url, &list_path, token, FORGE_TIMEOUT).await?;
         if status != 200 {
-            return Err(format!("forge returned HTTP {status} when listing pull requests"));
+            return Err(format!(
+                "forge returned HTTP {status} when listing pull requests"
+            ));
         }
-        let parsed: Value = serde_json::from_slice(&body).map_err(|_| "forge returned invalid JSON for pulls".to_string())?;
+        let parsed: Value = serde_json::from_slice(&body)
+            .map_err(|_| "forge returned invalid JSON for pulls".to_string())?;
         let items = parsed
             .as_array()
             .or_else(|| parsed.get("data").and_then(Value::as_array))
@@ -4544,7 +4632,10 @@ async fn find_or_create_open_pr(
                 .unwrap_or("");
             if head_ref == branch
                 && base_ref == base_branch
-                && let Some(num) = item.get("number").or_else(|| item.get("index")).and_then(Value::as_u64)
+                && let Some(num) = item
+                    .get("number")
+                    .or_else(|| item.get("index"))
+                    .and_then(Value::as_u64)
             {
                 return Ok(num);
             }
@@ -4576,7 +4667,11 @@ async fn find_or_create_open_pr(
 }
 
 /// A pull request from the base branch into itself cannot exist: refused before anything is pushed.
-fn base_branch_pr_response(server: &Server, record: &CheckoutRecord, action: RefusedAction) -> Response {
+fn base_branch_pr_response(
+    server: &Server,
+    record: &CheckoutRecord,
+    action: RefusedAction,
+) -> Response {
     record_refused(server, record, action);
     json_response(
         StatusCode::BAD_REQUEST,
@@ -4755,7 +4850,9 @@ async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body:
                 let pr_json = serde_json::from_slice::<Value>(&p_body).unwrap_or(Value::Null);
                 let pr_head = pr_json.pointer("/head/sha").and_then(Value::as_str);
                 let pr_base = pr_json.pointer("/base/ref").and_then(Value::as_str);
-                if pr_head.is_some_and(|sha| sha != head_sha) || pr_base.is_some_and(|base| base != record.base) {
+                if pr_head.is_some_and(|sha| sha != head_sha)
+                    || pr_base.is_some_and(|base| base != record.base)
+                {
                     return confirmation_moved_response();
                 }
                 if pr_json.get("mergeable").and_then(Value::as_bool) != Some(false) {
@@ -5447,7 +5544,11 @@ mod tests {
             match self.page_cap.load(std::sync::atomic::Ordering::SeqCst) {
                 0 if page == 1 => all,
                 0 => Vec::new(),
-                cap => all.into_iter().skip(page.saturating_sub(1) * cap).take(cap).collect(),
+                cap => all
+                    .into_iter()
+                    .skip(page.saturating_sub(1) * cap)
+                    .take(cap)
+                    .collect(),
             }
         }
 
@@ -5798,8 +5899,15 @@ mod tests {
                         return authorized;
                     }
                     authorized |= auth;
-                    let answer = if auth { "404 Not Found" } else { "401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"forge\"" };
-                    let _ = write!(stream, "HTTP/1.1 {answer}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    let answer = if auth {
+                        "404 Not Found"
+                    } else {
+                        "401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"forge\""
+                    };
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 {answer}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    );
                 }
                 authorized
             })
@@ -5808,7 +5916,12 @@ mod tests {
             let addr = listener.local_addr().unwrap();
             let seen = serve(listener);
             let _ = std::process::Command::new("git")
-                .args(["-c", "credential.helper=", "ls-remote", &format!("http://{addr}/org/x.git")])
+                .args([
+                    "-c",
+                    "credential.helper=",
+                    "ls-remote",
+                    &format!("http://{addr}/org/x.git"),
+                ])
                 .env("GIT_ASKPASS", askpass)
                 .env("GIT_TERMINAL_PROMPT", "0")
                 .output()
@@ -5820,22 +5933,34 @@ mod tests {
         let s = scratch("askpass");
         let state = s.dir.join("state");
         let forge = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let (askpass, _) = ensure_git_helpers_for_forge(&state, &format!("http://{}", forge.local_addr().unwrap())).unwrap();
+        let (askpass, _) = ensure_git_helpers_for_forge(
+            &state,
+            &format!("http://{}", forge.local_addr().unwrap()),
+        )
+        .unwrap();
         std::fs::write(state.join(TOKEN_FILE), "tok-e2e\n").unwrap();
-        assert!(ls_remote(&askpass, forge), "git sent the forge token to the forge");
+        assert!(
+            ls_remote(&askpass, forge),
+            "git sent the forge token to the forge"
+        );
 
         // A forge on `…:4123` and a server on `…:41234`: the prompt starts the same.
         let other = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let other_url = format!("http://{}", other.local_addr().unwrap());
-        let (askpass, _) = ensure_git_helpers_for_forge(&state, &other_url[..other_url.len() - 1]).unwrap();
-        assert!(!ls_remote(&askpass, other), "a port that only starts with the forge's gets no token");
+        let (askpass, _) =
+            ensure_git_helpers_for_forge(&state, &other_url[..other_url.len() - 1]).unwrap();
+        assert!(
+            !ls_remote(&askpass, other),
+            "a port that only starts with the forge's gets no token"
+        );
     }
 
     /// An `enabled` the user wrote but not as a boolean is read as off, not as the default on.
     #[test]
     fn an_enabled_that_is_not_a_boolean_turns_repositories_off() {
         for value in ["\"false\"", "\"no\"", "0", "\"\""] {
-            let settings = ChatReposSettings::from_toml(&format!("[chat_repos]\nenabled = {value}\n"));
+            let settings =
+                ChatReposSettings::from_toml(&format!("[chat_repos]\nenabled = {value}\n"));
             assert!(!settings.enabled, "enabled = {value}");
         }
         assert!(ChatReposSettings::from_toml("[chat_repos]\nenabled = \"true\"\n").enabled);
@@ -8778,7 +8903,19 @@ mod tests {
             std::fs::write(repo.join(format!("f{i:0150}.txt")), "a\n").unwrap();
         }
         git_sync(&repo, &["add", "."]);
-        git_sync(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "seed"]);
+        git_sync(
+            &repo,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "-m",
+                "seed",
+            ],
+        );
         git_sync(&repo, &["config", "core.autocrlf", "true"]);
         for i in 0..400 {
             std::fs::write(repo.join(format!("f{i:0150}.txt")), "a\nb\n").unwrap();
@@ -8790,7 +8927,11 @@ mod tests {
         .await
         .expect("the diff finished instead of waiting on a full stderr pipe")
         .unwrap();
-        assert_eq!(diff.matches("+b").count(), 400, "every file's change is in the diff");
+        assert_eq!(
+            diff.matches("+b").count(),
+            400,
+            "every file's change is in the diff"
+        );
     }
 
     #[tokio::test]
@@ -8812,19 +8953,49 @@ mod tests {
         .await;
         let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
         let cookie = owner_cookie(&server).await;
-        let (st, opened, body) =
-            post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/keyrepo", "bridge": "signal", "chat": "signal:+1555" })).await;
+        let (st, opened, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/keyrepo", "bridge": "signal", "chat": "signal:+1555" }),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{body}");
-        std::fs::write(PathBuf::from(opened["cwd"].as_str().unwrap()).join("left.txt"), "not committed\n").unwrap();
+        std::fs::write(
+            PathBuf::from(opened["cwd"].as_str().unwrap()).join("left.txt"),
+            "not committed\n",
+        )
+        .unwrap();
         let bridge = bridge_session_cookie(&server).await;
         let (_, current, body) = get_json(&server, &bridge, "/api/repos/current?bridge=signal&chat=signal:%2B1555").await;
         assert_eq!(current["repo"], "org/keyrepo", "{body}");
-        let (st, off, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
+        let (st, off, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/off",
+            json!({ "bridge": "signal", "chat": "signal:+1555" }),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{body}");
-        assert_eq!(off["uncommitted"], 1, "the file left behind is counted: {body}");
-        assert_eq!(server.chat_repos.current_repo(&server.config.codex_home, "signal:+1555"), None, "/off cleared what /open set");
+        assert_eq!(
+            off["uncommitted"], 1,
+            "the file left behind is counted: {body}"
+        );
+        assert_eq!(
+            server
+                .chat_repos
+                .current_repo(&server.config.codex_home, "signal:+1555"),
+            None,
+            "/off cleared what /open set"
+        );
         // A second /off has no repository to turn off: it names none.
-        let (st, again, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
+        let (st, again, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/off",
+            json!({ "bridge": "signal", "chat": "signal:+1555" }),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(again["repo"], Value::Null, "{body}");
     }
@@ -8848,7 +9019,13 @@ mod tests {
         .await;
         let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
         let cookie = owner_cookie(&server).await;
-        let (st, opened, body) = post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/names", "bridge": "web", "chat": "web:names" })).await;
+        let (st, opened, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/names", "bridge": "web", "chat": "web:names" }),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{body}");
         let thread = opened["thread"].as_str().unwrap().to_string();
         let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
@@ -8862,20 +9039,44 @@ mod tests {
         git_sync(&wt, &["add", "-A"]);
         git_sync(&wt, &["commit", "-m", "names"]);
 
-        let (st, listed, body) = get_json(&server, &cookie, &format!("/api/repos/diff?thread={thread}&scope=branch")).await;
+        let (st, listed, body) = get_json(
+            &server,
+            &cookie,
+            &format!("/api/repos/diff?thread={thread}&scope=branch"),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{body}");
-        let mut paths: Vec<&str> = listed.as_array().unwrap().iter().map(|e| e["path"].as_str().unwrap()).collect();
+        let mut paths: Vec<&str> = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["path"].as_str().unwrap())
+            .collect();
         paths.sort();
-        assert_eq!(paths, ["README.md", "a*", "ab", "caf\u{e9}.txt", "notes.md"], "{body}");
+        assert_eq!(
+            paths,
+            ["README.md", "a*", "ab", "caf\u{e9}.txt", "notes.md"],
+            "{body}"
+        );
 
-        let (st, one, body) = get_json(&server, &cookie, &format!("/api/repos/diff?thread={thread}&scope=branch&path=a%2A")).await;
+        let (st, one, body) = get_json(
+            &server,
+            &cookie,
+            &format!("/api/repos/diff?thread={thread}&scope=branch&path=a%2A"),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{body}");
         let text = one["diff"].as_str().unwrap();
         assert!(text.contains("+star") && !text.contains("+plain"), "{text}");
 
         std::fs::write(wt.join("a*"), "star\nmore\n").unwrap();
         std::fs::write(wt.join("ab"), "plain\nmore\n").unwrap();
-        let (st, one, body) = get_json(&server, &cookie, &format!("/api/repos/diff?thread={thread}&scope=uncommitted&path=a%2A")).await;
+        let (st, one, body) = get_json(
+            &server,
+            &cookie,
+            &format!("/api/repos/diff?thread={thread}&scope=uncommitted&path=a%2A"),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{body}");
         let text = one["diff"].as_str().unwrap();
         assert!(text.contains("a/a*") && !text.contains("a/ab"), "{text}");
@@ -8883,9 +9084,21 @@ mod tests {
 
     #[test]
     fn a_chunked_forge_reply_cut_short_is_an_error() {
-        assert_eq!(decode_chunked(b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"), Ok(b"hello world".to_vec()));
-        for cut in [&b"5\r\nhello\r\n"[..], b"5\r\nhel", b"5\r\nhello\r\n6\r\n wo", b"zz\r\nhello\r\n0\r\n\r\n"] {
-            assert!(decode_chunked(cut).is_err(), "{}", String::from_utf8_lossy(cut));
+        assert_eq!(
+            decode_chunked(b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"),
+            Ok(b"hello world".to_vec())
+        );
+        for cut in [
+            &b"5\r\nhello\r\n"[..],
+            b"5\r\nhel",
+            b"5\r\nhello\r\n6\r\n wo",
+            b"zz\r\nhello\r\n0\r\n\r\n",
+        ] {
+            assert!(
+                decode_chunked(cut).is_err(),
+                "{}",
+                String::from_utf8_lossy(cut)
+            );
         }
     }
 
@@ -8893,8 +9106,16 @@ mod tests {
     async fn the_owner_identity_is_read_through_an_included_git_config() {
         let s = scratch("identity-include");
         let (server, _probe) = test_server(&s.dir, None, true);
-        std::fs::write(s.dir.join("user/identity.inc"), "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n").unwrap();
-        std::fs::write(s.dir.join("user/.gitconfig"), "[include]\n\tpath = identity.inc\n").unwrap();
+        std::fs::write(
+            s.dir.join("user/identity.inc"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[include]\n\tpath = identity.inc\n",
+        )
+        .unwrap();
         assert_eq!(
             read_owner_git_identity(&server).await,
             Ok(("owner".to_string(), "owner@127.0.0.1".to_string())),
@@ -8907,7 +9128,16 @@ mod tests {
         // Forgejo allows `a..b`; only a whole `..` segment would leave the folder.
         assert!(valid_repo_name("org/a..b"));
         assert!(valid_repo_name("org..x/repo"));
-        for bad in ["org/..", "../repo", "org/.", "org/a/b", "org/a\\b", "/org/repo", "https://h/o/r", "org/a b"] {
+        for bad in [
+            "org/..",
+            "../repo",
+            "org/.",
+            "org/a/b",
+            "org/a\\b",
+            "/org/repo",
+            "https://h/o/r",
+            "org/a b",
+        ] {
             assert!(!valid_repo_name(bad), "{bad}");
         }
     }
@@ -8933,9 +9163,18 @@ mod tests {
         let cookie = owner_cookie(&server).await;
         // A directory where current.json belongs: the write cannot land.
         std::fs::create_dir_all(current_repos_path(&server.config.codex_home)).unwrap();
-        let (st, _, body) =
-            post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/unsaved", "bridge": "signal", "chat": "signal:+1555" })).await;
-        assert_eq!(st, StatusCode::INTERNAL_SERVER_ERROR, "an /open the chat will not remember must not report success: {body}");
+        let (st, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/unsaved", "bridge": "signal", "chat": "signal:+1555" }),
+        )
+        .await;
+        assert_eq!(
+            st,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "an /open the chat will not remember must not report success: {body}"
+        );
     }
 
     #[tokio::test]
@@ -9026,20 +9265,54 @@ mod tests {
             .collect();
         let (forge_url, forge, _handle) = start_fake_forge_with_state(Value::Array(repos)).await;
         forge.page_cap.store(2, std::sync::atomic::Ordering::SeqCst);
-        let listed = fetch_forge_repos(&forge_url, TEST_TOKEN, true).await.unwrap();
+        let listed = fetch_forge_repos(&forge_url, TEST_TOKEN, true)
+            .await
+            .unwrap();
         assert_eq!(listed.len(), 5, "every page of repositories is read");
 
         // The open pull request for this branch sits on the third page.
         {
             let mut pulls = forge.pulls.lock().unwrap();
             for number in 1..=5u64 {
-                let head_ref = if number == 5 { "phone/0000abcd".to_string() } else { format!("other/{number}") };
-                pulls.push(FakePull { number, repo: "org/r0".into(), head_ref, base_ref: "main".into(), title: String::new(), mergeable: true, merged: false });
+                let head_ref = if number == 5 {
+                    "phone/0000abcd".to_string()
+                } else {
+                    format!("other/{number}")
+                };
+                pulls.push(FakePull {
+                    number,
+                    repo: "org/r0".into(),
+                    head_ref,
+                    base_ref: "main".into(),
+                    title: String::new(),
+                    mergeable: true,
+                    merged: false,
+                });
             }
         }
-        let number = find_or_create_open_pr(&forge_url, TEST_TOKEN, "org/r0", "phone/0000abcd", "main", "0000abcd").await.unwrap();
-        assert_eq!(number, 5, "the existing pull request is found, not a second one opened");
-        assert!(!forge.requests.lock().unwrap().iter().any(|(m, _, _)| m == "POST"), "no pull request was created");
+        let number = find_or_create_open_pr(
+            &forge_url,
+            TEST_TOKEN,
+            "org/r0",
+            "phone/0000abcd",
+            "main",
+            "0000abcd",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            number, 5,
+            "the existing pull request is found, not a second one opened"
+        );
+        assert!(
+            !forge
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(m, _, _)| m == "POST"),
+            "no pull request was created"
+        );
     }
 
     #[tokio::test]
@@ -9060,29 +9333,63 @@ mod tests {
         ]))
         .await;
         let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
-        std::fs::write(s.dir.join("user/.gitconfig"), "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n").unwrap();
-        std::fs::write(server.config.user_config.as_ref().unwrap(), "[chat_repos]\nallow_main = [\"org/mainrepo\"]\n").unwrap();
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\nallow_main = [\"org/mainrepo\"]\n",
+        )
+        .unwrap();
         let cookie = owner_cookie(&server).await;
-        let (_, opened, _) =
-            post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/mainrepo", "bridge": "signal", "chat": "c1" })).await;
+        let (_, opened, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/mainrepo", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
         let thread = opened["thread"].as_str().unwrap().to_string();
         let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
         let nonce = get_nonce(&server, &cookie, &thread, "main").await;
-        let (st, _, body) = post_json(&server, &cookie, "/api/repos/main", json!({ "thread": thread, "confirm": nonce })).await;
+        let (st, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/main",
+            json!({ "thread": thread, "confirm": nonce }),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{body}");
         std::fs::write(wt.join("unpushed.txt"), "not on the forge yet\n").unwrap();
         let nonce = get_nonce(&server, &cookie, &thread, "commit").await;
-        let (st, _, body) =
-            post_json(&server, &cookie, "/api/repos/commit", json!({ "thread": thread, "message": "unpushed", "confirm": nonce })).await;
+        let (st, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "unpushed", "confirm": nonce }),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{body}");
         let forge_main = git_stdout(&bare, &["rev-parse", "main"]);
 
         // A pull request from main into main cannot exist: /pr and /merge must not push main on the way.
         for action in ["pr", "merge"] {
             let nonce = get_nonce(&server, &cookie, &thread, action).await;
-            let (st, _, body) = post_json(&server, &cookie, &format!("/api/repos/{action}"), json!({ "thread": thread, "confirm": nonce })).await;
+            let (st, _, body) = post_json(
+                &server,
+                &cookie,
+                &format!("/api/repos/{action}"),
+                json!({ "thread": thread, "confirm": nonce }),
+            )
+            .await;
             assert_eq!(st, StatusCode::BAD_REQUEST, "{action}: {body}");
-            assert_eq!(git_stdout(&bare, &["rev-parse", "main"]), forge_main, "{action} pushed main");
+            assert_eq!(
+                git_stdout(&bare, &["rev-parse", "main"]),
+                forge_main,
+                "{action} pushed main"
+            );
         }
     }
 
@@ -9144,8 +9451,18 @@ mod tests {
             "[submodule \"ext\"]\n\tpath = vendor/ext\n\turl = https://127.0.0.1:9443/outside/ext.git\n",
         )
         .unwrap();
-        let head = git_stdout(&seed_work, &["rev-parse", "HEAD"]).trim().to_string();
-        git_sync(&seed_work, &["update-index", "--add", "--cacheinfo", &format!("160000,{head},vendor/ext")]);
+        let head = git_stdout(&seed_work, &["rev-parse", "HEAD"])
+            .trim()
+            .to_string();
+        git_sync(
+            &seed_work,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("160000,{head},vendor/ext"),
+            ],
+        );
         git_sync(&seed_work, &["add", ".gitmodules"]);
         git_sync(&seed_work, &["commit", "-m", "add an off-forge submodule"]);
         git_sync(&seed_work, &["push", "origin", "main"]);
@@ -9178,7 +9495,9 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(again["cwd"], opened["cwd"]);
         assert_eq!(
-            std::fs::read_to_string(wt.join("vendor/ext/notes.txt")).ok().as_deref(),
+            std::fs::read_to_string(wt.join("vendor/ext/notes.txt"))
+                .ok()
+                .as_deref(),
             Some("the agent's work\n"),
             "re-opening the checkout must not clear a submodule folder"
         );

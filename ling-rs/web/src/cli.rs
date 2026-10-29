@@ -722,7 +722,10 @@ mod tests {
         let port = |words: &[&str]| flag_value(&args(words), "--port").map(str::parse::<u16>);
         assert_eq!(port(&["--lan"]), None, "no flag: the default port");
         assert_eq!(port(&["--port", "8790"]), Some(Ok(8790)));
-        assert!(matches!(port(&["--port"]), Some(Err(_))), "a bare --port is an error, not the default");
+        assert!(
+            matches!(port(&["--port"]), Some(Err(_))),
+            "a bare --port is an error, not the default"
+        );
     }
 
     #[test]
@@ -730,7 +733,11 @@ mod tests {
         let state = scratch("server-file");
         std::fs::write(server_file(&state), r#"{"pid": 4242, "port": 8788}"#).unwrap();
         remove_server_file_if_ours(&state, 4141);
-        assert_eq!(running_port(&state), 8788, "a server that exits leaves the file of the one still running");
+        assert_eq!(
+            running_port(&state),
+            8788,
+            "a server that exits leaves the file of the one still running"
+        );
         remove_server_file_if_ours(&state, 4242);
         assert!(!server_file(&state).exists());
     }

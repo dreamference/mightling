@@ -500,14 +500,22 @@ impl Store {
                     let _ = std::fs::remove_file(entry.path());
                     continue;
                 }
-                read => read.ok().and_then(|text| serde_json::from_str::<Record>(&text).ok()),
+                read => read
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<Record>(&text).ok()),
             };
             let Some(record) = record else {
                 // A record that does not read is not a reason to lose the history: both are set
                 // aside under names the store skips, for the owner to look at.
                 let aside = format!("unreadable-{}", now_secs());
-                let _ = std::fs::rename(&record_path, record_path.with_extension(format!("json.{aside}")));
-                let _ = std::fs::rename(entry.path(), entry.path().with_extension(format!("jsonl.{aside}")));
+                let _ = std::fs::rename(
+                    &record_path,
+                    record_path.with_extension(format!("json.{aside}")),
+                );
+                let _ = std::fs::rename(
+                    entry.path(),
+                    entry.path().with_extension(format!("jsonl.{aside}")),
+                );
                 continue;
             };
             if entry.metadata().map(|m| m.len()).unwrap_or(0) > record.length {
@@ -694,7 +702,8 @@ impl Store {
     /// is taken, so one the hub refuses leaves the thread withdrawn.
     fn end_withdrawal(&self, inner: &mut Inner, rollout: &str) {
         if inner.tombstones.remove(rollout).is_some() {
-            let _ = std::fs::remove_file(self.dir.join("tombstones").join(format!("{rollout}.json")));
+            let _ =
+                std::fs::remove_file(self.dir.join("tombstones").join(format!("{rollout}.json")));
         }
     }
 
@@ -1119,7 +1128,9 @@ mod tests {
         let home = scratch("unreadable");
         let store = Store::open(&home).unwrap();
         let line = b"{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"Keep me\"}}\n";
-        store.append(ID, &agent("lap1"), &Upload::first(FILE), line).unwrap();
+        store
+            .append(ID, &agent("lap1"), &Upload::first(FILE), line)
+            .unwrap();
         drop(store);
         let rollouts = hub_dir(&home).join("rollouts");
         std::fs::write(rollouts.join(format!("{ID}.json")), "{\"thread\":").unwrap();
@@ -1318,14 +1329,42 @@ mod tests {
         assert!(tombstones[0].withdrawn);
         assert!(store.threads().is_empty());
         // An upload the hub refuses leaves it withdrawn, here and after a restart.
-        assert!(matches!(store.append(ID, &laptop, &Upload { offset: 5, ..Upload::first(FILE) }, b"{}\n"), Err(Refusal::Mismatch { .. })));
-        assert!(matches!(store.append(ID, &laptop, &Upload { file: None, ..Upload::first(FILE) }, b"{}\n"), Err(Refusal::BadRequest(_))));
+        assert!(matches!(
+            store.append(
+                ID,
+                &laptop,
+                &Upload {
+                    offset: 5,
+                    ..Upload::first(FILE)
+                },
+                b"{}\n"
+            ),
+            Err(Refusal::Mismatch { .. })
+        ));
+        assert!(matches!(
+            store.append(
+                ID,
+                &laptop,
+                &Upload {
+                    file: None,
+                    ..Upload::first(FILE)
+                },
+                b"{}\n"
+            ),
+            Err(Refusal::BadRequest(_))
+        ));
         assert_eq!(store.manifest(0).tombstones.len(), 1);
         assert_eq!(Store::open(&home).unwrap().manifest(0).tombstones.len(), 1);
         // Should the owner publish it again (its folder no longer excluded), it may.
         assert!(store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").is_ok());
         assert!(store.manifest(0).tombstones.is_empty());
-        assert!(Store::open(&home).unwrap().manifest(0).tombstones.is_empty());
+        assert!(
+            Store::open(&home)
+                .unwrap()
+                .manifest(0)
+                .tombstones
+                .is_empty()
+        );
     }
 
     #[test]
