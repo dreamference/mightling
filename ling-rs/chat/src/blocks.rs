@@ -26,8 +26,16 @@ pub fn to_blocks(markdown: &str) -> Vec<Value> {
     parse_blocks(&lines)
 }
 
-fn fence(line: &str) -> Option<&str> {
-    line.trim_start().strip_prefix("```").map(str::trim)
+/// The backticks and the info string of a fence line, when the line is one.
+fn fence(line: &str) -> Option<(usize, &str)> {
+    let line = line.trim_start();
+    let ticks = line.len() - line.trim_start_matches('`').len();
+    (ticks >= 3).then(|| (ticks, line[ticks..].trim()))
+}
+
+/// Whether `line` closes a block opened with `ticks` backticks: as many or more, and nothing else.
+fn closes(line: &str, ticks: usize) -> bool {
+    matches!(fence(line), Some((n, "")) if n >= ticks)
 }
 
 fn heading(line: &str) -> Option<(usize, &str)> {
@@ -96,10 +104,10 @@ fn parse_blocks(lines: &[&str]) -> Vec<Value> {
             i += 1;
             continue;
         }
-        if let Some(info) = fence(line) {
+        if let Some((ticks, info)) = fence(line) {
             let mut code = Vec::new();
             i += 1;
-            while i < lines.len() && fence(lines[i]).is_none() {
+            while i < lines.len() && !closes(lines[i], ticks) {
                 code.push(lines[i]);
                 i += 1;
             }
@@ -402,6 +410,14 @@ fn inline_text(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_longer_fence_holds_a_shorter_one() {
+        let blocks = to_blocks("````md\n```rust\nfn a() {}\n```\n````\nafter");
+        assert_eq!(blocks[0], json!({ "type": "pre", "text": "```rust\nfn a() {}\n```", "language": "md" }));
+        assert_eq!(blocks[1], json!({ "type": "paragraph", "text": "after" }));
+        assert_eq!(blocks.len(), 2);
+    }
 
     #[test]
     fn paragraphs_headings_code_and_dividers() {

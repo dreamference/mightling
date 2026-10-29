@@ -107,7 +107,7 @@ pub fn render(markdown: &str) -> Styled {
             let start = out.units;
             let mut wrote = false;
             for inner in lines.by_ref() {
-                if inner.trim_start().starts_with(fence) && inner.trim().trim_start_matches(fence).is_empty() {
+                if closes(inner, fence) {
                     break;
                 }
                 if wrote {
@@ -143,15 +143,18 @@ pub fn render(markdown: &str) -> Styled {
     Styled { text: out.text, styles: out.styles }
 }
 
-fn fence_of(line: &str) -> Option<&'static str> {
+/// A fence line's run of backticks or tildes, when the line is one.
+fn fence_of(line: &str) -> Option<&str> {
+    let mark = line.chars().next().filter(|c| *c == '`' || *c == '~')?;
+    let run = &line[..line.len() - line.trim_start_matches(mark).len()];
     // A backtick in what follows the opening backticks makes it inline code (```ls```), not a fence.
-    if line.starts_with("```") && !line.trim_start_matches('`').contains('`') {
-        Some("```")
-    } else if line.starts_with("~~~") {
-        Some("~~~")
-    } else {
-        None
-    }
+    Some(run).filter(|run| run.len() >= 3 && !(mark == '`' && line[run.len()..].contains('`')))
+}
+
+/// Whether `line` closes the block `fence` opened: the same mark, as many or more, nothing else.
+fn closes(line: &str, fence: &str) -> bool {
+    let line = line.trim();
+    line.len() >= fence.len() && fence.chars().next().is_some_and(|mark| line.chars().all(|c| c == mark))
 }
 
 fn heading_text(line: &str) -> Option<&str> {
@@ -514,6 +517,12 @@ mod tests {
         assert_eq!(covered(&s, title), "Title");
         let tables: Vec<_> = s.styles.iter().filter(|st| st.kind == StyleKind::Monospace).skip(1).collect();
         assert_eq!(tables.len(), 2);
+    }
+
+    #[test]
+    fn a_longer_fence_holds_a_shorter_one() {
+        let s = render("````md\n```rust\nfn a() {}\n```\n````\nafter");
+        assert_eq!(s.text, "```rust\nfn a() {}\n```\nafter");
     }
 
     #[test]

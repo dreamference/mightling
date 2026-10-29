@@ -19,29 +19,36 @@ pub fn escape(text: &str) -> String {
     out
 }
 
-/// The info string of a fence line (```` ```rust ````), when the line is one.
-fn fence(line: &str) -> Option<&str> {
+/// The backticks and the info string of a fence line (```` ```rust ````), when the line is one.
+fn fence(line: &str) -> Option<(usize, &str)> {
+    let line = line.trim_start();
+    let ticks = line.len() - line.trim_start_matches('`').len();
     // A backtick in the info string makes it inline code (```ls```), not a fence.
-    line.trim_start().strip_prefix("```").map(|rest| rest.trim_start_matches('`')).filter(|info| !info.contains('`')).map(str::trim)
+    Some((ticks, line[ticks..].trim())).filter(|(ticks, info)| *ticks >= 3 && !info.contains('`'))
+}
+
+/// Whether `line` closes a block opened with `ticks` backticks: as many or more, and nothing else.
+fn closes(line: &str, ticks: usize) -> bool {
+    matches!(fence(line), Some((n, "")) if n >= ticks)
 }
 
 /// Markdown to the messenger HTML subset.
 pub fn to_html(markdown: &str) -> String {
     let mut out = String::new();
-    let mut code: Option<(String, Vec<&str>)> = None;
+    let mut code: Option<(usize, String, Vec<&str>)> = None;
     for line in markdown.split('\n') {
-        if let Some(info) = fence(line) {
-            match code.take() {
-                Some((language, lines)) => {
-                    out.push_str(&code_block(&language, &lines));
-                    out.push('\n');
-                }
-                None => code = Some((info.split_whitespace().next().unwrap_or_default().to_string(), Vec::new())),
+        if let Some((ticks, language, lines)) = code.as_mut() {
+            if closes(line, *ticks) {
+                out.push_str(&code_block(language, lines));
+                out.push('\n');
+                code = None;
+            } else {
+                lines.push(line);
             }
             continue;
         }
-        if let Some((_, lines)) = code.as_mut() {
-            lines.push(line);
+        if let Some((ticks, info)) = fence(line) {
+            code = Some((ticks, info.split_whitespace().next().unwrap_or_default().to_string(), Vec::new()));
             continue;
         }
         let trimmed = line.trim_start();
@@ -55,7 +62,7 @@ pub fn to_html(markdown: &str) -> String {
             out.push('\n');
         }
     }
-    if let Some((language, lines)) = code {
+    if let Some((_, language, lines)) = code {
         out.push_str(&code_block(&language, &lines));
         out.push('\n');
     }
@@ -133,10 +140,12 @@ pub fn split(markdown: &str, limit: usize) -> Vec<String> {
     let mut parts = Vec::new();
     let mut rest: Vec<char> = markdown.trim_end().chars().collect();
     let mut reopen = String::new();
+    // A closing fence is a line break and as many backticks as the longest opener.
+    let closer = 1 + markdown.split('\n').filter_map(fence).map(|(ticks, _)| ticks).max().unwrap_or(3);
     while !rest.is_empty() {
         let mut part: Vec<char> = reopen.chars().collect();
         // Room for a closing fence if this part ends inside a block.
-        let room = limit.saturating_sub(part.len() + 4);
+        let room = limit.saturating_sub(part.len() + closer);
         if rest.len() <= room {
             part.append(&mut rest);
         } else {
@@ -156,21 +165,22 @@ pub fn split(markdown: &str, limit: usize) -> Vec<String> {
         }
         let text: String = part.into_iter().collect();
         // Is a block open at the end of this part?
-        let mut open: Option<String> = None;
+        let mut open: Option<(usize, String)> = None;
         for line in text.split('\n') {
-            if let Some(info) = fence(line) {
-                open = match open {
-                    Some(_) => None,
-                    None => Some(info.to_string()),
-                };
-            }
+            open = match open {
+                Some((ticks, _)) if closes(line, ticks) => None,
+                None => fence(line).map(|(ticks, info)| (ticks, info.to_string())),
+                still => still,
+            };
         }
         let mut text = text.trim_end().to_string();
         match open {
-            Some(language) if !rest.is_empty() => {
-                text.push_str("\n```");
+            Some((ticks, language)) if !rest.is_empty() => {
+                let fence = "`".repeat(ticks);
+                text.push('\n');
+                text.push_str(&fence);
                 // A label that would leave no room in the next part is dropped, or nothing moves.
-                reopen = if language.chars().count() <= limit / 2 { format!("```{language}\n") } else { "```\n".to_string() };
+                reopen = if language.chars().count() <= limit / 2 { format!("{fence}{language}\n") } else { format!("{fence}\n") };
             }
             _ => reopen.clear(),
         }
@@ -201,6 +211,20 @@ mod tests {
         assert_eq!(to_html("```\"><b\nx\n```"), "<pre>x</pre>");
         // An unclosed block is closed.
         assert_eq!(to_html("```\n**not bold**"), "<pre>**not bold**</pre>");
+    }
+
+    #[test]
+    fn a_longer_fence_holds_a_shorter_one() {
+        // Markdown about Markdown: a block of four backticks shows a three-backtick one whole.
+        let text = "````md\n```rust\nfn a() {}\n```\n````\n**after**";
+        assert_eq!(to_html(text), "<pre><code class=\"language-md\">```rust\nfn a() {}\n```</code></pre>\n<b>after</b>");
+        let code = "```\nline\n```\n".repeat(20);
+        let parts = split(&format!("````\n{code}````"), 100);
+        assert!(parts.len() > 1);
+        for part in &parts {
+            assert!(part.starts_with("````\n") && part.ends_with("\n````"), "a part outside the block: {part}");
+            assert!(part.chars().count() <= 100, "a part over the limit: {part}");
+        }
     }
 
     #[test]
