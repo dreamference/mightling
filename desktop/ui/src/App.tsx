@@ -1088,7 +1088,7 @@ export function App() {
       promptHistory.push(prompt);
     } catch (error) {
       dispatch({ type: "select", threadId: null });
-      setDraft(prompt);
+      setDraftFor(draftKeyOf("ask", null), prompt);
       notice(error);
     }
   };
@@ -1949,7 +1949,8 @@ export function App() {
     if (target.page === "ask") {
       showView("ask");
       if (target.prompt && target.send) void askNow(target.prompt);
-      else if (target.prompt) setDraft(target.prompt);
+      // The new question's own draft: `setDraft` would still write the one shown before `showView`.
+      else if (target.prompt) setDraftFor(draftKeyOf("ask", null), target.prompt);
       return;
     }
     if (target.page === "settings") {
@@ -1964,7 +1965,7 @@ export function App() {
       return setExtensions("plugins");
     }
     showView("work");
-    if (target.prompt) setDraft(target.prompt);
+    if (target.prompt) setDraftFor(draftKeyOf("work", null), target.prompt);
     // A link's folder only when it is an absolute folder that exists; a remote names the open project it belongs to.
     if (target.cwd) {
       const asked = target.cwd;
