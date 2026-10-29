@@ -40,7 +40,7 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert "ling_launcher::parse::<MultitoolCli>().await?" in cli_main
     # The exit summary's "To continue this session, run: codex resume <id>" names ling (1.7.1:
     # found by a capture of a session's end); `codex/` itself is never changed.
-    assert 'println!("{}", line.replace("codex resume", "ling resume"));' in cli_main
+    assert 'println!("{}", line.replace("codex resume", "ling resume").replace("codex --remote", "ling --remote").replace("codex agents", "ling agents"));' in cli_main
     assert 'println!("{line}");\n        }\n    }\n    if is_fatal' not in cli_main
     status = subprocess.run(
         ["git", "-C", CODEX_SUBMODULE_DIR, "status", "--porcelain"], capture_output=True, text=True
@@ -205,6 +205,19 @@ def test_airgapped_treats_every_profile_without_a_sandbox_like_full_access():
     app_server = texts["0023-airgapped-app-server.patch"]
     assert "permission_refusal(matches!(p, PermissionProfile::Disabled)" not in app_server
     assert "permission_refusal(" + no_sandbox + "p)" in app_server
+
+
+def test_the_exit_summary_names_ling_in_every_command_it_prints():
+    # Codex's exit summary prints `codex resume`, and for a task left running on a daemon or a
+    # remote server also `codex --remote <address> resume` and `codex agents`; the CLI prints it
+    # (patch 0001) with each command renamed, so none of them sends the user to a missing binary.
+    import re
+    cli = Path(next(p for p in CodexBrandedBuilder.patches() if Path(p).name.startswith("0001-"))).read_text()
+    line = next(line for line in cli.splitlines() if line.startswith("+") and "format_exit_messages" not in line and "line.replace(" in line)
+    printed = "Reconnect: codex --remote ws://server:80/ resume 1. Stop the current turn: run codex agents. Or run codex resume."
+    for old, new in re.findall(r'replace\("([^"]*)", "([^"]*)"\)', line):
+        printed = printed.replace(old, new)
+    assert "codex" not in printed
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
