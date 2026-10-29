@@ -1338,6 +1338,90 @@ mod tests {
         );
     }
 
+    /// Run by [`a_stripped_environment_still_finds_the_session_files_and_the_runtime_folder`] in a
+    /// child process, whose environment it sets; does nothing in a normal run.
+    #[test]
+    fn paths_probe() {
+        if std::env::var_os("LING_AIRGAPPED_PATHS_PROBE").is_some() {
+            println!("session_file={:?}", session_file("0199a7c2-probe"));
+            println!("runtime_dir={:?}", runtime_dir());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stripped_environment_still_finds_the_session_files_and_the_runtime_folder() {
+        // A user's `shell_environment_policy` can strip `CODEX_HOME` and `XDG_RUNTIME_DIR` from a
+        // command's environment: the web commands must still find the session's file and the seals.
+        let base =
+            std::env::temp_dir().join(format!("ling-airgapped-paths-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let runtime = base.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        let test = module_path!()
+            .split_once("::")
+            .map_or("paths_probe".to_string(), |(_, path)| {
+                format!("{path}::paths_probe")
+            });
+        let probe = |env: &[(&str, Option<&Path>)]| {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([test.as_str(), "--exact", "--nocapture", "--test-threads=1"])
+                .env("LING_AIRGAPPED_PATHS_PROBE", "1")
+                .env("HOME", base.join("home"));
+            for (name, value) in env {
+                match value {
+                    Some(value) => command.env(name, value),
+                    None => command.env_remove(name),
+                };
+            }
+            String::from_utf8_lossy(&command.output().unwrap().stdout).into_owned()
+        };
+        let session_file = |path: PathBuf| {
+            format!(
+                "session_file={:?}",
+                Some(path.join(SESSION_DIR).join("0199a7c2-probe"))
+            )
+        };
+        let mightling = base.join("home/.mightling");
+        for codex_home in [None, Some(Path::new(""))] {
+            let printed = probe(&[("CODEX_HOME", codex_home)]);
+            assert!(
+                printed.contains(&session_file(mightling.clone())),
+                "{printed}"
+            );
+        }
+        let printed = probe(&[("CODEX_HOME", Some(&base.join("codex-home")))]);
+        assert!(
+            printed.contains(&session_file(base.join("codex-home"))),
+            "{printed}"
+        );
+
+        let printed = probe(&[("XDG_RUNTIME_DIR", Some(&runtime))]);
+        assert!(
+            printed.contains(&format!("runtime_dir={:?}", Some(&runtime))),
+            "{printed}"
+        );
+        // Unset, relative or missing, the variable gives way to the folder systemd makes per login.
+        #[cfg(target_os = "linux")]
+        let fallback = {
+            use std::os::unix::fs::MetadataExt;
+            let uid = std::fs::metadata(&runtime).unwrap().uid();
+            Some(PathBuf::from(format!("/run/user/{uid}"))).filter(|dir| dir.is_dir())
+        };
+        #[cfg(not(target_os = "linux"))]
+        let fallback: Option<PathBuf> = None;
+        let missing = base.join("missing");
+        for value in [None, Some(Path::new("relative")), Some(missing.as_path())] {
+            let printed = probe(&[("XDG_RUNTIME_DIR", value)]);
+            assert!(
+                printed.contains(&format!("runtime_dir={fallback:?}")),
+                "{printed}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn a_seal_holds_the_session_at_on_whatever_the_files_say() {
         // A command rewrote the session file to `off`, or deleted the key from a config file.
