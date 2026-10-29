@@ -981,3 +981,136 @@ def test_a_moved_forge_keeps_the_denylist(tmp_path, repositories):
     (folder / "secrets.json").write_text(json.dumps({"anonymity-denylist": "node-q\n"}))
     ForgeBackup.restore_secrets(folder)
     assert ForgeAnonymity.read_denylist() == "node-q\n"
+
+
+# -- what the spec promises and nothing else checked ------------------------------------------------
+
+
+def test_the_record_runs_actions_and_mails_nothing_and_a_mirror_pulls_every_ten_minutes(tmp_path):
+    record = ForgeAppIni.write(tmp_path / "record", "gx10-1a2b", "record").read_text()
+    assert "[actions]\nENABLED = true" in record
+    assert "ARTIFACT_RETENTION_DAYS = 7" in record and "LOG_RETENTION_DAYS = 7" in record
+    mirror = ForgeAppIni.write(tmp_path / "mirror", "node-b", "mirror").read_text()
+    assert "ARTIFACT_RETENTION_DAYS = 14" in mirror and "LOG_RETENTION_DAYS = 14" in mirror
+    assert "DEFAULT_INTERVAL = 10m" in mirror and "MIN_INTERVAL = 10m" in mirror
+    for text in (record, mirror):
+        assert "[mailer]\nENABLED = false" in text
+
+
+def test_a_monthly_timer_checks_that_the_newest_set_restores(monkeypatch):
+    monkeypatch.setattr(
+        ForgeService, "admin_executable", classmethod(lambda cls: "/opt/ling-admin")
+    )
+    units = ForgeService.units()
+    assert "OnCalendar=monthly" in units["mightling-forge-check.timer"]
+    assert (
+        "ExecStart=/opt/ling-admin forge restore --check" in units["mightling-forge-check.service"]
+    )
+
+
+def test_the_container_yields_the_cpu_to_the_model_server():
+    argv = ForgeContainer.run_arguments(Path("/data"), [])
+    assert int(argv[argv.index("--cpu-shares") + 1]) < 1024, "below docker's default share"
+
+
+def test_off_keeps_the_data_and_removes_the_advertisement(monkeypatch, capsys):
+    monkeypatch.delenv("DREAMFERENCE_FORGE", raising=False)
+    calls = []
+    monkeypatch.setattr(
+        ForgeService,
+        "systemctl",
+        classmethod(lambda cls, *a: calls.append(a) or subprocess.CompletedProcess(a, 0, "", "")),
+    )
+    advertised = []
+    monkeypatch.setattr(
+        ForgeService, "advertise", classmethod(lambda cls, role: advertised.append(role))
+    )
+    repository = ForgeSettings.data_dir() / "git" / "repositories" / "owner" / "x.git"
+    repository.mkdir(parents=True)
+    assert ForgeService.off() == 0
+    assert not ForgeSettings.enabled() and advertised == [None]
+    assert calls[0][:3] == ("disable", "--now", "mightling-forge.service")
+    assert "mightling-forge-backup.timer" in calls[0]
+    assert repository.is_dir() and "✅" in capsys.readouterr().out
+    monkeypatch.setattr(ForgeService, "setup", classmethod(lambda cls, **k: True))
+    assert ForgeService.on() == 0 and ForgeSettings.enabled()
+
+
+def test_key_add_gives_the_owner_the_public_key(tmp_path, monkeypatch):
+    from dreamference.forge.forge_command import ForgeCommand
+
+    posted = []
+    monkeypatch.setattr(ForgeAccounts, "admin_token", classmethod(lambda cls: "t"))
+    monkeypatch.setattr(
+        ForgeContainer,
+        "api",
+        classmethod(
+            lambda cls, method, path, token, body=None, timeout=30: (
+                posted.append((method, path, body)) or (201, {})
+            )
+        ),
+    )
+    key = tmp_path / "laptop.pub"
+    key.write_text("ssh-ed25519 AAAAC3Nza laptop\n")
+    import argparse
+
+    args = argparse.Namespace(forge_command="key", key_command="add", file=str(key))
+    assert ForgeCommand.dispatch(args) == 0
+    assert posted == [
+        (
+            "POST",
+            "/admin/users/owner/keys",
+            {"key": "ssh-ed25519 AAAAC3Nza laptop", "title": "laptop.pub", "read_only": False},
+        )
+    ]
+    monkeypatch.setattr(
+        ForgeContainer, "api", classmethod(lambda cls, *a, **k: (422, {"message": "key exists"}))
+    )
+    assert ForgeCommand.dispatch(args) == 1
+
+
+def test_the_storage_alarm_and_budget_are_reported():
+    gb = 1000**3
+    usage = {"repositories": gb // 2, "logs_artefacts": 0, "dumps": 0, "other": 0, "total": gb}
+    assert ForgeStorage.warnings(usage) == []
+    usage.update(repositories=2 * gb, total=11 * gb)
+    warnings = ForgeStorage.warnings(usage)
+    assert len(warnings) == 2
+    assert "above the 1 GB alarm" in warnings[0] and "above its 10 GB budget" in warnings[1]
+
+
+def test_status_names_the_role_the_last_backup_the_mirror_and_the_storage(monkeypatch):
+    from dreamference.forge.forge_command import ForgeCommand
+
+    monkeypatch.delenv("DREAMFERENCE_FORGE", raising=False)
+    monkeypatch.setattr(ForgeService, "host_name", classmethod(lambda cls: "gx10-1a2b"))
+    monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: False))
+    monkeypatch.setattr(ForgeStorage, "free_gb", classmethod(lambda cls: 400.0))
+    monkeypatch.setattr(
+        ForgeStorage,
+        "usage",
+        classmethod(
+            lambda cls: {
+                "repositories": 2 * 1000**3,
+                "logs_artefacts": 0,
+                "dumps": 0,
+                "other": 0,
+                "total": 2 * 1000**3,
+            }
+        ),
+    )
+    ForgeSettings.update_state(role="record")
+    ForgeSettings.write_secret("owner-password", "p" * 24)
+    lines = ForgeCommand.status_lines()
+    assert lines[0].startswith(
+        "Forge: on, record, not running at http://gx10-1a2b.local:3100/forge/"
+    )
+    assert "Last backup: never" in lines and "GitHub mirror: off" in lines
+    assert any(line.startswith("Storage: 2.00 GB") for line in lines)
+    assert any("above the 1 GB alarm" in line for line in lines)
+    assert "p" * 24 not in "\n".join(lines) and "password --show" in lines[-1]
+    ForgeSettings.update_state(role="mirror", record_name="gx10-77c0")
+    lines = ForgeCommand.status_lines()
+    assert "Forge of record: gx10-77c0" in lines and not any(
+        "Last backup" in line for line in lines
+    )

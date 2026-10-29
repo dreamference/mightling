@@ -1,7 +1,7 @@
-"""Moving the forge of record off the happy path.
+"""Moving the forge of record, mostly off the happy path.
 
-What a paired node asks for is checked, and every failed move leaves the record in place and
-unfrozen. Systemd, ssh and the backups are mocked.
+What a paired node asks for is checked, every failed move leaves the record in place and
+unfrozen, and a move or promotion that works keeps the old data beside the new. Systemd, ssh and the backups are mocked.
 """
 
 import io
@@ -22,6 +22,8 @@ from dreamference.node.node_pairing import NodePairing
 
 NAME = "forge-20261027-063000"
 TARGET = {"node": "node-b-1a2b", "name": "node-b"}
+# The real flip, for the move that works: `record_moving` makes any other move fail at it.
+BECOME_MIRROR = ForgeMove.__dict__["become_mirror"]
 
 
 @pytest.fixture(autouse=True)
@@ -168,6 +170,73 @@ def test_a_move_the_target_does_not_restore_unfreezes_and_keeps_the_role(
     assert requests == [f"forge-restore {NAME} {ForgeBackup.node_id()}"]
     assert "3 refs differ" in capsys.readouterr().out
     assert not ForgeMove.frozen_flag().exists() and ForgeSettings.role() == ROLE_RECORD
+
+
+def test_a_move_sends_the_set_to_one_more_node_and_keeps_the_old_data_aside(
+    record_moving, monkeypatch, capsys, _no_systemd
+):
+    from dreamference.forge.forge_mirrors import ForgeMirrors
+
+    other = {"node": "node-c-3c4d", "name": "node-c"}
+    spare = {"node": "node-d-5e6f", "name": "node-d"}
+    monkeypatch.setattr(NodePairing, "paired", classmethod(lambda cls: [TARGET, other, spare]))
+    sent = []
+    monkeypatch.setattr(
+        ForgeBackup, "send", classmethod(lambda cls, folder, record: sent.append(record) or True)
+    )
+    monkeypatch.setattr(
+        NodePairing,
+        "run",
+        classmethod(lambda cls, record, request, **k: answered('{"ok": true}\n')),
+    )
+    monkeypatch.setattr(ForgeMove, "become_mirror", BECOME_MIRROR)
+    set_up = []
+    monkeypatch.setattr(
+        ForgeService, "setup", classmethod(lambda cls, **k: set_up.append(k) or True)
+    )
+    synced = []
+    monkeypatch.setattr(ForgeMirrors, "sync", classmethod(lambda cls, **k: synced.append(k)))
+    data = ForgeSettings.data_dir()
+    (data / "git").mkdir(parents=True)
+    ForgeSettings.write_secret("owner-password", "o" * 24)
+    assert ForgeMove.move("node-b") == 0
+    assert sent == [TARGET, other], "the target and one more paired node"
+    assert ForgeSettings.role() == ROLE_MIRROR
+    assert ForgeSettings.state()["record_node"] == TARGET["node"]
+    aside = Path(ForgeSettings.state()["previous_data"])
+    assert (aside / "git").is_dir() and not data.exists(), "moved aside, never deleted"
+    assert list(ForgeSettings.secret_path("owner-password").parent.glob("owner-password.record-*"))
+    assert ("stop", "mightling-forge.service") in _no_systemd
+    assert set_up == [{"show_password": False}] and synced == [{}]
+    assert "30 days" in capsys.readouterr().out
+
+
+def test_promoting_this_node_restores_its_newest_set(monkeypatch, capsys):
+    from dreamference.forge.forge_mirrors import ForgeMirrors
+
+    restored = []
+    monkeypatch.setattr(ForgeBackup, "latest", classmethod(lambda cls: Path("/sets") / NAME))
+    monkeypatch.setattr(
+        ForgeMove,
+        "restore_here",
+        classmethod(
+            lambda cls, folder, previous: restored.append((folder.name, previous)) or {"ok": True}
+        ),
+    )
+    monkeypatch.setattr(ForgeMirrors, "sync", classmethod(lambda cls, **k: None))
+    assert ForgeMove.promote(None) == 0
+    assert restored == [(NAME, None)]
+    assert "pushed again" in capsys.readouterr().out
+    requests = []
+    monkeypatch.setattr(NodePairing, "find", classmethod(lambda cls, name, browse=True: TARGET))
+    monkeypatch.setattr(
+        NodePairing,
+        "run",
+        classmethod(
+            lambda cls, record, request, **k: requests.append(request) or answered('{"ok": true}\n')
+        ),
+    )
+    assert ForgeMove.promote("node-b") == 0 and requests == ["forge-promote"]
 
 
 @pytest.mark.parametrize(
