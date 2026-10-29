@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -239,3 +240,24 @@ def test_the_package_this_suite_imports_is_a_source_tree():
     assert CodexBrandedBuilder.has_source()
     assert not LegacyNameMigration.release_install()
     assert not LegacyNameMigration.allowed()
+
+
+def test_authorized_keys_is_replaced_whole_or_not_at_all(tmp_path):
+    # It was rewritten in place: a write cut short left sshd a truncated file, locking out every
+    # key in it, the owner's own included.
+    keys = NodeServe.authorized_keys()
+    keys.parent.mkdir(parents=True, exist_ok=True)
+    before = (
+        "ssh-ed25519 AAAAmine me@laptop\n"
+        f'command="{tmp_path}/puffin-admin node serve-job --key k1",no-pty ssh-ed25519 AAAAsender puffin-node\n')
+    keys.write_text(before)
+    keys.chmod(0o600)
+
+    with patch.object(legacy_name_migration.os, "replace", side_effect=OSError("disk full")):
+        with pytest.raises(OSError):
+            LegacyNameMigration.rewrite_authorized_keys()
+    assert keys.read_text() == before
+    assert LegacyNameMigration.rewrite_authorized_keys()
+    assert KEY_COMMENT in keys.read_text() and "AAAAmine" in keys.read_text()
+    assert oct(keys.stat().st_mode & 0o777) == "0o600"
+    assert [entry.name for entry in keys.parent.iterdir()] == [keys.name]

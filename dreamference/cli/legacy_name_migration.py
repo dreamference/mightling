@@ -301,7 +301,14 @@ class LegacyNameMigration:
             out.append(line)
         if not changed:
             return None
-        path.write_text("".join(out))
+        # Whole or not at all, as NodeServe writes it: a cut-short write would lock out every key.
+        staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            staging.write_text("".join(out))
+            os.chmod(staging, 0o600)
+            os.replace(staging, path)
+        finally:
+            staging.unlink(missing_ok=True)
         return f"pointed {changed} paired sender(s) at ling-admin in {path}"
 
     @classmethod
