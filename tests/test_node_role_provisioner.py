@@ -24,6 +24,7 @@ from dreamference.node.node_role_provisioner import (
     SUDOERS_PATH,
     NodeRoleProvisioner,
 )
+from dreamference.vllm_server.host_root_helper import HELPER_PATH, HostRootHelper
 from tests.test_fleet_provision import SECRET, FakeSession, StandIn, fleet  # noqa: F401
 
 PUBLIC_KEY = "ssh-ed25519 AAAAmainkey <user>@<main>"
@@ -156,20 +157,28 @@ def test_daemon_json_is_merged_never_overwritten():
         NodeRoleProvisioner.merge_daemon_json("{not json")
 
 
-def test_the_sudoers_drop_in_is_limited_to_named_commands():
-    text = NodeRoleProvisioner.render_sudoers("user", [ADMIN])
-    assert f"{ADMIN} node prepare *" in text
-    assert f"{ADMIN} host setup, \\\n" in text
-    assert text.rstrip().endswith("user ALL=(root) NOPASSWD: MIGHTLING_AGENTS")
-    assert not re.search(r"NOPASSWD:\s*ALL\b", text)
-    assert "/usr/bin/systemctl, /usr/bin/apt-get, /usr/bin/apt, /usr/bin/docker" in text
-    for user, paths in (
-        ("user1 ALL", []),
-        ("user1", ["/x/ling-admin, ALL"]),
-        ("user1", ["rel/ling-admin"]),
-    ):
+def test_the_sudoers_drop_in_allows_only_the_root_helper():
+    # Until 2026-10-29 it allowed systemctl, apt-get, apt and docker with any arguments, and
+    # `ling-admin` from paths the user can write: root to anyone with the node user's shell.
+    text = NodeRoleProvisioner.render_sudoers("user")
+    rules = [line for line in text.splitlines() if line.strip() and not line.startswith("#")]
+    assert rules == [f"user ALL=(root) NOPASSWD: {HELPER_PATH}"]
+    for word in ("systemctl", "apt", "docker", "ling-admin", "Cmnd_Alias"):
+        assert word not in text
+    for user in ("user1 ALL", "user1,ALL", "User", ""):
         with pytest.raises(ValueError):
-            NodeRoleProvisioner.render_sudoers(user, paths)
+            NodeRoleProvisioner.render_sudoers(user)
+
+
+def test_an_old_sudoers_rule_is_replaced_by_the_helper_rule(role_fleet):
+    machine = FakeSession.machines["new-node"] = StandIn()
+    machine.files = {
+        SUDOERS_PATH: "Cmnd_Alias MIGHTLING_AGENTS = /usr/bin/systemctl, /usr/bin/apt-get\n"
+        "user ALL=(root) NOPASSWD: MIGHTLING_AGENTS\n"
+    }
+    assert provision() == 0
+    assert machine.files[SUDOERS_PATH] == NodeRoleProvisioner.render_sudoers("user")
+    assert machine.files[HELPER_PATH] == HostRootHelper.render()
 
 
 def test_a_role_run_provisions_a_fresh_machine_in_order(role_fleet, capsys):
@@ -181,13 +190,15 @@ def test_a_role_run_provisions_a_fresh_machine_in_order(role_fleet, capsys):
     assert PUBLIC_KEY in files["authorized_keys"]
     merged = json.loads(files[DOCKER_DAEMON_JSON])
     assert merged["max-download-attempts"] == 100 and "nvidia" in merged["runtimes"]
-    assert "NOPASSWD: MIGHTLING_AGENTS" in files[SUDOERS_PATH] and ADMIN in files[SUDOERS_PATH]
+    assert files[SUDOERS_PATH] == NodeRoleProvisioner.render_sudoers("user")
+    assert files[HELPER_PATH] == HostRootHelper.render()
     assert files[SSHD_DROPIN_PATH] == SSHD_DROPIN
     markers = (
         "authorized_keys",
         "install.sh",
         "node prepare",
         "restart docker",
+        f'-m 0755 "$f" {HELPER_PATH}',
         "visudo -cf",
         "node enable",
         "forge on",

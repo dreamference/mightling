@@ -683,7 +683,7 @@ Set up new GB10s from this one: install Mightling, the root half, the model, pai
 | `--match` | With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-. |
 | `--start-timeout` | Seconds to wait for a started model server (default 1200) |
 | `--model-source` | copy (default): rsync the weights from here; hf: the node downloads the public weights from Hugging Face, each file is checked by SHA-256, only what the Hub lacks is sent from here. One of: `copy`, `hf`. |
-| `--role` | Also leave it as a night or engine node: main key, docker, agents' sudoers, key-only SSH, the role's setup and a readiness report (docs/dev/node.md) One of: `night`, `engine`. |
+| `--role` | Also leave it as a night or engine node: main key, docker, the root helper sudo allows, key-only SSH, the role's setup and a readiness report (docs/dev/node.md) One of: `night`, `engine`. |
 
 #### `ling-admin node prepare`
 

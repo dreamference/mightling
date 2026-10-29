@@ -2,7 +2,8 @@
 
 `NodeProvisioner` installs, prepares, advertises, copies the model and pairs (FLEET §7.1). With a
 role it also leaves the machine as the last one was provisioned by hand (docs/dev/node.md): the
-main node's key authorised, docker's daemon.json merged, the agents' limited sudoers drop-in, the
+main node's key authorised, docker's daemon.json merged, the root helper and the sudoers drop-in
+that allows it alone, the
 model downloaded when this machine has no copy, the forge mirror, SSH key-only, the role's own
 setup and a readiness report. That is the persistent access FLEET's decisions 3 and 6 rule out for a plain
 `node provision`, so it is only ever done when `--role` asks for it.
@@ -31,6 +32,7 @@ from dreamference.node.fleet_session import (
     FleetSession,
 )
 from dreamference.node.node_pairing import NodePairing
+from dreamference.vllm_server.host_root_helper import HELPER_PATH, HostRootHelper
 
 if TYPE_CHECKING:
     from dreamference.node.node_provisioner import NodeProvisioner
@@ -47,21 +49,6 @@ DOCKER_SETTINGS: Final[dict[str, Any]] = {
 MODEL_CONTAINER_PREFIX: Final[str] = "dreamference-vllm-"
 
 SUDOERS_PATH: Final[str] = "/etc/sudoers.d/mightling-agents"
-SUDO_COMMANDS: Final[tuple[str, ...]] = (
-    "/usr/bin/systemctl",
-    "/usr/bin/apt-get",
-    "/usr/bin/apt",
-    "/usr/bin/docker",
-)
-# The `ling-admin` steps that need root, allowed for each `ling-admin` the machine has.
-SUDO_ADMIN_STEPS: Final[tuple[str, ...]] = ("host setup", "node prepare")
-# Where `ling-admin` resolves there: the release venv, and whatever ~/.local/bin links to (a
-# source checkout's venv on a node run from main). Only the paths that exist are allowed.
-ADMIN_PATHS_SCRIPT: Final[str] = (
-    f'for p in {REMOTE_ADMIN} "$(readlink -f "$HOME/.local/bin/ling-admin")"; '
-    'do [ -x "$p" ] && echo "$p"; done'
-)
-SAFE_PATH: Final[re.Pattern[str]] = re.compile(r"/[A-Za-z0-9._/-]+")
 NOPASSWD_ALL: Final[str] = r"^[^#]*NOPASSWD:[[:space:]]*ALL[[:space:]]*$"
 
 SSHD_DROPIN_PATH: Final[str] = "/etc/ssh/sshd_config.d/00-mightling-key-only.conf"
@@ -118,8 +105,8 @@ class NodeRoleProvisioner:
                 models, assign, pair.
 
         Returns:
-            list: The same steps with the key before the install, docker and sudoers after the
-            prepare, the download after the copy, and the node list, forge and key-only SSH after
+            list: The same steps with the key before the install, docker, the root helper and
+            sudoers after the prepare, the download after the copy, and the node list, forge and key-only SSH after
             the pairing.
         """
         probe, os_update, install, prepare, advertise, models, assign, pair = base
@@ -130,6 +117,7 @@ class NodeRoleProvisioner:
             install,
             prepare,
             self.docker_daemon,
+            self.root_helper,
             self.sudoers,
             advertise,
             models,
@@ -151,6 +139,7 @@ class NodeRoleProvisioner:
         for step in (
             self.authorize_key,
             self.docker_daemon,
+            self.root_helper,
             self.sudoers,
             self.download_missing,
             self.forge_mirror,
@@ -306,10 +295,32 @@ class NodeRoleProvisioner:
             config["runtimes"] = {**runtimes, "nvidia": DOCKER_SETTINGS["runtimes"]["nvidia"]}
         return json.dumps(config, indent=4) + "\n"
 
-    def sudoers(self, host: str, session: FleetSession) -> bool:
-        """Install the agents' limited sudoers drop-in, checked by `visudo -c` first.
+    def root_helper(self, host: str, session: FleetSession) -> bool:
+        """Install the root helper, the one command the sudoers drop-in allows (`HostRootHelper`).
 
-        A leftover `NOPASSWD: ALL` elsewhere is reported, never removed.
+        Args:
+            host: The machine.
+            session: Its open session.
+
+        Returns:
+            bool: True when the installed helper is the rendered one.
+        """
+        password = self.provisioner.passwords.get(session.host)
+        wanted = HostRootHelper.render()
+        if session.sudo(f"cat {HELPER_PATH}", password).stdout == wanted:
+            return True
+        return self._change(
+            host,
+            f"install {HELPER_PATH} (root:root 0755)",
+            lambda: self._root_file(session, HELPER_PATH, wanted, "0755", check='sh -n "$f"'),
+        )
+
+    def sudoers(self, host: str, session: FleetSession) -> bool:
+        """Install the sudoers drop-in that allows the root helper alone, checked by `visudo -c`.
+
+        A node provisioned before 2026-10-29 has the old drop-in at the same path, which allowed
+        `systemctl`, `apt-get`, `apt` and `docker` with any arguments: it is replaced. A leftover
+        `NOPASSWD: ALL` elsewhere is reported, never removed.
 
         Args:
             host: The machine.
@@ -324,9 +335,8 @@ class NodeRoleProvisioner:
         )
         for path in leftover.stdout.split():
             print(f"⚠️  {host}: {path} grants NOPASSWD: ALL. Left as it is; remove it by hand.")
-        admins = session.run(ADMIN_PATHS_SCRIPT).stdout.split()
         try:
-            wanted = self.render_sudoers(session.user, list(dict.fromkeys(admins)))
+            wanted = self.render_sudoers(session.user)
         except ValueError as error:
             return self.provisioner._fail(host, "sudoers", str(error), "")
         if session.sudo(f"cat {SUDOERS_PATH}", password).stdout == wanted:
@@ -340,38 +350,24 @@ class NodeRoleProvisioner:
         )
 
     @classmethod
-    def render_sudoers(cls, user: str, admins: list[str]) -> str:
-        """Return the drop-in: systemd units, packages, Docker and ling-admin's two root steps.
+    def render_sudoers(cls, user: str) -> str:
+        """Return the drop-in: the node's user may run the root helper, and nothing else, as root.
 
         Args:
             user: The account the agents run as.
-            admins: The `ling-admin` paths that exist there.
 
         Returns:
             str: The file.
 
         Raises:
-            ValueError: A user name or path sudoers would read as something else.
+            ValueError: A user name sudoers would read as something else.
         """
         if not re.fullmatch(r"[a-z_][a-z0-9_-]*", user):
             raise ValueError(f"unexpected user name {user!r}")
-        for path in admins:
-            if not SAFE_PATH.fullmatch(path):
-                raise ValueError(f"unexpected ling-admin path {path!r}")
-        commands = [
-            ", ".join(SUDO_COMMANDS),
-            *(
-                f"{path} {step}{rest}"
-                for path in admins
-                for step in SUDO_ADMIN_STEPS
-                for rest in ("", " *")
-            ),
-        ]
         return (
-            f"# Passwordless sudo for {user}, limited to the commands Mightling's agents need on this node:\n"
-            "# systemd units, packages, Docker, and ling-admin's two root steps.\n"
-            "Cmnd_Alias MIGHTLING_AGENTS = " + ", \\\n    ".join(commands) + "\n"
-            f"{user} ALL=(root) NOPASSWD: MIGHTLING_AGENTS\n"
+            f"# Passwordless sudo for {user}: Mightling's root helper and nothing else. It runs\n"
+            "# host setup's fixes; every other root command asks for the password.\n"
+            f"{user} ALL=(root) NOPASSWD: {HELPER_PATH}\n"
         )
 
     def download_missing(self, host: str, session: FleetSession) -> bool:
