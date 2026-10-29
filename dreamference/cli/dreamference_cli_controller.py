@@ -410,7 +410,7 @@ class DreamferenceCLIController:
 
     @classmethod
     def _suggest_engine_fallback(cls, model: str, engine: str | None, what: str) -> None:
-        """After a failed start check on ling-serve, names SGLang, the default engine, to go back to.
+        """After a failed start check on ling-serve, names SGLang, the fallback engine, to go back to.
 
         Never switches by itself: the user decides, with one flag or one config key.
 

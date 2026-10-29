@@ -413,8 +413,9 @@ ENGINE_LING: Final[str] = "ling"
 # ling-engine (github.com/dreamference/ling-engine), the server written for this one model
 # (ling-engine specs/DREAMFERENCE_LING_ENGINE_INTEGRATION.md §12): opt-in for
 # qwen3.8-27b-nvfp4-dflash2 in 1.7.2 (`server start --engine ling`, or `server_engine = "ling"` in
-# the config), SGLang staying the default until ling-serve reads images, serves adapters and runs
-# more than two requests at once (the owner's decision of 2026-10-26). Its quality was measured on
+# the config), the default since 1.8.0 with four sessions at the full context (the owner's decisions
+# of 2026-10-26, 2026-10-28 and 2026-10-29). Image input and LoRA adapters follow in 1.8.1; until
+# then they stay on SGLang (`--engine sglang`, which an adapter start picks by itself). Its quality was measured on
 # SWE-bench nights 12 and 15 against SGLang and night 17 against SGLang with the phase-merge fix;
 # speculation and tree verification are exact, so the drafter moves speed alone.
 #
@@ -451,11 +452,11 @@ LING_ENGINE_KV_PAGES_SINCE: Final[str] = "f180b44a40369d7dd03f9ae97e7fa8be4ece13
 QWEN38_LING_SESSIONS: Final[int] = 4
 QWEN38_LING_BATCH: Final[int] = 4
 
-# The engine `server start` uses when neither `--engine` nor `server_engine` says. THE 1.8.0 SWITCH:
-# ENGINE_LING makes ling-serve the default and SGLang the `--engine sglang` fallback; nothing else
-# changes (`ModelMatrixRegistry.engine_recipes_for`). Not before the checklist of
-# docs/dev/release-1.8.0.md has passed.
-QWEN38_DEFAULT_ENGINE: Final[str] = ENGINE_SGLANG
+# The engine `server start` uses when neither `--engine` nor `server_engine` says. THE 1.8.0 SWITCH,
+# made: ENGINE_LING makes ling-serve the default and SGLang the `--engine sglang` fallback; nothing
+# else changes (`ModelMatrixRegistry.engine_recipes_for`). The checklist is
+# docs/dev/release-1.8.0.md; setting ENGINE_SGLANG back is the whole rollback.
+QWEN38_DEFAULT_ENGINE: Final[str] = ENGINE_LING
 
 # ling-serve's image (docker/ling-serve/Dockerfile, built by scripts/build_ling_serve_image.sh on an
 # aarch64 machine from QWEN38_LING_ENGINE_COMMIT), pinned by the digest GHCR gave the push
@@ -562,15 +563,16 @@ class ModelMatrixRegistry:
     # Static registry of supported target models and speculative draft models
     MATRIX: Final[Dict[str, ModelSpec]] = {
         "qwen3.8-27b-nvfp4-dflash2": ModelSpec(
-            name="Qwen 3.8 27B (NVFP4 + DFlash2, SGLang)",
+            name="Qwen 3.8 27B (NVFP4 + DFlash2, ling-serve)",
             params_b=27.0,
             supported_precisions=["NVFP4"],
             min_memory_gb=20.0,
             max_memory_gb=70.0,
             compatible_gb10=True,
             notes=(
-                "Served by SGLang (`engine: sglang`), with ling-engine's ling-serve beside it, opt-in "
-                "since 1.7.2 (`server start --engine ling`, QWEN38_LING_RECIPE). Not vLLM, because "
+                "Served by ling-engine's ling-serve since 1.8.0 (QWEN38_LING_RECIPE, four sessions "
+                "at the full context), with SGLang one flag away (`server start --engine sglang`), "
+                "the engine for image input and LoRA adapters until 1.8.1. Not vLLM, because "
                 "the speed is in the drafter: DFlash2 is a block-diffusion drafter vLLM supports "
                 "only through an unmerged pull request. The measurements below are SGLang's.\n\n"
                 "Measured here (2026-09-29, single stream, temperature 0, thinking off, median of "
@@ -601,10 +603,10 @@ class ModelMatrixRegistry:
                 "reasoning-effort default."
             ),
             hf_repo_id="RadixArk/Qwen3.8-27B-NVFP4",
-            # The default engine's recipe and the other's (QWEN38_DEFAULT_ENGINE): SGLang by default
-            # and ling-serve opt-in (`server start --engine ling`, `server_engine = "ling"`) until
-            # 1.8.0, when ling-serve becomes the default with four sessions at the full context
-            # (the owner's decisions of 2026-10-26 and 2026-10-28) and SGLang the rollback.
+            # The default engine's recipe and the other's (QWEN38_DEFAULT_ENGINE): ling-serve by
+            # default since 1.8.0, with four sessions at the full context (the owner's decisions of
+            # 2026-10-26 and 2026-10-28), and SGLang the rollback and, until 1.8.1, the engine for
+            # image input and LoRA adapters (opt-in ling-serve in 1.7.2).
             launch_overrides=_QWEN38_LAUNCH_OVERRIDES,
             engine_recipes=_QWEN38_ENGINE_RECIPES,
             supports_vision=True,

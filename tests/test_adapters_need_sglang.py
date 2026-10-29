@@ -14,10 +14,16 @@ MODEL = "qwen3.8-27b-nvfp4-dflash2"
 
 
 @pytest.fixture
-def ling_default(monkeypatch):
-    """Makes ling-serve the model's default engine, as the 1.8.0 switch will."""
+def ling_default():
+    """The registry as shipped: ling-serve is the model's default engine since the 1.8.0 switch."""
+    assert ModelMatrixRegistry.engines(MODEL) == [ENGINE_LING, ENGINE_SGLANG]
+
+
+@pytest.fixture
+def sglang_default(monkeypatch):
+    """The rollback position (QWEN38_DEFAULT_ENGINE = ENGINE_SGLANG): SGLang first."""
     monkeypatch.setattr(
-        ModelMatrixRegistry, "engines", classmethod(lambda cls, key: [ENGINE_LING, ENGINE_SGLANG])
+        ModelMatrixRegistry, "engines", classmethod(lambda cls, key: [ENGINE_SGLANG, ENGINE_LING])
     )
 
 
@@ -65,7 +71,19 @@ def test_ling_without_adapters_is_untouched(ling_default, no_adapters, capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_sglang_default_with_an_adapter_is_untouched(adapters, capsys):
+def test_the_shipped_default_with_an_adapter_starts_sglang(adapters, capsys):
+    # No monkeypatched registry: a plain `server start` after the 1.8.0 switch, adapter installed.
+    assert Cli._engine_for_adapters(MODEL, None, from_flag=False) == ENGINE_SGLANG
+    assert "mine" in capsys.readouterr().out
+
+
+def test_explicit_sglang_with_an_adapter_is_untouched(adapters, capsys):
+    assert Cli._engine_for_adapters(MODEL, ENGINE_SGLANG, from_flag=True) == ENGINE_SGLANG
+    assert Cli._engine_for_adapters(MODEL, ENGINE_SGLANG, from_flag=False) == ENGINE_SGLANG
+    assert capsys.readouterr().out == ""
+
+
+def test_sglang_default_with_an_adapter_is_untouched(sglang_default, adapters, capsys):
     assert Cli._engine_for_adapters(MODEL, None, from_flag=False) is None
     assert Cli._engine_for_adapters(MODEL, ENGINE_SGLANG, from_flag=True) == ENGINE_SGLANG
     assert capsys.readouterr().out == ""
@@ -76,7 +94,18 @@ def test_adapter_install_warns_when_the_engine_is_ling(ling_default, capsys):
     assert "cannot serve adapters yet" in capsys.readouterr().out
 
 
-def test_adapter_install_does_not_warn_on_sglang(capsys):
+def test_adapter_install_warns_on_the_shipped_default(capsys):
+    AdapterCommand._warn_if_ling({"key": MODEL}, DreamferenceConfig())
+    assert "cannot serve adapters yet" in capsys.readouterr().out
+
+
+def test_adapter_install_does_not_warn_when_the_config_names_sglang(monkeypatch, capsys):
+    monkeypatch.setenv("DREAMFERENCE_SERVER_ENGINE", ENGINE_SGLANG)
+    AdapterCommand._warn_if_ling({"key": MODEL}, DreamferenceConfig())
+    assert capsys.readouterr().out == ""
+
+
+def test_adapter_install_does_not_warn_on_sglang(sglang_default, capsys):
     AdapterCommand._warn_if_ling({"key": MODEL}, DreamferenceConfig())
     assert capsys.readouterr().out == ""
     assert adapter_command  # module imported

@@ -120,7 +120,7 @@ def test_the_patch_is_pinned_to_the_recipes_image_and_the_images_own_file():
     assert SGLANG_PHASE_MERGE_PATCH["path"] == SGLANG_SERVING_RESPONSES
     assert len(SGLANG_PHASE_MERGE_PATCH["sha256"]) == 64
     for model in (DEFAULT_MODEL_ALIAS, MINIMA):
-        recipe = ModelMatrixRegistry.get_launch_overrides(model)
+        recipe = ModelMatrixRegistry.get_launch_overrides(model, "sglang")
         patches = [SGLANG_PHASE_MERGE_PATCH, SGLANG_STREAM_PHASE_PATCH]
         assert recipe["runtime_patches"] == patches, model
         assert recipe["docker_image"] == QWEN38_SGLANG_IMAGE, model
@@ -152,13 +152,13 @@ def mounts(cmd: list[str]) -> list[str]:
 
 
 def test_every_sglang_launch_mounts_the_patched_file_without_adapters(verified):  # noqa: F811
-    recipe = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS)
+    recipe = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, "sglang")
     (patch,) = SGLangRuntimePatcher.for_launch(recipe, lora=False)
     written = SGLangRuntimePatcher.host_dir() / SGLangRuntimePatcher.file_name(patch)
     expected = f"{written}:{SGLANG_SERVING_RESPONSES}:ro"
     mgr = VLLMServerManager()
     for kwargs in ({}, {"gate": True}, {"gate": True, "api_key": "k"}):
-        cmd = mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS, **kwargs)
+        cmd = mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS, engine="sglang", **kwargs)
         assert "--enable-lora" not in cmd
         assert mounts(cmd) == [expected], kwargs
     assert len(mounts(mgr.build_launch_command(model=MINIMA, gate=True))) == 1
@@ -166,14 +166,16 @@ def test_every_sglang_launch_mounts_the_patched_file_without_adapters(verified):
 
 def test_with_adapters_the_one_mounted_file_carries_both_patches(verified):  # noqa: F811
     install()
-    recipe = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS)
+    recipe = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, "sglang")
     (both,) = SGLangRuntimePatcher.for_launch(recipe, lora=True)
     assert both["substitutions"] == [
         *SGLANG_PHASE_MERGE_PATCH["substitutions"],
         *SGLANG_STREAM_PHASE_PATCH["substitutions"],
         *QWEN38_LORA_RECIPE["runtime_patches"][0]["substitutions"],
     ]
-    cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=True)
+    cmd = VLLMServerManager().build_launch_command(
+        model=DEFAULT_MODEL_ALIAS, engine="sglang", gate=True
+    )
     assert "--enable-lora" in cmd
     (mount,) = mounts(cmd)
     assert mount.startswith(

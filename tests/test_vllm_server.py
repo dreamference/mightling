@@ -1262,7 +1262,7 @@ def test_an_sglang_recipe_launches_sglang_inside_the_same_guarded_container():
     # around it -- name, cgroup cap, CPU limit, OOM score, mounts -- must not, since the watchdog
     # and every client address it by name and port.
     mgr = VLLMServerManager()
-    cmd = mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2")
+    cmd = mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2", engine="sglang")
     image = next(a for a in cmd if a.startswith("lmsysorg/sglang@sha256:"))
     prefix, server = cmd[:cmd.index(image)], cmd[cmd.index(image) + 1:]
 
@@ -1296,7 +1296,7 @@ def test_a_custom_hf_home_is_what_the_model_container_mounts(tmp_path, monkeypat
     # on such a host the engine was pointed at a path the container could not see.
     hf_home = tmp_path / "hf"
     monkeypatch.setenv("HF_HOME", str(hf_home))
-    cmd = VLLMServerManager().build_launch_command(model="qwen3.8-27b-nvfp4-dflash2")
+    cmd = VLLMServerManager().build_launch_command(model="qwen3.8-27b-nvfp4-dflash2", engine="sglang")
     mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-v"]
 
     assert f"{hf_home}:/root/.cache/huggingface" in mounts
@@ -1427,7 +1427,7 @@ def test_the_chat_template_is_patched_for_efforts_and_late_system_messages(tmp_p
     from dreamference.hardware.model_downloader import ModelDownloader
     from dreamference.vllm_server.chat_template_patcher import ChatTemplatePatcher
 
-    patches = get_model_launch_overrides("qwen3.8-27b-nvfp4-dflash2")["chat_template_patches"]
+    patches = get_model_launch_overrides("qwen3.8-27b-nvfp4-dflash2", "sglang")["chat_template_patches"]
     stock = (
         "{%- if enable_thinking is undefined or enable_thinking is true %}\n"
         + patches[0][0] + "\n"
@@ -1455,7 +1455,7 @@ def test_the_chat_template_is_patched_for_efforts_and_late_system_messages(tmp_p
     assert ChatTemplatePatcher.prepare("RadixArk/Qwen3.8-27B-NVFP4", "abc", patches) is None
     mgr = VLLMServerManager()
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
-    cmd = mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2")
+    cmd = mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2", engine="sglang")
     assert cmd[cmd.index("--chat-template") + 1].endswith(
         ChatTemplatePatcher.file_name("RadixArk/Qwen3.8-27B-NVFP4", "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854", patches))
 
@@ -1465,5 +1465,5 @@ def test_the_sglang_recipe_samples_with_pytorch_not_flashinfer(monkeypatch):
     # completions request on the GB10 (2026-09-29); the recipe must keep PyTorch's sampler.
     mgr = VLLMServerManager()
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
-    cmd = mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2")
+    cmd = mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2", engine="sglang")
     assert cmd[cmd.index("--sampling-backend") + 1] == "pytorch"

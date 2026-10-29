@@ -47,18 +47,19 @@ def flag(args: list[str], name: str) -> str:
     return args[args.index(name) + 1]
 
 
-def test_sglang_stays_the_default_and_ling_serve_is_opt_in():
-    # The owner's decision (2026-10-26): ling-serve becomes the default once it reads images,
-    # serves adapters and runs more than two requests at once.
-    assert ModelMatrixRegistry.engines(DEFAULT_MODEL_ALIAS) == [ENGINE_SGLANG, ENGINE_LING]
+def test_ling_serve_is_the_default_and_sglang_is_the_fallback():
+    # The owner's decisions (2026-10-28, 2026-10-29): ling-serve is the default in 1.8.0 with four
+    # sessions at the full context; image input and LoRA stay on SGLang until 1.8.1.
+    assert ModelMatrixRegistry.engines(DEFAULT_MODEL_ALIAS) == [ENGINE_LING, ENGINE_SGLANG]
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)
-    assert recipe["engine"] == ENGINE_SGLANG and recipe["docker_image"] == QWEN38_SGLANG_IMAGE
-    assert recipe["chat_template_patches"] and recipe["runtime_patches"] and recipe["lora"]
+    assert recipe["engine"] == ENGINE_LING and recipe["docker_image"] == QWEN38_LING_IMAGE
+    assert "lora" not in recipe
     # Naming the default's own engine is the default recipe.
-    assert get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG) == recipe
-    ling = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
-    assert ling["engine"] == ENGINE_LING and "lora" not in ling
-    with pytest.raises(ValueError, match="engines: sglang, ling"):
+    assert get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING) == recipe
+    sglang = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG)
+    assert sglang["engine"] == ENGINE_SGLANG and sglang["docker_image"] == QWEN38_SGLANG_IMAGE
+    assert sglang["chat_template_patches"] and sglang["runtime_patches"] and sglang["lora"]
+    with pytest.raises(ValueError, match="engines: ling, sglang"):
         get_model_launch_overrides(DEFAULT_MODEL_ALIAS, "vllm")
 
 
@@ -186,11 +187,15 @@ def test_behind_the_gate_ling_serve_listens_on_loopback_and_the_gate_runs_in_its
 
 
 def test_an_api_key_is_refused_on_ling_serve_and_names_the_fallback():
-    with pytest.raises(RuntimeError, match="--engine sglang"):
-        VLLMServerManager().build_launch_command(
-            model=DEFAULT_MODEL_ALIAS, api_key="secret", engine=ENGINE_LING
-        )
-    cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, api_key="secret")
+    # Since the 1.8.0 switch the default engine refuses one too; SGLang takes it.
+    for engine in (ENGINE_LING, None):
+        with pytest.raises(RuntimeError, match="--engine sglang"):
+            VLLMServerManager().build_launch_command(
+                model=DEFAULT_MODEL_ALIAS, api_key="secret", engine=engine
+            )
+    cmd = VLLMServerManager().build_launch_command(
+        model=DEFAULT_MODEL_ALIAS, api_key="secret", engine=ENGINE_SGLANG
+    )
     assert "secret" in cmd
 
 
@@ -255,9 +260,9 @@ def test_server_start_names_the_engine_and_refuses_one_the_model_lacks(capsys):
     from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController as Cli
 
     assert Cli._server_engine(DEFAULT_MODEL_ALIAS, None, from_flag=False) is None
-    assert "Engine: SGLang; also: --engine ling" in capsys.readouterr().out
-    assert Cli._server_engine(DEFAULT_MODEL_ALIAS, "ling", from_flag=True) == "ling"
-    assert "Engine: ling-serve" in capsys.readouterr().out
+    assert "Engine: ling-serve (ling-engine); also: --engine sglang" in capsys.readouterr().out
+    assert Cli._server_engine(DEFAULT_MODEL_ALIAS, "sglang", from_flag=True) == "sglang"
+    assert "Engine: SGLang" in capsys.readouterr().out
     with pytest.raises(SystemExit) as stop:
         Cli._server_engine("qwen3.8-27b-minima-nvfp4-dflash2", "ling", from_flag=True)
     assert stop.value.code == 2
@@ -271,8 +276,10 @@ def test_a_failed_check_on_ling_serve_names_the_sglang_fallback_and_switches_not
     out = capsys.readouterr().out
     assert "ling-serve failed the tool-call check" in out
     assert "ling-admin server start --engine sglang" in out
-    # On SGLang (the default), or a model without ling-serve, nothing is suggested.
+    # ling-serve as the default (since 1.8.0) gets the same suggestion.
     Cli._suggest_engine_fallback(DEFAULT_MODEL_ALIAS, None, "to start")
+    assert "ling-serve failed to start" in capsys.readouterr().out
+    # On SGLang, or a model without ling-serve, nothing is suggested.
     Cli._suggest_engine_fallback(DEFAULT_MODEL_ALIAS, "sglang", "to start")
     Cli._suggest_engine_fallback("qwen3.8-27b-minima-nvfp4-dflash2", None, "to start")
     assert capsys.readouterr().out == ""
@@ -515,7 +522,9 @@ def test_the_tool_call_checks_hints_name_ling_serves_own_parsing():
     ling = ToolCallCanary.parsers(DEFAULT_MODEL_ALIAS, ENGINE_LING)
     assert "ling-serve's built-in qwen3_coder" in ling["tool"]
     assert "compiled into ling-serve" in ling["template"]
-    sglang = ToolCallCanary.parsers(DEFAULT_MODEL_ALIAS)
+    # The default engine is ling-serve since 1.8.0; SGLang's hint names its parser flag.
+    assert ToolCallCanary.parsers(DEFAULT_MODEL_ALIAS) == ling
+    sglang = ToolCallCanary.parsers(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG)
     assert sglang["tool"] == "--tool-call-parser qwen3_coder"
 
 
@@ -611,8 +620,8 @@ def test_flipping_the_default_engine_is_one_constant_and_keeps_sglang_as_the_fal
         split_engine_recipes,
     )
 
-    # Today's switch position: SGLang (the checklist of docs/dev/release-1.8.0.md flips it).
-    assert QWEN38_DEFAULT_ENGINE == ENGINE_SGLANG
+    # The switch position since 1.8.0: ling-serve (docs/dev/release-1.8.0.md).
+    assert QWEN38_DEFAULT_ENGINE == ENGINE_LING
     recipes = {ENGINE_SGLANG: dict(QWEN38_SGLANG_RECIPE), ENGINE_LING: QWEN38_LING_RECIPE}
     default, others = split_engine_recipes(ENGINE_LING, recipes)
     assert default is QWEN38_LING_RECIPE and list(others) == [ENGINE_SGLANG]
