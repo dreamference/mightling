@@ -180,6 +180,30 @@ def test_the_lan_copy_authorises_an_ephemeral_key_pins_the_host_key_and_always_c
     assert any("sed -i" in c for c in donor.commands)
 
 
+def test_a_donor_cannot_reach_the_recipients_shell_through_its_host_key(hub):
+    recipient, donor = RemoteSession(), RemoteSession()
+
+    def recipient_run(script, input_text=None, timeout=None, **kwargs):
+        recipient.commands.append(script)
+        if "ssh-keygen" in script:
+            return completed(0, "/tmp/work\nssh-ed25519 AAAAkey mightling-lan-copy-x\n")
+        return completed(0)
+
+    def donor_run(script, input_text=None, timeout=None, **kwargs):
+        donor.commands.append(script)
+        if "ssh_host_ed25519" in script:
+            return completed(0, "ssh-ed25519 AAAA;touch${IFS}/tmp/owned root@x\n")
+        return completed(0)
+
+    recipient.run, donor.run = recipient_run, donor_run
+    fetch, _ = fetcher(hub, recipient)
+    assert not fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
+    assert not any("owned" in c for c in recipient.commands)
+    # refused before the donor authorised anything, and the removal still runs
+    assert not any("printf" in c and "authorized_keys" in c for c in donor.commands)
+    assert any("sed -i" in c for c in donor.commands)
+
+
 def test_a_lan_copy_key_whose_removal_fails_is_named_in_a_warning(hub, caplog):
     recipient, donor = RemoteSession(), RemoteSession()
 

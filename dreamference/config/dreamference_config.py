@@ -200,7 +200,12 @@ class DreamferenceConfig:
             )
         ).lower()
 
-        # 7. HuggingFace access token
+        # 7. HuggingFace access token. Whether save_config() may write it is decided by where it
+        # came from: a token from the environment stays there, because the file is by default
+        # `dreamference.toml` in the working directory, a repository the agent reads and a commit
+        # can carry away. One named as an argument is written, and one the file already holds is
+        # kept as it was, even while the environment overrides it.
+        self._hf_token_to_save: Optional[str] = hf_token if hf_token is not None else self.file_data.get("hf_token")
         self.hf_token: Optional[str] = (
             hf_token
             if hf_token is not None
@@ -485,7 +490,7 @@ class DreamferenceConfig:
             data["diffusion_model"] = self.diffusion_model
         if self.draft_model is not None: data["draft_model"] = self.draft_model
         if self.num_speculative_tokens != DEFAULT_SPECULATIVE_TOKENS: data["num_speculative_tokens"] = self.num_speculative_tokens
-        if self.hf_token is not None: data["hf_token"] = self.hf_token
+        if self._hf_token_to_save is not None: data["hf_token"] = self._hf_token_to_save
         if self.enable_prefix_caching != DEFAULT_PREFIX_CACHING: data["enable_prefix_caching"] = self.enable_prefix_caching
         if self.enable_chunked_prefill != DEFAULT_CHUNKED_PREFILL: data["enable_chunked_prefill"] = self.enable_chunked_prefill
         if self.num_scheduler_steps != DEFAULT_SCHEDULER_STEPS: data["num_scheduler_steps"] = self.num_scheduler_steps

@@ -4,11 +4,16 @@ One `## <repository>` section per repository, so `/night report` can print just 
 repository it is asked from, and the general notes after them.
 """
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
 LAST_MESSAGE_STATUSES: Final[tuple] = ("stalled", "failed", "interrupted")
+# C0 controls but tab and newline, DEL and C1: the agent writes the last message, the judge its
+# reason, and `ling night report` prints the file to a terminal, where ESC starts a sequence that
+# can set the clipboard (OSC 52), hide text or retitle the window.
+CONTROL: Final[re.Pattern] = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
 class NightShiftReport:
@@ -31,7 +36,7 @@ class NightShiftReport:
             compactions: The compaction audit's lines (compaction spec §10.3), if any.
 
         Returns:
-            str: Markdown.
+            str: Markdown, without terminal control characters.
         """
         lines = [
             f"# Night Shift — {started:%Y-%m-%d}",
@@ -52,7 +57,7 @@ class NightShiftReport:
             lines += ["", "## Compactions", ""] + [f"- {line}" for line in compactions]
         if notes:
             lines += ["", "## Notes", ""] + [f"- {note}" for note in notes]
-        return "\n".join(lines).rstrip() + "\n"
+        return CONTROL.sub("", "\n".join(lines)).rstrip() + "\n"
 
     @classmethod
     def _review(cls, tasks: list[dict[str, Any]]) -> list[str]:

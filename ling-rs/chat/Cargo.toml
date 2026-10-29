@@ -20,12 +20,13 @@ futures = { version = "0.3", default-features = false, features = ["std"] }
 ling-airgapped = { path = "../airgapped" }
 ling-web-server = { path = "../web" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
 serde_json = "1"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
-tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
+tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.182"
 
 [dev-dependencies]
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query", "ws"] }

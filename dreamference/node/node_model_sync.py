@@ -22,7 +22,7 @@ import subprocess
 import sys
 import tarfile
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Final, List, Optional
 
 GIB: Final[int] = 1024 ** 3
@@ -32,6 +32,11 @@ DISK_MARGIN: Final[int] = 10 * GIB
 
 # A large file in the hub cache is stored under the SHA-256 of its content.
 LFS_BLOB: Final[re.Pattern] = re.compile(r"[0-9a-f]{64}")
+
+# The parts of a hub cache folder a copy may carry links in, and the parent a link may climb to.
+BLOBS: Final[str] = "blobs"
+SNAPSHOTS: Final[str] = "snapshots"
+PARENT: Final[str] = ".."
 
 
 class NodeModelSync:
@@ -221,7 +226,7 @@ class NodeModelSync:
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir()
         try:
-            problem = cls._unpack(sys.stdin.buffer, staging, allowed)
+            problem = cls._unpack(sys.stdin.buffer, staging, allowed, size)
             problem = problem or cls._verify(staging)
             if problem:
                 print(f"❌ {problem}; nothing was added to the cache.", file=sys.stderr)
@@ -233,19 +238,71 @@ class NodeModelSync:
         return 0
 
     @classmethod
-    def _unpack(cls, stream: Any, staging: Path, allowed: set) -> Optional[str]:
-        """Extracts the stream into `staging`; returns what was wrong with it, if anything."""
+    def _unpack(cls, stream: Any, staging: Path, allowed: set, size: int) -> str | None:
+        """Extracts the stream into `staging`; returns what was wrong with it, if anything.
+
+        `size` is what the sender declared, counted as `size()` counts it: the free-space check was
+        made for that much, so a copy that carries more is refused before it can fill the disk.
+        """
+        root = Path(staging).resolve()
+        carried = 0
         try:
             with tarfile.open(fileobj=stream, mode="r|") as archive:
                 for member in archive:
-                    top = member.name.lstrip("./").split("/", 1)[0]
-                    if top not in allowed:
-                        return f"the copy carried {member.name}, which is not a folder of this model"
-                    # `data` refuses absolute names, `..`, devices, and links that leave the folder.
+                    carried += member.size if member.isreg() else 0
+                    refusal = (
+                        f"the copy carried more than the {size} bytes it declared"
+                        if carried > size
+                        else None
+                        if cls._stays_in_folder(member, root, allowed)
+                        else f"the copy carried {member.name}, which is not a folder of this model"
+                    )
+                    if refusal:
+                        return refusal
+                    # `data` also refuses devices and odd modes.
                     archive.extract(member, staging, filter="data")
         except (tarfile.TarError, OSError) as error:
             return f"the copy was cut short or malformed ({error})"
         return None
+
+    @classmethod
+    def _stays_in_folder(cls, member: tarfile.TarInfo, root: Path, allowed: set) -> bool:
+        """Whether a member of a copy lands inside one of the model's folders.
+
+        The `data` filter alone keeps a member inside the staging folder, not inside the model's
+        own folder: a link to `..` there, then a file through it, once put a folder of the
+        client's choosing beside the model's, and `_merge` moved it into the cache.
+
+        Args:
+            member: The member about to be extracted.
+            root: The staging folder, resolved.
+            allowed: The names of the model's folders.
+
+        Returns:
+            bool: True for a folder, file or link of the cache's own shape: the top is one of the
+            model's folders, no `..`, nothing below a link, and links only from a snapshot to a
+            blob of the same folder (`snapshots/<revision>/…/<file> -> ../../blobs/<file>`).
+        """
+        parts = PurePosixPath(member.name).parts
+        if not parts or parts[0] not in allowed or PARENT in parts or member.islnk():
+            return False
+        top, *below = parts
+        if not below:
+            return member.isdir()
+        kind, *rest = below
+        if kind == BLOBS and not (member.isreg() and len(rest) == 1 if rest else member.isdir()):
+            return False
+        if member.issym():
+            target = PurePosixPath(member.linkname).parts
+            if (
+                kind != SNAPSHOTS
+                or not rest[1:]
+                or target[:-1] != (PARENT,) * len(rest) + (BLOBS,)
+                or target[-1] in (".", PARENT)
+            ):
+                return False
+        place = root.joinpath(*parts)
+        return place.parent.resolve().is_relative_to(root / top) and not place.is_symlink()
 
     @classmethod
     def _verify(cls, staging: Path) -> Optional[str]:

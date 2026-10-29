@@ -1124,6 +1124,33 @@ async fn a_mini_app_launch_is_checked_against_ling_chats_bot_behind_the_credenti
 /// for the bot's approval, issues a `Browser` device labelled `telegram-app` with `control` scope,
 /// hands out the device cookie once, and can be revoked like any device.
 #[tokio::test]
+async fn discords_front_is_a_public_name_but_never_serves_telegrams_launch_pairing() {
+    // DISCORD §3.11: Discord's launch carries nothing signed, so its front gets the deep links and
+    // the device sign-in, never `/bridge.js` or Telegram's launch pairing.
+    let scratch = scratch("dcfront");
+    let mut config = config(&scratch.dir, 3100, vec!["[addr]".to_string()]);
+    config.public_names = vec!["dc.example.ts.net".to_string()];
+    let user_config = config.user_config.clone().unwrap();
+    std::fs::create_dir_all(user_config.parent().unwrap()).unwrap();
+    std::fs::write(&user_config, "[chat]\ndiscord_web_url = \"https://dc.example.ts.net/\"\n").unwrap();
+    let server = Server::new(config).unwrap();
+    assert!(server.public_host(Some("dc.example.ts.net")));
+    let (status, _, locked) = call(
+        &server,
+        Request::builder().uri("/").header(header::HOST, "DC.example.ts.net").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(!locked.contains("/bridge.js"), "{locked}");
+    let (status, _, _) = call(
+        &server,
+        Request::builder().uri("/bridge.js").header(header::HOST, "dc.example.ts.net").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn a_mini_app_first_launch_pairs_only_on_the_front_and_only_after_the_bot_approves() {
     let scratch = scratch("tgpair");
     let mut config = config(&scratch.dir, 3100, vec!["192.168.50.105".to_string()]);

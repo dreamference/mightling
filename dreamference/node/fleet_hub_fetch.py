@@ -16,6 +16,7 @@ their names (the LAN copy uses the donor's `<hostname>.local`, resolved there, n
 
 import hashlib
 import logging
+import re
 import secrets
 import shlex
 import time
@@ -30,6 +31,8 @@ LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
 # Fields of a public key line that pin a host: its type and its key.
 KEY_FIELDS: Final[int] = 2
+# The donor's host key as `ssh-keygen` writes it; anything else would reach the recipient's shell.
+HOST_KEY: Final[re.Pattern] = re.compile(r"ssh-ed25519 [A-Za-z0-9+/]+={0,2}")
 
 # How often a download is started again, with a pause between: a house line drops now and then.
 HF_ATTEMPTS: Final[int] = 8
@@ -333,6 +336,11 @@ class FleetHubFetch:
             fields = (hostkey.stdout or "").split()
             if hostkey.returncode != 0 or len(fields) < KEY_FIELDS:
                 return False
+            if not HOST_KEY.fullmatch(" ".join(fields[:KEY_FIELDS])):
+                LOG.warning(
+                    "%s gave a host key that is not an ed25519 key; no LAN copy.", donor_name
+                )
+                return False
             # `expiry-time` (the donor's own clock) ends the key even when the removal below never
             # reaches the donor: the link is failing, which is why this copy runs at all.
             authorised = donor.run(
@@ -349,7 +357,8 @@ class FleetHubFetch:
                 "-o ServerAliveInterval=15 -o ServerAliveCountMax=4"
             )
             copy = (
-                f"printf '%s %s %s\\n' {shlex.quote(donor_name)} {fields[0]} {fields[1]} "
+                f"printf '%s %s %s\\n' {shlex.quote(donor_name)} {shlex.quote(fields[0])} "
+                f"{shlex.quote(fields[1])} "
                 f"> {workdir}/kh && for i in $(seq 1 20); do "
                 f"rsync -aH --partial --append-verify --timeout=120 --mkpath "
                 f"-e {shlex.quote(transport)} "

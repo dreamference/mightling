@@ -617,6 +617,12 @@ class NodeJob:
         for hidden in ("/tmp", "/run", "/var/tmp", "/dev/shm", home):
             argv += ["--tmpfs", hidden]
         argv += ["--bind", str(tree), str(tree)]
+        # The worktree's `.git` pointer read-only: the host runs `git` in the tree afterwards
+        # (`_commit`, Night Shift's runner), and a pointer the job rewrote to a git directory of its
+        # own would have that git run the job's hooks on the host, outside this sandbox.
+        dot_git = tree / ".git"
+        if dot_git.exists():
+            argv += ["--ro-bind", str(dot_git), str(dot_git)]
         for path in writable:
             argv += ["--bind", str(path), str(path)]
         for path in readable:
@@ -666,8 +672,14 @@ class NodeJob:
             added = cls._git(
                 ["--git-dir", str(repo), "worktree", "add", "--detach", str(tree), record["commit"]]
             )
-            if added.returncode != 0:
-                record["note"] = f"git worktree add failed: {added.stderr.strip()[-200:]}"
+            # Read now, before the job runs: the job can rewrite the worktree's `.git`.
+            admin = cls._admin_dir(tree, repo) if added.returncode == 0 else None
+            if admin is None:
+                record["note"] = (
+                    f"git worktree add failed: {added.stderr.strip()[-200:]}"
+                    if added.returncode != 0
+                    else "git worktree add left no administrative folder in the repository"
+                )
                 return 1
             network = record["airgapped"] != "on"
             with open(log, "ab") as sink:
@@ -696,7 +708,7 @@ class NodeJob:
                 )
             if record.get("out"):
                 record["out_files"] = cls._keep_out(record, tree, directory)
-            record["branch"] = cls._commit(record, tree, repo)
+            record["branch"] = cls._commit(record, tree, admin)
             return code
         except Exception as error:  # A runner bug must not leave the job `running` forever.
             record["note"] = f"job runner error: {error}"
@@ -809,12 +821,33 @@ class NodeJob:
                         None,
                         f"the environment's setup command failed (exit {code}); its output is in the log",
                     )
-                (env_dir / ".complete").write_text(setup + "\n")
+                cls._mark_complete(env_dir / ".complete", setup)
                 sink.write(b"--- setup done\n")
                 record["environment"] = f"{key} (built)"
                 return env_dir, None
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)
+
+    @classmethod
+    def _mark_complete(cls, marker: Path, setup: str) -> None:
+        """Writes the environment's marker.
+
+        The setup ran with this folder writable, so whatever it
+        left at the marker's name is removed first and the marker is created afresh, never
+        written through: a link there would have the node write any file of its user, such as
+        `~/.ssh/authorized_keys`, with the client's setup text.
+
+        Args:
+            marker: The `.complete` file in the environment folder.
+            setup: The setup command, which the marker holds.
+        """
+        if marker.is_dir() and not marker.is_symlink():
+            shutil.rmtree(marker)
+        elif marker.is_symlink() or marker.exists():
+            marker.unlink()
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        with os.fdopen(os.open(marker, flags, 0o644), "w") as handle:
+            handle.write(setup + "\n")
 
     @classmethod
     def missing_module(cls, log: Path) -> bool:
@@ -846,6 +879,12 @@ class NodeJob:
         """
         source = tree / record["out"]
         if not source.exists() or source.is_symlink():
+            return 0
+        # A link the job left above the folder (`x -> ~`, `--out x/.ssh`) would have the node move
+        # one of its own folders out for `job-out` to send. The job has ended, so nothing moves it
+        # between this check and the move.
+        root = os.path.realpath(tree)
+        if not os.path.realpath(source).startswith(root + os.sep):
             return 0
         kept = directory / "out"
         shutil.rmtree(kept, ignore_errors=True)
@@ -959,9 +998,40 @@ class NodeJob:
         return removed
 
     @classmethod
-    def _commit(cls, record: Dict[str, Any], tree: Path, repo: Path) -> Optional[str]:
-        """Commits what `git status` shows on `job/<id>`; None when the job changed nothing."""
-        status = cls._git(["-C", str(tree), "status", "--porcelain"])
+    def _admin_dir(cls, tree: Path, repo: Path) -> Path | None:
+        """Finds the worktree's administrative folder before the job can touch it.
+
+        Args:
+            tree: A worktree `git worktree add` has just made.
+            repo: The job repository it belongs to.
+
+        Returns:
+            Path | None: The worktree's administrative folder in `repo` (`worktrees/<name>`),
+            as its `.git` file names it; None when it names anything else.
+        """
+        try:
+            line = (tree / ".git").read_text().strip()
+        except OSError:
+            return None
+        if not line.startswith("gitdir: "):
+            return None
+        admin = Path(os.path.realpath(tree / line.removeprefix("gitdir: ")))
+        worktrees = Path(os.path.realpath(repo)) / "worktrees"
+        return admin if admin.parent == worktrees and admin.is_dir() else None
+
+    @classmethod
+    def _commit(cls, record: Dict[str, Any], tree: Path, admin: Path) -> str | None:
+        """Commits what `git status` shows on `job/<id>`; None when the job changed nothing.
+
+        This runs outside the sandbox, so git is pointed at the worktree's administrative folder
+        in the job repository and never at the worktree's `.git`, which the job could have
+        replaced with a repository of its own: its hooks, fsmonitor or config would run here as
+        the node's user. No hook runs for a job's commit either; the owner's choice to let hooks
+        run (docs/dev/host-safety.md) is about their own checkouts, not a client's job.
+        """
+        location = ["--git-dir", str(admin), "--work-tree", str(tree)]
+        location += ["-c", "core.hooksPath=/dev/null"]
+        status = cls._git([*location, "status", "--porcelain"])
         if status.returncode != 0 or not status.stdout.strip():
             return None
         branch = f"job/{record['id']}"
@@ -977,7 +1047,7 @@ class NodeJob:
             ("add", ["add", "-A"]),
             ("commit", [*identity, "commit", "-q", "-m", f"job: {first_line}"]),
         ):
-            result = cls._git(["-C", str(tree), *arguments])
+            result = cls._git([*location, *arguments])
             if result.returncode != 0:
                 record["note"] = f"git {step} failed: {result.stderr.strip()[-200:]}"
                 return None

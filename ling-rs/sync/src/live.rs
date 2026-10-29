@@ -14,6 +14,10 @@
 //!   passes this machine's own copy of `policy.json` first (`Policy::vet_outgoing`, with the server
 //!   requests still waiting): an approval only for one that waits, a new thread under the same
 //!   rules as any other. How it went goes back to the hub.
+//! - **Kept threads.** A thread under a folder in `[sync] exclude` or a throwaway (`ephemeral`, a
+//!   subagent's) is neither followed nor driven: a message, a stop or an approval about it is
+//!   refused, and an approval's thread is the one its request was asked in, never the hub's word.
+//!   The desktop app's host (`desktop/electron/src/sync-host.ts`) refuses the same.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -48,6 +52,16 @@ const LOOK_EVERY: Duration = Duration::from_secs(5);
 const ANSWER_WITHIN: Duration = Duration::from_secs(60);
 /// The largest event passed on.
 const EVENT_CAP: usize = 256 << 10;
+/// The refusal of a command about a thread kept on this device; the desktop app's host says the same.
+const KEPT: &str = "this thread is kept on this device";
+
+/// Whether a thread the server described leaves this device: not a throwaway, and not under an
+/// excluded folder (with folders excluded, a thread whose folder is unknown counts as excluded).
+fn leaves(settings: &Settings, thread: &Value) -> bool {
+    let throwaway = thread.get("ephemeral") == Some(&Value::Bool(true)) || thread.get("parentThreadId").is_some_and(Value::is_string);
+    let cwd = thread.get("cwd").and_then(Value::as_str).filter(|cwd| !cwd.is_empty());
+    !throwaway && cwd.map_or(settings.exclude.is_empty(), |cwd| !settings.excluded(cwd))
+}
 
 /// The sockets an app-server of this machine may listen on.
 pub fn sockets(codex_home: &Path) -> Vec<PathBuf> {
@@ -70,6 +84,8 @@ struct Shared {
     attached: Mutex<BTreeMap<String, String>>,
     /// The turn running in each thread.
     turns: Mutex<HashMap<String, String>>,
+    /// The `[sync]` settings of the last look: which threads are kept here.
+    settings: Mutex<Settings>,
     closed: Mutex<bool>,
 }
 
@@ -226,6 +242,7 @@ impl Connection {
 
     /// Asks which threads are loaded and attaches to those not attached yet. Returns them.
     pub async fn attach_loaded(&self, settings: &Settings) -> BTreeSet<String> {
+        *self.shared.settings.lock().unwrap_or_else(|p| p.into_inner()) = settings.clone();
         let loaded = self.raw_request("thread/loaded/list", json!({})).await.unwrap_or(Value::Null);
         let ids: Vec<String> = loaded.get("data").and_then(Value::as_array).map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
         for id in &ids {
@@ -233,9 +250,10 @@ impl Connection {
                 continue;
             }
             if let Ok(answer) = self.raw_request("thread/resume", json!({ "threadId": id })).await {
-                let cwd = answer.pointer("/thread/cwd").and_then(Value::as_str).unwrap_or_default().to_string();
-                // A thread kept on this device (`[sync] exclude`) is not followed from elsewhere.
-                if !settings.excluded(&cwd) {
+                let thread = answer.get("thread").cloned().unwrap_or(Value::Null);
+                // A thread kept on this device (`[sync] exclude`, a throwaway) is not followed from elsewhere.
+                if leaves(settings, &thread) {
+                    let cwd = thread.get("cwd").and_then(Value::as_str).unwrap_or_default().to_string();
                     self.shared.attached.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone(), cwd);
                 }
             }
@@ -248,6 +266,18 @@ impl Connection {
 
     pub fn holds(&self, thread: &str) -> bool {
         self.shared.attached.lock().unwrap_or_else(|p| p.into_inner()).contains_key(thread)
+    }
+
+    /// Whether a command may touch a thread: one attached, or one the server describes
+    /// (`thread/read`, which loads nothing) as leaving this device. Its folder, or `None` if kept.
+    async fn published(&self, thread: &str) -> Option<String> {
+        if let Some(cwd) = self.shared.attached.lock().unwrap_or_else(|p| p.into_inner()).get(thread) {
+            return Some(cwd.clone());
+        }
+        let read = self.raw_request("thread/read", json!({ "threadId": thread })).await.unwrap_or(Value::Null);
+        let described = read.get("thread").filter(|described| described.get("id").and_then(Value::as_str) == Some(thread)).cloned().unwrap_or(json!({}));
+        let settings = self.shared.settings.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        leaves(&settings, &described).then(|| described.get("cwd").and_then(Value::as_str).unwrap_or_default().to_string())
     }
 
     pub fn projects(&self) -> Vec<String> {
@@ -269,8 +299,10 @@ impl Connection {
         match kind {
             "send" => {
                 let thread = thread.ok_or("a message names its thread")?;
+                let cwd = self.published(&thread).await.ok_or(KEPT)?;
                 if !self.holds(&thread) {
                     self.user_request(policy, codex_home, "thread/resume", json!({ "threadId": thread })).await?;
+                    self.shared.attached.lock().unwrap_or_else(|p| p.into_inner()).insert(thread.clone(), cwd);
                 }
                 let running = self.shared.turns.lock().unwrap_or_else(|p| p.into_inner()).get(&thread).cloned();
                 match running {
@@ -293,18 +325,26 @@ impl Connection {
                 if !ANSWERABLE.contains(&asked.get("method").and_then(Value::as_str).unwrap_or_default()) {
                     return Err("this question is answered on the device itself".to_string());
                 }
+                // The thread is the one the request was asked in, whatever the hub named.
+                if self.published(&of_thread).await.is_none() {
+                    return Err(KEPT.to_string());
+                }
                 let answer = self.vet(policy, codex_home, json!({ "id": request, "result": { "decision": decision } }))?;
                 self.send_raw(answer)?;
                 Ok(Some(of_thread))
             }
             "stop" => {
                 let thread = thread.ok_or("name the thread")?;
+                self.published(&thread).await.ok_or(KEPT)?;
                 let turn = self.shared.turns.lock().unwrap_or_else(|p| p.into_inner()).get(&thread).cloned().ok_or("no turn is running")?;
                 self.user_request(policy, codex_home, "turn/interrupt", json!({ "threadId": thread, "turnId": turn })).await?;
                 Ok(Some(thread))
             }
             "start" => {
                 let cwd = command.get("cwd").and_then(Value::as_str).ok_or("name the folder")?;
+                if !self.projects().iter().any(|project| project == cwd) {
+                    return Err("a new thread starts in one of the folders this device offers".to_string());
+                }
                 let started = self.user_request(policy, codex_home, "thread/start", json!({ "cwd": cwd })).await?;
                 let thread = started.pointer("/thread/id").and_then(Value::as_str).ok_or("the server named no thread")?.to_string();
                 self.shared.attached.lock().unwrap_or_else(|p| p.into_inner()).insert(thread.clone(), cwd.to_string());
@@ -396,8 +436,14 @@ impl Host {
         for command in &commands {
             let id = command.get("id").cloned().unwrap_or(Value::Null);
             let thread = command.get("thread").and_then(Value::as_str);
+            let cwd = command.get("cwd").and_then(Value::as_str);
             let connections = self.connections();
-            let connection = connections.iter().find(|connection| thread.is_some_and(|thread| connection.holds(thread))).or_else(|| connections.first()).cloned();
+            // The server that holds the thread, or for a new one the server that offered its folder.
+            let connection = connections
+                .iter()
+                .find(|connection| thread.is_some_and(|thread| connection.holds(thread)) || cwd.is_some_and(|cwd| connection.projects().iter().any(|project| project == cwd)))
+                .or_else(|| connections.first())
+                .cloned();
             let result = match connection {
                 Some(connection) => connection.carry_out(&self.policy, &self.codex_home, command).await,
                 None => Err("no app-server of this device is open".to_string()),

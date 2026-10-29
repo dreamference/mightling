@@ -7,6 +7,7 @@ server or opens the user's queue: every test has its own queue directory and rep
 
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -1092,6 +1093,17 @@ def test_report_rows_carry_what_the_spec_lists():
     assert f"git -C /r diff {'b' * 12}..night/a" in text
     assert "## Notes" in text
 
+
+
+def test_the_report_keeps_no_terminal_escape_an_agent_or_judge_wrote():
+    # `ling night report` prints the file to a terminal: an ESC from the agent's last message
+    # could set the clipboard (OSC 52) or hide the rest of the line.
+    task = {"id": "e", "repo": "/r", "base": "b" * 40, "task": "Other", "status": "failed",
+            "result": {"last_message": "done\x1b]52;c;aGk=\x07 \x1b[8mhidden\x9b2J\r", "attempts": 1,
+                       "best_of": {"n": 2, "ran": 2, "chosen": 1, "reason": "better\x1b]0;title\x07"}}}
+    text = NightShiftReport.render(datetime(2026, 10, 1, 1, 0), [task], ["note\x1bc"])
+    assert not re.search("[\x00-\x08\x0b-\x1f\x7f-\x9f]", text)
+    assert "Last message: done]52;c;aGk= [8mhidden2J" in text and "Why: better]0;title" in text
 
 # -- several nodes (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3, §13.3) --------------------------------
 

@@ -1,6 +1,6 @@
 # Phone messengers
 
-You can ask Mightling questions from your phone, through **Signal**, **Matrix** or **Telegram**.
+You can ask Mightling questions from your phone, through **Signal**, **Matrix**, **Telegram** or **Discord**.
 A question you send becomes an Ask thread on the node, the same kind `ling web` opens, and the
 answer comes back in the same chat.
 
@@ -13,14 +13,15 @@ anywhere. When one is on, `ling-admin audit egress` lists it in every report as 
 | **Signal** | End-to-end encrypted. Uses your own account, in Note to Self. | `ling signal setup` | `ling signal remove` |
 | **Matrix** | Your own homeserver on the node, reached over your tailnet. | `ling-admin matrix start`, then `ling chat start` | `ling chat stop`, `ling-admin matrix stop` |
 | **Telegram** | Less private: messages pass through Telegram's servers unencrypted. | `ling chat telegram setup`, then `ling chat start` | `ling chat telegram off` |
+| **Discord** | The least private: Discord keeps every message, unencrypted, with your account. | `ling chat discord setup`, then `ling chat start` | `ling chat discord off` |
 
-All three need `ling web` running on the node (`ling web start`). The air gap applies to the two
-that leave the machine. At `/airgapped on`, Signal sends nothing, not even a read receipt, and
-Telegram pauses. When the air gap is off again, Signal tells you what you missed. Matrix keeps
+All of them need `ling web` running on the node (`ling web start`). The air gap applies to the
+three that leave the machine. At `/airgapped on`, Signal sends nothing, not even a read receipt, and
+Telegram and Discord pause. When the air gap is off again, Signal tells you what you missed. Matrix keeps
 working, because its homeserver is on the node and has no route out.
 
-**Matrix and Telegram are previews.** They are tested against stand-ins of a homeserver and of
-Telegram's Bot API, not yet against the real services. Signal has been used with a real account and
+**Matrix, Telegram and Discord are previews.** They are tested against stand-ins of a homeserver,
+of Telegram's Bot API and of Discord's API and Gateway, not yet against the real services. Signal has been used with a real account and
 is not a preview.
 
 ## How a phone chat behaves
@@ -278,3 +279,31 @@ ling chat start
 one. `ling chat telegram off` deletes the token and the pairings; revoke the token in @BotFather
 (`/revoke`) as well. `ling chat stop` stops the bridge for every messenger, and it stays off until
 `ling chat start`.
+
+## Discord
+
+Discord is the least private messenger: Discord's servers keep every message you and the bot
+exchange, unencrypted, tied to your Discord account. Use it only for questions you would not mind
+Discord reading.
+
+1. Create an application in Discord's Developer Portal, give it a bot, and leave the bot private
+   (*Public Bot* off) with no privileged intents. Setup refuses a public bot, or one with the
+   *Message Content* intent.
+2. On the node, run `ling chat discord setup`. It asks you to type `yes`, then for the bot token,
+   which is not shown as you type and is kept only in the bridge's state, readable by you alone.
+   It prints a link that adds the bot to your account.
+3. Run `ling chat discord pair` and send the code it prints to the bot in a direct message, as
+   `/pair <code>`, within 10 minutes. The code works once. Then run `ling chat start`.
+
+The bot answers only you, and only in your direct messages with it. Anyone else is told once a day
+that the bot is private; servers it is added to are left at once, except one you name as
+`discord_home_server` under `[chat]` so that you can message the bot. A status line with a **Stop**
+button shows while an answer is written, and approvals come as buttons.
+
+With `discord_web_url` under `[chat]` set to your HTTPS front for `ling web`, `/app` and the
+repository notices carry an **Open** button that opens the thread in `ling web`. Signing in there
+is the same as from any browser: `ling web pair`, or a code confirmed from Signal or Matrix.
+
+`ling chat status` lists the paired accounts, `ling chat discord users` and
+`ling chat discord remove <id>` manage them, and `ling chat discord off` deletes the token and the
+pairings and withdraws the bot's commands. Delete the application in the Developer Portal as well.

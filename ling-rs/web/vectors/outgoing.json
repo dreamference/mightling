@@ -782,6 +782,24 @@
       "message": {"id": 345, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "rm -rf"}], "sandboxPolicy": {"type": "dangerFullAccess"}}},
       "accept": true,
       "out": {"id": 345, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "rm -rf"}], "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": [], "networkAccess": true, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false}}}
+    },
+    {
+      "name": "params given as a list are refused: the app-server reads a list field by field, so it would carry a sandbox, approvals and instructions past the policy",
+      "bridge": true,
+      "message": {"id": 346, "method": "thread/start", "params": [null, null, false, null, "/home/user", null, "never", null, "danger-full-access", null, null, null, "the UI's own text"]},
+      "accept": false
+    },
+    {
+      "name": "a turn's params given as a list are refused, so a repository turn's sandbox cannot be set past the policy",
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 347, "method": "turn/start", "params": ["repo-t1", [{"type": "text", "text": "hi"}], {"type": "dangerFullAccess"}]},
+      "accept": false
+    },
+    {
+      "name": "params that are neither an object nor null are refused, a request's or a notification's",
+      "message": {"method": "initialized", "params": "x"},
+      "accept": false
     }
   ]
 }

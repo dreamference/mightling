@@ -58,7 +58,7 @@ inspect)
     [ -s "$S/$f" ] || exit 1
     case "$4" in
     *Image*) cat "$S/image" ;;
-    *Args*) sed -n '/^serve$/,$p' "$S/run" | tail -n +2 | tr '\\n' ' ' ;;
+    *Args*) {{ echo --model; echo m; sed -n '/^serve$/,$p' "$S/run" | tail -n +2; }} | paste -sd' ' ;;
     *Env*) grep -A1 -x -- -e "$S/run" | grep -vx -- -e | grep -vx -- -- ;;
     *) [ "$(cat "$S/$f")" = yes ] && echo true || echo false ;;
     esac ;;
@@ -295,3 +295,16 @@ def test_an_arm_whose_flags_never_reach_the_container_is_not_ready(machine):
     result = run("serve", "engine", ENGINE_ARGS="--fair-pairing 1")
     assert result.returncode == 1 and "ready" not in result.stdout
     assert calls(state).count("worktree server start --engine ling") == 2
+
+
+def test_an_arm_with_only_a_step_trace_is_ready_once_its_environment_carries_it(machine):
+    run, state = machine
+    production_sglang(state)
+    arm = {"ENGINE_ENV": "LING_STEP_TRACE=/root/t/n22-x.jsonl"}
+    result = run("serve", "engine", **arm)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == f"ready engine {LING_IMAGE}"
+    given = (state / "run").read_text().splitlines()
+    assert given[:3] == ["-e", "LING_STEP_TRACE=/root/t/n22-x.jsonl", "-d"]
+    assert given[-1] == "serve"
+    assert calls(state).count("worktree server start --engine ling") == 1
