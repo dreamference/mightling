@@ -56,8 +56,10 @@ export async function drawDiagrams(root: HTMLElement | null): Promise<number> {
       code.dataset.diagram = "skipped";
       continue;
     }
+    // Taken before the render: another message's diagrams may be drawn meanwhile and move the counter.
+    const id = `mightling-diagram-${++counter}`;
     try {
-      const { svg } = await mermaid.render(`mightling-diagram-${++counter}`, source);
+      const { svg } = await mermaid.render(id, source);
       const pre = code.parentElement;
       if (!pre || !pre.isConnected) continue;
       const figure = document.createElement("figure");
@@ -81,7 +83,7 @@ export async function drawDiagrams(root: HTMLElement | null): Promise<number> {
     } catch {
       code.dataset.diagram = "failed";
       // Mermaid leaves its error drawing in the page on a failed render; take it away.
-      document.getElementById(`dmightling-diagram-${counter}`)?.remove();
+      document.getElementById(`d${id}`)?.remove();
     }
   }
   return drawn;
