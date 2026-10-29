@@ -484,6 +484,42 @@ async fn a_dropped_connection_resumes_from_the_last_event() {
     assert_eq!(stand.frames.lock().unwrap()[1]["d"]["seq"], 2);
 }
 
+/// A resume address that no longer answers is dropped, and the session is resumed through the
+/// address `/gateway/bot` names: not tried again for ever, and not identified again either.
+#[tokio::test]
+async fn a_resume_address_that_does_not_answer_is_left_for_the_gateways_own() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let stand = Gateway { url: url.clone(), frames: Arc::default(), connections: Arc::default(), drops: false };
+    let app = Router::new().route("/", axum::routing::get(gateway)).with_state(stand.clone());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let gateway_url = url.clone();
+    let (rest, api) = stand_in(Arc::new(move |call, _| match call {
+        "GET /gateway/bot" => (StatusCode::OK, json!({ "url": gateway_url })),
+        _ => (StatusCode::OK, json!({})),
+    }))
+    .await;
+    let dead = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dead_url = format!("ws://{}", dead.local_addr().unwrap());
+    drop(dead);
+    let dir = scratch("gateway-dead-resume");
+    let mut state = DiscordState::load(&dir);
+    state.session_id = Some("sess-0".to_string());
+    state.seq = Some(5);
+    state.resume_url = Some(dead_url);
+    state.save(&dir).unwrap();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let first = tokio::time::timeout(Duration::from_secs(20), discord_gateway::connect_once(&api, &dir, &tx, 100)).await.unwrap();
+    assert_eq!(first, Ended::Resume);
+    let state = DiscordState::load(&dir);
+    assert_eq!((state.session_id.as_deref(), state.seq, state.resume_url.as_deref()), (Some("sess-0"), Some(5), None));
+    let _ = tokio::time::timeout(Duration::from_secs(20), discord_gateway::connect_once(&api, &dir, &tx, 100)).await.unwrap();
+    assert_eq!(rest.calls(), vec!["GET /gateway/bot"]);
+    let frames = stand.frames.lock().unwrap();
+    assert_eq!((frames[0]["op"].as_u64(), frames[0]["d"]["session_id"].as_str(), frames[0]["d"]["seq"].as_u64()), (Some(6), Some("sess-0"), Some(5)));
+    assert!(DiscordState::load(&dir).identifies.is_empty(), "no identify");
+}
+
 #[tokio::test]
 async fn the_identify_limit_stops_the_gateway_before_it_identifies() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

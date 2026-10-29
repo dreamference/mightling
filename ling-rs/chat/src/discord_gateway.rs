@@ -89,7 +89,8 @@ fn jitter_ms(limit: u32) -> u32 {
 /// One connection, from the URL to its end.
 pub async fn connect_once(api: &DiscordApi, dir: &PathBuf, events: &mpsc::UnboundedSender<(String, Value)>, identify_limit: usize) -> Ended {
     let mut state = DiscordState::load(dir);
-    let resuming = state.session_id.is_some() && state.resume_url.is_some();
+    // Without a resume address (one that stopped answering) the session resumes through `/gateway/bot`'s.
+    let resuming = state.session_id.is_some();
     let base = match &state.resume_url {
         Some(url) if resuming => url.clone(),
         _ => match api.request(Method::GET, "/gateway/bot", None).await {
@@ -112,6 +113,10 @@ pub async fn connect_once(api: &DiscordApi, dir: &PathBuf, events: &mpsc::Unboun
         Ok((socket, _)) => socket,
         Err(err) => {
             eprintln!("ling chat: Discord: the Gateway did not answer ({err})");
+            // A resume address that does not answer is not tried again: the next try asks `/gateway/bot`.
+            if resuming && state.resume_url.take().is_some() {
+                let _ = state.save(dir);
+            }
             return if resuming { Ended::Resume } else { Ended::Identify };
         }
     };
