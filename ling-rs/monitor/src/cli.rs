@@ -50,8 +50,37 @@ pub struct State {
     pub seen_commits: BTreeSet<String>,
 }
 
+/// The reason `ling monitor <command> <rest>` is refused for an argument the command does not take,
+/// or `None`. Checked before the command reads or changes anything (`disable` removes units).
+pub fn refused_args(command: &str, rest: &[String]) -> Option<String> {
+    let (flags, valued): (&[&str], &[&str]) = match command {
+        "check" => (&["--dry-run", "--verbose", "--once"], &[]),
+        "status" => (&["--json"], &[]),
+        "replay" => (&[], &["--since", "--until"]),
+        _ => (&[], &[]),
+    };
+    let mut args = rest.iter();
+    while let Some(arg) = args.next() {
+        if valued.contains(&arg.as_str()) {
+            if args.next().is_none() {
+                return Some(format!("ling monitor {command}: {arg} needs a value"));
+            }
+        } else if !flags.contains(&arg.as_str()) {
+            return Some(format!("ling monitor {command}: unexpected argument `{arg}`"));
+        }
+    }
+    None
+}
+
 /// Runs one command; returns the exit code.
 pub fn run(args: &[String], exec_prefix: &[String]) -> i32 {
+    if let Some(command) = args.first().map(String::as_str)
+        && !matches!(command, "help" | "--help" | "-h")
+        && let Some(reason) = refused_args(command, &args[1..])
+    {
+        eprintln!("{reason}\n\n{USAGE}");
+        return 2;
+    }
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
         eprintln!("ling monitor: HOME is not set");
         return 2;
@@ -545,6 +574,20 @@ mod tests {
         fn git(&self, _dir: &Path, args: &[&str]) -> Option<String> {
             Some(if args[0] == "rev-parse" { "/home/u/repo/.git\n".to_string() } else { self.log.clone() })
         }
+    }
+
+    #[test]
+    fn a_command_refuses_an_unknown_flag_and_an_extra_word() {
+        let words = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for command in ["check", "status", "doctor", "replay", "enable", "disable", "notify-test", "digest"] {
+            assert!(refused_args(command, &words(&["--bogus-flag"])).is_some(), "{command} took an unknown flag");
+            assert!(refused_args(command, &words(&["extra"])).is_some(), "{command} took an extra word");
+        }
+        assert!(refused_args("check", &words(&["--dry-run", "--once", "--verbose"])).is_none());
+        assert!(refused_args("status", &words(&["--json"])).is_none());
+        assert!(refused_args("replay", &words(&["--since", "2026-01-01", "--until", "2026-02-01"])).is_none());
+        assert!(refused_args("replay", &words(&["--since"])).is_some(), "a flag with no value");
+        assert!(refused_args("disable", &[]).is_none());
     }
 
     fn ts(text: &str) -> i64 {

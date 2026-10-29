@@ -2088,6 +2088,12 @@ def test_the_jobs_own_options_are_not_read_as_node_runs():
     assert (options.bind, options.out, options.setup) == (["/data/a"], "ckpt", "uv sync")
     assert command == ["python", "--bind", "x"]
     assert split([])[1] == []
+    # An option it does not know, before `--` or where the command would start, is refused
+    # rather than run as (part of) the command.
+    for words in (["--memroy", "16G", "--", "python"], ["--memroy", "16G", "python"], ["python", "--", "x"]):
+        with pytest.raises(SystemExit) as exit_info:
+            split(words)
+        assert exit_info.value.code == 2, words
 
 
 def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(

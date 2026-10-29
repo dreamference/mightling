@@ -223,7 +223,8 @@ class NodeJobSender:
             Any: `(options, command)`: the options (`memory`, `time`, `test`, `gpu`, `setup`,
             `out`, `bind`) and the command's words. With `--`, what follows it is the command verbatim, so the
             command's own options are never read as this one's; without it, the command starts
-            at the first word that is not one of these options.
+            at the first word that is not one of these options. An option it does not know, or a
+            word before `--`, exits with argparse's error (2) rather than joining the command.
         """
         import argparse
         parser = argparse.ArgumentParser(add_help=False, prog="ling-admin node run")
@@ -236,8 +237,7 @@ class NodeJobSender:
         parser.add_argument("--bind", action="append", default=[])
         if "--" in words:
             at = words.index("--")
-            options, extra = parser.parse_known_args(words[:at])
-            return options, extra + words[at + 1:]
+            return parser.parse_args(words[:at]), words[at + 1:]
         options, command = parser.parse_known_args([])
         index = 0
         own = {"--memory": 2, "--time": 2, "--test": 2, "--gpu": 1, "--setup": 2, "--out": 2, "--bind": 2}
@@ -247,6 +247,8 @@ class NodeJobSender:
                 break
             index += 1 if "=" in words[index] else own[word]
         options, _ = parser.parse_known_args(words[:index])
+        if words[index:] and words[index].startswith("-"):
+            parser.error(f"unrecognized arguments: {words[index]}")
         return options, words[index:]
 
     @classmethod

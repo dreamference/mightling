@@ -207,6 +207,38 @@ fn current_user() -> String {
     run_command(&["id".to_string(), "-un".to_string()], None).map(|out| out.trim().to_string()).unwrap_or_default()
 }
 
+/// The argument `command` does not take, if any: an unknown flag, a stray word, or a flag that needs a
+/// value and has none. Checked first, so a mistyped `remove --dry-runn` does not remove anything.
+fn unexpected_argument(command: &str, rest: &[String]) -> Option<String> {
+    let (switches, valued): (&[&str], &[&str]) = match command {
+        "serve" => (&[], &["--state", "--runtime"]),
+        "init" => (
+            &["--linked", "--vision"],
+            &["--state", "--account", "--signal-cli", "--own-uuid", "--own-device", "--port", "--node", "--version", "--instance", "--user", "--env"],
+        ),
+        "retool" => (&[], &["--state", "--signal-cli", "--version", "--env"]),
+        "pair" => (&[], &["--state", "--code", "--port", "--device"]),
+        "bind" | "trust-owner" | "account" => (&[], &["--state"]),
+        "verify-signal-cli" => (&[], &["--file", "--signature"]),
+        "trust" | "start" | "stop" | "unit" => (&[], &["--name"]),
+        "status" => (&[], &["--name", "--runtime"]),
+        "remove" => (&["--dry-run"], &["--name"]),
+        "setup" => (&["--dry-run", "--refresh", "--voice"], &["--name", "--number", "--port"]),
+        _ => return None,
+    };
+    let mut words = rest.iter();
+    while let Some(word) = words.next() {
+        if valued.contains(&word.as_str()) {
+            if words.next().is_none() {
+                return Some(format!("`ling signal {command} {word}` needs a value"));
+            }
+        } else if !switches.contains(&word.as_str()) {
+            return Some(format!("`ling signal {command}` takes no `{word}`"));
+        }
+    }
+    None
+}
+
 /// Runs one `ling signal …` (or `ling-signal …`) command line, without the program name, and
 /// returns the exit code. Every command is synchronous; the ones that need an async runtime build
 /// their own, which is why the launcher calls this from a blocking thread.
@@ -214,6 +246,10 @@ pub fn run(args: &[String], invocation: &Invocation) -> i32 {
     let command = args.first().map(String::as_str).unwrap_or_default();
     if BRIDGE_COMMANDS.contains(&command) && !invocation.bridge_commands {
         eprintln!("`{command}` is run by the bridge's own account, through {}; `ling signal setup` does that.", unit::BRIDGE_PATH);
+        return 2;
+    }
+    if let Some(problem) = unexpected_argument(command, args.get(1..).unwrap_or_default()) {
+        eprintln!("{problem}\n{USAGE}");
         return 2;
     }
     match args.first().map(String::as_str) {
@@ -1308,6 +1344,26 @@ mod tests {
         fn invocation(&self) -> Invocation {
             Invocation { bridge: std::env::current_exe().ok(), bridge_commands: false, host: self.host() }
         }
+    }
+
+    #[test]
+    fn every_command_refuses_an_unknown_flag_and_a_stray_word() {
+        let node = Node::new("own");
+        let invocation = Invocation { bridge_commands: true, ..node.invocation() };
+        let commands = [
+            "serve", "init", "retool", "pair", "bind", "trust-owner", "account", "verify-signal-cli", "trust", "start", "stop", "unit",
+            "status", "remove", "setup",
+        ];
+        for command in commands {
+            for extra in ["--bogus-flag", "stray"] {
+                assert_eq!(run(&args(&[command, extra]), &invocation), 2, "{command} {extra}");
+                assert_eq!(run(&args(&[command, "--dry-run", extra]), &invocation), 2, "{command} --dry-run {extra}");
+            }
+        }
+        assert_eq!(run(&args(&["setup", "--refresh", "--bogus-flag"]), &invocation), 2);
+        assert!(unexpected_argument("remove", &args(&["--name"])).is_some(), "a flag with no value");
+        assert!(unexpected_argument("remove", &args(&["--name", "work", "--dry-run"])).is_none());
+        assert!(unexpected_argument("setup", &args(&["--number", "+15551234567", "--voice", "--port", "3100"])).is_none());
     }
 
     #[test]
