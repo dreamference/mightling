@@ -1932,6 +1932,71 @@ mod tests {
     }
 
     #[test]
+    fn the_spec_bounds_aliases_and_night_statuses_hold() {
+        // §14: the documented aliases name the same closed-list kinds.
+        for (alias, kind) in [
+            ("file", Kind::FileLine),
+            ("log_line", Kind::FileLine),
+            ("pid", Kind::PidExit),
+            ("process_exit", Kind::PidExit),
+            ("http", Kind::HttpStatus),
+            ("unit", Kind::SystemdUnit),
+            ("night", Kind::NightTask),
+            ("task", Kind::NightTask),
+        ] {
+            assert_eq!(Kind::parse(alias), Ok(kind), "{alias}");
+        }
+        // A request without `timeout_s` waits 1,800 s at most; a file read is bounded to 64 MiB.
+        let req = WatchRequest {
+            kind: "pid".to_string(),
+            pid: Some(100),
+            ..Default::default()
+        };
+        assert_eq!(req.validate().unwrap().timeout_s, 1_800);
+        assert_eq!(MAX_FILE_BYTES, 64 * 1024 * 1024);
+        // `observed` is capped at 6,000 characters.
+        let long = "x".repeat(MAX_OBSERVED_CHARS + 50);
+        let kept = truncate_observed(&long);
+        assert_eq!(kept.chars().take_while(|c| *c == 'x').count(), 6_000);
+        // The six finished Night Shift statuses each end a `night_task` wait.
+        let finished = [
+            "done",
+            "no-change",
+            "stalled",
+            "failed",
+            "interrupted",
+            "cancelled",
+        ];
+        assert_eq!(FINISHED_NIGHT_STATUSES, &finished);
+        for status in FINISHED_NIGHT_STATUSES {
+            let mut probe = FakeProbe::new();
+            probe.night_polls.push_back(Ok(Some(status.to_string())));
+            let req = WatchRequest {
+                kind: "night".to_string(),
+                id: Some("20261027-01".to_string()),
+                timeout_s: Some(30),
+                ..Default::default()
+            };
+            assert!(execute(&req, &mut probe).unwrap().met, "{status}");
+        }
+        // Loopback by any of its three names; `git` flags that run a program are refused.
+        for url in [
+            "http://127.0.0.1:8000/",
+            "http://localhost:8000/",
+            "http://[::1]:8000/",
+        ] {
+            assert!(parse_and_check_watch_url(url).is_ok(), "{url}");
+        }
+        for bad in [
+            "git diff --textconv",
+            "git log --ext-diff",
+            "git diff --output=x",
+        ] {
+            assert!(parse_and_check_allowlisted_command(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn read_only_curl_and_git_forms_are_allowed() {
         for allowed in ["curl -sSf http://127.0.0.1:8000/health", "curl --head http://localhost:3100/", "git -C . log -1", "git diff --stat"] {
             assert!(parse_and_check_allowlisted_command(allowed).is_ok(), "{allowed}");
