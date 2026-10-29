@@ -31,20 +31,20 @@ or `server_engine = "sglang"` in `~/.config/dreamference/config.toml` to keep it
 is exact on both: the drafter changes the speed, never the output. If ling-serve fails one of
 `server start`'s checks, `server start` says so and prints the way back; it never switches by itself.
 
-**Four conversations at once at the full context.** ling-serve runs four conversations in parallel,
-each with the model's 262,144-token context (two until now; a third waited). Their contexts live in
-pages taken from one pool, so four of them fit where four full-size blocks would not. Measured on our
+**Four conversations at once.** ling-serve runs four conversations in parallel, each with a
+196,608-token context (two until now; a third waited). Paged memory, which lets four conversations
+have the model's full 262,144 tokens, comes in a later 1.8.x. Measured on our
 machine, not a leaderboard: {{TBD combined rate of four conversations, tokens per second}}, against
 {{TBD SGLang's pooled rate on the same four conversations}} on SGLang; one conversation decodes at
-{{TBD}} tokens per second. Output is identical to the flat layout and to one stream at a time, checked
+{{TBD}} tokens per second. Output is identical to one stream at a time, checked
 bit for bit.
 
 **Memory is sized when the server starts.** ling-serve plans its footprint before it allocates
-anything and sizes the page pool from the memory free at that moment; `ling-admin server start` runs the
+anything; `ling-admin server start` runs the
 same plan first and, if the host would be left short, stops and says by how much. While serving, a
 request that arrives when the host is nearly out of memory is answered with HTTP 503 and the reason,
 instead of risking the machine. About {{TBD}} GB of memory in use while serving four conversations.
-`ling-admin status` shows the engine, its sessions and batch, and whether the KV cache is paged.
+`ling-admin status` shows the engine, its sessions and batch, and whether the KV cache is paged (it is not in 1.8.0).
 
 **Conversations that begin alike are read once.** The system prompt, the tool list and a repository's
 instructions open every agent conversation. ling-serve now reuses what it has already read for such a

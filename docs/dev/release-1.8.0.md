@@ -1,7 +1,7 @@
 # The 1.8.0 cut: ling-serve becomes the default engine
 
-1.8.0 serves the default model with ling-engine's `ling-serve`, four conversations at once at the full
-262,144-token context, with SGLang one flag away. Mightling's side is in the tree; the switch (step 6) is
+1.8.0 serves the default model with ling-engine's `ling-serve`, four conversations at once at 196,608
+tokens each (paged memory, four at the full 262,144, comes in a later 1.8.x), with SGLang one flag away. Mightling's side is in the tree; the switch (step 6) is
 made on the branch `prep/1.8.0` (2026-10-29), which is merged only once the bar below has passed on the
 pinned engine. This is the checklist, for the engine's paged memory (P4b-P4d,
 ling-engine `specs/DREAMFERENCE_LING_ENGINE_BATCHING.md` §5.3).
@@ -14,8 +14,9 @@ ling-engine `specs/DREAMFERENCE_LING_ENGINE_BATCHING.md` §5.3).
   own sessions, no flag it may not parse. **Owner decision 2026-10-29: 1.8.0 ships with paging OFF.** The pin
   (02704d4, P4d merged, features `kv-pages` and `sparse-head`) is flat by default, and the recipe's `kv_pages`
   (`QWEN38_LING_KV_PAGES`) is `False`: the launch passes no `--sessions`, `--batch` or `--kv-pages` (still
-  `--vision off`), so the engine's flat slots, auto-sized from MemAvailable (3 x 262,144 on the node-b figures),
-  serve. 1.8.1 switches `kv_pages` on after its own night.
+  `--vision off`) except what the flat layout needs: `--max-context 196608 --sessions 4 --batch 4`, four flat
+  slots of 196,608 tokens each (the engine's auto-size gave only 3 x 262,144 on the node-b figures). Paged
+  memory, four at the full 262,144, comes in a later 1.8.x after its own night.
 - `LING_ENGINE_KV_PAGES_SINCE` is ling-engine's last P4b commit (`f180b44`). `tests/test_hardware.py` checks, in a
   checkout with the submodule, that a recipe lists `"kv-pages"` exactly when its `engine_commit` descends from it
   (the same rule as the sparse head).
