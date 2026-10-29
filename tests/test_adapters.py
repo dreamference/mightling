@@ -575,12 +575,18 @@ def test_on_a_client_the_command_names_the_node(capsys):
         ([], {"DREAMFERENCE_HF_TOKEN": "from-dreamference-env"}, "from-dreamference-env"),
         ([], {"HF_TOKEN": "from-hf-env", "DREAMFERENCE_HF_TOKEN": "x"}, "from-hf-env"),
         (["--hf-token", "from-flag"], {"HF_TOKEN": "from-hf-env"}, "from-flag"),
+        ([], {}, "from-config-file"),
     ],
 )
-def test_install_takes_the_hub_token_in_the_model_downloads_order(monkeypatch, argv, env, expected):
+def test_install_takes_the_hub_token_in_the_model_downloads_order(
+    tmp_path, monkeypatch, argv, env, expected
+):
     from dreamference.config import DreamferenceConfig
     from dreamference.node.node_identity import NodeIdentity
 
+    config_file = tmp_path / "dreamference.toml"
+    config_file.write_text('hf_token = "from-config-file"\n')
+    monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(config_file))
     for name in ("HF_TOKEN", "DREAMFERENCE_HF_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
