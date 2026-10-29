@@ -22,6 +22,9 @@ from dreamference.node.node_service_file import SERVICE_TYPE
 # What NVIDIA's first-boot wizard publishes on every finished unit (FLEET §3, §9.1).
 SSH_SERVICE_TYPE: Final[str] = "_ssh._tcp"
 
+# What avahi-browse itself says about a service; a TXT record with one of these keys is ignored.
+BASE_FIELDS: Final[frozenset[str]] = frozenset({"interface", "name", "host", "address", "port"})
+
 # Host names a GB10 is shipped with: DGX Spark, ASUS Ascent GX10, HP ZGX.
 GB10_NAMES: Final[re.Pattern] = re.compile(r"^(spark|gx10|zgx)-", re.IGNORECASE)
 
@@ -57,7 +60,7 @@ class NodeBrowser:
                      "address": cls.scoped(fields[7], interface), "port": fields[8]}
             for record in fields[9].split('" "'):
                 key, _, value = record.strip('"').partition("=")
-                if key:
+                if key and key not in BASE_FIELDS:  # a TXT record cannot move the node
                     entry[key] = value
             identity = entry.get("node", entry["name"])
             if identity not in best:

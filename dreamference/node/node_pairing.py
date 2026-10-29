@@ -6,6 +6,7 @@ restricts to one forced command, `ling-admin node serve-job`. `ling-admin node a
 sets the key up once; the user never types an SSH command.
 """
 
+import ipaddress
 import json
 import os
 import re
@@ -708,14 +709,37 @@ class NodePairing:
             Optional[Dict[str, str]]: The node as a browse shows it, or None.
         """
         wanted = name.strip().lower()
+        typed_address = cls._is_address(wanted)
         for node in NodeBrowser.browse():
             if not NODE_ID.fullmatch(node.get("node") or ""):
+                continue
+            address = node["address"].lower()
+            if typed_address:
+                # Anyone can name a service after an address; only where it answers counts.
+                if wanted in (address, address.split("%")[0]):
+                    return node
                 continue
             if wanted in (node["name"].lower(), node["address"].lower(), node["node"].lower()) or (
                 len(wanted) >= 4 and node["node"].lower().startswith(wanted)
             ):
                 return node
         return None
+
+    @classmethod
+    def _is_address(cls, text: str) -> bool:
+        """Whether a typed name is an IP address.
+
+        Args:
+            text: What was typed.
+
+        Returns:
+            bool: Whether it is an IP address (an IPv6 one may carry its `%interface`).
+        """
+        try:
+            ipaddress.ip_address(text.split("%")[0])
+        except ValueError:
+            return False
+        return True
 
     @classmethod
     def _save(cls, record: dict[str, Any]) -> None:
