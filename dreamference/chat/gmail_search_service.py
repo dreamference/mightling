@@ -370,7 +370,9 @@ class GmailSearchService:
                     with urllib.request.urlopen(req, timeout=10) as res:
                         data = json.load(res)
                         if "access_token" in data:
-                            cls.save_token(address, data["access_token"], data.get("expires_in", 3599), directory, refresh_token=refresh)
+                            # Google may rotate the refresh token; the old one then stops working.
+                            cls.save_token(address, data["access_token"], data.get("expires_in", 3599), directory,
+                                           refresh_token=data.get("refresh_token") or refresh)
                             valid.append({"email": address, "access_token": data["access_token"],
                                           "scopes": cls.account_scopes(acc)})
                 except Exception:
