@@ -938,3 +938,54 @@ fn a_submodule_whose_path_has_a_space_is_left_out_of_the_superprojects_roots() {
         .collect();
     assert_eq!(listed, [("my lib".to_string(), "my lib".to_string())]);
 }
+
+/// `.gitmodules` is the repository's own text: a path that climbs out of it names nothing of
+/// the repository's, even when a repository of the user's sits there.
+#[test]
+fn a_gitmodules_path_that_climbs_out_of_the_repository_is_never_examined() {
+    let f = fixture();
+    let root = f.repo.root.clone();
+    let outside = library(
+        f.dir.path(),
+        "neighbour",
+        "t@localhost",
+        &[(
+            "Cargo.toml",
+            "[package]\nname = \"neighbour\"\nversion = \"0.1.0\"\n",
+        )],
+        2,
+    );
+    let climb = format!("../{}", outside.file_name().unwrap().to_string_lossy());
+    std::fs::write(
+        root.join(".gitmodules"),
+        format!("[submodule \"neighbour\"]\n\tpath = {climb}\n\turl = ../neighbour\n"),
+    )
+    .unwrap();
+    git(&root, &["add", ".gitmodules"]);
+    git(&root, &["commit", "-qm", "climb"]);
+    assert!(
+        decisions(&f.repo).iter().all(|s| !s.indexed),
+        "{:?}",
+        decisions(&f.repo)
+    );
+    let roots: Vec<String> = plan::detect(&f.repo).into_iter().map(|t| t.root).collect();
+    assert!(roots.iter().all(|r| !r.contains("..")), "{roots:?}");
+
+    // Nor through a link the repository ships at an innocent path.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&outside, root.join("vendor")).unwrap();
+        std::fs::write(
+            root.join(".gitmodules"),
+            "[submodule \"neighbour\"]\n\tpath = vendor\n\turl = ../neighbour\n",
+        )
+        .unwrap();
+        git(&root, &["add", ".gitmodules", "vendor"]);
+        git(&root, &["commit", "-qm", "link"]);
+        assert!(
+            decisions(&f.repo).iter().all(|s| !s.indexed),
+            "{:?}",
+            decisions(&f.repo)
+        );
+    }
+}
