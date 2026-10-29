@@ -267,3 +267,62 @@ def test_home_compat_edit_keeps_using_unmoved_home(tmp_path):
     assert rr.apply_compat(tmp_path, False) == 1
     assert "crate::rename::unmoved_home(&home)" in home_rs.read_text()
     assert rr.apply_compat(tmp_path, False) == 0
+
+
+def test_a_compat_edit_matches_reformatted_rust_across_lines(tmp_path, monkeypatch):
+    old = "    let x = f(a) else { return None; };\n"
+    new = "    let x = g(a);\n"
+    reformatted = (
+        "        let x =\n            f(a)\n        else {\n            return None;\n        };\n"
+    )
+    (tmp_path / "a.rs").write_text(f"fn demo() {{\n{reformatted}}}\n")
+    monkeypatch.setattr(rr, "COMPAT_EDITS", [("a.rs", old, new, 1)])
+    assert rr.apply_compat(tmp_path, False) == 1
+    assert (tmp_path / "a.rs").read_text() == f"fn demo() {{\n{new}}}\n"
+    assert rr.apply_compat(tmp_path, False) == 0
+
+
+def test_a_compat_edit_does_not_relax_layout_for_non_formatter_files(tmp_path, monkeypatch):
+    old = "    let x = f(a) else { return None; };\n"
+    reformatted = (
+        "        let x =\n            f(a)\n        else {\n            return None;\n        };\n"
+    )
+    (tmp_path / "a.yml").write_text(reformatted)
+    monkeypatch.setattr(rr, "COMPAT_EDITS", [("a.yml", old, "    let x = g(a);\n", 1)])
+    with pytest.raises(SystemExit):
+        rr.apply_compat(tmp_path, False)
+
+
+def test_a_tolerant_insert_before_anchor_keeps_the_files_own_layout(tmp_path, monkeypatch):
+    old = "    let x = f(a) else { return None; };\n"
+    prefix = "    prep();\n"
+    reformatted = (
+        "        let x =\n            f(a)\n        else {\n            return None;\n        };\n"
+    )
+    (tmp_path / "a.rs").write_text(reformatted)
+    monkeypatch.setattr(rr, "COMPAT_EDITS", [("a.rs", old, prefix + old, 1)])
+    assert rr.apply_compat(tmp_path, False) == 1
+    assert (tmp_path / "a.rs").read_text() == prefix + reformatted
+
+
+def test_compat_abort_message_names_constant_or_index(tmp_path, monkeypatch):
+    (tmp_path / "a.rs").write_text("present\n")
+    monkeypatch.setattr(rr, "SLICE_ANCHOR", "absent\n")
+    monkeypatch.setattr(rr, "COMPAT_EDITS", [("a.rs", rr.SLICE_ANCHOR, "x\n", 1)])
+    with pytest.raises(SystemExit) as excinfo:
+        rr.apply_compat(tmp_path, False)
+    assert "SLICE_ANCHOR" in str(excinfo.value)
+
+    monkeypatch.setattr(rr, "COMPAT_EDITS", [("a.rs", "inline absent\n", "x\n", 1)])
+    with pytest.raises(SystemExit) as excinfo:
+        rr.apply_compat(tmp_path, False)
+    assert "COMPAT_EDITS[0]" in str(excinfo.value)
+
+
+def test_real_compat_anchors_match_their_own_exact_layout():
+    checked = 0
+    for path, old, _new, _count in rr.COMPAT_EDITS:
+        if path.endswith((".rs", ".py")):
+            assert len(rr.anchor_pattern(old).findall(old)) == 1, path
+            checked += 1
+    assert checked > 0
