@@ -816,3 +816,25 @@ def test_an_account_that_fails_to_log_in_has_its_connection_closed(monkeypatch):
     connections, _error, failures = GmailSearchService._open_mailboxes()
     assert connections == {} and len(failures) == 1
     assert closed == [True]
+
+
+def test_a_refresh_that_rotates_the_refresh_token_stores_the_new_one(tmp_path, monkeypatch):
+    from dreamference.chat import gmail_search_service as svc_mod
+    from dreamference.chat.gmail_search_service import CREDENTIALS_NAME, GmailSearchService
+
+    directory = str(tmp_path)
+    account = {
+        "email": "a@x.com",
+        "access_token": GmailSearchService._seal("old", directory),
+        "expires_at": 0,
+        "refresh_token": GmailSearchService._seal("ref-old", directory),
+    }
+    (tmp_path / CREDENTIALS_NAME).write_text(json.dumps({"accounts": {"a@x.com": account}}))
+    reply = {"access_token": "new", "expires_in": 3600, "refresh_token": "ref-new"}
+    monkeypatch.setattr(
+        svc_mod.urllib.request, "urlopen", lambda req, timeout=10: _Response(json.dumps(reply).encode()),
+    )
+    assert GmailSearchService.credentials(directory)[0]["access_token"] == "new"
+    stored = GmailSearchService._raw(directory)["accounts"]["a@x.com"]
+    assert GmailSearchService._unseal(stored["refresh_token"], directory) == "ref-new"
+
