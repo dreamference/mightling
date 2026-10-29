@@ -563,9 +563,10 @@ class ModelGateService:
             if forward is None:
                 return
             try:
-                upstream_reader, upstream_writer = await asyncio.wait_for(
+                upstream_reader, connected_writer = await asyncio.wait_for(
                     asyncio.open_connection(*self.upstream), UPSTREAM_CONNECT_TIMEOUT_S
                 )
+                upstream_writer = connected_writer
             except (TimeoutError, OSError):
                 await self.respond(
                     writer,
@@ -582,8 +583,8 @@ class ModelGateService:
                     head_only=method == "HEAD",
                 )
                 return
-            upstream_writer.write(forward[0] + (forward[1] or b""))
-            await upstream_writer.drain()
+            connected_writer.write(forward[0] + (forward[1] or b""))
+            await connected_writer.drain()
 
             async def client_side() -> None:
                 if forward[1] is None:
@@ -768,8 +769,11 @@ class ModelGateService:
             f"on {self.listen[0]}:{port} in front of {self.upstream[0]}:{self.upstream[1]}, "
             f"state in {self.state_dir}"
         )
-        async with self.server:
-            await self.server.serve_forever()
+        server = self.server
+        if server is None:
+            raise RuntimeError("the gate server did not start")
+        async with server:
+            await server.serve_forever()
 
 
 def _address(text: str) -> tuple[str, int]:

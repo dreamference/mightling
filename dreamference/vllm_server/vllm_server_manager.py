@@ -6,6 +6,7 @@ This module provides the VLLMServerManager class which handles building vLLM ser
 polling HTTP health checks, and capturing logs.
 """
 
+import functools
 import os
 import re
 import sys
@@ -1947,7 +1948,8 @@ class VLLMServerManager:
             )
 
         # Step 2: Build launch command
-        launch = dict(
+        launch = functools.partial(
+            self.build_launch_command,
             model=model,
             port=port,
             quantization=quantization,
@@ -1974,7 +1976,7 @@ class VLLMServerManager:
         # gate's list. If the patch cannot be prepared, this start serves the base alone.
         from dreamference.vllm_server.adapter_serving import AdapterServing
         serve_adapters = AdapterServing.prepare(model, docker_image, gate and not api_key, engine)
-        cmd = self.build_launch_command(**launch, gate=gate, serve_adapters=serve_adapters)
+        cmd = launch(gate=gate, serve_adapters=serve_adapters)
 
         # Step 3: Cleanup potential container name conflicts prior to launch
         if cmd and cmd[0] == "docker":
@@ -1991,7 +1993,7 @@ class VLLMServerManager:
                 if gate:
                     print(f"⚠️  Without the model gate: the engine serves port {port} itself, and a "
                           "benchmark run waits for other requests instead of refusing them.")
-                    cmd = self.build_launch_command(**launch, gate=False)
+                    cmd = launch(gate=False)
                 ModelGate.remove(port)
 
         print(f"🚀 Starting GB10 vLLM Server: {' '.join(cmd)}")

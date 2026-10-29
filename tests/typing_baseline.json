@@ -5,24 +5,8 @@
    "assignment": 3,
    "attr-defined": 4,
    "list-item": 2
-  },
-  "dreamference/vllm_server/diffusion_openai_service.py": {
-   "assignment": 1,
-   "misc": 1
-  },
-  "dreamference/vllm_server/host_safety_setup.py": {
-   "assignment": 1
-  },
-  "dreamference/vllm_server/model_gate_service.py": {
-   "union-attr": 5
-  },
-  "dreamference/vllm_server/model_loading_monitor.py": {
-   "assignment": 3
-  },
-  "dreamference/vllm_server/vllm_server_manager.py": {
-   "arg-type": 14
   }
  },
  "mypy": "2.4.0",
- "total": 49
+ "total": 24
 }

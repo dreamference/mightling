@@ -91,8 +91,8 @@ class DiffusionModelRunner:
 
             scan = dynamic_module_utils.get_imports
 
-            def runtime_imports(filename: str) -> List[str]:
-                needed = _imports_outside_main_guard(filename)
+            def runtime_imports(filename: "str | os.PathLike[Any]") -> List[str]:
+                needed = _imports_outside_main_guard(os.fspath(filename))
                 return [name for name in scan(filename) if name in needed]
 
             dynamic_module_utils.get_imports = runtime_imports
@@ -181,7 +181,7 @@ def _imports_outside_main_guard(filename: str) -> set:
                 and isinstance(node.test.left, ast.Name) and node.test.left.id == "__name__")
 
     names: set = set()
-    pending = [node for node in tree.body if not is_main_guard(node)]
+    pending: list[ast.AST] = [node for node in tree.body if not is_main_guard(node)]
     while pending:
         node = pending.pop()
         if isinstance(node, ast.Import):

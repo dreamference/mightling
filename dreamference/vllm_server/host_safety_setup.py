@@ -28,15 +28,12 @@ interruption left out of use is finished on the next run.
 """
 
 import getpass
-try:
-    import grp
-except ImportError:  # Windows, where only the release builder imports this package
-    grp = None
 import os
 import shutil
 import signal
 import subprocess
 import sys
+from types import ModuleType
 from typing import Any, Dict, Final, List, Optional
 
 from dreamference.vllm_server.vllm_server_manager import (
@@ -46,6 +43,14 @@ from dreamference.vllm_server.vllm_server_manager import (
     WATERMARK_SCALE_FACTOR,
     VLLMServerManager,
 )
+
+grp: ModuleType | None
+try:
+    import grp as _grp
+
+    grp = _grp
+except ImportError:  # Windows, where only the release builder imports this package
+    grp = None
 
 SWAP_FILE: Final[str] = "/swap.img"
 SYSCTL_FILE: Final[str] = "/etc/sysctl.d/99-dreamference.conf"

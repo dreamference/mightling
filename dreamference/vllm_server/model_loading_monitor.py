@@ -65,11 +65,11 @@ class ModelLoadingMonitor:
 
     def _monitor_loop(self) -> None:
         """Main monitoring loop that runs in background thread."""
-        last_log_check = 0
+        last_log_check = 0.0
         health_check_interval = 2
-        last_health_check = 0
+        last_health_check = 0.0
         memory_print_interval = 10
-        last_memory_print = 0
+        last_memory_print = 0.0
 
         while self.running:
             current_time = time.time()
