@@ -16,6 +16,35 @@ describe("the app-server's process", () => {
     }
   });
 
+  // A stopped server's output still in the pipes is not this app's any more: a restarted one would get the
+  // old one's requests and notifications, and the window its lines.
+  it.skipIf(process.platform === "win32")("delivers nothing from a server once it is stopped", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-server-stopped-"));
+    process.env.CODEX_HOME = path.join(dir, "home");
+    // Keeps both pipes full until it is killed.
+    process.env.MIGHTLING_BIN = nodeScript(dir, "ling", [
+      'const line = JSON.stringify({ method: "thread/name/updated", params: { threadId: "old", threadName: "x".repeat(200) } }) + "\\n";',
+      'const flood = (stream, text) => { while (stream.write(text.repeat(50))); stream.once("drain", () => flood(stream, text)); };',
+      'flood(process.stdout, line); flood(process.stderr, "old server line\\n");',
+    ].join("\n") + "\n");
+    let stopped = false;
+    const early: string[] = [];
+    const late: string[] = [];
+    const server = new AppServer(null, { deliver: (event) => (stopped ? late : early).push(event.channel), busyChanged: () => {} });
+    try {
+      server.start();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      server.stop();
+      stopped = true;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(early).toContain("work://message");
+      expect(late.filter((channel) => channel === "work://stderr" || channel === "work://message")).toEqual([]);
+    } finally {
+      server.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(process.platform === "win32")("closing its input throws nothing in this process", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-server-closed-"));
     process.env.CODEX_HOME = path.join(dir, "home");

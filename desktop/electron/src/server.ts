@@ -38,6 +38,8 @@ export type ServerObserver = (message: unknown, kind: "serverRequest" | "notific
 
 export class AppServer {
   private child: ChildProcessWithoutNullStreams | null = null;
+  /** Servers `stop` killed: what they left in the pipes is dropped. */
+  private readonly killed = new WeakSet<ChildProcessWithoutNullStreams>();
   private readonly pending = new Set<string>();
   /** Thread openers whose new thread works in an Ask folder, by request id: answered, the folder is named after the thread. */
   private readonly openers = new Map<string, string>();
@@ -71,8 +73,15 @@ export class AppServer {
     this.initialized = false;
     this.busy = new BusyTracker();
     this.marker = home && child.pid ? busyMarker(home, child.pid) : null;
-    readline.createInterface({ input: child.stdout }).on("line", (line) => this.incoming(line));
-    readline.createInterface({ input: child.stderr }).on("line", (line) => this.events.deliver({ channel: "work://stderr", payload: line }));
+    // Lines a stopped server left in the pipes are dropped: they are not the next server's. One that exited on its
+    // own still has its last lines read (its exit can come first), until another starts.
+    const own = () => this.child === child || (this.child === null && !this.killed.has(child));
+    readline.createInterface({ input: child.stdout }).on("line", (line) => {
+      if (own()) this.incoming(line);
+    });
+    readline.createInterface({ input: child.stderr }).on("line", (line) => {
+      if (own()) this.events.deliver({ channel: "work://stderr", payload: line });
+    });
     child.once("exit", (code) => this.exited(code));
     // A server going down closes its input before it exits: a write then fails with EPIPE, which unheard would crash the app (its exit is reported above).
     child.stdin.on("error", () => undefined);
@@ -230,6 +239,7 @@ export class AppServer {
     const child = this.child;
     if (!child) return;
     child.removeAllListeners("exit");
+    this.killed.add(child);
     this.child = null;
     try {
       child.kill("SIGKILL");
