@@ -288,6 +288,17 @@ impl Server {
         })
     }
 
+    /// Whether a request came through a reverse proxy such as the overlay's HTTPS front: it names
+    /// one of the front's names, or it carries a forwarding header. The front connects from
+    /// loopback like a local client and may pass the client's own `Host` on (`tailscale serve`
+    /// does), so `Host` alone cannot tell; the forwarding headers are written by the front itself,
+    /// which drops a client's own (`tailscale serve` sets `X-Forwarded-For` and `X-Forwarded-Host`).
+    /// A local client that sends one is only refused what the front is refused.
+    pub fn through_proxy(&self, headers: &HeaderMap) -> bool {
+        self.public_host(header_str(headers, header::HOST))
+            || [header::FORWARDED.as_str(), "x-forwarded-for", "x-forwarded-host", "x-real-ip"].iter().any(|name| headers.contains_key(*name))
+    }
+
     fn new_session_with(&self, bridge: bool) -> String {
         let token = auth::random_hex(32);
         let hash = auth::sha256_hex(&token);
@@ -413,8 +424,8 @@ async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) 
         return secured(text(StatusCode::MISDIRECTED_REQUEST, "This server does not answer to that name.\n"));
     }
     // Git over HTTP to the forge carries the forge's own credentials, as on the forge's own port,
-    // and is passed on only on the LAN and loopback names (forge.rs).
-    if crate::forge::is_git(request.uri().path()) && !server.public_host(header_str(headers, header::HOST)) {
+    // and is passed on only to a client on the LAN or this machine, never through a front (forge.rs).
+    if crate::forge::is_git(request.uri().path()) && !server.through_proxy(headers) {
         return secured(next.run(request).await);
     }
     let upgrade = header_str(headers, header::UPGRADE).is_some_and(|value| value.eq_ignore_ascii_case("websocket"));

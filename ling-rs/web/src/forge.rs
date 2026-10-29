@@ -11,8 +11,9 @@
 //! The forge's `ROOT_URL` ends in `/forge/` (the Python side writes it), so its pages link under
 //! `/forge/`; Forgejo itself serves at its root, so the prefix is taken off on the way in. Git over
 //! HTTP (`…/info/refs`, `git-upload-pack`, `git-receive-pack`) passes through with the client's own
-//! credentials and none of ours, only on the LAN and loopback names, never on an overlay front: it
-//! is what the forge's own port already offers on the LAN, so the clone URLs the forge shows work.
+//! credentials and none of ours, only on the LAN and loopback names, never through an overlay
+//! front or any other reverse proxy (`Server::through_proxy`): it is what the forge's own port
+//! already offers on the LAN, so the clone URLs the forge shows work.
 
 use std::collections::BTreeMap;
 use std::path::Path;

@@ -329,7 +329,10 @@ impl Policy {
                         .and_then(Value::as_str)
                         .and_then(|id| prompts.repo_thread_cwd(id).map(|cwd| (id.to_string(), cwd)));
                     let is_repo = repo_thread.is_some();
-                    if prompts.is_bridge() || is_repo {
+                    // An Ask thread keeps the folder and sandbox it was started with: a turn's
+                    // `sandboxPolicy` would hold for the turns after it.
+                    let is_ask = params.get("threadId").and_then(Value::as_str).and_then(|id| prompts.scratch_folder_of(id)).is_some();
+                    if prompts.is_bridge() || is_repo || is_ask {
                         for field in &self.pinned_turn_fields {
                             params.remove(field);
                         }

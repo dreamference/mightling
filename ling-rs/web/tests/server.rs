@@ -1278,6 +1278,36 @@ async fn discords_front_is_a_public_name_but_never_serves_telegrams_launch_pairi
 }
 
 #[tokio::test]
+async fn git_through_the_front_is_not_passed_on_whatever_host_the_front_forwards() {
+    let scratch = scratch("gitfront");
+    // A stand-in forge that answers every connection, never the machine's own.
+    let forge = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let forge_url = format!("http://{}", forge.local_addr().unwrap());
+    tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        while let Ok((mut stream, _)) = forge.accept().await {
+            let mut buffer = [0u8; 4096];
+            let _ = stream.read(&mut buffer).await;
+            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nfake forge").await;
+        }
+    });
+    let mut config = config(&scratch.dir, 3100, Vec::new());
+    config.public_names = vec!["node.example.ts.net".to_string()];
+    config.forge_url = Some(forge_url);
+    let server = Server::new(config).unwrap();
+    let git = "/forge/o/r.git/info/refs?service=git-upload-pack";
+    // `tailscale serve` passes the client's own Host on and writes the forwarding headers itself.
+    let forwarded = request("GET", git).header("x-forwarded-for", "192.0.2.9").header("x-forwarded-host", "node.example.ts.net").body(Body::empty()).unwrap();
+    let (status, _, body) = call(&server, forwarded).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    let front = Request::builder().method("GET").uri(git).header(header::HOST, "node.example.ts.net").body(Body::empty()).unwrap();
+    assert_eq!(call(&server, front).await.0, StatusCode::UNAUTHORIZED);
+    // On the LAN and loopback it is passed on to the forge (none here) without a sign-in.
+    let (status, _, body) = call(&server, request("GET", git).body(Body::empty()).unwrap()).await;
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "fake forge"));
+}
+
+#[tokio::test]
 async fn a_mini_app_first_launch_pairs_only_on_the_front_and_only_after_the_bot_approves() {
     let scratch = scratch("tgpair");
     let mut config = config(&scratch.dir, 3100, vec!["192.168.50.105".to_string()]);
