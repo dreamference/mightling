@@ -204,3 +204,23 @@ def test_the_diffusion_sidecar_answers_a_body_that_is_not_an_object_with_400():
         assert resp.status_code == 400
     finally:
         server.shutdown()
+
+
+def test_the_canary_reads_utf8_events_whatever_charset_the_stream_names():
+    import io
+    import json
+
+    import requests
+    from test_tool_call_canary import call_item, check, message_item, stream
+
+    # "х" is D1 85 in UTF-8; read as ISO-8859-1 (requests' default for text/*), the 0x85 is NEL,
+    # a line break to str.splitlines(), and the event it was in came apart.
+    events = stream(message_item("Погода: х"), call_item())
+    body = "".join(f"event: {e['type']}\ndata: {json.dumps(e, ensure_ascii=False)}\n\n" for e in events)
+    response = requests.Response()
+    response.status_code = 200
+    response.headers["Content-Type"] = "text/event-stream"
+    response.encoding = requests.utils.get_encoding_from_headers(response.headers)
+    response.raw = io.BytesIO(body.encode("utf-8"))
+    ok, detail = check(response)
+    assert ok, detail

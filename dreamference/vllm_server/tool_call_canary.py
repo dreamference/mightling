@@ -111,8 +111,9 @@ class ToolCallCanary:
                 body = (getattr(response, "text", "") or "").strip().replace("\n", " ")[:160]
                 return False, cls.refusal(response.status_code, body, model_key, engine)
             try:
-                events, finished = cls.read_events(response.iter_lines(decode_unicode=True),
-                                                   started + timeout, clock)
+                # Bytes, decoded as UTF-8 per line by read_events: requests would decode a
+                # charset-less `text/event-stream` as ISO-8859-1, and its 0x85 is a line break.
+                events, finished = cls.read_events(response.iter_lines(), started + timeout, clock)
             except requests.RequestException as error:
                 return False, f"the stream broke off ({type(error).__name__})"
         finally:
