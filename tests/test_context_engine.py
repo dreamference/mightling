@@ -145,3 +145,34 @@ def test_the_embedding_model_runs_on_the_cpu_with_bounded_inputs(monkeypatch):
     model = embedding_calculator.EmbeddingCalculator._get_model()
     assert made == ["cpu"]
     assert model.max_seq_length == embedding_calculator.MAX_SEQUENCE_TOKENS
+
+
+def test_one_file_is_read_in_process_as_the_index_workers_read_it(tmp_path):
+    # The workers run in a process pool, where coverage does not follow them; the same routine
+    # is called here directly.
+    from dreamference.context_engine import context_engine
+
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    (tmp_path / "pkg").mkdir()
+    source = tmp_path / "pkg" / "mod.py"
+    source.write_text('class Loader:\n    """Loads."""\n    async def load(self, path):\n        pass\n')
+    (tmp_path / "huge.txt").write_text("a" * (context_engine.MAX_FILE_BYTES + 1))
+    (tmp_path / "blob.dat").write_bytes(b"x" * 100 + b"\0" + b"y" * 100)
+    late_nul = tmp_path / "late.txt"
+    late_nul.write_bytes(b"x" * context_engine.BINARY_SNIFF_BYTES + b"\0tail")
+    (tmp_path / "broken.py").write_text("def broken(:\n")
+
+    indexed, content = engine._process_single_file(source)
+    assert indexed.rel_path == os.path.join("pkg", "mod.py") and content.startswith("class Loader")
+    assert [(s.name, s.symbol_type, s.signature, s.docstring) for s in indexed.symbols] == [
+        ("Loader", "class", "class Loader", "Loads."),
+        ("load", "function", "def load(self, path)", None),
+    ]
+    assert indexed.symbols[1].line_start == 3 and indexed.symbols[1].line_end == 4
+
+    assert engine._process_single_file(tmp_path / "huge.txt") is None
+    assert engine._process_single_file(tmp_path / "blob.dat") is None
+    assert engine._process_single_file(late_nul) is not None  # only the start is sniffed
+    assert engine._process_single_file(tmp_path / "gone.py") is None
+    broken, _ = engine._process_single_file(tmp_path / "broken.py")
+    assert broken.symbols == []  # a file that does not parse is still indexed, by its words
