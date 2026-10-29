@@ -611,6 +611,36 @@ mod tests {
     }
 
     #[test]
+    fn the_placeholder_keeps_the_exit_code_of_the_shell_tools_form() {
+        let path = Path::new("/state/masking/outputs/call_1.txt");
+        let body: Vec<String> = (0..30).map(|n| format!("FAILED test_{n} {}", "z".repeat(40))).collect();
+        let text = format!("Exit code: 1\nWall time: 2.5 seconds\nOutput:\n{}", body.join("\n"));
+        let shown = placeholder(&text, path);
+        let lines: Vec<&str> = shown.lines().collect();
+        assert_eq!(lines[1], "Exit code: 1");
+        assert!(lines[2].starts_with("… FAILED test_29"), "{shown}");
+        assert!(shown.chars().count() <= MAX_PLACEHOLDER_CHARS);
+    }
+
+    #[test]
+    fn a_move_changes_only_the_masked_outputs() {
+        let scratch = Scratch::new("only");
+        let mut items = history(40, 60);
+        let before = items.clone();
+        run(&scratch.0, &mut items, policy().high + 1);
+        let gone = masked(&items);
+        assert!(!gone.is_empty());
+        for (index, (after, was)) in items.iter().zip(&before).enumerate() {
+            if gone.contains(&index) {
+                assert_eq!(after.item["call_id"], was.item["call_id"]);
+                assert_eq!(after.item["type"], was.item["type"]);
+            } else {
+                assert_eq!(after, was, "item {index} changed");
+            }
+        }
+    }
+
+    #[test]
     fn a_tools_answer_keeps_its_own_first_line_and_becomes_text() {
         let scratch = Scratch::new("mcp");
         let body: Vec<String> = (0..40).map(|n| format!("{n:4}  code line {}", "y".repeat(30))).collect();
