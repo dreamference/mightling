@@ -176,7 +176,7 @@ def test_http_routes_cover_status_connect_and_oauth_flows(service_port, monkeypa
             return FakeResp(json.dumps({"email": "u@x.com"}).encode())
         return urllib.request.build_opener().open(req, timeout=timeout)
 
-    OAUTH_STATES["st-ok"] = {"code_verifier": "v", "time": 1.0, "app": "drive"}
+    OAUTH_STATES["st-ok"] = {"code_verifier": "v", "time": time.time(), "app": "drive"}
     monkeypatch.setattr(
         GmailSearchService, "accept_grant", classmethod(lambda cls, app, data, addr: None)
     )
@@ -205,7 +205,11 @@ def test_http_routes_cover_status_connect_and_oauth_flows(service_port, monkeypa
         return urllib.request.build_opener().open(req, timeout=timeout)
 
     monkeypatch.setattr(svc_mod.urllib.request, "urlopen", broken_urlopen)
-    get_err, html_err = _req_status(service_port, "/?code=c1&state=st-ok")
+    # A state is taken once: the second callback with st-ok is refused.
+    get_again, html_again = _req_status(service_port, "/?code=c1&state=st-ok")
+    assert get_again == HTTPStatus.OK and "Invalid state" in html_again
+    OAUTH_STATES["st-down"] = {"code_verifier": "v", "time": time.time(), "app": "drive"}
+    get_err, html_err = _req_status(service_port, "/?code=c1&state=st-down")
     assert get_err == HTTPStatus.OK and "token exchange down" in html_err
 
 

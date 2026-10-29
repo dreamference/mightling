@@ -665,3 +665,22 @@ def test_saving_a_token_never_shows_another_thread_a_half_written_credentials_fi
     assert sorted(GmailSearchService._raw(directory)["accounts"]) == ["a@example.com"]
     assert (tmp_path / "credentials.json").stat().st_mode & 0o777 == 0o600
     assert sorted(path.name for path in tmp_path.iterdir()) == ["credentials.json", "credentials.key"]
+
+
+def test_an_oauth_state_is_taken_once_and_expires(monkeypatch):
+    # Each start recorded a state with its time, and nothing ever read the time or removed one.
+    from dreamference.chat import gmail_search_service as service_module
+    from dreamference.chat.gmail_search_service import OAUTH_STATE_SECONDS, GmailSearchService
+
+    monkeypatch.setattr(service_module, "OAUTH_STATES", {})
+    clock = [1000.0]
+    monkeypatch.setattr(service_module.time, "time", lambda: clock[0])
+    fresh = GmailSearchService.new_state("drive", "verifier")
+    assert GmailSearchService.take_state(fresh) == {"code_verifier": "verifier", "time": 1000.0, "app": "drive"}
+    assert GmailSearchService.take_state(fresh) is None
+
+    stale = GmailSearchService.new_state("gmail", "old")
+    clock[0] += OAUTH_STATE_SECONDS + 1
+    GmailSearchService.new_state("gmail", "new")
+    assert stale not in service_module.OAUTH_STATES and len(service_module.OAUTH_STATES) == 1
+    assert GmailSearchService.take_state(stale) is None
