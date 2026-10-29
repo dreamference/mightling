@@ -466,20 +466,21 @@ class WebTools:
 
         endpoint = f"{SEARXNG_URL.rstrip('/')}/search"
         try:
-            response = _Session().get(
-                endpoint,
-                params={
-                    "q": query,
-                    "format": "json",
-                    "categories": SEARXNG_CATEGORY_NAMES.get(categories, categories),
-                    "language": language,
-                    **({"time_range": time_range} if time_range in TIME_RANGES else {}),
-                },
-                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
-                timeout=REQUEST_TIMEOUT_S,
-            )
-            response.raise_for_status()
-            payload = response.json()
+            with _within_deadline() as session:
+                response = session.get(
+                    endpoint,
+                    params={
+                        "q": query,
+                        "format": "json",
+                        "categories": SEARXNG_CATEGORY_NAMES.get(categories, categories),
+                        "language": language,
+                        **({"time_range": time_range} if time_range in TIME_RANGES else {}),
+                    },
+                    headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+                    timeout=REQUEST_TIMEOUT_S,
+                )
+                response.raise_for_status()
+                payload = response.json()
         except requests.RequestException as e:
             return {
                 "query": query,

@@ -273,3 +273,17 @@ def test_a_page_sent_a_byte_at_a_time_through_a_proxy_ends_at_the_deadline(
     with pytest.raises(requests.Timeout):
         WebTools._download("http://page.invalid/")
     assert time.monotonic() - started < 10
+
+
+def test_search_ends_at_the_deadline_when_searxng_answers_a_byte_at_a_time(
+    monkeypatch, loopback
+):
+    import time
+
+    port = drip(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 9000\r\n\r\n")
+    monkeypatch.setattr(web_tools, "SEARXNG_URL", f"http://127.0.0.1:{port}")
+    monkeypatch.setattr(web_tools, "REQUEST_DEADLINE_S", 2.0)
+    started = time.monotonic()
+    outcome = WebTools.search("python")
+    assert "took longer than 2 s" in outcome["error"]
+    assert time.monotonic() - started < 10
