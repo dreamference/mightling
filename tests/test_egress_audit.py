@@ -1033,3 +1033,22 @@ def test_an_interrupted_sendmmsg_on_a_route_lookup_socket_reaches_it_once(resume
 def test_the_model_servers_port_is_allowed_with_or_without_a_scheme(vllm_host, port):
     # Without `http://`, urlparse would read `localhost` as the scheme and find no port.
     assert EgressAudit.allowed_ports(vllm_host)[port] == "model server"
+
+
+@pytest.mark.parametrize(
+    "send",
+    [
+        # sendmsg names its destination in the message header.
+        '5 sendmsg(7<UDP:[1234]>, {msg_name={sa_family=AF_INET, sin_port=htons(443), '
+        'sin_addr=inet_addr("192.0.2.7")}, msg_namelen=16, msg_iov=[{iov_base="x", iov_len=1}], '
+        'msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 1\n',
+        # writev on a socket whose connect was only a route lookup sends to what it named.
+        '5 connect(7<UDP:[1234]>, {sa_family=AF_INET, sin_port=htons(443), '
+        'sin_addr=inet_addr("192.0.2.7")}, 16) = 0\n'
+        '5 writev(7<UDP:[1234]>, [{iov_base="x", iov_len=1}], 1) = 1\n',
+    ],
+)
+def test_a_payload_sent_with_sendmsg_or_writev_reaches_its_destination(send):
+    trace = StraceParser.parse('5 execve("/bin/true", ["true"], 0x0 /* 1 var */) = 0\n' + send)
+    assert trace.destinations == {"192.0.2.7:443": 1}
+    assert EgressAudit.judge(trace, ALLOWED, replied=True).status == FAIL
