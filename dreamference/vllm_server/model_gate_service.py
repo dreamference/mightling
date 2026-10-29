@@ -459,13 +459,15 @@ class ModelGateService:
         """Copies bytes as they arrive until the source ends, replacing one id with another of its length."""
         carry = b""
         while True:
-            data = await source.read(BUFFER)
+            read = data = await source.read(BUFFER)
             if replacement is not None:
                 data, carry = (
                     GateAdapters.replace_stream(data, carry, *replacement) if data else (carry, b"")
                 )
             if not data:
-                return
+                if not read:
+                    return
+                continue  # The whole read may be the start of the id: held back, not the end.
             sink.write(data)
             await sink.drain()
 

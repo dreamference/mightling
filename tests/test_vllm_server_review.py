@@ -123,3 +123,30 @@ def test_a_failed_docker_run_takes_down_the_gate_and_the_watchdog(monkeypatch, b
     # Left behind, the gate holds the public port and answers every request 502.
     assert stopped == [8000]
     assert mgr.watchdog is None or mgr.watchdog.stopped
+
+
+def test_the_gate_pipe_keeps_going_while_a_read_ends_inside_the_id(tmp_path):
+    import asyncio
+
+    from dreamference.vllm_server.model_gate_service import ModelGateService
+
+    old, new = b'"base:my-adapter"', b'"my-adapter-xyz1"'
+    chunks = [b'data: {"model": ', b'"base:', b"my-", b'adapter", "x": 1}\n\n']
+
+    class Source:
+        async def read(self, n):
+            return chunks.pop(0) if chunks else b""
+
+    class Sink:
+        sent = b""
+
+        def write(self, data):
+            Sink.sent += data
+
+        async def drain(self):
+            pass
+
+    asyncio.run(ModelGateService.pipe(Source(), Sink(), (old, new)))
+    # The third read ends inside the id again, so it alone has nothing to send yet.
+    assert Sink.sent == b'data: {"model": "my-adapter-xyz1", "x": 1}\n\n'
+
