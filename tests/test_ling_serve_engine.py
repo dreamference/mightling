@@ -68,10 +68,12 @@ def test_the_image_is_pinned_by_digest_and_the_engine_commit_is_a_full_hash():
     # must be the full hash an ancestry check takes.
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
     assert recipe["engine_commit"] == QWEN38_LING_ENGINE_COMMIT
-    # 1.7.2's engine: b8e9451 plus the parse-only tool-call fix (bdda3a2) and the tokenizer cache's
-    # mutex (8d112d0); no sparse head yet (ec9dce8).
-    assert QWEN38_LING_ENGINE_COMMIT.startswith("8d112d0")
-    assert recipe["engine_features"] == []
+    # 1.8.0's engine: ling-engine main at the merge of P4d (02704d4), paging off by default; it has
+    # the page pool and the sparse head.
+    assert QWEN38_LING_ENGINE_COMMIT.startswith("02704d4")
+    assert recipe["engine_features"] == ["kv-pages", "sparse-head"]
+    # The owner's decision of 2026-10-29: the recipe does not turn paging on at 1.8.0.
+    assert recipe["kv_pages"] is False
     assert re.fullmatch(r"[0-9a-f]{40}", QWEN38_LING_ENGINE_COMMIT)
     assert re.fullmatch(r"ghcr\.io/dreamference/ling-serve@sha256:[0-9a-f]{64}", QWEN38_LING_IMAGE)
     assert recipe["docker_image"] == QWEN38_LING_IMAGE
@@ -156,6 +158,8 @@ def test_every_flag_the_builder_emits_is_one_ling_serve_parses():
         "--batch",
         "--prefill-chunk-contended",
         "--side-prefill",
+        "--kv-pages",
+        "--vision",
     }
     for gate in (False, True):
         cmd = VLLMServerManager().build_launch_command(
@@ -445,6 +449,7 @@ def test_ling_serve_plan_runs_plan_only_in_the_image_and_reads_its_json_line(mon
     assert (
         cmd[-1] == "--plan-only"
         and "--rm" in cmd
+        and cmd[cmd.index("--gpus") + 1] == "all"  # libcuda comes from the container toolkit
         and cmd[cmd.index(QWEN38_LING_IMAGE) + 1] == "--model"
     )
     assert "--max-context" in cmd
@@ -452,8 +457,9 @@ def test_ling_serve_plan_runs_plan_only_in_the_image_and_reads_its_json_line(mon
     # recipe's features) is asked with the recipe's sessions, the pool and image input off; an engine
     # before the pool with none of them, so a pin moving across LING_ENGINE_KV_PAGES_SINCE changes both.
     paged = "kv-pages" in (recipe.get("engine_features") or [])
-    assert ("--sessions" in cmd) == paged
-    assert ("--kv-pages" in cmd) == paged
+    pooled = paged and bool(recipe.get("kv_pages"))
+    assert ("--sessions" in cmd) == pooled
+    assert ("--kv-pages" in cmd) == pooled
     assert ("--vision" in cmd and cmd[cmd.index("--vision") + 1] == "off") == paged
 
 
@@ -629,8 +635,12 @@ def test_image_input_is_off_on_a_paged_engine_and_untouched_on_an_older_one():
     # ling-engine 689690c, an ancestor of the page pool, so only a "kv-pages" engine is given it.
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
     assert recipe["vision"] is False
-    flat = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", recipe, 8000, 262144)
+    older = {**recipe, "engine_features": []}
+    flat = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", older, 8000, 262144)
     assert "--vision" not in flat
+    # The 1.8.0 pin has the flag, and the recipe's paging stays off with the tower.
+    pinned = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", recipe, 8000, 262144)
+    assert flag(pinned, "--vision") == "off" and "--kv-pages" not in pinned
     paged = LingServeLaunchBuilder.server_args(
         "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(), 8000, 262144
     )
@@ -690,6 +700,7 @@ def test_the_vision_switch_is_older_than_the_page_pool():
 def _paged_recipe(**changes):
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
     recipe["engine_features"] = ["kv-pages"]
+    recipe["kv_pages"] = True  # the recipe at 1.8.1: the pool on
     return {**recipe, **changes}
 
 
@@ -697,8 +708,14 @@ def test_the_recipe_asks_for_four_sessions_but_an_engine_without_the_pool_does_n
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
     assert recipe["sessions"] == recipe["batch"] == 4
     # At the 1.7.2 pin (no "kv-pages"): the engine's own sessions, no flag it may not parse.
-    flat = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", recipe, 8000, 262144)
+    older = {**recipe, "engine_features": []}
+    flat = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", older, 8000, 262144)
     assert not {"--sessions", "--batch", "--kv-pages"} & set(flat)
+    # At the 1.8.0 pin (paged engine, recipe's kv_pages off): the flat slots, nothing that turns the
+    # pool on or asks for four full flat contexts.
+    off = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", recipe, 8000, 262144)
+    assert not {"--sessions", "--batch", "--kv-pages"} & set(off)
+    assert "--vision" in off
     paged = LingServeLaunchBuilder.server_args(
         "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(), 8000, 262144
     )
