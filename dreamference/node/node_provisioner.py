@@ -58,6 +58,8 @@ CONTAINER_RUNNING: Final[str] = "true"
 # How often a model copy is started again while its connection keeps dropping (a node at
 # another site, reached over the internet), with a pause between: carrying on from the partial file.
 COPY_ATTEMPTS: Final[int] = 30
+# What `systemctl reboot` over ssh exits with when the connection goes down with the machine.
+REBOOT_DROPPED: Final[int] = 255
 
 # `--model-source` value: the node downloads the public weights itself.
 HUB_SOURCE: Final[str] = "hf"
@@ -378,7 +380,16 @@ class NodeProvisioner:
                 "the update failed",
                 f"ling-admin node provision {host} --os-update",
             )
-        session.sudo("systemctl reboot", password)
+        # ssh drops (255) as the machine goes down; any other failure (an inhibitor, a refused
+        # sudo) leaves the old kernel running and the machine answering as if it had come back.
+        reboot = session.sudo("systemctl reboot", password)
+        if reboot.returncode not in (0, REBOOT_DROPPED):
+            return self._fail(
+                host,
+                "OS update",
+                f"the reboot was refused: {(reboot.stderr or reboot.stdout).strip()[-200:]}",
+                f"sudo systemctl reboot on {host}, then ling-admin node provision {host}",
+            )
         session.close()
         if not self._wait_for_ssh(session):
             return self._fail(

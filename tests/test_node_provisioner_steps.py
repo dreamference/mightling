@@ -202,16 +202,18 @@ def test_choosing_keeps_only_numbers_that_name_a_listed_machine(provisioner, bro
 class Session:
     """Stands in for a `FleetSession`, recording what it is asked to run."""
 
-    def __init__(self, update_code: int = 0) -> None:
+    def __init__(self, update_code: int = 0, reboot_code: int = 0) -> None:
         self.host = "node-b"
         self.update_code = update_code
+        self.reboot_code = reboot_code
         self.ran: list = []
 
     def sudo(self, line, password):
-        """Records a sudo line and answers the update with `update_code`."""
+        """Records a sudo line and answers the update and the reboot with their codes."""
         self.ran.append(line)
+        code = {"dist-upgrade": self.update_code, "systemctl reboot": self.reboot_code}
         return subprocess.CompletedProcess(
-            [], self.update_code if "dist-upgrade" in line else 0, "", ""
+            [], next((value for key, value in code.items() if key in line), 0), "", ""
         )
 
     def run_admin(self, args, docker=False):
@@ -235,6 +237,19 @@ def test_a_failed_os_update_does_not_reboot(provisioner):
     assert provisioner._step_os_update("node-b", session) is False
     assert "systemctl reboot" not in session.ran
     assert provisioner.results["node-b"]["left"] == "ling-admin node provision node-b --os-update"
+
+
+def test_a_refused_reboot_fails_the_os_update_and_a_dropped_session_does_not(
+    provisioner, monkeypatch
+):
+    # A reboot that systemd refuses (an inhibitor) leaves the old kernel running: the machine
+    # still answers, so waiting for it proves nothing.
+    provisioner.options["os_update"] = True
+    monkeypatch.setattr(provisioner, "_wait_for_ssh", lambda session: True)
+    monkeypatch.setattr(provisioner, "_step_probe", lambda host, session: True)
+    assert provisioner._step_os_update("node-b", Session(reboot_code=1)) is False
+    assert "reboot" in provisioner.results["node-b"]["reason"]
+    assert provisioner._step_os_update("node-b", Session(reboot_code=255)) is True
 
 
 @pytest.mark.parametrize("failing", ["apt-get", "fwupdmgr"])
