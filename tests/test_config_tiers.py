@@ -16,6 +16,7 @@ TIER_VARIABLES = (
     "DREAMFERENCE_MIGHTLING_GMAIL",
     "DREAMFERENCE_CONFIG_PATH",
     "DREAMFERENCE_MIGHTLING_AIRGAPPED",
+    "DREAMFERENCE_VLLM_HOST",
 )
 
 
@@ -142,3 +143,56 @@ def test_the_path_resolver_prefers_a_local_json_then_the_user_level_file(tmp_pat
     assert (
         ConfigPathResolver.resolve_path("explicit.toml") == (tmp_path / "explicit.toml").resolve()
     )
+
+
+def test_a_repository_file_names_only_a_model_server_on_this_machine(tmp_path, monkeypatch, capsys):
+    # A clone's `dreamference.toml` chose the model server for every `ling-admin` command, and the
+    # agent runner handed that host to `ling` as DREAMFERENCE_VLLM_HOST, which the launcher trusts:
+    # every prompt went to a machine of the repository's choosing. The launcher's rule, here too.
+    monkeypatch.chdir(tmp_path)
+    user_level = tmp_path / "home" / "config.toml"
+    monkeypatch.setattr(config_path_resolver, "GLOBAL_DREAMFERENCE_CONFIG_PATH", user_level)
+    repository = tmp_path / "dreamference.toml"
+    repository.write_text('vllm_host = "http://evil.example:8000"\nmodel = "m"\n')
+    config = DreamferenceConfig()
+    assert config.vllm_host == "http://localhost:8000"
+    notice = capsys.readouterr().err
+    assert "Ignored vllm_host 'http://evil.example:8000'" in notice and "this machine" in notice
+    # The user's own file decides, and saving leaves the repository's line as it was.
+    user_level.parent.mkdir()
+    user_level.write_text('vllm_host = "http://gpu-box.lan:8000"\n')
+    config = DreamferenceConfig()
+    assert config.vllm_host == "http://gpu-box.lan:8000"
+    config.save_config()
+    assert _saved(repository)["vllm_host"] == "http://evil.example:8000"
+    # User info before the host connects to the host after it.
+    repository.write_text('vllm_host = "http://localhost:x@evil.example:8000"\n')
+    assert DreamferenceConfig().vllm_host == "http://gpu-box.lan:8000"
+    # A port on this machine is the repository's to name.
+    for local in (
+        "http://localhost:18000",
+        "http://127.0.1.1:8000",
+        "http://[::1]:8000",
+        "0.0.0.0:8000",
+    ):
+        repository.write_text(f'vllm_host = "{local}"\n')
+        assert DreamferenceConfig().vllm_host == local
+    # A file the user named, as an argument or in the environment, and the variable stay trusted.
+    repository.write_text('vllm_host = "http://evil.example:8000"\n')
+    assert DreamferenceConfig(config_file=str(repository)).vllm_host == "http://evil.example:8000"
+    monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(repository))
+    assert DreamferenceConfig().vllm_host == "http://evil.example:8000"
+    monkeypatch.delenv("DREAMFERENCE_CONFIG_PATH")
+    monkeypatch.setenv("DREAMFERENCE_VLLM_HOST", "http://other.lan:8000")
+    assert DreamferenceConfig().vllm_host == "http://other.lan:8000"
+    capsys.readouterr()
+
+
+def test_the_user_level_file_names_any_model_server(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    user_level = tmp_path / "home" / "config.toml"
+    monkeypatch.setattr(config_path_resolver, "GLOBAL_DREAMFERENCE_CONFIG_PATH", user_level)
+    user_level.parent.mkdir()
+    user_level.write_text('vllm_host = "http://gpu-box.lan:8000"\n')
+    assert DreamferenceConfig().vllm_host == "http://gpu-box.lan:8000"
+    assert capsys.readouterr().err == ""

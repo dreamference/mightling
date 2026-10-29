@@ -50,3 +50,26 @@ class ConfigPathResolver:
             return GLOBAL_DREAMFERENCE_CONFIG_PATH.resolve()
 
         return LOCAL_DREAMFERENCE_CONFIG_PATH.resolve()
+
+    @classmethod
+    def user_path(cls) -> Path:
+        """The user's own configuration file, `~/.config/dreamference/config.toml`."""
+        return GLOBAL_DREAMFERENCE_CONFIG_PATH
+
+    @classmethod
+    def is_repository_file(cls, path: Path, custom_path: str | None = None) -> bool:
+        """Whether `resolve_path` chose the working folder's own file.
+
+        That is a repository's, which a clone brings and the agent can write, rather than one the
+        user named or the user's own.
+
+        Args:
+            path (Path): The path `resolve_path(custom_path)` returned.
+            custom_path (str | None): The explicit path given to it, if any.
+
+        Returns:
+            bool: True for `./dreamference.toml` or `./dreamference.json`.
+        """
+        if custom_path or os.getenv("DREAMFERENCE_CONFIG_PATH"):
+            return False
+        return path.resolve() != GLOBAL_DREAMFERENCE_CONFIG_PATH.resolve()
