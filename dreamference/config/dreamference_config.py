@@ -613,18 +613,30 @@ class DreamferenceConfig:
                 if key in self.file_data:
                     data[key] = self.file_data[key]
 
-        # A repository's file keeps its network keys as they were and is never given one: it may not
-        # choose an address, and one written there would only be ignored.
-        if self._repository_file and out_path == self.config_file_path:
-            for key in sorted(NETWORK_KEYS):
-                value = data.pop(key, None)
-                if key in self._repository_network:
-                    data[key] = self._repository_network[key]
-                elif value is not None and value != self.file_data.get(key):
-                    print(f"⚠️  {key} not saved in {out_path}: a repository's own file may not choose a network "
-                          "address. Set it in ~/.config/dreamference/config.toml.")
-
+        self._keep_network_keys(data, out_path)
         return ConfigFileStorageManager.save_config_dict(out_path, data, owned=CONFIG_KEYS | RETIRED_KEYS)
+
+    def _keep_network_keys(self, data: dict[str, Any], out_path: Path) -> None:
+        """Leaves a repository's file's network keys as they were, and gives it none.
+
+        It may not choose an address, and one written there would only be ignored. Any other file
+        is left to save_config().
+
+        Args:
+            data: What save_config() is about to write, changed in place.
+            out_path: The file save_config() writes.
+        """
+        if not self._repository_file or out_path != self.config_file_path:
+            return
+        for key in sorted(NETWORK_KEYS):
+            value = data.pop(key, None)
+            if key in self._repository_network:
+                data[key] = self._repository_network[key]
+            elif value is not None and value != self.file_data.get(key):
+                sys.stderr.write(
+                    f"⚠️  {key} not saved in {out_path}: a repository's own file may not choose a network "
+                    "address. Set it in ~/.config/dreamference/config.toml.\n"
+                )
 
     def resolve_tool_call_parser(self) -> str:
         """
