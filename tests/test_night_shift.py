@@ -1157,6 +1157,21 @@ def test_enable_writes_absolute_paths_and_the_window(tmp_path, monkeypatch):
     assert not (NightShiftScheduler.unit_dir() / "mightling-night.timer").exists()
 
 
+def test_disable_says_so_and_keeps_the_timer_when_systemctl_cannot_stop_it(monkeypatch, capsys):
+    ok = staticmethod(lambda args: subprocess.CompletedProcess(args, 0, "", ""))
+    monkeypatch.setattr(NightShiftScheduler, "systemctl", ok)
+    monkeypatch.setattr(NightShiftScheduler, "lingering", classmethod(lambda cls: True))
+    assert NightShiftScheduler.enable("01:30-06:15")
+    monkeypatch.setattr(NightShiftScheduler, "systemctl", staticmethod(
+        lambda args: subprocess.CompletedProcess(args, 1, "", "Failed to connect to bus")))
+    assert not NightShiftScheduler.disable()
+    assert "❌" in capsys.readouterr().out
+    assert (NightShiftScheduler.unit_dir() / "mightling-night.timer").exists()
+    # With no timer installed there is nothing to stop.
+    (NightShiftScheduler.unit_dir() / "mightling-night.timer").unlink()
+    assert NightShiftScheduler.disable()
+
+
 def test_the_service_quotes_a_path_with_a_space(monkeypatch):
     # systemd splits ExecStart= and Environment= on whitespace unless quoted, and expands `%`.
     import shlex
