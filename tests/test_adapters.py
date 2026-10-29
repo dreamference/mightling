@@ -636,3 +636,29 @@ def test_an_installed_set_that_cannot_be_read_is_not_replaced_by_one_entry():
         AdapterStore.drop("rust")
     assert path.read_text(encoding="utf-8") == text
     assert AdapterStore.entries() == {}
+
+
+def test_the_third_party_confirmation_needs_a_terminal(monkeypatch, capsys):
+    # The name was read from stdin wherever it came from, so `printf 'rust\n' | ling-admin adapter
+    # install --third-party …` installed an unsigned adapter with nobody at the terminal.
+    import io
+
+    from dreamference.cli.adapter_command import AdapterCommand
+    from dreamference.hardware.adapter_manifest import AdapterManifest
+
+    manifest = AdapterManifest(
+        name="rust", display_name="Rust", version="1", description="d", base_repo=BASE_REPO,
+        base_revision="r", base_digest="d", rank=8, target_modules=("q_proj",),
+    )
+    piped = io.StringIO("rust\n")
+    monkeypatch.setattr("sys.stdin", piped)
+    assert AdapterCommand._confirm(manifest) is False
+    assert piped.read() == "rust\n", "nothing was read"
+    assert "terminal" in capsys.readouterr().out
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr("sys.stdin", Terminal("rust\n"))
+    assert AdapterCommand._confirm(manifest) is True
