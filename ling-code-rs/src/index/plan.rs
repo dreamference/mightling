@@ -382,7 +382,9 @@ pub fn detect(repo: &Repo) -> Vec<Target> {
                 out.push(Target::new(Kind::Static, "scip-python", &file));
             }
         }
-        if let Ok(manifest) = std::fs::read_to_string(path.join("Cargo.toml")) {
+        if let Some(manifest) =
+            crate::paths::read_repo_file(&path.join("Cargo.toml"), crate::paths::REPO_READ_CAP)
+        {
             let member_elsewhere =
                 manifest.contains(".workspace = true") && !manifest.contains("[workspace]");
             if !member_elsewhere

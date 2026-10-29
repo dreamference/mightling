@@ -263,9 +263,80 @@ fn open_state_file(
     Ok(file)
 }
 
+/// The most ling-code reads of a state file it wrote itself (`scip/manifest.json` holds a stamp per
+/// indexed file, so a large repository's runs to tens of megabytes).
+pub const STATE_READ_CAP: u64 = 256 << 20;
+
+/// The most ling-code reads of a repository's own small text file (`Cargo.toml`, `dreamference.toml`).
+pub const REPO_READ_CAP: u64 = 1 << 20;
+
+/// A state file ling-code wrote itself, read as text: never through a symlink, never from a FIFO
+/// or a device, and None past `cap` bytes. A clone can commit its `.dreamference` with any of
+/// those in it, and these reads run outside the sandbox and outside any memory cap.
+pub fn read_state_file(path: &Path, cap: u64) -> Option<String> {
+    read_capped(path, cap, false)
+}
+
+/// A repository's file read as text: a symlink is followed (a checkout may link its own files),
+/// but only a regular file of at most `cap` bytes is read, never a FIFO, a device or more.
+pub fn read_repo_file(path: &Path, cap: u64) -> Option<String> {
+    read_capped(path, cap, true)
+}
+
+fn read_capped(path: &Path, cap: u64, follow: bool) -> Option<String> {
+    use std::io::Read;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    // No blocking on a FIFO with no writer; the type check below then refuses it.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        libc::O_NONBLOCK | if follow { 0 } else { libc::O_NOFOLLOW },
+    );
+    let file = options.open(path).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.len() > cap {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(cap + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > cap {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
 #[cfg(all(test, unix))]
 mod state_file_tests {
     use super::*;
+
+    #[test]
+    fn capped_reads_refuse_links_fifos_devices_and_oversized_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "secret").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert_eq!(read_state_file(&link, 64), None);
+        assert_eq!(read_repo_file(&link, 64).as_deref(), Some("secret"));
+        assert_eq!(read_state_file(&outside, 64).as_deref(), Some("secret"));
+
+        // A FIFO with no writer would block a plain open forever.
+        let fifo = dir.path().join("fifo");
+        let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        assert_eq!(read_state_file(&fifo, 64), None);
+        assert_eq!(read_repo_file(&fifo, 64), None);
+        let to_device = dir.path().join("to_device");
+        std::os::unix::fs::symlink("/dev/null", &to_device).unwrap();
+        assert_eq!(read_repo_file(&to_device, 64), None);
+
+        let big = dir.path().join("big");
+        std::fs::write(&big, "x".repeat(65)).unwrap();
+        assert_eq!(read_state_file(&big, 64), None);
+        assert_eq!(read_repo_file(&big, 64), None);
+        assert!(read_repo_file(&big, 65).is_some());
+    }
 
     #[test]
     fn a_planted_symlink_is_refused_and_its_target_left_alone() {

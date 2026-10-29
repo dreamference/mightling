@@ -118,7 +118,7 @@ impl Settings {
         let Some(table) = settings
             .config_path
             .as_ref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|p| crate::paths::read_repo_file(p, crate::paths::REPO_READ_CAP))
             .and_then(|t| t.parse::<toml::Table>().ok())
         else {
             return;

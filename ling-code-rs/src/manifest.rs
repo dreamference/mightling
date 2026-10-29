@@ -114,10 +114,12 @@ pub struct Manifest {
 
 impl Manifest {
     pub fn load(scip_dir: &Path) -> Manifest {
-        std::fs::read_to_string(scip_dir.join("manifest.json"))
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
+        crate::paths::read_state_file(
+            &scip_dir.join("manifest.json"),
+            crate::paths::STATE_READ_CAP,
+        )
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
     }
 
     /// Writes the manifest atomically (temporary file, then rename).
@@ -149,7 +151,10 @@ pub struct GraphSnapshot {
 
 impl GraphSnapshot {
     pub fn load(scip_dir: &Path) -> Option<GraphSnapshot> {
-        let text = std::fs::read_to_string(scip_dir.join("graph.json")).ok()?;
+        let text = crate::paths::read_state_file(
+            &scip_dir.join("graph.json"),
+            crate::paths::STATE_READ_CAP,
+        )?;
         serde_json::from_str(&text).ok()
     }
 
@@ -199,6 +204,29 @@ pub fn now_rfc3339() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_manifest_or_graph_link_is_not_followed() {
+        // A clone can commit `.dreamference/scip/` with links to anything, /dev/zero included.
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        let mut planted = Manifest::default();
+        planted
+            .runs
+            .insert("scip-python:.".into(), RunEntry::default());
+        planted.save(&outside).unwrap();
+        GraphSnapshot::default().save(&outside).unwrap();
+        assert_eq!(Manifest::load(&outside).runs.len(), 1);
+        let scip = dir.path().join("scip");
+        std::fs::create_dir(&scip).unwrap();
+        for name in ["manifest.json", "graph.json"] {
+            std::os::unix::fs::symlink(outside.join(name), scip.join(name)).unwrap();
+        }
+        assert!(Manifest::load(&scip).runs.is_empty());
+        assert!(GraphSnapshot::load(&scip).is_none());
+    }
 
     #[test]
     fn file_stamp_and_sha256_record_file_metadata_and_digest() {
