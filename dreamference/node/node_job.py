@@ -1096,7 +1096,8 @@ class NodeJob:
         position = max(0, offset)
         while True:
             record = cls.reconcile(job_id) or {}
-            finished = record.get("status") in FINAL_STATUSES
+            # A record that is gone (pruned while its log was read) never finishes.
+            finished = not record or record.get("status") in FINAL_STATUSES
             try:
                 with open(log, "rb") as handle:
                     handle.seek(position)

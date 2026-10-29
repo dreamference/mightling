@@ -3005,3 +3005,20 @@ def test_a_forced_command_ending_in_a_backslash_is_refused():
     # that follow would become part of the command.
     with pytest.raises(ValueError):
         NodePairing.authorized_line(PUBLIC_KEY, "/x node serve-job --key a\\")
+
+
+def test_following_a_job_whose_record_is_gone_ends(job_node, monkeypatch):
+    import threading
+
+    from dreamference.node import NodeJob
+
+    # A finished job pruned while its log is still being read leaves no record behind.
+    monkeypatch.setattr(NodeJob, "reconcile", classmethod(lambda cls, job_id: None))
+    result = []
+    follower = threading.Thread(
+        target=lambda: result.append(NodeJob.follow("20261002-1200-fed", poll_s=0.01)),
+        daemon=True,
+    )
+    follower.start()
+    follower.join(timeout=5)
+    assert result == [1]
