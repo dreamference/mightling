@@ -448,11 +448,15 @@ pub fn is_trusted(codex_home: &Path, root: &Path) -> bool {
 }
 
 /// For a linked worktree, whose `.git` is a file saying `gitdir: <main>/.git/worktrees/<name>`,
-/// the main worktree's root.
+/// the main worktree's root. That folder must name this `.git` back (its `gitdir` file): the `.git`
+/// file alone is the folder's to write, so it cannot borrow a trusted repository's trust.
 fn main_worktree(root: &Path) -> Option<PathBuf> {
     let text = std::fs::read_to_string(root.join(".git")).ok()?;
     let gitdir = PathBuf::from(text.strip_prefix("gitdir:")?.trim());
     let gitdir = if gitdir.is_absolute() { gitdir } else { root.join(gitdir) };
+    let back = PathBuf::from(std::fs::read_to_string(gitdir.join("gitdir")).ok()?.trim());
+    let back = if back.is_absolute() { back } else { gitdir.join(back) };
+    (std::fs::canonicalize(back).ok()? == std::fs::canonicalize(root.join(".git")).ok()?).then_some(())?;
     let worktrees = gitdir.parent()?;
     (worktrees.file_name()? == "worktrees").then_some(())?;
     let dot_git = worktrees.parent()?;
