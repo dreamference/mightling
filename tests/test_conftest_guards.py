@@ -3,10 +3,19 @@
 import os
 import socket
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
-from conftest import INSTALLED_BINARY_DIRS, MODEL_SERVER_PORTS, REAL_HOME, _installed_binary
+from conftest import (
+    INSTALLED_BINARY_DIRS,
+    MODEL_SERVER_PORTS,
+    REAL_HOME,
+    _classes_defined_in,
+    _installed_binary,
+    _under_real_home,
+)
 
 
 def test_the_installed_binaries_are_recognised_by_path_link_and_name(tmp_path, monkeypatch):
@@ -69,3 +78,18 @@ def test_connecting_to_the_model_server_fails_the_test(listener, monkeypatch):
         other.listen(1)
         with socket.create_connection(other.getsockname(), timeout=2):
             pass
+
+
+def test_no_path_of_the_code_points_into_the_real_home():
+    # A class's own constant counts as much as a module's: the tensorizer cache once sent a test to
+    # write and delete a model's file in the real ~/.cache.
+    from dreamference.hardware.model_downloader import ModelDownloader
+
+    assert str(ModelDownloader.TENSORIZER_CACHE_HOME).startswith(os.environ["HOME"] + os.sep)
+    assert not _under_real_home(ModelDownloader.get_tensorized_dir("any-model"))
+    left = [f"{owner.__name__}.{attribute}"
+            for name, module in list(sys.modules.items()) if module and name.startswith("dreamference")
+            for owner in [module, *_classes_defined_in(module)]
+            for attribute, value in vars(owner).items()
+            if isinstance(value, (str, Path)) and _under_real_home(value)]
+    assert left == []

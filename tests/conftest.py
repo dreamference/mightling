@@ -7,6 +7,7 @@ container. Its successors are below: no real `docker` command that changes somet
 systemd unit, and the one-time offer to remove Onyx's leftovers never made.
 """
 
+import inspect
 import os
 import sys
 import threading
@@ -390,16 +391,29 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     # test model's signature, so the next real `server start` saw a mismatch and discarded a
     # 467 MB torch.compile cache (an 8-12 minute recompile). Every string or Path attribute of a
     # dreamference module that lies under the real home is re-pointed at the same place under the
-    # test's home -- including copies another module took with `from ... import`.
+    # test's home -- including copies another module took with `from ... import`. So is every such
+    # attribute of a class the module defines: `ModelDownloader.TENSORIZER_CACHE_HOME` led a test to
+    # write, then delete, a model's tensorized file in the real ~/.cache (2026-10-29).
     for module_name, module in list(sys.modules.items()):
         if module is None or not (module_name == "dreamference" or module_name.startswith("dreamference.")):
             continue
-        for attribute, value in list(vars(module).items()):
-            if attribute.startswith("__"):
-                continue
-            if isinstance(value, (str, Path)) and _under_real_home(value):
-                relocated = home / os.path.relpath(str(value), REAL_HOME)
-                monkeypatch.setattr(module, attribute, type(value)(relocated) if isinstance(value, Path) else str(relocated))
+        for owner in [module, *_classes_defined_in(module)]:
+            _relocate_paths(owner, home, monkeypatch)
+
+
+def _relocate_paths(owner, home: Path, monkeypatch) -> None:
+    for attribute, value in list(vars(owner).items()):
+        if attribute.startswith("__"):
+            continue
+        if isinstance(value, (str, Path)) and _under_real_home(value):
+            relocated = home / os.path.relpath(str(value), REAL_HOME)
+            monkeypatch.setattr(owner, attribute, type(value)(relocated) if isinstance(value, Path) else str(relocated))
+
+
+def _classes_defined_in(module) -> list:
+    """The module's own classes, not those it imported: each is relocated once, where it lives."""
+    return [value for value in vars(module).values()
+            if inspect.isclass(value) and value.__module__ == module.__name__]
 
 
 def _under_real_home(value) -> bool:
