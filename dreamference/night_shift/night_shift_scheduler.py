@@ -135,16 +135,16 @@ class NightShiftScheduler:
             bool: True on success; False, with the unit files kept, when the timer could not be stopped.
         """
         stopped = cls.systemctl(["disable", "--now", f"{UNIT}.timer"])
-        if stopped.returncode != 0 and (cls.unit_dir() / f"{UNIT}.timer").exists():
-            print(f"❌ systemctl --user disable --now {UNIT}.timer: {stopped.stderr.strip()}")
-            return False
-        for suffix in ("timer", "service"):
-            path = cls.unit_dir() / f"{UNIT}.{suffix}"
-            if path.exists():
-                path.unlink()
-        cls.systemctl(["daemon-reload"])
-        print("✅ Night Shift disabled.")
-        return True
+        disabled = stopped.returncode == 0 or not (cls.unit_dir() / f"{UNIT}.timer").exists()
+        if disabled:
+            for suffix in ("timer", "service"):
+                path = cls.unit_dir() / f"{UNIT}.{suffix}"
+                if path.exists():
+                    path.unlink()
+            cls.systemctl(["daemon-reload"])
+        print("✅ Night Shift disabled." if disabled
+              else f"❌ systemctl --user disable --now {UNIT}.timer: {stopped.stderr.strip()}")
+        return disabled
 
     @classmethod
     def status(cls) -> str:

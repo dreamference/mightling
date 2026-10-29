@@ -156,9 +156,7 @@ class NightShiftHost:
             does not answer.
         """
         try:
-            with cls.urlopen(
-                f"{host.rstrip('/')}/v1/models", timeout=timeout
-            ) as response:
+            with cls.urlopen(f"{host.rstrip('/')}/v1/models", timeout=timeout) as response:
                 data = json.load(response)
             model = data["data"][0]
             return str(model["id"]), int(model.get("max_model_len") or 0)

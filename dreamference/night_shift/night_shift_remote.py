@@ -278,6 +278,15 @@ class NightShiftRemote:
         return 2
 
     @classmethod
+    def _held(cls, night_dir: Path, task_id: str, base: str, text: str, sender: str) -> dict[str, Any]:
+        """Answers the same task sent again after its answer was lost (ssh 255); refuses another one."""
+        existing = NightShiftQueue.read(night_dir, task_id) or {}
+        if (existing.get("base"), existing.get("task"), (existing.get("remote") or {}).get("sender")) != (
+                base, text, sender):
+            raise ValueError(f"a task {task_id} already exists on this node; queue it again for a new id")
+        return {"status": existing.get("status") or "queued", "note": "this node already holds it"}
+
+    @classmethod
     def accept(cls, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Queues a task from another machine in this node's own Night Shift queue. Everything here
@@ -320,12 +329,7 @@ class NightShiftRemote:
         tasks_dir.mkdir(parents=True, exist_ok=True)
         path = tasks_dir / f"{task_id}.json"
         if path.exists():
-            # The same task sent again after its answer was lost (ssh 255) is already queued here.
-            existing = NightShiftQueue.read(night_dir, task_id) or {}
-            if (existing.get("base"), existing.get("task"), (existing.get("remote") or {}).get("sender")) == (
-                    base, text, str(request.get("sender") or "")[:100]):
-                return {"status": existing.get("status") or "queued", "note": "this node already holds it"}
-            raise ValueError(f"a task {task_id} already exists on this node; queue it again for a new id")
+            return cls._held(night_dir, task_id, base, text, str(request.get("sender") or "")[:100])
         author = request.get("author") if isinstance(request.get("author"), dict) else {}
         now = NightShiftQueue.now()
         record = {
