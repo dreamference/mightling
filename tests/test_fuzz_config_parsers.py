@@ -359,11 +359,12 @@ def test_a_saved_configuration_loads_back_to_the_same_settings(seed, tmp_path, m
         suffix = rng.pick((".json", ".yaml", ".toml"))
         path = tmp_path / f"saved{index % 5}{suffix}"
         path.unlink(missing_ok=True)
-        config = DreamferenceConfig(config_file=str(path))
+        # Only a token named as an argument is saved; one set later, like one from the environment, is not.
+        token = rng.pick((None, "tok", "t=k", 't"k', "t#k"))
+        config = DreamferenceConfig(config_file=str(path), hf_token=token)
         config.vllm_host = rng.pick(STRING_VALUES[:4]) or "http://h:1"
         config.model = rng.pick(("alpha", "a=b", 'q"uote', "back\\slash", "h#sh", "col:on"))
         config.draft_model = rng.pick((None, "d", "d=1", "e#f"))
-        config.hf_token = rng.pick((None, "tok", "t=k", 't"k', "t#k"))
         config.num_speculative_tokens = rng.below(40)
         config.mightling_airgapped = rng.pick(LEVELS)
         config.mightling_refine = rng.chance(1, 2)

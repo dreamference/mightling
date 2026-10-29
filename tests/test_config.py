@@ -226,7 +226,5 @@ def test_toml_strings_with_escaped_quotes_are_read_as_written(tmp_path):
     path = tmp_path / "quotes.toml"
     path.write_text('a = "\\"\\"no::,off1,"\nb = "\\""\n')
     assert ConfigFileStorageManager.load_config_dict(path) == {"a": '""no::,off1,', "b": '"'}
-    config = DreamferenceConfig(config_file=str(path))
-    config.hf_token = '""token'
-    config.save_config()
+    DreamferenceConfig(config_file=str(path), hf_token='""token').save_config()
     assert DreamferenceConfig(config_file=str(path)).hf_token == '""token'
