@@ -86,6 +86,16 @@ def test_fetch_hands_back_text_that_is_not_markup_as_it_is(online):
     assert WebTools.fetch("https://example.org")["text"] == "<not> markup"
 
 
+@pytest.mark.parametrize("content_type", ["text/html", "text/plain"])
+def test_fetch_reads_a_page_that_names_an_unknown_charset_as_utf8(online, content_type):
+    # The charset comes from the page's server: an unknown one used to raise LookupError out of a
+    # tool whose errors are returned, not raised.
+    online.return_value = Page(
+        "café".encode(), content_type=content_type, encoding="x-no-such-charset"
+    )
+    assert WebTools.fetch("https://example.org")["text"] == "café"
+
+
 def test_search_at_air_gap_on_or_with_an_empty_query_makes_no_request(monkeypatch, online):
     assert WebTools.search("   ")["error"] == "empty query"
     monkeypatch.setattr(WebTools, "airgapped_level", classmethod(lambda cls: "on"))
