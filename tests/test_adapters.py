@@ -688,3 +688,12 @@ def test_two_concurrent_changes_to_the_installed_set_both_land(monkeypatch):
     first.join(5)
     second.join(5)
     assert sorted(AdapterStore.entries()) == ["go", "rust"]
+
+
+@pytest.mark.parametrize("header", [[], ["q_proj"], "text", 7, None])
+def test_a_safetensors_header_that_is_not_an_object_is_refused_as_not_safetensors(tmp_path, header):
+    text = json.dumps(header).encode()
+    weights = tmp_path / "adapter_model.safetensors"
+    weights.write_bytes(struct.pack("<Q", len(text)) + text)
+    with pytest.raises(ValueError, match="is not a safetensors file"):
+        AdapterVerifier.check_tensors(weights, {"q_proj"})
