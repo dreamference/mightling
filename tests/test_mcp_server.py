@@ -204,3 +204,25 @@ def test_a_request_longer_than_64_kib_is_answered_and_the_server_keeps_answering
     replies = _stdio_replies(tmp_path, (json.dumps(big) + "\n" + json.dumps(ping) + "\n").encode())
     assert [r.get("id") for r in replies] == [1, 2]
     assert "result" in replies[0]
+
+
+def test_code_search_does_not_build_the_context_index_during_a_night_run(tmp_path, monkeypatch):
+    # `ling-admin index` waits while a Night Shift or SWE-bench run holds the runner lock; the MCP
+    # server's first search built the same index (a process pool and the embedding model) anyway.
+    from unittest.mock import MagicMock
+
+    from dreamference.night_shift import NightShiftQueue
+
+    engine = MagicMock()
+    engine.index_file.exists.return_value = False
+    monkeypatch.setattr(MCPServer, "context_engine", property(lambda self: engine))
+    monkeypatch.setattr("dreamference.mcp_server.code_index_search.INSTALL_DIR", str(tmp_path / "nowhere"))
+    monkeypatch.setattr(NightShiftQueue, "runner_holder", classmethod(lambda cls, night_dir=None: "a SWE-bench run"))
+    result = MCPServer().execute_tool("workspace_search_code", {"query": "x"})
+    assert engine.index_workspace.call_count == 0
+    assert "SWE-bench run" in result["error"] and "swe-bench status" in result["error"]
+
+    # An index already on disk is only read, so it still answers.
+    engine.index_file.exists.return_value = True
+    engine.search_code.return_value = [{"rel_path": "x.py", "score": 1.0}]
+    assert MCPServer().execute_tool("workspace_search_code", {"query": "x"}) == [{"rel_path": "x.py", "score": 1.0}]

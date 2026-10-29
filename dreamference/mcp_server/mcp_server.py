@@ -8,7 +8,7 @@ enabling Codex, JetBrains, and VS Code companion tools.
 import sys
 import json
 import asyncio
-from typing import Dict, Any, List, Optional, Final, TYPE_CHECKING
+from typing import Dict, Any, Optional, Final, TYPE_CHECKING
 if TYPE_CHECKING:
     from dreamference.context_engine import ContextEngine
 from dreamference.mcp_server.ide_state import IDEState
@@ -20,6 +20,29 @@ global_ide_state: Final[IDEState] = IDEState()
 # The longest request line read from stdin. asyncio's default is 64 KiB, and a longer line (a diff
 # for `ide_apply_diff` easily is one) used to raise out of the loop and end the server.
 LINE_LIMIT: Final[int] = 16 * 1024 * 1024
+
+# How the runner lock's holder names a SWE-bench run, which has its own status command.
+SWE_BENCH_HOLDER: Final[str] = "SWE-bench"
+
+
+def _night_run_refusal() -> str | None:
+    """
+    Says why the context index is not built now, as `ling-admin index` would.
+
+    Building it (a process pool and the embedding model) waits while a Night Shift or SWE-bench
+    run holds the runner lock (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §6.2).
+
+    Returns:
+        str | None: The message, or None when nothing holds the lock.
+    """
+    from dreamference.night_shift import NightShiftQueue
+    holder = NightShiftQueue.runner_holder()
+    if not holder:
+        return None
+    where = "swe-bench status" if SWE_BENCH_HOLDER in holder else "night status"
+    return (f"{holder[0].upper()}{holder[1:]} is in progress, so this workspace is not indexed "
+            f"until it ends: see `ling-admin {where}`.")
+
 
 class MCPServer:
     """
@@ -179,11 +202,14 @@ class MCPServer:
             # The code index router answers when it is installed and this workspace is indexed
             # (milliseconds, no model); otherwise the context engine does, as before. Both block,
             # so both run in the thread pool.
-            def _do_search() -> List[Dict[str, Any]]:
+            def _do_search() -> list[dict[str, Any]] | dict[str, str]:
                 from dreamference.mcp_server.code_index_search import CodeIndexSearch
                 indexed = CodeIndexSearch.search(query, top_k=top_k)
                 if indexed is not None:
                     return indexed
+                refusal = None if self.context_engine.index_file.exists() else _night_run_refusal()
+                if refusal:
+                    return {"error": refusal}
                 self.context_engine.index_workspace()
                 return self.context_engine.search_code(query, top_k=top_k)
             return await asyncio.to_thread(_do_search)
