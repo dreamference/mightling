@@ -133,10 +133,11 @@ def _no_browse_wait(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_passwordless_sudo(monkeypatch):
     # Whether sudo needs a password on this machine must not decide a test, and asking it is a
-    # real sudo; a test of the no-password path says so itself.
+    # real sudo; a test of the no-password path says so itself. The same for a node's root helper.
     from dreamference.vllm_server import HostSafetySetup
 
     monkeypatch.setattr(HostSafetySetup, "passwordless_sudo", classmethod(lambda cls: False))
+    monkeypatch.setattr(HostSafetySetup, "helper_works", classmethod(lambda cls: False), raising=False)
 
 
 @pytest.fixture(autouse=True)

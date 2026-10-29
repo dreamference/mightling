@@ -1694,7 +1694,7 @@ class DreamferenceCLIController:
                  "Hugging Face, each file is checked by SHA-256, only what the Hub lacks is sent from here")
         node_provision_parser.add_argument(
             "--role", choices=["night", "engine"], default=None,
-            help="Also leave it as a night or engine node: main key, docker, agents' sudoers, key-only SSH, "
+            help="Also leave it as a night or engine node: main key, docker, the root helper sudo allows, key-only SSH, "
                  "the role's setup and a readiness report (docs/dev/node.md)")
         node_subparsers.add_parser("prepare", help="(Run with sudo) the root steps of a node install, for the user who ran sudo, and nothing else")
         node_subparsers.add_parser("askpass", help=argparse.SUPPRESS)

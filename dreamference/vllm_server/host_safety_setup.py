@@ -37,8 +37,10 @@ import shutil
 import signal
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
+from dreamference.vllm_server.host_root_helper import HELPER_PATH
 from dreamference.vllm_server.vllm_server_manager import (
     EARLYOOM_ARGS,
     MIN_FREE_KBYTES,
@@ -53,6 +55,8 @@ EARLYOOM_DEFAULTS: Final[str] = "/etc/default/earlyoom"
 FSTAB: Final[str] = "/etc/fstab"
 # How long `sudo -n true` may take to say whether sudo would ask for a password.
 SUDO_PROBE_SECONDS: Final[int] = 10
+# `root_mode` when sudo runs a role node's root helper, and nothing else, without a password.
+HELPER_MODE: Final[str] = "helper"
 DOCKER_SOCKET: Final[str] = "/var/run/docker.sock"
 # Where NVIDIA documents installing the two things DGX OS ships and a plain Ubuntu does not. Every
 # GB10 machine ships DGX OS (HP and Lenovo also document Ubuntu 24.04), so these matter only to a
@@ -125,7 +129,7 @@ class HostSafetySetup:
         if not steps:
             cls._say("✅ Host setup: nothing to do. This machine has what a model load and ling's sandbox need.")
             return True
-        mode = cls.root_mode(yes)
+        mode = cls.root_mode(yes, helper=True)
         if mode is None:
             reason = ("sudo needs a password and --yes never waits for one" if yes
                       else "sudo cannot ask for a password here (no terminal)")
@@ -137,8 +141,9 @@ class HostSafetySetup:
                 cls._describe(number, step)
                 if mode is None or step.get("manual"):
                     continue
-                for command in step["commands"]:
-                    if not cls._run_as_root(command, mode):
+                commands, run_mode = cls._step_commands(step, mode)
+                for command in commands:
+                    if not cls._run_as_root(command, run_mode):
                         cls._say(f"❌ That command failed; the rest of \"{step['name']}\" was skipped.")
                         break
         finally:
@@ -158,17 +163,41 @@ class HostSafetySetup:
         return False
 
     @classmethod
-    def root_mode(cls, yes: bool = False) -> Optional[str]:
+    def _step_commands(cls, step: dict[str, Any], mode: str) -> tuple[list[list[str]], str]:
+        """Return the commands that apply one step's fix, and the root mode to run them in.
+
+        Args:
+            step: One of `steps()`.
+            mode: What `root_mode` decided.
+
+        Returns:
+            tuple[list[list[str]], str]: The step's commands as they are, or, when sudo allows only
+            a role node's root helper, the helper's verbs for it run with `sudo -n` (none, said so,
+            when the helper does not do this fix).
+        """
+        if mode != HELPER_MODE:
+            return step["commands"], mode
+        # A role node's sudoers allows its root helper and nothing else.
+        commands = [[HELPER_PATH, *argv] for argv in step.get("helper", [])]
+        if not commands:
+            cls._say("⚠️  The node's root helper does not do this one; run `ling-admin host setup` in a terminal.")
+        return commands, "sudo -n"
+
+    @classmethod
+    def root_mode(cls, yes: bool = False, helper: bool = False) -> Optional[str]:
         """
         Decides how a command is run as root, running nothing that changes the machine.
 
         Args:
             yes: Never wait for input, so a password prompt is not an option.
+            helper: The caller can run its commands as the role node's root helper's verbs
+                (only `setup` can).
 
         Returns:
             Optional[str]: `root` (this process is root, so no sudo), `sudo` (sudo may ask on this
-            terminal), `sudo -n` (sudo needs no password: a NOPASSWD rule or a fresh timestamp), or
-            None when root cannot be had without asking someone who is not there.
+            terminal), `sudo -n` (sudo needs no password: a NOPASSWD rule or a fresh timestamp),
+            `helper` (sudo runs only `HELPER_PATH` without one), or None when root cannot be had
+            without asking someone who is not there.
         """
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             return "root"
@@ -176,7 +205,9 @@ class HostSafetySetup:
             return None
         if not yes and sys.stdin.isatty():
             return "sudo"
-        return "sudo -n" if cls.passwordless_sudo() else None
+        if cls.passwordless_sudo():
+            return "sudo -n"
+        return HELPER_MODE if helper and cls.helper_works() else None
 
     @classmethod
     def passwordless_sudo(cls) -> bool:
@@ -187,6 +218,21 @@ class HostSafetySetup:
         try:
             return subprocess.run(["sudo", "-n", "true"], stdin=subprocess.DEVNULL, capture_output=True,
                                   timeout=SUDO_PROBE_SECONDS, check=False).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    @classmethod
+    def helper_works(cls) -> bool:
+        """Return True if the role node's root helper is installed and sudo runs it without asking.
+
+        Returns:
+            bool: Whether `sudo -n HELPER_PATH probe` succeeds.
+        """
+        if not Path(HELPER_PATH).is_file():
+            return False
+        try:
+            return subprocess.run(["sudo", "-n", HELPER_PATH, "probe"], stdin=subprocess.DEVNULL,
+                                  capture_output=True, timeout=SUDO_PROBE_SECONDS, check=False).returncode == 0
         except (OSError, subprocess.SubprocessError):
             return False
 
@@ -220,6 +266,7 @@ class HostSafetySetup:
                 ["sed", "-i", 's/^ENABLED=.*/ENABLED="true"/', "/etc/default/sysstat"],
                 ["systemctl", "enable", "--now", "sysstat"],
             ],
+            "helper": [["sysstat"]],
         }
 
     @classmethod
@@ -233,6 +280,7 @@ class HostSafetySetup:
                 "name": "arm earlyoom",
                 "why": "it is running with thresholds that can never fire, or that kill healthy loads, on this hardware",
                 "commands": [write_args, ["systemctl", "restart", "earlyoom"]],
+                "helper": [["earlyoom"]],
             }
         return {
             "name": "install and arm earlyoom",
@@ -243,6 +291,7 @@ class HostSafetySetup:
                 ["systemctl", "enable", "earlyoom"],
                 ["systemctl", "restart", "earlyoom"],
             ],
+            "helper": [["earlyoom"]],
         }
 
     @classmethod
@@ -304,6 +353,7 @@ class HostSafetySetup:
                 return step
             make.insert(0, ["swapoff", SWAP_FILE])
         step["commands"] = make
+        step["helper"] = [["swap"]]
         return step
 
     @classmethod
@@ -327,6 +377,7 @@ class HostSafetySetup:
                     # Kept across reboots, and written once however often this runs.
                     ["sh", "-c", f"grep -qx '{line}' {SYSCTL_FILE} 2>/dev/null || echo '{line}' >> {SYSCTL_FILE}"],
                 ],
+                "helper": [["sysctl", name]],
             })
         return steps
 
@@ -365,6 +416,7 @@ class HostSafetySetup:
             "why": f"{user} is not in the docker group, so every docker command Mightling runs is refused; "
                    f"it takes effect at your next login",
             "commands": [["usermod", "-aG", "docker", user]],
+            "helper": [["docker-group"]],
         }
 
     @classmethod
@@ -384,10 +436,12 @@ class HostSafetySetup:
             # it; a machine installed as Ubuntu Server does not. Codex falls back to a bundled copy
             # Mightling does not install, and Night Shift, node jobs and the code indexers call the
             # system one, so it is installed, with the profile at the same time where it is needed.
+            profile = SandboxPrerequisite.fix_commands() or []
             return {
                 "name": "install bubblewrap",
                 "why": "`ling`'s command sandbox, Night Shift tasks, node jobs and the code indexers all run in it",
-                "commands": [["apt-get", "install", "-y", "bubblewrap"], *(SandboxPrerequisite.fix_commands() or [])],
+                "commands": [["apt-get", "install", "-y", "bubblewrap"], *profile],
+                "helper": [["bubblewrap"], *cls._profile_helper(profile)],
             }
         if cls.sandbox_works() is not False:
             return None
@@ -406,7 +460,18 @@ class HostSafetySetup:
         # An AppArmor profile for bubblewrap alone, the shape of Ubuntu's own for sandboxing
         # programs; see sandbox_prerequisite.py for why not the sysctl.
         step["commands"] = commands
+        step["helper"] = cls._profile_helper(commands)
         return step
+
+    @classmethod
+    def _profile_helper(cls, commands: list[list[str]]) -> list[list[str]]:
+        """Return the root helper's verb for the profile fix, if it is the helper's to do.
+
+        The helper installs our profile and loads it; with another profile attaching to
+        bubblewrap (`fix_commands`' other answer) it has nothing to do, and a terminal does it.
+        """
+        from dreamference.vllm_server.sandbox_prerequisite import PROFILE_PATH
+        return [["bwrap-profile"]] if commands and commands[-1] == ["apparmor_parser", "-r", PROFILE_PATH] else []
 
     @classmethod
     def _wifi_step(cls) -> Optional[Dict[str, Any]]:
