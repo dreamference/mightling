@@ -190,9 +190,11 @@ def test_a_session_the_night_run_started_is_not_counted_as_interactive(tmp_path)
     installed.parent.mkdir()
     shutil.copy("/bin/bash", installed)
     marked = dict(os.environ, MIGHTLING_NIGHT_RUN="1")
+    # A suite run by Night Shift's own test step inherits the marker: the user's session must not.
+    unmarked = {name: value for name, value in os.environ.items() if name != "MIGHTLING_NIGHT_RUN"}
     # `sleep 30; :` keeps bash itself running: a lone command would be exec'd in its place.
     night = subprocess.Popen([str(installed), "-c", "sleep 30; :"], env=marked)
-    user = subprocess.Popen([str(installed), "-c", "sleep 30; :"])
+    user = subprocess.Popen([str(installed), "-c", "sleep 30; :"], env=unmarked)
     try:
         for process in (night, user):
             _wait_for_exe(process, installed)
