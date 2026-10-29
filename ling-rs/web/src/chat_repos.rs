@@ -2809,7 +2809,12 @@ async fn repo_off(State(server): State<Arc<Server>>, headers: HeaderMap, body: B
         });
 
     if let Some(rec) = matching_record {
-        let uncommitted = count_porcelain_lines_sync(&server, Path::new(&rec.dir));
+        // git status may take seconds on a large checkout: off the async workers.
+        let counter = Arc::clone(&server);
+        let dir = rec.dir.clone();
+        let uncommitted = tokio::task::spawn_blocking(move || count_porcelain_lines_sync(&counter, Path::new(&dir)))
+            .await
+            .unwrap_or(0);
         server.chat_repos.record_event_for_record(
             &rec,
             rec.app_threads.last().map(String::as_str),
@@ -8790,14 +8795,16 @@ mod tests {
         .await;
         let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
         let cookie = owner_cookie(&server).await;
-        let (st, _, body) =
+        let (st, opened, body) =
             post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/keyrepo", "bridge": "signal", "chat": "signal:+1555" })).await;
         assert_eq!(st, StatusCode::OK, "{body}");
+        std::fs::write(PathBuf::from(opened["cwd"].as_str().unwrap()).join("left.txt"), "not committed\n").unwrap();
         let bridge = bridge_session_cookie(&server).await;
         let (_, current, body) = get_json(&server, &bridge, "/api/repos/current?bridge=signal&chat=signal:%2B1555").await;
         assert_eq!(current["repo"], "org/keyrepo", "{body}");
-        let (st, _, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
+        let (st, off, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
         assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(off["uncommitted"], 1, "the file left behind is counted: {body}");
         assert_eq!(server.chat_repos.current_repo(&server.config.codex_home, "signal:+1555"), None, "/off cleared what /open set");
         // A second /off has no repository to turn off: it names none.
         let (st, again, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
