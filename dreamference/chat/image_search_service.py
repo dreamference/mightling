@@ -163,9 +163,12 @@ class HardenedFetcher:
                 parsed = ipaddress.ip_address(address)
             except ValueError:
                 raise FetchRejected(f"{host} resolved to non-address {address!r}")
+            # `not is_global` catches what the named ranges miss: RFC 6598's 100.64/10, which
+            # Tailscale numbers tailnets from, is neither private nor global.
             if (
                 parsed.is_private or parsed.is_loopback or parsed.is_link_local
                 or parsed.is_multicast or parsed.is_reserved or parsed.is_unspecified
+                or not parsed.is_global
             ):
                 raise FetchRejected(f"{host} resolves to non-public address {address}")
             pinned = pinned or address

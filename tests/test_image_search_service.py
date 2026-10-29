@@ -66,6 +66,14 @@ def test_a_url_resolving_to_the_docker_network_is_refused():
             HardenedFetcher.assert_public("evil.example", resolver=_resolver(private))
 
 
+def test_a_url_resolving_to_the_shared_address_space_is_refused():
+    # RFC 6598's 100.64/10 is neither private nor global to `ipaddress`; Tailscale numbers its
+    # tailnet from it, so a host on a tailnet would let an image URL reach its peers.
+    for shared in ("100.64.0.1", "100.100.100.100", "100.101.102.103"):
+        with pytest.raises(FetchRejected):
+            HardenedFetcher.assert_public("evil.example", resolver=_resolver(shared))
+
+
 def test_a_public_address_is_pinned_for_the_connection():
     assert (
         HardenedFetcher.assert_public("img.example", resolver=_resolver("93.184.216.34"))
