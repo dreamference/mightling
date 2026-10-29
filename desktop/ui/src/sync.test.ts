@@ -39,6 +39,11 @@ describe("threads from other devices", () => {
     expect((await on.status())?.caller.scope).toBe("watch");
   });
 
+  it("is nothing when the status answer is not JSON (a page served in its place)", async () => {
+    const api = hub(async () => new Response("<!doctype html><title>Mightling</title>", { status: 200 }));
+    expect(await api.status()).toBeNull();
+  });
+
   it("archives and deletes through the hub, and says why the hub refused", async () => {
     const { api, sent } = stand_in({
       "/api/sync/threads/x/meta": [200, {}],

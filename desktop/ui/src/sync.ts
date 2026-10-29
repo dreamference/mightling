@@ -135,7 +135,8 @@ export function hub(fetcher: Fetch = (input, init) => fetch(input, init)) {
     status: async (): Promise<SyncStatus | null> => {
       const answer = await fetcher("/api/sync/status").catch(() => null);
       if (!answer || !answer.ok) return null;
-      return answer.json() as Promise<SyncStatus>;
+      // An answer that is not JSON (a page served in the route's place) is a hub that is not there.
+      return answer.json().catch(() => null) as Promise<SyncStatus | null>;
     },
     threads: () => fetcher("/api/sync/threads").then((answer) => json<{ cursor: number; this_device: string | null; threads: SyncedThread[] }>(answer)),
     read: (thread: string) => fetcher(`/api/sync/threads/${encodeURIComponent(thread)}`).then((answer) => json<{ thread: SyncedThread; items: SyncedItem[] }>(answer)),
