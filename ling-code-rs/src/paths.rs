@@ -621,3 +621,46 @@ pub fn runtime_dir() -> PathBuf {
         _ => std::env::temp_dir(),
     }
 }
+
+#[cfg(test)]
+mod worktree_tests {
+    use super::*;
+
+    fn run(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn a_git_file_naming_another_repositorys_worktree_borrows_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main");
+        std::fs::create_dir(&main).unwrap();
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "x"]);
+        let wt = dir.path().join("wt");
+        run(&main, &["worktree", "add", "-q", wt.to_str().unwrap()]);
+        let real = |path: &Path| std::fs::canonicalize(path).unwrap();
+        assert_eq!(real(&Repo::discover(&wt).unwrap().main_root), real(&main));
+        // A copy of the worktree's `.git` file: git finds the main repository's common dir, but
+        // the worktree's own `gitdir` does not name this folder, so its trust is not borrowed.
+        let forged = dir.path().join("forged");
+        std::fs::create_dir(&forged).unwrap();
+        std::fs::copy(wt.join(".git"), forged.join(".git")).unwrap();
+        let repo = Repo::discover(&forged).unwrap();
+        assert_eq!(real(&repo.root), real(&forged));
+        assert_eq!(real(&repo.main_root), real(&forged));
+    }
+}
