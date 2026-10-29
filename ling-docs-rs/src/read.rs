@@ -229,6 +229,20 @@ pub fn read(
         text: String::new(),
         next: None,
     };
+    render(out, &units, pages, locator, word, budget)
+}
+
+/// The text of `units` (page, first line, text) a locator asks for, within the budget.
+fn render(
+    mut out: ReadOut,
+    units: &[(Option<u32>, Option<u32>, String)],
+    pages: Option<u32>,
+    locator: Option<Locator>,
+    word: &str,
+    budget: usize,
+) -> Result<ReadOut> {
+    let doc_id = out.doc_id.clone();
+    let kind = out.kind.clone();
     if kind == "image" {
         // An image's text, read by OCR (§20), is one unit.
         out.loc = crate::ocr::worker::IMAGE_LOC.to_string();
@@ -257,7 +271,13 @@ pub fn read(
         }
         let mut used = 0;
         let mut last = None;
+        let asked = matches!(locator, Some(Locator::Page(_)));
         for (page, text) in by_page.range(first..) {
+            // A page asked for that has no text is said so below, not answered by a later one.
+            if asked && *page != first {
+                out.next = Some(format!("p.{page}"));
+                break;
+            }
             let cost = estimate_tokens(text);
             if last.is_some() && used + cost > budget {
                 out.next = Some(format!("p.{page}"));
@@ -271,7 +291,7 @@ pub fn read(
             used += cost;
             last = Some(*page);
             // A page asked for by number is answered alone.
-            if matches!(locator, Some(Locator::Page(_))) {
+            if asked {
                 if let Some((next, _)) = by_page.range(page + 1..).next() {
                     out.next = Some(format!("p.{next}"));
                 }
@@ -289,7 +309,7 @@ pub fn read(
         return Ok(out);
     }
     let mut lines: BTreeMap<u32, &str> = BTreeMap::new();
-    for (_, first, text) in &units {
+    for (_, first, text) in units {
         if let Some(first) = first {
             for (i, line) in text.split('\n').enumerate() {
                 lines.insert(first + i as u32, line);
@@ -430,5 +450,50 @@ mod tests {
         let clipped = clip(&long, 50);
         assert!(clipped.ends_with("[… page cut at the output limit]"));
         assert!(clipped.len() < long.len());
+    }
+
+    fn blank(kind: &str) -> ReadOut {
+        ReadOut {
+            doc_id: "docs:1".into(),
+            path: String::new(),
+            title: String::new(),
+            kind: kind.into(),
+            pages: None,
+            loc: String::new(),
+            text: String::new(),
+            next: None,
+        }
+    }
+
+    #[test]
+    fn a_page_without_text_is_said_so_not_answered_with_a_later_page() {
+        let units = [
+            (Some(1), None, "one".to_string()),
+            (Some(2), None, "two".to_string()),
+            (Some(5), None, "five".to_string()),
+        ];
+        let out = render(
+            blank("pdf"),
+            &units,
+            Some(5),
+            Some(Locator::Page(3)),
+            "lines",
+            6000,
+        )
+        .unwrap();
+        assert!(out.text.starts_with("p.3 has no text"), "{}", out.text);
+        assert_eq!(out.loc, "p.3");
+        assert_eq!(out.next.as_deref(), Some("p.5"));
+        let out = render(
+            blank("pdf"),
+            &units,
+            Some(5),
+            Some(Locator::Page(2)),
+            "lines",
+            6000,
+        )
+        .unwrap();
+        assert_eq!(out.text, "[p.2]\ntwo");
+        assert_eq!(out.next.as_deref(), Some("p.5"));
     }
 }
