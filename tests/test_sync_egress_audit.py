@@ -181,3 +181,29 @@ def test_a_cycle_cut_off_at_the_timeout_is_a_failed_trace_and_leaves_nothing_run
     ):
         assert SyncEgressAudit.run(ling="/opt/ling") == 2
     assert "trace failed" in capsys.readouterr().out
+
+
+def test_the_hub_reached_over_ipv6_loopback_passes():
+    # The destination is `[::1]:port`: its address is read without the brackets and its port
+    # after the last colon.
+    line = (
+        "100 connect(9, {sa_family=AF_INET6, sin6_port=htons(%d), sin6_flowinfo=htonl(0), "
+        'inet_pton(AF_INET6, "::1", &sin6_addr), sin6_scope_id=0}, 28) = 0\n' % PORT
+    )
+    trace = StraceParser.parse(STARTED + line)
+    assert trace.destinations == {f"[::1]:{PORT}": 1}
+    verdict = SyncEgressAudit.judge(trace, PORT, published=True, exec_held=True)
+    assert (verdict.status, verdict.problems) == (PASS, [])
+
+
+def test_a_query_whose_name_was_read_fails_by_its_name():
+    query = r"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x0baudit-probe\x07example\x03com\x00\x00\x01\x00\x01"
+    lookup = (
+        CONNECT.format(port=53, address="127.0.0.53", result="0")
+        + f'100 sendto(9, "{query}", 40, MSG_NOSIGNAL, NULL, 0) = 40\n'
+    )
+    trace = StraceParser.parse(STARTED + TO_HUB + lookup)
+    assert trace.dns_names == {"audit-probe.example.com": 1}
+    verdict = SyncEgressAudit.judge(trace, PORT, published=True, exec_held=True)
+    assert verdict.status == FAIL
+    assert verdict.problems == ["asked a resolver for audit-probe.example.com (1x)"]
