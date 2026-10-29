@@ -375,3 +375,270 @@ The thirds are planned as nights 14 to 16; which arms they carry, G1 to G3 below
 | G3 | third 3 | if both passed their behaviour measures: `<record>+finish-check <record>+finish-check+test-guard`; if one passed: `<record> <record>+<that arm>`; if neither: no guard night | as above; the arm that passed now has 100 paired tasks over two thirds |
 
 The finish check goes first: it targets the larger class (broken passing tests are 2 to 9% of graded instances in §24's table, against the test guard's few rewritten assertions), and the owner named both. One 50-task pair cannot confirm a resolve-count effect of the size expected (§6.5 item 4: about 7 net tasks for p < 0.05), so each arm is judged by its behaviour measure on its first third, and only an arm that passes is run on a second third, pooled over the 100 tasks for the resolve count. An arm becomes the default only on the owner's decision after that. The guards stack with every other arm, and the night's other arm settings stay the record arm's.
+
+## 11. Failures of the nights since 2026-10-20 (2026-10-29)
+
+Every run with graded results that finished between 2026-10-20 and 2026-10-29, classified with §2's method (the agent's log, the grading report, the eval's test output). `day1` was still running and is left out, as are the smoke runs. Data: each run's `instances/<id>.json`, `logs/<id>.jsonl` and `eval/1/` under `~/.local/share/dreamference/swe-bench/runs/<run>/`.
+
+### 11.1 The runs
+
+| Night | Run | Server | Tasks | Resolved | Note |
+|---|---|---|---|---|---|
+| n13 | `n13-default-1`, `-2`, `-3` | SGLang 0.5.21 | 50 (`night13-list`), three repeats | 22, 25, 26 | Ended 2026-10-20; SGLang's `/v1/responses` drops the step after an announcing message (the phase bug, fixed by the phase merge on 2026-10-22) |
+| n12 | `n12-exec-tool-function-apply-patch-off-on-sglang` | SGLang 0.5.21 | 50 (`night12-list`) | 24 | Phase bug; the first attempt failed on 2026-10-20 when the agents' build trees filled the disk (36 of 50 done, the engine round never ran) |
+| n12 | `…-on-engine` | ling-serve | same 50 | 32 | |
+| n15 | `n15-exec-tool-function-apply-patch-off-on-sglang` | SGLang 0.5.21 | 20 (`night15-list`) | 10 | Phase bug |
+| n15 | `…-on-engine` | ling-serve | same 20 | 15 | |
+| check | `phase-merge-check-sglang` | SGLang with the phase merge | 10 of n12's 50 | 9 | |
+| n17 | `n17-exec-tool-function-apply-patch-off-on-sglang` | SGLang with the phase merge | n12's 50 | 29 | |
+| n17 | `…-on-engine` | ling-serve 8d112d0 | n12's 50 | 33 | |
+| n14 | `n14-default`, `n14-default-finish-check` | SGLang with the phase merge, another GB10 | 50 (`fresh-150k` third 1) | 30, 31 | |
+| n15b | `n15b-default`, `n15b-default-test-guard` | SGLang with the phase merge, another GB10 | 50 (`fresh-150k` third 2) | 35, 32 | |
+
+### 11.2 Categories
+
+| Code | Category | Rule |
+|---|---|---|
+| I | Harness or infrastructure | The run or its eval failed for a reason outside the agent and the model: status `error`, an image pull, a test that fails on the network for the reference patch too |
+| Pe | Engine output: SGLang phase bug, no patch | A run with the phase bug; status `empty` or `stalled`, or no patch; the last message announces a step |
+| Pp | Engine output: SGLang phase bug, partial patch | A run with the phase bug; status `done` with a patch that fails the hidden tests; the last message announces a step it never took. Two causes at once: on n12, 9 of the 16 also fail on the engine arm |
+| X | Engine output: raw tool call | A message holds the raw `</parameter></function></tool_call>` text of a tool call the engine did not parse |
+| L | Agent loop | No patch, or the agent stopped before testing, on a server without the phase bug |
+| W | Wrong patch | Graded and not resolved: a `FAIL_TO_PASS` test fails or a `PASS_TO_PASS` test breaks |
+| T | Timeout | Killed at `task_timeout_s` (3600 s) |
+
+No new category was needed. All 11 timeouts are an agent still working (27 to 136 messages each), not a hung generation; one (`django-13112`, test guard) is resolved by the patch collected at the kill.
+
+### 11.3 Counts
+
+| Run | Resolved | I | Pe | Pp | X | L | W | T |
+|---|---|---|---|---|---|---|---|---|
+| n13 #1 | 22 | 1 | 4 | 12 | 0 | 0 | 11 | 0 |
+| n13 #2 | 25 | 0 | 3 | 11 | 0 | 0 | 11 | 0 |
+| n13 #3 | 26 | 0 | 5 | 10 | 0 | 0 | 9 | 0 |
+| n12 SGLang | 24 | 0 | 6 | 16 | 0 | 0 | 4 | 0 |
+| n12 engine | 32 | 0 | 0 | 0 | 3 | 0 | 13 | 2 |
+| n15 SGLang | 10 | 0 | 1 | 1 | 0 | 0 | 8 | 0 |
+| n15 engine | 15 | 0 | 0 | 0 | 1 | 0 | 4 | 0 |
+| check | 9 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
+| n17 SGLang | 29 | 0 | 0 | 0 | 0 | 0 | 18 | 3 |
+| n17 engine | 33 | 0 | 0 | 0 | 0 | 0 | 15 | 2 |
+| n14 default | 30 | 1 | 0 | 0 | 0 | 0 | 18 | 1 |
+| n14 finish check | 31 | 1 | 0 | 0 | 0 | 0 | 18 | 0 |
+| n15b default | 35 | 1 | 0 | 0 | 0 | 1 | 13 | 0 |
+| n15b test guard | 32 | 1 | 0 | 0 | 0 | 1 | 14 | 2 |
+
+Across n13's three repeats of the same 50 tasks, 14 are resolved every time, 14 never and 22 only sometimes: one run of 50 moves by several tasks on its own.
+
+### 11.4 Each failure
+
+A dash is a task not in that run. Rows resolved in every run that has them are left out.
+
+
+**n12, n17 and the phase-merge check (same 50 tasks)**
+
+| Instance | n12 SGLang | n12 engine | check | n17 SGLang | n17 engine |
+|---|---|---|---|---|---|
+| `astropy-14182` | Pp | R | R | W | R |
+| `django-10554` | Pp | W | W | W | W |
+| `django-11141` | Pp | W | – | W | W |
+| `django-11532` | Pp | W | – | W | R |
+| `django-11728` | Pp | W | – | W | W |
+| `django-11749` | Pp | R | – | R | R |
+| `django-11820` | Pp | W | – | W | W |
+| `django-12262` | W | R | – | R | R |
+| `django-12708` | Pp | R | R | R | R |
+| `django-14315` | Pp | W | – | W | W |
+| `django-15098` | Pp | T | – | W | T |
+| `django-15268` | Pe | R | R | T | R |
+| `django-15525` | Pe | R | R | R | W |
+| `django-15554` | Pp | X | – | R | T |
+| `django-15572` | R | W | – | R | R |
+| `django-16032` | Pp | R | – | R | R |
+| `django-16819` | Pp | R | – | W | R |
+| `requests-6028` | R | R | – | R | W |
+| `pytest-7324` | Pp | R | – | R | R |
+| `sphinx-9281` | W | W | – | W | W |
+| `sphinx-9602` | Pp | W | – | W | W |
+| `sympy-12419` | R | R | – | W | R |
+| `sympy-12481` | Pe | R | R | W | R |
+| `sympy-13480` | R | W | – | R | R |
+| `sympy-13757` | W | X | – | R | R |
+| `sympy-14976` | Pe | W | – | W | W |
+| `sympy-15349` | Pp | R | – | T | W |
+| `sympy-17630` | R | W | – | W | W |
+| `sympy-18199` | Pe | W | – | W | W |
+| `sympy-19040` | W | X | – | T | W |
+| `sympy-21596` | Pe | T | – | W | W |
+| `sympy-23950` | R | R | – | W | R |
+
+**n13 (three repeats, SGLang)**
+
+| Instance | n13 #1 | n13 #2 | n13 #3 |
+|---|---|---|---|
+| `astropy-13579` | Pe | W | R |
+| `astropy-14539` | Pe | R | Pp |
+| `django-11138` | Pp | W | Pp |
+| `django-11292` | Pp | R | Pp |
+| `django-11790` | R | W | R |
+| `django-11885` | Pp | W | Pe |
+| `django-12039` | R | R | W |
+| `django-12193` | R | W | R |
+| `django-12325` | Pe | Pp | Pp |
+| `django-12774` | Pp | R | W |
+| `django-13212` | W | Pp | Pe |
+| `django-14053` | W | Pp | R |
+| `django-14351` | Pp | Pp | R |
+| `django-14376` | W | W | W |
+| `django-14434` | W | R | R |
+| `django-14500` | R | W | R |
+| `django-14534` | R | W | W |
+| `django-15104` | I | R | R |
+| `django-15252` | Pp | W | W |
+| `django-15375` | Pp | R | R |
+| `django-15561` | R | Pp | Pe |
+| `django-15957` | W | Pp | Pp |
+| `django-16642` | R | W | W |
+| `django-16877` | W | Pp | Pp |
+| `django-16901` | R | Pp | Pp |
+| `seaborn-3069` | Pe | Pp | Pp |
+| `scikit-learn-25931` | W | R | R |
+| `sphinx-10449` | Pp | R | W |
+| `sphinx-9673` | W | R | R |
+| `sympy-13615` | W | W | R |
+| `sympy-13878` | W | Pe | Pe |
+| `sympy-13974` | Pp | Pp | Pp |
+| `sympy-17318` | Pp | Pe | Pp |
+| `sympy-21612` | Pp | Pe | Pe |
+| `sympy-23413` | W | R | W |
+| `sympy-24562` | Pp | Pp | W |
+
+**n15 (20 tasks)**
+
+| Instance | n15 SGLang | n15 engine |
+|---|---|---|
+| `astropy-14365` | Pp | R |
+| `django-11400` | W | W |
+| `django-13033` | Pe | X |
+| `django-13837` | W | W |
+| `django-15973` | W | W |
+| `django-16100` | W | R |
+| `django-16631` | W | W |
+| `requests-5414` | W | R |
+| `sphinx-10673` | W | R |
+| `sympy-21379` | W | R |
+
+**n14 (fresh-150k third 1)**
+
+| Instance | default | finish check |
+|---|---|---|
+| `astropy-14365` | W | R |
+| `django-11400` | W | W |
+| `django-12308` | W | W |
+| `django-13023` | R | W |
+| `django-13837` | W | W |
+| `django-15127` | W | W |
+| `django-15563` | R | W |
+| `django-15973` | T | R |
+| `django-16100` | W | W |
+| `django-16454` | W | W |
+| `django-16631` | W | W |
+| `requests-2317` | I | I |
+| `requests-5414` | W | W |
+| `pytest-10081` | W | R |
+| `pytest-10356` | W | W |
+| `scikit-learn-26194` | W | W |
+| `sphinx-10673` | R | W |
+| `sphinx-9461` | W | W |
+| `sympy-13798` | W | W |
+| `sympy-15976` | W | W |
+| `sympy-20438` | W | W |
+| `sympy-21379` | W | R |
+| `sympy-21930` | W | W |
+
+**n15b (fresh-150k third 2)**
+
+| Instance | default | test guard |
+|---|---|---|
+| `astropy-13236` | R | W |
+| `astropy-13977` | W | W |
+| `astropy-14369` | R | W |
+| `django-11477` | W | L |
+| `django-11999` | W | W |
+| `django-12273` | R | T |
+| `django-13346` | R | W |
+| `django-13512` | W | R |
+| `django-14140` | W | W |
+| `django-14725` | W | W |
+| `django-16256` | W | W |
+| `django-16502` | W | W |
+| `requests-1766` | I | I |
+| `pylint-4970` | W | W |
+| `sphinx-9230` | W | R |
+| `sphinx-9658` | W | W |
+| `sympy-15017` | R | W |
+| `sympy-18698` | L | T |
+| `sympy-20428` | W | W |
+| `sympy-22080` | W | W |
+
+### 11.5 Where the engines differ on the same task
+
+| Night | Resolved by ling-serve only | Resolved by SGLang only | Both fail |
+|---|---|---|---|
+| n12 (SGLang with the phase bug) | 11: `astropy-14182`, `django-11749`, `django-12262`, `django-12708`, `django-15268`, `django-15525`, `django-16032`, `django-16819`, `pytest-7324`, `sympy-12481`, `sympy-15349`; 10 of them Pe or Pp on SGLang | 3: `django-15572`, `sympy-13480`, `sympy-17630` (W on the engine) | 15 |
+| n15 (SGLang with the phase bug) | 5: `astropy-14365` (Pp on SGLang), `django-16100`, `requests-5414`, `sphinx-10673`, `sympy-21379` (W on SGLang) | 0 | 5 |
+| n17 (both fixed) | 7: `astropy-14182`, `django-11532`, `django-15268` (T on SGLang), `django-16819`, `sympy-12419`, `sympy-12481`, `sympy-23950` | 3: `django-15525` (W), `django-15554` (T), `requests-6028` (W, 2 of 2 `FAIL_TO_PASS`) | 14 |
+
+| Night | Task | SGLang | ling-serve |
+|---|---|---|---|
+| n12 | `django-15554` | Pp | X, no patch |
+| n12 | `sympy-13757`, `sympy-19040` | W | X |
+| n15 | `django-13033` | Pe | X, no patch |
+| n12 | `django-15098` | Pp | T |
+| n12 | `sympy-21596` | Pe | T |
+| n17 | `django-15098` | W | T, no patch |
+| n17 | `sympy-15349`, `sympy-19040` | T | W |
+
+The raw tool-call text (X) is ling-serve's only engine-output failure: 3 tasks on n12 and 1 on n15, none on n17. The phase bug (Pe, Pp) is SGLang's: 22 of n12's 26 failures, none after the merge.
+
+### 11.6 Infrastructure
+
+| Task | Runs | Evidence | Cause |
+|---|---|---|---|
+| `psf__requests-2317` | n14, both arms | 5 tests fail in the eval with `ssl.SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate`: the `FAIL_TO_PASS` test `test_requests_history_is_saved` and 4 `PASS_TO_PASS` tests (`test_auth_is_stripped_on_redirect_off_host`, `test_mixed_case_scheme_acceptable`, `test_pyopenssl_redirect`, `TestTimeout::test_stream_timeout`) | The tests call httpbin.org over https |
+| `psf__requests-1766` | n15b, both arms | All `FAIL_TO_PASS` tests pass; `test_mixed_case_scheme_acceptable` fails with the same error, so a correct patch is graded unresolved | Same |
+| both | Before 2026-10-20 | The gold-patch validation (2026-10-01 to 10-08) resolved both; `im100-default` and `im100-refine` graded 2317 and the night-8 arms graded 1766 (2026-10-08 to 10-16) with no TLS failure | |
+| both | Hypothesis, not proven | httpbin.org serves the same chain (Let's Encrypt YE1, ISRG Root YE) from two GB10s, consistent with the eval images' old CA bundle not knowing that root; it would fail on every machine. A gold re-run would prove it | |
+| `django__django-15104` | n13 #1 | Status `error`: the image could not be pulled; resolved in n13 #2 and #3 | One-off |
+| night 12, first attempt | 2026-10-20 | The disk filled with the agents' build trees at 36 of 50 SGLang tasks; the engine round never ran | One-off |
+
+| List | Holds an I task |
+|---|---|
+| `fresh-51m.txt` (the 1.8.0 bar night) | None |
+| `night18-list` to `night22a-list` | None |
+| `fresh-150k-1of3`, `fresh-61j`, `sample-100` | `requests-2317` |
+| `fresh-150k-2of3`, `fresh-50d`, `night8-list` | `requests-1766` |
+
+No task fails for an infrastructure reason on every night: the two TLS tasks are in no list since n15b, and `requests-6028`, the one requests task in `fresh-51m`, grades without TLS errors.
+
+### 11.7 What the bar night's budget goes to
+
+12 of `fresh-51m`'s 51 tasks were never resolved in any run that had them (4 or 5 runs each, both engines). They are wrong patches, not infrastructure, and say nothing about which engine is better.
+
+| Task | n12 SGLang | n12 engine | check | n17 SGLang | n17 engine |
+|---|---|---|---|---|---|
+| `django-10554` | Pp | W | W | W | W |
+| `django-11141`, `django-11728`, `django-11820`, `django-14315`, `sphinx-9602` | Pp | W | – | W | W |
+| `sympy-14976`, `sympy-18199` | Pe | W | – | W | W |
+| `sphinx-9281` | W | W | – | W | W |
+| `django-15098` | Pp | T | – | W | T |
+| `sympy-19040` | W | X | – | T | W |
+| `sympy-21596` | Pe | T | – | W | W |
+
+| Run | Wall time on the 12 | Wall time on all 50 |
+|---|---|---|
+| n12 engine | 4.3 h | 10.5 h |
+| n17 SGLang | 3.8 h | 11.3 h |
+| n17 engine | 2.0 h | 7.3 h |
+
+`django-10554` is graded "patch did not apply" on n12's engine arm and on both n17 arms, but the patch applied: the eval's test run crashed in `printErrors` with `DatabaseError: ORDER BY term does not match any column`, which the report counts as not applied (a reporting artefact like §5.1's). The gold patch resolves it (validation report), so the class is W.
