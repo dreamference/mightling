@@ -7,7 +7,8 @@
 //! before it runs:
 //!
 //! 1. installs the node's CA in the system trust store (NetBird's client trusts nothing else; the CA
-//!    is name-constrained to the box and the overlay's domain, so it vouches for nothing more);
+//!    is name-constrained to the box and the overlay's domain, so it vouches for nothing more, and
+//!    `constrained_ca` refuses one that is not before anything is installed);
 //! 2. installs NetBird's client from its release archive, pinned by SHA-256, when it is missing,
 //!    and starts its service;
 //! 3. runs `netbird up` with the management URL and the one-time setup key from the bundle;
@@ -28,6 +29,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
+use base64::Engine;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -113,12 +115,143 @@ pub fn parse_code(text: &str) -> Option<String> {
     (digits.len() == 8 && digits.chars().all(|c| c.is_ascii_digit())).then_some(digits)
 }
 
+// -- the CA's constraints ---------------------------------------------------------------------------
+
+/// `basicConstraints` (2.5.29.19) and `nameConstraints` (2.5.29.30), the extension OIDs' contents.
+const BASIC_CONSTRAINTS: &[u8] = &[0x55, 0x1d, 0x13];
+const NAME_CONSTRAINTS: &[u8] = &[0x55, 0x1d, 0x1e];
+/// `SEQUENCE { cA TRUE, pathLenConstraint 0 }`, the only basic constraints a node's CA has.
+const CA_PATHLEN_ZERO: &[u8] = &[0x30, 0x06, 0x01, 0x01, 0xff, 0x02, 0x01, 0x00];
+
+/// One DER element of `bytes`: its tag, its contents and what follows it. Strict DER only: no
+/// indefinite or overlong length, no multi-byte tag, nothing past the end.
+fn der(bytes: &[u8]) -> Result<(u8, &[u8], &[u8]), String> {
+    let malformed = || "the CA in the bundle is not a well-formed certificate".to_string();
+    let tag = *bytes.first().ok_or_else(malformed)?;
+    let first = *bytes.get(1).ok_or_else(malformed)?;
+    if tag & 0x1f == 0x1f {
+        return Err(malformed());
+    }
+    let (length, start) = if first < 0x80 {
+        (usize::from(first), 2usize)
+    } else {
+        let count = usize::from(first & 0x7f);
+        if count == 0 || count > 4 {
+            return Err(malformed());
+        }
+        let digits = bytes.get(2..2 + count).ok_or_else(malformed)?;
+        if digits.first() == Some(&0) {
+            return Err(malformed());
+        }
+        let length = digits.iter().fold(0usize, |acc, digit| (acc << 8) | usize::from(*digit));
+        if length < 0x80 {
+            return Err(malformed());
+        }
+        (length, 2 + count)
+    };
+    let end = start.checked_add(length).ok_or_else(malformed)?;
+    let contents = bytes.get(start..end).ok_or_else(malformed)?;
+    Ok((tag, contents, bytes.get(end..).unwrap_or_default()))
+}
+
+/// Every element of `bytes`, in order.
+fn der_all(mut bytes: &[u8]) -> Result<Vec<(u8, &[u8])>, String> {
+    let mut elements = Vec::new();
+    while !bytes.is_empty() {
+        let (tag, contents, rest) = der(bytes)?;
+        elements.push((tag, contents));
+        bytes = rest;
+    }
+    Ok(elements)
+}
+
+/// The one element of `bytes`, which must have `tag`.
+fn der_only(bytes: &[u8], tag: u8) -> Result<&[u8], String> {
+    match der_all(bytes)?.as_slice() {
+        [(found, contents)] if *found == tag => Ok(contents),
+        _ => Err("the CA in the bundle is not a well-formed certificate".to_string()),
+    }
+}
+
+/// Whether a `nameConstraints` DNS entry (lowercased, without its leading dot) is a domain a
+/// node's CA may be held to: not empty (that permits every name) and not a bare top-level domain.
+fn constraint_entry_is_a_domain(entry: &str) -> bool {
+    entry.contains('.')
+        && !entry.starts_with('.')
+        && !entry.ends_with('.')
+        && entry.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '.'))
+}
+
+/// Checks the bundle's CA before it goes in the system trust store, where it could vouch for any
+/// site: it must be one CA that signs no other CA (`basicConstraints` critical, `CA:TRUE,
+/// pathlen:0`), with critical `nameConstraints` that permit only DNS domains, none excluded, one of
+/// them the management host or a domain above it. The certificate's DER is read here, with no
+/// `openssl`, so the check runs everywhere `join` does; the node makes its CA this way in
+/// `dreamference/remote/remote_certificate_authority.py`.
+pub fn constrained_ca(pem: &str, management_host: &str) -> Result<(), String> {
+    let malformed = || "the CA in the bundle is not a well-formed certificate".to_string();
+    let body: String = pem.lines().filter(|line| !line.starts_with("-----")).map(str::trim).collect();
+    let bytes = base64::engine::general_purpose::STANDARD.decode(body).map_err(|_| malformed())?;
+    let certificate = der_all(der_only(&bytes, 0x30)?)?;
+    let tbs = certificate.first().filter(|(tag, _)| *tag == 0x30).ok_or_else(malformed)?.1;
+    let mut extension_lists = der_all(tbs)?.into_iter().filter(|(tag, _)| *tag == 0xa3);
+    let (Some((_, list)), None) = (extension_lists.next(), extension_lists.next()) else {
+        return Err("the CA in the bundle has no extensions, so no name constraints".to_string());
+    };
+    let mut basic = None;
+    let mut names = None;
+    let mut seen = Vec::new();
+    for (tag, extension) in der_all(der_only(list, 0x30)?)? {
+        let fields = der_all(extension)?;
+        let (oid, critical, value) = match (tag, fields.as_slice()) {
+            (0x30, [(0x06, oid), (0x04, value)]) => (*oid, false, *value),
+            (0x30, [(0x06, oid), (0x01, flag), (0x04, value)]) => (*oid, *flag == [0xff], *value),
+            _ => return Err(malformed()),
+        };
+        if seen.contains(&oid) {
+            return Err("the CA in the bundle repeats an extension".to_string());
+        }
+        seen.push(oid);
+        if oid == BASIC_CONSTRAINTS {
+            basic = Some((critical, value));
+        } else if oid == NAME_CONSTRAINTS {
+            names = Some((critical, value));
+        }
+    }
+    if basic != Some((true, CA_PATHLEN_ZERO)) {
+        return Err("the CA in the bundle may sign other CAs (it needs critical CA:TRUE, pathlen:0)".to_string());
+    }
+    let Some((true, constraints)) = names else {
+        return Err("the CA in the bundle is not name-constrained (it needs critical nameConstraints)".to_string());
+    };
+    let permitted = der_only(der_only(constraints, 0x30)?, 0xa0)
+        .map_err(|_| "the CA's name constraints must permit DNS domains only and exclude none".to_string())?;
+    let mut entries = Vec::new();
+    for (tag, subtree) in der_all(permitted)? {
+        let entry = match (tag, der_all(subtree)?.as_slice()) {
+            (0x30, [(0x82, name)]) => String::from_utf8_lossy(name).to_ascii_lowercase(),
+            _ => return Err("the CA's name constraints must permit DNS domains only and exclude none".to_string()),
+        };
+        let entry = entry.trim_start_matches('.').to_string();
+        if !constraint_entry_is_a_domain(&entry) {
+            return Err(format!("the CA's name constraint {entry:?} is not a domain"));
+        }
+        entries.push(entry);
+    }
+    let host = management_host.to_ascii_lowercase();
+    let host = host.trim_end_matches('.');
+    if !entries.iter().any(|entry| host == entry || host.ends_with(&format!(".{entry}"))) {
+        return Err(format!("the CA in the bundle is not constrained to {host} (it permits {})", entries.join(", ")));
+    }
+    Ok(())
+}
+
 /// Checks the node's answer and reads the bundle.
 ///
 /// Refused: a wrong proof (someone who does not know the code answered), a bundle for another
 /// node than the one browsed, an overlay name that is not that node's own, a management URL that
 /// is not HTTPS, anything that is not a certificate where the CA goes, a setup key with odd
-/// characters.
+/// characters, a CA that is not name-constrained to the management host (`constrained_ca`).
 pub fn verify(code: &str, nonce: &str, answer: &serde_json::Value, node_id: &str) -> Result<Bundle, String> {
     let text = answer.get("bundle").and_then(|value| value.as_str()).ok_or("the node sent no bundle")?;
     let mac = answer.get("mac").and_then(|value| value.as_str()).ok_or("the node sent no proof")?;
@@ -148,9 +281,13 @@ pub fn verify(code: &str, nonce: &str, answer: &serde_json::Value, node_id: &str
     if host.is_empty() || !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | ':')) {
         return Err(format!("{} is not an HTTPS URL", bundle.management_url));
     }
-    if !bundle.ca.starts_with("-----BEGIN CERTIFICATE-----") || !bundle.ca.trim_end().ends_with("-----END CERTIFICATE-----") {
-        return Err("the CA in the bundle is not a certificate".to_string());
+    if bundle.ca.matches("-----BEGIN ").count() != 1
+        || !bundle.ca.starts_with("-----BEGIN CERTIFICATE-----")
+        || !bundle.ca.trim_end().ends_with("-----END CERTIFICATE-----")
+    {
+        return Err("the CA in the bundle is not one certificate".to_string());
     }
+    constrained_ca(&bundle.ca, host.split(':').next().unwrap_or_default())?;
     if bundle.setup_key.is_empty() || !bundle.setup_key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err("the setup key in the bundle is malformed".to_string());
     }
@@ -522,7 +659,93 @@ mod tests {
     use super::*;
 
     const NODE_ID: &str = "7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001";
-    const CA: &str = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----";
+    // Made the way the node makes its CA (remote_certificate_authority.py), constrained to
+    // example.org and netbird.selfhosted, and the ways one could be made to vouch for more.
+    const GOOD_CA: &str = "-----BEGIN CERTIFICATE-----\n\
+        MIIBlDCCATqgAwIBAgIUQYiLH6Ase6KR+pYLH0M87QvBr50wCgYIKoZIzj0EAwIw\n\
+        DDEKMAgGA1UEAwwBdDAeFw0yNjEwMjkyMDM0NTBaFw0zNjEwMjYyMDM0NTBaMAwx\n\
+        CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQpdHNEPm7q7lgS\n\
+        TDXlc9rFvDOdWizQy37IUON2kjfteym4U2YYMsfuobYyZVmrX/S4MkPxFnZMETUz\n\
+        JjzVa/z4o3oweDASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAz\n\
+        BgNVHR4BAf8EKTAnoCUwDYILZXhhbXBsZS5vcmcwFIISbmV0YmlyZC5zZWxmaG9z\n\
+        dGVkMB0GA1UdDgQWBBTq5bDiI7+cmIIoWBqH41ePLIuUVTAKBggqhkjOPQQDAgNI\n\
+        ADBFAiEArqIdW7P3TiYK5kkM9Lxs/HHw7waDZWUZKbAAKJFdTQwCIDU15ieYWRCY\n\
+        1sXiQhztvnGxbF0JMvaUGRRSUjmG43K6\n\
+        -----END CERTIFICATE-----";
+    const CA_WITHOUT_NAME_CONSTRAINTS: &str = "-----BEGIN CERTIFICATE-----\n\
+        MIIBYDCCAQWgAwIBAgIUDh15IzVbQc/judCtvhaYx6F4z2cwCgYIKoZIzj0EAwIw\n\
+        DDEKMAgGA1UEAwwBdDAeFw0yNjEwMjkyMDM0NTBaFw0zNjEwMjYyMDM0NTBaMAwx\n\
+        CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQpdHNEPm7q7lgS\n\
+        TDXlc9rFvDOdWizQy37IUON2kjfteym4U2YYMsfuobYyZVmrX/S4MkPxFnZMETUz\n\
+        JjzVa/z4o0UwQzASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAd\n\
+        BgNVHQ4EFgQU6uWw4iO/nJiCKFgah+NXjyyLlFUwCgYIKoZIzj0EAwIDSQAwRgIh\n\
+        ALHkhb9QKKwKpWS7Ddyrlk0748s9WjeMTLvktoQyqXG1AiEA6rjFV9zJm5YBVwxx\n\
+        wGCnmGpAulv8pkMU7XFAEQPjPEk=\n\
+        -----END CERTIFICATE-----";
+    const CA_WITH_NON_CRITICAL_NAME_CONSTRAINTS: &str = "-----BEGIN CERTIFICATE-----\n\
+        MIIBfDCCASGgAwIBAgIUSH2tSOZ2eWFctSOPB5C7eL8d1y4wCgYIKoZIzj0EAwIw\n\
+        DDEKMAgGA1UEAwwBdDAeFw0yNjEwMjkyMDM0NTBaFw0zNjEwMjYyMDM0NTBaMAwx\n\
+        CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQpdHNEPm7q7lgS\n\
+        TDXlc9rFvDOdWizQy37IUON2kjfteym4U2YYMsfuobYyZVmrX/S4MkPxFnZMETUz\n\
+        JjzVa/z4o2EwXzASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAa\n\
+        BgNVHR4EEzARoA8wDYILZXhhbXBsZS5vcmcwHQYDVR0OBBYEFOrlsOIjv5yYgihY\n\
+        GofjV48si5RVMAoGCCqGSM49BAMCA0kAMEYCIQDJMOu3UuI1IGb01/bsBugsseDW\n\
+        GQt/SnztOSGKSHlFygIhAL7EFtaP7Jou6srgW++N+2f8QCTs4IGHM8zzkn0b7ule\n\
+        -----END CERTIFICATE-----";
+    const CA_WITHOUT_PATHLEN: &str = "-----BEGIN CERTIFICATE-----\n\
+        MIIBezCCASGgAwIBAgIUIJ8hQi5Flu73su479tMcf/8gkeUwCgYIKoZIzj0EAwIw\n\
+        DDEKMAgGA1UEAwwBdDAeFw0yNjEwMjkyMDM0NTBaFw0zNjEwMjYyMDM0NTBaMAwx\n\
+        CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQpdHNEPm7q7lgS\n\
+        TDXlc9rFvDOdWizQy37IUON2kjfteym4U2YYMsfuobYyZVmrX/S4MkPxFnZMETUz\n\
+        JjzVa/z4o2EwXzAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAdBgNV\n\
+        HR4BAf8EEzARoA8wDYILZXhhbXBsZS5vcmcwHQYDVR0OBBYEFOrlsOIjv5yYgihY\n\
+        GofjV48si5RVMAoGCCqGSM49BAMCA0gAMEUCIQC/RoSomzNZeRy+PagS9l6mEP9L\n\
+        Q0PXXIRUVQz1w86+eQIgdIgrvLaVM3nnNm66X0hIAezNSUlWARLGFqtkmhs7Uks=\n\
+        -----END CERTIFICATE-----";
+    const CA_PERMITTING_AN_IP_RANGE: &str = "-----BEGIN CERTIFICATE-----\n\
+        MIIBijCCATCgAwIBAgIUJ9hmYCqxZO0HXquxDzrUjSvGdp0wCgYIKoZIzj0EAwIw\n\
+        DDEKMAgGA1UEAwwBdDAeFw0yNjEwMjkyMDM0NTBaFw0zNjEwMjYyMDM0NTBaMAwx\n\
+        CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQpdHNEPm7q7lgS\n\
+        TDXlc9rFvDOdWizQy37IUON2kjfteym4U2YYMsfuobYyZVmrX/S4MkPxFnZMETUz\n\
+        JjzVa/z4o3AwbjASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAp\n\
+        BgNVHR4BAf8EHzAdoBswDYILZXhhbXBsZS5vcmcwCocICgAAAP8AAAAwHQYDVR0O\n\
+        BBYEFOrlsOIjv5yYgihYGofjV48si5RVMAoGCCqGSM49BAMCA0gAMEUCIQC4cnWy\n\
+        nVbdkp8mcnYqHbYP4wGPxRIVSOTcx/dMuveybQIgNEqvJ79vHLBYVHCfBSDVnLUe\n\
+        Vg+C85toyBpRifLfIOA=\n\
+        -----END CERTIFICATE-----";
+    const CA_PERMITTING_A_WHOLE_TLD: &str = "-----BEGIN CERTIFICATE-----\n\
+        MIIBdjCCARygAwIBAgIULG9cYxzpuqNS3fLf75LOEvhfA6kwCgYIKoZIzj0EAwIw\n\
+        DDEKMAgGA1UEAwwBdDAeFw0yNjEwMjkyMDM0NTBaFw0zNjEwMjYyMDM0NTBaMAwx\n\
+        CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQpdHNEPm7q7lgS\n\
+        TDXlc9rFvDOdWizQy37IUON2kjfteym4U2YYMsfuobYyZVmrX/S4MkPxFnZMETUz\n\
+        JjzVa/z4o1wwWjASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAV\n\
+        BgNVHR4BAf8ECzAJoAcwBYIDb3JnMB0GA1UdDgQWBBTq5bDiI7+cmIIoWBqH41eP\n\
+        LIuUVTAKBggqhkjOPQQDAgNIADBFAiEApq95qSgvcp8ioP60ErirZRxYA+bAaupy\n\
+        8JtvZnYRr14CIAmssNYJgCeb/+dkJbPBoq6w1aKLnMc20jQwwXUm7web\n\
+        -----END CERTIFICATE-----";
+    const CA_WITH_AN_EXCLUDED_SUBTREE: &str = "-----BEGIN CERTIFICATE-----\n\
+        MIIBkzCCATmgAwIBAgIUdOwEtYZBd0oFTI6O4cZaehKstPcwCgYIKoZIzj0EAwIw\n\
+        DDEKMAgGA1UEAwwBdDAeFw0yNjEwMjkyMDM0NTBaFw0zNjEwMjYyMDM0NTBaMAwx\n\
+        CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQpdHNEPm7q7lgS\n\
+        TDXlc9rFvDOdWizQy37IUON2kjfteym4U2YYMsfuobYyZVmrX/S4MkPxFnZMETUz\n\
+        JjzVa/z4o3kwdzASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAy\n\
+        BgNVHR4BAf8EKDAmoA8wDYILZXhhbXBsZS5vcmehEzARgg9iYWQuZXhhbXBsZS5v\n\
+        cmcwHQYDVR0OBBYEFOrlsOIjv5yYgihYGofjV48si5RVMAoGCCqGSM49BAMCA0gA\n\
+        MEUCIQClEEZTM9jaNCiIXuxbvX3zvbHaft5cGU2qK/LcMtQ/9QIgZ3QGpL1IEG7C\n\
+        fLprtMe48ThiHe5MJjRHo8I1fg17Y7k=\n\
+        -----END CERTIFICATE-----";
+    const CA_WITH_A_COMMENT: &str = "-----BEGIN CERTIFICATE-----\n\
+        MIIBkjCCATegAwIBAgIUN+Z5C1QwVPJuwyMJxIn9/NjvDwwwCgYIKoZIzj0EAwIw\n\
+        DDEKMAgGA1UEAwwBdDAeFw0yNjEwMjkyMDM0NTBaFw0zNjEwMjYyMDM0NTBaMAwx\n\
+        CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQpdHNEPm7q7lgS\n\
+        TDXlc9rFvDOdWizQy37IUON2kjfteym4U2YYMsfuobYyZVmrX/S4MkPxFnZMETUz\n\
+        JjzVa/z4o3cwdTASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAd\n\
+        BgNVHR4BAf8EEzARoA8wDYILZXhhbXBsZS5vcmcwEQYJYIZIAYb4QgENBAQWAmhp\n\
+        MB0GA1UdDgQWBBTq5bDiI7+cmIIoWBqH41ePLIuUVTAKBggqhkjOPQQDAgNJADBG\n\
+        AiEAlnX3FcBS4oQL5em6KMFHYKrxdUhzuXE0XdfbRtOpUUkCIQD9JhEfkSw93SD9\n\
+        2cULAb4Qixyr13eAGkTOe5dOZZCrrA==\n\
+        -----END CERTIFICATE-----";
+    const CA: &str = GOOD_CA;
 
     #[test]
     fn hmac_matches_rfc_4231_case_2() {
@@ -591,6 +814,62 @@ mod tests {
             let text = value_json.to_string();
             assert!(verify("12345678", &nonce, &answer("12345678", &nonce, &text), NODE_ID).is_err(), "{key}={value}");
         }
+    }
+
+    #[test]
+    fn a_ca_that_could_vouch_for_other_sites_is_refused() {
+        let nonce = "ab".repeat(16);
+        let two = format!("{GOOD_CA}\n{GOOD_CA}");
+        for (label, ca) in [
+            ("no name constraints", CA_WITHOUT_NAME_CONSTRAINTS),
+            ("non-critical name constraints", CA_WITH_NON_CRITICAL_NAME_CONSTRAINTS),
+            ("no pathlen", CA_WITHOUT_PATHLEN),
+            ("an IP range", CA_PERMITTING_AN_IP_RANGE),
+            ("a whole top-level domain", CA_PERMITTING_A_WHOLE_TLD),
+            ("an excluded subtree", CA_WITH_AN_EXCLUDED_SUBTREE),
+            ("two certificates", two.as_str()),
+        ] {
+            let mut value: serde_json::Value = serde_json::from_str(&bundle_text()).unwrap();
+            value["ca"] = serde_json::Value::String(ca.to_string());
+            let text = value.to_string();
+            assert!(verify("12345678", &nonce, &answer("12345678", &nonce, &text), NODE_ID).is_err(), "{label}");
+        }
+    }
+
+    #[test]
+    fn the_ca_must_be_constrained_to_the_management_host() {
+        for host in ["relay.example.org", "example.org.", "Relay.Example.Org"] {
+            assert_eq!(constrained_ca(GOOD_CA, host), Ok(()), "{host}");
+        }
+        // A comment is only text in the DER: it cannot pass for a constraint.
+        assert_eq!(constrained_ca(CA_WITH_A_COMMENT, "relay.example.org"), Ok(()));
+        for host in ["relay.example.net", "evilexample.org", "org", ""] {
+            assert!(constrained_ca(GOOD_CA, host).is_err(), "{host}");
+        }
+    }
+
+    #[test]
+    fn an_empty_or_top_level_constraint_is_not_a_domain() {
+        for entry in ["", "org", ".", "example.org.", ".example.org", "exa mple.org", "EXAMPLE.org"] {
+            assert!(!constraint_entry_is_a_domain(entry), "{entry:?}");
+        }
+        assert!(constraint_entry_is_a_domain("example.org"));
+        assert!(constraint_entry_is_a_domain("netbird.selfhosted"));
+    }
+
+    #[test]
+    fn only_strict_der_is_read() {
+        assert!(der(&[0x30, 0x80, 0x00, 0x00]).is_err(), "indefinite length");
+        assert!(der(&[0x30, 0x81, 0x01, 0x00]).is_err(), "overlong length");
+        assert!(der(&[0x30, 0x82, 0x00, 0x80]).is_err(), "length with a leading zero");
+        assert!(der(&[0x30, 0x05, 0x00]).is_err(), "past the end");
+        assert!(der(&[0x1f, 0x01, 0x00]).is_err(), "multi-byte tag");
+        let body: String = GOOD_CA.lines().filter(|line| !line.starts_with("-----")).collect();
+        let mut bytes = base64::engine::general_purpose::STANDARD.decode(body).unwrap();
+        bytes.push(0);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let trailing = format!("-----BEGIN CERTIFICATE-----\n{encoded}\n-----END CERTIFICATE-----");
+        assert!(constrained_ca(&trailing, "relay.example.org").is_err(), "a byte past the certificate");
     }
 
     #[test]
