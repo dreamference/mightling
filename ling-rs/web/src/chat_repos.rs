@@ -3449,7 +3449,7 @@ async fn ahead_behind(server: &Server, worktree_dir: &Path, base_branch: &str) -
 }
 
 async fn uncommitted_stats(server: &Server, worktree_dir: &Path) -> Result<Vec<Value>, String> {
-    let numstat = run_git_checked(server, Some(worktree_dir), &["diff", "--numstat", "HEAD", "--"], false).await?;
+    let numstat = run_git_checked(server, Some(worktree_dir), &["diff", "--numstat", "-z", "--no-renames", "HEAD", "--"], false).await?;
     let mut entries = parse_numstat(&numstat);
     let mut seen: std::collections::HashSet<String> = entries
         .iter()
@@ -3494,16 +3494,18 @@ async fn uncommitted_stats(server: &Server, worktree_dir: &Path) -> Result<Vec<V
     Ok(entries)
 }
 
+/// Parses `git diff --numstat -z --no-renames`: one `added\tremoved\tpath` record per NUL, the
+/// path as it is on disk (not quoted, never `old => new`).
 fn parse_numstat(output: &str) -> Vec<Value> {
     let mut out = Vec::new();
-    for line in output.lines() {
-        let mut parts = line.splitn(3, '\t');
+    for record in output.split('\0') {
+        let mut parts = record.trim_start_matches('\n').splitn(3, '\t');
         let (Some(add_str), Some(rem_str), Some(path)) = (parts.next(), parts.next(), parts.next()) else {
             continue;
         };
         let added = add_str.trim().parse::<u64>().unwrap_or(0);
         let removed = rem_str.trim().parse::<u64>().unwrap_or(0);
-        let clean_path = path.trim();
+        let clean_path = path;
         if !clean_path.is_empty() {
             out.push(json!({
                 "path": clean_path,
@@ -3616,7 +3618,7 @@ async fn repo_diff(
                 Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
             };
             let range = format!("{mb}..HEAD");
-            match run_git_diff_capped(&server, &worktree_dir, &["diff", &range, "--", rel], true).await {
+            match run_git_diff_capped(&server, &worktree_dir, &["diff", &range, "--", &literal_pathspec(rel)], true).await {
                 Ok(text) => text,
                 Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
             }
@@ -3635,22 +3637,27 @@ async fn repo_diff(
             Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
         };
         let range = format!("{mb}..HEAD");
-        match run_git_checked(&server, Some(&worktree_dir), &["diff", "--numstat", &range, "--"], false).await {
+        match run_git_checked(&server, Some(&worktree_dir), &["diff", "--numstat", "-z", "--no-renames", &range, "--"], false).await {
             Ok(out) => json_response(StatusCode::OK, Value::Array(parse_numstat(&out))),
             Err(err) => json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
         }
     }
 }
 
+/// `rel` as a pathspec that names that one path: no glob, no `:(magic)`.
+fn literal_pathspec(rel: &str) -> String {
+    format!(":(literal){rel}")
+}
+
 async fn uncommitted_file_diff(server: &Server, worktree_dir: &Path, rel: &str) -> Result<String, String> {
-    let tracked_diff = run_git_diff_capped(server, worktree_dir, &["diff", "HEAD", "--", rel], true).await?;
+    let tracked_diff = run_git_diff_capped(server, worktree_dir, &["diff", "HEAD", "--", &literal_pathspec(rel)], true).await?;
     if !tracked_diff.is_empty() {
         return Ok(tracked_diff);
     }
     let untracked = run_git_checked(
         server,
         Some(worktree_dir),
-        &["ls-files", "--others", "--exclude-standard", "--", rel],
+        &["ls-files", "--others", "--exclude-standard", "--", &literal_pathspec(rel)],
         false,
     )
     .await?;
@@ -4012,7 +4019,7 @@ async fn repo_commit(State(server): State<Arc<Server>>, headers: HeaderMap, body
     let numstat = match run_git_checked(
         &server,
         Some(&worktree_dir),
-        &["show", "--first-parent", "--numstat", "--format=", "HEAD"],
+        &["show", "--first-parent", "--numstat", "-z", "--no-renames", "--format=", "HEAD"],
         false,
     )
     .await
@@ -8721,6 +8728,58 @@ mod tests {
         let (st, again, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(again["repo"], Value::Null, "{body}");
+    }
+
+    #[tokio::test]
+    async fn diff_lists_name_files_as_they_are_and_a_file_s_diff_is_that_file_only() {
+        let s = scratch("diff-names");
+        let bare = make_bare_repo(&s.dir, "org/names");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/names",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+        let (st, opened, body) = post_json(&server, &cookie, "/api/repos/open", json!({ "repo": "org/names", "bridge": "web", "chat": "web:names" })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let thread = opened["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
+        git_sync(&wt, &["config", "user.email", "dev@127.0.0.1"]);
+        git_sync(&wt, &["config", "user.name", "dev"]);
+        // A rename, a name git would quote, and a name that is also a glob for another file.
+        git_sync(&wt, &["mv", "README.md", "notes.md"]);
+        std::fs::write(wt.join("caf\u{e9}.txt"), "one\n").unwrap();
+        std::fs::write(wt.join("a*"), "star\n").unwrap();
+        std::fs::write(wt.join("ab"), "plain\n").unwrap();
+        git_sync(&wt, &["add", "-A"]);
+        git_sync(&wt, &["commit", "-m", "names"]);
+
+        let (st, listed, body) = get_json(&server, &cookie, &format!("/api/repos/diff?thread={thread}&scope=branch")).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let mut paths: Vec<&str> = listed.as_array().unwrap().iter().map(|e| e["path"].as_str().unwrap()).collect();
+        paths.sort();
+        assert_eq!(paths, ["README.md", "a*", "ab", "caf\u{e9}.txt", "notes.md"], "{body}");
+
+        let (st, one, body) = get_json(&server, &cookie, &format!("/api/repos/diff?thread={thread}&scope=branch&path=a%2A")).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let text = one["diff"].as_str().unwrap();
+        assert!(text.contains("+star") && !text.contains("+plain"), "{text}");
+
+        std::fs::write(wt.join("a*"), "star\nmore\n").unwrap();
+        std::fs::write(wt.join("ab"), "plain\nmore\n").unwrap();
+        let (st, one, body) = get_json(&server, &cookie, &format!("/api/repos/diff?thread={thread}&scope=uncommitted&path=a%2A")).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let text = one["diff"].as_str().unwrap();
+        assert!(text.contains("a/a*") && !text.contains("a/ab"), "{text}");
     }
 
     #[test]
