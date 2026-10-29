@@ -27,6 +27,8 @@ use crate::limits::Verdict;
 use crate::limits::Watch;
 use ling_web_server::chat_settings::ChatSettings;
 
+use crate::repo_notice::BranchName;
+use crate::repo_notice::RefusedAction;
 use crate::repo_notice::RepoName;
 use crate::repo_notice::RepoNotice;
 use crate::repo_notice::RepoNoticeKind;
@@ -119,7 +121,28 @@ pub const HELP: &str = "Mightling, from your phone. Each conversation is an Ask 
 /use <n> — continue thread n from /threads\n\
 /status — what Mightling is doing\n\
 /night add <task> — queue a task for Night Shift tonight, with this thread's last exchange; /night status — the queue\n\
+/push — push this chat's repository branch to the forge, after you confirm\n\
+/merge — merge its branch into the default branch, after you confirm\n\
 /help — this list";
+
+/// How long a `/push` or `/merge` confirmation stays open in the chat: inside the ten minutes
+/// `ling web`'s confirmation nonce lives (CHAT_REPOS §4.7).
+pub const REPO_CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// A query parameter, percent-encoded (chat keys carry `:`, `!`, `/` and `-`).
+fn query_escape(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// A checkout's thread id as `ling web` names it: short, and only letters, digits, `-` and `_`.
+fn valid_thread(thread: &str) -> bool {
+    !thread.is_empty() && thread.len() <= 64 && thread.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
 
 /// Settings (MIGHTLING_CHAT §10).
 #[derive(Clone, Debug)]
@@ -343,6 +366,10 @@ enum Local {
     NightAdd { task: String },
     /// A Telegram Mini App first-launch device pairing request (CHAT_REPOS §12.1 G2).
     LaunchPair { id: String },
+    /// `/push` or `/merge` (CHAT_REPOS §4.7): `confirm` is `ling web`'s single-use nonce, bound
+    /// to this bridge's session, the thread, the intent and the commit and target it was issued
+    /// for; it is sent only when the user presses the button.
+    RepoConfirm { action: RefusedAction, thread: String, confirm: String, repo: RepoName, notified: bool },
 }
 
 pub struct Hub {
@@ -655,6 +682,8 @@ impl Hub {
                     ),
                 );
             }
+            "/push" => self.repo_confirm(chat, RefusedAction::Push).await,
+            "/merge" => self.repo_confirm(chat, RefusedAction::Merge).await,
             "/night" => {
                 let rest = text.trim()["/night".len()..].trim().to_string();
                 self.night(chat, &rest).await;
@@ -1289,6 +1318,108 @@ impl Hub {
         repo
     }
 
+    /// `/push` and `/merge` (CHAT_REPOS §4.7): finds the checkout this chat works in, asks
+    /// `ling web` for a confirmation bound to its current commit and target, and asks the user with
+    /// counts and validated names only. Nothing is pushed or merged until the button is pressed.
+    async fn repo_confirm(&mut self, chat: &str, action: RefusedAction) {
+        let no_repo = "No repository is open in this chat; open the app.";
+        let Some((adapter, rest)) = chat.split_once(':') else { return };
+        let mut path = format!("/api/repos/current?bridge={}&chat={}", query_escape(adapter), query_escape(rest));
+        if adapter == "telegram"
+            && let Some(repo) = self.active_repo_for_telegram_chat(chat).await
+        {
+            path.push_str(&format!("&repo={}", query_escape(&repo.to_string())));
+        }
+        let checkout = self.agent.web(&path, None).await.ok().and_then(|v| v.get("checkout").cloned()).unwrap_or(Value::Null);
+        let (Some(thread), Some(repo), Some(branch), Some(base)) = (
+            checkout.get("thread").and_then(Value::as_str).filter(|t| valid_thread(t)),
+            checkout.get("repo").and_then(Value::as_str).and_then(RepoName::parse),
+            checkout.get("branch").and_then(Value::as_str).and_then(BranchName::parse),
+            checkout.get("base").and_then(Value::as_str).and_then(BranchName::parse),
+        ) else {
+            self.notice(chat, no_repo);
+            return;
+        };
+        let notified = checkout.get("notified").and_then(Value::as_bool) == Some(true);
+        let intent = if action == RefusedAction::Merge { "merge" } else { "push" };
+        let state = self.agent.web(&format!("/api/repos/state?thread={}&intent={intent}", query_escape(thread)), None).await;
+        let state = state.unwrap_or(Value::Null);
+        let confirm = state
+            .get("confirm")
+            .and_then(Value::as_str)
+            .filter(|c| c.len() == 32 && c.bytes().all(|b| b.is_ascii_hexdigit()));
+        let count = state.get(if action == RefusedAction::Merge { "ahead" } else { "unpushed" }).and_then(Value::as_u64);
+        let (Some(confirm), Some(count)) = (confirm, count) else {
+            self.notice(chat, format!("{action} refused in {repo}; open the app."));
+            return;
+        };
+        if count == 0 {
+            let line = if action == RefusedAction::Merge { format!("Nothing to merge in {repo}.") } else { format!("Nothing to push in {repo}.") };
+            self.notice(chat, line);
+            return;
+        }
+        let (text, option) = if action == RefusedAction::Merge {
+            (format!("Merge {count} commits of {repo} ({branch}) into {base}?"), "Merge")
+        } else {
+            (format!("Push {count} commits of {repo} ({branch}) to the forge?"), "Push")
+        };
+        self.next_approval += 1;
+        let nonce = ling_web_server::auth::random_hex(8);
+        self.approvals.insert(
+            nonce.clone(),
+            Pending {
+                local: Some(Local::RepoConfirm { action, thread: thread.to_string(), confirm: confirm.to_string(), repo, notified }),
+                chat: chat.to_string(),
+                thread: String::new(),
+                request: Value::Null,
+                method: "local/repoConfirm".to_string(),
+                params: Value::Null,
+                replies: vec![Reply::Approve, Reply::Decline],
+                free_text: false,
+                deadline: Instant::now() + self.config.approval_timeout.min(REPO_CONFIRM_TIMEOUT),
+                seq: self.next_approval,
+            },
+        );
+        self.send(Outbound::Approval { chat: chat.to_string(), id: nonce, text, options: vec![option.to_string(), "Cancel".to_string()] });
+    }
+
+    /// Sends a confirmed `/push` or `/merge` to `ling web` with its nonce, off the hub's loop, and
+    /// says how it went in fixed words: the server's own error text never reaches the chat. A
+    /// success is said only when the checkout's own notice does not reach this chat.
+    fn repo_confirmed(&self, chat: &str, action: RefusedAction, thread: &str, confirm: &str, repo: &RepoName, notified: bool) {
+        let Some(adapter) = self.adapters.get(adapter_of(chat)).cloned() else { return };
+        let path = if action == RefusedAction::Merge { "/api/repos/merge" } else { "/api/repos/push" };
+        let body = json!({ "thread": thread, "confirm": confirm });
+        let (agent, chat, repo) = (self.agent.clone(), chat.to_string(), repo.clone());
+        let command = if action == RefusedAction::Merge { "/merge" } else { "/push" };
+        tokio::spawn(async move {
+            let text = match agent.web(path, Some(body)).await {
+                Ok(_) if notified => return,
+                Ok(value) if action == RefusedAction::Merge => {
+                    match (
+                        value.get("branch").and_then(Value::as_str).and_then(BranchName::parse),
+                        value.get("into").and_then(Value::as_str).and_then(BranchName::parse),
+                    ) {
+                        (Some(branch), Some(into)) => format!("Merged {branch} into {into} in {repo}."),
+                        _ => format!("Merged in {repo}."),
+                    }
+                }
+                Ok(value) => match value.get("pushed").and_then(Value::as_u64) {
+                    Some(commits) => format!("Pushed {commits} commits of {repo}."),
+                    None => format!("Pushed {repo}."),
+                },
+                Err(err) if err.starts_with("the branch moved since you confirmed") => {
+                    format!("The branch moved since you confirmed; send {command} again.")
+                }
+                Err(err) if err == "confirmation missing or expired" => {
+                    format!("That confirmation expired; send {command} again.")
+                }
+                Err(_) => format!("{action} refused in {repo}; open the app."),
+            };
+            let _ = adapter.send(Outbound::Notice { chat, text });
+        });
+    }
+
     /// Pending Telegram Mini App first-launch device pairing requests (`GET /api/telegram/pending-pairs`,
     /// specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §12.1 G2): prompts the paired Telegram user once per
     /// request id with a fresh random approval nonce and `Approve` / `Decline` buttons.
@@ -1615,6 +1746,14 @@ impl Hub {
                     self.launch_pair_decide(id, false);
                     "Declined."
                 }
+                (Local::RepoConfirm { .. }, Reply::Approve) if adapter_of(&pending.chat) == "telegram" && self.airgapped => {
+                    "Not sent: the air gap is on."
+                }
+                (Local::RepoConfirm { action, thread, confirm, repo, notified }, Reply::Approve) => {
+                    self.repo_confirmed(&pending.chat, *action, thread, confirm, repo, *notified);
+                    if *action == RefusedAction::Merge { "Merging." } else { "Pushing." }
+                }
+                (Local::RepoConfirm { .. }, _) => "Cancelled.",
             };
             self.close(pending.chat, approval.to_string(), outcome);
             return;
@@ -1715,6 +1854,7 @@ impl Hub {
                             self.launch_pair_decide(id, false);
                             "Declined: no answer in time."
                         }
+                        Local::RepoConfirm { .. } => "No answer in time; nothing was sent.",
                     };
                     self.close(pending.chat, approval, outcome);
                     continue;

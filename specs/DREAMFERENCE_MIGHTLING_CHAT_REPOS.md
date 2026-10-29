@@ -220,6 +220,7 @@ The repository service is one more module, `ling-rs/web/src/chat_repos.rs`. Its 
 - **The second layer** is the forge's own hook. A push it refuses is reported the same way.
 - **Private and archived repositories:** a private repository skips the GitHub-oriented check, because it's never mirrored. An archived repository refuses every write (§5.4).
 - **Only `phone/<thread>` is pushed,** or `main` under §3.3. Never a force push, never a deletion.
+- **Exactly the confirmed commit is pushed:** the refspec is `<confirmed sha>:refs/heads/<branch>`, so a commit made after the confirmation never rides along; if the worktree's head moved, the push is refused with "the branch moved since you confirmed; confirm again" (§4.7).
 
 ### 4.6 Update, merge and pull requests
 
@@ -234,6 +235,7 @@ The repository service is one more module, `ling-rs/web/src/chat_repos.rs`. Its 
   - **Requirements:** the forge's required status checks must be green when the repository has them (the forge's gate, FORGEJO §4.2).
   - **On a conflict or a red check,** it's refused with the reason ("conflicts with main: /update, then /merge").
   - **Afterwards,** the owner's desk gets the change with an ordinary pull. Nothing touches the desk's tree.
+- **The merge is pinned to the confirmed commit:** the forge's merge call carries `head_commit_id`, and an open pull request is reused only when both its head and its base match.
 - **`/pr`** opens a pull request `phone/<thread>` → default branch on the forge, titled with the thread's name, and answers with its link through `ling web`'s `/forge/`. If one is already open, it answers with that link.
 
 ### 4.7 Routes
@@ -244,8 +246,8 @@ The repository service is one more module, `ling-rs/web/src/chat_repos.rs`. Its 
 | `POST /api/repos/open` | `{repo, bridge, chat, thread?}` | A new checkout and Work thread, or the chat's existing one; answers `{thread, cwd, branch}` |
 | `POST /api/repos/off` | `{bridge, chat, thread?}` | Clears the chat's current repository in `current.json` and answers `{repo, branch, uncommitted}` |
 | `GET /api/repos/notices?chat=&after=` | | Bridge-only: typed repository events (`RepoEventKind`) since `after` for `RepoNotice` delivery (§5.3) |
-| `GET /api/repos/current?chat=` | | Bridge-only: the chat's current repository and checkout (`current.json`) |
-| `GET /api/repos/state?thread=` | | Branch, base, ahead and behind, uncommitted files with counts, access mode, budget (and a confirmation nonce with `?intent=…`) |
+| `GET /api/repos/current?bridge=&chat=&repo=` | | Bridge-only: the chat's current repository (`current.json`) and `checkout {thread, repo, branch, base, notified}`: the chat's own latest checkout of the repository, else the latest from any chat; `notified` says whether its notices reach this chat |
+| `GET /api/repos/state?thread=` | | Branch, base, `head`, ahead and behind, `unpushed`, uncommitted files with counts, access mode, budget (and a confirmation nonce with `?intent=…`) |
 | `GET /api/repos/diff?thread=&path=&scope=` | | `scope`: `uncommitted`, `branch` (against the base) or `turn`; a stat, or one file's diff |
 | `GET /api/repos/log?thread=` | | The branch's commits since its base |
 | `POST /api/repos/commit` | `{thread, message}` | §4.4 |
@@ -259,6 +261,9 @@ The repository service is one more module, `ling-rs/web/src/chat_repos.rs`. Its 
 
 - **Thread checks:** every route that takes a thread checks that `index.json` maps it to a checkout under `chat-repos/`. No route takes a path.
 - **Confirmation:** the routes that change something take a `confirm` nonce, issued by a preceding `GET` with `?intent=…`. A bridge's confirmation (button, YES, ✅) carries that nonce, so a confirmation can't be replayed or aimed at another thread.
+  - **The nonce:** 128 random bits, single use, valid 10 minutes, bound to the caller (the owner's session or the bridge's device), the thread and the intent. For `push`, `pr` and `merge` it's also bound to the worktree's head commit, the branch and the base at issue time. It's taken under the repository's lock before any git or forge call: a missing, expired, reused or other caller's nonce answers 409 `expired`, and a head, branch or base that moved answers 409 `moved` (the nonce is spent either way).
+  - **`/push` and `/merge` from the bots** (`ling-chat`'s hub): the hub reads the chat's checkout from `/current`, asks `/state?intent=…`, and shows a counts-only prompt with two buttons ("Push 2 commits of org/widget (phone/co-1) to the forge?"). Only a press of its button, in the same chat, within five minutes (inside the nonce's ten), sends the nonce. The outcome is said in fixed words, never the server's text; success is said only when the checkout's own notices (§5.3) don't reach that chat. On Telegram the air gap blocks the send.
+  - **Discord** has no adapter yet. When it gets one, a button press must be acknowledged within three seconds, so the bot defers the interaction and answers with a follow-up.
 
 ## 5. Work threads from a phone
 
