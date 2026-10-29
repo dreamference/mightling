@@ -2161,9 +2161,16 @@ pub fn ensure_git_helpers_for_forge(state_dir: &Path, forge_url: &str) -> std::i
     auth::private_dir(&hooks_dir)?;
 
     let forge_base = forge_url.trim().trim_end_matches('/');
+    // Git asks `Username for 'http://host:port': ` then `Password for
+    // 'http://mightling-phone@host:port': `; the closing quote keeps `host:32001` from passing as
+    // `host:3200`.
+    let with_user = match forge_base.split_once("://") {
+        Some((scheme, rest)) => format!("{scheme}://mightling-phone@{rest}"),
+        None => format!("mightling-phone@{forge_base}"),
+    };
     let askpass_path = state_dir.join(ASKPASS_SCRIPT);
     let script = format!(
-        "#!/bin/sh\ncase \"$1\" in\n*\"{forge_base}\"*) ;;\n*) exit 1 ;;\nesac\ncase \"$1\" in\nUsername*) printf 'mightling-phone\\n' ;;\n*) tr -d '\\r\\n' < \"$(dirname \"$0\")/{TOKEN_FILE}\"; printf '\\n' ;;\nesac\n"
+        "#!/bin/sh\ncase \"$1\" in\n*\"'{forge_base}'\"*|*\"'{forge_base}/\"*|*\"'{with_user}'\"*|*\"'{with_user}/\"*) ;;\n*) exit 1 ;;\nesac\ncase \"$1\" in\nUsername*) printf 'mightling-phone\\n' ;;\n*) tr -d '\\r\\n' < \"$(dirname \"$0\")/{TOKEN_FILE}\"; printf '\\n' ;;\nesac\n"
     );
     if std::fs::read_to_string(&askpass_path).ok().as_deref() != Some(script.as_str()) {
         auth::write_private(&askpass_path, &script)?;
@@ -5686,6 +5693,65 @@ mod tests {
         assert_eq!(custom.work_answer_seconds, 600);
         assert_eq!(custom.work_tool_calls, 50);
         assert_eq!(custom.work_command_seconds, 120);
+    }
+
+    /// Git asks for the password as `Password for 'http://mightling-phone@host:port': `, so the
+    /// askpass answers that prompt, and none for a port that merely starts with the forge's.
+    #[cfg(unix)]
+    #[test]
+    fn the_askpass_answers_git_for_the_forge_and_only_the_forge() {
+        use std::io::{BufRead, BufReader, Write};
+        // Answers 401 until a request carries `mightling-phone:tok-e2e`; says whether one did once
+        // a request with `X-Done` comes.
+        fn serve(listener: std::net::TcpListener) -> std::thread::JoinHandle<bool> {
+            std::thread::spawn(move || {
+                let mut authorized = false;
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else { break };
+                    let (mut auth, mut done) = (false, false);
+                    for line in BufReader::new(stream.try_clone().unwrap()).lines() {
+                        let Ok(line) = line else { break };
+                        if line.is_empty() {
+                            break;
+                        }
+                        auth |= line == "Authorization: Basic bWlnaHRsaW5nLXBob25lOnRvay1lMmU=";
+                        done |= line == "X-Done: 1";
+                    }
+                    if done {
+                        return authorized;
+                    }
+                    authorized |= auth;
+                    let answer = if auth { "404 Not Found" } else { "401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"forge\"" };
+                    let _ = write!(stream, "HTTP/1.1 {answer}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                }
+                authorized
+            })
+        }
+        fn ls_remote(askpass: &Path, listener: std::net::TcpListener) -> bool {
+            let addr = listener.local_addr().unwrap();
+            let seen = serve(listener);
+            let _ = std::process::Command::new("git")
+                .args(["-c", "credential.helper=", "ls-remote", &format!("http://{addr}/org/x.git")])
+                .env("GIT_ASKPASS", askpass)
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .output()
+                .unwrap();
+            let mut done = std::net::TcpStream::connect(addr).unwrap();
+            let _ = write!(done, "GET / HTTP/1.1\r\nX-Done: 1\r\n\r\n");
+            seen.join().unwrap()
+        }
+        let s = scratch("askpass");
+        let state = s.dir.join("state");
+        let forge = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let (askpass, _) = ensure_git_helpers_for_forge(&state, &format!("http://{}", forge.local_addr().unwrap())).unwrap();
+        std::fs::write(state.join(TOKEN_FILE), "tok-e2e\n").unwrap();
+        assert!(ls_remote(&askpass, forge), "git sent the forge token to the forge");
+
+        // A forge on `…:4123` and a server on `…:41234`: the prompt starts the same.
+        let other = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let other_url = format!("http://{}", other.local_addr().unwrap());
+        let (askpass, _) = ensure_git_helpers_for_forge(&state, &other_url[..other_url.len() - 1]).unwrap();
+        assert!(!ls_remote(&askpass, other), "a port that only starts with the forge's gets no token");
     }
 
     /// An `enabled` the user wrote but not as a boolean is read as off, not as the default on.
