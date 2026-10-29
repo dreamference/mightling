@@ -520,6 +520,20 @@ mod tests {
     }
 
     #[test]
+    fn a_masked_output_that_was_dropped_keeps_the_drop_placeholder() {
+        // Drop-first compaction rewrites the history; its short placeholder is not masked over.
+        let scratch = Scratch::new("dropped");
+        let mut items = history(40, 60);
+        run(&scratch.0, &mut items, policy().high + 1);
+        let first = masked(&items)[0];
+        let mut later = history(40, 60);
+        let dropped = "[output of cargo test dropped at compaction (exit 0); re-run if needed]";
+        later[first].item["output"] = json!(dropped);
+        run(&scratch.0, &mut later, policy().low);
+        assert_eq!(later[first].item["output"], json!(dropped));
+    }
+
+    #[test]
     fn the_last_ten_and_short_outputs_are_never_masked() {
         let scratch = Scratch::new("exempt");
         let mut items = history(30, 20);
