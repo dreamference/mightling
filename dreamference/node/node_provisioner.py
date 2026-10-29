@@ -487,19 +487,23 @@ class NodeProvisioner:
 
     def _step_models(self, host: str, session: FleetSession) -> bool:
         state = self._state(host)
-        missing = [
-            folder
-            for folder in FleetProbe.missing_models(state, self.plan["folders"])
-            if FleetModelPlan.local_folders([folder])
-        ]
+        missing = FleetProbe.missing_models(state, self.plan["folders"])
+        absent = self._absent_here(missing)
         needed = FleetModelPlan.bytes_needed(missing)
-        if not FleetModelPlan.fits(float(state.get("free_gb") or 0), needed):
-            return self._fail(
-                host,
-                "copy the model",
+        if absent:
+            refusal = (
+                f"{', '.join(absent)} {'is' if len(absent) == 1 else 'are'} on neither this machine nor {host}",
+                f"ling-admin model download {self.model} here first",
+            )
+        elif not FleetModelPlan.fits(float(state.get("free_gb") or 0), needed):
+            refusal = (
                 f"not enough disk: {needed / GIB:.0f} GiB to copy, {state.get('free_gb')} GiB free",
                 "free space there, then re-run",
             )
+        else:
+            refusal = None
+        if refusal is not None:
+            return self._fail(host, "copy the model", *refusal)
         started = time.monotonic()
         if not self._fetch_models(host, session, missing):
             return False
@@ -517,6 +521,11 @@ class NodeProvisioner:
                 f"ssh {self._user(host)}@{host} ling-admin searxng start",
             )
         return True
+
+    @classmethod
+    def _absent_here(cls, folders: list[str]) -> list[str]:
+        """The folders a node lacks that this machine has no copy of either, to copy or check."""
+        return [folder for folder in folders if not FleetModelPlan.local_folders([folder])]
 
     def _fetch_models(self, host: str, session: FleetSession, missing: list[str]) -> bool:
         """Brings the missing folders to the machine: rsync from here, or from Hugging Face (`hf`)."""
@@ -842,8 +851,13 @@ class NodeProvisioner:
 
         from_hub = self.options.get("model_source") == HUB_SOURCE
         verb = "download from Hugging Face" if from_hub else "copy"
+        missing = FleetProbe.missing_models(state, self.plan["folders"])
+        absent = self._absent_here(missing)
         changes = [
-            f"{verb} {folder}" for folder in FleetProbe.missing_models(state, self.plan["folders"])
+            f"{folder} is on neither this machine nor the node"
+            if folder in absent
+            else f"{verb} {folder}"
+            for folder in missing
         ]
         changes += [
             f"image {image}"

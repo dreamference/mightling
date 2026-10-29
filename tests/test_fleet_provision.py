@@ -580,6 +580,16 @@ def test_a_node_serving_the_old_model_is_restarted_with_the_one_assigned(fleet, 
     assert "start" in requests
 
 
+def test_a_model_folder_on_neither_machine_fails_the_copy_and_the_dry_run_says_so(fleet, monkeypatch, capsys):
+    monkeypatch.setattr(FleetModelPlan, "local_folders", classmethod(lambda cls, folders: []))
+    FakeSession.machines = {"spark-1": StandIn()}
+    assert provision(["spark-1"], dry_run=True) == 0
+    assert "models--org--m is on neither this machine nor the node" in capsys.readouterr().out
+    assert provision(["spark-1"]) == 1
+    out = capsys.readouterr().out
+    assert "models--org--m is on neither this machine nor spark-1" in out
+
+
 def test_web_is_off_unless_asked(fleet):
     FakeSession.machines = {"spark-1": StandIn()}
     provision(["spark-1"], web=True)
