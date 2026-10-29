@@ -154,6 +154,20 @@ def test_skipped_runs_do_not_block_and_releases_are_ignored(mod: Any) -> None:
     assert repo.decide(mod)[0] is not None
 
 
+def test_the_ragon_rename_rehearsal_never_gates_a_release(mod: Any) -> None:
+    repo = FakeRepo()
+    repo.sha_runs = [
+        run_entry(".github/workflows/ragon-rename-rehearsal.yml", "Ragon", conclusion="failure"),
+        run_entry(
+            ".github/workflows/ragon-rename-rehearsal.yml",
+            "Ragon",
+            status="in_progress",
+            conclusion=None,
+        ),
+    ]
+    assert repo.decide(mod)[0] is not None
+
+
 def test_a_head_without_a_successful_dry_run_is_not_green(mod: Any) -> None:
     repo = FakeRepo()
     repo.dry_runs = [{"conclusion": "failure", "status": "completed"}]
