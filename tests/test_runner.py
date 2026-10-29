@@ -140,3 +140,109 @@ def test_readiness_waiter_needs_health_and_a_completion(monkeypatch):
 
     monkeypatch.setattr(waiter, "_pre_warm", lambda: False)
     assert waiter.wait_for_vllm(max_wait=0) is False
+
+
+def _codex_runner(tmp_path, monkeypatch, installed=True, executable="/opt/ling", **config):
+    from dreamference.runner import CodexInstaller, CodexRunner
+
+    monkeypatch.setattr(CodexInstaller, "install_if_missing", classmethod(lambda cls: installed))
+    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: executable))
+    return CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml"), **config))
+
+
+def test_codex_runner_starts_nothing_when_ling_cannot_be_built_or_found(tmp_path, monkeypatch, capsys):
+    import pytest
+
+    monkeypatch.setattr("subprocess.call", lambda *a, **k: pytest.fail("ling may not start"))
+
+    assert _codex_runner(tmp_path, monkeypatch, installed=False).run_session(prompt="x") == 1
+    assert _codex_runner(tmp_path, monkeypatch, executable=None).run_session(prompt="x") == 1
+    assert "ling-admin codex build" in capsys.readouterr().out
+
+
+def test_codex_runner_reports_a_ling_that_cannot_be_run(tmp_path, monkeypatch, capsys):
+    def refuse(cmd, env=None, **kwargs):
+        raise PermissionError(13, "Permission denied", cmd[0])
+
+    monkeypatch.setattr("subprocess.call", refuse)
+
+    assert _codex_runner(tmp_path, monkeypatch).run_session() == 1
+    assert "Failed to run ling" in capsys.readouterr().out
+
+
+def test_codex_runner_debug_sets_rust_log_unless_the_caller_did(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("subprocess.call", lambda cmd, env=None, **k: calls.append((cmd, env)) or 0)
+    monkeypatch.delenv("RUST_LOG", raising=False)
+    runner = _codex_runner(tmp_path, monkeypatch, mightling_gmail=False)
+
+    runner.run_session(debug=True)
+    monkeypatch.setenv("RUST_LOG", "warn")
+    runner.run_session(debug=True)
+    runner.run_session()
+
+    (cmd, verbose), (_, chosen), (_, quiet) = calls
+    assert cmd == ["/opt/ling"]  # no prompt, no arguments, and no --debug flag Codex lacks
+    assert "codex_mcp=trace" in verbose["RUST_LOG"]
+    assert chosen["RUST_LOG"] == "warn"
+    assert quiet["RUST_LOG"] == "warn"  # inherited, not set by the runner
+    assert verbose["DREAMFERENCE_MIGHTLING_GMAIL"] == "false"
+
+
+def test_readiness_waiter_gives_up_at_once_when_the_gate_is_closed(monkeypatch, capsys):
+    # The server is up but only a benchmark run may use it: waiting would last the whole run.
+    from dreamference.runner import VLLMReadinessWaiter
+    from dreamference.vllm_server.model_gate import ModelGate
+
+    waiter = VLLMReadinessWaiter(config=DreamferenceConfig())
+    monkeypatch.setattr(waiter.vllm_manager, "check_health", lambda timeout=None: False)
+    monkeypatch.setattr(ModelGate, "probe", classmethod(
+        lambda cls, host, timeout=None: {"state": "closed", "message": "A SWE-bench run holds the model"}))
+    monkeypatch.setattr("time.sleep", lambda s: (_ for _ in ()).throw(AssertionError("waited")))
+
+    assert waiter.wait_for_vllm(max_wait=None) is False
+    assert "A SWE-bench run holds the model" in capsys.readouterr().out
+
+
+def test_readiness_waiter_stops_on_an_interrupt(monkeypatch):
+    from dreamference.runner import VLLMReadinessWaiter
+
+    waiter = VLLMReadinessWaiter(config=DreamferenceConfig())
+
+    def interrupted(timeout=None):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(waiter.vllm_manager, "check_health", interrupted)
+    assert waiter.wait_for_vllm(max_wait=None) is False
+
+
+def test_readiness_pre_warm_asks_for_one_token_of_the_served_checkpoint(monkeypatch):
+    import json
+    from dreamference.runner import VLLMReadinessWaiter, vllm_readiness_waiter
+
+    waiter = VLLMReadinessWaiter(config=DreamferenceConfig(model="qwen3.8-27b-nvfp4-dflash2", vllm_host="http://gb10:9000"))
+    sent = []
+
+    class Reply:
+        def __init__(self, status):
+            self.status = status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    statuses = iter([200, 503])
+    monkeypatch.setattr(vllm_readiness_waiter.urllib.request, "urlopen",
+                        lambda req, timeout=None: sent.append(req) or Reply(next(statuses)))
+
+    assert waiter._pre_warm() is True
+    assert waiter._pre_warm() is False
+    body = json.loads(sent[0].data)
+    assert sent[0].full_url == "http://gb10:9000/v1/chat/completions"
+    assert body["model"] == "RadixArk/Qwen3.8-27B-NVFP4" and body["max_tokens"] == 1
+
+    monkeypatch.setattr(vllm_readiness_waiter.urllib.request, "urlopen",
+                        lambda req, timeout=None: (_ for _ in ()).throw(OSError("connection refused")))
+    assert waiter._pre_warm() is False
