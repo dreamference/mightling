@@ -104,10 +104,12 @@ class NodeServe:
         existing = path.read_text().splitlines() if path.is_file() else []
         kept = [entry for entry in existing if f"--key {tag}" not in entry]
         kept.append(line)
-        staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        # Replaced where it really is: a link (a dotfiles checkout's file) stays a link.
+        target = path.resolve()
+        staging = target.with_name(f".{target.name}.{os.getpid()}.tmp")
         staging.write_text("\n".join(kept) + "\n")
         os.chmod(staging, 0o600)
-        os.replace(staging, path)
+        os.replace(staging, target)
         print(f"✅ Authorised for Mightling node operations only ({path}).")
         return True
 
@@ -130,10 +132,11 @@ class NodeServe:
                 if not (f"--key {tag}" in entry and entry.rstrip().endswith(KEY_COMMENT))]
         if len(kept) == len(lines):
             return False
-        staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        target = path.resolve()
+        staging = target.with_name(f".{target.name}.{os.getpid()}.tmp")
         staging.write_text("\n".join(kept) + ("\n" if kept else ""))
         os.chmod(staging, 0o600)
-        os.replace(staging, path)
+        os.replace(staging, target)
         return True
 
     @classmethod

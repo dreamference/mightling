@@ -409,6 +409,19 @@ def test_the_forced_command_names_an_admin_path_with_a_space_as_one_word(monkeyp
     assert shlex.split(forced)[0] == admin
 
 
+def test_a_linked_authorized_keys_stays_a_link_to_the_file_it_names(tmp_path):
+    path = NodeServe.authorized_keys()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    kept = tmp_path / "dotfiles" / "authorized_keys"
+    kept.parent.mkdir()
+    kept.write_text("ssh-ed25519 AAAAown my laptop\n")
+    path.symlink_to(kept)
+    assert NodeServe.authorize("ssh-ed25519 AAAAfirst a")
+    assert path.is_symlink() and "AAAAfirst" in kept.read_text()
+    assert NodeServe.unauthorize(NodeServe.key_tag("ssh-ed25519 AAAAfirst a"))
+    assert path.is_symlink() and kept.read_text() == "ssh-ed25519 AAAAown my laptop\n"
+
+
 @pytest.mark.parametrize("key", ["", "ssh-ed25519", "not a key at all"])
 def test_authorising_something_that_is_not_a_public_key_writes_nothing(key, capsys):
     assert not NodeServe.authorize(key)
