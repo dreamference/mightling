@@ -835,3 +835,17 @@ def test_a_service_that_answers_too_slowly_is_not_reported_as_stopped(tmp_path):
         ):
             result = GmailClient.search("x")
         assert result != NOT_RUNNING_ERROR and "in time" in result["error"]
+
+
+def test_an_error_reply_that_is_not_an_object_still_reads_as_an_error(tmp_path):
+    secret = tmp_path / "service-secret"
+    secret.write_text("s")
+
+    def answered(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, 502, "Bad Gateway", {}, io.BytesIO(b'["x"]'))
+
+    with (
+        patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)),
+        patch("urllib.request.urlopen", answered),
+    ):
+        assert GmailClient.search("x") == {"error": "Gmail service answered HTTP 502."}

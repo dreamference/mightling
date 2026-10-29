@@ -115,7 +115,8 @@ class GmailClient:
                 body = json.load(error)
             except ValueError:
                 body = {}
-            return {"error": body.get("error") or f"Gmail service answered HTTP {error.code}."}
+            message = body.get("error") if isinstance(body, dict) else None
+            return {"error": message or f"Gmail service answered HTTP {error.code}."}
         except TimeoutError:
             return dict(SLOW_ERROR)
         except urllib.error.URLError as error:
