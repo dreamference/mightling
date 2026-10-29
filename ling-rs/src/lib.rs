@@ -1426,14 +1426,26 @@ pub fn configure_codex_home(
 /// Every launch rewrites the catalog and may rewrite `config.toml`, and a second `ling` starting
 /// at the same moment reads them. `std::fs::write` truncates first, so that reader could see an
 /// empty or half-written file and refuse to start; a rename is atomic, so it sees one version or
-/// the other.
+/// the other. The file keeps its mode: Codex's `config.toml` can hold an MCP server's token, and
+/// the new file would otherwise take the umask's.
 pub(crate) fn write_atomically(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
     let name = path
         .file_name()
         .context("a config path has no file name")?
         .to_string_lossy();
     let staging = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    std::fs::write(&staging, contents)
+    let permissions = std::fs::metadata(path).ok().map(|meta| meta.permissions());
+    std::fs::File::create(&staging)
+        .and_then(|mut file| {
+            // The mode first, so the contents are never readable by more than the file was.
+            if let Some(permissions) = permissions {
+                file.set_permissions(permissions)?;
+            }
+            file.write_all(contents)
+        })
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&staging);
+        })
         .with_context(|| format!("could not write {}", staging.display()))?;
     std::fs::rename(&staging, path).inspect_err(|_| {
         let _ = std::fs::remove_file(&staging);
@@ -2161,6 +2173,24 @@ mod tests {
             .map(|entries| entries.filter_map(Result::ok).filter(|e| e.file_name() != "config.toml").count())
             .unwrap_or(usize::MAX);
         assert_eq!(leftovers, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_config_replaced_whole_keeps_its_mode() {
+        // Codex's `config.toml` can hold an MCP server's token; a 0600 file came back 0644.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mightling-atomic-mode-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap_or_default();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "old = 1\n").unwrap_or_default();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap_or_default();
+        write_atomically(&path, b"new = 2\n").expect("write");
+        let mode = std::fs::metadata(&path).map(|meta| meta.permissions().mode() & 0o777).unwrap_or_default();
+        assert_eq!(mode, 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap_or_default(), "new = 2\n");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
