@@ -350,6 +350,8 @@ describe("editors", () => {
       process.env.PATH = savedPath;
     }
     expect(execProgram("env BAMF=1 subl %F")).toBe("subl");
+    expect(execProgram("env -u GTK_IM_MODULE BAMF=1 code %F")).toBe("code");
+    expect(execProgram("env --unset=GTK_IM_MODULE -i code %F")).toBe("code");
     expect(execProgram("%F")).toBeNull();
     expect(systemDataDirs().length).toBeGreaterThan(0);
   });

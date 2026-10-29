@@ -49,10 +49,14 @@ export function execProgram(exec: string): string | null {
   const match = exec.trim().match(/^"([^"]+)"|^(\S+)/);
   const program = match ? match[1] ?? match[2] : null;
   if (!program || program.startsWith("%")) return null;
-  // `env VAR=x program …` and `flatpak run …` launchers: keep it simple, take the program after env's assignments.
+  // `env VAR=x program …` and `flatpak run …` launchers: keep it simple, take the program after env's options and assignments.
   if (path.basename(program) === "env") {
-    const rest = exec.trim().split(/\s+/).slice(1).filter((word) => !word.includes("="));
-    return rest[0] ?? null;
+    const words = exec.trim().split(/\s+/).slice(1);
+    for (let i = 0; i < words.length; i++) {
+      if (["-u", "--unset", "-C", "--chdir"].includes(words[i])) i++;
+      else if (!words[i].includes("=") && !words[i].startsWith("-")) return words[i];
+    }
+    return null;
   }
   return program;
 }
