@@ -358,7 +358,7 @@ class NodeJobSender:
         target = cls.received_dir(job_id)
         try:
             process = subprocess.Popen(NodePairing.ssh_command(record, f"job-out {job_id}"), stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE)
+                                       stderr=subprocess.DEVNULL)
         except (OSError, LookupError):
             return False
         count = 0
@@ -372,6 +372,9 @@ class NodeJobSender:
                     count += member.isfile()
         except (tarfile.TarError, OSError):
             pass
+        # A stream the reader stopped in would otherwise leave the node writing to a full pipe.
+        if process.stdout is not None:
+            process.stdout.close()
         process.wait()
         if process.returncode != 0 or not count:
             if not quiet_when_absent:

@@ -1813,6 +1813,32 @@ def test_out_files_come_back_and_a_hostile_archive_cannot_write_outside(
     )
 
 
+def test_an_unreadable_out_stream_does_not_leave_the_fetch_waiting_forever(
+    tmp_path, monkeypatch
+):
+    import threading
+
+    from dreamference.node import NodeJobSender, NodePairing
+
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    NodeJobSender._remember("20261002-1200-abc", paired_record(), str(tmp_path), "calc-0123456789")
+    # Not a tar, and more of it than a pipe holds: the reader stops at the first block.
+    monkeypatch.setattr(
+        NodePairing,
+        "ssh_command",
+        classmethod(lambda cls, record, request: ["sh", "-c", "yes | head -c 2000000"]),
+    )
+    results = []
+    worker = threading.Thread(
+        target=lambda: results.append(NodeJobSender._fetch_out("20261002-1200-abc", True)),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=30)
+    assert not worker.is_alive()
+    assert results == [False]
+
+
 def test_only_paths_the_node_allows_are_bound_and_only_read_only(job_node, tmp_path, monkeypatch):
     from dreamference.node import NodeJob
 
