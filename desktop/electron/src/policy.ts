@@ -86,6 +86,8 @@ function turnSandboxPolicy(workspace: WorkspaceSandbox, readOnly: boolean): Json
 /** The rules of `policy.json`. */
 export interface Policy {
   allowedRequests: ReadonlySet<string>;
+  /** The requests a phone bridge may send: opening, reading and naming threads and their turns. */
+  bridgeAllowedRequests: ReadonlySet<string>;
   allowedNotifications: ReadonlySet<string>;
   threadOpeners: ReadonlySet<string>;
   droppedThreadFields: readonly string[];
@@ -149,6 +151,7 @@ export function parsePolicy(value: unknown): Policy {
   if (!isObject(value)) throw new Error("policy.json: not an object");
   const policy: Policy = {
     allowedRequests: new Set(strings(value, "allowedRequests")),
+    bridgeAllowedRequests: new Set(strings(value, "bridgeAllowedRequests")),
     allowedNotifications: new Set(strings(value, "allowedNotifications")),
     threadOpeners: new Set(strings(value, "threadOpeners")),
     droppedThreadFields: strings(value, "droppedThreadFields"),
@@ -189,6 +192,9 @@ export function parsePolicy(value: unknown): Policy {
   }
   if ([...policy.repoPrompts].some((name) => policy.scratchPrompts.has(name))) {
     throw new Error("policy.json: a repo prompt cannot also be a scratch prompt");
+  }
+  if (![...policy.bridgeAllowedRequests].every((method) => policy.allowedRequests.has(method))) {
+    throw new Error("policy.json: every request a phone bridge may send must be allowed");
   }
   if (![...policy.airgappedRefusedRequests].every((method) => policy.allowedRequests.has(method))) {
     throw new Error("policy.json: every request refused at airgapped on must be allowed at off");
@@ -389,6 +395,7 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
   const key = "id" in object ? JSON.stringify(object.id) : undefined;
   if (method !== undefined && key !== undefined) {
     if (!policy.allowedRequests.has(method)) throw new Error(`the Mightling UI does not send ${method}`);
+    if (prompts.isBridge() && !policy.bridgeAllowedRequests.has(method)) throw new Error(`a phone bridge does not send ${method}`);
     if (policy.airgappedRefusedRequests.has(method) && prompts.airgappedOn(threadIdOf(object))) {
       throw new Error(policy.airgappedRefusalReasons.get(method) ?? `airgapped is on: ${method} fetches a plugin or a marketplace with git outside the sandbox. Run ling airgapped default off to install one.`);
     }

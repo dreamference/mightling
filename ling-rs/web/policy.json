@@ -76,6 +76,16 @@
     "mcpServerStatus/list",
     "app/list"
   ],
+  "bridgeAllowedRequests": [
+    "initialize",
+    "thread/start",
+    "thread/resume",
+    "thread/turns/list",
+    "thread/name/set",
+    "turn/start",
+    "turn/steer",
+    "turn/interrupt"
+  ],
   "allowedNotifications": [
     "initialized"
   ],

@@ -800,6 +800,55 @@
       "name": "params that are neither an object nor null are refused, a request's or a notification's",
       "message": {"method": "initialized", "params": "x"},
       "accept": false
+    },
+    {
+      "name": "a phone bridge runs no command: command/exec with Full Access is refused",
+      "bridge": true,
+      "message": {"id": 360, "method": "command/exec", "params": {"command": ["/bin/sh", "-c", "id"], "cwd": "/w", "sandboxPolicy": {"type": "dangerFullAccess"}}},
+      "accept": false
+    },
+    {
+      "name": "a phone bridge runs no ! command",
+      "bridge": true,
+      "message": {"id": 361, "method": "thread/shellCommand", "params": {"threadId": "ask-7", "command": "id"}},
+      "accept": false
+    },
+    {
+      "name": "a phone bridge writes no configuration: an MCP server's command is a host command",
+      "bridge": true,
+      "message": {"id": 362, "method": "config/value/write", "params": {"keyPath": "mcp_servers.x", "value": {"command": "/bin/sh", "args": ["-c", "id"]}, "mergeStrategy": "replace"}},
+      "accept": false
+    },
+    {
+      "name": "a phone bridge writes no configuration in a batch either",
+      "bridge": true,
+      "message": {"id": 363, "method": "config/batchWrite", "params": {"edits": [{"keyPath": "sandbox_mode", "value": "danger-full-access", "mergeStrategy": "replace"}]}},
+      "accept": false
+    },
+    {
+      "name": "a phone bridge reads no file",
+      "bridge": true,
+      "message": {"id": 364, "method": "fs/readFile", "params": {"path": "/etc/passwd"}},
+      "accept": false
+    },
+    {
+      "name": "a phone bridge installs no plugin",
+      "bridge": true,
+      "message": {"id": 365, "method": "plugin/install", "params": {"marketplacePath": "/m", "pluginName": "p"}},
+      "accept": false
+    },
+    {
+      "name": "a phone bridge lists a thread's turns",
+      "bridge": true,
+      "message": {"id": 366, "method": "thread/turns/list", "params": {"threadId": "ask-7"}},
+      "accept": true,
+      "out": {"id": 366, "method": "thread/turns/list", "params": {"threadId": "ask-7"}}
+    },
+    {
+      "name": "the owner's window writes configuration",
+      "message": {"id": 367, "method": "config/value/write", "params": {"keyPath": "features.memories", "value": true, "mergeStrategy": "upsert"}},
+      "accept": true,
+      "out": {"id": 367, "method": "config/value/write", "params": {"keyPath": "features.memories", "value": true, "mergeStrategy": "upsert"}}
     }
   ]
 }
