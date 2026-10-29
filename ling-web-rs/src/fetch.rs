@@ -300,9 +300,17 @@ pub fn decode(body: &[u8], content_type: &str, is_html: bool) -> String {
         let label = META_CHARSET.captures(head)?.get(1)?.as_bytes().to_vec();
         String::from_utf8(label).ok()
     };
+    // A header charset no encoding knows (`charset=`, a typo) leaves the meta in charge.
+    let known = |label: String| Encoding::for_label(label.as_bytes());
     let encoding = declared
-        .or_else(|| if is_html { sniffed() } else { None })
-        .and_then(|label| Encoding::for_label(label.as_bytes()))
+        .and_then(known)
+        .or_else(|| {
+            if is_html {
+                sniffed().and_then(known)
+            } else {
+                None
+            }
+        })
         .unwrap_or(encoding_rs::UTF_8);
     let (text, _, _) = encoding.decode(body);
     text.into_owned()
@@ -317,7 +325,9 @@ pub fn render_text(page: &FetchedPage, max_chars: i64) -> String {
     out.push_str(&page.text);
     out.push('\n');
     if page.truncated {
-        out.push_str(&format!("\n[truncated at {max_chars} chars]\n"));
+        // The limit `page` cut at, not the one asked for.
+        let limit = max_chars.clamp(1, MAX_CHARS_CEILING);
+        out.push_str(&format!("\n[truncated at {limit} chars]\n"));
     }
     out
 }
@@ -452,6 +462,17 @@ mod tests {
     }
 
     #[test]
+    fn a_header_charset_no_encoding_knows_leaves_the_meta_in_charge() {
+        let with_meta = [b"<meta charset=\"windows-1252\">caf".as_slice(), &[0xe9]].concat();
+        for header in ["text/html; charset=", "text/html; charset=bogus-8"] {
+            assert!(
+                decode(&with_meta, header, true).ends_with("café"),
+                "{header}"
+            );
+        }
+    }
+
+    #[test]
     fn rendering_matches_the_python_command() {
         let page = FetchedPage {
             url: "u".into(),
@@ -466,5 +487,25 @@ mod tests {
             render_text(&page, 4),
             "# T\n\nBody\n\n[truncated at 4 chars]\n"
         );
+    }
+
+    #[test]
+    fn the_truncation_line_names_the_limit_the_text_was_cut_at() {
+        let body = "x".repeat(MAX_CHARS_CEILING as usize + 10);
+        for (asked, kept) in [(0, 1), (-5, 1), (MAX_CHARS_CEILING + 1, MAX_CHARS_CEILING)] {
+            let page = page(
+                "u",
+                "u".into(),
+                200,
+                "text/plain".into(),
+                body.as_bytes(),
+                asked,
+            );
+            assert_eq!(page.text.chars().count() as i64, kept);
+            assert!(
+                render_text(&page, asked).ends_with(&format!("[truncated at {kept} chars]\n")),
+                "asked {asked}"
+            );
+        }
     }
 }
