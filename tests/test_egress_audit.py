@@ -989,3 +989,38 @@ def test_every_address_a_sendmmsg_names_is_counted():
             f'{message("140.82.112.3", 443)}], 2, 0) = 2\n')
     trace = StraceParser.parse(line)
     assert trace.destinations == {"127.0.0.1:9000": 1, "140.82.112.3:443": 1}
+
+
+# How strace prints a sendmmsg another thread's line interrupted: the descriptor on the first line,
+# the messages (decoded only once the call returns) on the `resumed` line.
+INTERLEAVED_SENDMMSG = (
+    '5 sendmmsg(7<UDP:[1234]>,  <unfinished ...>\n'
+    '6 write(2</dev/null>, "x", 1) = 1\n'
+    '5 <... sendmmsg resumed>[{msg_hdr={msg_name={sa_family=AF_INET, sin_port=htons(443), '
+    'sin_addr=inet_addr("198.51.100.7")}, msg_namelen=16, msg_iov=[{iov_base="x", iov_len=1}], '
+    'msg_iovlen=1, msg_controllen=0, msg_flags=0}, msg_len=1}], 1, 0) = 1\n'
+)
+
+
+@pytest.mark.parametrize("result", ["= 1", "= -1 EAGAIN (Resource temporarily unavailable)"])
+def test_a_sendmmsg_whose_messages_are_on_its_resumed_line_is_a_destination(result):
+    # The resumed line was not read at all: a batch sent off this machine left no destination and
+    # the verdict passed. A failed send is still an attempt.
+    trace = StraceParser.parse(INTERLEAVED_SENDMMSG.replace("= 1\n", f"{result}\n"))
+    assert trace.destinations == {"198.51.100.7:443": 1} and trace.lines == 3
+    assert EgressAudit.judge(trace, ALLOWED, replied=True).status == FAIL
+
+
+@pytest.mark.parametrize("resumed", [True, False])
+def test_an_interrupted_sendmmsg_on_a_route_lookup_socket_reaches_it_once(resumed):
+    # On a connected socket the messages name no address: the payload is what moves the route
+    # lookup to the destinations, once, whether or not strace printed the call's end.
+    text = ('5 connect(7<UDP:[1234]>, {sa_family=AF_INET, sin_port=htons(443), '
+            'sin_addr=inet_addr("198.51.100.7")}, 16) = 0\n'
+            '5 sendmmsg(7<UDP:[1234]>,  <unfinished ...>\n')
+    if resumed:
+        text += ('5 <... sendmmsg resumed>[{msg_hdr={msg_name=NULL, msg_namelen=0, '
+                 'msg_iov=[{iov_base="x", iov_len=1}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, '
+                 'msg_len=1}], 1, 0) = 1\n')
+    trace = StraceParser.parse(text)
+    assert trace.destinations == {"198.51.100.7:443": 1}
