@@ -85,6 +85,7 @@ class SyncEgressAudit:
         if trace.dns_servers and not trace.dns_names:
             servers = ", ".join(sorted(trace.dns_servers))
             problems.append(f"sent a DNS query to {servers} whose name could not be read")
+        problems += trace.local_resolver_problems()
         problems += [
             f"ran a git command that reaches a network: {command}"
             for command in trace.networked_git

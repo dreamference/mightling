@@ -1161,3 +1161,52 @@ def test_a_udp_connect_on_a_socket_already_connected_is_a_destination():
         'sin_addr=inet_addr("192.0.2.7")}, 16) = 0\n'
     )
     assert trace.destinations == {"192.0.2.7:443": 1} and trace.route_lookups == {}
+
+
+BUS_LOOKUP = (
+    '5 sendmsg(9<UNIX-STREAM:[600->601]>, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="l\\1\\0\\1'
+    '\\30\\0\\0\\0\\1\\0\\0\\0\\240\\0\\0\\0\\1\\1o\\0\\31\\0\\0\\0/org/freedesktop/resolve1\\0\\6\\1s\\0'
+    '\\30\\0\\0\\0org.freedesktop.resolve1\\0\\3\\1s\\0\\17\\0\\0\\0ResolveHostname\\0", iov_len=176}], '
+    "msg_iovlen=1, msg_controllen=0, msg_flags=0}, MSG_NOSIGNAL) = 176\n"
+)
+
+
+@pytest.mark.parametrize(
+    "line, socket",
+    [
+        ('5 connect(7<UNIX-STREAM:[500]>, {sa_family=AF_UNIX, sun_path="/run/avahi-daemon/socket"}, 110) = 0\n',
+         "/run/avahi-daemon/socket"),
+        ('5 connect(7<UNIX-STREAM:[500]>, {sa_family=AF_UNIX, sun_path="/run/systemd/resolve/io.systemd.Resolve"}, '
+         "110) = 0\n", "/run/systemd/resolve/io.systemd.Resolve"),
+        (BUS_LOOKUP, "org.freedesktop.resolve1 on the D-Bus"),
+        (BUS_LOOKUP.replace("resolve1", "Avahi"), "org.freedesktop.Avahi on the D-Bus"),
+    ],
+)
+def test_a_lookup_through_a_local_resolver_socket_fails_and_names_the_socket(line, socket):
+    # nss-mdns and nss-resolve ask avahi or systemd-resolved over a unix socket or the system bus,
+    # and those resolve the name on the network: no DNS packet is ever traced, so this passed.
+    trace = StraceParser.parse(line + '5 execve("/opt/ling", ["ling"], 0x0 /* 1 vars */) = 0\n')
+    assert trace.local_resolvers == {socket: 1}
+    verdict = EgressAudit.judge(trace, ALLOWED, replied=True)
+    assert verdict.status == FAIL
+    assert verdict.problems == [f"asked a local resolver through {socket} (1x)"]
+
+
+def test_the_docs_and_sync_audits_fail_a_lookup_through_a_local_resolver_too():
+    from dreamference.audit.docs_egress_audit import DocsEgressAudit
+    from dreamference.audit.sync_egress_audit import SyncEgressAudit
+
+    trace = StraceParser.parse(BUS_LOOKUP + '5 execve("/opt/ling", ["ling"], 0x0 /* 1 vars */) = 0\n')
+    line = "asked a local resolver through org.freedesktop.resolve1 on the D-Bus (1x)"
+    assert line in DocsEgressAudit.judge(trace, indexed=True, found=True).problems
+    assert line in SyncEgressAudit.judge(trace, 8080, published=True, exec_held=True).problems
+
+
+def test_the_system_bus_and_other_unix_sockets_are_not_a_lookup():
+    trace = StraceParser.parse(
+        '5 connect(7<UNIX-STREAM:[500]>, {sa_family=AF_UNIX, sun_path="/run/dbus/system_bus_socket"}, 110) = 0\n'
+        + BUS_LOOKUP.replace("org.freedesktop.resolve1", "org.a11y.atspi.Registry")
+        + '5 connect(8, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT\n'
+        + '5 write(3</tmp/ling.log>, "asked org.freedesktop.resolve1", 30) = 30\n'
+    )
+    assert trace.local_resolvers == {}

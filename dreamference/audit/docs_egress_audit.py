@@ -148,6 +148,7 @@ class DocsEgressAudit:
             f"asked a resolver for {name} ({count}x)"
             for name, count in sorted(trace.dns_names.items())
         ]
+        problems += trace.local_resolver_problems()
         problems += [
             f"ran a git command that reaches a network: {command}"
             for command in trace.networked_git
