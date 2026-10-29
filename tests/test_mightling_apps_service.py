@@ -193,6 +193,24 @@ def test_drive_read_exports_a_doc_as_text_and_refuses_binaries(google):
     assert "error" in GoogleWorkspaceReader.drive_read(ACCOUNTS, "b@y.com|F1")  # no Drive grant
 
 
+def test_drive_search_across_accounts_returns_the_newest_files_of_all_of_them(monkeypatch):
+    accounts = [
+        {"email": "a@x.com", "access_token": "tok-a", "scopes": [DRIVE_SCOPE]},
+        {"email": "c@z.com", "access_token": "tok-c", "scopes": [DRIVE_SCOPE]},
+    ]
+    times = {"tok-a": ["2026-01-02T00:00:00.000Z", "2026-01-01T00:00:00.000Z"],
+             "tok-c": ["2026-10-02T00:00:00.000Z", "2026-10-01T00:00:00.000Z"]}  # fmt: skip
+
+    def opener(request, timeout=None):
+        token = request.get_header("Authorization").removeprefix("Bearer ")
+        files = [{"id": f"{token}-{n}", "modifiedTime": t} for n, t in enumerate(times[token])]
+        return FakeGoogle({urllib.parse.urlparse(request.full_url).path: {"files": files}})(request)
+
+    monkeypatch.setattr(GoogleWorkspaceReader, "opener", opener)
+    answer = GoogleWorkspaceReader.drive_search(accounts, "plan", 2)
+    assert [f["id"] for f in answer["files"]] == ["c@z.com|tok-c-0", "c@z.com|tok-c-1"]
+
+
 def test_an_account_without_drive_says_how_to_connect(google):
     google({})
     answer = GoogleWorkspaceReader.drive_search([ACCOUNTS[1]], "x", 5)
@@ -240,6 +258,25 @@ def test_calendar_events_merge_every_calendar_earliest_first(google):
     assert answer["events"][0]["attendees"] == 2
     event_queries = [q for q in fake.queries() if "timeMin" in q]
     assert all(q["singleEvents"] == ["true"] and q["q"] == ["stand"] for q in event_queries)
+
+
+def test_calendar_events_are_ordered_by_the_moment_not_by_the_text(google):
+    google(
+        {
+            "/calendar/v3/users/me/calendarList": {"items": [{"id": "primary"}, {"id": "nyc"}]},
+            # 09:00 in Paris is 07:00 UTC, an hour before the other calendar's 08:00 UTC.
+            "/calendar/v3/calendars/primary/events": {
+                "items": [{"id": "paris", "start": {"dateTime": "2026-10-05T09:00:00+02:00"}}]
+            },
+            "/calendar/v3/calendars/nyc/events": {
+                "items": [{"id": "utc", "start": {"dateTime": "2026-10-05T08:00:00Z"}}]
+            },
+        }
+    )
+    answer = GoogleWorkspaceReader.calendar_events(
+        ACCOUNTS, "2026-10-05T00:00:00Z", "2026-10-06T00:00:00Z", limit=1
+    )
+    assert [e["id"] for e in answer["events"]] == ["paris"]
 
 
 def test_a_calendar_filter_and_one_event(google):

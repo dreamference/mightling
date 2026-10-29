@@ -13,6 +13,7 @@ carry the full `drive` and `calendar` scopes (§11.1 item 5). The only requests 
 there is no method that writes, and none is to be added.
 """
 
+import datetime
 import json
 import urllib.error
 import urllib.parse
@@ -166,6 +167,8 @@ class GoogleWorkspaceReader:
                         "shared_drive": item.get("driveId", ""),
                     }
                 )
+        # Each account answers newest first; across accounts the newest of all of them win.
+        files.sort(key=lambda found: found["modified"], reverse=True)
         answer: dict[str, Any] = {"files": files[:limit]}
         if errors:
             answer["errors"] = errors
@@ -294,6 +297,25 @@ class GoogleWorkspaceReader:
         return event
 
     @classmethod
+    def _moment(cls, when: str) -> datetime.datetime:
+        """Turns an event's start into a point in time, so calendars in other zones compare.
+
+        Args:
+            when (str): RFC 3339 `dateTime` with its offset, or an all-day `date`.
+
+        Returns:
+            datetime.datetime: The moment in UTC; an all-day date at its midnight UTC, and an
+                unreadable start before everything.
+        """
+        try:
+            moment = datetime.datetime.fromisoformat(when)
+        except ValueError:
+            return datetime.datetime.min.replace(tzinfo=datetime.UTC)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=datetime.UTC)
+        return moment.astimezone(datetime.UTC)
+
+    @classmethod
     def calendar_events(
         cls,
         accounts: list[Account],
@@ -363,7 +385,7 @@ class GoogleWorkspaceReader:
                 events.extend(
                     cls._event(account, calendar_id, item) for item in body.get("items", [])
                 )
-        events.sort(key=lambda event: event["start"])
+        events.sort(key=lambda event: cls._moment(event["start"]))
         answer: dict[str, Any] = {"events": events[:limit]}
         if errors:
             answer["errors"] = errors
