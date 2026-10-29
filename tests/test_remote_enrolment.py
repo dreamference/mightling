@@ -141,6 +141,13 @@ def test_wrong_proofs_count_down_and_the_tenth_withdraws_the_code():
     assert lefts == list(range(9, -1, -1)) and state["outcome"] == "withdrawn"
 
 
+def test_a_proof_with_letters_outside_ascii_is_one_wrong_attempt_not_a_crash():
+    state = {"failures": 0, "outcome": None}
+    bad = {"nonce": NONCE, "proof": "é" * 64}
+    status, body = RemoteEnrolment.respond(CODE, bad, lambda c: pytest.fail("minted"), state)
+    assert status == 401 and body["attempts_left"] == 9
+
+
 # -- the listener
 
 
