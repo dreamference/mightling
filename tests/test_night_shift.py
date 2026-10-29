@@ -1623,3 +1623,38 @@ def test_remote_start_runner_and_prune(two_nodes, monkeypatch):
     assert not (nd / "logs" / f"{task_id}.log").exists()
     assert not NodeJob.job_dir(task_id).exists()
 
+
+
+def test_refine_a_task_cut_off_in_its_study_has_no_session_and_is_studied_again(setup, monkeypatch):
+    # specs/DREAMFERENCE_MIGHTLING_REFINE.md §5.3 point 5: the window ends the study step, so the
+    # task is interrupted with no session, and the next night studies it again from the start.
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "hang")
+    record = queue(setup["night"], setup["repo"])
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({"refine": True}), setup["ling"],
+                            deadline=time.time() + 1, window_end=time.time() + 1)
+    assert run.run() == "interrupted"
+    record = NightShiftQueue.read(setup["night"], record["id"])
+    assert record["session"] is None
+    assert record["result"]["refine"]["study_exit"] == "interrupted"
+    only, = calls(setup)
+    assert only[-1].startswith("This is the first of two steps")
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "refine")
+    rerun = NightShiftTaskRun(setup["night"], record, NightShiftSettings({"refine": True}), setup["ling"],
+                              deadline=time.time() + 60, window_end=time.time() + 3600)
+    assert rerun.run() == "done"
+    study, fix = calls(setup)[1:]
+    assert study[-1].startswith("This is the first of two steps") and "resume" not in study + fix
+    record = NightShiftQueue.read(setup["night"], record["id"])
+    assert record["session"] and record["session"] != record["result"]["refine"]["study_session"]
+
+
+def test_refine_gives_the_doing_step_a_fresh_task_timeout_within_the_window(setup, monkeypatch):
+    # §5.3 point 3: after the study the doing step gets a full `task_timeout` of its own, but
+    # never past the window's end.
+    started = time.time()
+    status, _, run = refined_run(setup, monkeypatch, {"refine": True, "task_timeout": "10m"})
+    assert status == "done"
+    assert started + 600 <= run.deadline <= time.time() + 600 < run.window_end
+    status, _, run = refined_run(setup, monkeypatch, {"refine": True}, task_id="20261001-0100-def")
+    assert status == "done" and run.settings.task_timeout_s > 3600
+    assert run.deadline == run.window_end
