@@ -63,13 +63,15 @@ def test_a_sandbox_that_cannot_be_tried_asks_nothing(machine):
     assert SandboxPrerequisite.gate("night", "run") is True
 
 
-@pytest.mark.parametrize("command, subcommand", [("mcp", None), ("host", "check"), ("node", "serve-job")])
+@pytest.mark.parametrize("command, subcommand", [("mcp", None), ("host", "check"), ("host", "setup"), ("node", "serve-job"),
+                                                 ("node", "askpass"), ("node", "prepare")])
 def test_protocol_and_host_commands_are_never_asked(machine, command, subcommand):
     assert SandboxPrerequisite.gate(command, subcommand) is True
 
 
-def test_a_command_mightling_runs_is_never_asked(machine, monkeypatch):
-    monkeypatch.setenv("CODEX_THREAD_ID", "019a-test")
+@pytest.mark.parametrize("variable", ["CODEX_THREAD_ID", "CODEX_SANDBOX"])
+def test_a_command_mightling_runs_is_never_asked(machine, monkeypatch, variable):
+    monkeypatch.setenv(variable, "019a-test")
     assert SandboxPrerequisite.gate("night", "run") is True
 
 
@@ -81,6 +83,14 @@ def test_fixing_it_installs_the_profile_through_sudo_and_goes_on(machine, capsys
     assert load == ["apparmor_parser", "-r", "/etc/apparmor.d/puffin-bwrap"]
     out = capsys.readouterr().out
     assert "AppArmor" in out and "✅" in out
+
+
+def test_fixing_it_after_turning_it_off_says_how_to_put_the_timer_back(machine, capsys):
+    machine["answers"] = ["2"]
+    SandboxPrerequisite.gate("status", None)
+    assert SandboxPrerequisite.fix() is True
+    assert not SandboxPrerequisite.decision_path().exists()
+    assert "`ling-admin night enable` puts the timer back" in capsys.readouterr().out
 
 
 def test_a_fix_that_does_not_take_still_refuses_what_needs_the_sandbox(machine, monkeypatch, capsys):
@@ -133,8 +143,10 @@ def test_with_nobody_at_a_terminal_it_warns_and_refuses_only_the_night_run(machi
     machine["tty"] = False             # the Night Shift timer, a script, an SSH command
     assert SandboxPrerequisite.gate("status", None) is True
     assert SandboxPrerequisite.gate("night", "run") is False
+    assert SandboxPrerequisite.gate("night", "enable") is False
     err = capsys.readouterr().err
     assert "host setup" in err and "nobody is at a terminal" in err
+    assert not SandboxPrerequisite.decision_path().exists()
 
 
 def test_no_profile_is_offered_when_apparmor_is_not_the_cause(machine, monkeypatch, capsys):
