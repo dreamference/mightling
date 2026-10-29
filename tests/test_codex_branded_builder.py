@@ -45,6 +45,40 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert status.stdout == ""
 
 
+def test_the_patches_apply_to_an_export_inside_another_git_repository(tmp_path, monkeypatch):
+    # Run from a folder inside a repository, `git apply` resolves the patch's paths from that
+    # repository's top and silently skips every hunk outside the folder: the export came out
+    # unpatched and prepare_source still said it succeeded (found 2026-10-29, exporting into a
+    # worktree). Here a stand-in submodule and patch, the export inside an unrelated repository.
+    def git(*args, cwd):
+        subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+                       cwd=cwd, check=True, capture_output=True)
+
+    submodule = tmp_path / "codex"
+    (submodule / "codex-rs").mkdir(parents=True)
+    (submodule / "codex-rs" / "main.rs").write_text("codex\n")
+    git("init", "-q", cwd=submodule)
+    git("add", "-A", cwd=submodule)
+    git("commit", "-q", "-m", "pin", cwd=submodule)
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=submodule, capture_output=True, text=True).stdout.strip()
+    patch_file = tmp_path / "0001-brand.patch"
+    patch_file.write_text("diff --git a/codex-rs/main.rs b/codex-rs/main.rs\n--- a/codex-rs/main.rs\n"
+                          "+++ b/codex-rs/main.rs\n@@ -1 +1 @@\n-codex\n+ling\n")
+    crate = tmp_path / "ling-rs"
+    crate.mkdir()
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    git("init", "-q", cwd=outer)
+    monkeypatch.setattr(builder_module, "CODEX_SUBMODULE_DIR", str(submodule))
+    monkeypatch.setattr(builder_module, "MIGHTLING_CRATE_DIR", str(crate))
+    monkeypatch.setattr(CodexBrandedBuilder, "source_commit", classmethod(lambda cls: commit))
+    monkeypatch.setattr(CodexBrandedBuilder, "patches", classmethod(lambda cls: [str(patch_file)]))
+    monkeypatch.setattr(CodexBrandedBuilder, "stamp_version", classmethod(lambda cls, manifest, version: True))
+
+    assert CodexBrandedBuilder.prepare_source(str(outer / "export"))
+    assert (outer / "export" / "codex-rs" / "main.rs").read_text() == "ling\n"
+
+
 def test_the_codex_submodule_is_committed_as_a_submodule():
     # A worktree whose codex/ was replaced by a symlink to another checkout's committed that symlink
     # once (release/1.7.1, 266ae50): the Windows build then found no codex/.github/actions and the
