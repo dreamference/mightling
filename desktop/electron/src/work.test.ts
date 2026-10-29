@@ -25,6 +25,7 @@ vi.mock("electron", () => {
 });
 vi.mock("./window-state", () => ({ place: vi.fn(), track: vi.fn() }));
 
+import { shell } from "electron";
 import { WORK_URL } from "./app-protocol";
 import { openWork, pageUrl, staysOnPage } from "./work";
 
@@ -73,5 +74,17 @@ describe("the app's windows", () => {
       expect(entry.open?.({ url: "app://-/index.html" })).toEqual({ action: "deny" });
       expect(entry.open?.({ url: "https://example.com" })).toEqual({ action: "deny" });
     }
+  });
+
+  it("open in the browser only a web address links.ts allows, as the page's own link/open does", () => {
+    openWork({ preload: "/p/preload.cjs", show: false, theme: "light", view: "work" });
+    const openExternal = vi.mocked(shell.openExternal);
+    openExternal.mockClear();
+    for (const url of ["https://user:secret@example.com/", "https://user@example.com/", `https://example.com/${"a".repeat(2100)}`, "file:///etc/passwd", "javascript:alert(1)"]) {
+      expect(made[0].open?.({ url }), url).toEqual({ action: "deny" });
+    }
+    expect(openExternal).not.toHaveBeenCalled();
+    made[0].open?.({ url: "https://example.com/a b" });
+    expect(openExternal).toHaveBeenCalledWith("https://example.com/a%20b");
   });
 });

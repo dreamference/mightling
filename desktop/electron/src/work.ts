@@ -13,6 +13,7 @@ import { BrowserWindow, app, shell, type Rectangle } from "electron";
 
 import appConfig from "../app.json";
 import { WORK_URL } from "./app-protocol";
+import { webUrl } from "./links";
 import { themeArgument, windowColours, type Theme } from "./theme";
 import { place, track } from "./window-state";
 import type { PaneKind } from "./windows";
@@ -82,7 +83,9 @@ export function openWork(options: WorkOptions): BrowserWindow {
 function lockDown(window: BrowserWindow): void {
   const contents = window.webContents;
   contents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url)) void shell.openExternal(url);
+    // The rules of the page's own link/open (links.ts): http or https, no user name or password.
+    const target = webUrl(url);
+    if (target) void shell.openExternal(target);
     return { action: "deny" };
   });
   // The page is bundled; it never navigates anywhere else, nor is redirected there.
