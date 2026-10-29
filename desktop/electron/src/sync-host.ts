@@ -203,9 +203,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): HostConfig | n
 }
 
 /** Whether `folder` is `root` or inside it. */
-function within(folder: string, root: string): boolean {
+export function within(folder: string, root: string): boolean {
   const relative = path.relative(root, folder);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  // `..notes` is a folder inside; only `..` itself, or a path through it, leaves.
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 export class SyncHost {
