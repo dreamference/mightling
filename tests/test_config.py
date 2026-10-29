@@ -182,9 +182,26 @@ def test_a_valid_toml_file_the_old_reader_refused_still_turns_the_air_gap_on(tmp
     for text in (
         'x = [1, "a"]\nmightling_airgapped = "on"\n',
         '"\\u006dightling_airgapped" = "on"\n',
-        '﻿mightling_airgapped = "on"\n',
+        '\ufeffmightling_airgapped = "on"\n',
     ):
         path = tmp_path / "dreamference.toml"
         path.write_text(text, encoding="utf-8")
         monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(path))
         assert DreamferenceConfig.resolve_airgapped_level() == "on", text
+
+
+def test_a_config_file_saved_with_a_byte_order_mark_is_read_whole(tmp_path):
+    # Windows editors put U+FEFF first. TOML then read the first key as "\ufeffmightling_airgapped",
+    # so the level the file sets was ignored (the air gap silently off), and JSON refused the file.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    texts = {
+        "marked.toml": 'mightling_airgapped = "on"\nmodel = "m"\n',
+        "marked.json": '{"mightling_airgapped": "on", "model": "m"}',
+        "marked.yaml": "mightling_airgapped: 'on'\nmodel: m\n",
+    }
+    for name, text in texts.items():
+        path = tmp_path / name
+        path.write_bytes(b"\xef\xbb\xbf" + text.encode())
+        assert ConfigFileStorageManager.load_config_dict(path) == {"mightling_airgapped": "on", "model": "m"}, name
+    assert DreamferenceConfig(config_file=str(tmp_path / "marked.toml")).mightling_airgapped == "on"

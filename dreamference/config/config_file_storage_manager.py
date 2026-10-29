@@ -39,19 +39,22 @@ class ConfigFileStorageManager:
         if not path.exists():
             return {}
         try:
-            if path.suffix == ".toml":
-                # tomllib reads every valid TOML file, as the Rust readers do; the older `toml`
-                # package refuses some (a mixed-type array anywhere) and misreads others (an
-                # escaped quoted key), so it is only the fallback for text tomllib refuses.
-                text = path.read_text(encoding="utf-8-sig")
-                try:
-                    return tomllib.loads(text)
-                except tomllib.TOMLDecodeError:
-                    if toml is None:
-                        raise
-                    return toml.loads(text)
-            with open(path, "r", encoding="utf-8") as f:
-                if yaml and path.suffix in (".yaml", ".yml"):
+            # `utf-8-sig`: an editor that saves a byte order mark (Notepad does) would otherwise make
+            # TOML read the first key as "\ufeffkey", so that setting, often the air-gap level, was
+            # silently ignored, and make JSON refuse the whole file.
+            with open(path, "r", encoding="utf-8-sig") as f:
+                if path.suffix == ".toml":
+                    # tomllib reads every valid TOML file, as the Rust readers do; the older `toml`
+                    # package refuses some (a mixed-type array anywhere) and misreads others (an
+                    # escaped quoted key), so it is only the fallback for text tomllib refuses.
+                    text = f.read()
+                    try:
+                        return tomllib.loads(text)
+                    except tomllib.TOMLDecodeError:
+                        if toml is None:
+                            raise
+                        return toml.loads(text)
+                elif yaml and path.suffix in (".yaml", ".yml"):
                     return yaml.safe_load(f) or {}
                 else:
                     return json.load(f) or {}
