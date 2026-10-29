@@ -731,6 +731,41 @@ def test_the_recipe_asks_for_four_sessions_but_an_engine_without_the_pool_does_n
     assert paged.index("--kv-pages") < paged.index("--graphs")
 
 
+def test_paging_and_fair_pairing_are_off_in_the_recipe_and_switchable_per_launch(monkeypatch):
+    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    assert recipe["kv_pages"] is False and recipe["fair_pairing"] is False
+    monkeypatch.delenv("DREAMFERENCE_LING_PAGING", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_LING_FAIR_PAIRING", raising=False)
+    features = ["kv-pages", "paging-switch", "fair-pairing"]
+
+    def args(**changes):
+        return LingServeLaunchBuilder.server_args(
+            "RadixArk/Qwen3.8-27B-NVFP4", {**recipe, "engine_features": features, **changes}, 8000, 262144
+        )
+
+    off = args()
+    # Flat and unfair, said explicitly; the sessions the pool would hold are not asked of flat slots.
+    assert "--no-kv-pages" in off and "--kv-pages" not in off and "--sessions" not in off
+    assert flag(off, "--fair-pairing") == "0"
+    # The recipe turns either on; the environment of a night arm turns it back, or on, per launch.
+    on = args(kv_pages=True, fair_pairing=True)
+    assert "--kv-pages" in on and "--no-kv-pages" not in on and flag(on, "--sessions") == "4"
+    assert flag(on, "--fair-pairing") == "1"
+    monkeypatch.setenv("DREAMFERENCE_LING_PAGING", "1")
+    monkeypatch.setenv("DREAMFERENCE_LING_FAIR_PAIRING", "1")
+    armed = args()
+    assert "--kv-pages" in armed and flag(armed, "--fair-pairing") == "1"
+    monkeypatch.setenv("DREAMFERENCE_LING_PAGING", "0")
+    monkeypatch.setenv("DREAMFERENCE_LING_FAIR_PAIRING", "0")
+    assert "--no-kv-pages" in args(kv_pages=True, fair_pairing=True)
+    assert flag(args(kv_pages=True, fair_pairing=True), "--fair-pairing") == "0"
+    # A value that is not 0 or 1 is ignored; an engine without the features gets neither flag.
+    monkeypatch.setenv("DREAMFERENCE_LING_PAGING", "yes")
+    assert "--kv-pages" in args(kv_pages=True)
+    old = args(engine_features=["kv-pages"], kv_pages=False)
+    assert not {"--no-kv-pages", "--fair-pairing", "--kv-pages"} & set(old)
+
+
 def test_the_paged_launch_uses_only_flags_ling_serve_parses():
     # ling-engine main's parser (src/serve/main.cpp) beside the shipped commit's.
     known = {

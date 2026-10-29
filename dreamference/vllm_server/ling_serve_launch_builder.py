@@ -7,6 +7,7 @@ builds for every engine -- the container name, the cgroup memory cap, the CPU li
 score, the mounts and the PSI watchdog -- so this class produces only what follows the image name.
 """
 
+import os
 from typing import Any, Final
 
 from dreamference.hardware.model_matrix_registry import ENGINE_LING, ModelMatrixRegistry
@@ -25,6 +26,20 @@ STEP_GRAPHS_FLAG: Final[str] = "--graphs"
 # The engine feature (a recipe's `engine_features`) of the KV page pool, and ling-serve's flag for it.
 KV_PAGES_FEATURE: Final[str] = "kv-pages"
 KV_PAGES_FLAG: Final[str] = "--kv-pages"
+
+# 1.8.1: paging and fair pairing are per-launch switches. A recipe says `kv_pages` / `fair_pairing`
+# (booleans; off in the ling recipe until the 10-31 night decides), and a night arm overrides either
+# with the environment (`DREAMFERENCE_LING_PAGING=0|1`, `DREAMFERENCE_LING_FAIR_PAIRING=0|1`) so one
+# image serves every arm. The flags go in explicitly, the default value too, so `docker inspect` names
+# the arm. `--no-kv-pages` exists on an engine with the "paging-switch" feature (the page pool became
+# ling-serve's default there, off by owner decision, so the flag is the only way to say flat);
+# `--fair-pairing 1|0` on one with "fair-pairing".
+PAGING_SWITCH_FEATURE: Final[str] = "paging-switch"
+FAIR_PAIRING_FEATURE: Final[str] = "fair-pairing"
+NO_KV_PAGES_FLAG: Final[str] = "--no-kv-pages"
+FAIR_PAIRING_FLAG: Final[str] = "--fair-pairing"
+PAGING_ENV: Final[str] = "DREAMFERENCE_LING_PAGING"
+FAIR_PAIRING_ENV: Final[str] = "DREAMFERENCE_LING_FAIR_PAIRING"
 
 # ling-serve's switch for image input (`--vision on|off`, on by default), parsed since ling-engine
 # 689690c, an ancestor of LING_ENGINE_KV_PAGES_SINCE: an engine with the "kv-pages" feature takes it,
@@ -51,6 +66,25 @@ class LingServeLaunchBuilder:
             bool: True for `engine: ling`.
         """
         return ModelMatrixRegistry.engine_of(recipe) == ENGINE_LING
+
+    @classmethod
+    def switch(cls, recipe: dict[str, Any], key: str, env_name: str, default: bool) -> bool:
+        """Reads one per-launch switch: the environment, then the recipe, then the default.
+
+        Args:
+            recipe: The model's launch recipe.
+            key: The recipe's key (`kv_pages`, `fair_pairing`).
+            env_name: The environment variable a night arm sets (`0`/`1`; anything else is ignored).
+            default: The value when neither names it.
+
+        Returns:
+            bool: Whether the switch is on for this launch.
+        """
+        env = os.environ.get(env_name, "").strip()
+        if env in ("0", "1"):
+            return env == "1"
+        value = recipe.get(key)
+        return value if isinstance(value, bool) else default
 
     @classmethod
     def server_args(
@@ -104,17 +138,23 @@ class LingServeLaunchBuilder:
             )
             if speculative.get("num_speculative_tokens"):
                 args.extend(["--draft-block", str(speculative["num_speculative_tokens"])])
-        if KV_PAGES_FEATURE in (recipe.get("engine_features") or []):
+        features = recipe.get("engine_features") or []
+        if KV_PAGES_FEATURE in features:
             # An engine with the pool parses these flags. The sessions and the batch are the
-            # recipe's, paged or flat; paging is the recipe's choice (`kv_pages`, off at 1.8.0,
-            # where the recipe's context is the one four flat slots fit at). Given both the
-            # sessions and the context, the engine sizes nothing and refuses a start it cannot hold.
+            # recipe's, paged or flat. Given both the sessions and the context, the engine sizes
+            # nothing and refuses a start it cannot hold. Paging is a per-launch switch (`kv_pages`),
+            # off in the recipe; an engine with the switch is told so explicitly.
             if recipe.get("sessions"):
                 args.extend(["--sessions", str(recipe["sessions"])])
             if recipe.get("batch"):
                 args.extend(["--batch", str(recipe["batch"])])
-            if recipe.get("kv_pages"):
+            if cls.switch(recipe, "kv_pages", PAGING_ENV, True):
                 args.append(KV_PAGES_FLAG)
+            elif PAGING_SWITCH_FEATURE in features:
+                args.append(NO_KV_PAGES_FLAG)
+            if FAIR_PAIRING_FEATURE in features:
+                fair = cls.switch(recipe, "fair_pairing", FAIR_PAIRING_ENV, False)
+                args.extend([FAIR_PAIRING_FLAG, "1" if fair else "0"])
             if recipe.get("vision") is False:
                 args.extend([VISION_FLAG, VISION_OFF])
         args.extend(str(a) for a in recipe.get("extra_args") or [])
@@ -169,6 +209,12 @@ class LingServeLaunchBuilder:
                 else {}
             ),
             **({"KV cache": "Paged"} if KV_PAGES_FLAG in args else {}),
+            **({"KV cache": "Flat"} if NO_KV_PAGES_FLAG in args else {}),
+            **(
+                {"Fair pairing": "On" if value(FAIR_PAIRING_FLAG) == "1" else "Off"}
+                if value(FAIR_PAIRING_FLAG)
+                else {}
+            ),
             **(
                 {"Image input": "Off (--engine sglang reads images)"}
                 if value(VISION_FLAG) == VISION_OFF

@@ -551,6 +551,12 @@ QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
     # image understanding, the launcher declares text input only, and neither the tower nor its cache
     # takes memory from the four sessions. `--engine sglang` reads images.
     "vision": False,
+    # 1.8.1's per-launch switches (LingServeLaunchBuilder.switch): the KV page pool and fair pairing,
+    # each off until the 10-31 night decides its default; a night arm overrides either with
+    # DREAMFERENCE_LING_PAGING / DREAMFERENCE_LING_FAIR_PAIRING (0 or 1). Both act only on an engine
+    # whose `engine_features` has "kv-pages" (and "paging-switch" for `--no-kv-pages`, "fair-pairing"
+    # for `--fair-pairing`), so they take effect when the pin moves to the candidate engine.
+    "fair_pairing": False,
 }
 
 
