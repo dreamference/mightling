@@ -233,7 +233,7 @@ class ModelDownloader:
             try:
                 dgx_cache = os.path.expanduser("~/.cache/dreamference")
                 hf_base = cls.get_hf_cache_dir()
-                dgx_base = cls.get_dgx_cache_dir()
+                dgx_base = Path(dgx_cache)
                 
                 if snapshot_dir.is_relative_to(hf_base) and tdir.is_relative_to(dgx_base):
                     snap_rel = snapshot_dir.relative_to(hf_base)
