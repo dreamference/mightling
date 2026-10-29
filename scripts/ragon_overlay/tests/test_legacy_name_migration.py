@@ -169,7 +169,11 @@ def test_a_puffin_node_is_moved_to_the_new_names_and_a_second_run_does_nothing(
     assert LegacyNameMigration.run() == [], "a second run finds nothing to do"
 
 
-def test_a_machine_with_nothing_old_says_nothing(opted_in, capsys):
+def test_a_machine_with_nothing_old_says_nothing(opted_in, capsys, monkeypatch, tmp_path):
+    # An interpreter without a ragon-admin beside it: the suite's own environment may have one
+    # (an installed renamed tree), and the test home would then get a fresh link to it.
+    (tmp_path / "bin").mkdir()
+    monkeypatch.setattr("sys.executable", str(tmp_path / "bin/python"))
     assert LegacyNameMigration.run() == []
     assert capsys.readouterr().err == ""
 
