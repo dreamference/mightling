@@ -29,8 +29,9 @@
 //!   [--instance NAME --user USER]`
 //! - `retool --state DIR --signal-cli PATH --version V [--env K=V]…`: `setup --refresh`'s update of
 //!   the runtime the bridge starts
-//! - `pair --state DIR --port N --code CODE [--device NAME]`: trade a `ling web pair` code for the
-//!   device cookie, as `signal-bridge` or the instance's own device name
+//! - `pair --state DIR --port N [--code CODE] [--device NAME]`: trade a `ling web pair` code for the
+//!   device cookie, as `signal-bridge` or the instance's own device name; without `--code` it reads
+//!   the code from stdin, which is how `setup` hands it over (a command line is public)
 //! - `account --state DIR`: the number, the mode, the user served and the account id (§18.4)
 //! - `bind --state DIR`: a fresh six-digit code that makes its first sender the owner
 //! - `trust-owner --state DIR`: §5.3 on the bridge's data, with the unit stopped
@@ -465,10 +466,11 @@ fn run_verify_signal_cli(args: &[String]) -> i32 {
 }
 
 fn run_pair(args: &[String]) -> i32 {
-    let (Some(state_dir), Some(code)) = (flag(args, "--state"), flag(args, "--code")) else {
-        eprintln!("pair needs --state and --code");
+    let Some(state_dir) = flag(args, "--state") else {
+        eprintln!("pair needs --state, and --code or the code on stdin");
         return 2;
     };
+    let code = flag(args, "--code").unwrap_or_else(|| code_from(std::io::stdin().lock()));
     let port = flag(args, "--port").and_then(|p| p.parse().ok()).unwrap_or(3100);
     let device = flag(args, "--device").unwrap_or_else(|| crate::agent::DEVICE_NAME.to_string());
     match runtime().block_on(crate::agent::pair(port, &code, &device)) {
@@ -487,6 +489,13 @@ fn run_pair(args: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// The first line of `input`, trimmed: the code `setup` writes to `pair`'s stdin.
+fn code_from(mut input: impl BufRead) -> String {
+    let mut line = String::new();
+    let _ = input.read_line(&mut line);
+    line.trim().to_string()
 }
 
 fn run_bind(args: &[String]) -> i32 {
@@ -902,8 +911,7 @@ fn finish_setup(instance: &Instance, host: &Host, args: &[String], number: Optio
     };
     let bridge_bin = unit::BRIDGE_PATH.to_string();
     let state_dir = instance.state_dir();
-    let pair = [bridge_bin.clone(), "pair".into(), "--state".into(), state_dir.clone(), "--port".into(), port.to_string(), "--code".into(), pairing, "--device".into(), instance.device_name()];
-    if let Err(output) = run_command(&setup::as_bridge(instance, &pair), None) {
+    if let Err(output) = run_command(&setup::pair_command(instance, port), Some(&format!("{pairing}\n"))) {
         eprintln!("❌ {output}");
         return Err(Abandon { linked_device: linked });
     }
@@ -1241,6 +1249,12 @@ mod tests {
 
     fn args(words: &[&str]) -> Vec<String> {
         words.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn pair_takes_the_code_from_the_first_line_of_stdin() {
+        assert_eq!(code_from(" 12345678 \nmore\n".as_bytes()), "12345678");
+        assert_eq!(code_from("".as_bytes()), "");
     }
 
     /// A node of its own for one test: state folders, system accounts, unit files and memory in a

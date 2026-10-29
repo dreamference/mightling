@@ -408,6 +408,13 @@ pub fn as_bridge(instance: &Instance, command: &[String]) -> Vec<String> {
     full
 }
 
+/// `pair` as the instance's account. The `ling web pair` code goes to its stdin, never into the
+/// command line: any local user can read another's command line in /proc, and the code opens ling web.
+pub fn pair_command(instance: &Instance, port: u16) -> Vec<String> {
+    let pair = [unit::BRIDGE_PATH, "pair", "--state", &instance.state_dir(), "--port", &port.to_string(), "--device", &instance.device_name()];
+    as_bridge(instance, &pair.map(str::to_string))
+}
+
 /// signal-cli on the bridge's data, with its environment, as the bridge's account.
 pub fn signal_cli_command(instance: &Instance, arch: &str, account: &str, args: &[&str]) -> Vec<String> {
     let mut command = vec!["env".to_string()];
@@ -718,6 +725,19 @@ mod tests {
         assert_eq!(found, (InstalledBridge::Missing, InstalledBridge::Same, InstalledBridge::Different));
         // The SHA-256 of the bytes, in hex (as `sha256sum` prints it).
         assert_eq!(digest.as_deref(), Some("c6e7b4f83cfe2169910422f47b941d2386297109ffad0f18014455cfbfed3b5f"));
+    }
+
+    #[test]
+    fn the_pairing_code_never_rides_in_the_command_line() {
+        for instance in [first(), named("work")] {
+            let command = pair_command(&instance, 3100);
+            assert_eq!(command[..3], ["sudo", "-u", instance.account().as_str()]);
+            assert_eq!(command[3..5], [unit::BRIDGE_PATH, "pair"]);
+            assert!(command.windows(2).any(|w| w == ["--state", instance.state_dir().as_str()]));
+            assert!(command.windows(2).any(|w| w == ["--device", instance.device_name().as_str()]));
+            assert!(!command.iter().any(|arg| arg.starts_with("--code")));
+            assert!(!command.iter().any(|arg| arg.len() == 8 && arg.chars().all(|c| c.is_ascii_digit())));
+        }
     }
 
     #[test]
