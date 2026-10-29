@@ -1271,6 +1271,16 @@ def test_a_switch_written_halfway_leaves_the_nodes_config_as_it_was(monkeypatch)
     assert path.read_text() == '[night]\nwindow = "22-06"\n', "the node's config was truncated"
 
 
+def test_a_forge_switched_off_stays_off_when_the_rest_of_the_config_does_not_parse(monkeypatch):
+    monkeypatch.delenv("DREAMFERENCE_FORGE", raising=False)
+    path = ForgeSettings.config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[forge]\nenabled = false  # off\n\n[night\nwindow = 22-06\n")
+    assert ForgeSettings.enabled() is False
+    path.write_text("[forge]\nenabled = true\n[night\n")
+    assert ForgeSettings.enabled() is True
+
+
 def test_a_config_that_cannot_be_read_is_not_replaced_by_the_switch(monkeypatch):
     path = ForgeSettings.config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
