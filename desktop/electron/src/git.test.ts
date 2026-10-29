@@ -360,17 +360,18 @@ describe("editors", () => {
     const app = path.join(dir, "Tool.app");
     fs.mkdirSync(app);
     // Windows: what ShellExecute starts, whatever the case, trailing dots and spaces, a stream, PATHEXT's own.
-    for (const name of ["setup.bat", "SETUP.EXE", "run.cmd.", "run.ps1 ", "go.lnk", "x.url", "a.hta", "s.js", "a.txt:evil.bat", "C:\\w\\tool.msi"]) {
+    for (const name of ["setup.bat", "SETUP.EXE", "run.cmd.", "run.ps1 ", "go.lnk", "x.url", "a.hta", "s.js", "a.txt:evil.bat", "C:\\w\\tool.msi", "fix.py", "gui.pyw", "deploy.sh", "app.jar"]) {
       expect(await runsWhenOpened(path.join(dir, name), "win32", "")).toMatch(/would run, not open/);
     }
     expect(await runsWhenOpened(path.join(dir, "tool.xyz"), "win32", ".COM;.EXE;.XYZ")).toMatch(/would run/);
     for (const name of ["report.pdf", "notes.md", "photo.png", "data.csv"]) expect(await runsWhenOpened(path.join(dir, name), "win32", ".COM;.EXE")).toBeNull();
     // macOS: an application (a folder), a Terminal script, an installer, an executable; Linux: a launcher or an executable, also behind a link.
     expect(await runsWhenOpened(app, "darwin")).toMatch(/Tool.app would run/);
-    for (const name of ["go.command", "x.pkg", "y.fileloc"]) expect(await runsWhenOpened(path.join(dir, name), "darwin")).toMatch(/would run/);
+    for (const name of ["go.command", "x.pkg", "y.fileloc", "fix.py", "app.jar"]) expect(await runsWhenOpened(path.join(dir, name), "darwin")).toMatch(/would run/);
     expect(await runsWhenOpened(script, "darwin")).toMatch(/would run/);
     expect(await runsWhenOpened(entry, "linux")).toMatch(/app.desktop would run/);
     expect(await runsWhenOpened(script, "linux")).toMatch(/would run/);
+    expect(await runsWhenOpened(path.join(dir, "app.jar"), "linux")).toMatch(/would run/);
     expect(await runsWhenOpened(path.join(dir, "readme.txt"), "linux")).toMatch(/readme.txt would run/);
     // Documents and folders open.
     expect(await runsWhenOpened(notes, "linux")).toBeNull();

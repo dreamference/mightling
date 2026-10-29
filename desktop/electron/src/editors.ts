@@ -127,13 +127,13 @@ export function openCommand(editor: Editor, file: string, line: number | null): 
 /** What Windows runs when it is opened (ShellExecute), beside `PATHEXT`'s own list. */
 const WINDOWS_RUNS = new Set([
   ".exe", ".com", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".msi", ".msp", ".msc", ".scr", ".pif",
-  ".cpl", ".lnk", ".url", ".reg", ".hta", ".jar", ".inf", ".scf", ".appref-ms", ".application", ".appx", ".appxbundle", ".msix",
+  ".cpl", ".lnk", ".url", ".reg", ".hta", ".jar", ".py", ".pyw", ".pyz", ".pyzw", ".sh", ".bash", ".inf", ".scf", ".appref-ms", ".application", ".appx", ".appxbundle", ".msix",
   ".msixbundle", ".appinstaller", ".settingcontent-ms", ".library-ms", ".search-ms", ".diagcab", ".gadget", ".xll",
 ]);
 /** What a Mac launches, installs or runs in Terminal when it is opened. */
-const MAC_RUNS = new Set([".app", ".command", ".tool", ".terminal", ".pkg", ".mpkg", ".workflow", ".action", ".prefpane", ".saver", ".fileloc", ".inetloc", ".webloc"]);
+const MAC_RUNS = new Set([".app", ".command", ".jar", ".py", ".pyw", ".tool", ".terminal", ".pkg", ".mpkg", ".workflow", ".action", ".prefpane", ".saver", ".fileloc", ".inetloc", ".webloc"]);
 /** What a Linux desktop launches when it is opened. */
-const LINUX_RUNS = new Set([".desktop", ".appimage"]);
+const LINUX_RUNS = new Set([".desktop", ".appimage", ".jar"]);
 
 /**
  * Why the system would run `file` rather than open it (null when it would open it): the system's
