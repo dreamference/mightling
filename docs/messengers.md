@@ -296,7 +296,8 @@ Discord reading.
    `/pair <code>`, within 10 minutes. The code works once. Then run `ling chat start`.
 
 The bot answers only you, and only in your direct messages with it. Anyone else is told once a day
-that the bot is private; servers it is added to are left at once. A status line with a **Stop**
+that the bot is private; servers it is added to are left at once, except one you name as
+`discord_home_server` under `[chat]` so that you can message the bot. A status line with a **Stop**
 button shows while an answer is written, and approvals come as buttons.
 
 With `discord_web_url` under `[chat]` set to your HTTPS front for `ling web`, `/app` and the
