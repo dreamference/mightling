@@ -840,6 +840,22 @@ def test_window_end_is_the_next_such_time():
     assert NightShiftRunner.window_end(now, None, 30, "x") == now + timedelta(minutes=30)
 
 
+@pytest.mark.parametrize("start", [datetime(2026, 10, 24, 22, 0), datetime(2026, 3, 28, 22, 0)])
+def test_window_end_is_the_wall_clock_time_on_a_night_the_clocks_change(start, monkeypatch):
+    # The start's UTC offset is not the end's on these nights: 06:00 is 06:00 on the clock.
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        now = start.astimezone()
+        end = NightShiftRunner.window_end(now, "06:00", None, "x").astimezone()
+        assert (end.day, end.hour, end.minute) == (start.day + 1, 6, 0)
+        end = NightShiftRunner.window_end(now, None, None, "01:00-06:00").astimezone()
+        assert (end.day, end.hour) == (start.day + 1, 6)
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
 def test_an_outside_request_or_session_blocks_the_next_start(fake_host):
     settings = NightShiftSettings({})
     FakeHost.samples = [{"running": 1.0, "served": 1.0, "kv_pool": 1.0}]
