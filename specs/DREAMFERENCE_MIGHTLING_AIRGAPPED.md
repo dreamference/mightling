@@ -28,7 +28,7 @@
 **`on` is the only level that may be called air-gapped.** Nothing the agent runs can open a connection to anything, on the internet or on this machine. Search, fetch and Gmail are off because each sends something out: a query to an engine, a URL to a site, a mail search to Google.
 
 **What still talks at `on`,** all of it on this machine:
-- `ling` itself to the model server (`vllm_host`). If that is another machine on the LAN, prompts go there, as the user configured.
+- `ling` itself to the model server (`vllm_host`). If that is another machine on the LAN, prompts go there, as the user configured. A repository's own `./dreamference.toml` cannot choose it: there `vllm_host` may name only this machine (since 2026-10-29).
 - The launcher's check of the Gmail service on `127.0.0.1:8767` is skipped at `on`, since Gmail is not offered.
 - The code index reads its files; it has no network code.
 

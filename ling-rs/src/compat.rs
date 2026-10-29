@@ -179,7 +179,7 @@ pub fn resolve() -> Result<Resolved, String> {
     resolve_from(env.as_deref(), user_file, &others)
 }
 
-fn same_file(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_file(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,
