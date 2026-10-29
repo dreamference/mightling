@@ -160,9 +160,27 @@ pub fn bot(codex_home: &Path) -> Option<(String, Vec<i64>)> {
 /// `[chat] telegram_mini_app_url` from a configuration file's text, when it is a plain `https://`
 /// address (Telegram opens nothing else): no user name or password, no fragment.
 pub fn mini_app_url(text: &str) -> Option<String> {
+    front_url(text, "telegram_mini_app_url")
+}
+
+/// `[chat] discord_web_url`, the address Discord's link buttons open (DISCORD §3.11), under the
+/// same rules as the Mini App's.
+pub fn discord_web_url(text: &str) -> Option<String> {
+    front_url(text, "discord_web_url")
+}
+
+/// A `[chat]` front address from a configuration file's text, when it is a plain `https://` one.
+pub fn front_url(text: &str, key: &str) -> Option<String> {
     let document = toml::from_str::<toml::Table>(text).ok()?;
-    let url = document.get("chat")?.as_table()?.get("telegram_mini_app_url")?.as_str()?.trim().to_string();
+    let url = document.get("chat")?.as_table()?.get(key)?.as_str()?.trim().to_string();
     valid_front_url(&url).then_some(url)
+}
+
+/// The `Host` of every configured front (the Mini App's, Discord's): `ling web`'s public names.
+pub fn front_authorities(text: &str) -> Vec<String> {
+    let mut names: Vec<String> = [mini_app_url(text), discord_web_url(text)].into_iter().flatten().filter_map(|url| authority(&url)).collect();
+    names.dedup();
+    names
 }
 
 /// Whether `url` is a plain `https://` front address with no userinfo or fragment.
@@ -189,6 +207,12 @@ pub fn mini_app_host(user_config: &Path) -> Option<String> {
     let text = std::fs::read_to_string(user_config).ok()?;
     let url = mini_app_url(&text)?;
     authority(&url)
+}
+
+/// The `Host` a browser sends for the configured `[chat] discord_web_url` in `user_config`.
+pub fn discord_web_host(user_config: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(user_config).ok()?;
+    authority(&discord_web_url(&text)?)
 }
 
 /// Whether `id` is a valid deep-link thread id (G3): 8 lowercase hex characters (a `chat-repos`
@@ -544,6 +568,15 @@ mod tests {
         assert_eq!(url("https://node.example.ts.net/#x"), None);
         assert_eq!(url("https:///"), None);
         assert_eq!(mini_app_url(""), None);
+        assert_eq!(discord_web_url("[chat]\ndiscord_web_url = \"http://node.example.ts.net/\"\n"), None);
+    }
+
+    #[test]
+    fn both_fronts_are_public_names() {
+        let text = "[chat]\ntelegram_mini_app_url = \"https://tg.example.ts.net/\"\ndiscord_web_url = \"https://dc.example.ts.net:8443/\"\n";
+        assert_eq!(front_authorities(text), vec!["tg.example.ts.net".to_string(), "dc.example.ts.net:8443".to_string()]);
+        assert_eq!(front_authorities("[chat]\ndiscord_web_url = \"https://dc.example.ts.net/\"\n"), vec!["dc.example.ts.net".to_string()]);
+        assert!(front_authorities("").is_empty());
         assert_eq!(mini_app_url("[chat]\ntelegram_mini_app_url = 3\n"), None);
     }
 

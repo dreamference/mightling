@@ -242,6 +242,8 @@ impl Server {
 
     /// Whether `Host` names the configured HTTPS front (`telegram_mini_app_url` / `public_names`)
     /// and not loopback, the LAN or another address (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §12.1 G2).
+    /// Discord's front (`discord_web_url`) is a public name but not Telegram's: its launch carries
+    /// nothing signed, so Telegram's launch pairing is not served there.
     pub fn front_host_ok(&self, headers: &HeaderMap) -> bool {
         let Some(host) = header_str(headers, header::HOST) else {
             return false;
@@ -258,7 +260,8 @@ impl Server {
         {
             return host == configured;
         }
-        !self.config.public_names.is_empty()
+        let discord = self.config.user_config.as_deref().and_then(crate::telegram_app::discord_web_host);
+        !discord.is_some_and(|discord| discord.eq_ignore_ascii_case(&host))
             && self
                 .config
                 .public_names
