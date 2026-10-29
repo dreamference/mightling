@@ -66,7 +66,7 @@ export interface HostedServer {
 export interface HostConfig {
   device: string;
   secret: string;
-  /** The hub's base URL (`http://192.168.50.105:3100`), from `agent-status.json`. */
+  /** The hub's base URL (`http://hub.example:3100`), from `agent-status.json`. */
   hub: string;
   /** Folders whose threads stay on this device, absolute. */
   exclude: string[];

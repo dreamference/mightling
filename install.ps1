@@ -102,7 +102,67 @@ foreach ($Name in $Required) {
 }
 if (-not $Assets.ContainsKey($SumsName)) { Fail "release $Tag has no $SumsName." }
 
-Say "Installing Mightling $Tag for $Target (preview, unsigned)"
+Say "Installing Mightling $Tag for $Target (preview)"
+
+# -- the signature ---------------------------------------------------------------------------
+
+# Mightling's release keys, as `ling update` compiles them in (ling-rs/release-signing.pub) and
+# install.sh carries them; every release from $SignedSince on signs SHA256SUMS with one of them.
+$ReleaseKeys = @('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKIG5+J3RTa4AaoT0o2qIhVr7bGvaa+T5b84rDv31ptj mightling-release-2026-10')
+$SignedSince = "1.5.0"
+
+# Whether a tag is $SignedSince or newer. A tag that is not a version is treated as new: a name
+# nobody can read is no reason to skip the check (install.sh and `ling update` decide the same way).
+function Test-SigningRequired([string]$Name) {
+    if ($Name.TrimStart("v") -notmatch "^(\d+)\.(\d+)\.(\d+)") { return $true }
+    $Have = @([long]$Matches[1], [long]$Matches[2], [long]$Matches[3])
+    $Since = @($SignedSince.Split(".") | ForEach-Object { [long]$_ })
+    for ($I = 0; $I -lt 3; $I++) {
+        if ($Have[$I] -gt $Since[$I]) { return $true }
+        if ($Have[$I] -lt $Since[$I]) { return $false }
+    }
+    return $true
+}
+
+# Windows 11's own OpenSSH client first (an optional feature, on by default), then one on PATH.
+function Find-SshKeygen {
+    foreach ($Folder in @("System32", "Sysnative")) {
+        $Path = Join-Path $env:SystemRoot "$Folder\OpenSSH\ssh-keygen.exe"
+        if (Test-Path -LiteralPath $Path) { return $Path }
+    }
+    $Found = Get-Command ssh-keygen.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($Found) { return $Found.Path }
+    return $null
+}
+
+# The allowed-signers lines for public-key lines: `mightling-release <type> <key>`.
+function Get-Signers([string[]]$Keys) {
+    return @($Keys | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith("#") } |
+        ForEach-Object { $Parts = $_ -split "\s+"; "mightling-release $($Parts[0]) $($Parts[1])" })
+}
+
+# ssh-keygen -Y verify, the signed file on standard input. Windows's ssh-keygen never sees the end
+# of a pipe, and 5.1 re-encodes text it pipes to a program, so the input is the file itself
+# (Start-Process hands ssh-keygen the file's handle).
+function Test-Signature([string]$Keygen, [string]$Signers, [string]$Namespace, [string]$Signature, [string]$Message) {
+    $Folder = Split-Path -Parent $Signers
+    $Out = Join-Path $Folder "verify.out"
+    $Err = Join-Path $Folder "verify.err"
+    $Arguments = "-Y verify -f `"$Signers`" -I mightling-release -n $Namespace -s `"$Signature`""
+    $Process = Start-Process -FilePath $Keygen -ArgumentList $Arguments -RedirectStandardInput $Message `
+        -RedirectStandardOutput $Out -RedirectStandardError $Err -NoNewWindow -Wait -PassThru
+    $script:VerifyOutput = (@(Get-Content -Path $Out, $Err) -join " ").Trim()
+    return ($Process.ExitCode -eq 0)
+}
+
+function Read-Sums([string]$Path) {
+    $Table = @{}
+    foreach ($Line in (Get-Content -Path $Path)) {
+        $Parts = $Line.Trim() -split "\s+"
+        if ($Parts.Count -ge 2) { $Table[$Parts[1].TrimStart("*")] = $Parts[0].ToLower() }
+    }
+    return $Table
+}
 
 # -- download and check everything before installing anything ---------------------------------
 
@@ -128,11 +188,53 @@ function Expand-Gzip([string]$From, [string]$To) {
 }
 
 try {
-    $Sums = @{}
-    foreach ($Line in (Get-Content -Path (Get-Asset $SumsName))) {
-        $Parts = $Line.Trim() -split "\s+"
-        if ($Parts.Count -ge 2) { $Sums[$Parts[1].TrimStart("*")] = $Parts[0].ToLower() }
+    $SumsFile = Get-Asset $SumsName
+    # SHA256SUMS lists every asset of the release, this PC's checksum file and the desktop app's
+    # installer among them, and its signature is what ties everything checked below to the release
+    # job (specs/DREAMFERENCE_RELEASE_SIGNING.md).
+    $Signed = $null
+    if ($Assets.ContainsKey("SHA256SUMS.sig")) {
+        $Keygen = Find-SshKeygen
+        if (-not $Keygen) {
+            Fail "ssh-keygen.exe, which checks the release's signature, was not found. Add Windows's OpenSSH Client (Settings > System > Optional features) and run this again; nothing was installed."
+        }
+        if (-not $Assets.ContainsKey("SHA256SUMS")) { Fail "release $Tag has SHA256SUMS.sig but no SHA256SUMS; nothing was installed." }
+        $Signature = Get-Asset "SHA256SUMS.sig"
+        $SignedSums = Get-Asset "SHA256SUMS"
+        $Signers = Join-Path $Work "allowed_signers"
+        $Lines = Get-Signers $ReleaseKeys
+        # A key rotation: the release names the new key, signed by a key trusted here under a
+        # namespace of its own (specs/DREAMFERENCE_RELEASE_SIGNING.md section 5).
+        if ($Assets.ContainsKey("release-key-transition.pub")) {
+            if (-not $Assets.ContainsKey("release-key-transition.pub.sig")) {
+                Fail "release $Tag names a new release key but carries no endorsement of it; nothing was installed."
+            }
+            $NewKey = Get-Asset "release-key-transition.pub"
+            $NewKeySig = Get-Asset "release-key-transition.pub.sig"
+            [IO.File]::WriteAllText($Signers, (($Lines -join "`n") + "`n"))
+            if (-not (Test-Signature $Keygen $Signers "mightling-release-key" $NewKeySig $NewKey)) {
+                Fail "release $Tag names a new release key that no trusted key has signed; nothing was installed."
+            }
+            $Lines += Get-Signers (Get-Content -Path $NewKey)
+        }
+        # LF and no byte-order mark, which ssh-keygen reads as it reads a file written on Linux.
+        [IO.File]::WriteAllText($Signers, (($Lines -join "`n") + "`n"))
+        if (-not (Test-Signature $Keygen $Signers "mightling-release" $Signature $SignedSums)) {
+            Fail "release $Tag failed its signature check: SHA256SUMS is not signed by Mightling's release key ($VerifyOutput). Nothing was installed."
+        }
+        $Signed = Read-Sums $SignedSums
+        if (-not $Signed.ContainsKey($SumsName)) { Fail "SHA256SUMS has no checksum for $SumsName; nothing was installed." }
+        if ((Get-FileHash -Algorithm SHA256 -Path $SumsFile).Hash.ToLower() -ne $Signed[$SumsName]) {
+            Fail "$SumsName does not match its checksum in SHA256SUMS; nothing was installed."
+        }
+        Say "  release $Tag is signed by Mightling's release key"
+    } elseif (Test-SigningRequired $Tag) {
+        Fail "release $Tag is not signed (it has no SHA256SUMS.sig); nothing was installed. Every release from $SignedSince on is signed by Mightling's release key, so an unsigned one did not come from its release job."
+    } else {
+        Say "  release $Tag predates signed releases ($SignedSince); it is checked against its checksums only"
     }
+
+    $Sums = Read-Sums $SumsFile
 
     $Wanted = @()
     foreach ($Name in $Required) { $Wanted += $Name }
@@ -164,11 +266,9 @@ try {
         } elseif (-not $Assets.ContainsKey("SHA256SUMS")) {
             Say "  release $Tag has no SHA256SUMS to check $SetupName against; leaving the desktop app out"
         } else {
-            $AllSums = @{}
-            foreach ($Line in (Get-Content -Path (Get-Asset "SHA256SUMS"))) {
-                $Parts = $Line.Trim() -split "\s+"
-                if ($Parts.Count -ge 2) { $AllSums[$Parts[1].TrimStart("*")] = $Parts[0].ToLower() }
-            }
+            # The signed SHA256SUMS; only a release from before signing began gets here without one.
+            $AllSums = $Signed
+            if ($null -eq $AllSums) { $AllSums = Read-Sums (Get-Asset "SHA256SUMS") }
             if (-not $AllSums.ContainsKey($SetupName)) { Fail "SHA256SUMS has no checksum for $SetupName; nothing was installed." }
             $AppSetup = Get-Asset $SetupName
             $Actual = (Get-FileHash -Algorithm SHA256 -Path $AppSetup).Hash.ToLower()

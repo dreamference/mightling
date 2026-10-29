@@ -201,3 +201,65 @@ def test_ling_uninstall_removes_rules_by_program_as_install_ps1_does():
     assert "$_.Name -like '{RULE_PREFIX}*'" in source
     assert "$Program.StartsWith($_, 'OrdinalIgnoreCase')" in source
     assert 'pub const RULE_PREFIX: &str = "Mightling-mDNS-";' in source
+
+
+# -- the release's signature (specs/DREAMFERENCE_RELEASE_SIGNING.md) --------------------------------
+
+RELEASE_KEYS_PS1 = re.compile(r"^\$ReleaseKeys = @\((.*)\)$", re.MULTILINE)
+
+
+def signature_block() -> str:
+    text = script()
+    return text[text.index('if ($Assets.ContainsKey("SHA256SUMS.sig"))') :]
+
+
+def test_install_ps1_trusts_the_keys_ling_update_compiles_in():
+    keys = [
+        line
+        for line in (ROOT / "ling-rs" / "release-signing.pub").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    embedded = re.findall(r"'([^']*)'", RELEASE_KEYS_PS1.search(script()).group(1))
+    assert keys and embedded == keys
+
+
+def test_install_ps1_requires_signatures_from_the_same_release_as_install_sh():
+    since = re.search(r'^SIGNED_SINCE="([^"]+)"$', (ROOT / "install.sh").read_text(), re.MULTILINE)
+    assert f'$SignedSince = "{since.group(1)}"' in script()
+
+
+def test_install_ps1_checks_sha256sums_against_the_release_key():
+    block = signature_block()
+    assert "-Y verify" in script()
+    assert 'Test-Signature $Keygen $Signers "mightling-release" $Signature $SignedSums' in block
+    assert 'Test-Signature $Keygen $Signers "mightling-release-key"' in block
+    assert "failed its signature check" in block
+
+
+def test_an_unsigned_release_since_signing_began_installs_nothing():
+    block = signature_block()
+    unsigned = block.index("} elseif (Test-SigningRequired $Tag) {")
+    assert block[unsigned:].split("\n", 2)[1].strip().startswith('Fail "release $Tag is not signed')
+
+
+def test_the_per_target_checksums_are_tied_to_the_signed_sha256sums():
+    block = signature_block()
+    assert "$Signed[$SumsName]" in block
+    assert 'Fail "$SumsName does not match its checksum in SHA256SUMS' in block
+
+
+def test_nothing_is_unpacked_or_run_before_the_signature_is_checked():
+    text = script()
+    checked = text.index('if ($Assets.ContainsKey("SHA256SUMS.sig"))')
+    for step in (
+        "Expand-Gzip $Archive",
+        "Unblock-File -Path $AppSetup",
+        "Start-Process -FilePath $AppSetup",
+    ):
+        assert checked < text.index(step), step
+
+
+def test_the_desktop_app_is_checked_against_the_signed_sha256sums():
+    text = script()
+    app = text[text.index("$AppSetup = $null") :]
+    assert "$AllSums = $Signed" in app

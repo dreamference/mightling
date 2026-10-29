@@ -87,7 +87,7 @@ other, by both verifiers.
 | Signing | `.github/workflows/release.yml`, job `release`, step "Write and sign SHA256SUMS". The key is written to a 0600 temporary file only for the `ssh-keygen -Y sign` call. If the secret is missing, the release fails |
 | Self-check | Same step: the job verifies its own signature against `release-signing.pub` (and a transition, if one is present) before publishing. A secret that does not match the published key stops the release, rather than shipping one no client would install |
 | Attestation | Same job, `actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8` (v4.2.2), with `subject-checksums` over every file plus `SHA256SUMS` and its `.sig`. The job has `id-token: write` and `attestations: write`, and no other job does |
-| Verification | `ling update` (`ling-rs/src/update.rs`, `release_signature.rs`) and `install.sh`. install.ps1 is on `windows/phase-0-1` and should use the same `ssh-keygen -Y verify` lines; Windows 11's `ssh-keygen.exe` has `-Y` |
+| Verification | `ling update` (`ling-rs/src/update.rs`, `release_signature.rs`) `install.sh` and `install.ps1`, which runs Windows 11's own `ssh-keygen.exe` (`-Y verify`) with the same keys, namespaces and branches; its input is the file's handle (`Start-Process -RedirectStandardInput`), since that `ssh-keygen` never sees the end of a pipe |
 
 The current key:
 
