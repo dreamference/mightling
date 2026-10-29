@@ -22,7 +22,7 @@ pub const CHUNK_TOKENS: usize = 512;
 pub const CHUNK_OVERLAP: f64 = 0.15;
 
 /// The chunker's own version: bumped only when a change to `chunk.rs` moves chunk boundaries.
-pub const CHUNKER_VERSION: u32 = 1;
+pub const CHUNKER_VERSION: u32 = 2;
 
 /// What decides where chunks end, recorded with a collection (§7.5): when it differs, the
 /// documents are chunked again from their stored text and only chunks whose text changed are

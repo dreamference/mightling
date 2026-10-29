@@ -58,6 +58,59 @@ pub fn text_hash(title: &str, heading: &str, text: &str) -> [u8; 32] {
     sha2::Sha256::digest(embed_input(title, heading, text).as_bytes()).into()
 }
 
+/// No real text has fewer tokens than its bytes over this, so a text that long is over any target
+/// without being tokenized: the tokenizer's memory grows with its input (§10.2), and a document
+/// is whatever its sender wrote (one 100 MB paragraph with no full stop).
+const BYTES_PER_TOKEN: usize = 64;
+
+/// The longest piece a long unit is windowed over: a longer sentence (no full stop, or a script
+/// that does not end sentences with one) is cut at a space before this, else at a character.
+const MAX_PIECE_BYTES: usize = 1024;
+
+/// The longest heading or locator a chunk keeps: each chunk carries its own copy.
+const MAX_LABEL_BYTES: usize = 1024;
+
+/// `text` cut to at most `max` bytes, at a character boundary.
+fn clip(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// A text's size against a target: its tokens, but never fewer than its bytes allow, and a text
+/// already over the target by its bytes is not tokenized at all.
+fn weight(counter: &dyn TokenCount, text: &str, target: usize) -> usize {
+    let floor = text.len().div_ceil(BYTES_PER_TOKEN);
+    if floor > target {
+        return floor;
+    }
+    counter.count(text).max(floor)
+}
+
+/// A sentence in parts of at most [`MAX_PIECE_BYTES`].
+fn parts(sentence: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = sentence;
+    while rest.len() > MAX_PIECE_BYTES {
+        let head = clip(rest, MAX_PIECE_BYTES);
+        let cut = match head.rfind(char::is_whitespace) {
+            Some(at) if at > MAX_PIECE_BYTES / 2 => at,
+            _ => head.len(),
+        };
+        out.push(&rest[..cut]);
+        rest = rest[cut..].trim_start();
+    }
+    if !rest.is_empty() {
+        out.push(rest);
+    }
+    out
+}
+
 /// A piece of a long unit: a sentence or a line, with the line it came from; an empty piece marks
 /// a paragraph's end.
 struct Piece {
@@ -93,7 +146,7 @@ fn sentences(line: &str) -> Vec<&str> {
     out.into_iter().filter(|p| !p.trim().is_empty()).collect()
 }
 
-fn pieces(unit: &Unit, counter: &dyn TokenCount) -> Vec<Piece> {
+fn pieces(unit: &Unit, counter: &dyn TokenCount, target: usize) -> Vec<Piece> {
     let mut out = Vec::new();
     let mut in_para = false;
     for (i, line) in unit.text.split('\n').enumerate() {
@@ -110,10 +163,10 @@ fn pieces(unit: &Unit, counter: &dyn TokenCount) -> Vec<Piece> {
             continue;
         }
         in_para = true;
-        for sentence in sentences(line) {
+        for part in sentences(line).into_iter().flat_map(parts) {
             out.push(Piece {
-                text: sentence.to_string(),
-                tokens: counter.count(sentence),
+                text: part.to_string(),
+                tokens: weight(counter, part, target),
                 line: number,
             });
         }
@@ -250,7 +303,18 @@ pub fn chunk(units: &[Unit], counter: &dyn TokenCount, target: usize, overlap: f
     let mut cur = Packing::default();
     let mut heading = String::new();
     for unit in units {
-        let tokens = counter.count(&unit.text);
+        let clipped;
+        let unit = if unit.loc.len() > MAX_LABEL_BYTES || unit.heading.len() > MAX_LABEL_BYTES {
+            clipped = Unit {
+                loc: clip(&unit.loc, MAX_LABEL_BYTES).to_string(),
+                heading: clip(&unit.heading, MAX_LABEL_BYTES).to_string(),
+                ..unit.clone()
+            };
+            &clipped
+        } else {
+            unit
+        };
+        let tokens = weight(counter, &unit.text, target);
         if !cur.texts.is_empty() && (cur.tokens + tokens > target || unit.group != cur.group) {
             cur.emit(&heading, &mut out);
         }
@@ -282,7 +346,7 @@ pub fn chunk(units: &[Unit], counter: &dyn TokenCount, target: usize, overlap: f
             };
             packing.emit(heading, out);
         };
-        for piece in pieces(unit, counter) {
+        for piece in pieces(unit, counter, target) {
             if window_tokens + piece.tokens > target && !window.is_empty() {
                 flush(&window, &mut out, &heading);
                 let mut keep: Vec<Piece> = Vec::new();
@@ -420,6 +484,64 @@ mod tests {
             "{}",
             chunks.last().unwrap().loc
         );
+    }
+
+    /// Words, recording the longest text it was asked to count.
+    #[derive(Default)]
+    struct Longest(std::cell::Cell<usize>);
+
+    impl TokenCount for Longest {
+        fn count(&self, text: &str) -> usize {
+            self.0.set(self.0.get().max(text.len()));
+            Words.count(text)
+        }
+    }
+
+    /// Zero tokens for everything: a tokenizer whose normalizer drops every character.
+    struct Nothing;
+
+    impl TokenCount for Nothing {
+        fn count(&self, _: &str) -> usize {
+            0
+        }
+    }
+
+    #[test]
+    fn a_hostile_unit_never_reaches_the_tokenizer_or_a_chunk_whole() {
+        let bound = 512 * BYTES_PER_TOKEN + MAX_PIECE_BYTES;
+        let blob = "QUJD".repeat(2_500_000);
+        let words = "word ".repeat(2_000_000);
+        // Two bytes a character, and the cut at 1024 bytes falls inside one.
+        let accents = format!("a{}", "é".repeat(3_000_000));
+        for text in [&blob, &words, &accents] {
+            let mut long = unit("lines 1-1", 1, text);
+            long.heading = "H".repeat(5_000_000);
+            let counter = Longest::default();
+            let chunks = chunk(&[long], &counter, 512, 0.15);
+            assert!(
+                counter.0.get() <= 512 * BYTES_PER_TOKEN,
+                "{}",
+                counter.0.get()
+            );
+            assert!(chunks.len() > 1);
+            for c in &chunks {
+                assert!(c.text.len() <= bound, "{}", c.text.len());
+                assert!(c.heading.len() <= MAX_LABEL_BYTES);
+            }
+            let kept: usize = chunks.iter().map(|c| c.text.len()).sum();
+            assert!(kept >= text.len() - chunks.len() * 2, "nothing is lost");
+        }
+        // A counter that sees no tokens still packs and windows to a bounded size.
+        let units: Vec<Unit> = (1..=20_000)
+            .map(|i| unit(&format!("lines {i}-{i}"), i, "\u{200b}\u{200b}"))
+            .collect();
+        for c in chunk(&units, &Nothing, 512, 0.15) {
+            assert!(c.text.len() <= bound, "{}", c.text.len());
+        }
+        let lines = "\u{200b}\u{200b}\n".repeat(200_000);
+        for c in chunk(&[unit("lines 1-1", 1, &lines)], &Nothing, 512, 0.15) {
+            assert!(c.text.len() <= bound, "{}", c.text.len());
+        }
     }
 
     #[test]

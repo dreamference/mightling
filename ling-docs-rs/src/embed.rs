@@ -23,6 +23,10 @@ pub const QUERY_PREFIX: &str = "query: ";
 /// Tokens an input is cut to, special tokens included.
 pub const MAX_TOKENS: usize = 512;
 
+/// The bytes of an input that are tokenized: far more than [`MAX_TOKENS`] tokens of any real text,
+/// and a bound on the tokenizer's memory whatever a document's title or heading holds.
+const MAX_INPUT_BYTES: usize = MAX_TOKENS * 64;
+
 /// Something that turns text into a unit vector.
 pub trait Embed {
     fn dim(&self) -> usize;
@@ -111,6 +115,11 @@ impl ModelTokenizer {
 
     /// Token ids with the special tokens, cut to [`MAX_TOKENS`] (the closing token kept).
     pub fn ids(&self, text: &str) -> Result<Vec<i64>> {
+        let mut end = text.len().min(MAX_INPUT_BYTES);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let text = &text[..end];
         let encoding = self
             .tokenizer
             .encode(text, true)
@@ -297,6 +306,8 @@ mod tests {
             "counting must not stop at 512"
         );
         assert_eq!(tokenizer.ids(&long).unwrap().len(), MAX_TOKENS);
+        let huge = format!("a{}", "é".repeat(MAX_INPUT_BYTES));
+        assert_eq!(tokenizer.ids(&huge).unwrap().len(), MAX_TOKENS);
     }
 
     #[test]
