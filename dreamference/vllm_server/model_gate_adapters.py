@@ -63,6 +63,9 @@ class ModelGateAdapters:
         self.loaded: OrderedDict[str, bool] = OrderedDict()
         self.synced = False
         self.locks: dict[str, asyncio.Lock] = {}
+        # One load at a time: a load makes room against the count of what is loaded, and two
+        # concurrent loads would each count without the other and leave the engine over its limit.
+        self.load_lock = asyncio.Lock()
 
     # -- the list and the key ------------------------------------------------------------------
 
@@ -167,24 +170,31 @@ class ModelGateAdapters:
         """
         lock = self.locks.setdefault(name, asyncio.Lock())
         async with lock:
-            if not self.synced:
-                await self.sync(listing)
-            if name in self.loaded:
+            # A loaded adapter does not wait behind another adapter's load.
+            if self.synced and name in self.loaded:
                 self.loaded.move_to_end(name)
                 return None
-            adapters = listing["adapters"]
-            entry = adapters[name] if isinstance(adapters, dict) else {}
-            problem = await asyncio.to_thread(self.files_problem, entry)
-            if problem:
-                return problem
-            await self.make_room(int(str(listing.get("max_loaded") or 8)))
-            status, body = await self.engine_call(
-                "POST", "/load_lora_adapter", {"lora_name": name, "lora_path": entry["path"]}
-            )
-            if status != HTTP_OK:
-                return f"the engine did not load {name}: {body[:300].decode('utf-8', 'replace')}"
-            self.loaded[name] = True
-            return None
+            async with self.load_lock:
+                if not self.synced:
+                    await self.sync(listing)
+                if name in self.loaded:
+                    self.loaded.move_to_end(name)
+                    return None
+                adapters = listing["adapters"]
+                entry = adapters[name] if isinstance(adapters, dict) else {}
+                problem = await asyncio.to_thread(self.files_problem, entry)
+                if problem:
+                    return problem
+                await self.make_room(int(str(listing.get("max_loaded") or 8)))
+                status, body = await self.engine_call(
+                    "POST", "/load_lora_adapter", {"lora_name": name, "lora_path": entry["path"]}
+                )
+                if status != HTTP_OK:
+                    return (
+                        f"the engine did not load {name}: {body[:300].decode('utf-8', 'replace')}"
+                    )
+                self.loaded[name] = True
+                return None
 
     async def sync(self, listing: dict[str, object]) -> None:
         """Learns which adapters the engine holds (those given at its start), and unloads removed ones.
