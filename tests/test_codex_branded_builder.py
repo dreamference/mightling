@@ -122,9 +122,9 @@ def test_the_patches_stay_small():
     # bytes before it and is 46,801 after.
     # Raised to 55,000 on 2026-10-20 by the owner, on top of that series, for 1.7.1 (the sandbox's
     # host sockets, the vendor names in the TUI) and ling-claude's five TUI hooks (about 3.8 KB).
-    # The first: 0019's sandbox hunk denies the host's control sockets for every managed profile
+    # The first: 0019's sandbox hunk denied the host's control sockets for every managed profile
     # (`ling_airgapped::host_sockets`, 377 bytes), after a sandboxed command ran `docker restart` on
-    # the host; 47,178 after.
+    # the host; 47,178 after. Since 2026-10-22 only at /airgapped on (`host_sockets_at`).
     # The compatibility mode's five TUI hooks, 0029-compat-hooks (3,464 bytes; 50,642 after), each
     # one call into ling-rs/src/compat_keys.rs that answers "Codex's own behaviour" outside the mode:
     # Enter in the composer (a draft ending in `\` gets a newline; Claude Code's command names run
@@ -145,6 +145,9 @@ def test_the_patches_stay_small():
     # Raised to 60,000 on 2026-10-26 with the owner's approval, for the Windows fixes W1/W2/W9
     # (0032 guard fails closed, 0033 sandbox window station, 0034 doctor on Windows); 59,496 after.
     # Raised to 64,000 on 2026-10-27 by the owner: headroom for Windows and compat fixes; 59,496 then.
+    # Not raised on 2026-10-28 for 0035 (640 bytes: the code-mode host found beside the resolved
+    # executable); 60,136 after. Down the same day when cave mode was removed: 0017 (2,834 bytes)
+    # deleted and 0018, 0019, 0025 and 0028 re-cut; 57,571 after.
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 64_000
 
 
