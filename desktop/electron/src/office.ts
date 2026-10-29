@@ -2,7 +2,7 @@
 // `.odt` (and their kin) converted to a PDF by a LibreOffice installed on this machine, which the
 // window then shows as it shows any PDF. LibreOffice runs headless, in a network namespace of its
 // own (bubblewrap's `--unshare-net`: nothing it does reaches the network, at any `/airgapped`
-// level), with the root read-only but for a /tmp of its own and a scratch folder, a profile of its own there, and a time
+// level), with the root read-only but for a /tmp of its own and a scratch folder, an empty /run and home, a profile of its own there, and a time
 // limit. Without LibreOffice, or without bubblewrap (macOS, Windows), the tab says so instead.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -49,20 +49,38 @@ export function isOfficeFile(file: string): boolean {
   return dot > 0 && OFFICE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
 }
 
+/** Whether `file` is `dir` or inside it. */
+function within(file: string, dir: string): boolean {
+  const relative = path.relative(dir, file);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 /** The sandboxed conversion's command line: bubblewrap around LibreOffice, the network unshared. */
-export function conversionCommand(bwrap: string, soffice: string, file: string, scratch: string): { command: string; args: string[] } {
+export function conversionCommand(bwrap: string, soffice: string, file: string, scratch: string, home: string = os.homedir()): { command: string; args: string[] } {
   const profile = path.join(scratch, "profile");
   const tmp = path.join(scratch, "tmp");
+  // An empty home, unless it is the root itself; a LibreOffice installed under it (`…/program/soffice`) keeps its installation folder.
+  const hidden = path.isAbsolute(home) && path.resolve(home) !== path.resolve("/") ? path.resolve(home) : null;
+  let program = soffice;
+  try {
+    program = fs.realpathSync(soffice);
+  } catch {
+    // Not there to resolve: bound as it is named.
+  }
+  const installation = hidden && within(program, hidden) ? [path.dirname(path.dirname(program))] : [];
   return {
     command: bwrap,
     args: [
       // LibreOffice writes under /tmp whatever TMPDIR says: a tmpfs of its own, then the scratch folder, the file and the command.
-      // An empty /run too: a read-only root still lets it connect to the sockets there (the session bus, docker).
+      // An empty /run and home too: a read-only root still lets it connect to the sockets there (the session bus, docker, an
+      // agent's), and the home holds the user's keys.
       "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/run",
-      "--bind", scratch, scratch, "--ro-bind", file, file, "--ro-bind", soffice, soffice,
+      ...(hidden ? ["--tmpfs", hidden] : []),
+      ...installation.flatMap((dir) => ["--ro-bind", dir, dir]),
+      "--bind", scratch, scratch, "--ro-bind", file, file, "--ro-bind", program, program,
       "--unshare-net", "--unshare-ipc", "--unshare-pid", "--die-with-parent", "--new-session",
       "--setenv", "TMPDIR", tmp, "--setenv", "HOME", scratch,
-      soffice, `-env:UserInstallation=file://${profile}`, "--headless", "--norestore", "--nolockcheck",
+      program, `-env:UserInstallation=file://${profile}`, "--headless", "--norestore", "--nolockcheck",
       "--convert-to", "pdf", "--outdir", path.join(scratch, "out"), file,
     ],
   };

@@ -34,6 +34,38 @@ describe("office previews", () => {
     expect(run).toBeLessThan(args.indexOf("--bind"));
   });
 
+  // The same holds for a socket under the user's home (an agent's, an editor's), and the home holds the
+  // user's keys; LibreOffice sees an empty one, with the scratch folder, the file and the command still bound.
+  it.skipIf(process.platform === "win32")("hide the user's home from LibreOffice", () => {
+    const { args } = conversionCommand("/usr/bin/bwrap", "/usr/bin/soffice", "/h/u/d/a.docx", "/h/u/tmp/s", "/h/u");
+    const home = args.findIndex((arg, i) => arg === "--tmpfs" && args[i + 1] === "/h/u");
+    expect(home).toBeGreaterThan(2);
+    expect(home).toBeLessThan(args.indexOf("--bind"));
+    expect(args.slice(args.indexOf("--bind"), args.indexOf("--bind") + 3)).toEqual(["--bind", "/h/u/tmp/s", "/h/u/tmp/s"]);
+    expect(args).toContain("/h/u/d/a.docx");
+  });
+
+  // A LibreOffice installed under the home (unpacked there, or linked from ~/.local/bin) stays visible:
+  // its installation folder is bound read-only and run by its real path.
+  it.skipIf(process.platform === "win32")("keep a LibreOffice installed under the home", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "office-home-"));
+    try {
+      const program = path.join(home, "opt", "libreoffice", "program");
+      fs.mkdirSync(program, { recursive: true });
+      fs.writeFileSync(path.join(program, "soffice"), "");
+      fs.mkdirSync(path.join(home, "bin"));
+      fs.symlinkSync(path.join(program, "soffice"), path.join(home, "bin", "soffice"));
+      const real = fs.realpathSync(path.join(program, "soffice"));
+      const { args } = conversionCommand("/usr/bin/bwrap", path.join(home, "bin", "soffice"), "/d/a.docx", "/tmp/s", home);
+      const install = path.dirname(path.dirname(real));
+      const bound = args.findIndex((arg, i) => arg === "--ro-bind" && args[i + 1] === install && args[i + 2] === install);
+      expect(bound).toBeGreaterThan(args.findIndex((arg, i) => arg === "--tmpfs" && args[i + 1] === home));
+      expect(args[args.indexOf("--new-session") + 7]).toBe(real);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("say so without LibreOffice, and refuse what is not an office file", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "office-test-"));
     const file = path.join(dir, "a.docx");
