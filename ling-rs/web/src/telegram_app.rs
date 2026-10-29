@@ -369,6 +369,16 @@ fn init_data_stale_at(init_data: &str, now: u64) -> u64 {
     signed_at.saturating_add(MAX_LAUNCH_AGE_SECS)
 }
 
+/// Holds the pending-request lock (`telegram-pairs.lock`) while it lives: every change below reads
+/// and writes the requests and used launches whole, and two at once would write back each other's
+/// request as it was (an approval or a decline lost, one approved launch claimed twice).
+fn lock_pending(state: &Path) -> std::io::Result<std::fs::File> {
+    auth::private_dir(state)?;
+    let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(state.join("telegram-pairs.lock"))?;
+    lock.lock()?;
+    Ok(lock)
+}
+
 fn load_pending_pairs_raw(state: &Path, now: u64) -> Vec<PendingLaunchPair> {
     let Ok(text) = std::fs::read_to_string(pending_pairs_file(state)) else {
         return Vec::new();
@@ -416,6 +426,7 @@ fn record_used_init_data(state: &Path, digest: &str, expires_at: u64, now: u64) 
 /// `initData` digests are remembered until they would be stale (`auth_date + MAX_LAUNCH_AGE_SECS`)
 /// so the same `initData` cannot pair twice.
 pub fn create_pending_pair(state: &Path, user_id: i64, init_data: &str, now: u64) -> std::io::Result<PendingLaunchPair> {
+    let _lock = lock_pending(state)?;
     let digest = launch_digest(init_data);
     let used = load_used_launches_raw(state, now);
     if used.iter().any(|entry| auth::same_secret(&entry.init_data_sha256, &digest)) {
@@ -453,6 +464,7 @@ pub fn create_pending_pair(state: &Path, user_id: i64, init_data: &str, now: u64
 
 /// Lists unapproved, non-expired pending device requests for the bot to prompt the user on.
 pub fn list_pending_pairs(state: &Path, now: u64) -> Vec<PendingLaunchPair> {
+    let _lock = lock_pending(state);
     let entries = load_pending_pairs_raw(state, now);
     let _ = save_pending_pairs_raw(state, &entries);
     entries.into_iter().filter(|entry| !entry.approved).collect()
@@ -462,6 +474,7 @@ pub fn list_pending_pairs(state: &Path, now: u64) -> Vec<PendingLaunchPair> {
 /// when the launching webview claims the request in [`claim_pending_pair`], so no plaintext token
 /// is written to disk and an unclaimed approval expires with the request.
 pub fn approve_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result<bool> {
+    let _lock = lock_pending(state)?;
     let mut entries = load_pending_pairs_raw(state, now);
     let Some(entry) = entries.iter_mut().find(|entry| entry.id == id && !entry.approved) else {
         let _ = save_pending_pairs_raw(state, &entries);
@@ -474,6 +487,7 @@ pub fn approve_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result
 
 /// Declines (deletes) a pending request by `id`.
 pub fn decline_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result<bool> {
+    let _lock = lock_pending(state)?;
     let mut entries = load_pending_pairs_raw(state, now);
     let before = entries.len();
     entries.retain(|entry| entry.id != id);
@@ -486,6 +500,9 @@ pub fn decline_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result
 /// request, mints a `Browser` device with `control` scope labelled `telegram-app`, and hands out
 /// the device token exactly once.
 pub fn claim_pending_pair(state: &Path, id: &str, user_id: i64, init_data: &str, now: u64) -> ClaimOutcome {
+    let Ok(_lock) = lock_pending(state) else {
+        return ClaimOutcome::NotFound;
+    };
     let mut entries = load_pending_pairs_raw(state, now);
     let Some(index) = entries.iter().position(|entry| entry.id == id) else {
         let _ = save_pending_pairs_raw(state, &entries);
@@ -617,6 +634,30 @@ mod tests {
         }
         for bad_thread in ["", "3f2a9c1", "3f2a9c1ee", "3F2A9C1E", "../etc", "-abc-def", "abc-def-", "abc--def", "thr_1", &"a".repeat(65)] {
             assert_eq!(open_thread_url(front, bad_thread, false), None, "{bad_thread}");
+        }
+    }
+
+    #[test]
+    fn requests_approved_at_once_are_all_approved() {
+        // Each request is a read and a write of one file: approvals at the same moment must not
+        // write back each other's request unapproved.
+        for round in 0..30 {
+            let state = std::env::temp_dir().join(format!("ling-web-tg-race-{}-{round}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&state);
+            auth::private_dir(&state).unwrap();
+            let ids: Vec<String> = (0..3).map(|n| create_pending_pair(&state, 50 + n, &format!("init-race-{n}"), 1000).unwrap().id).collect();
+            let start = std::sync::Barrier::new(ids.len());
+            std::thread::scope(|scope| {
+                for id in &ids {
+                    let (state, start) = (&state, &start);
+                    scope.spawn(move || {
+                        start.wait();
+                        assert!(approve_pending_pair(state, id, 1001).unwrap());
+                    });
+                }
+            });
+            assert!(list_pending_pairs(&state, 1002).is_empty(), "round {round}: an approval was lost");
+            let _ = std::fs::remove_dir_all(&state);
         }
     }
 
