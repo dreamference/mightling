@@ -536,3 +536,51 @@ def test_a_model_refused_for_memory_is_told_the_budget_it_was_compared_against(m
     valid, msg = check_model_compatibility("qwen3.8-27b-nvfp4-dflash2")
     assert valid is False
     assert f"{total * 0.95:.1f} GB" in msg and "available" not in msg
+
+
+def test_a_serialization_that_fails_midway_leaves_no_tensors_file(tmp_path, monkeypatch):
+    # A truncated model.tensors is non-empty, so is_model_tensorized() took it for a finished one.
+    import types
+
+    from dreamference.hardware import ModelDownloader
+    from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    monkeypatch.setattr(VLLMServerManager, "check_host_safety", classmethod(lambda cls: None))
+    monkeypatch.setattr(ModelDownloader, "is_model_downloaded", classmethod(lambda cls, *a, **k: True))
+    monkeypatch.setattr(
+        ModelDownloader, "get_model_snapshot_dir", classmethod(lambda cls, *a, **k: snapshot)
+    )
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "subprocess.run", lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr="")
+    )
+
+    class Serializer:
+        def __init__(self, path):
+            self.path = path
+
+        def write_module(self, model):
+            Path(self.path).write_bytes(b"half a checkpoint")
+            raise RuntimeError("out of memory")
+
+    torch = types.ModuleType("torch")
+    torch.tensor = lambda *a, **k: None
+    nn = types.ModuleType("torch.nn")
+    nn.Parameter = lambda *a, **k: None
+    torch.nn = nn
+    model = types.SimpleNamespace(register_parameter=lambda *a: None)
+    transformers = types.ModuleType("transformers")
+    transformers.AutoModelForCausalLM = types.SimpleNamespace(from_pretrained=lambda *a, **k: model)
+    tensorizer = types.ModuleType("tensorizer")
+    tensorizer.TensorSerializer = Serializer
+    for name, module in {
+        "torch": torch, "torch.nn": nn, "transformers": transformers, "tensorizer": tensorizer
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    ModelDownloader.tensorize_model(model_key, force=True)
+    assert ModelDownloader.is_model_tensorized(model_key) is False
+    assert not (ModelDownloader.get_tensorized_dir(model_key) / "model.tensors").exists()

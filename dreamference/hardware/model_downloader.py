@@ -355,6 +355,8 @@ class ModelDownloader:
                 pass
 
         if not serialization_success:
+            # A failed attempt may have left part of the file, which would read as tensorized.
+            tensors_file.unlink(missing_ok=True)
             print(f"⚠️  'tensorizer' not installed — skipping tensorize step (normal download will be used).")
             return True
 
