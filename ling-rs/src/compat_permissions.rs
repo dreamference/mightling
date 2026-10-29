@@ -811,6 +811,49 @@ mod tests {
     }
 
     #[test]
+    fn a_repositorys_rules_wait_for_trust_and_the_users_do_not() {
+        let base = std::env::temp_dir().join(format!("mightling-compat-permissions-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (home, repo) = (base.join("home"), base.join("repo"));
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(repo.join(".claude")).unwrap();
+        let write = |file: PathBuf, value: Value| std::fs::write(file, value.to_string()).unwrap();
+        write(home.join(".claude/settings.json"), json!({"permissions": {"deny": ["Bash(user-deny *)"]}}));
+        write(repo.join(".claude/settings.json"), json!({"permissions": {"ask": ["Bash(repo-ask *)"], "allow": ["Bash(repo-allow *)"]}}));
+        write(repo.join(".claude/settings.local.json"), json!({"permissions": {"deny": ["Bash(local-deny *)"]}}));
+        let extra = [(Kind::Deny, "Bash(flag-deny *)".to_string())];
+        // Only this fixture's rules: a managed settings file on the machine adds its own.
+        let ours = |rules: Vec<Rule>| -> Vec<Rule> {
+            let mine = |rule: &Rule| ["user", "repo", "local", "flag"].iter().any(|word| rule.text.starts_with(&format!("Bash({word}-")));
+            rules.into_iter().filter(mine).collect()
+        };
+
+        let (untrusted, notes) = rules_for(&repo, Some(&home), false, &extra);
+        assert_eq!(
+            ours(untrusted),
+            [
+                Rule { kind: Kind::Deny, text: "Bash(user-deny *)".into(), anchor: home.join(".claude") },
+                Rule { kind: Kind::Deny, text: "Bash(flag-deny *)".into(), anchor: repo.clone() },
+            ]
+        );
+        assert!(!notes.iter().any(|note| note.contains(&repo.display().to_string())), "{notes:?}");
+
+        let (trusted, notes) = rules_for(&repo, Some(&home), true, &extra);
+        assert_eq!(
+            ours(trusted),
+            [
+                Rule { kind: Kind::Deny, text: "Bash(user-deny *)".into(), anchor: home.join(".claude") },
+                Rule { kind: Kind::Allow, text: "Bash(repo-allow *)".into(), anchor: repo.clone() },
+                Rule { kind: Kind::Ask, text: "Bash(repo-ask *)".into(), anchor: repo.clone() },
+                Rule { kind: Kind::Deny, text: "Bash(local-deny *)".into(), anchor: repo.clone() },
+                Rule { kind: Kind::Deny, text: "Bash(flag-deny *)".into(), anchor: repo.clone() },
+            ]
+        );
+        assert!(notes.iter().any(|note| note.starts_with("allow rules in") && note.contains("settings.json")), "{notes:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn a_guard_that_cannot_run_refuses_the_call() {
         let dir = std::env::temp_dir().join(format!("mightling guard (x86) {}", std::process::id()));
         let exe = dir.join(if cfg!(windows) { "ling.exe" } else { "ling" });
