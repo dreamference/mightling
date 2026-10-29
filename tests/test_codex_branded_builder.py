@@ -895,6 +895,18 @@ def test_a_crate_install_leaves_another_installs_staging_file_alone(tmp_path, mo
     assert (bin_dir / "x").read_text() == "#!/bin/sh\n"
 
 
+
+def test_a_directory_named_like_a_crate_binary_is_not_current(tmp_path, monkeypatch):
+    # The stamped check took any path with the execute bit, a directory included; the unstamped
+    # one (binaries_installed) asks for a file.
+    crate = _fake_crate(tmp_path, monkeypatch)
+    assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is True
+    binary = tmp_path / "install" / "bin" / "x"
+    binary.unlink()
+    binary.mkdir()
+    assert not CodexBrandedBuilder.crate_is_current(str(crate), "stamp", ("x",))
+
+
 def test_linking_leaves_another_links_staging_link_alone(tmp_path):
     link = tmp_path / "bin" / "ling"
     link.parent.mkdir()
