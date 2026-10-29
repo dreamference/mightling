@@ -195,6 +195,7 @@ def test_at_off_the_mcp_search_asks_the_category_as_before(monkeypatch):
 
 def test_the_mcp_web_tools_resolve_the_level_on_every_call(monkeypatch):
     from unittest.mock import MagicMock, patch
+
     from dreamference.mcp_server.web_tools import AIRGAPPED_ON_MESSAGE, WebTools
 
     # The server is long-lived: a level set after it started applies to its next call (§7).
