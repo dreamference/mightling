@@ -548,6 +548,8 @@ def test_a_serialization_that_fails_midway_leaves_no_tensors_file(tmp_path, monk
     model_key = "qwen3.8-27b-nvfp4-dflash2"
     snapshot = tmp_path / "snapshot"
     snapshot.mkdir()
+    # Fixed at import from the real home: point it at the test's folder.
+    monkeypatch.setattr(ModelDownloader, "TENSORIZER_CACHE_HOME", tmp_path / "tensorizer")
     monkeypatch.setattr(VLLMServerManager, "check_host_safety", classmethod(lambda cls: None))
     monkeypatch.setattr(ModelDownloader, "is_model_downloaded", classmethod(lambda cls, *a, **k: True))
     monkeypatch.setattr(
@@ -625,3 +627,18 @@ def test_an_interrupted_download_is_not_taken_for_a_downloaded_model():
     # A blob still being written is a download that has not finished.
     (root / "blobs" / "0123abcd.incomplete").write_bytes(b"\0")
     assert ModelDownloader.is_model_downloaded(model_key, revision) is False
+
+
+def test_a_model_tensorized_at_one_pin_is_not_loaded_once_the_pin_moves(tmp_path, monkeypatch):
+    from dreamference.hardware import ModelDownloader
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    monkeypatch.setattr(ModelDownloader, "TENSORIZER_CACHE_HOME", tmp_path / "tensorizer")
+    monkeypatch.setattr(ModelMatrixRegistry, "pinned_revision", classmethod(lambda cls, k: "a" * 40))
+    tdir = ModelDownloader.get_tensorized_dir(model_key)
+    tdir.mkdir(parents=True)
+    (tdir / "model.tensors").write_bytes(b"weights of the old pin")
+    assert ModelDownloader.is_model_tensorized(model_key) is True
+    monkeypatch.setattr(ModelMatrixRegistry, "pinned_revision", classmethod(lambda cls, k: "b" * 40))
+    assert ModelDownloader.is_model_tensorized(model_key) is False

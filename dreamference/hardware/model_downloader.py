@@ -133,15 +133,17 @@ class ModelDownloader:
             model_key (str): Model key or repo ID.
 
         Returns:
-            Optional[Path]: Output directory path.
+            Optional[Path]: Output directory path; under the pinned commit for a pinned model, so
+            a checkpoint serialized at an earlier pin is never loaded for the current one.
         """
         if not model_key:
             return None
         repo_id = ModelMatrixRegistry.resolve_hf_repo(model_key)
         if not repo_id:
             return None
-        folder_name = repo_id.replace("/", "--")
-        return cls.TENSORIZER_CACHE_HOME / folder_name
+        folder = cls.TENSORIZER_CACHE_HOME / repo_id.replace("/", "--")
+        revision = ModelMatrixRegistry.pinned_revision(model_key)
+        return folder / revision if revision else folder
 
     @classmethod
     def get_tensorized_path(cls, model_key: str) -> Optional[Path]:
