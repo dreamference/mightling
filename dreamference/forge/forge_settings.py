@@ -47,6 +47,7 @@ ROLES: Final[tuple] = (ROLE_RECORD, ROLE_MIRROR)
 OFF_WORDS: Final[tuple] = ("0", "false", "no", "off")
 FORGE_TABLE: Final[str] = "[forge]"
 ENABLED_KEY: Final[str] = "enabled"
+TOML_FALSE: Final[str] = "false"
 # The owner's and the maintenance accounts (§2.2), and the read-only account mirrors pull with.
 OWNER: Final[str] = "owner"
 ADMIN: Final[str] = "forge-admin"
@@ -173,10 +174,34 @@ class ForgeSettings:
         if override:
             return override not in OFF_WORDS
         try:
-            table = tomllib.loads(cls.config_path().read_text()).get("forge", {})
-        except (OSError, tomllib.TOMLDecodeError):
+            text = cls.config_path().read_text()
+        except OSError:
             return True
+        try:
+            table = tomllib.loads(text).get("forge", {})
+        except tomllib.TOMLDecodeError:
+            # A config TOML cannot parse still says what the owner switched: its line is read.
+            return cls.written_switch(text.splitlines()) != TOML_FALSE
         return not (isinstance(table, dict) and table.get("enabled") is False)
+
+    @classmethod
+    def written_switch(cls, lines: list[str]) -> str | None:
+        """Read `[forge] enabled` line by line, as `set_enabled` writes it.
+
+        Args:
+            lines: The node's config.
+
+        Returns:
+            str | None: The value as written (`true`, `false`), or None when there is none.
+        """
+        in_forge = False
+        for line in lines:
+            stripped = line.split("#", 1)[0].strip()
+            if stripped.startswith("["):
+                in_forge = "".join(stripped.split()) == FORGE_TABLE
+            elif in_forge and stripped.split("=", 1)[0].strip() == ENABLED_KEY:
+                return stripped.split("=", 1)[-1].strip().lower()
+        return None
 
     @classmethod
     def set_enabled(cls, enabled: bool) -> None:
