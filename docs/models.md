@@ -39,12 +39,10 @@ ling-serve was opt-in from 1.7.2 (`--engine ling`); nothing about that command c
 
 What changes for you:
 
-- **Four conversations at once**, each with the model's full 262,144-token context. Until 1.7 the
+- **Four conversations at once**, each with a 196,608-token context (the model's full 262,144 comes
+  with paged memory in a later 1.8.x). Until 1.7 the
   engine ran two at a time and a third waited. A fourth task, a phone thread or the desktop app's
   second window no longer queues behind the others.
-- **A shared, paged memory for conversations.** Each conversation's context lives in pages taken from
-  one pool instead of a full-size block reserved up front, which is what lets four conversations at
-  262,144 tokens fit in the memory of one GB10.
 - **Memory sized at start** from what the machine has free (see [Memory](#memory)).
 - **Conversations take fair turns**: a long prompt being read does not stall the answers of the
   others.
@@ -137,7 +135,7 @@ SGLang keeps its own limits and settings, below.
 
 | What you see | What it means | What to do |
 |---|---|---|
-| `server start` says "Not enough memory to start ling-serve" and prints a plan, the load peak and the missing amount | The plan for four conversations at 262,144 tokens, plus the load peak, does not fit in the memory free now | Free memory (close the desktop session, stop other large services), or `ling-admin server start --engine sglang` |
+| `server start` says "Not enough memory to start ling-serve" and prints a plan, the load peak and the missing amount | The plan for four conversations at 196,608 tokens, plus the load peak, does not fit in the memory free now | Free memory (close the desktop session, stop other large services), or `ling-admin server start --engine sglang` |
 | `server start` reports a failed NVFP4 or tool-call check and prints the way back | The engine started but its output failed a check | Run the printed `--engine sglang` command, and report it with `ling-admin server logs` |
 | A request is answered with HTTP 503 and a `host_memory_low` reason | The machine is nearly out of memory; the server refuses new work to protect the host | Free memory and retry; the work already running continues |
 | A new conversation waits | Four are already running (or kept warm) | It starts when one finishes; recently used conversations are protected for 30 seconds |
