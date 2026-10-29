@@ -160,6 +160,11 @@ def test_a_node_that_still_answers_is_not_cut_without_force(monkeypatch, capsys)
 def test_a_node_with_no_plug_set_says_how_to_set_one(capsys):
     assert NodePowerCycle.cycle("house-1") == 3
     assert "power-config node house-1" in capsys.readouterr().out
+    # An entry edited by hand down to no plug is no plug either.
+    NodePowerSettings.path().parent.mkdir(parents=True, exist_ok=True)
+    NodePowerSettings.path().write_text(json.dumps({"nodes": {"house-1": {"via": "house-2"}}}))
+    assert NodePowerCycle.cycle("house-1") == 3
+    assert "power-config node house-1" in capsys.readouterr().out
 
 
 def test_a_direct_plug_is_used_from_here_and_the_plug_is_never_left_off(monkeypatch, capsys):

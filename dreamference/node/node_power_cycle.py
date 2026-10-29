@@ -201,7 +201,7 @@ class NodePowerCycle:
             int: 0 when the node answers again, 1 otherwise, 3 when nothing is configured for it.
         """
         entry = NodePowerSettings.load()["nodes"].get(node)
-        if entry is None:
+        if entry is None or not entry.get("plug"):
             print(
                 f"❌ No plug is set for {node}: ling-admin node power-config node {node} --plug <name> [--via <node>]"
             )
