@@ -1,5 +1,4 @@
-"""
-Night tasks worked by another node (specs/DREAMFERENCE_MIGHTLING_NODE.md §13.3, §13.5, §13.7).
+"""Night tasks worked by another node (specs/DREAMFERENCE_MIGHTLING_NODE.md §13.3, §13.5, §13.7).
 
 `/night add --on <node>` records the node with the task. At night this machine's runner does not
 run it: it pushes the task's base commit to that node's job repository over the pairing and asks
@@ -22,7 +21,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional
+from typing import Any, Final
 
 from dreamference.night_shift.night_shift_queue import FINAL_STATUSES, NightShiftQueue
 from dreamference.runner.safe_git import SafeGit
@@ -51,9 +50,8 @@ class NightShiftRemote:
     # -- the sender ------------------------------------------------------------------------------
 
     @classmethod
-    def sent_tasks(cls, night_dir: Path) -> List[Dict[str, Any]]:
-        """
-        Args:
+    def sent_tasks(cls, night_dir: Path) -> list[dict[str, Any]]:
+        """Args:
             night_dir: The queue directory.
 
         Returns:
@@ -63,9 +61,8 @@ class NightShiftRemote:
                 if task.get("on") and task.get("status") in SENT_STATUSES]
 
     @classmethod
-    def hand_off(cls, night_dir: Path, pending: List[Dict[str, Any]], notes: List[str]) -> List[Dict[str, Any]]:
-        """
-        Hands every pending task queued with `--on` to its node.
+    def hand_off(cls, night_dir: Path, pending: list[dict[str, Any]], notes: list[str]) -> list[dict[str, Any]]:
+        """Hands every pending task queued with `--on` to its node.
 
         Args:
             night_dir: The queue directory.
@@ -117,9 +114,8 @@ class NightShiftRemote:
         return sent
 
     @classmethod
-    def request_for(cls, night_dir: Path, task: Dict[str, Any], slug: str) -> Dict[str, Any]:
-        """
-        Builds what is sent to the node for one task.
+    def request_for(cls, night_dir: Path, task: dict[str, Any], slug: str) -> dict[str, Any]:
+        """Builds what is sent to the node for one task.
 
         Args:
             night_dir: The queue directory.
@@ -141,10 +137,9 @@ class NightShiftRemote:
                 "sender": NodeIdentity.read() or "", "sender_name": socket.gethostname()}
 
     @classmethod
-    def collect(cls, night_dir: Path, sent: List[Dict[str, Any]], end: datetime, notes: List[str],
+    def collect(cls, night_dir: Path, sent: list[dict[str, Any]], end: datetime, notes: list[str],
                 wait: bool) -> None:
-        """
-        Asks each node about the tasks sent to it, forwards a `/night drop`, and brings back
+        """Asks each node about the tasks sent to it, forwards a `/night drop`, and brings back
         every finished task's branch and result.
 
         Args:
@@ -188,8 +183,8 @@ class NightShiftRemote:
             cls.sleep(min(POLL_S, max(1.0, end.timestamp() - time.time())))
 
     @classmethod
-    def _bring_back(cls, night_dir: Path, task: Dict[str, Any], record: Dict[str, Any],
-                    status: Dict[str, Any]) -> None:
+    def _bring_back(cls, night_dir: Path, task: dict[str, Any], record: dict[str, Any],
+                    status: dict[str, Any]) -> None:
         """Fetches a finished task's branch and copies its result into this machine's record."""
         from dreamference.node.node_job_sender import NodeJobSender
         from dreamference.node.node_pairing import NodePairing
@@ -215,9 +210,8 @@ class NightShiftRemote:
                                    result=result)
 
     @classmethod
-    def json_line(cls, text: str) -> Optional[Dict[str, Any]]:
-        """
-        Args:
+    def json_line(cls, text: str) -> dict[str, Any] | None:
+        """Args:
             text: A node's answer.
 
         Returns:
@@ -235,9 +229,8 @@ class NightShiftRemote:
     # -- the node ----------------------------------------------------------------------------------
 
     @classmethod
-    def serve(cls, operation: str, arguments: List[str]) -> int:
-        """
-        Carries out a night request from a paired node: submit, status, cancel, fetched.
+    def serve(cls, operation: str, arguments: list[str]) -> int:
+        """Carries out a night request from a paired node: submit, status, cancel, fetched.
 
         Args:
             operation: `night-submit`, `night-status`, `night-cancel` or `night-fetched`.
@@ -278,9 +271,8 @@ class NightShiftRemote:
         return 2
 
     @classmethod
-    def accept(cls, request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Queues a task from another machine in this node's own Night Shift queue. Everything here
+    def accept(cls, request: dict[str, Any]) -> dict[str, Any]:
+        """Queues a task from another machine in this node's own Night Shift queue. Everything here
         came from another machine.
 
         Args:
@@ -347,8 +339,7 @@ class NightShiftRemote:
 
     @classmethod
     def start_runner(cls) -> str:
-        """
-        Starts this node's night run now if its window is open and nothing holds its runner lock,
+        """Starts this node's night run now if its window is open and nothing holds its runner lock,
         so a task handed over during the sender's night is worked the same night.
 
         Returns:
@@ -380,14 +371,13 @@ class NightShiftRemote:
 
     @classmethod
     def cancel(cls, task_id: str) -> str:
-        """
-        Args:
+        """Args:
             task_id: A task from another machine.
 
         Returns:
             str: Its status after the request: `cancelled`, `cancel-requested`, or what it was.
         """
-        def change(record: Dict[str, Any]) -> str:
+        def change(record: dict[str, Any]) -> str:
             if record.get("status") in ("queued", "interrupted"):
                 NightShiftQueue.set_status(record, "cancelled", "dropped by the sender")
             elif record.get("status") == "running":
@@ -397,8 +387,7 @@ class NightShiftRemote:
 
     @classmethod
     def task_home(cls, task_id: str) -> Path:
-        """
-        Args:
+        """Args:
             task_id: A task from another machine.
 
         Returns:
@@ -409,9 +398,8 @@ class NightShiftRemote:
         return NodeJob.job_dir(task_id) / "home"
 
     @classmethod
-    def prune(cls, now: Optional[datetime] = None) -> List[str]:
-        """
-        Removes finished tasks from other machines that are past their keep: the record, its
+    def prune(cls, now: datetime | None = None) -> list[str]:
+        """Removes finished tasks from other machines that are past their keep: the record, its
         logs, its `CODEX_HOME`, the branch and the pushed ref.
 
         Args:

@@ -26,7 +26,8 @@ import json
 import os
 import subprocess
 import sys
-from typing import Callable, Final, List, Optional
+from collections.abc import Callable
+from typing import Final
 
 from dreamference.chat.google_service import GOOGLE_CONTAINER_NAME, GoogleService
 from dreamference.chat.searxng_sidecar import SEARXNG_CONTAINER_NAME
@@ -53,7 +54,7 @@ RETIRED_MESSAGE: Final[str] = (
 )
 
 
-def _run(argv: List[str], timeout: int = 120) -> subprocess.CompletedProcess:
+def _run(argv: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
     return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
 
 
@@ -62,44 +63,39 @@ class RetiredWebChat:
 
     @classmethod
     def deployed(cls) -> bool:
-        """
-        Returns:
-            bool: True if an Onyx deployment folder exists: a cheap check before asking Docker.
+        """Returns:
+        bool: True if an Onyx deployment folder exists: a cheap check before asking Docker.
         """
         return os.path.isdir(ONYX_DEPLOYMENT_DIR)
 
     @classmethod
-    def containers(cls) -> List[str]:
-        """
-        Returns:
-            List[str]: The names of the compose project's containers, running or not.
+    def containers(cls) -> list[str]:
+        """Returns:
+        List[str]: The names of the compose project's containers, running or not.
         """
         result = _run(["docker", "ps", "-a", "--filter", PROJECT_LABEL, "--format", "{{.Names}}"], timeout=30)
         return result.stdout.split() if result.returncode == 0 else []
 
     @classmethod
-    def volumes(cls) -> List[str]:
-        """
-        Returns:
-            List[str]: The compose project's volumes: saved chats and accounts among them.
+    def volumes(cls) -> list[str]:
+        """Returns:
+        List[str]: The compose project's volumes: saved chats and accounts among them.
         """
         result = _run(["docker", "volume", "ls", "-q", "--filter", PROJECT_LABEL], timeout=30)
         return result.stdout.split() if result.returncode == 0 else []
 
     @classmethod
-    def networks(cls) -> List[str]:
-        """
-        Returns:
-            List[str]: The names of the compose project's networks (names, not ids: a container's
-            `NetworkMode` names the network it was created on).
+    def networks(cls) -> list[str]:
+        """Returns:
+        List[str]: The names of the compose project's networks (names, not ids: a container's
+        `NetworkMode` names the network it was created on).
         """
         result = _run(["docker", "network", "ls", "--filter", PROJECT_LABEL, "--format", "{{.Name}}"], timeout=30)
         return result.stdout.split() if result.returncode == 0 else []
 
     @classmethod
-    def attached(cls, network: str) -> List[str]:
-        """
-        Args:
+    def attached(cls, network: str) -> list[str]:
+        """Args:
             network (str): One of the project's networks.
 
         Returns:
@@ -116,9 +112,8 @@ class RetiredWebChat:
         return names
 
     @classmethod
-    def container_networks(cls, name: str) -> List[str]:
-        """
-        Args:
+    def container_networks(cls, name: str) -> list[str]:
+        """Args:
             name (str): A container's name.
 
         Returns:
@@ -129,7 +124,7 @@ class RetiredWebChat:
         return result.stdout.split() if result.returncode == 0 else []
 
     @classmethod
-    def release_network(cls, network: str) -> List[str]:
+    def release_network(cls, network: str) -> list[str]:
         """Takes Mightling's own containers off one of Onyx's networks, so it can be removed.
 
         A container on it as a second network (SearXNG, joined by Onyx's `configure`) is
@@ -157,10 +152,9 @@ class RetiredWebChat:
         return held
 
     @classmethod
-    def images(cls) -> List[str]:
-        """
-        Returns:
-            List[str]: Onyx's own images (`onyxdotapp/*`), as `repository:tag`.
+    def images(cls) -> list[str]:
+        """Returns:
+        List[str]: Onyx's own images (`onyxdotapp/*`), as `repository:tag`.
         """
         result = _run(["docker", "images", "--format", "{{.Repository}}:{{.Tag}}"], timeout=30)
         if result.returncode != 0:
@@ -168,11 +162,10 @@ class RetiredWebChat:
         return [name for name in result.stdout.split() if name.startswith(ONYX_IMAGE_PREFIX)]
 
     @classmethod
-    def orphan_sidecars(cls) -> List[str]:
-        """
-        Returns:
-            List[str]: The former web chat's sidecars that still sit on a network other than the
-            sidecar network (Onyx's); `ling-admin images start` and `voice start` replace them.
+    def orphan_sidecars(cls) -> list[str]:
+        """Returns:
+        List[str]: The former web chat's sidecars that still sit on a network other than the
+        sidecar network (Onyx's); `ling-admin images start` and `voice start` replace them.
         """
         orphans = []
         for name in FORMER_SIDECARS:
@@ -182,13 +175,12 @@ class RetiredWebChat:
         return orphans
 
     @classmethod
-    def compose_down_command(cls) -> Optional[List[str]]:
+    def compose_down_command(cls) -> list[str] | None:
+        """Returns:
+        Optional[List[str]]: `docker compose … down` for the deployment, without `-v` (the
+        volumes stay), or None when its compose files are gone.
         """
-        Returns:
-            Optional[List[str]]: `docker compose … down` for the deployment, without `-v` (the
-            volumes stay), or None when its compose files are gone.
-        """
-        files: List[str] = []
+        files: list[str] = []
         for name in ONYX_COMPOSE_FILES:
             path = os.path.join(ONYX_DEPLOYMENT_DIR, name)
             if os.path.isfile(path):
@@ -240,10 +232,9 @@ class RetiredWebChat:
         return not cls.volumes() and not cls.images() and not cls.networks()
 
     @classmethod
-    def describe(cls) -> List[str]:
-        """
-        Returns:
-            List[str]: What is left, for `ling-admin chat status` and before each question.
+    def describe(cls) -> list[str]:
+        """Returns:
+        List[str]: What is left, for `ling-admin chat status` and before each question.
         """
         lines = [f"Containers: {', '.join(cls.containers()) or 'none'}"]
         lines.append(f"Volumes (saved chats, accounts): {', '.join(cls.volumes()) or 'none'}")
@@ -255,7 +246,7 @@ class RetiredWebChat:
 
     @classmethod
     def remove(cls, yes: bool = False, delete_data: bool = False,
-               ask: Optional[Callable[[str], bool]] = None) -> int:
+               ask: Callable[[str], bool] | None = None) -> int:
         """`ling-admin chat remove`: step 1, then step 2, each asked unless its flag says so.
 
         Args:
@@ -326,7 +317,7 @@ class RetiredWebChat:
             pass
 
     @classmethod
-    def offer(cls, command: Optional[str]) -> None:
+    def offer(cls, command: str | None) -> None:
         """The one-time offer at an interactive `ling-admin` run on an install that still has Onyx.
 
         Args:

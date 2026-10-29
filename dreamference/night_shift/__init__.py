@@ -1,5 +1,4 @@
-"""
-Night Shift: coding tasks queued with `/night add` run overnight, each in its own git worktree, and
+"""Night Shift: coding tasks queued with `/night add` run overnight, each in its own git worktree, and
 leave a branch and a morning report (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md).
 """
 

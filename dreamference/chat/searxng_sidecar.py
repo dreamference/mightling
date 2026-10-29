@@ -1,5 +1,4 @@
-"""
-The SearXNG container behind `ling-search`, the MCP server's web search and image search:
+"""The SearXNG container behind `ling-search`, the MCP server's web search and image search:
 `ling-admin searxng start`.
 
 Until 2026-10-01 it was started by hand, from a `docker run` line in an error message, which put
@@ -11,7 +10,7 @@ and a container found on the default bridge is replaced.
 import os
 import subprocess
 from collections.abc import Callable
-from typing import Final, List
+from typing import Final
 
 from dreamference.chat.searxng_settings import OWN, UNWRITTEN, WRITTEN, SearxngSettings
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
@@ -29,18 +28,16 @@ class SearxngSidecar:
 
     @classmethod
     def config_dir(cls) -> str:
-        """
-        Returns:
-            str: `~/.config/searxng`, mounted as the container's `/etc/searxng`. Its
-            `settings.yml`, written by `SearxngSettings`, enables the JSON API and picks the
-            engines.
+        """Returns:
+        str: `~/.config/searxng`, mounted as the container's `/etc/searxng`. Its
+        `settings.yml`, written by `SearxngSettings`, enables the JSON API and picks the
+        engines.
         """
         return os.path.expanduser("~/.config/searxng")
 
     @classmethod
-    def run_command(cls) -> List[str]:
-        """
-        Builds the `docker run` command.
+    def run_command(cls) -> list[str]:
+        """Builds the `docker run` command.
 
         Returns:
             List[str]: The argv. The port is published on loopback only, unless this node is
@@ -103,9 +100,8 @@ class SearxngSidecar:
         return result.returncode == 0
 
     @classmethod
-    def extra_networks(cls) -> List[str]:
-        """
-        Lists the user-defined networks the existing container is attached to (the retired Onyx
+    def extra_networks(cls) -> list[str]:
+        """Lists the user-defined networks the existing container is attached to (the retired Onyx
         web chat's, on an older install), so a replacement can rejoin them.
 
         Returns:
@@ -122,10 +118,9 @@ class SearxngSidecar:
 
     @classmethod
     def published_address(cls) -> str:
-        """
-        Returns:
-            str: The host address the existing container publishes its port on (`127.0.0.1`,
-            `0.0.0.0`), or "" when there is no container or no published port.
+        """Returns:
+        str: The host address the existing container publishes its port on (`127.0.0.1`,
+        `0.0.0.0`), or "" when there is no container or no published port.
         """
         result = subprocess.run(
             ["docker", "inspect", SEARXNG_CONTAINER_NAME, "--format",
@@ -139,8 +134,7 @@ class SearxngSidecar:
 
     @classmethod
     def start(cls, say: Callable[[str], None] | None = None) -> bool:
-        """
-        Makes SearXNG run on the sidecar network, published where the node's settings say.
+        """Makes SearXNG run on the sidecar network, published where the node's settings say.
 
         The settings file is made this version's first (`SearxngSettings.ensure`, which leaves a
         file of the user's own alone). A container already created on a user-defined network and

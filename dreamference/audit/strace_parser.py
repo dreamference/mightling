@@ -1,5 +1,4 @@
-"""
-Reading an `strace` of a `ling` session (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3.1).
+"""Reading an `strace` of a `ling` session (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3.1).
 
 This module provides the StraceParser class. It reads the output of
 
@@ -24,7 +23,7 @@ the old reading, every connect a destination.
 import ipaddress
 import os
 import re
-from typing import Dict, Final, List, Optional, Tuple
+from typing import Final
 
 from dreamference.audit.egress_trace import EgressTrace
 
@@ -55,7 +54,7 @@ UDP_KINDS: Final[frozenset] = frozenset({"UDP", "UDPv6", "UDPLITE", "UDPLITEv6"}
 # `1234 <... execve resumed>) = 0`: the result of a call another process's line interrupted.
 RESUMED_EXECVE: Final[re.Pattern] = re.compile(r"^(?:\[pid\s+(\d+)\]\s+|(\d+)\s+)?<\.\.\. execve resumed>.*\)\s*=\s*(-?\d+)")
 
-SIMPLE_ESCAPES: Final[Dict[str, int]] = {
+SIMPLE_ESCAPES: Final[dict[str, int]] = {
     "n": 10, "t": 9, "r": 13, "v": 11, "f": 12, "a": 7, "b": 8, "e": 27, "\\": 92, '"': 34, "'": 39,
 }
 
@@ -65,8 +64,7 @@ class StraceParser:
 
     @classmethod
     def parse(cls, text: str) -> EgressTrace:
-        """
-        Parses a whole trace.
+        """Parses a whole trace.
 
         Args:
             text (str): The trace, one syscall per line.
@@ -76,11 +74,11 @@ class StraceParser:
         """
         trace = EgressTrace()
         # (pid, fd) of sockets connected to a resolver, whose later payloads are DNS queries.
-        resolver_sockets: Dict[Tuple[str, str], str] = {}
+        resolver_sockets: dict[tuple[str, str], str] = {}
         # Inode of a UDP socket that was only connected so far, to the destination it names.
-        udp_routes: Dict[str, str] = {}
+        udp_routes: dict[str, str] = {}
         # An execve whose result is on a later line (`<unfinished ...>`), by pid.
-        pending_execve: Dict[str, str] = {}
+        pending_execve: dict[str, str] = {}
         for line in text.splitlines():
             line = line.strip()
             resumed = RESUMED_EXECVE.match(line)
@@ -106,8 +104,8 @@ class StraceParser:
 
     @classmethod
     def _read_socket_call(cls, pid: str, syscall: str, rest: str, trace: EgressTrace,
-                          resolver_sockets: Dict[Tuple[str, str], str],
-                          udp_routes: Optional[Dict[str, str]] = None) -> None:
+                          resolver_sockets: dict[tuple[str, str], str],
+                          udp_routes: dict[str, str] | None = None) -> None:
         udp_routes = {} if udp_routes is None else udp_routes
         fd, kind, inner = cls.fd_label(rest.split(",", 1)[0].strip())
         udp = kind in UDP_KINDS
@@ -153,7 +151,7 @@ class StraceParser:
                     trace.dns_names[name] = trace.dns_names.get(name, 0) + 1
 
     @classmethod
-    def _udp_payload(cls, inner: str, trace: EgressTrace, udp_routes: Dict[str, str]) -> None:
+    def _udp_payload(cls, inner: str, trace: EgressTrace, udp_routes: dict[str, str]) -> None:
         """A payload sent on a UDP socket: its destination counts as reached, whatever the connect was."""
         target = udp_routes.get(inner)
         if target is None:
@@ -167,9 +165,8 @@ class StraceParser:
         trace.destinations[target] = trace.destinations.get(target, 0) + 1
 
     @classmethod
-    def fd_label(cls, text: str) -> Tuple[str, str, str]:
-        """
-        Splits a descriptor as strace printed it.
+    def fd_label(cls, text: str) -> tuple[str, str, str]:
+        """Splits a descriptor as strace printed it.
 
         Args:
             text (str): `23`, or with `-yy` `23<UDPv6:[10868489]>`.
@@ -203,9 +200,8 @@ class StraceParser:
                 trace.networked_git.append(" ".join([name] + argv[1:])[:300])
 
     @classmethod
-    def git_subcommand(cls, args: List[str]) -> Optional[str]:
-        """
-        Finds the subcommand of a git command line: the first word that is neither one of git's
+    def git_subcommand(cls, args: list[str]) -> str | None:
+        """Finds the subcommand of a git command line: the first word that is neither one of git's
         own options nor an option's value.
 
         Args:
@@ -225,9 +221,8 @@ class StraceParser:
         return None
 
     @classmethod
-    def destination_in(cls, text: str) -> Optional[Tuple[str, int]]:
-        """
-        Finds the IP destination named in a syscall's arguments.
+    def destination_in(cls, text: str) -> tuple[str, int] | None:
+        """Finds the IP destination named in a syscall's arguments.
 
         Args:
             text (str): The arguments as strace printed them.
@@ -246,8 +241,7 @@ class StraceParser:
 
     @classmethod
     def format_destination(cls, address: str, port: int) -> str:
-        """
-        Formats a destination as `ip:port`, with IPv6 in brackets.
+        """Formats a destination as `ip:port`, with IPv6 in brackets.
 
         Args:
             address (str): The IP address.
@@ -260,8 +254,7 @@ class StraceParser:
 
     @classmethod
     def is_loopback(cls, address: str) -> bool:
-        """
-        Tells whether an address never leaves the machine.
+        """Tells whether an address never leaves the machine.
 
         Args:
             address (str): An IPv4 or IPv6 address.
@@ -280,9 +273,8 @@ class StraceParser:
         return ip.is_loopback or ip.is_unspecified
 
     @classmethod
-    def strings_in(cls, text: str) -> List[bytes]:
-        """
-        Extracts every C string literal from a line of strace output, unescaped.
+    def strings_in(cls, text: str) -> list[bytes]:
+        """Extracts every C string literal from a line of strace output, unescaped.
 
         Args:
             text (str): Part of a trace line.
@@ -290,7 +282,7 @@ class StraceParser:
         Returns:
             List[bytes]: The strings' bytes, in order.
         """
-        strings: List[bytes] = []
+        strings: list[bytes] = []
         index = 0
         while index < len(text):
             if text[index] != '"':
@@ -305,8 +297,7 @@ class StraceParser:
 
     @classmethod
     def unescape(cls, literal: str) -> bytes:
-        """
-        Decodes strace's C-style escapes: `\\n`, octal `\\236` and `\\0`, hex `\\x1f`.
+        """Decodes strace's C-style escapes: `\\n`, octal `\\236` and `\\0`, hex `\\x1f`.
 
         Args:
             literal (str): The text between the quotes.
@@ -339,9 +330,8 @@ class StraceParser:
         return bytes(out)
 
     @classmethod
-    def dns_query_name(cls, payload: bytes) -> Optional[str]:
-        """
-        Reads the name a DNS query asks for.
+    def dns_query_name(cls, payload: bytes) -> str | None:
+        """Reads the name a DNS query asks for.
 
         Args:
             payload (bytes): A UDP payload (strace may have cut it at 256 bytes; the name comes
@@ -353,7 +343,7 @@ class StraceParser:
         # Header: id(2) flags(2) qdcount(2) ancount(2) nscount(2) arcount(2); QR is the top bit.
         if len(payload) < 14 or payload[2] & 0x80 or payload[4:6] != b"\x00\x01":
             return None
-        labels: List[str] = []
+        labels: list[str] = []
         index = 12
         while index < len(payload):
             length = payload[index]

@@ -1,5 +1,4 @@
-"""
-Refreshing a repository's code index before its night tasks start
+"""Refreshing a repository's code index before its night tasks start
 (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §6.3).
 
 A night task's `ling exec` starts `ling-code session`, which re-indexes while the task is
@@ -14,7 +13,7 @@ import os
 import signal
 import subprocess
 from pathlib import Path
-from typing import Dict, Final, List, Optional
+from typing import Final
 
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.runner.codex_branded_builder import INSTALL_DIR
@@ -29,9 +28,8 @@ class NightShiftIndex:
     """Runs `ling-code index` for the night run."""
 
     @classmethod
-    def executable(cls) -> Optional[str]:
-        """
-        Locates the installed `ling-code`, in Mightling's own install directory only.
+    def executable(cls) -> str | None:
+        """Locates the installed `ling-code`, in Mightling's own install directory only.
 
         Returns:
             Optional[str]: Absolute path to the binary, or None if it has not been built.
@@ -41,8 +39,7 @@ class NightShiftIndex:
 
     @classmethod
     def refresh(cls, binary: str, repo: Path, timeout_s: float) -> str:
-        """
-        Re-indexes one repository in the foreground and says what happened.
+        """Re-indexes one repository in the foreground and says what happened.
 
         Args:
             binary: The `ling-code` executable.
@@ -72,8 +69,7 @@ class NightShiftIndex:
 
     @classmethod
     def summarise(cls, output: str) -> str:
-        """
-        Condenses `ling-code index --wait` output: one `<unit>: <status>` line per run, and
+        """Condenses `ling-code index --wait` output: one `<unit>: <status>` line per run, and
         `skipped: <why>` lines.
 
         Args:
@@ -82,8 +78,8 @@ class NightShiftIndex:
         Returns:
             str: Counts by status, with the runs that did not finish named.
         """
-        counts: Dict[str, int] = {}
-        problems: List[str] = []
+        counts: dict[str, int] = {}
+        problems: list[str] = []
         for line in output.splitlines():
             if line.startswith("skipped:") or ": " not in line:
                 continue

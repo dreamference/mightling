@@ -1,5 +1,4 @@
-"""
-The `issue-v1` hooks, run inside an instance's container by Codex
+"""The `issue-v1` hooks, run inside an instance's container by Codex
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §20).
 
 `issue-v1` as a task rule only asks; this enforces two of its lines, once each per task:
@@ -29,7 +28,7 @@ import re
 import shlex
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 CONDITIONS_FILE = "conditions.json"
 STATE_FILE = "state.json"
@@ -66,8 +65,7 @@ class SweBenchIssueGate:
 
     @classmethod
     def text_of(cls, value: Any) -> str:
-        """
-        Args:
+        """Args:
             value: A hook payload's `tool_input` or `tool_response`, of any shape.
 
         Returns:
@@ -83,8 +81,7 @@ class SweBenchIssueGate:
 
     @classmethod
     def file_touched(cls, path: str, command: str, output: str) -> bool:
-        """
-        Whether a tool call touched a repository file: its command or output names the path
+        """Whether a tool call touched a repository file: its command or output names the path
         (`cat a/b.py`, `grep -n x a/b.py`, a `grep -rn` hit `./a/b.py:12:`), or its command names
         the file's directory and then its base name (`cd a && cat b.py`).
 
@@ -102,9 +99,8 @@ class SweBenchIssueGate:
         return bool(directory) and directory in command and re.search(r"(^|[\s/'\"])" + re.escape(name) + r"\b", command) is not None
 
     @classmethod
-    def reads(cls, targets: List[Dict[str, Any]], command: str, output: str) -> List[str]:
-        """
-        Which targets a tool call read. A file is read when the call touched it
+    def reads(cls, targets: list[dict[str, Any]], command: str, output: str) -> list[str]:
+        """Which targets a tool call read. A file is read when the call touched it
         (`file_touched`); a definition when the output shows `def <name>` or `class <name>`,
         or the call touched a file that defines it.
 
@@ -131,9 +127,8 @@ class SweBenchIssueGate:
     # -- edits ---------------------------------------------------------------------------------
 
     @classmethod
-    def repository_file(cls, path: str, cwd: str, root: str) -> Optional[str]:
-        """
-        Args:
+    def repository_file(cls, path: str, cwd: str, root: str) -> str | None:
+        """Args:
             path: A path as a command wrote it.
             cwd: The directory the command ran in.
             root: The repository.
@@ -183,9 +178,8 @@ class SweBenchIssueGate:
         return mask
 
     @classmethod
-    def segments(cls, command: str) -> List[str]:
-        """
-        Args:
+    def segments(cls, command: str) -> list[str]:
+        """Args:
             command: A shell command line.
 
         Returns:
@@ -218,16 +212,15 @@ class SweBenchIssueGate:
         return [piece for piece in pieces if piece.strip()]
 
     @classmethod
-    def words(cls, segment: str) -> List[str]:
+    def words(cls, segment: str) -> list[str]:
         try:
             return shlex.split(segment, comments=False, posix=True)
         except ValueError:
             return segment.split()
 
     @classmethod
-    def edit_of(cls, tool_name: str, command: str, cwd: str, root: str) -> Optional[Dict[str, Any]]:
-        """
-        Whether a tool call changes a file that exists in the repository: what the first-edit
+    def edit_of(cls, tool_name: str, command: str, cwd: str, root: str) -> dict[str, Any] | None:
+        """Whether a tool call changes a file that exists in the repository: what the first-edit
         hold and the "after the last edit" rule mean by an edit. Detected: `apply_patch` (the
         tool, or the command in a shell) updating or deleting a file; in a shell command,
         `sed -i`/`perl -i` on a file, `>`, `>>` or `tee` onto one, `git apply`, `git am` and
@@ -287,9 +280,8 @@ class SweBenchIssueGate:
         return re.sub(r"\s+", "", text)
 
     @classmethod
-    def code_matches(cls, code: str, example: Dict[str, Any]) -> bool:
-        """
-        Whether code the agent ran is the issue's Python example: one of the example's key
+    def code_matches(cls, code: str, example: dict[str, Any]) -> bool:
+        """Whether code the agent ran is the issue's Python example: one of the example's key
         lines appears in it (whitespace ignored), or it calls at least half of the example's
         distinctive functions.
 
@@ -310,9 +302,8 @@ class SweBenchIssueGate:
         return len(calls & made) >= max(1, (len(calls) + 1) // 2)
 
     @classmethod
-    def ran_code(cls, command: str, cwd: str) -> List[Optional[str]]:
-        """
-        The Python code a shell command runs: `-c` arguments, here-documents fed to Python, and
+    def ran_code(cls, command: str, cwd: str) -> list[str | None]:
+        """The Python code a shell command runs: `-c` arguments, here-documents fed to Python, and
         the scripts it runs with Python or pytest, read from disk (`None` for a script that
         cannot be read: what it holds is unknown).
 
@@ -323,7 +314,7 @@ class SweBenchIssueGate:
         Returns:
             List[Optional[str]]: One entry per piece of code; empty when it runs no Python.
         """
-        pieces: List[Optional[str]] = []
+        pieces: list[str | None] = []
         for match in HEREDOC.finditer(command):
             before = command[:match.start()].split("\n")[-1]
             if any(PYTHON.search(word) for word in cls.words(before.replace("<", " "))):
@@ -356,9 +347,8 @@ class SweBenchIssueGate:
         return pieces
 
     @classmethod
-    def runs_example(cls, command: str, cwd: str, examples: List[Dict[str, Any]]) -> bool:
-        """
-        Whether a shell command runs the issue's example. A Python example: some code the
+    def runs_example(cls, command: str, cwd: str, examples: list[dict[str, Any]]) -> bool:
+        """Whether a shell command runs the issue's example. A Python example: some code the
         command runs matches it (`code_matches`), or the command runs a script that cannot be
         read (unsure, so it counts). A shell example: the command runs the same program on the
         same file.
@@ -388,10 +378,9 @@ class SweBenchIssueGate:
     # -- the events ----------------------------------------------------------------------------
 
     @classmethod
-    def pre_tool_use(cls, state: Dict[str, Any], conditions: Dict[str, Any],
-                     payload: Dict[str, Any]) -> Optional[str]:
-        """
-        Before a tool call: records it, and decides whether it is the first edit to hold.
+    def pre_tool_use(cls, state: dict[str, Any], conditions: dict[str, Any],
+                     payload: dict[str, Any]) -> str | None:
+        """Before a tool call: records it, and decides whether it is the first edit to hold.
 
         Args:
             state: The task's state, changed in place.
@@ -440,9 +429,8 @@ class SweBenchIssueGate:
         return None
 
     @classmethod
-    def post_tool_use(cls, state: Dict[str, Any], conditions: Dict[str, Any], payload: Dict[str, Any]) -> None:
-        """
-        After a tool call: records the targets its command or output read.
+    def post_tool_use(cls, state: dict[str, Any], conditions: dict[str, Any], payload: dict[str, Any]) -> None:
+        """After a tool call: records the targets its command or output read.
 
         Args:
             state: The task's state, changed in place.
@@ -458,9 +446,8 @@ class SweBenchIssueGate:
             reads.setdefault(target, seq)
 
     @classmethod
-    def stop(cls, state: Dict[str, Any], conditions: Dict[str, Any], payload: Dict[str, Any]) -> Optional[str]:
-        """
-        When the agent stops: decides whether this is the stop to hold.
+    def stop(cls, state: dict[str, Any], conditions: dict[str, Any], payload: dict[str, Any]) -> str | None:
+        """When the agent stops: decides whether this is the stop to hold.
 
         Args:
             state: The task's state, changed in place.
@@ -492,9 +479,8 @@ class SweBenchIssueGate:
     # -- the process ---------------------------------------------------------------------------
 
     @classmethod
-    def handle(cls, event: str, directory: str, payload: Dict[str, Any]) -> Optional[str]:
-        """
-        One hook event, under the state's lock: loads the conditions and the state, decides,
+    def handle(cls, event: str, directory: str, payload: dict[str, Any]) -> str | None:
+        """One hook event, under the state's lock: loads the conditions and the state, decides,
         and writes the state back.
 
         Args:
@@ -542,9 +528,8 @@ class SweBenchIssueGate:
             return reason
 
     @classmethod
-    def main(cls, argv: List[str]) -> int:
-        """
-        Args:
+    def main(cls, argv: list[str]) -> int:
+        """Args:
             argv: `[event, directory]`.
 
         Returns:

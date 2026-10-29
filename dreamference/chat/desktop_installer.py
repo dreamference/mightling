@@ -1,5 +1,4 @@
-"""
-Toolchain Verification for the Mightling Desktop App.
+"""Toolchain Verification for the Mightling Desktop App.
 
 This module provides the DesktopInstaller class, which reports whether this machine can build the
 Electron app in `desktop/electron` (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md) and installs
@@ -27,7 +26,7 @@ needs Rust.
 import os
 import shutil
 import subprocess
-from typing import Final, List, Optional, Tuple
+from typing import Final
 
 # Where rustup puts the toolchain, and the installer that puts it there (used by the Codex build).
 CARGO_BIN: Final[str] = os.path.expanduser("~/.cargo/bin")
@@ -35,7 +34,7 @@ RUSTUP_URL: Final[str] = "https://sh.rustup.rs"
 
 # The oldest Node the build accepts: Electron Forge 8 declares `node >= 22.13.0` (its packages are
 # ESM); the release workflows build with the newest 22.
-MIN_NODE_VERSION: Final[Tuple[int, int]] = (22, 13)
+MIN_NODE_VERSION: Final[tuple[int, int]] = (22, 13)
 
 # Where a checkout's AppArmor profile goes, and its name.
 APPARMOR_PROFILE_PATH: Final[str] = "/etc/apparmor.d/mightling-desktop-dev"
@@ -48,14 +47,12 @@ USERNS_SYSCTL: Final[str] = "/proc/sys/kernel/apparmor_restrict_unprivileged_use
 
 
 class DesktopInstaller:
-    """
-    Verifies and provisions what the Mightling desktop app is built and run with.
+    """Verifies and provisions what the Mightling desktop app is built and run with.
     """
 
     @classmethod
-    def missing_prerequisites(cls, build: bool = False) -> List[str]:
-        """
-        Lists the prerequisites that are absent, in the order they should be installed.
+    def missing_prerequisites(cls, build: bool = False) -> list[str]:
+        """Lists the prerequisites that are absent, in the order they should be installed.
 
         Args:
             build (bool): Whether the `.deb` is to be made, which Forge's maker does with `dpkg`
@@ -66,7 +63,7 @@ class DesktopInstaller:
             List[str]: Short identifiers -- `"node"`, `"npm"`, `"dpkg"` -- for whatever is
                 missing. An empty list means the app can be built.
         """
-        missing: List[str] = []
+        missing: list[str] = []
         version = cls.node_version()
         if version is None or version < MIN_NODE_VERSION:
             missing.append("node")
@@ -77,9 +74,8 @@ class DesktopInstaller:
         return missing
 
     @classmethod
-    def node_version(cls) -> Optional[Tuple[int, int]]:
-        """
-        The major and minor version of the `node` on PATH.
+    def node_version(cls) -> tuple[int, int] | None:
+        """The major and minor version of the `node` on PATH.
 
         Returns:
             Optional[Tuple[int, int]]: The version, or None when there is no node or its answer
@@ -102,8 +98,7 @@ class DesktopInstaller:
 
     @classmethod
     def has_rust(cls) -> bool:
-        """
-        Reports whether a Rust toolchain is on PATH or in the standard rustup location.
+        """Reports whether a Rust toolchain is on PATH or in the standard rustup location.
 
         Returns:
             bool: True if `cargo` can be found.
@@ -111,9 +106,8 @@ class DesktopInstaller:
         return cls.cargo_path() is not None
 
     @classmethod
-    def cargo_path(cls) -> Optional[str]:
-        """
-        Locates the `cargo` binary.
+    def cargo_path(cls) -> str | None:
+        """Locates the `cargo` binary.
 
         Checks `~/.cargo/bin` as well as PATH, because a rustup installed in this same session is
         on disk but not yet on the PATH of the shell that installed it.
@@ -128,8 +122,7 @@ class DesktopInstaller:
 
     @classmethod
     def install_rust(cls) -> bool:
-        """
-        Installs a Rust toolchain with rustup, unattended.
+        """Installs a Rust toolchain with rustup, unattended.
 
         Returns:
             bool: True if cargo is present afterwards.
@@ -158,8 +151,7 @@ class DesktopInstaller:
 
     @classmethod
     def userns_allowed(cls) -> bool:
-        """
-        Reports whether a program started from this shell may create a user namespace, which is
+        """Reports whether a program started from this shell may create a user namespace, which is
         what Chromium's sandbox does first. Under a terminal with a permissive AppArmor profile
         (PyCharm's) it may; from a plain terminal or the launcher it may not, until a profile
         names the binary.
@@ -179,8 +171,7 @@ class DesktopInstaller:
 
     @classmethod
     def userns_restricted(cls) -> bool:
-        """
-        Whether this kernel refuses a user namespace to programs without an AppArmor profile.
+        """Whether this kernel refuses a user namespace to programs without an AppArmor profile.
 
         Returns:
             bool: True if `kernel.apparmor_restrict_unprivileged_userns` is 1.
@@ -192,9 +183,8 @@ class DesktopInstaller:
             return False
 
     @classmethod
-    def covering_profile(cls, binary: str) -> Optional[str]:
-        """
-        Finds a profile file that attaches to the binary: the `.deb`'s (`mightling`), a checkout's
+    def covering_profile(cls, binary: str) -> str | None:
+        """Finds a profile file that attaches to the binary: the `.deb`'s (`mightling`), a checkout's
         (`mightling-desktop-dev`) or an unpacked build's (`mightling-unpacked`). A profile
         attaches by the quoted absolute path, which is how all three name it; the files are
         world-readable, so no root is needed to look.
@@ -224,9 +214,8 @@ class DesktopInstaller:
         return None
 
     @classmethod
-    def uncovered(cls, binaries: List[str]) -> List[str]:
-        """
-        The binaries that would be refused their sandbox when started from the launcher or a
+    def uncovered(cls, binaries: list[str]) -> list[str]:
+        """The binaries that would be refused their sandbox when started from the launcher or a
         plain terminal: none where the kernel does not restrict user namespaces, else those no
         profile names.
 
@@ -241,9 +230,8 @@ class DesktopInstaller:
         return [binary for binary in binaries if cls.covering_profile(binary) is None]
 
     @classmethod
-    def apparmor_profile(cls, binaries: List[str]) -> str:
-        """
-        The AppArmor profile text that grants `userns` to the given binaries: the shape of the
+    def apparmor_profile(cls, binaries: list[str]) -> str:
+        """The AppArmor profile text that grants `userns` to the given binaries: the shape of the
         `.deb`'s profile (desktop/electron/linux/postinst) and of Ubuntu's own sandbox profiles.
 
         Args:
@@ -266,9 +254,8 @@ class DesktopInstaller:
         return "\n".join(lines)
 
     @classmethod
-    def install_apparmor_profile(cls, binaries: List[str]) -> bool:
-        """
-        Writes and loads the profile with sudo, printing the command first.
+    def install_apparmor_profile(cls, binaries: list[str]) -> bool:
+        """Writes and loads the profile with sudo, printing the command first.
 
         A binary need not exist yet: a profile attaches by path when the program is started, so
         the packaged app's path is covered before the first `desktop run` writes it.
@@ -303,9 +290,8 @@ class DesktopInstaller:
         return loaded.returncode == 0
 
     @classmethod
-    def report(cls, build: bool = False) -> Tuple[bool, List[str]]:
-        """
-        Prints what is missing and how to get it.
+    def report(cls, build: bool = False) -> tuple[bool, list[str]]:
+        """Prints what is missing and how to get it.
 
         Args:
             build (bool): Whether the `.deb` is to be made (see `missing_prerequisites`).

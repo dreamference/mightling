@@ -1,5 +1,4 @@
-"""
-The private Matrix homeserver behind `ling chat`'s Matrix adapter: `ling-admin matrix …`
+"""The private Matrix homeserver behind `ling chat`'s Matrix adapter: `ling-admin matrix …`
 (specs/DREAMFERENCE_MIGHTLING_CHAT.md §5).
 
 tuwunel runs as the container `dreamference-matrix` on an **internal** Docker network, so it has no
@@ -24,7 +23,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Final, List, Optional, Tuple
+from typing import Any, Final
 
 MATRIX_CONTAINER: Final[str] = "dreamference-matrix"
 # tuwunel 1.9.3 (2026-09-25), the multi-architecture index, pinned by digest.
@@ -61,17 +60,18 @@ class MatrixHomeserver:
     # -- seams the tests replace --------------------------------------------------------------
 
     @classmethod
-    def _run(cls, argv: List[str], timeout: int = 120) -> subprocess.CompletedProcess:
+    def _run(cls, argv: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
         """Runs a command, capturing its output. A missing program (Tailscale removed since `start`,
-        say) is a failed step, not an exception, so `stop` and `remove` still do the rest."""
+        say) is a failed step, not an exception, so `stop` and `remove` still do the rest.
+        """
         try:
             return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
         except FileNotFoundError as error:
             return subprocess.CompletedProcess(argv, 127, "", str(error))
 
     @classmethod
-    def _http(cls, method: str, url: str, body: Optional[Dict[str, Any]] = None,
-              token: Optional[str] = None) -> Tuple[int, Dict[str, Any]]:
+    def _http(cls, method: str, url: str, body: dict[str, Any] | None = None,
+              token: str | None = None) -> tuple[int, dict[str, Any]]:
         """One JSON request to the homeserver through the loopback proxy."""
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(url, data=data, method=method)
@@ -102,7 +102,7 @@ class MatrixHomeserver:
         return os.path.join(cls.chat_dir(), name)
 
     @classmethod
-    def _load(cls, name: str) -> Dict[str, Any]:
+    def _load(cls, name: str) -> dict[str, Any]:
         try:
             with open(cls._path(name), encoding="utf-8") as handle:
                 value = json.load(handle)
@@ -111,7 +111,7 @@ class MatrixHomeserver:
             return {}
 
     @classmethod
-    def _save(cls, name: str, value: Dict[str, Any]) -> None:
+    def _save(cls, name: str, value: dict[str, Any]) -> None:
         """Writes a file readable only by the user, replacing it whole."""
         directory = cls.chat_dir()
         os.makedirs(directory, exist_ok=True)
@@ -125,11 +125,10 @@ class MatrixHomeserver:
     # -- Tailscale ------------------------------------------------------------------------------
 
     @classmethod
-    def tailscale_name(cls) -> Optional[str]:
-        """
-        Returns:
-            Optional[str]: This machine's tailnet name (`node.tail1234.ts.net`) when Tailscale is
-            running and signed in, else None.
+    def tailscale_name(cls) -> str | None:
+        """Returns:
+        Optional[str]: This machine's tailnet name (`node.tail1234.ts.net`) when Tailscale is
+        running and signed in, else None.
         """
         try:
             result = cls._run(["tailscale", "status", "--json"], timeout=30)
@@ -149,9 +148,8 @@ class MatrixHomeserver:
     # -- Docker ---------------------------------------------------------------------------------
 
     @classmethod
-    def run_command(cls, server_name: str, token: str, push: bool) -> List[str]:
-        """
-        Builds the `docker run` command.
+    def run_command(cls, server_name: str, token: str, push: bool) -> list[str]:
+        """Builds the `docker run` command.
 
         Args:
             server_name: The permanent server name.
@@ -202,7 +200,7 @@ class MatrixHomeserver:
         return result.returncode == 0 and result.stdout.strip() == "true"
 
     @classmethod
-    def container_address(cls) -> Optional[str]:
+    def container_address(cls) -> str | None:
         """The container's address on whichever network it is on."""
         result = cls._run(["docker", "inspect", "-f",
                            "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", MATRIX_CONTAINER], timeout=30)
@@ -218,9 +216,8 @@ class MatrixHomeserver:
         return os.path.expanduser("~/.config/systemd/user")
 
     @classmethod
-    def proxy_units(cls, target: str) -> Dict[str, str]:
-        """
-        Args:
+    def proxy_units(cls, target: str) -> dict[str, str]:
+        """Args:
             target: `address:port` of the container.
 
         Returns:
@@ -266,15 +263,14 @@ class MatrixHomeserver:
         return False
 
     @classmethod
-    def register(cls, localpart: str, password: str, token: str) -> Optional[Dict[str, Any]]:
-        """
-        Creates an account through the registration-token flow.
+    def register(cls, localpart: str, password: str, token: str) -> dict[str, Any] | None:
+        """Creates an account through the registration-token flow.
 
         Returns:
             Optional[Dict[str, Any]]: The server's answer (`user_id`, `access_token`), or None.
         """
         url = f"{PROXY_URL}/_matrix/client/v3/register"
-        body: Dict[str, Any] = {"username": localpart, "password": password, "inhibit_login": False,
+        body: dict[str, Any] = {"username": localpart, "password": password, "inhibit_login": False,
                                 "initial_device_display_name": "ling-admin"}
         status, answer = cls._http("POST", url, body)
         for _ in range(3):
@@ -284,7 +280,7 @@ class MatrixHomeserver:
                 return None
             completed = answer.get("completed") or []
             stage = "m.login.registration_token" if "m.login.registration_token" not in completed else "m.login.dummy"
-            auth: Dict[str, Any] = {"type": stage, "session": answer["session"]}
+            auth: dict[str, Any] = {"type": stage, "session": answer["session"]}
             if stage == "m.login.registration_token":
                 auth["token"] = token
             status, answer = cls._http("POST", url, {**body, "auth": auth})
@@ -301,8 +297,7 @@ class MatrixHomeserver:
 
     @classmethod
     def start(cls) -> int:
-        """
-        Starts (or creates) the homeserver, the proxy, the bot account and `tailscale serve`.
+        """Starts (or creates) the homeserver, the proxy, the bot account and `tailscale serve`.
 
         Returns:
             int: The exit code.
@@ -400,8 +395,7 @@ class MatrixHomeserver:
 
     @classmethod
     def stop(cls) -> int:
-        """
-        Turns the homeserver off until the next `start`: `tailscale serve` no longer offers it, the
+        """Turns the homeserver off until the next `start`: `tailscale serve` no longer offers it, the
         proxy socket is disabled (so a reboot does not listen again) and the container is stopped
         (`unless-stopped` keeps it stopped). The accounts and messages stay in the volume.
         """

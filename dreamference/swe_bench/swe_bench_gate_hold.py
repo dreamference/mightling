@@ -1,5 +1,4 @@
-"""
-A SWE-bench run's hold on the model gate (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18).
+"""A SWE-bench run's hold on the model gate (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18).
 
 While a run holds it, the gate in front of the model server refuses every request that does not
 come from the run's internal network. The hold writes the run's record for the gate (the
@@ -18,7 +17,7 @@ import secrets
 import statistics
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.vllm_server.model_gate import ModelGate
@@ -33,32 +32,31 @@ class SweBenchGateHold:
     # Seam the tests replace.
     gate = ModelGate
 
-    def __init__(self, store: SweBenchRunStore, vllm_host: str, subnet: Optional[str],
-                 label: Optional[str] = None) -> None:
-        """
-        Args:
-            store: The run.
-            vllm_host: This machine's model server, where the gate answers.
-            subnet: The run's internal network; None leaves the gate open (nothing could tell
-                the run's requests from the others).
-            label: What the refusal calls the run (e.g. `night 1`); defaults to its name.
+    def __init__(self, store: SweBenchRunStore, vllm_host: str, subnet: str | None,
+                 label: str | None = None) -> None:
+        """Args:
+        store: The run.
+        vllm_host: This machine's model server, where the gate answers.
+        subnet: The run's internal network; None leaves the gate open (nothing could tell
+            the run's requests from the others).
+        label: What the refusal calls the run (e.g. `night 1`); defaults to its name.
         """
         self.store = store
         self.vllm_host = vllm_host
         self.subnet = subnet
         self.label = label
         self.id = secrets.token_hex(8)
-        self.total: Optional[int] = None
-        self.instances: List[str] = []
+        self.total: int | None = None
+        self.instances: list[str] = []
         self.parallel = 1
         self.started = time.time()
         self.enforced = False
         self.ever_enforced = False
-        self.live: Optional[Dict[str, Any]] = None
-        self._pauses: Dict[float, float] = {}
-        self._earlier: Dict[str, Any] = {"sessions": [], "pauses": []}
+        self.live: dict[str, Any] | None = None
+        self._pauses: dict[float, float] = {}
+        self._earlier: dict[str, Any] = {"sessions": [], "pauses": []}
         self._stop = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
     # -- the `with` block ----------------------------------------------------------------------
@@ -89,9 +87,8 @@ class SweBenchGateHold:
 
     # -- what the run tells the gate -----------------------------------------------------------
 
-    def update(self, instances: List[str], parallel: int) -> None:
-        """
-        Gives the hold the run's instances and parallelism, once the manifest is known.
+    def update(self, instances: list[str], parallel: int) -> None:
+        """Gives the hold the run's instances and parallelism, once the manifest is known.
 
         Args:
             instances: The instances the run covers (excluded ones left out).
@@ -102,11 +99,10 @@ class SweBenchGateHold:
         self.parallel = max(1, int(parallel))
         self.tick()
 
-    def progress(self) -> Dict[str, Any]:
-        """
-        Returns:
-            Dict[str, Any]: `done`, `total` and `eta_s` (None until an instance has finished):
-            the instances left times the median instance's time, over the parallelism.
+    def progress(self) -> dict[str, Any]:
+        """Returns:
+        Dict[str, Any]: `done`, `total` and `eta_s` (None until an instance has finished):
+        the instances left times the median instance's time, over the parallelism.
         """
         if self.total is None:
             return {"done": None, "total": None, "eta_s": None}
@@ -139,27 +135,24 @@ class SweBenchGateHold:
             self._persist(now)
 
     def priority(self) -> bool:
-        """
-        Returns:
-            bool: Whether the gate is refusing everyone but this run right now (in force and not
-            paused): the run then neither waits for open sessions nor for other requests.
+        """Returns:
+        bool: Whether the gate is refusing everyone but this run right now (in force and not
+        paused): the run then neither waits for open sessions nor for other requests.
         """
         live = self.live or {}
         return self.enforced and live.get("state") == "closed"
 
     def paused(self) -> bool:
-        """
-        Returns:
-            bool: Whether a pause is letting other requests through right now.
+        """Returns:
+        bool: Whether a pause is letting other requests through right now.
         """
         return self.enforced and (self.live or {}).get("state") == "paused"
 
     # -- the run's record of it ----------------------------------------------------------------
 
     @classmethod
-    def read(cls, store: SweBenchRunStore) -> Dict[str, Any]:
-        """
-        Args:
+    def read(cls, store: SweBenchRunStore) -> dict[str, Any]:
+        """Args:
             store: A run.
 
         Returns:

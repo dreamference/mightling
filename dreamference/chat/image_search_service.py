@@ -1,5 +1,4 @@
-"""
-Mightling Image Search Service.
+"""Mightling Image Search Service.
 
 Implements ``specs/DREAMFERENCE_IMAGE_SEARCH.md``: a standalone sidecar (the
 ``dreamference-image-search`` container) that lets the assistant search the web for images and
@@ -41,7 +40,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, Final, List, Optional, Tuple
+from typing import Any, Final
 
 try:  # Pillow is the one third-party need; every use degrades without it.
     from PIL import Image
@@ -84,7 +83,7 @@ SECRET_ENV: Final[str] = "MIGHTLING_IMAGE_SECRET"
 
 # Magic bytes accepted from the network. Sniffing the payload rather than trusting Content-Type
 # is what keeps an attacker-controlled URL from handing the pipeline an HTML page or worse.
-_MAGIC: Final[Tuple[Tuple[bytes, str], ...]] = (
+_MAGIC: Final[tuple[tuple[bytes, str], ...]] = (
     (b"\xff\xd8\xff", "image/jpeg"),
     (b"\x89PNG\r\n\x1a\n", "image/png"),
     (b"GIF87a", "image/gif"),
@@ -96,9 +95,8 @@ class FetchRejected(Exception):
     """A download refused by the hardened fetcher, with the reason in the message."""
 
 
-def sniff_image_type(payload: bytes) -> Optional[str]:
-    """
-    Identifies an image payload by its magic bytes.
+def sniff_image_type(payload: bytes) -> str | None:
+    """Identifies an image payload by its magic bytes.
 
     Args:
         payload (bytes): The first bytes of a downloaded body.
@@ -115,8 +113,7 @@ def sniff_image_type(payload: bytes) -> Optional[str]:
 
 
 class HardenedFetcher:
-    """
-    Downloads a URL from the open internet without letting it probe the Docker network.
+    """Downloads a URL from the open internet without letting it probe the Docker network.
 
     The defenses are the spec's list: DNS resolution up front with every address checked
     against the private ranges (pinning -- the checked address is the one connected to, so a
@@ -131,8 +128,7 @@ class HardenedFetcher:
         allow_hosts: frozenset = frozenset(),
         resolver: Any = socket.getaddrinfo,
     ) -> str:
-        """
-        Resolves a hostname and rejects it unless every address is publicly routable.
+        """Resolves a hostname and rejects it unless every address is publicly routable.
 
         Args:
             host (str): Hostname or address literal from the URL.
@@ -179,8 +175,7 @@ class HardenedFetcher:
         resolver: Any = socket.getaddrinfo,
         opener: Any = None,
     ) -> bytes:
-        """
-        Downloads a URL under the full set of guards.
+        """Downloads a URL under the full set of guards.
 
         Args:
             url (str): The http(s) URL to fetch.
@@ -224,8 +219,7 @@ class HardenedFetcher:
 
     @classmethod
     def _open(cls, url: str, pinned_ip: str, timeout: float):
-        """
-        Opens a connection to the pinned address while presenting the original hostname.
+        """Opens a connection to the pinned address while presenting the original hostname.
 
         Args:
             url (str): The URL being fetched.
@@ -259,8 +253,7 @@ class HardenedFetcher:
 
     @classmethod
     def _read_capped(cls, response: Any, max_bytes: int) -> bytes:
-        """
-        Streams a response body up to a hard size cap.
+        """Streams a response body up to a hard size cap.
 
         Args:
             response (Any): An object with a file-like ``read``.
@@ -286,8 +279,7 @@ class HardenedFetcher:
 
 
 def phash64(image: Any) -> int:
-    """
-    Computes a 64-bit perceptual hash of an image.
+    """Computes a 64-bit perceptual hash of an image.
 
     The classic pHash recipe: 32x32 grayscale, 2D DCT-II, the top-left 8x8 of coefficients
     minus the DC term, thresholded at their median. Implemented directly so the container
@@ -321,8 +313,7 @@ def phash64(image: Any) -> int:
 
 
 def hamming(a: int, b: int) -> int:
-    """
-    Counts differing bits between two 64-bit hashes.
+    """Counts differing bits between two 64-bit hashes.
 
     Args:
         a (int): First hash.
@@ -335,8 +326,7 @@ def hamming(a: int, b: int) -> int:
 
 
 class ImageStore:
-    """
-    The sidecar's persistence: image files on disk, dedupe metadata in SQLite.
+    """The sidecar's persistence: image files on disk, dedupe metadata in SQLite.
 
     The database lives beside the images so the whole store is one directory, which is what
     lets the runner mount a single user-owned path instead of a root-owned named volume --
@@ -344,8 +334,7 @@ class ImageStore:
     """
 
     def __init__(self, data_dir: str):
-        """
-        Opens (creating if needed) the store under a directory.
+        """Opens (creating if needed) the store under a directory.
 
         Args:
             data_dir (str): Directory for ``images/`` and ``db.sqlite``.
@@ -363,8 +352,7 @@ class ImageStore:
         self._db.commit()
 
     def path(self, file_id: str) -> str:
-        """
-        Maps a file id to its on-disk path.
+        """Maps a file id to its on-disk path.
 
         Args:
             file_id (str): The stored image's identifier.
@@ -374,9 +362,8 @@ class ImageStore:
         """
         return os.path.join(self.images_dir, f"{file_id}.jpg")
 
-    def lookup_source(self, source_url: str) -> Optional[Dict[str, Any]]:
-        """
-        Finds a previously cached image by its source URL.
+    def lookup_source(self, source_url: str) -> dict[str, Any] | None:
+        """Finds a previously cached image by its source URL.
 
         Args:
             source_url (str): The original image URL.
@@ -398,9 +385,8 @@ class ImageStore:
             return None
         return {"file_id": row[0], "phash": row[1], "title": row[2]}
 
-    def lookup_id(self, file_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Finds a cached image's metadata by its file id.
+    def lookup_id(self, file_id: str) -> dict[str, Any] | None:
+        """Finds a cached image's metadata by its file id.
 
         Args:
             file_id (str): The stored image's identifier.
@@ -415,9 +401,8 @@ class ImageStore:
         return {"source_url": row[0], "title": row[1]} if row else None
 
     def persist(self, source_url: str, payload: bytes, title: str,
-                phash: Optional[int]) -> str:
-        """
-        Writes an image to disk and records its metadata.
+                phash: int | None) -> str:
+        """Writes an image to disk and records its metadata.
 
         Args:
             source_url (str): Where the bytes came from.
@@ -449,11 +434,10 @@ class ImageStore:
             self._db.commit()
         return file_id
 
-    def collect_garbage(self, now: Optional[float] = None,
+    def collect_garbage(self, now: float | None = None,
                         max_age: int = GC_MAX_AGE_SECONDS,
                         max_bytes: int = GC_MAX_VOLUME_BYTES) -> int:
-        """
-        Deletes expired images, then trims oldest-first to the volume cap.
+        """Deletes expired images, then trims oldest-first to the volume cap.
 
         Args:
             now (Optional[float]): The clock, injectable for tests.
@@ -493,8 +477,7 @@ class ImageStore:
         return removed
 
     def _delete(self, file_id: str) -> None:
-        """
-        Removes one image and its row.
+        """Removes one image and its row.
 
         Args:
             file_id (str): The stored image's identifier.
@@ -512,16 +495,14 @@ class SearxngClient:
     """Queries SearXNG on the sidecar network for image results."""
 
     def __init__(self, base_url: str):
-        """
-        Args:
-            base_url (str): SearXNG base URL, e.g. ``http://dreamference-searxng:8080``.
+        """Args:
+        base_url (str): SearXNG base URL, e.g. ``http://dreamference-searxng:8080``.
         """
         self.base_url = base_url.rstrip("/")
         self.host = urllib.parse.urlparse(self.base_url).hostname or ""
 
-    def search_images(self, query: str) -> List[Dict[str, str]]:
-        """
-        Runs one image-category search.
+    def search_images(self, query: str) -> list[dict[str, str]]:
+        """Runs one image-category search.
 
         Args:
             query (str): The search text.
@@ -554,17 +535,15 @@ class SiglipClient:
     """Scores thumbnails against the query through the Infinity embeddings sidecar."""
 
     def __init__(self, base_url: str, model: str = ""):
-        """
-        Args:
-            base_url (str): The Infinity server, e.g. ``http://dreamference-siglip:9100``.
-            model (str): Model id to name in requests; Infinity defaults to its only model.
+        """Args:
+        base_url (str): The Infinity server, e.g. ``http://dreamference-siglip:9100``.
+        model (str): Model id to name in requests; Infinity defaults to its only model.
         """
         self.base_url = base_url.rstrip("/")
         self.model = model
 
-    def _embed(self, inputs: List[str], modality: str) -> List[List[float]]:
-        """
-        Posts one embeddings request.
+    def _embed(self, inputs: list[str], modality: str) -> list[list[float]]:
+        """Posts one embeddings request.
 
         Args:
             inputs (List[str]): Texts, or data-URI images.
@@ -573,7 +552,7 @@ class SiglipClient:
         Returns:
             List[List[float]]: One vector per input, in order.
         """
-        payload: Dict[str, Any] = {"input": inputs, "modality": modality}
+        payload: dict[str, Any] = {"input": inputs, "modality": modality}
         if self.model:
             payload["model"] = self.model
         request = urllib.request.Request(
@@ -586,9 +565,8 @@ class SiglipClient:
         rows = sorted(data.get("data", []), key=lambda r: r.get("index", 0))
         return [row["embedding"] for row in rows]
 
-    def score(self, query: str, thumbnails: List[bytes]) -> List[float]:
-        """
-        Cosine-scores thumbnails against a query.
+    def score(self, query: str, thumbnails: list[bytes]) -> list[float]:
+        """Cosine-scores thumbnails against a query.
 
         Args:
             query (str): The search text.
@@ -603,7 +581,7 @@ class SiglipClient:
         ]
         image_vecs = self._embed(uris, "image")
 
-        def cosine(a: List[float], b: List[float]) -> float:
+        def cosine(a: list[float], b: list[float]) -> float:
             dot = sum(x * y for x, y in zip(a, b))
             norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
             return dot / norm if norm else 0.0
@@ -615,17 +593,15 @@ class VisionRanker:
     """Re-ranks the shortlist with the served multimodal model."""
 
     def __init__(self, base_url: str, model: str):
-        """
-        Args:
-            base_url (str): OpenAI-compatible base URL including ``/v1``.
-            model (str): Served model id.
+        """Args:
+        base_url (str): OpenAI-compatible base URL including ``/v1``.
+        model (str): Served model id.
         """
         self.base_url = base_url.rstrip("/")
         self.model = model
 
-    def rank(self, query: str, thumbnails: List[bytes]) -> List[int]:
-        """
-        Asks the model to order thumbnails by relevance.
+    def rank(self, query: str, thumbnails: list[bytes]) -> list[int]:
+        """Asks the model to order thumbnails by relevance.
 
         Args:
             query (str): The search text.
@@ -636,7 +612,7 @@ class VisionRanker:
                 if the model's answer is not the strict JSON asked for -- ranking is an
                 improvement, never a gate.
         """
-        content: List[Dict[str, Any]] = [{
+        content: list[dict[str, Any]] = [{
             "type": "text",
             "text": (
                 f"You are filtering image search results for the query {query!r}. "
@@ -682,8 +658,7 @@ class VisionRanker:
 
 
 class ImageSearchService:
-    """
-    The funnel, wired from collaborators so every stage is testable offline.
+    """The funnel, wired from collaborators so every stage is testable offline.
 
     Each stage degrades rather than gates: no SigLIP means the first eight candidates go to
     ranking, no vision model means SigLIP's order stands, and a candidate whose thumbnail or
@@ -691,15 +666,14 @@ class ImageSearchService:
     """
 
     def __init__(self, store: ImageStore, searxng: SearxngClient,
-                 siglip: Optional[SiglipClient], ranker: Optional[VisionRanker],
+                 siglip: SiglipClient | None, ranker: VisionRanker | None,
                  fetcher: Any = HardenedFetcher):
-        """
-        Args:
-            store (ImageStore): Persistence for winners.
-            searxng (SearxngClient): Candidate source.
-            siglip (Optional[SiglipClient]): Pre-filter; skipped when None or failing.
-            ranker (Optional[VisionRanker]): Vision re-rank; skipped when None or failing.
-            fetcher (Any): The hardened downloader; injectable for tests.
+        """Args:
+        store (ImageStore): Persistence for winners.
+        searxng (SearxngClient): Candidate source.
+        siglip (Optional[SiglipClient]): Pre-filter; skipped when None or failing.
+        ranker (Optional[VisionRanker]): Vision re-rank; skipped when None or failing.
+        fetcher (Any): The hardened downloader; injectable for tests.
         """
         self.store = store
         self.searxng = searxng
@@ -708,9 +682,8 @@ class ImageSearchService:
         self.fetcher = fetcher
         self._pool = ThreadPoolExecutor(max_workers=8)
 
-    def search(self, queries: List[str], count: int = RESULT_COUNT) -> Dict[str, str]:
-        """
-        Runs the full funnel for a set of queries.
+    def search(self, queries: list[str], count: int = RESULT_COUNT) -> dict[str, str]:
+        """Runs the full funnel for a set of queries.
 
         Args:
             queries (List[str]): One or more search texts; results are merged round-robin.
@@ -760,9 +733,8 @@ class ImageSearchService:
             ),
         }
 
-    def _gather(self, queries: List[str]) -> List[Dict[str, str]]:
-        """
-        Merges per-query result lists round-robin and dedupes by image URL.
+    def _gather(self, queries: list[str]) -> list[dict[str, str]]:
+        """Merges per-query result lists round-robin and dedupes by image URL.
 
         Args:
             queries (List[str]): The search texts.
@@ -788,10 +760,9 @@ class ImageSearchService:
                     return merged
         return merged
 
-    def _run_funnel(self, query: str, candidates: List[Dict[str, str]],
-                    need: int) -> List[Dict[str, str]]:
-        """
-        Thumbnails, SigLIP, pHash collapse, speculative prefetch, vision rank, persist.
+    def _run_funnel(self, query: str, candidates: list[dict[str, str]],
+                    need: int) -> list[dict[str, str]]:
+        """Thumbnails, SigLIP, pHash collapse, speculative prefetch, vision rank, persist.
 
         Args:
             query (str): Combined query text for scoring and ranking.
@@ -829,7 +800,7 @@ class ImageSearchService:
             except Exception:
                 pass
 
-        winners: List[Dict[str, str]] = []
+        winners: list[dict[str, str]] = []
         chosen = set()
         for index in order:
             if len(winners) >= need:
@@ -855,10 +826,9 @@ class ImageSearchService:
                 future.cancel()
         return winners
 
-    def _fetch_thumbnails(self, candidates: List[Dict[str, str]]
-                          ) -> List[Tuple[Dict[str, str], bytes]]:
-        """
-        Fetches candidate thumbnails in parallel, dropping the unfetchable.
+    def _fetch_thumbnails(self, candidates: list[dict[str, str]]
+                          ) -> list[tuple[dict[str, str], bytes]]:
+        """Fetches candidate thumbnails in parallel, dropping the unfetchable.
 
         Args:
             candidates (List[Dict[str, str]]): The candidate pool.
@@ -868,7 +838,7 @@ class ImageSearchService:
         """
         allow = frozenset({self.searxng.host}) if self.searxng.host else frozenset()
 
-        def grab(cand: Dict[str, str]) -> Optional[bytes]:
+        def grab(cand: dict[str, str]) -> bytes | None:
             if "file_id" in cand:
                 try:
                     with open(self.store.path(cand["file_id"]), "rb") as fh:
@@ -898,8 +868,7 @@ class ImageSearchService:
 
     @staticmethod
     def _rank_thumb(payload: bytes) -> bytes:
-        """
-        Downscales a thumbnail for the vision rank call.
+        """Downscales a thumbnail for the vision rank call.
 
         Args:
             payload (bytes): The fetched thumbnail.
@@ -918,9 +887,8 @@ class ImageSearchService:
         except Exception:
             return payload
 
-    def _fetch_full(self, url: str) -> Optional[bytes]:
-        """
-        Fetches a full-size image with no SSRF exemptions at all.
+    def _fetch_full(self, url: str) -> bytes | None:
+        """Fetches a full-size image with no SSRF exemptions at all.
 
         Args:
             url (str): The original image URL.
@@ -933,10 +901,9 @@ class ImageSearchService:
         except Exception:
             return None
 
-    def _prefilter(self, query: str, thumbs: List[Tuple[Dict[str, str], bytes]],
-                   keep: int = RANK_CANDIDATES) -> List[Tuple[Dict[str, str], bytes]]:
-        """
-        Keeps the SigLIP top candidates, or the first few when SigLIP is unavailable.
+    def _prefilter(self, query: str, thumbs: list[tuple[dict[str, str], bytes]],
+                   keep: int = RANK_CANDIDATES) -> list[tuple[dict[str, str], bytes]]:
+        """Keeps the SigLIP top candidates, or the first few when SigLIP is unavailable.
 
         Args:
             query (str): The search text.
@@ -956,10 +923,9 @@ class ImageSearchService:
         return [thumbs[i] for _, i in ranked[:keep]]
 
     @staticmethod
-    def _collapse(thumbs: List[Tuple[Dict[str, str], bytes]]
-                  ) -> List[Tuple[Dict[str, str], bytes]]:
-        """
-        Merges visual near-duplicates by perceptual hash.
+    def _collapse(thumbs: list[tuple[dict[str, str], bytes]]
+                  ) -> list[tuple[dict[str, str], bytes]]:
+        """Merges visual near-duplicates by perceptual hash.
 
         Args:
             thumbs (List[Tuple[Dict[str, str], bytes]]): Candidates with thumbnails.
@@ -971,8 +937,8 @@ class ImageSearchService:
         """
         if Image is None:
             return thumbs
-        kept: List[Tuple[Dict[str, str], bytes]] = []
-        hashes: List[int] = []
+        kept: list[tuple[dict[str, str], bytes]] = []
+        hashes: list[int] = []
         for cand, thumb in thumbs:
             try:
                 candidate_hash = phash64(Image.open(io.BytesIO(thumb)))
@@ -989,8 +955,7 @@ class ImageSearchService:
 
 
 def build_service() -> ImageSearchService:
-    """
-    Wires the service from environment configuration.
+    """Wires the service from environment configuration.
 
     Returns:
         ImageSearchService: Ready to serve.
@@ -1008,9 +973,8 @@ def build_service() -> ImageSearchService:
     )
 
 
-def serve(port: int = SERVICE_PORT, secret: Optional[str] = None) -> None:
-    """
-    Runs the HTTP service until killed.
+def serve(port: int = SERVICE_PORT, secret: str | None = None) -> None:
+    """Runs the HTTP service until killed.
 
     Args:
         port (int): Port to listen on.
@@ -1032,7 +996,7 @@ def serve(port: int = SERVICE_PORT, secret: Optional[str] = None) -> None:
     threading.Thread(target=gc_loop, daemon=True).start()
 
     class Handler(BaseHTTPRequestHandler):
-        def _reply(self, status: int, body: Dict[str, Any]) -> None:
+        def _reply(self, status: int, body: dict[str, Any]) -> None:
             encoded = json.dumps(body).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")

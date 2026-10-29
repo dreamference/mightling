@@ -1,5 +1,4 @@
-"""
-Where `ling-admin swe-bench` keeps its files, what it pins, and the `[swe_bench]` table of
+"""Where `ling-admin swe-bench` keeps its files, what it pins, and the `[swe_bench]` table of
 `dreamference.toml` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §4, §12).
 
 The directories are module-level constants on purpose: the test suite re-points every such
@@ -11,7 +10,7 @@ import os
 import platform
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, Final, Optional
+from typing import Any, Final
 
 from dreamference.config.config_path_resolver import ConfigPathResolver
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
@@ -28,7 +27,7 @@ HARNESS_VERSION: Final[str] = "5.0.2"
 
 # Dataset names this command accepts, and the HuggingFace ids behind them. `lite` is not an
 # alias of the harness's own command line, which is why the mapping lives here.
-DATASETS: Final[Dict[str, str]] = {
+DATASETS: Final[dict[str, str]] = {
     "verified": "SWE-bench/SWE-bench_Verified",
     "lite": "SWE-bench/SWE-bench_Lite",
     "full": "SWE-bench/SWE-bench",
@@ -117,10 +116,9 @@ IMAGE_CACHE_RECORD: Final[Path] = CACHE_DIR / "image-cache.json"
 class SweBenchSettings:
     """Resolved `[swe_bench]` settings, defaults filled in."""
 
-    def __init__(self, table: Optional[Dict[str, Any]] = None) -> None:
-        """
-        Args:
-            table: The `[swe_bench]` table; None reads it from the config file.
+    def __init__(self, table: dict[str, Any] | None = None) -> None:
+        """Args:
+        table: The `[swe_bench]` table; None reads it from the config file.
         """
         if table is None:
             table = self.read_table()
@@ -148,9 +146,8 @@ class SweBenchSettings:
         self.nodes: Any = table.get("nodes", "paired")
 
     @classmethod
-    def read_table(cls, path: Optional[Path] = None) -> Dict[str, Any]:
-        """
-        Reads `[swe_bench]` from a TOML file.
+    def read_table(cls, path: Path | None = None) -> dict[str, Any]:
+        """Reads `[swe_bench]` from a TOML file.
 
         Args:
             path: The file; None resolves the config file.
@@ -169,17 +166,15 @@ class SweBenchSettings:
 
     @classmethod
     def architecture(cls) -> str:
-        """
-        Returns:
-            str: The machine's architecture as Docker names it (`arm64`, `amd64`).
+        """Returns:
+        str: The machine's architecture as Docker names it (`arm64`, `amd64`).
         """
         machine = platform.machine().lower()
         return {"aarch64": "arm64", "x86_64": "amd64"}.get(machine, machine)
 
     @classmethod
     def dataset_id(cls, name: str) -> str:
-        """
-        Resolves a dataset name.
+        """Resolves a dataset name.
 
         Args:
             name: `verified`, `lite`, `full`, `multilingual`, or a HuggingFace id.

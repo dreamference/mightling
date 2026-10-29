@@ -1,5 +1,4 @@
-"""
-The verdict on a night arm's smoke check: one real task run with the arm's exact settings before
+"""The verdict on a night arm's smoke check: one real task run with the arm's exact settings before
 the night starts (`scripts/swe_bench_night1.sh start`), read from the run's files.
 
 Night 5's candidate arm failed at startup on all 44 of its tasks (the model catalog named an
@@ -11,7 +10,7 @@ the model is not.
 """
 
 import json
-from typing import Any, Dict, Final, List, Optional
+from typing import Any, Final
 
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 
@@ -31,9 +30,8 @@ class SweBenchArmSmoke:
     """Judges one smoke instance of a night arm: did the agent run and reach the model?"""
 
     @classmethod
-    def events(cls, log_text: str) -> List[Dict[str, Any]]:
-        """
-        Args:
+    def events(cls, log_text: str) -> list[dict[str, Any]]:
+        """Args:
             log_text: An instance's log (`ling exec --json`'s events, after a first line that is
                 not JSON).
 
@@ -61,7 +59,7 @@ class SweBenchArmSmoke:
         return ""
 
     @classmethod
-    def model_replied(cls, events: List[Dict[str, Any]]) -> bool:
+    def model_replied(cls, events: list[dict[str, Any]]) -> bool:
         """True when an event shows an answer from the model: a model item, or a turn that completed with tokens."""
         for event in events:
             kind = event.get("type")
@@ -75,9 +73,8 @@ class SweBenchArmSmoke:
         return False
 
     @classmethod
-    def verdict(cls, state: Optional[Dict[str, Any]], log_text: str, run_status: int) -> Optional[str]:
-        """
-        Decides whether the arm ran.
+    def verdict(cls, state: dict[str, Any] | None, log_text: str, run_status: int) -> str | None:
+        """Decides whether the arm ran.
 
         Args:
             state: The instance's state (`runs/<run>/instances/<id>.json`), or None when there is none.
@@ -115,8 +112,7 @@ class SweBenchArmSmoke:
 
     @classmethod
     def check(cls, run: str, instance_id: str, run_status: int, arm: str) -> int:
-        """
-        Prints the verdict on a smoke run, the way the night script shows it.
+        """Prints the verdict on a smoke run, the way the night script shows it.
 
         Args:
             run: The smoke run's name.

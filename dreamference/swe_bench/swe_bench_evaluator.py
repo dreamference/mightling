@@ -1,5 +1,4 @@
-"""
-Validation and grading (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5.3, §6, §12).
+"""Validation and grading (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5.3, §6, §12).
 
 Both are calls to the upstream harness. **Validation** grades an instance twice here, with the
 reference patch and with a no-op patch, and records it as usable when the first resolves and the
@@ -10,11 +9,16 @@ what it found.
 import json
 import shutil
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional
+from typing import Any, Final
 
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
-from dreamference.swe_bench.swe_bench_harness import EVAL_RESET, HARNESS_LOG_DIR, NOOP_PATCH, SweBenchHarness
+from dreamference.swe_bench.swe_bench_harness import (
+    EVAL_RESET,
+    HARNESS_LOG_DIR,
+    NOOP_PATCH,
+    SweBenchHarness,
+)
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
@@ -34,16 +38,14 @@ class SweBenchEvaluator:
 
     @classmethod
     def validation_dir(cls) -> Path:
-        """
-        Returns:
-            Path: Where the harness runs for validation.
+        """Returns:
+        Path: Where the harness runs for validation.
         """
         return swe_bench_settings.CACHE_DIR / "validation"
 
     @classmethod
-    def disk_problem(cls, settings: "swe_bench_settings.SweBenchSettings") -> Optional[str]:
-        """
-        Checks the disk reserve: images are about 2.2 GB each unpacked and share the one
+    def disk_problem(cls, settings: "swe_bench_settings.SweBenchSettings") -> str | None:
+        """Checks the disk reserve: images are about 2.2 GB each unpacked and share the one
         filesystem with the model caches.
 
         Args:
@@ -64,10 +66,9 @@ class SweBenchEvaluator:
     # -- validation ----------------------------------------------------------------------------
 
     @classmethod
-    def validate(cls, dataset: str, instance_ids: List[str],
-                 settings: "swe_bench_settings.SweBenchSettings", force: bool = False) -> Dict[str, Optional[str]]:
-        """
-        Validates instances on this machine and records each result.
+    def validate(cls, dataset: str, instance_ids: list[str],
+                 settings: "swe_bench_settings.SweBenchSettings", force: bool = False) -> dict[str, str | None]:
+        """Validates instances on this machine and records each result.
 
         Args:
             dataset: The dataset the instances belong to.
@@ -83,9 +84,9 @@ class SweBenchEvaluator:
         tags = SweBenchImages.tags()
         built = SweBenchImages.built_tags()
         builds_here = swe_bench_settings.SweBenchSettings.task_repo(dataset) is not None
-        outcome: Dict[str, Optional[str]] = {}
-        images: Dict[str, str] = {}
-        digests: Dict[str, Optional[str]] = {}
+        outcome: dict[str, str | None] = {}
+        images: dict[str, str] = {}
+        digests: dict[str, str | None] = {}
         for instance_id in instance_ids:
             if not force and instance_id in validated:
                 outcome[instance_id] = None
@@ -153,9 +154,8 @@ class SweBenchEvaluator:
         return problem
 
     @classmethod
-    def validation_problem(cls, gold: Optional[Dict[str, Any]], noop: Optional[Dict[str, Any]]) -> Optional[str]:
-        """
-        Decides from the two verdicts whether an instance is usable here.
+    def validation_problem(cls, gold: dict[str, Any] | None, noop: dict[str, Any] | None) -> str | None:
+        """Decides from the two verdicts whether an instance is usable here.
 
         Args:
             gold: The harness's report for the reference patch; None if it wrote none.
@@ -177,9 +177,8 @@ class SweBenchEvaluator:
     # -- grading -------------------------------------------------------------------------------
 
     @classmethod
-    def grader(cls, manifest: Dict[str, Any], variant: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Describes what a grading is done with; a change in any of it starts a new grading.
+    def grader(cls, manifest: dict[str, Any], variant: str | None = None) -> dict[str, Any]:
+        """Describes what a grading is done with; a change in any of it starts a new grading.
 
         Args:
             manifest: The run's manifest.
@@ -199,10 +198,9 @@ class SweBenchEvaluator:
         return grader
 
     @classmethod
-    def grading_number(cls, store: SweBenchRunStore, grader: Dict[str, Any],
-                       variant: Optional[str] = None) -> int:
-        """
-        Picks the grading to continue or start. A grading names a grader, not a set of patches:
+    def grading_number(cls, store: SweBenchRunStore, grader: dict[str, Any],
+                       variant: str | None = None) -> int:
+        """Picks the grading to continue or start. A grading names a grader, not a set of patches:
         the number goes up when the harness, the dataset snapshot or the image source changed,
         or when an instance already graded now has a different image, because the harness caches
         verdicts by run id and instance id and would otherwise return the old one.
@@ -232,9 +230,8 @@ class SweBenchEvaluator:
 
     @classmethod
     def grade(cls, store: SweBenchRunStore, settings: "swe_bench_settings.SweBenchSettings",
-              only: Optional[List[str]] = None, variant: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
-        """
-        Grades the run's predictions that the current grading has not graded yet.
+              only: list[str] | None = None, variant: str | None = None) -> dict[str, dict[str, Any]]:
+        """Grades the run's predictions that the current grading has not graded yet.
 
         Args:
             store: The run.
@@ -255,8 +252,8 @@ class SweBenchEvaluator:
         record = store.grading(number, variant)
         record["grader"] = grader
         images = {instance_id: entry["image"] for instance_id, entry in manifest.get("images", {}).items()}
-        pending: List[Dict[str, Any]] = []
-        dropped: Dict[str, List[str]] = {}
+        pending: list[dict[str, Any]] = []
+        dropped: dict[str, list[str]] = {}
         # A patch with no test file is the patch the plain grading graded: its verdict is taken
         # from there, by the same grader, so the regrade differs from the plain grading only where
         # a patch changed, never by a flaky test, and pulls no image for it.
@@ -289,8 +286,8 @@ class SweBenchEvaluator:
 
         work = store.grading_dir(number, variant)
         rows = {row["instance_id"]: row for row in SweBenchHarness.rows(manifest.get("dataset", "verified"))}
-        digests: Dict[str, Optional[str]] = {}
-        gradable: List[Dict[str, Any]] = []
+        digests: dict[str, str | None] = {}
+        gradable: list[dict[str, Any]] = []
         for prediction in pending:
             instance_id = prediction["instance_id"]
             image = images.get(instance_id)
@@ -338,9 +335,8 @@ class SweBenchEvaluator:
         return record["results"]
 
     @classmethod
-    def test_counts(cls, report: Optional[Dict[str, Any]]) -> Optional[Dict[str, int]]:
-        """
-        Counts the two test lists of a harness verdict (survey 2026-10-13 §3.2): the tests the
+    def test_counts(cls, report: dict[str, Any] | None) -> dict[str, int] | None:
+        """Counts the two test lists of a harness verdict (survey 2026-10-13 §3.2): the tests the
         fix must make pass (FAIL_TO_PASS) and the tests that passed before and must still pass
         (PASS_TO_PASS). Only counts are kept; the names stay in the harness's logs.
 
@@ -354,7 +350,7 @@ class SweBenchEvaluator:
         status = (report or {}).get("tests_status")
         if not isinstance(status, dict) or not status:
             return None
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for key, name in (("f2p", "FAIL_TO_PASS"), ("p2p", "PASS_TO_PASS")):
             lists = status.get(name) or {}
             passed, failed = len(lists.get("success") or []), len(lists.get("failure") or [])
@@ -362,10 +358,9 @@ class SweBenchEvaluator:
         return counts
 
     @classmethod
-    def logged_test_counts(cls, store: SweBenchRunStore, number: int, variant: Optional[str],
-                           result: Dict[str, Any], instance_id: str, model: str) -> Optional[Dict[str, int]]:
-        """
-        A recorded verdict's test counts: from the grading record when it has them, otherwise
+    def logged_test_counts(cls, store: SweBenchRunStore, number: int, variant: str | None,
+                           result: dict[str, Any], instance_id: str, model: str) -> dict[str, int] | None:
+        """A recorded verdict's test counts: from the grading record when it has them, otherwise
         read back from the harness's report in the grading's directory, so a grading made
         before the counts were recorded needs no regrade. Reads files only.
 
@@ -394,9 +389,8 @@ class SweBenchEvaluator:
         return cls.test_counts(report)
 
     @classmethod
-    def results(cls, store: SweBenchRunStore, variant: Optional[str] = None) -> tuple:
-        """
-        Args:
+    def results(cls, store: SweBenchRunStore, variant: str | None = None) -> tuple:
+        """Args:
             store: The run.
             variant: The grading series; None for the plain one.
 

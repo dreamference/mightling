@@ -1,5 +1,4 @@
-"""
-The code index as an arm of the benchmark: `swe-bench run --code-index universal`
+"""The code index as an arm of the benchmark: `swe-bench run --code-index universal`
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §13).
 
 Without it the agent in a container navigates with `grep` and `find` only: the runtime carries
@@ -29,8 +28,9 @@ import os
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, Final, List, Optional
+from typing import Any, Final
 
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
@@ -54,7 +54,7 @@ MIGHTLING_CODE_OVERRIDE_ENV: Final[str] = "DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE
 # The MCP server's name in Codex's configuration, and the variables Codex must pass it; both as
 # the launcher has them (`ling-rs/src/code_index.rs`, `MCP_SERVER` and `FORWARDED_ENV`).
 MCP_SERVER: Final[str] = "ling_code"
-MCP_FORWARDED_ENV: Final[List[str]] = [
+MCP_FORWARDED_ENV: Final[list[str]] = [
     "MIGHTLING_CODE_ROOT", "MIGHTLING_CODE_STATE_DIR", "MIGHTLING_CODE_GRAPH_DB", "MIGHTLING_CODE_PROJECT",
     "MIGHTLING_CODE_TOOLS_DIR", "MIGHTLING_CODE_INDEXERS_DIR", "MIGHTLING_CODE_LAYERS", "CODEX_HOME", "DREAMFERENCE_CONFIG_PATH",
     "DREAMFERENCE_VLLM_HOST"]
@@ -77,12 +77,11 @@ class SweBenchCodeIndex:
                                                  stdin=subprocess.DEVNULL, **kwargs))
 
     @classmethod
-    def host_binary(cls) -> Optional[str]:
-        """
-        Returns:
-            Optional[str]: The installed `ling-code` (beside `ling`), or None if absent; or
-            the one `DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE` names, to measure a build of it that
-            is not installed (the arm then differs from the plain one in `ling-code` alone).
+    def host_binary(cls) -> str | None:
+        """Returns:
+        Optional[str]: The installed `ling-code` (beside `ling`), or None if absent; or
+        the one `DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE` names, to measure a build of it that
+        is not installed (the arm then differs from the plain one in `ling-code` alone).
         """
         override = os.environ.get(MIGHTLING_CODE_OVERRIDE_ENV)
         if override:
@@ -97,20 +96,18 @@ class SweBenchCodeIndex:
 
     @classmethod
     def runtime_dir(cls) -> Path:
-        """
-        Returns:
-            Path: The relocated `ling-code`, kept apart from `ling`'s runtime so that
-            runtime's hash, which a run's manifest pins, does not change when this one appears.
-            A build named by `DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE` gets a directory of its own,
-            so preparing it never replaces the one a running arm has mounted.
+        """Returns:
+        Path: The relocated `ling-code`, kept apart from `ling`'s runtime so that
+        runtime's hash, which a run's manifest pins, does not change when this one appears.
+        A build named by `DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE` gets a directory of its own,
+        so preparing it never replaces the one a running arm has mounted.
         """
         name = "runtime-code-override" if os.environ.get(MIGHTLING_CODE_OVERRIDE_ENV) else "runtime-code"
         return swe_bench_settings.CACHE_DIR / name
 
     @classmethod
-    def ensure_runtime(cls, patchelf: str) -> Optional[str]:
-        """
-        Builds the relocated `ling-code` unless the one on disk was made from the installed
+    def ensure_runtime(cls, patchelf: str) -> str | None:
+        """Builds the relocated `ling-code` unless the one on disk was made from the installed
         binary. Same treatment as `ling`: the instance images have an older glibc.
 
         Args:
@@ -157,9 +154,8 @@ class SweBenchCodeIndex:
     # -- one instance's index ------------------------------------------------------------------
 
     @classmethod
-    def index_dir(cls, row: Dict[str, Any], arm: str = "universal") -> Path:
-        """
-        Args:
+    def index_dir(cls, row: dict[str, Any], arm: str = "universal") -> Path:
+        """Args:
             row: The instance's dataset row.
             arm: `universal` or `exact`: each has a cache of its own.
 
@@ -171,9 +167,8 @@ class SweBenchCodeIndex:
             / f"{repo}@{str(row['base_commit'])[:16]}"
 
     @classmethod
-    def record(cls, row: Dict[str, Any], arm: str = "universal") -> Optional[Dict[str, Any]]:
-        """
-        Args:
+    def record(cls, row: dict[str, Any], arm: str = "universal") -> dict[str, Any] | None:
+        """Args:
             row: The instance's dataset row.
             arm: `universal` or `exact`.
 
@@ -196,9 +191,8 @@ class SweBenchCodeIndex:
         return record
 
     @classmethod
-    def copy_testbed(cls, row: Dict[str, Any], image: str, checkout: Path) -> bool:
-        """
-        Copies the repository exactly as the agent will get it out of a container that never runs.
+    def copy_testbed(cls, row: dict[str, Any], image: str, checkout: Path) -> bool:
+        """Copies the repository exactly as the agent will get it out of a container that never runs.
 
         Args:
             row: The instance's dataset row.
@@ -221,9 +215,8 @@ class SweBenchCodeIndex:
         return True
 
     @classmethod
-    def ensure(cls, row: Dict[str, Any], image: str, arm: str = "universal") -> Optional[Dict[str, Any]]:
-        """
-        Builds the instance's index on the host unless one is cached.
+    def ensure(cls, row: dict[str, Any], image: str, arm: str = "universal") -> dict[str, Any] | None:
+        """Builds the instance's index on the host unless one is cached.
 
         Args:
             row: The instance's dataset row.
@@ -285,9 +278,8 @@ class SweBenchCodeIndex:
         return dict(record, cached=False)
 
     @classmethod
-    def ensure_exact(cls, row: Dict[str, Any], image: str, binary: str) -> Optional[Dict[str, Any]]:
-        """
-        Builds the SCIP stores of one instance on the host, with the graph off.
+    def ensure_exact(cls, row: dict[str, Any], image: str, binary: str) -> dict[str, Any] | None:
+        """Builds the SCIP stores of one instance on the host, with the graph off.
 
         `ling-code index --wait` runs each static indexer in turn under the machine's admission
         rules; a run the model kept busy past its wait is deferred, and the next attempt picks it
@@ -319,8 +311,8 @@ class SweBenchCodeIndex:
             MIGHTLING_CODE_LAYERS="exact",
             DREAMFERENCE_CONFIG_PATH=str(settings),
         )
-        logs: List[str] = []
-        runs: Dict[str, Any] = {}
+        logs: list[str] = []
+        runs: dict[str, Any] = {}
         for attempt in range(1, EXACT_ATTEMPTS + 1):
             try:
                 indexed = cls.execute([binary, "index", "--wait"], cwd=str(checkout), env=environment,
@@ -361,9 +353,8 @@ class SweBenchCodeIndex:
     sleep: Callable[[float], None] = staticmethod(time.sleep)
 
     @classmethod
-    def container_arguments(cls, row: Dict[str, Any], record: Dict[str, Any], arm: str = "universal") -> Dict[str, Any]:
-        """
-        Says how a container is given the index.
+    def container_arguments(cls, row: dict[str, Any], record: dict[str, Any], arm: str = "universal") -> dict[str, Any]:
+        """Says how a container is given the index.
 
         Args:
             row: The instance's dataset row.
@@ -401,9 +392,8 @@ class SweBenchCodeIndex:
         }
 
     @classmethod
-    def mcp_overrides(cls) -> List[str]:
-        """
-        The `-c` overrides that declare `ling-code mcp` to Codex as a **required** server.
+    def mcp_overrides(cls) -> list[str]:
+        """The `-c` overrides that declare `ling-code mcp` to Codex as a **required** server.
 
         The launcher declares it without `required`, and Codex then gives an optional server a
         short grace period before the first request and leaves its tools out if it is not up: in
@@ -425,10 +415,9 @@ class SweBenchCodeIndex:
                 f"{key}.startup_timeout_sec=120"]
 
     @classmethod
-    def cached(cls) -> List[str]:
-        """
-        Returns:
-            List[str]: The names of the cached indexes.
+    def cached(cls) -> list[str]:
+        """Returns:
+        List[str]: The names of the cached indexes.
         """
         root = swe_bench_settings.CACHE_DIR / "index"
         return sorted(entry.name for entry in root.iterdir()) if root.is_dir() else []

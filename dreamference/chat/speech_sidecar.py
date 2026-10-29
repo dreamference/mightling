@@ -16,7 +16,7 @@ Nothing here prints: a failure is kept in `SpeechSidecar.problem` for the CLI to
 """
 
 import subprocess
-from typing import ClassVar, Final, List, Optional
+from typing import ClassVar, Final
 
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
@@ -37,9 +37,8 @@ class SpeechSidecar:
 
     @classmethod
     def state(cls) -> str:
-        """
-        Returns:
-            str: `running`, `exited`, another Docker state, or "" when there is no container.
+        """Returns:
+        str: `running`, `exited`, another Docker state, or "" when there is no container.
         """
         result = subprocess.run(
             ["docker", "inspect", STT_CONTAINER_NAME, "--format", "{{.State.Status}}"],
@@ -48,7 +47,7 @@ class SpeechSidecar:
         return result.stdout.strip() if result.returncode == 0 else ""
 
     @classmethod
-    def run_command(cls) -> List[str]:
+    def run_command(cls) -> list[str]:
         """Builds the `docker run` command.
 
         Returns:
@@ -104,7 +103,7 @@ class SpeechSidecar:
         return True
 
     @classmethod
-    def ensure_on_node(cls) -> Optional[bool]:
+    def ensure_on_node(cls) -> bool | None:
         """Starts the server on a node when it is absent, as `server start` does for the Google
         service (decided 2026-10-09). Never raises, and the model downloads in the background:
         the model server must start anyway.
@@ -134,10 +133,9 @@ class SpeechSidecar:
         return not cls.state()
 
     @classmethod
-    def status_lines(cls) -> List[str]:
-        """
-        Returns:
-            List[str]: The container's state and network, and where the audio goes.
+    def status_lines(cls) -> list[str]:
+        """Returns:
+        List[str]: The container's state and network, and where the audio goes.
         """
         state = cls.state()
         network = SidecarNetwork.network_mode(STT_CONTAINER_NAME) if state else ""

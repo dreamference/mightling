@@ -1,5 +1,4 @@
-"""
-The page the desktop app's audit session opens in a preview tab
+"""The page the desktop app's audit session opens in a preview tab
 (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §5, Phase 3 item 4).
 
 This module provides the PreviewPage class: a loopback HTTP server, for the length of one
@@ -12,7 +11,7 @@ the trace then shows. The page's own port is the one loopback port it adds to th
 
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Final, List
+from typing import Final
 
 # Sites the page reaches for. Reserved example names, so even a leak would ask nobody real.
 PAGE: Final[str] = """<!doctype html>
@@ -42,7 +41,7 @@ class PreviewPage:
     """A loopback server for the audit's preview page, recording what was asked of it."""
 
     def __init__(self) -> None:
-        self.paths: List[str] = []
+        self.paths: list[str] = []
         page = PAGE.encode()
         paths = self.paths
 
@@ -72,8 +71,7 @@ class PreviewPage:
         return f"http://127.0.0.1:{self.port}/"
 
     def loaded(self) -> bool:
-        """
-        Whether the preview loaded the page and ran it (its script asks for `/seen`).
+        """Whether the preview loaded the page and ran it (its script asks for `/seen`).
 
         Returns:
             bool: True once the page's own request came back.

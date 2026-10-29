@@ -1,5 +1,4 @@
-"""
-A TCP relay from the benchmark network's gateway to another node's model server
+"""A TCP relay from the benchmark network's gateway to another node's model server
 (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3, specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
 
 An instance's container is on an internal Docker network whose only reachable address is the
@@ -11,7 +10,7 @@ nowhere else. It lives as long as the run.
 
 import socket
 import threading
-from typing import Final, List, Optional, Tuple
+from typing import Final
 
 BUFFER: Final[int] = 65536
 
@@ -19,22 +18,20 @@ BUFFER: Final[int] = 65536
 class SweBenchRelay:
     """One listening socket on the gateway, forwarding to one model server."""
 
-    def __init__(self, listen_address: str, target: Tuple[str, int]) -> None:
-        """
-        Args:
-            listen_address: The gateway's address.
-            target: The other node's model server, `(address, port)`.
+    def __init__(self, listen_address: str, target: tuple[str, int]) -> None:
+        """Args:
+        listen_address: The gateway's address.
+        target: The other node's model server, `(address, port)`.
         """
         self.listen_address = listen_address
         self.target = target
-        self.port: Optional[int] = None
-        self._server: Optional[socket.socket] = None
-        self._threads: List[threading.Thread] = []
+        self.port: int | None = None
+        self._server: socket.socket | None = None
+        self._threads: list[threading.Thread] = []
         self._closed = threading.Event()
 
     def start(self) -> int:
-        """
-        Listens on a free port of the gateway and starts forwarding.
+        """Listens on a free port of the gateway and starts forwarding.
 
         Returns:
             int: The port.

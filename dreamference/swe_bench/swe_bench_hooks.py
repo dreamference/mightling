@@ -1,5 +1,4 @@
-"""
-Codex hooks as an arm (`swe-bench run --hooks`, specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §20).
+"""Codex hooks as an arm (`swe-bench run --hooks`, specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §20).
 
 A hook set registers commands for Codex's hook events in the instance's own `CODEX_HOME`
 before its first session starts, each with the trust entry Codex requires before it runs a
@@ -11,12 +10,12 @@ container edits the same `config.toml` and keeps groups and trust entries that a
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional
+from typing import Any, Final
 
 from dreamference.swe_bench import swe_bench_issue_gate
 
 # The hook sets `--hooks` takes, with what each enforces.
-HOOK_SETS: Final[Dict[str, str]] = {
+HOOK_SETS: Final[dict[str, str]] = {
     "issue-v1": "the first edit is held once until the files and functions the issue names have been read, "
                 "and the first stop is held once if the issue shows an example that no command since "
                 "the last edit has run",
@@ -34,7 +33,7 @@ HOOK_COMMAND: Final[str] = ('for p in /opt/miniconda3/bin/python3 /opt/miniconda
                             ' {event} {directory}; done; exit 0')
 
 # Codex's events (the table under `[hooks]`), their label in trust keys, and the gate's event.
-EVENTS: Final[List[tuple]] = [("PreToolUse", "pre_tool_use", "pre-tool-use"),
+EVENTS: Final[list[tuple]] = [("PreToolUse", "pre_tool_use", "pre-tool-use"),
                               ("PostToolUse", "post_tool_use", "post-tool-use"),
                               ("Stop", "stop", "stop")]
 HOOK_TIMEOUT_S: Final[int] = 30
@@ -44,9 +43,8 @@ class SweBenchHooks:
     """Registers a hook set in an instance's `CODEX_HOME` and reads back what it did."""
 
     @classmethod
-    def hook_hash(cls, event_label: str, command: str, timeout: int, matcher: Optional[str] = None) -> str:
-        """
-        The hash Codex compares with `hooks.state.<key>.trusted_hash` before it runs a hook
+    def hook_hash(cls, event_label: str, command: str, timeout: int, matcher: str | None = None) -> str:
+        """The hash Codex compares with `hooks.state.<key>.trusted_hash` before it runs a hook
         (codex-rs/config/src/fingerprint.rs `version_for_toml` over the normalised hook,
         hooks/src/engine/discovery.rs `hook_hash`): SHA-256 over canonical JSON, keys sorted,
         no spaces. The same scheme as the launcher's (ling-rs/src/compaction.rs), pinned by a
@@ -61,7 +59,7 @@ class SweBenchHooks:
         Returns:
             str: `sha256:<hex>`.
         """
-        identity: Dict[str, Any] = {"event_name": event_label,
+        identity: dict[str, Any] = {"event_name": event_label,
                                     "hooks": [{"async": False, "command": command, "timeout": timeout, "type": "command"}]}
         if matcher:
             identity["matcher"] = matcher
@@ -70,8 +68,7 @@ class SweBenchHooks:
 
     @classmethod
     def config_text(cls, config_path: str, directory: str) -> str:
-        """
-        The `[hooks]` tables of a hook set: one group per event with no matcher (every tool),
+        """The `[hooks]` tables of a hook set: one group per event with no matcher (every tool),
         one command handler each, and their trust entries keyed
         `<config path>:<event label>:<group>:<handler>`.
 
@@ -95,8 +92,7 @@ class SweBenchHooks:
 
     @classmethod
     def register(cls, codex_home: Path, container_codex_home: str, container_directory: str) -> None:
-        """
-        Writes the hook set into an instance's `config.toml`, before any session.
+        """Writes the hook set into an instance's `config.toml`, before any session.
 
         Args:
             codex_home: The instance's `CODEX_HOME` on the host.
@@ -112,24 +108,21 @@ class SweBenchHooks:
 
     @classmethod
     def gate_source(cls) -> Path:
-        """
-        Returns:
-            Path: The gate's file in the installed package, mounted read-only into containers.
+        """Returns:
+        Path: The gate's file in the installed package, mounted read-only into containers.
         """
         return Path(swe_bench_issue_gate.__file__).resolve()
 
     @classmethod
     def gate_digest(cls) -> str:
-        """
-        Returns:
-            str: The SHA-256 of the gate's file, recorded in the manifest.
+        """Returns:
+        str: The SHA-256 of the gate's file, recorded in the manifest.
         """
         return hashlib.sha256(cls.gate_source().read_bytes()).hexdigest()
 
     @classmethod
-    def outcome(cls, directory: Path) -> Dict[str, Any]:
-        """
-        What the gate did in one task, from its conditions and state, for the instance's state.
+    def outcome(cls, directory: Path) -> dict[str, Any]:
+        """What the gate did in one task, from its conditions and state, for the instance's state.
 
         Args:
             directory: The gate's directory on the host.
@@ -141,7 +134,7 @@ class SweBenchHooks:
             `example_run_after_last_edit` (at the last stop; None without an example or an
             edit), `errors`.
         """
-        def load(name: str) -> Dict[str, Any]:
+        def load(name: str) -> dict[str, Any]:
             try:
                 return json.loads((directory / name).read_text())
             except (OSError, ValueError):

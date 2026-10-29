@@ -1,5 +1,4 @@
-"""
-What an issue names, and the example it shows, as the `issue-v1` hooks' conditions
+"""What an issue names, and the example it shows, as the `issue-v1` hooks' conditions
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §20).
 
 Extraction is by rule from the issue's text, with no model call: repository paths, dotted module
@@ -15,7 +14,7 @@ import ast
 import re
 import textwrap
 import warnings
-from typing import Any, Dict, Final, List, Optional, Tuple
+from typing import Any, Final
 
 # At most this many things to read before the first edit: past it the hold stops being a check
 # and becomes a reading list. Kept in priority order (below), the rest recorded as dropped.
@@ -65,9 +64,8 @@ class SweBenchIssueTargets:
     # -- the text ------------------------------------------------------------------------------
 
     @classmethod
-    def split(cls, text: str) -> Tuple[str, List[Tuple[str, str]]]:
-        """
-        Args:
+    def split(cls, text: str) -> tuple[str, list[tuple[str, str]]]:
+        """Args:
             text: The issue.
 
         Returns:
@@ -78,9 +76,8 @@ class SweBenchIssueTargets:
         return FENCE.sub("\n", text), blocks
 
     @classmethod
-    def candidates(cls, text: str) -> Dict[str, List[Any]]:
-        """
-        What the issue names, before resolution, in priority order within each kind.
+    def candidates(cls, text: str) -> dict[str, list[Any]]:
+        """What the issue names, before resolution, in priority order within each kind.
 
         - `paths`: `(path, source)` for each code file named in the prose or inline code
           (`prose`), in a code block (`code`), or in a traceback frame (`traceback`, deepest
@@ -96,7 +93,7 @@ class SweBenchIssueTargets:
             Dict[str, List[Any]]: `paths`, `dotted` and `names`.
         """
         prose, blocks = cls.split(text)
-        paths: List[Tuple[str, str]] = []
+        paths: list[tuple[str, str]] = []
         seen = set()
 
         def add_path(path: str, source: str) -> None:
@@ -114,8 +111,8 @@ class SweBenchIssueTargets:
         for frame in reversed(frames):
             add_path(frame, "traceback")
         inline = " ".join(INLINE.findall(prose))
-        dotted: List[str] = []
-        names: List[str] = []
+        dotted: list[str] = []
+        names: list[str] = []
         for source in (inline, prose):
             for match in DOTTED.finditer(source):
                 name = match.group(1)
@@ -136,9 +133,8 @@ class SweBenchIssueTargets:
         return {"paths": paths, "dotted": dotted, "names": names}
 
     @classmethod
-    def examples(cls, text: str) -> List[Dict[str, Any]]:
-        """
-        The runnable examples the issue shows. A Python example is a fenced block that parses
+    def examples(cls, text: str) -> list[dict[str, Any]]:
+        """The runnable examples the issue shows. A Python example is a fenced block that parses
         as Python, calls something and is more than one bare expression (which is more likely
         printed output), or a run of `>>>` lines (fenced or not); a shell example
         is a command in a shell block or after a `$ ` prompt that is not setup (`pip install`,
@@ -153,7 +149,7 @@ class SweBenchIssueTargets:
             `{"kind": "shell", "commands": [[program, argument]], "first"}`.
         """
         prose, blocks = cls.split(text)
-        found: List[Dict[str, Any]] = []
+        found: list[dict[str, Any]] = []
         for language, body in blocks:
             if language in SHELL_LANGS or re.search(r"^\s*\$ ", body, re.M):
                 example = cls.shell_example(body, language in SHELL_LANGS)
@@ -170,9 +166,8 @@ class SweBenchIssueTargets:
         return found
 
     @classmethod
-    def python_example(cls, body: str) -> Optional[Dict[str, Any]]:
-        """
-        Args:
+    def python_example(cls, body: str) -> dict[str, Any] | None:
+        """Args:
             body: A code block.
 
         Returns:
@@ -215,9 +210,8 @@ class SweBenchIssueTargets:
         return {"kind": "python", "key_lines": key_lines[:8], "calls": calls[:10], "first": key_lines[0][:80]}
 
     @classmethod
-    def shell_example(cls, body: str, shell_block: bool) -> Optional[Dict[str, Any]]:
-        """
-        Args:
+    def shell_example(cls, body: str, shell_block: bool) -> dict[str, Any] | None:
+        """Args:
             body: A code block.
             shell_block: Whether its language is a shell's, where unprompted lines are commands.
 
@@ -247,9 +241,8 @@ class SweBenchIssueTargets:
     # -- the repository ------------------------------------------------------------------------
 
     @classmethod
-    def resolve_script(cls, names: List[str]) -> str:
-        """
-        The light index, run in the container: every tracked file, then the `def`/`class` lines
+    def resolve_script(cls, names: list[str]) -> str:
+        """The light index, run in the container: every tracked file, then the `def`/`class` lines
         of the names in tracked Python files.
 
         Args:
@@ -267,9 +260,8 @@ class SweBenchIssueTargets:
         return script
 
     @classmethod
-    def parse_listing(cls, output: str) -> Tuple[List[str], Dict[str, List[str]]]:
-        """
-        Args:
+    def parse_listing(cls, output: str) -> tuple[list[str], dict[str, list[str]]]:
+        """Args:
             output: What `resolve_script` printed.
 
         Returns:
@@ -278,7 +270,7 @@ class SweBenchIssueTargets:
         """
         files_part, _, definitions_part = output.partition("@@definitions@@\n")
         files = [line for line in files_part.splitlines() if line]
-        definitions: Dict[str, List[str]] = {}
+        definitions: dict[str, list[str]] = {}
         for line in definitions_part.splitlines():
             parts = line.split(":", 2)
             if len(parts) != 3:
@@ -291,9 +283,8 @@ class SweBenchIssueTargets:
         return files, definitions
 
     @classmethod
-    def resolve_path(cls, path: str, files: List[str]) -> Tuple[Optional[str], str]:
-        """
-        Finds the tracked file a path names: the path itself, or the longest tail of it that
+    def resolve_path(cls, path: str, files: list[str]) -> tuple[str | None, str]:
+        """Finds the tracked file a path names: the path itself, or the longest tail of it that
         names exactly one file (`/usr/lib/python3/site-packages/django/db/models/query.py` is
         `django/db/models/query.py`). A bare base name must be unique.
 
@@ -313,9 +304,8 @@ class SweBenchIssueTargets:
         return None, "not in the repository"
 
     @classmethod
-    def resolve_dotted(cls, name: str, files: List[str]) -> Tuple[Optional[str], List[str]]:
-        """
-        Maps a dotted name to a module file: `a.b.c` is `a/b/c.py` or `a/b/c/__init__.py`, or
+    def resolve_dotted(cls, name: str, files: list[str]) -> tuple[str | None, list[str]]:
+        """Maps a dotted name to a module file: `a.b.c` is `a/b/c.py` or `a/b/c/__init__.py`, or
         a shorter prefix with the rest naming definitions in it.
 
         Returns:
@@ -333,9 +323,8 @@ class SweBenchIssueTargets:
         return None, parts
 
     @classmethod
-    def conditions(cls, text: str, listing: str, root: str = "/testbed") -> Dict[str, Any]:
-        """
-        Builds the hooks' conditions: what must be read before the first edit, and the
+    def conditions(cls, text: str, listing: str, root: str = "/testbed") -> dict[str, Any]:
+        """Builds the hooks' conditions: what must be read before the first edit, and the
         example to run before stopping.
 
         Priority, until `MAX_TARGETS`: paths named in the prose, dotted module names, functions
@@ -353,8 +342,8 @@ class SweBenchIssueTargets:
         """
         found = cls.candidates(text)
         files, definitions = cls.parse_listing(listing)
-        targets: List[Dict[str, Any]] = []
-        dropped: List[Dict[str, str]] = []
+        targets: list[dict[str, Any]] = []
+        dropped: list[dict[str, str]] = []
         target_files: set = set()
 
         def add_file(path: str, source: str, mentioned: str) -> None:
@@ -364,7 +353,7 @@ class SweBenchIssueTargets:
             targets.append({"id": f"file:{path}", "kind": "file", "path": path, "label": path, "from": source,
                             "text": mentioned})
 
-        def add_definition(name: str, where: List[str], source: str, mentioned: str) -> None:
+        def add_definition(name: str, where: list[str], source: str, mentioned: str) -> None:
             if any(t.get("name") == name for t in targets):
                 return
             targets.append({"id": f"def:{name}", "kind": "definition", "name": name, "files": where,
@@ -424,9 +413,8 @@ class SweBenchIssueTargets:
                 "examples": cls.examples(text), "dropped": dropped[:40]}
 
     @classmethod
-    def names_to_resolve(cls, text: str) -> List[str]:
-        """
-        Args:
+    def names_to_resolve(cls, text: str) -> list[str]:
+        """Args:
             text: The issue.
 
         Returns:

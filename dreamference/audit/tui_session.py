@@ -1,5 +1,4 @@
-"""
-One interactive `ling` session driven on a pseudo-terminal, for `ling-admin audit egress --tui`
+"""One interactive `ling` session driven on a pseudo-terminal, for `ling-admin audit egress --tui`
 (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3.1 step 3).
 
 This module provides the TuiSession class. `ling exec` and the full-screen interface start
@@ -17,7 +16,7 @@ import json
 import os
 import signal
 import time
-from typing import Dict, Final, List, Optional
+from typing import Final
 
 ROWS: Final[int] = 50
 COLS: Final[int] = 160
@@ -37,9 +36,8 @@ class TuiSession:
     """Opens the interface, holds one exchange with the model and quits."""
 
     @classmethod
-    def missing_modules(cls) -> List[str]:
-        """
-        Names what the pseudo-terminal session needs and this environment lacks.
+    def missing_modules(cls) -> list[str]:
+        """Names what the pseudo-terminal session needs and this environment lacks.
 
         Returns:
             List[str]: Any of `pexpect` and `pyte` that cannot be imported; empty when both can.
@@ -54,8 +52,7 @@ class TuiSession:
 
     @classmethod
     def trust(cls, home: str, repo: str) -> None:
-        """
-        Marks `repo` as trusted in a throwaway `CODEX_HOME`, so the interface opens on its
+        """Marks `repo` as trusted in a throwaway `CODEX_HOME`, so the interface opens on its
         composer instead of on the question whether to trust the directory. The launcher edits
         this file in place and keeps the table.
 
@@ -67,9 +64,8 @@ class TuiSession:
             handle.write(f"[projects.{json.dumps(os.path.realpath(repo))}]\ntrust_level = \"trusted\"\n")
 
     @classmethod
-    def reply_in(cls, home: str) -> Optional[str]:
-        """
-        Reads the model's reply from the session file the interface writes, not from the screen:
+    def reply_in(cls, home: str) -> str | None:
+        """Reads the model's reply from the session file the interface writes, not from the screen:
         the screen also shows the prompt that was typed, which may itself contain the reply's
         words.
 
@@ -97,10 +93,9 @@ class TuiSession:
         return None
 
     @classmethod
-    def run(cls, command: List[str], cwd: str, env: Dict[str, str], home: str, prompt: str,
-            timeout: float) -> Dict[str, object]:
-        """
-        Runs `command` (strace around `ling`) on a pseudo-terminal: waits for the composer,
+    def run(cls, command: list[str], cwd: str, env: dict[str, str], home: str, prompt: str,
+            timeout: float) -> dict[str, object]:
+        """Runs `command` (strace around `ling`) on a pseudo-terminal: waits for the composer,
         types `prompt`, waits for the reply, and quits with `/quit`. A session that does not end
         by itself is stopped with everything it started.
 

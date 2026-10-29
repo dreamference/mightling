@@ -1,5 +1,4 @@
-"""
-One run's files (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §4):
+"""One run's files (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §4):
 
 ```text
 runs/<run>/manifest.json       what was measured; written once
@@ -17,7 +16,7 @@ import os
 import re
 import threading
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional
+from typing import Any, Final
 
 from dreamference.swe_bench import swe_bench_settings
 
@@ -41,18 +40,16 @@ class SweBenchRunStore:
     """Reads and writes a run directory."""
 
     def __init__(self, name: str) -> None:
-        """
-        Args:
-            name: The run's name.
+        """Args:
+        name: The run's name.
         """
         self.name = name
         self.directory: Path = swe_bench_settings.RESULTS_DIR / "runs" / name
 
     @classmethod
-    def runs(cls) -> List[str]:
-        """
-        Returns:
-            List[str]: The names of the runs on disk, oldest first.
+    def runs(cls) -> list[str]:
+        """Returns:
+        List[str]: The names of the runs on disk, oldest first.
         """
         root = swe_bench_settings.RESULTS_DIR / "runs"
         if not root.is_dir():
@@ -61,10 +58,9 @@ class SweBenchRunStore:
         return [entry.name for entry in sorted(entries, key=lambda entry: entry.stat().st_mtime)]
 
     @classmethod
-    def latest(cls) -> Optional[str]:
-        """
-        Returns:
-            Optional[str]: The most recently started run, if any.
+    def latest(cls) -> str | None:
+        """Returns:
+        Optional[str]: The most recently started run, if any.
         """
         runs = cls.runs()
         return runs[-1] if runs else None
@@ -76,16 +72,14 @@ class SweBenchRunStore:
         """The run's manifest."""
         return self.directory / "manifest.json"
 
-    def manifest(self) -> Optional[Dict[str, Any]]:
-        """
-        Returns:
-            Optional[Dict[str, Any]]: The manifest, or None when the run does not exist.
+    def manifest(self) -> dict[str, Any] | None:
+        """Returns:
+        Optional[Dict[str, Any]]: The manifest, or None when the run does not exist.
         """
         return self._read(self.manifest_path)
 
-    def write_manifest(self, manifest: Dict[str, Any]) -> None:
-        """
-        Writes the manifest of a new run. It is never edited afterwards.
+    def write_manifest(self, manifest: dict[str, Any]) -> None:
+        """Writes the manifest of a new run. It is never edited afterwards.
 
         Args:
             manifest: The manifest (§6.4).
@@ -101,9 +95,8 @@ class SweBenchRunStore:
 
     # -- instances -----------------------------------------------------------------------------
 
-    def state(self, instance_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Args:
+    def state(self, instance_id: str) -> dict[str, Any] | None:
+        """Args:
             instance_id: The instance.
 
         Returns:
@@ -111,9 +104,8 @@ class SweBenchRunStore:
         """
         return self._read(self.directory / "instances" / f"{instance_id}.json")
 
-    def write_state(self, instance_id: str, state: Dict[str, Any]) -> None:
-        """
-        Replaces an instance's state.
+    def write_state(self, instance_id: str, state: dict[str, Any]) -> None:
+        """Replaces an instance's state.
 
         Args:
             instance_id: The instance.
@@ -122,10 +114,9 @@ class SweBenchRunStore:
         """
         self._write(self.directory / "instances" / f"{instance_id}.json", state)
 
-    def states(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Returns:
-            Dict[str, Dict[str, Any]]: Every instance state on disk, by instance id.
+    def states(self) -> dict[str, dict[str, Any]]:
+        """Returns:
+        Dict[str, Dict[str, Any]]: Every instance state on disk, by instance id.
         """
         directory = self.directory / "instances"
         if not directory.is_dir():
@@ -137,16 +128,14 @@ class SweBenchRunStore:
                 found[path.stem] = state
         return found
 
-    def finished(self) -> List[str]:
-        """
-        Returns:
-            List[str]: Instances whose prediction is written, in the order they finished.
+    def finished(self) -> list[str]:
+        """Returns:
+        List[str]: Instances whose prediction is written, in the order they finished.
         """
         return [prediction["instance_id"] for prediction in self.predictions()]
 
     def log_path(self, instance_id: str) -> Path:
-        """
-        Args:
+        """Args:
             instance_id: The instance.
 
         Returns:
@@ -154,9 +143,8 @@ class SweBenchRunStore:
         """
         return self.directory / "logs" / f"{instance_id}.jsonl"
 
-    def log_stats(self, instance_id: str, start: int = 0, end: Optional[int] = None) -> Dict[str, int]:
-        """
-        Counts what the agent did, from `ling exec`'s events: its commands and tool calls, how
+    def log_stats(self, instance_id: str, start: int = 0, end: int | None = None) -> dict[str, int]:
+        """Counts what the agent did, from `ling exec`'s events: its commands and tool calls, how
         many of them asked `ling-code` something (as a shell command or as a `code_*` tool),
         and the tokens of every turn.
 
@@ -200,9 +188,8 @@ class SweBenchRunStore:
                     stats[key] += int(usage.get(key) or 0)
         return stats
 
-    def compactions(self, instance_id: str) -> Optional[Dict[str, Any]]:
-        """
-        The compactions of an instance's sessions, from the rollouts kept in its scratch
+    def compactions(self, instance_id: str) -> dict[str, Any] | None:
+        """The compactions of an instance's sessions, from the rollouts kept in its scratch
         `codex-home` (compaction survey 2026-10-13 §1, §3.5): one per `compacted` record. A
         compaction's time is the gap between its record and the last earlier record more than
         2 s before it, which covers the compaction request's prefill and the summary's decode
@@ -220,9 +207,9 @@ class SweBenchRunStore:
         paths = sorted((self.directory / "scratch" / instance_id / "codex-home" / "sessions").rglob("rollout*.jsonl"))
         if not paths:
             return None
-        seconds: List[Optional[float]] = []
+        seconds: list[float | None] = []
         for path in paths:
-            earlier: List[float] = []
+            earlier: list[float] = []
             try:
                 lines = path.read_text(errors="replace").splitlines()
             except OSError:
@@ -235,7 +222,7 @@ class SweBenchRunStore:
                 if not isinstance(record, dict):
                     continue
                 try:
-                    stamp: Optional[float] = datetime.fromisoformat(
+                    stamp: float | None = datetime.fromisoformat(
                         str(record["timestamp"]).replace("Z", "+00:00")).timestamp()
                 except (ValueError, KeyError):
                     stamp = None  # counted, but not timed
@@ -253,11 +240,10 @@ class SweBenchRunStore:
         """The run's predictions file, in the harness's format."""
         return self.directory / "predictions.jsonl"
 
-    def predictions(self) -> List[Dict[str, Any]]:
-        """
-        Returns:
-            List[Dict[str, Any]]: The predictions written so far. A torn last line (the run was
-            killed mid-write) is ignored, so its instance simply runs again.
+    def predictions(self) -> list[dict[str, Any]]:
+        """Returns:
+        List[Dict[str, Any]]: The predictions written so far. A torn last line (the run was
+        killed mid-write) is ignored, so its instance simply runs again.
         """
         try:
             lines = self.predictions_path.read_text().splitlines()
@@ -274,8 +260,7 @@ class SweBenchRunStore:
         return predictions
 
     def append_prediction(self, instance_id: str, model_name: str, patch: str) -> None:
-        """
-        Appends one prediction. An instance whose agent failed or changed nothing is written
+        """Appends one prediction. An instance whose agent failed or changed nothing is written
         with an empty patch, so it is unresolved and never missing from the denominator.
 
         Args:
@@ -301,9 +286,8 @@ class SweBenchRunStore:
     # -- gradings ------------------------------------------------------------------------------
 
     @classmethod
-    def eval_directory_name(cls, variant: Optional[str] = None) -> str:
-        """
-        Args:
+    def eval_directory_name(cls, variant: str | None = None) -> str:
+        """Args:
             variant: A grading series other than the plain one (`drop-test-hunks`), or None.
 
         Returns:
@@ -311,9 +295,8 @@ class SweBenchRunStore:
         """
         return f"eval-{variant}" if variant else "eval"
 
-    def gradings(self, variant: Optional[str] = None) -> List[int]:
-        """
-        Args:
+    def gradings(self, variant: str | None = None) -> list[int]:
+        """Args:
             variant: The grading series; None for the plain one.
 
         Returns:
@@ -325,9 +308,8 @@ class SweBenchRunStore:
         return sorted(int(entry.name) for entry in directory.iterdir()
                       if entry.is_dir() and entry.name.isdigit())
 
-    def grading_dir(self, number: int, variant: Optional[str] = None) -> Path:
-        """
-        Args:
+    def grading_dir(self, number: int, variant: str | None = None) -> Path:
+        """Args:
             number: The grading number.
             variant: The grading series; None for the plain one.
 
@@ -336,9 +318,8 @@ class SweBenchRunStore:
         """
         return self.directory / self.eval_directory_name(variant) / str(number)
 
-    def grading(self, number: int, variant: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Args:
+    def grading(self, number: int, variant: str | None = None) -> dict[str, Any]:
+        """Args:
             number: The grading number.
             variant: The grading series; None for the plain one.
 
@@ -351,19 +332,18 @@ class SweBenchRunStore:
         record.setdefault("results", {})
         return record
 
-    def write_grading(self, number: int, record: Dict[str, Any], variant: Optional[str] = None) -> None:
-        """
-        Args:
-            number: The grading number.
-            record: The grading record, as `grading()` returns it.
-            variant: The grading series; None for the plain one.
+    def write_grading(self, number: int, record: dict[str, Any], variant: str | None = None) -> None:
+        """Args:
+        number: The grading number.
+        record: The grading record, as `grading()` returns it.
+        variant: The grading series; None for the plain one.
         """
         self._write(self.grading_dir(number, variant) / "grading.json", record)
 
     # -- files ---------------------------------------------------------------------------------
 
     @classmethod
-    def _read(cls, path: Path) -> Optional[Dict[str, Any]]:
+    def _read(cls, path: Path) -> dict[str, Any] | None:
         try:
             record = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -371,7 +351,7 @@ class SweBenchRunStore:
         return record if isinstance(record, dict) else None
 
     @classmethod
-    def _write(cls, path: Path, record: Dict[str, Any]) -> None:
+    def _write(cls, path: Path, record: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         staging = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         staging.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")

@@ -1,5 +1,4 @@
-"""
-The best-of-N chooser, version 1 (specs/DREAMFERENCE_BACKLOG.md items 1 and 6).
+"""The best-of-N chooser, version 1 (specs/DREAMFERENCE_BACKLOG.md items 1 and 6).
 
 The one implementation of chooser v1, used by Night Shift's best-of-N (`NightShiftBestOfN`) and by
 the chooser test on disk (`scripts/swe_bench_chooser_test.py`, which imports it), so the chooser a
@@ -20,7 +19,8 @@ import json
 import random
 import re
 import urllib.request
-from typing import Any, Callable, Dict, Final, List, Optional, Sequence, Tuple
+from collections.abc import Callable, Sequence
+from typing import Any, Final
 
 from dreamference.night_shift.chooser_candidate import ChooserCandidate
 
@@ -65,7 +65,7 @@ Rate the correctness of each solution from 1 (wrong) to 10 (certainly correct). 
 RATING_A: <1-10>
 RATING_B: <1-10>"""
 
-Compare = Callable[[ChooserCandidate, ChooserCandidate], Optional[Tuple[float, float]]]
+Compare = Callable[[ChooserCandidate, ChooserCandidate], tuple[float, float] | None]
 
 
 class NightShiftChooser:
@@ -79,17 +79,16 @@ class NightShiftChooser:
         return text[:limit] + f"\n[... cut: {len(text) - limit} more characters]"
 
     @classmethod
-    def ratings(cls, answer: str) -> Optional[Tuple[float, float]]:
+    def ratings(cls, answer: str) -> tuple[float, float] | None:
         """The last `RATING_A` and `RATING_B` of an answer, clamped to 1-10; None when either is missing."""
-        found: Dict[str, float] = {}
+        found: dict[str, float] = {}
         for side, value in RATING.findall(answer):
             found[side] = min(10.0, max(1.0, float(value)))
         return (found["A"], found["B"]) if "A" in found and "B" in found else None
 
     @classmethod
-    def messages(cls, issue: str, a: str, b: str) -> List[Dict[str, str]]:
-        """
-        One judge call's messages.
+    def messages(cls, issue: str, a: str, b: str) -> list[dict[str, str]]:
+        """One judge call's messages.
 
         Args:
             issue: The issue (or the Night Shift task's text).
@@ -105,10 +104,9 @@ class NightShiftChooser:
                     a=cls.clip(a, MAX_PATCH_CHARS), b=cls.clip(b, MAX_PATCH_CHARS))}]
 
     @classmethod
-    def pairings(cls, ids: List[str], scores: Dict[str, float], played: set, counts: Dict[str, int],
-                 rng: random.Random) -> List[Tuple[str, str]]:
-        """
-        The next round of V1's tournament: random disjoint pairs while some candidate has fewer
+    def pairings(cls, ids: list[str], scores: dict[str, float], played: set, counts: dict[str, int],
+                 rng: random.Random) -> list[tuple[str, str]]:
+        """The next round of V1's tournament: random disjoint pairs while some candidate has fewer
         than two comparisons, then a Swiss round (neighbours in score, within a window of 8). A pair
         is never played twice.
 
@@ -144,9 +142,8 @@ class NightShiftChooser:
 
     @classmethod
     def tournament(cls, candidates: Sequence[ChooserCandidate], compare: Compare,
-                   rng: random.Random, swiss_rounds: int = 1) -> Dict[str, float]:
-        """
-        V1's pairwise tournament over the candidates.
+                   rng: random.Random, swiss_rounds: int = 1) -> dict[str, float]:
+        """V1's pairwise tournament over the candidates.
 
         Args:
             candidates: The survivors of the regression filter.
@@ -160,8 +157,8 @@ class NightShiftChooser:
         """
         by_id = {c.id: c for c in candidates}
         ids = sorted(by_id)
-        scores = {i: 0.0 for i in ids}
-        counts = {i: 0 for i in ids}
+        scores = dict.fromkeys(ids, 0.0)
+        counts = dict.fromkeys(ids, 0)
         played: set = set()
         swiss = 0
         while len(ids) > 1:
@@ -190,9 +187,8 @@ class NightShiftChooser:
 
     @classmethod
     def choose(cls, candidates: Sequence[ChooserCandidate], compare: Compare,
-               rng: random.Random, swiss_rounds: int = 1) -> Dict[str, Any]:
-        """
-        The chooser: the regression filter, then the pairwise judge over the survivors. It is given
+               rng: random.Random, swiss_rounds: int = 1) -> dict[str, Any]:
+        """The chooser: the regression filter, then the pairwise judge over the survivors. It is given
         no verdict on the issue.
 
         Returns:
@@ -216,11 +212,10 @@ class NightShiftChooser:
                 "chosen": sorted(i for i, p in points.items() if p == top)}
 
     @classmethod
-    def server_judge(cls, server: str, issue: str, seed: Optional[int] = None,
+    def server_judge(cls, server: str, issue: str, seed: int | None = None,
                      timeout: float = JUDGE_TIMEOUT_S,
-                     log: Optional[List[Dict[str, Any]]] = None) -> Compare:
-        """
-        A judge that asks the model server, as Night Shift runs it.
+                     log: list[dict[str, Any]] | None = None) -> Compare:
+        """A judge that asks the model server, as Night Shift runs it.
 
         The server is the night run's own (loopback or a paired node by name), reached without any
         proxy. A call that fails or cannot be read counts as unreadable (0.5 each at the floor), so
@@ -238,20 +233,20 @@ class NightShiftChooser:
         """
         base = server.rstrip("/").removesuffix("/v1") + "/v1"
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        model: Dict[str, str] = {}
+        model: dict[str, str] = {}
 
-        def request(path: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        def request(path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
             data = None if payload is None else json.dumps(payload).encode()
             req = urllib.request.Request(base + path, data=data, headers={"Content-Type": "application/json"})
             with opener.open(req, timeout=timeout) as response:
                 return json.loads(response.read())
 
-        def compare(a: ChooserCandidate, b: ChooserCandidate) -> Optional[Tuple[float, float]]:
-            record: Dict[str, Any] = {"a": a.id, "b": b.id}
+        def compare(a: ChooserCandidate, b: ChooserCandidate) -> tuple[float, float] | None:
+            record: dict[str, Any] = {"a": a.id, "b": b.id}
             try:
                 if "id" not in model:
                     model["id"] = str(((request("/models").get("data") or [{}])[0]).get("id") or "")
-                payload: Dict[str, Any] = {"model": model["id"], "max_tokens": JUDGE_MAX_TOKENS,
+                payload: dict[str, Any] = {"model": model["id"], "max_tokens": JUDGE_MAX_TOKENS,
                                            "temperature": JUDGE_TEMPERATURE, "top_p": JUDGE_TOP_P,
                                            "messages": cls.messages(issue, a.patch, b.patch)}
                 if seed is not None:

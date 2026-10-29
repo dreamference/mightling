@@ -1,5 +1,4 @@
-"""
-The services around the agent that are not the agent: the desktop app, the sidecars and the
+"""The services around the agent that are not the agent: the desktop app, the sidecars and the
 Google service.
 
 The desktop app is a window onto `ling app-server` (`desktop_installer`, `desktop_runner`).

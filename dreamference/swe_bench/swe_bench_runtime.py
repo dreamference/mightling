@@ -1,5 +1,4 @@
-"""
-A copy of `ling` that starts inside a SWE-bench instance image
+"""A copy of `ling` that starts inside a SWE-bench instance image
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §12).
 
 The installed binary is linked against this machine's C library (glibc 2.39 on the GB10); the
@@ -22,7 +21,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Final, List, Optional
+from typing import Final
 
 from dreamference.runner.codex_branded_builder import CODE_MODE_HOST_NAME, CodexBrandedBuilder
 from dreamference.swe_bench import swe_bench_settings
@@ -45,16 +44,14 @@ class SweBenchRuntime:
 
     @classmethod
     def directory(cls) -> Path:
-        """
-        Returns:
-            Path: The runtime directory under the benchmark's cache.
+        """Returns:
+        Path: The runtime directory under the benchmark's cache.
         """
         return swe_bench_settings.CACHE_DIR / "runtime"
 
     @classmethod
     def source_hash(cls, mightling_bin: str) -> str:
-        """
-        Identifies the installed binaries the runtime is copied from.
+        """Identifies the installed binaries the runtime is copied from.
 
         Args:
             mightling_bin: The installed `ling` executable.
@@ -70,10 +67,9 @@ class SweBenchRuntime:
         return digest.hexdigest()
 
     @classmethod
-    def current_hash(cls) -> Optional[str]:
-        """
-        Returns:
-            Optional[str]: The source hash the existing runtime was built from, if there is one.
+    def current_hash(cls) -> str | None:
+        """Returns:
+        Optional[str]: The source hash the existing runtime was built from, if there is one.
         """
         try:
             return (cls.directory() / STAMP_NAME).read_text().strip() or None
@@ -81,9 +77,8 @@ class SweBenchRuntime:
             return None
 
     @classmethod
-    def ensure(cls, mightling_bin: str, patchelf: str) -> Optional[str]:
-        """
-        Builds the runtime unless the one on disk was made from the installed binaries.
+    def ensure(cls, mightling_bin: str, patchelf: str) -> str | None:
+        """Builds the runtime unless the one on disk was made from the installed binaries.
 
         Args:
             mightling_bin: The installed `ling` executable.
@@ -122,8 +117,7 @@ class SweBenchRuntime:
 
     @classmethod
     def host_libraries(cls, mightling_bin: str) -> tuple:
-        """
-        Finds the loader and libraries the installed binary is linked against, from `ldd`.
+        """Finds the loader and libraries the installed binary is linked against, from `ldd`.
 
         Args:
             mightling_bin: The installed `ling` executable.
@@ -136,9 +130,9 @@ class SweBenchRuntime:
                 dependency is noticed instead of silently missing in the container.
         """
         output = subprocess.run(["ldd", mightling_bin], capture_output=True, text=True, check=True).stdout
-        loader: Optional[str] = None
-        names: List[str] = []
-        libraries: List[str] = []
+        loader: str | None = None
+        names: list[str] = []
+        libraries: list[str] = []
         for line in output.splitlines():
             words = line.split()
             if not words or words[0].startswith("linux-vdso"):
@@ -156,15 +150,14 @@ class SweBenchRuntime:
         return loader, libraries
 
     @classmethod
-    def _binaries(cls, mightling_bin: str) -> List[str]:
+    def _binaries(cls, mightling_bin: str) -> list[str]:
         host = os.path.join(os.path.dirname(os.path.realpath(mightling_bin)), CODE_MODE_HOST_NAME)
         return [os.path.realpath(mightling_bin)] + ([host] if os.path.exists(host) else [])
 
     @classmethod
-    def installed_mightling(cls) -> Optional[str]:
-        """
-        Returns:
-            Optional[str]: The installed branded `ling`, or None if it has not been built.
+    def installed_mightling(cls) -> str | None:
+        """Returns:
+        Optional[str]: The installed branded `ling`, or None if it has not been built.
         """
         path = CodexBrandedBuilder.executable_path()
         return path if os.path.exists(path) else None

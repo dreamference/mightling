@@ -1,5 +1,4 @@
-"""
-The Docker network Dreamference's own sidecars are created on, and the check for a container that
+"""The Docker network Dreamference's own sidecars are created on, and the check for a container that
 was not created on one.
 
 A container's DNS setup is decided by the network it is *created* on, and attaching it to another
@@ -34,8 +33,7 @@ class SidecarNetwork:
 
     @classmethod
     def ensure(cls) -> bool:
-        """
-        Creates the sidecar network unless it exists.
+        """Creates the sidecar network unless it exists.
 
         Returns:
             bool: True if the network exists once this returns.
@@ -55,8 +53,7 @@ class SidecarNetwork:
 
     @classmethod
     def network_mode(cls, container: str) -> str:
-        """
-        Reports the network a container was created on.
+        """Reports the network a container was created on.
 
         Args:
             container: The container's name.
@@ -72,8 +69,7 @@ class SidecarNetwork:
 
     @classmethod
     def created_on_default_bridge(cls, container: str) -> bool:
-        """
-        Tells whether a container exists and was created on Docker's default bridge, where its
+        """Tells whether a container exists and was created on Docker's default bridge, where its
         DNS servers are a copy taken at start.
 
         Args:

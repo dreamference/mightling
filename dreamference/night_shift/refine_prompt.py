@@ -1,5 +1,4 @@
-"""
-The texts of refine mode (specs/DREAMFERENCE_MIGHTLING_REFINE.md): a first session studies a task and
+"""The texts of refine mode (specs/DREAMFERENCE_MIGHTLING_REFINE.md): a first session studies a task and
 writes a refined description without changing anything, then a fresh session does the task with
 that description.
 
@@ -16,7 +15,7 @@ in the study's six sections and the fix rules only, and is chosen by `mightling_
 """
 
 import re
-from typing import Dict, Final
+from typing import Final
 
 STUDY_INTRO: Final[str] = """This is the first of two steps. Do not fix anything yet: study the {subject} below and write a precise
 description of the problem for the second step, which will make the fix."""
@@ -113,7 +112,7 @@ FIX_TEMPLATE: Final[str] = """{rules}
 {refined}"""
 
 # The pieces by their marker names in ling-rs/prompts/refine.md.
-PIECES: Final[Dict[str, str]] = {
+PIECES: Final[dict[str, str]] = {
     "study-intro": STUDY_INTRO,
     "study-sections": STUDY_SECTIONS,
     "study-sections-v2": STUDY_SECTIONS_V2,
@@ -131,7 +130,7 @@ NIGHT_WRITES: Final[str] = "every change there is discarded when this step ends.
 
 # The versions of the texts, by the name the settings use: v1 is the measured one, whose SWE-bench
 # prompts are pinned; v2 differs in the study's sections and the fix rules only.
-VERSIONS: Final[Dict[str, Dict[str, str]]] = {
+VERSIONS: Final[dict[str, dict[str, str]]] = {
     "v1": {"sections": STUDY_SECTIONS, "rules": FIX_RULES},
     "v2": {"sections": STUDY_SECTIONS_V2, "rules": FIX_RULES_V2},
 }
@@ -144,8 +143,7 @@ class RefinePrompt:
 
     @classmethod
     def subject(cls, piece: str, subject: str) -> str:
-        """
-        Fills a piece's `{subject}`.
+        """Fills a piece's `{subject}`.
 
         Args:
             piece: One of the pieces above.
@@ -157,9 +155,8 @@ class RefinePrompt:
         return piece.replace("{subject}", subject)
 
     @classmethod
-    def pieces_of(cls, version: str) -> Dict[str, str]:
-        """
-        Args:
+    def pieces_of(cls, version: str) -> dict[str, str]:
+        """Args:
             version: A key of `VERSIONS`.
 
         Returns:
@@ -175,8 +172,7 @@ class RefinePrompt:
     @classmethod
     def compose_study(cls, task: str, writes: str, code_index: bool = False, subject: str = "task",
                       version: str = "v1") -> str:
-        """
-        Builds the product's study prompt.
+        """Builds the product's study prompt.
 
         Args:
             task: The task, verbatim.
@@ -198,8 +194,7 @@ class RefinePrompt:
 
     @classmethod
     def fix_block(cls, refined: str, subject: str = "task", version: str = "v1") -> str:
-        """
-        Builds what the second step is given after the task: the rules, then the description.
+        """Builds what the second step is given after the task: the rules, then the description.
 
         Args:
             refined: The first step's description; empty when it wrote none.
@@ -216,8 +211,7 @@ class RefinePrompt:
 
     @classmethod
     def compose_fix(cls, task_prompt: str, refined: str, subject: str = "task", version: str = "v1") -> str:
-        """
-        Builds the product's second prompt: the task as it would have been given, then the block.
+        """Builds the product's second prompt: the task as it would have been given, then the block.
 
         Args:
             task_prompt: The prompt the task gets without refine mode.
@@ -231,9 +225,8 @@ class RefinePrompt:
         return f"{task_prompt}\n\n{cls.fix_block(refined, subject, version)}"
 
     @classmethod
-    def parse_pieces(cls, text: str) -> Dict[str, str]:
-        """
-        Reads the pieces of `ling-rs/prompts/refine.md`, as the launcher does.
+    def parse_pieces(cls, text: str) -> dict[str, str]:
+        """Reads the pieces of `ling-rs/prompts/refine.md`, as the launcher does.
 
         Args:
             text: The file's contents.
@@ -241,7 +234,7 @@ class RefinePrompt:
         Returns:
             Dict[str, str]: Each marker's piece: the lines between it and the next marker.
         """
-        pieces: Dict[str, str] = {}
+        pieces: dict[str, str] = {}
         name = None
         lines: list = []
         for line in text.split("\n"):

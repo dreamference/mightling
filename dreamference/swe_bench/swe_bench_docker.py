@@ -1,5 +1,4 @@
-"""
-The one place `ling-admin swe-bench` runs `docker` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
+"""The one place `ling-admin swe-bench` runs `docker` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
 
 Every container, image and network command of the benchmark goes through `SweBenchDocker.run`
 or `SweBenchDocker.popen`, so the test suite replaces two methods and nothing in it can start a
@@ -8,7 +7,7 @@ container, pull an image or reach the network.
 
 import json
 import subprocess
-from typing import IO, Any, Dict, Final, List, Optional
+from typing import IO, Any, Final
 
 # The variable `image_path` reads from an image's configuration.
 PATH_VARIABLE: Final[str] = "PATH"
@@ -18,10 +17,9 @@ class SweBenchDocker:
     """Thin wrappers over the `docker` command line."""
 
     @classmethod
-    def run(cls, args: List[str], timeout: Optional[float] = None,
-            input_text: Optional[str] = None) -> subprocess.CompletedProcess:
-        """
-        Runs `docker <args>` to completion.
+    def run(cls, args: list[str], timeout: float | None = None,
+            input_text: str | None = None) -> subprocess.CompletedProcess:
+        """Runs `docker <args>` to completion.
 
         Args:
             args: The arguments after `docker`.
@@ -41,9 +39,8 @@ class SweBenchDocker:
             return subprocess.CompletedProcess(["docker", *args], 127, "", str(error))
 
     @classmethod
-    def popen(cls, args: List[str], stdout: IO[Any]) -> subprocess.Popen:
-        """
-        Starts `docker <args>` and returns at once, for the agent's long `docker exec`.
+    def popen(cls, args: list[str], stdout: IO[Any]) -> subprocess.Popen:
+        """Starts `docker <args>` and returns at once, for the agent's long `docker exec`.
 
         Args:
             args: The arguments after `docker`.
@@ -56,9 +53,8 @@ class SweBenchDocker:
                                 stderr=subprocess.STDOUT, start_new_session=True)
 
     @classmethod
-    def image_digest(cls, image: str) -> Optional[str]:
-        """
-        Identifies a local image.
+    def image_digest(cls, image: str) -> str | None:
+        """Identifies a local image.
 
         Args:
             image: The image reference.
@@ -101,9 +97,8 @@ class SweBenchDocker:
         return None
 
     @classmethod
-    def ensure_image(cls, image: str) -> Optional[str]:
-        """
-        Makes an image present locally, pulling it if needed.
+    def ensure_image(cls, image: str) -> str | None:
+        """Makes an image present locally, pulling it if needed.
 
         Args:
             image: The image reference.
@@ -119,9 +114,8 @@ class SweBenchDocker:
         return cls.image_digest(image)
 
     @classmethod
-    def ensure_network(cls, name: str) -> Optional[str]:
-        """
-        Creates the internal network if it does not exist, and finds its gateway.
+    def ensure_network(cls, name: str) -> str | None:
+        """Creates the internal network if it does not exist, and finds its gateway.
 
         Args:
             name: The network's name.
@@ -143,9 +137,8 @@ class SweBenchDocker:
         return None
 
     @classmethod
-    def subnet(cls, name: str) -> Optional[str]:
-        """
-        The internal network's subnet: every instance container's address is in it, which is
+    def subnet(cls, name: str) -> str | None:
+        """The internal network's subnet: every instance container's address is in it, which is
         how the model gate tells the run's requests from everyone else's.
 
         Args:
@@ -161,9 +154,8 @@ class SweBenchDocker:
         return None
 
     @classmethod
-    def network(cls, name: str) -> Optional[Dict[str, Any]]:
-        """
-        Describes a network.
+    def network(cls, name: str) -> dict[str, Any] | None:
+        """Describes a network.
 
         Args:
             name: The network's name.

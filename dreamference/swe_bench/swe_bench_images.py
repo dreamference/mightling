@@ -1,5 +1,4 @@
-"""
-Instance images for this machine's architecture, and the list of instances that are known to
+"""Instance images for this machine's architecture, and the list of instances that are known to
 grade correctly in them (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5.3, §12).
 
 On arm64 Verified's images come from the community repository `greynewell/swe-bench-arm64`, whose
@@ -14,8 +13,9 @@ import json
 import os
 import time
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
@@ -31,9 +31,10 @@ class SweBenchImages:
     """Resolves, pulls and removes instance images, and keeps the validated list."""
 
     @classmethod
-    def _fetch_tags(cls) -> List[str]:
+    def _fetch_tags(cls) -> list[str]:
         """Lists every tag of the community repository through the registry's own API (Docker
-        Hub's web API stops anonymous paging at 1,000 tags; the repository has 1,721)."""
+        Hub's web API stops anonymous paging at 1,000 tags; the repository has 1,721).
+        """
         repo = swe_bench_settings.COMMUNITY_IMAGE_REPO
         with urllib.request.urlopen(
                 f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull",
@@ -45,20 +46,18 @@ class SweBenchImages:
             return list(json.load(response)["tags"])
 
     # Seam: tests replace it so nothing in the suite reaches the network.
-    fetch_tags: Callable[[], List[str]] = _fetch_tags
+    fetch_tags: Callable[[], list[str]] = _fetch_tags
 
     @classmethod
     def tags_path(cls) -> Path:
-        """
-        Returns:
-            Path: The cached tag list.
+        """Returns:
+        Path: The cached tag list.
         """
         return swe_bench_settings.CACHE_DIR / "community-tags.json"
 
     @classmethod
-    def tags(cls, refresh: bool = False) -> List[str]:
-        """
-        Returns the community repository's tags, from the cache when it is fresh.
+    def tags(cls, refresh: bool = False) -> list[str]:
+        """Returns the community repository's tags, from the cache when it is fresh.
 
         Args:
             refresh: Fetch the list again even if the cached one is fresh.
@@ -68,7 +67,7 @@ class SweBenchImages:
             empty list when there is none.
         """
         path = cls.tags_path()
-        cached: List[str] = []
+        cached: list[str] = []
         try:
             record = json.loads(path.read_text())
             cached = list(record["tags"])
@@ -88,10 +87,9 @@ class SweBenchImages:
 
     @classmethod
     def image_for(
-        cls, instance_id: str, tags: Optional[List[str]] = None, built: list[str] | None = None
-    ) -> Optional[str]:
-        """
-        Names the image an instance runs in on this machine.
+        cls, instance_id: str, tags: list[str] | None = None, built: list[str] | None = None
+    ) -> str | None:
+        """Names the image an instance runs in on this machine.
 
         The community image when there is one, else an image built here.
 
@@ -150,34 +148,30 @@ class SweBenchImages:
 
     @classmethod
     def validated_path(cls) -> Path:
-        """
-        Returns:
-            Path: `validated-<arch>.json` in the cache.
+        """Returns:
+        Path: `validated-<arch>.json` in the cache.
         """
         architecture = swe_bench_settings.SweBenchSettings.architecture()
         return swe_bench_settings.CACHE_DIR / f"validated-{architecture}.json"
 
     @classmethod
-    def validated(cls) -> Dict[str, Dict[str, Any]]:
-        """
-        Returns:
-            Dict[str, Dict[str, Any]]: Validated instance id to `{image, digest, source, at}`.
+    def validated(cls) -> dict[str, dict[str, Any]]:
+        """Returns:
+        Dict[str, Dict[str, Any]]: Validated instance id to `{image, digest, source, at}`.
         """
         return cls._read_validated().get("instances", {})
 
     @classmethod
-    def rejected(cls) -> Dict[str, str]:
-        """
-        Returns:
-            Dict[str, str]: Instances that failed validation here, with the reason.
+    def rejected(cls) -> dict[str, str]:
+        """Returns:
+        Dict[str, str]: Instances that failed validation here, with the reason.
         """
         return cls._read_validated().get("rejected", {})
 
     @classmethod
-    def record_validation(cls, instance_id: str, image: Optional[str], digest: Optional[str],
-                          problem: Optional[str]) -> None:
-        """
-        Records one instance's validation result, replacing an earlier one.
+    def record_validation(cls, instance_id: str, image: str | None, digest: str | None,
+                          problem: str | None) -> None:
+        """Records one instance's validation result, replacing an earlier one.
 
         Args:
             instance_id: The instance.
@@ -204,7 +198,7 @@ class SweBenchImages:
         os.replace(staging, path)
 
     @classmethod
-    def _read_validated(cls) -> Dict[str, Any]:
+    def _read_validated(cls) -> dict[str, Any]:
         try:
             record = json.loads(cls.validated_path().read_text())
         except (OSError, ValueError):
@@ -214,10 +208,9 @@ class SweBenchImages:
     # -- disk ----------------------------------------------------------------------------------
 
     @classmethod
-    def local_images(cls) -> List[Dict[str, str]]:
-        """
-        Returns:
-            List[Dict[str, str]]: The benchmark's images present locally, as `{image, size}`.
+    def local_images(cls) -> list[dict[str, str]]:
+        """Returns:
+        List[Dict[str, str]]: The benchmark's images present locally, as `{image, size}`.
         """
         result = SweBenchDocker.run(["images", swe_bench_settings.COMMUNITY_IMAGE_REPO,
                                      "--format", "{{.Repository}}:{{.Tag}}\t{{.Size}}"], timeout=60)
@@ -229,9 +222,8 @@ class SweBenchImages:
         return images
 
     @classmethod
-    def remove(cls, images: List[str]) -> int:
-        """
-        Removes instance images.
+    def remove(cls, images: list[str]) -> int:
+        """Removes instance images.
 
         Layers shared with images that stay are kept by Docker. Images built here are kept:
         nothing pulls them back, and building one again takes up to an hour (`docker rmi`

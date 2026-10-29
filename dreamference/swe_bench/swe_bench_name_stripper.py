@@ -1,5 +1,4 @@
-"""
-Issue text with the fix's names taken out: `swe-bench run --strip-names`.
+"""Issue text with the fix's names taken out: `swe-bench run --strip-names`.
 
 Most SWE-bench issues point at the code they are about: of the 24 instances the index arms ran,
 13 name the file the fix is in and 9 a function or class it touches, so an agent finds the place
@@ -25,7 +24,7 @@ depend on the list of the machine that reads the report.
 import os
 import re
 from pathlib import PurePosixPath
-from typing import Dict, Final, FrozenSet, List, Optional, Tuple
+from typing import Final
 
 # The phrase a name is replaced with, by kind: `[file 1]`, `[module 1]`, `[class 1]`, `[function 1]`.
 # A file and its module share a number: `[file 2]` and `[module 2]` are the same file.
@@ -47,14 +46,13 @@ class SweBenchNameStripper:
     """Derives a gold patch's names and takes them out of an issue's text."""
 
     # The words of `WORD_LIST`, read once; the tests replace it.
-    _english: Optional[FrozenSet[str]] = None
+    _english: frozenset[str] | None = None
 
     @classmethod
-    def english(cls) -> FrozenSet[str]:
-        """
-        Returns:
-            FrozenSet[str]: The lowercase words of the system word list; empty when there is none,
-            which `is_english` reads as "every word is English".
+    def english(cls) -> frozenset[str]:
+        """Returns:
+        FrozenSet[str]: The lowercase words of the system word list; empty when there is none,
+        which `is_english` reads as "every word is English".
         """
         if cls._english is None:
             words: set = set()
@@ -66,8 +64,7 @@ class SweBenchNameStripper:
 
     @classmethod
     def is_english(cls, word: str) -> bool:
-        """
-        Args:
+        """Args:
             word: A plain name, letters only.
 
         Returns:
@@ -77,9 +74,8 @@ class SweBenchNameStripper:
         return not words or word.lower() in words
 
     @classmethod
-    def names(cls, patch: str) -> List[Tuple[str, str, str]]:
-        """
-        The names a gold patch reveals, longest first so a path is replaced before its parts.
+    def names(cls, patch: str) -> list[tuple[str, str, str]]:
+        """The names a gold patch reveals, longest first so a path is replaced before its parts.
 
         Args:
             patch: The instance's gold `patch` (a unified diff of source files only).
@@ -90,7 +86,7 @@ class SweBenchNameStripper:
             shorter tail of it, its file name, its module) shares the file's path as its group,
             so they get one number; a function or class is its own group.
         """
-        found: Dict[str, Tuple[str, str]] = {}
+        found: dict[str, tuple[str, str]] = {}
         for path in DIFF_FILE.findall(patch or ""):
             pure = PurePosixPath(path)
             parts = pure.parts
@@ -119,8 +115,7 @@ class SweBenchNameStripper:
 
     @classmethod
     def distinctive(cls, name: str) -> bool:
-        """
-        Whether a name can only be code: it has an underscore, a dot, a slash, a digit, or a capital
+        """Whether a name can only be code: it has an underscore, a dot, a slash, a digit, or a capital
         after its first letter (`get_meta`, `QuerySet`, `sql/compiler.py`).
 
         Args:
@@ -133,8 +128,7 @@ class SweBenchNameStripper:
 
     @classmethod
     def pattern(cls, name: str) -> "re.Pattern[str]":
-        """
-        The pattern a name is found by in issue text.
+        """The pattern a name is found by in issue text.
 
         Args:
             name: The name.
@@ -157,9 +151,8 @@ class SweBenchNameStripper:
                           rf"|(?<![\w]){escaped}(?=\(|`|\.py\b))")
 
     @classmethod
-    def strip(cls, problem_statement: str, patch: str) -> Tuple[str, Dict[str, str]]:
-        """
-        Takes the gold patch's names out of an issue's text.
+    def strip(cls, problem_statement: str, patch: str) -> tuple[str, dict[str, str]]:
+        """Takes the gold patch's names out of an issue's text.
 
         Args:
             problem_statement: The issue as the dataset gives it.
@@ -170,9 +163,9 @@ class SweBenchNameStripper:
             mapped to the phrase that replaced it (empty when the issue named none of them).
         """
         text = problem_statement or ""
-        numbers: Dict[str, int] = {}
-        counters: Dict[str, int] = {}
-        replaced: Dict[str, str] = {}
+        numbers: dict[str, int] = {}
+        counters: dict[str, int] = {}
+        replaced: dict[str, str] = {}
         for name, kind, group in cls.names(patch):
             pattern = cls.pattern(name)
             if not pattern.search(text):

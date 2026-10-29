@@ -1,5 +1,4 @@
-"""
-The upstream SWE-bench harness, in a virtualenv of its own
+"""The upstream SWE-bench harness, in a virtualenv of its own
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §6.1, §12).
 
 Grading is always the harness's: this module installs it, hands it a dataset file and a
@@ -20,8 +19,9 @@ import shlex
 import subprocess
 import sys
 import threading
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Callable, Dict, Final, Iterable, List, Optional
+from typing import Any, Final
 
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
@@ -76,16 +76,14 @@ class SweBenchHarness:
 
     @classmethod
     def venv_dir(cls) -> Path:
-        """
-        Returns:
-            Path: The harness's virtualenv.
+        """Returns:
+        Path: The harness's virtualenv.
         """
         return swe_bench_settings.CACHE_DIR / "venv"
 
     @classmethod
     def tool(cls, name: str) -> str:
-        """
-        Args:
+        """Args:
             name: An executable of the virtualenv (`swebench`, `python`, `patchelf`).
 
         Returns:
@@ -94,10 +92,9 @@ class SweBenchHarness:
         return str(cls.venv_dir() / "bin" / name)
 
     @classmethod
-    def installed_version(cls) -> Optional[str]:
-        """
-        Returns:
-            Optional[str]: The installed harness version, or None when there is no virtualenv.
+    def installed_version(cls) -> str | None:
+        """Returns:
+        Optional[str]: The installed harness version, or None when there is no virtualenv.
         """
         if not os.path.exists(cls.tool("python")):
             return None
@@ -107,8 +104,7 @@ class SweBenchHarness:
 
     @classmethod
     def install(cls) -> bool:
-        """
-        Creates the virtualenv and installs the pinned harness and `patchelf` into it. The
+        """Creates the virtualenv and installs the pinned harness and `patchelf` into it. The
         project's own `.venv` is not touched.
 
         Returns:
@@ -134,8 +130,7 @@ class SweBenchHarness:
 
     @classmethod
     def snapshot_path(cls, dataset: str) -> Path:
-        """
-        Args:
+        """Args:
             dataset: A dataset name or id.
 
         Returns:
@@ -145,9 +140,8 @@ class SweBenchHarness:
         return swe_bench_settings.CACHE_DIR / "datasets" / f"{name}.jsonl"
 
     @classmethod
-    def download_dataset(cls, dataset: str, force: bool = False) -> Optional[Dict[str, Any]]:
-        """
-        Downloads a dataset's `test` split once and keeps it as a local file, so `run` and
+    def download_dataset(cls, dataset: str, force: bool = False) -> dict[str, Any] | None:
+        """Downloads a dataset's `test` split once and keeps it as a local file, so `run` and
         `eval` need no network and every run sees the same rows. A dataset pinned in
         `DATASET_REVISIONS` is fetched at that revision.
 
@@ -185,9 +179,8 @@ class SweBenchHarness:
         return meta
 
     @classmethod
-    def dataset_meta(cls, dataset: str) -> Dict[str, Any]:
-        """
-        Args:
+    def dataset_meta(cls, dataset: str) -> dict[str, Any]:
+        """Args:
             dataset: A dataset name or id.
 
         Returns:
@@ -199,9 +192,8 @@ class SweBenchHarness:
             return {}
 
     @classmethod
-    def rows(cls, dataset: str) -> List[Dict[str, Any]]:
-        """
-        Reads the local snapshot.
+    def rows(cls, dataset: str) -> list[dict[str, Any]]:
+        """Reads the local snapshot.
 
         Args:
             dataset: A dataset name or id.
@@ -216,10 +208,9 @@ class SweBenchHarness:
         return [json.loads(line) for line in text.splitlines() if line.strip()]
 
     @classmethod
-    def write_dataset_file(cls, path: Path, rows: Iterable[Dict[str, Any]],
-                           images: Dict[str, str]) -> List[str]:
-        """
-        Writes the dataset file one harness call grades against: the given rows, each with its
+    def write_dataset_file(cls, path: Path, rows: Iterable[dict[str, Any]],
+                           images: dict[str, str]) -> list[str]:
+        """Writes the dataset file one harness call grades against: the given rows, each with its
         `image` replaced by the image this machine runs and its `eval_script`'s test-file reset
         made per file (`per_file_reset`).
 
@@ -247,8 +238,7 @@ class SweBenchHarness:
 
     @classmethod
     def per_file_reset(cls, eval_script: str, base_commit: str) -> str:
-        """
-        Makes the eval script's test-file reset survive a test patch that creates a file.
+        """Makes the eval script's test-file reset survive a test patch that creates a file.
 
         The upstream script resets the test patch's files with one command,
         `git checkout <base> <file>…`, before applying the test patch and again after the tests.
@@ -284,11 +274,10 @@ class SweBenchHarness:
     # -- grading -------------------------------------------------------------------------------
 
     @classmethod
-    def evaluate(cls, work_dir: Path, dataset_file: Path, run_id: str, instance_ids: List[str],
-                 predictions: Optional[Path], workers: int, timeout_s: int,
-                 memory: Optional[str] = None) -> bool:
-        """
-        Calls `swebench eval` in `work_dir`, where it leaves `logs/run_evaluation/<run_id>/`.
+    def evaluate(cls, work_dir: Path, dataset_file: Path, run_id: str, instance_ids: list[str],
+                 predictions: Path | None, workers: int, timeout_s: int,
+                 memory: str | None = None) -> bool:
+        """Calls `swebench eval` in `work_dir`, where it leaves `logs/run_evaluation/<run_id>/`.
 
         Args:
             work_dir: The directory the harness runs in.
@@ -329,8 +318,7 @@ class SweBenchHarness:
 
     @classmethod
     def _cap_containers(cls, run_id: str, memory: str, stop: threading.Event) -> None:
-        """
-        Puts a memory limit on the harness's containers, which it creates with none. They belong
+        """Puts a memory limit on the harness's containers, which it creates with none. They belong
         to dockerd's cgroup, so a systemd scope around the harness would not reach them.
         """
         capped: set = set()
@@ -343,9 +331,8 @@ class SweBenchHarness:
 
     @classmethod
     def instance_report(cls, work_dir: Path, run_id: str, model_name: str,
-                        instance_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Reads one instance's verdict from the harness's logs.
+                        instance_id: str) -> dict[str, Any] | None:
+        """Reads one instance's verdict from the harness's logs.
 
         Args:
             work_dir: The directory the harness ran in.
@@ -368,8 +355,7 @@ class SweBenchHarness:
 
     @classmethod
     def test_patch_failed(cls, work_dir: Path, run_id: str, model_name: str, instance_id: str) -> bool:
-        """
-        Tells whether the instance's test patch failed to apply on top of the model's, the case
+        """Tells whether the instance's test patch failed to apply on top of the model's, the case
         §5.1 keeps visible instead of stripping test files from the model's patch.
 
         `git apply` words its refusals in several ways (`patch does not apply`, `already exists in
@@ -391,8 +377,7 @@ class SweBenchHarness:
 
     @classmethod
     def test_patch_rejected(cls, text: str) -> bool:
-        """
-        Reads an eval script's output for a rejected test patch.
+        """Reads an eval script's output for a rejected test patch.
 
         Args:
             text: The harness's `test_output.txt`.

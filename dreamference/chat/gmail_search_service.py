@@ -1,5 +1,4 @@
-"""
-The Google service: Gmail, Drive and Calendar for Mightling's apps and `ling-admin gmail`.
+"""The Google service: Gmail, Drive and Calendar for Mightling's apps and `ling-admin gmail`.
 
 This module provides the GmailSearchService class, an HTTP service that turns a Gmail mailbox into
 the two operations an assistant needs (Drive and Calendar are `google_workspace_reader.py`). The
@@ -47,7 +46,6 @@ mail.
 import base64
 import email
 import email.header
-import email.utils
 import hashlib
 import hmac
 import html
@@ -61,12 +59,16 @@ import urllib.parse
 import urllib.request
 from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, Final, List, Optional, Tuple
+from typing import Any, Final
 
 # Drive and Calendar for Mightling's apps. In the container this file runs as /config/service.py with
 # the reader staged beside it, so the plain import is the one that works there.
 try:
-    from dreamference.chat.google_workspace_reader import CALENDAR_SCOPE, DRIVE_SCOPE, GoogleWorkspaceReader
+    from dreamference.chat.google_workspace_reader import (
+        CALENDAR_SCOPE,
+        DRIVE_SCOPE,
+        GoogleWorkspaceReader,
+    )
 except ImportError:  # pragma: no cover - the container's layout
     from google_workspace_reader import CALENDAR_SCOPE, DRIVE_SCOPE, GoogleWorkspaceReader  # type: ignore
 
@@ -110,7 +112,7 @@ TOKEN_LIFETIME_SECONDS: Final[int] = 3599
 MISSING_APP_SCOPE: Final[str] = (
     "Google did not grant {app} access for {email}. Connect it again and leave the {app} box ticked."
 )
-OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
+OAUTH_STATES: dict[str, dict[str, Any]] = {}
 
 
 # Written by the host so the setup page can say what GNOME is holding. The service cannot look for
@@ -209,16 +211,14 @@ PAGE_STYLE: Final[str] = (
 
 
 class GmailSearchService:
-    """
-    Serves Gmail search and message retrieval over HTTP for Mightling's apps.
+    """Serves Gmail search and message retrieval over HTTP for Mightling's apps.
     """
 
     # ------------------------------------------------------------------ storage
 
     @classmethod
-    def _key(cls, directory: Optional[str] = None) -> bytes:
-        """
-        Returns the sealing key, creating it on first use.
+    def _key(cls, directory: str | None = None) -> bytes:
+        """Returns the sealing key, creating it on first use.
 
         Args:
             directory (Optional[str]): Credentials directory; the mounted one by default.
@@ -242,8 +242,7 @@ class GmailSearchService:
 
     @classmethod
     def _keystream(cls, key: bytes, nonce: bytes, length: int) -> bytes:
-        """
-        Expands the key into `length` bytes, HMAC-SHA256 in counter mode.
+        """Expands the key into `length` bytes, HMAC-SHA256 in counter mode.
 
         Args:
             key (bytes): The sealing key.
@@ -261,9 +260,8 @@ class GmailSearchService:
         return out[:length]
 
     @classmethod
-    def _seal(cls, plaintext: str, directory: Optional[str] = None) -> str:
-        """
-        Encrypts the access token for storage, encrypt-then-MAC.
+    def _seal(cls, plaintext: str, directory: str | None = None) -> str:
+        """Encrypts the access token for storage, encrypt-then-MAC.
 
         **This is obfuscation with a clear threat model, and it is worth being precise about what
         it buys.** The key sits in the same directory as the ciphertext, because the service is
@@ -288,9 +286,8 @@ class GmailSearchService:
         return base64.b64encode(nonce + tag + cipher).decode("ascii")
 
     @classmethod
-    def _unseal(cls, blob: str, directory: Optional[str] = None) -> Optional[str]:
-        """
-        Recovers a sealed token, or None if it does not authenticate.
+    def _unseal(cls, blob: str, directory: str | None = None) -> str | None:
+        """Recovers a sealed token, or None if it does not authenticate.
 
         Args:
             blob (str): The value `_seal` produced.
@@ -318,7 +315,7 @@ class GmailSearchService:
             return None
 
     @classmethod
-    def _raw(cls, directory: Optional[str] = None) -> Dict[str, Any]:
+    def _raw(cls, directory: str | None = None) -> dict[str, Any]:
         """Reads credentials file. Migrates old single-account format if needed."""
         try:
             with open(os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)) as handle:
@@ -335,21 +332,24 @@ class GmailSearchService:
         return stored
 
     @classmethod
-    def credentials(cls, directory: Optional[str] = None) -> List[Dict[str, str]]:
+    def credentials(cls, directory: str | None = None) -> list[dict[str, str]]:
         """Returns all valid valid accounts."""
-        import json, time, urllib.request, urllib.parse
+        import json
+        import time
+        import urllib.parse
+        import urllib.request
         stored = cls._raw(directory)
         valid = []
         for address, acc in stored.get("accounts", {}).items():
             sealed = acc.get("access_token")
             if not sealed: continue
-            
+
             if float(acc.get("expires_at", 0)) - time.time() < 60:
                 sealed_refresh = acc.get("refresh_token")
                 if not sealed_refresh: continue
                 refresh = cls._unseal(sealed_refresh, directory)
                 if not refresh: continue
-                
+
                 req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
                     "client_id": GOOGLE_OAUTH_CLIENT_ID,
                     "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
@@ -373,8 +373,9 @@ class GmailSearchService:
 
 
     @classmethod
-    def delete_token(cls, address: str, directory: Optional[str] = None) -> bool:
-        import os, json
+    def delete_token(cls, address: str, directory: str | None = None) -> bool:
+        import json
+        import os
         path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
         stored = cls._raw(directory)
         accounts = stored.get("accounts", {})
@@ -387,7 +388,7 @@ class GmailSearchService:
             except OSError:
                 return False
         return False
-        
+
     @classmethod
     def save_token(
         cls,
@@ -401,7 +402,7 @@ class GmailSearchService:
         path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
         stored = cls._raw(directory)
         accounts = stored.get("accounts", {})
-        
+
         acc = accounts.get(address, {"email": address})
         # What the account held before: a stored token without recorded scopes was a Gmail grant.
         previous = cls.account_scopes(acc) if acc.get("access_token") else []
@@ -412,7 +413,7 @@ class GmailSearchService:
         if scopes:
             acc["scopes"] = sorted(set(previous) | set(scopes))
         accounts[address] = acc
-        
+
         try:
             with open(path, "w") as handle:
                 json.dump({"accounts": accounts}, handle, indent=2)
@@ -422,9 +423,8 @@ class GmailSearchService:
         return True
 
     @classmethod
-    def forget(cls, directory: Optional[str] = None) -> bool:
-        """
-        Removes the stored token, which is what disconnecting means here.
+    def forget(cls, directory: str | None = None) -> bool:
+        """Removes the stored token, which is what disconnecting means here.
 
         Args:
             directory (Optional[str]): Credentials directory; the mounted one by default.
@@ -441,9 +441,8 @@ class GmailSearchService:
         return True
 
     @classmethod
-    def gnome_accounts(cls, directory: Optional[str] = None) -> List[str]:
-        """
-        Reads the Google addresses the host found in GNOME Online Accounts.
+    def gnome_accounts(cls, directory: str | None = None) -> list[str]:
+        """Reads the Google addresses the host found in GNOME Online Accounts.
 
         Args:
             directory (Optional[str]): Credentials directory; the mounted one by default.
@@ -459,9 +458,8 @@ class GmailSearchService:
         return [str(entry) for entry in found] if isinstance(found, list) else []
 
     @classmethod
-    def save_gnome_accounts(cls, addresses: List[str], directory: Optional[str] = None) -> bool:
-        """
-        Records what the host saw in GNOME, for the setup page to report.
+    def save_gnome_accounts(cls, addresses: list[str], directory: str | None = None) -> bool:
+        """Records what the host saw in GNOME, for the setup page to report.
 
         Args:
             addresses (List[str]): Google addresses GOA is holding.
@@ -509,8 +507,7 @@ class GmailSearchService:
 
     @classmethod
     def _xoauth2(cls, address: str, token: str):
-        """
-        Builds the responder imaplib's AUTHENTICATE calls for the XOAUTH2 exchange.
+        """Builds the responder imaplib's AUTHENTICATE calls for the XOAUTH2 exchange.
 
         Two details are the difference between working and hanging, and neither is guessable:
 
@@ -545,9 +542,8 @@ class GmailSearchService:
     @classmethod
     def _open_mailboxes(
         cls,
-    ) -> Tuple[Dict[str, imaplib.IMAP4_SSL], Optional[str], List[Dict[str, str]]]:
-        """
-        Opens every connected account's All Mail folder read-only.
+    ) -> tuple[dict[str, imaplib.IMAP4_SSL], str | None, list[dict[str, str]]]:
+        """Opens every connected account's All Mail folder read-only.
 
         An account that fails to open is reported rather than skipped: with several accounts, a
         silent skip makes "that account is broken" look exactly like "nothing matched there".
@@ -560,7 +556,7 @@ class GmailSearchService:
         if not stored:
             return {}, NOT_CONNECTED_MESSAGE, []
         connections = {}
-        failures: List[Dict[str, str]] = []
+        failures: list[dict[str, str]] = []
         for cred in stored:
             try:
                 conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT_SECONDS)
@@ -679,9 +675,8 @@ class GmailSearchService:
         )
 
     @classmethod
-    def grants_gmail(cls, token_response: Dict[str, Any]) -> bool:
-        """
-        Tells whether a token response carries Gmail access.
+    def grants_gmail(cls, token_response: dict[str, Any]) -> bool:
+        """Tells whether a token response carries Gmail access.
 
         Args:
             token_response (Dict[str, Any]): Google's token endpoint reply.
@@ -694,8 +689,7 @@ class GmailSearchService:
 
     @classmethod
     def _describe(cls, error: Exception) -> str:
-        """
-        Turns an IMAP failure into one readable line.
+        """Turns an IMAP failure into one readable line.
 
         imaplib raises with the server's response as bytes, which prints as `b'...'`.
 
@@ -716,8 +710,7 @@ class GmailSearchService:
 
     @classmethod
     def _all_mail_folder(cls, connection: imaplib.IMAP4_SSL) -> str:
-        """
-        Finds the folder holding every message once, by its special-use attribute.
+        """Finds the folder holding every message once, by its special-use attribute.
 
         The English name `[Gmail]/All Mail` is what most examples hard-code, and it is wrong for
         every account whose interface language is not English. The `\\All` attribute in the LIST
@@ -746,9 +739,8 @@ class GmailSearchService:
         return ALL_MAIL_FALLBACK
 
     @classmethod
-    def _search_uids(cls, connection: imaplib.IMAP4_SSL, query: str) -> List[bytes]:
-        """
-        Runs a Gmail search and returns the matching UIDs, newest last.
+    def _search_uids(cls, connection: imaplib.IMAP4_SSL, query: str) -> list[bytes]:
+        """Runs a Gmail search and returns the matching UIDs, newest last.
 
         `X-GM-RAW` hands the string to the same engine the Gmail web UI uses, which is why the
         tool's documented syntax survived every change of transport unchanged.
@@ -783,9 +775,8 @@ class GmailSearchService:
         return data[0].split()
 
     @classmethod
-    def search(cls, query: str, limit: int) -> Dict[str, Any]:
-        """
-        Finds messages matching a Gmail search query.
+    def search(cls, query: str, limit: int) -> dict[str, Any]:
+        """Finds messages matching a Gmail search query.
 
         Returns:
             Dict[str, Any]: `messages`, newest first, plus `errors` naming each account that could
@@ -795,7 +786,7 @@ class GmailSearchService:
         connections, error, failures = cls._open_mailboxes()
         if not connections:
             return {"error": error, "errors": failures} if failures else {"error": error}
-        
+
         limit = max(1, min(limit, MAX_RESULT_LIMIT))
         all_messages = []
         for address, connection in connections.items():
@@ -815,16 +806,15 @@ class GmailSearchService:
                     connection.logout()
                 except Exception:
                     pass
-        
-        answer: Dict[str, Any] = {"messages": all_messages[:limit]}
+
+        answer: dict[str, Any] = {"messages": all_messages[:limit]}
         if failures:
             answer["errors"] = failures
         return answer
 
     @classmethod
-    def _fetch_headers(cls, connection: imaplib.IMAP4_SSL, uids: List[bytes]) -> List[Dict[str, str]]:
-        """
-        Fetches just the headers a result list needs.
+    def _fetch_headers(cls, connection: imaplib.IMAP4_SSL, uids: list[bytes]) -> list[dict[str, str]]:
+        """Fetches just the headers a result list needs.
 
         `BODY.PEEK` rather than `BODY` throughout: a search tool that silently marked twenty
         messages as read would be doing real damage to a mailbox.
@@ -836,7 +826,7 @@ class GmailSearchService:
         Returns:
             List[Dict[str, str]]: One summary per message.
         """
-        results: List[Dict[str, str]] = []
+        results: list[dict[str, str]] = []
         for uid in uids:
             try:
                 status, data = connection.uid(
@@ -863,8 +853,7 @@ class GmailSearchService:
 
     @classmethod
     def _message_id(cls, prefix: bytes) -> str:
-        """
-        Pulls Gmail's stable message id out of a FETCH response prefix.
+        """Pulls Gmail's stable message id out of a FETCH response prefix.
 
         `X-GM-MSGID` is the right id to hand the model rather than the UID: a UID is only
         meaningful inside one folder of one session, while the Gmail id is stable and searchable.
@@ -879,9 +868,8 @@ class GmailSearchService:
         return found.group(1).decode("ascii") if found else ""
 
     @classmethod
-    def _fetch_body(cls, connection: imaplib.IMAP4_SSL, uid: str) -> Dict[str, Any]:
-        """
-        Reads one message in full, without marking it read.
+    def _fetch_body(cls, connection: imaplib.IMAP4_SSL, uid: str) -> dict[str, Any]:
+        """Reads one message in full, without marking it read.
 
         Args:
             connection (imaplib.IMAP4_SSL): A connection with a folder selected.
@@ -953,17 +941,17 @@ class GmailSearchService:
         return {"error": "not found"}
 
     @classmethod
-    def message(cls, message_id: str) -> Dict[str, Any]:
+    def message(cls, message_id: str) -> dict[str, Any]:
         """Reads one message body."""
         if "|" in message_id:
             email, real_id = message_id.split("|", 1)
         else:
             email, real_id = None, message_id
-            
+
         connections, error, _failures = cls._open_mailboxes()
         if not connections:
             return {"error": error}
-            
+
         if email and email in connections:
             conn = connections[email]
             try:
@@ -999,8 +987,7 @@ class GmailSearchService:
         return {"error": "Message not found"}
     @classmethod
     def _close(cls, connection: imaplib.IMAP4_SSL) -> None:
-        """
-        Ends a connection without letting its failure surface as the request's failure.
+        """Ends a connection without letting its failure surface as the request's failure.
 
         Args:
             connection (imaplib.IMAP4_SSL): The connection to close.
@@ -1013,8 +1000,7 @@ class GmailSearchService:
 
     @classmethod
     def _decode_header(cls, value: str) -> str:
-        """
-        Turns an RFC 2047 encoded header into plain text.
+        """Turns an RFC 2047 encoded header into plain text.
 
         Args:
             value (str): The raw header value.
@@ -1034,8 +1020,7 @@ class GmailSearchService:
 
     @classmethod
     def _extract_text(cls, message: Message) -> str:
-        """
-        Returns the readable body: the plain-text part, or HTML stripped down to text.
+        """Returns the readable body: the plain-text part, or HTML stripped down to text.
 
         Args:
             message (Message): The parsed message.
@@ -1077,9 +1062,8 @@ class GmailSearchService:
     # ------------------------------------------------------------------ HTTP
 
     @classmethod
-    def post_refusal(cls, origin: Optional[str]) -> Optional[str]:
-        """
-        Decides whether a POST may change the service's state, judged by the page that sent it.
+    def post_refusal(cls, origin: str | None) -> str | None:
+        """Decides whether a POST may change the service's state, judged by the page that sent it.
         `/disconnect` and the two OAuth steps take no shared secret, because the pages that call
         them (the web chat's Connect card and this service's own setup page) cannot hold one; so
         the browser's `Origin` header is what keeps another website, or a DNS-rebinding page
@@ -1101,9 +1085,8 @@ class GmailSearchService:
         return f"requests from {origin} are not accepted"
 
     @classmethod
-    def serve(cls, port: int = SERVICE_PORT, secret: Optional[str] = None) -> None:
-        """
-        Runs the HTTP service until killed.
+    def serve(cls, port: int = SERVICE_PORT, secret: str | None = None) -> None:
+        """Runs the HTTP service until killed.
 
         Args:
             port (int): Port to listen on.
@@ -1113,7 +1096,7 @@ class GmailSearchService:
         expected = secret or os.environ.get("MIGHTLING_GMAIL_SECRET", "")
 
         class Handler(BaseHTTPRequestHandler):
-            def _reply(self, status: int, body: Dict[str, Any]) -> None:
+            def _reply(self, status: int, body: dict[str, Any]) -> None:
                 encoded = json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -1146,8 +1129,7 @@ class GmailSearchService:
                 self._html(f"<h2>Mightling</h2><p>{message}</p>")
 
             def _setup_page(self, app: str = "gmail") -> None:
-                """
-                Serves the HTML for Mightling's own Google OAuth flow, for one app.
+                """Serves the HTML for Mightling's own Google OAuth flow, for one app.
 
                 Args:
                     app (str): `gmail`, `drive` or `calendar`: which scope the consent asks for.
@@ -1207,7 +1189,7 @@ class GmailSearchService:
                     OAUTH_STATES[state] = {"code_verifier": verifier, "time": time.time(), "app": app}
                     self._reply(200, {"auth_url": cls.auth_url(app, state, challenge)})
                     return
-                    
+
 
                 if parsed.path == "/disconnect":
                     content_length = int(self.headers.get('Content-Length', 0))
@@ -1247,12 +1229,12 @@ class GmailSearchService:
                                 }).encode("utf-8"), headers={"Content-Type": "application/x-www-form-urlencoded"})
                                 with urllib.request.urlopen(req, timeout=10) as res:
                                     tdata = json.load(res)
-                                
+
                                 req2 = urllib.request.Request("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {tdata['access_token']}"})
                                 with urllib.request.urlopen(req2, timeout=10) as res2:
                                     user_data = json.load(res2)
                                     email_addr = user_data.get("email", "")
-                                
+
                                 app = OAUTH_STATES[state].get("app", "gmail")
                                 if email_addr and "access_token" in tdata:
                                     refused = cls.accept_grant(app, tdata, email_addr)
@@ -1271,7 +1253,7 @@ class GmailSearchService:
             def do_GET(self) -> None:  # noqa: N802 - name fixed by http.server
                 parsed = urllib.parse.urlparse(self.path)
                 query = urllib.parse.parse_qs(parsed.query)
-                
+
                 # OAuth redirect
                 if parsed.path == "/" and "code" in query and "state" in query:
                     code = query["code"][0]
@@ -1290,13 +1272,13 @@ class GmailSearchService:
                         try:
                             with urllib.request.urlopen(req, timeout=10) as res:
                                 data = json.load(res)
-                                
+
                             # identify user
                             req2 = urllib.request.Request("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {data['access_token']}"})
                             with urllib.request.urlopen(req2, timeout=10) as res2:
                                 user_data = json.load(res2)
                                 email_addr = user_data.get("email", "")
-                            
+
                             app = OAUTH_STATES[state].get("app", "gmail")
                             if email_addr and "access_token" in data:
                                 self._html(cls.grant_page(app, cls.accept_grant(app, data, email_addr)))

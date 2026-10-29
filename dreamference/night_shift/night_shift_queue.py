@@ -1,5 +1,4 @@
-"""
-The Night Shift queue on disk, as the `ling` launcher writes it.
+"""The Night Shift queue on disk, as the `ling` launcher writes it.
 
 The launcher (`ling-rs/src/night.rs`) adds, lists and drops tasks; the night run reads them and
 records what happened. Both sides change a task only under `tasks/<id>.lock` (flock on both sides)
@@ -10,10 +9,11 @@ See specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §4.
 import fcntl
 import json
 import os
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Final, Iterator, List, Optional
+from typing import Any, Final
 
 # Statuses a night run picks up: new tasks, and tasks a previous window cut off.
 RUNNABLE_STATUSES: Final[tuple] = ("queued", "interrupted")
@@ -27,8 +27,7 @@ class NightShiftQueue:
 
     @classmethod
     def night_dir(cls) -> Path:
-        """
-        Resolves the queue directory the way the launcher does.
+        """Resolves the queue directory the way the launcher does.
 
         Returns:
             Path: `$CODEX_HOME/night`, with `CODEX_HOME` defaulting to `~/.mightling`.
@@ -37,9 +36,8 @@ class NightShiftQueue:
         return Path(codex_home) / "night"
 
     @classmethod
-    def tasks(cls, night_dir: Path) -> List[Dict[str, Any]]:
-        """
-        Reads every task, oldest first.
+    def tasks(cls, night_dir: Path) -> list[dict[str, Any]]:
+        """Reads every task, oldest first.
 
         Args:
             night_dir: The queue directory.
@@ -58,9 +56,8 @@ class NightShiftQueue:
         return sorted(records, key=lambda task: task.get("id", ""))
 
     @classmethod
-    def read(cls, night_dir: Path, task_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Reads one task.
+    def read(cls, night_dir: Path, task_id: str) -> dict[str, Any] | None:
+        """Reads one task.
 
         Args:
             night_dir: The queue directory.
@@ -73,9 +70,8 @@ class NightShiftQueue:
 
     @classmethod
     def update(cls, night_dir: Path, task_id: str,
-               change: Callable[[Dict[str, Any]], Any]) -> Any:
-        """
-        Changes one task under its lock and writes it back whole.
+               change: Callable[[dict[str, Any]], Any]) -> Any:
+        """Changes one task under its lock and writes it back whole.
 
         Args:
             night_dir: The queue directory.
@@ -97,9 +93,8 @@ class NightShiftQueue:
             return outcome
 
     @classmethod
-    def set_status(cls, record: Dict[str, Any], status: str, note: Optional[str] = None) -> None:
-        """
-        Sets a record's status and appends it to the history, as the launcher does.
+    def set_status(cls, record: dict[str, Any], status: str, note: str | None = None) -> None:
+        """Sets a record's status and appends it to the history, as the launcher does.
 
         Args:
             record: The task record, edited in place.
@@ -107,16 +102,15 @@ class NightShiftQueue:
             note: An optional note kept with the history entry.
         """
         record["status"] = status
-        entry: Dict[str, Any] = {"at": cls.now(), "status": status}
+        entry: dict[str, Any] = {"at": cls.now(), "status": status}
         if note:
             entry["note"] = note
         record.setdefault("history", []).append(entry)
 
     @classmethod
     def transition(cls, night_dir: Path, task_id: str, status: str,
-                   note: Optional[str] = None, **fields: Any) -> str:
-        """
-        Moves a task to `status` unless it was cancelled meanwhile.
+                   note: str | None = None, **fields: Any) -> str:
+        """Moves a task to `status` unless it was cancelled meanwhile.
 
         A `/night drop` of a running task leaves it `cancel-requested`; the runner must not write
         over that with its own next status, so a requested cancellation wins and becomes
@@ -132,7 +126,7 @@ class NightShiftQueue:
         Returns:
             str: The status actually written.
         """
-        def change(record: Dict[str, Any]) -> str:
+        def change(record: dict[str, Any]) -> str:
             for key, value in fields.items():
                 record[key] = value
             wanted = status
@@ -146,8 +140,7 @@ class NightShiftQueue:
     @classmethod
     @contextmanager
     def runner_lock(cls, night_dir: Path, holder: str = "a Night Shift run") -> Iterator[bool]:
-        """
-        Holds `runner.lock` for a run, without waiting. A night run and a SWE-bench run take the
+        """Holds `runner.lock` for a run, without waiting. A night run and a SWE-bench run take the
         same lock, so the two never work the model server at once.
 
         Args:
@@ -174,9 +167,8 @@ class NightShiftQueue:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
     @classmethod
-    def runner_holder(cls, night_dir: Optional[Path] = None) -> Optional[str]:
-        """
-        Names what holds `runner.lock` right now.
+    def runner_holder(cls, night_dir: Path | None = None) -> str | None:
+        """Names what holds `runner.lock` right now.
 
         Args:
             night_dir: The queue directory; defaults to `night_dir()`.
@@ -194,9 +186,8 @@ class NightShiftQueue:
             return "a run"
 
     @classmethod
-    def runner_active(cls, night_dir: Optional[Path] = None) -> bool:
-        """
-        Tells whether a night run holds `runner.lock` right now.
+    def runner_active(cls, night_dir: Path | None = None) -> bool:
+        """Tells whether a night run holds `runner.lock` right now.
 
         `ling-admin index`, `codex build` and `server start` ask this and refuse while it is
         true (spec §6.2): each of them is heavy enough to put the model server at risk.
@@ -220,9 +211,8 @@ class NightShiftQueue:
 
     @classmethod
     def now(cls) -> str:
-        """
-        Returns:
-            str: The local time as RFC 3339 with its offset, the launcher's history format.
+        """Returns:
+        str: The local time as RFC 3339 with its offset, the launcher's history format.
         """
         return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -238,7 +228,7 @@ class NightShiftQueue:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
     @classmethod
-    def _read(cls, path: Path) -> Optional[Dict[str, Any]]:
+    def _read(cls, path: Path) -> dict[str, Any] | None:
         try:
             record = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -246,7 +236,7 @@ class NightShiftQueue:
         return record if isinstance(record, dict) else None
 
     @classmethod
-    def _write_atomically(cls, path: Path, record: Dict[str, Any]) -> None:
+    def _write_atomically(cls, path: Path, record: dict[str, Any]) -> None:
         staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         staging.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
         os.replace(staging, path)

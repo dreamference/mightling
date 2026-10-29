@@ -1,5 +1,4 @@
-"""
-`ling-admin night run`: works through the Night Shift queue inside a window
+"""`ling-admin night run`: works through the Night Shift queue inside a window
 (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5).
 
 It never starts, stops or loads the model server, and gives way to anyone working interactively.
@@ -19,18 +18,18 @@ import threading
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, ClassVar, Dict, Final, List, Optional, Tuple
+from typing import Any, ClassVar, Final
 
+from dreamference.night_shift.night_shift_autofill import NightShiftAutofill
+from dreamference.night_shift.night_shift_best_of_n import NightShiftBestOfN
 from dreamference.night_shift.night_shift_compaction_audit import NightShiftCompactionAudit
 from dreamference.night_shift.night_shift_host import GIB, NIGHT_POOL_SHARE, NightShiftHost
 from dreamference.night_shift.night_shift_index import NightShiftIndex
-from dreamference.night_shift.night_shift_queue import NightShiftQueue, RUNNABLE_STATUSES
-from dreamference.night_shift.night_shift_autofill import NightShiftAutofill
+from dreamference.night_shift.night_shift_queue import RUNNABLE_STATUSES, NightShiftQueue
 from dreamference.night_shift.night_shift_recurring import NightShiftRecurring
 from dreamference.night_shift.night_shift_remote import NightShiftRemote
 from dreamference.night_shift.night_shift_report import NightShiftReport
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
-from dreamference.night_shift.night_shift_best_of_n import NightShiftBestOfN
 
 # Free memory a night run never eats into: room above earlyoom's 5% line (~6.2 GiB here).
 MEMORY_RESERVE: Final[int] = 8 * GIB
@@ -53,12 +52,11 @@ class NightShiftRunner:
     compactions: ClassVar[list[str]] = []
 
     @classmethod
-    def run(cls, until: Optional[str] = None, minutes: Optional[float] = None,
-            idle_minutes: Optional[float] = None, night_dir: Optional[Path] = None,
-            mightling_bin: Optional[str] = None, vllm_host: Optional[str] = None,
-            settings: Optional[NightShiftSettings] = None, ignore_sessions: bool = False) -> int:
-        """
-        Runs the queue until the window closes or nothing is left.
+    def run(cls, until: str | None = None, minutes: float | None = None,
+            idle_minutes: float | None = None, night_dir: Path | None = None,
+            mightling_bin: str | None = None, vllm_host: str | None = None,
+            settings: NightShiftSettings | None = None, ignore_sessions: bool = False) -> int:
+        """Runs the queue until the window closes or nothing is left.
 
         Args:
             until: `HH:MM` the window ends; defaults to the end of `[night] window`.
@@ -107,7 +105,7 @@ class NightShiftRunner:
                 print(f"✅ Night Shift: nothing queued.{cls._audit_only_report(night_dir, started)}")
                 return 0
             print(f"🌙 Night Shift: {len(pending)} task(s) queued; window ends {end:%H:%M}.")
-            notes: List[str] = list(repeating)
+            notes: list[str] = list(repeating)
             # A task queued for another node is handed over whatever this machine's own state: that
             # node's runner admits it by that node's checks.
             sent += cls.remote.hand_off(night_dir, pending, notes)
@@ -136,7 +134,7 @@ class NightShiftRunner:
         cls.remote.collect(night_dir, sent, end, notes, wait=True)
         final = cls._reread(night_dir, looked_at)
         path = cls._write_report(night_dir, started, final, notes)
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for task in final:
             counts[task.get("status", "?")] = counts.get(task.get("status", "?"), 0) + 1
         summary = ", ".join(f"{count} {status}" for status, count in counts.items())
@@ -144,13 +142,12 @@ class NightShiftRunner:
         return 0
 
     @classmethod
-    def _reread(cls, night_dir: Path, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _reread(cls, night_dir: Path, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [NightShiftQueue.read(night_dir, task["id"]) or task for task in tasks]
 
     @classmethod
-    def lanes(cls, vllm_host: str, settings: NightShiftSettings) -> Tuple[List[Dict[str, Any]], List[str]]:
-        """
-        This machine's model server and every paired node serving the same model, each with the
+    def lanes(cls, vllm_host: str, settings: NightShiftSettings) -> tuple[list[dict[str, Any]], list[str]]:
+        """This machine's model server and every paired node serving the same model, each with the
         tasks it may hold and their compaction limit.
 
         Args:
@@ -175,9 +172,8 @@ class NightShiftRunner:
         return lanes, [NodeLanes.describe(lane) for lane in lanes[1:]] + skipped
 
     @classmethod
-    def admit(cls, vllm_host: str, mightling_bin: str, idle_minutes: float, end: datetime) -> Optional[str]:
-        """
-        The admission checks of §5.2, in order; the first failure is the reason the night does
+    def admit(cls, vllm_host: str, mightling_bin: str, idle_minutes: float, end: datetime) -> str | None:
+        """The admission checks of §5.2, in order; the first failure is the reason the night does
         not run.
 
         Returns:
@@ -197,17 +193,16 @@ class NightShiftRunner:
 
     @classmethod
     def wait_for_idle(cls, vllm_host: str, mightling_bin: str, idle_minutes: float,
-                      end: datetime) -> Optional[str]:
-        """
-        Waits until nobody has used the model for `idle_minutes`: no TUI session, no running or
+                      end: datetime) -> str | None:
+        """Waits until nobody has used the model for `idle_minutes`: no TUI session, no running or
         queued request, and the server's prompt-token counter unchanged throughout.
 
         Returns:
             Optional[str]: Why the run cannot start (someone is working, or the window ran out
             while waiting); None once the model has been idle long enough.
         """
-        quiet_since: Optional[float] = None
-        last_served: Optional[float] = None
+        quiet_since: float | None = None
+        last_served: float | None = None
         while True:
             now = time.time()
             if not cls.ignore_sessions and cls.host.interactive_mightling_pids(mightling_bin):
@@ -226,10 +221,9 @@ class NightShiftRunner:
             cls.sleep(min(IDLE_POLL_S, max(1.0, idle_minutes * 60)))
 
     @classmethod
-    def refresh_indexes(cls, pending: List[Dict[str, Any]], settings: NightShiftSettings,
-                        end: datetime, notes: List[str]) -> None:
-        """
-        Refreshes the code index of every repository with queued tasks, one at a time, before any
+    def refresh_indexes(cls, pending: list[dict[str, Any]], settings: NightShiftSettings,
+                        end: datetime, notes: list[str]) -> None:
+        """Refreshes the code index of every repository with queued tasks, one at a time, before any
         task starts, so each begins with a fresh index (code-index spec §6.3). `ling-code` admits
         and sandboxes its own runs; a refresh that does not finish leaves the index as it was,
         which the router's answers already account for.
@@ -245,7 +239,7 @@ class NightShiftRunner:
         binary = cls.index.executable()
         if binary is None:
             return
-        repos: List[str] = []
+        repos: list[str] = []
         for task in pending:
             if task.get("remote"):
                 # Another machine's repository, held here as a bare job repository: not indexed.
@@ -263,10 +257,9 @@ class NightShiftRunner:
             notes.append(f"Code index of {repo}: {cls.index.refresh(binary, Path(repo), budget)}.")
 
     @classmethod
-    def budget_note(cls, parallel: int, budget: Optional[int], kv_pool: float,
+    def budget_note(cls, parallel: int, budget: int | None, kv_pool: float,
                     settings: NightShiftSettings) -> str:
-        """
-        The report's line on how the KV pool was divided.
+        """The report's line on how the KV pool was divided.
 
         Args:
             parallel: Tasks at once.
@@ -289,11 +282,10 @@ class NightShiftRunner:
         return head + tail
 
     @classmethod
-    def schedule(cls, night_dir: Path, pending: List[Dict[str, Any]], settings: NightShiftSettings,
-                 mightling_bin: str, vllm_host: str, end: datetime, parallel: int, notes: List[str],
-                 context_budget: Optional[int] = None, lanes: Optional[List[Dict[str, Any]]] = None) -> None:
-        """
-        Starts tasks while the window is open, the machine is quiet and memory admits one more;
+    def schedule(cls, night_dir: Path, pending: list[dict[str, Any]], settings: NightShiftSettings,
+                 mightling_bin: str, vllm_host: str, end: datetime, parallel: int, notes: list[str],
+                 context_budget: int | None = None, lanes: list[dict[str, Any]] | None = None) -> None:
+        """Starts tasks while the window is open, the machine is quiet and memory admits one more;
         at the window's end asks every running task to stop (it is then `interrupted`). Each task
         compacts at `context_budget`, its share of the KV pool (None: no limit is passed).
 
@@ -304,9 +296,9 @@ class NightShiftRunner:
         lanes = lanes or [{"name": "this machine", "node": None, "host": vllm_host, "parallel": parallel,
                            "budget": context_budget}]
         queue = cls.round_robin(pending)
-        active: List[tuple] = []
+        active: list[tuple] = []
         end_ts = end.timestamp()
-        paused_for: Optional[str] = None
+        paused_for: str | None = None
         while queue or active:
             active = [(thread, run) for thread, run in active if thread.is_alive()]
             if time.time() >= end_ts:
@@ -355,8 +347,7 @@ class NightShiftRunner:
 
     @classmethod
     def reason_kind(cls, reason: str) -> str:
-        """
-        A start blocker's reason with its figures removed, so one wait is noted once.
+        """A start blocker's reason with its figures removed, so one wait is noted once.
 
         Args:
             reason: What `start_blocker` returned.
@@ -368,8 +359,7 @@ class NightShiftRunner:
 
     @classmethod
     def lane_of(cls, run: Any, default: str) -> str:
-        """
-        Args:
+        """Args:
             run: A running task (or benchmark instance).
             default: The run's own model server.
 
@@ -379,10 +369,9 @@ class NightShiftRunner:
         return getattr(run, "lane_host", None) or default
 
     @classmethod
-    def start_blocker(cls, vllm_host: str, mightling_bin: str, active: List[tuple],
-                      settings: NightShiftSettings, local: bool = True, priority: bool = False) -> Optional[str]:
-        """
-        Whether another task may start now (§5.5 and memory).
+    def start_blocker(cls, vllm_host: str, mightling_bin: str, active: list[tuple],
+                      settings: NightShiftSettings, local: bool = True, priority: bool = False) -> str | None:
+        """Whether another task may start now (§5.5 and memory).
 
         An outside request is one beyond the night's own: the engine's running and queued
         requests exceed the number of night tasks currently waiting on the model.
@@ -423,18 +412,16 @@ class NightShiftRunner:
         return None
 
     @classmethod
-    def pending_tasks(cls, night_dir: Path) -> List[Dict[str, Any]]:
-        """
-        Returns:
-            List[Dict[str, Any]]: Queued and interrupted tasks of every repository, oldest first.
+    def pending_tasks(cls, night_dir: Path) -> list[dict[str, Any]]:
+        """Returns:
+        List[Dict[str, Any]]: Queued and interrupted tasks of every repository, oldest first.
         """
         return [task for task in NightShiftQueue.tasks(night_dir)
                 if task.get("status") in RUNNABLE_STATUSES]
 
     @classmethod
-    def round_robin(cls, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Orders tasks first in, first out within a repository and alternates between repositories,
+    def round_robin(cls, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Orders tasks first in, first out within a repository and alternates between repositories,
         so one long list cannot starve another (§4).
 
         Args:
@@ -443,10 +430,10 @@ class NightShiftRunner:
         Returns:
             List[Dict[str, Any]]: The order to start them in.
         """
-        by_repo: Dict[str, List[Dict[str, Any]]] = {}
+        by_repo: dict[str, list[dict[str, Any]]] = {}
         for task in tasks:
             by_repo.setdefault(task.get("repo", ""), []).append(task)
-        order: List[Dict[str, Any]] = []
+        order: list[dict[str, Any]] = []
         lists = list(by_repo.values())
         while any(lists):
             for repo_tasks in lists:
@@ -455,10 +442,9 @@ class NightShiftRunner:
         return order
 
     @classmethod
-    def window_end(cls, now: datetime, until: Optional[str], minutes: Optional[float],
+    def window_end(cls, now: datetime, until: str | None, minutes: float | None,
                    window: str) -> datetime:
-        """
-        When this run must stop.
+        """When this run must stop.
 
         Args:
             now: The start time, timezone-aware.
@@ -512,7 +498,7 @@ class NightShiftRunner:
         return f" Compaction audit: {cls._write_report(night_dir, started, [], [])}"
 
     @classmethod
-    def _write_report(cls, night_dir: Path, started: datetime, tasks: List[Dict[str, Any]],
-                      notes: List[str]) -> Path:
+    def _write_report(cls, night_dir: Path, started: datetime, tasks: list[dict[str, Any]],
+                      notes: list[str]) -> Path:
         text = NightShiftReport.render(started, tasks, notes, compactions=cls.compactions)
         return NightShiftReport.write(night_dir, started, text)

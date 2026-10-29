@@ -1,5 +1,4 @@
-"""
-Test files taken out of a collected patch, for the regrade-only arm
+"""Test files taken out of a collected patch, for the regrade-only arm
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md §6.2).
 
 `swe-bench eval --drop-test-hunks` grades a copy of a run's predictions with every file section
@@ -10,7 +9,7 @@ tests.
 
 import re
 from pathlib import PurePosixPath
-from typing import Final, List, Optional, Tuple
+from typing import Final
 
 # A directory of tests, as a whole path component (`django/test/` is framework source).
 TEST_DIRECTORIES: Final[frozenset] = frozenset({"tests", "testing"})
@@ -43,8 +42,7 @@ class SweBenchPatchFilter:
 
     @classmethod
     def is_test_path(cls, path: str) -> bool:
-        """
-        Args:
+        """Args:
             path: A repository-relative path.
 
         Returns:
@@ -57,9 +55,8 @@ class SweBenchPatchFilter:
         return any(part in TEST_DIRECTORIES for part in parts[:-1]) or bool(TEST_FILE_NAMES.match(parts[-1]))
 
     @classmethod
-    def drop_test_hunks(cls, patch: str) -> Tuple[str, List[str]]:
-        """
-        Removes every file section of a `git diff` whose old or new path is a test file.
+    def drop_test_hunks(cls, patch: str) -> tuple[str, list[str]]:
+        """Removes every file section of a `git diff` whose old or new path is a test file.
 
         Args:
             patch: The collected patch.
@@ -68,8 +65,8 @@ class SweBenchPatchFilter:
             Tuple[str, List[str]]: The patch without those sections (empty when nothing is
             left), and the paths dropped, in the patch's order.
         """
-        kept: List[str] = []
-        dropped: List[str] = []
+        kept: list[str] = []
+        dropped: list[str] = []
         for section in cls.sections(patch):
             paths = cls.paths(section)
             if paths and any(cls.is_test_path(path) for path in paths):
@@ -134,17 +131,16 @@ class SweBenchPatchFilter:
         return lost
 
     @classmethod
-    def sections(cls, patch: str) -> List[str]:
-        """
-        Args:
+    def sections(cls, patch: str) -> list[str]:
+        """Args:
             patch: A unified diff in `git diff`'s format.
 
         Returns:
             List[str]: Its pieces, each starting at a `diff --git` line (anything before the
             first such line is a piece of its own), whose concatenation is the patch.
         """
-        pieces: List[str] = []
-        current: List[str] = []
+        pieces: list[str] = []
+        current: list[str] = []
         for line in patch.splitlines(keepends=True):
             if line.startswith(DIFF_HEADER) and current:
                 pieces.append("".join(current))
@@ -155,9 +151,8 @@ class SweBenchPatchFilter:
         return pieces
 
     @classmethod
-    def paths(cls, section: str) -> List[str]:
-        """
-        Args:
+    def paths(cls, section: str) -> list[str]:
+        """Args:
             section: One file section of a `git diff`.
 
         Returns:
@@ -168,7 +163,7 @@ class SweBenchPatchFilter:
         lines = section.splitlines()
         if not lines or not lines[0].startswith(DIFF_HEADER):
             return []
-        found: List[str] = []
+        found: list[str] = []
         for line in lines[1:]:
             if line.startswith("@@"):
                 break
@@ -191,7 +186,7 @@ class SweBenchPatchFilter:
         return found
 
     @classmethod
-    def _strip(cls, text: str, prefixed: bool) -> Optional[str]:
+    def _strip(cls, text: str, prefixed: bool) -> str | None:
         text = text.rstrip("\n").split("\t")[0]
         if text.startswith('"') and text.endswith('"'):
             # Git quotes a path with special characters; only the quote and backslash matter to

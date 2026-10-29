@@ -1,5 +1,4 @@
-"""
-The host as a container on Docker's default bridge sees it.
+"""The host as a container on Docker's default bridge sees it.
 
 The model server runs with `--network host`, so on the host it answers on localhost:8000. A
 container on the default bridge (OpenHands; the retired Onyx web chat was one too) has a
@@ -22,8 +21,7 @@ class DockerBridge:
 
     @classmethod
     def container_vllm_url(cls, vllm_host: str) -> str:
-        """
-        Rewrites a host-side model server URL into one reachable from inside a bridged container.
+        """Rewrites a host-side model server URL into one reachable from inside a bridged container.
 
         This is the step that silently breaks an otherwise correct setup: a loopback host is the
         container itself on the bridge, so the client merely fails to connect. A loopback host is
@@ -45,8 +43,7 @@ class DockerBridge:
 
     @classmethod
     def gateway(cls) -> str:
-        """
-        Reports the default bridge network's gateway address, which is the host from a container.
+        """Reports the default bridge network's gateway address, which is the host from a container.
 
         Returns:
             str: The gateway IP, or Docker's conventional 172.17.0.1 if it cannot be read.

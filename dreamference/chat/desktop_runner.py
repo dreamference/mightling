@@ -1,5 +1,4 @@
-"""
-Mightling Desktop App Runner.
+"""Mightling Desktop App Runner.
 
 This module provides the DesktopRunner class, which builds and launches the Electron app in
 `desktop/electron` (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md), built the way the Codex
@@ -23,7 +22,7 @@ import platform
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Final, List, Optional
+from typing import Final
 
 from dreamference.chat.desktop_installer import APPARMOR_PROFILE_NAME, CARGO_BIN, DesktopInstaller
 
@@ -77,14 +76,12 @@ WEBVIEW_CACHE_DIR_NAME: Final[str] = "Cache"
 
 
 class DesktopRunner:
-    """
-    Builds and runs the Mightling desktop app.
+    """Builds and runs the Mightling desktop app.
     """
 
     @classmethod
     def _environment(cls) -> dict:
-        """
-        Returns the environment the build tools and the app run with.
+        """Returns the environment the build tools and the app run with.
 
         `~/.cargo/bin` is put on PATH for the Codex build, which shares this helper; a rustup
         installed during the same run is on disk but absent from the inherited PATH.
@@ -99,8 +96,7 @@ class DesktopRunner:
 
     @classmethod
     def _ensure_toolchain(cls, build: bool = False) -> bool:
-        """
-        Checks Node and npm are present (and, for the `.deb`, dpkg); nothing is
+        """Checks Node and npm are present (and, for the `.deb`, dpkg); nothing is
         installed, since all of them come from the system.
 
         Args:
@@ -113,7 +109,7 @@ class DesktopRunner:
         return complete
 
     @classmethod
-    def _npm(cls, args: List[str], cwd: Path) -> bool:
+    def _npm(cls, args: list[str], cwd: Path) -> bool:
         npm = shutil.which("npm")
         if npm is None:
             print("❌ npm is needed to build the desktop app: install Node.js 22.13 or later.")
@@ -122,8 +118,7 @@ class DesktopRunner:
 
     @classmethod
     def lock_hash(cls, directory: Path) -> str:
-        """
-        The SHA-256 of a project's `package-lock.json`, which names every package `npm ci` installs.
+        """The SHA-256 of a project's `package-lock.json`, which names every package `npm ci` installs.
 
         Args:
             directory (Path): The npm project.
@@ -136,8 +131,7 @@ class DesktopRunner:
 
     @classmethod
     def packages_current(cls, directory: Path) -> bool:
-        """
-        Whether a project's `node_modules` was installed from its lock file as it is now: a stamp
+        """Whether a project's `node_modules` was installed from its lock file as it is now: a stamp
         `npm ci` left there holds the lock file's hash. A dependency added since (smol-toml was,
         and Rolldown then could not resolve it) changes the hash, so the packages are installed again.
 
@@ -152,8 +146,7 @@ class DesktopRunner:
 
     @classmethod
     def mark_installed(cls, directory: Path) -> None:
-        """
-        Records, after a successful `npm ci`, which lock file `node_modules` was installed from.
+        """Records, after a successful `npm ci`, which lock file `node_modules` was installed from.
 
         Args:
             directory (Path): The npm project.
@@ -181,8 +174,7 @@ class DesktopRunner:
 
     @classmethod
     def has_source(cls) -> bool:
-        """
-        Tells a checkout from a release install, which has the package but no `desktop/` project.
+        """Tells a checkout from a release install, which has the package but no `desktop/` project.
 
         Returns:
             bool: True if the Electron project is beside the package, i.e. the app can be built here.
@@ -191,8 +183,7 @@ class DesktopRunner:
 
     @classmethod
     def _no_source(cls) -> int:
-        """
-        Says why the desktop app cannot be built on a machine installed from a release.
+        """Says why the desktop app cannot be built on a machine installed from a release.
 
         Returns:
             int: 1.
@@ -207,8 +198,7 @@ class DesktopRunner:
 
     @classmethod
     def _run_installed(cls) -> int:
-        """
-        Opens the desktop app a release's `.deb` installed, where there is no project to run.
+        """Opens the desktop app a release's `.deb` installed, where there is no project to run.
 
         Returns:
             int: The app's exit code, or 1 if it is not installed.
@@ -221,8 +211,7 @@ class DesktopRunner:
 
     @classmethod
     def copy_bundled_binaries(cls) -> bool:
-        """
-        Copies `ling` and `codex-code-mode-host` from the installed build into `resources/`, where
+        """Copies `ling` and `codex-code-mode-host` from the installed build into `resources/`, where
         Forge packages them beside the app (the Codex app bundles its agent the same way). A
         `rg` on PATH rides along too, for the agent's fuzzy file search.
 
@@ -245,8 +234,7 @@ class DesktopRunner:
 
     @classmethod
     def run(cls) -> int:
-        """
-        Opens the Mightling desktop window from the checkout: packages the app (`electron-forge
+        """Opens the Mightling desktop window from the checkout: packages the app (`electron-forge
         package`: Vite builds the main process, the preload and Work's page; `ling` is bundled)
         and runs the packaged binary, so what opens is what the `.deb` ships. Not
         `electron-forge start`, whose dev server Work's `app://` page does not use.
@@ -276,8 +264,7 @@ class DesktopRunner:
 
     @classmethod
     def build(cls) -> int:
-        """
-        Builds the distributable `.deb` (and a zip) with Electron Forge.
+        """Builds the distributable `.deb` (and a zip) with Electron Forge.
 
         `ling` must be built, because it is bundled into the app: the app-server Ask and Work
         share is that binary.
@@ -309,9 +296,8 @@ class DesktopRunner:
             return {}
 
     @classmethod
-    def _app_identifier(cls) -> Optional[str]:
-        """
-        Reads the app's identifier out of `app.json`.
+    def _app_identifier(cls) -> str | None:
+        """Reads the app's identifier out of `app.json`.
 
         Taken from the config rather than repeated here, so the data directory this points at
         cannot drift away from the one the app actually uses.
@@ -323,8 +309,7 @@ class DesktopRunner:
 
     @classmethod
     def clear_webview_cache(cls) -> bool:
-        """
-        Empties Chromium's HTTP cache, leaving cookies and local storage in place.
+        """Empties Chromium's HTTP cache, leaving cookies and local storage in place.
 
         Returns:
             bool: True if there was a cache and it was removed.
@@ -341,9 +326,8 @@ class DesktopRunner:
         return True
 
     @classmethod
-    def binary_path(cls) -> Optional[str]:
-        """
-        Locates the packaged desktop binary (`electron-forge package` or `make` output).
+    def binary_path(cls) -> str | None:
+        """Locates the packaged desktop binary (`electron-forge package` or `make` output).
 
         Returns:
             Optional[str]: Path to the binary, or None if it has not been built.
@@ -362,8 +346,7 @@ class DesktopRunner:
 
     @classmethod
     def packaged_binary_path(cls) -> str:
-        """
-        Where `electron-forge package` writes the app's binary on this machine, whether or not it
+        """Where `electron-forge package` writes the app's binary on this machine, whether or not it
         has been written yet: `out/<productName>-linux-<arch>/<executable>`.
 
         Returns:
@@ -377,9 +360,8 @@ class DesktopRunner:
         return str(ELECTRON_DIR / "out" / f"{name}-linux-{arch}" / executable)
 
     @classmethod
-    def dev_binaries(cls) -> List[str]:
-        """
-        The Electron binaries a checkout runs: npm's prebuilt `electron`, and the packaged app
+    def dev_binaries(cls) -> list[str]:
+        """The Electron binaries a checkout runs: npm's prebuilt `electron`, and the packaged app
         `desktop run` and the launcher entry start. All need the AppArmor profile. The packaged
         path is included before it exists: `desktop install` runs before the first `desktop run`
         packages the app, and a profile written then without it left the app the launcher starts
@@ -397,9 +379,8 @@ class DesktopRunner:
         return binaries
 
     @classmethod
-    def warn_uncovered(cls, binaries: List[str]) -> bool:
-        """
-        Says, with the fix, when a binary about to be started has no AppArmor profile on a machine
+    def warn_uncovered(cls, binaries: list[str]) -> bool:
+        """Says, with the fix, when a binary about to be started has no AppArmor profile on a machine
         that needs one. From PyCharm's terminal (a permissive profile) it still starts; from the
         launcher or a plain terminal Chromium aborts with "No usable sandbox!".
 
@@ -420,8 +401,7 @@ class DesktopRunner:
 
     @classmethod
     def install_desktop_entry(cls) -> bool:
-        """
-        Registers the app with the desktop environment: an icon and a `.desktop` entry.
+        """Registers the app with the desktop environment: an icon and a `.desktop` entry.
 
         Without this the running window has no entry to match, so the dock shows an unnamed generic
         icon and there is nothing in the applications grid to launch. A deb ships these under
@@ -488,8 +468,7 @@ class DesktopRunner:
 
     @classmethod
     def install(cls) -> int:
-        """
-        Installs what the desktop app is built and run from, without building it: npm's packages
+        """Installs what the desktop app is built and run from, without building it: npm's packages
         (Electron among them), and the AppArmor profile Chromium's sandbox needs on this machine.
 
         Returns:
@@ -514,8 +493,7 @@ class DesktopRunner:
 
     @classmethod
     def status(cls) -> int:
-        """
-        Reports whether the desktop app can be built, and whether the `ling` it bundles is built.
+        """Reports whether the desktop app can be built, and whether the `ling` it bundles is built.
 
         Returns:
             int: 0 if the app could be built and launched right now, 1 otherwise.

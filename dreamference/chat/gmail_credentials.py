@@ -1,5 +1,4 @@
-"""
-Mailbox Credentials for Gmail Search.
+"""Mailbox Credentials for Gmail Search.
 
 This module provides the GmailCredentials class, the host-side view of the token the Gmail search
 service runs on. It is a thin front on `GmailSearchService` so that the sealing format and the file
@@ -14,7 +13,7 @@ mounted folder when a connection completes in the browser.
 """
 
 import os
-from typing import Dict, Final, Optional
+from typing import Final
 
 from dreamference.chat.gmail_search_service import GmailSearchService
 
@@ -25,14 +24,11 @@ CREDENTIALS_FILE: Final[str] = os.path.join(CREDENTIALS_DIR, "credentials.json")
 
 
 class GmailCredentials:
-    """
-    Reads and clears the Google access token the search service authenticates with.
-    """
+    """Reads and clears the Google access token the search service authenticates with."""
 
     @classmethod
     def ensure_directory(cls) -> bool:
-        """
-        Creates the credentials directory, readable only by this user.
+        """Creates the credentials directory, readable only by this user.
 
         Returns:
             bool: True if the directory exists afterwards.
@@ -45,9 +41,8 @@ class GmailCredentials:
         return True
 
     @classmethod
-    def load(cls) -> Optional[Dict[str, str]]:
-        """
-        Reads the stored token.
+    def load(cls) -> dict[str, str] | None:
+        """Reads the stored token.
 
         Returns:
             Optional[Dict[str, str]]: The address and access token, or None if Gmail is not
@@ -57,8 +52,7 @@ class GmailCredentials:
 
     @classmethod
     def forget(cls) -> bool:
-        """
-        Removes the stored token.
+        """Removes the stored token.
 
         Returns:
             bool: True if nothing is stored afterwards.

@@ -1,5 +1,4 @@
-"""
-The systemd user timer that starts the night run (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.1):
+"""The systemd user timer that starts the night run (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.1):
 `ling-admin night enable|disable|status`.
 
 A user service has neither `~/.local/bin` nor the virtualenv on its PATH, so the unit names
@@ -12,8 +11,9 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Final, List
+from typing import Final
 
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
@@ -28,30 +28,27 @@ class NightShiftScheduler:
     """Installs, removes and reports the `mightling-night` timer."""
 
     # Seam: tests replace it so nothing in the suite talks to the real systemd.
-    systemctl: Callable[[List[str]], subprocess.CompletedProcess] = staticmethod(
+    systemctl: Callable[[list[str]], subprocess.CompletedProcess] = staticmethod(
         lambda args: subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True))
 
     @classmethod
     def unit_dir(cls) -> Path:
-        """
-        Returns:
-            Path: `~/.config/systemd/user`.
+        """Returns:
+        Path: `~/.config/systemd/user`.
         """
         return Path(os.path.expanduser("~/.config/systemd/user"))
 
     @classmethod
     def admin_executable(cls) -> str:
-        """
-        Returns:
-            str: The absolute path of this environment's `ling-admin`.
+        """Returns:
+        str: The absolute path of this environment's `ling-admin`.
         """
         candidate = Path(sys.executable).parent / "ling-admin"
         return str(candidate) if candidate.exists() else (shutil.which("ling-admin") or str(candidate))
 
     @classmethod
     def render_units(cls, window: str, admin: str) -> tuple:
-        """
-        Renders the timer and service.
+        """Renders the timer and service.
 
         Args:
             window: `HH:MM-HH:MM`.
@@ -77,8 +74,7 @@ class NightShiftScheduler:
 
     @classmethod
     def enable(cls, window: str) -> bool:
-        """
-        Installs and starts the timer.
+        """Installs and starts the timer.
 
         Args:
             window: `HH:MM-HH:MM`.
@@ -108,8 +104,7 @@ class NightShiftScheduler:
 
     @classmethod
     def disable(cls) -> bool:
-        """
-        Stops and removes the timer and service.
+        """Stops and removes the timer and service.
 
         Returns:
             bool: True on success.
@@ -125,8 +120,7 @@ class NightShiftScheduler:
 
     @classmethod
     def status(cls) -> str:
-        """
-        Describes the timer, the window and the queue of every repository.
+        """Describes the timer, the window and the queue of every repository.
 
         Returns:
             str: Lines to print.
@@ -157,9 +151,8 @@ class NightShiftScheduler:
 
     @classmethod
     def lingering(cls) -> bool:
-        """
-        Returns:
-            bool: True if systemd keeps this user's services running after logout.
+        """Returns:
+        bool: True if systemd keeps this user's services running after logout.
         """
         try:
             result = subprocess.run(["loginctl", "show-user", getpass.getuser(), "-p", "Linger", "--value"],

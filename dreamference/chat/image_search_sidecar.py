@@ -23,7 +23,7 @@ import shutil
 import subprocess
 import time
 import urllib.request
-from typing import ClassVar, Final, List, Optional
+from typing import ClassVar, Final
 
 from dreamference.chat.docker_bridge import DockerBridge
 from dreamference.chat.searxng_sidecar import SEARXNG_CONTAINER_NAME
@@ -87,7 +87,7 @@ class ImageSearchSidecar:
         return result.stdout.strip() if result.returncode == 0 else ""
 
     @classmethod
-    def secret(cls) -> Optional[str]:
+    def secret(cls) -> str | None:
         """Returns the shared secret `/search` requires, creating it once (mode 0600).
 
         The MCP server reads the same file, so its existence is also what tells the launcher that
@@ -147,7 +147,7 @@ class ImageSearchSidecar:
             return fallback
 
     @classmethod
-    def run_command(cls, secret: str, vision_url: str, vision_model: str, siglip: bool) -> List[str]:
+    def run_command(cls, secret: str, vision_url: str, vision_model: str, siglip: bool) -> list[str]:
         """Builds the `docker run` command for the service.
 
         Args:
@@ -175,7 +175,7 @@ class ImageSearchSidecar:
         ]  # fmt: skip
 
     @classmethod
-    def siglip_command(cls) -> List[str]:
+    def siglip_command(cls) -> list[str]:
         """Builds the `docker run` command for the SigLIP embeddings server.
 
         Returns:
@@ -298,7 +298,7 @@ class ImageSearchSidecar:
         return True
 
     @classmethod
-    def ensure_on_node(cls, vllm_host: str, model: str) -> Optional[bool]:
+    def ensure_on_node(cls, vllm_host: str, model: str) -> bool | None:
         """Starts the service on a node when it is absent, as `server start` does for the Google
         service (decided 2026-10-09). Never raises and never waits for its health: the model
         server must start anyway. SigLIP is left to `ling-admin images start`, since its image
@@ -334,7 +334,7 @@ class ImageSearchSidecar:
         return not cls.state() and not cls.state(SIGLIP_CONTAINER_NAME)
 
     @classmethod
-    def status_lines(cls) -> List[str]:
+    def status_lines(cls) -> list[str]:
         """Describes the service for `ling-admin images status`.
 
         Returns:
