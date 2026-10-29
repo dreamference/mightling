@@ -2,7 +2,7 @@
 Main Dreamference Configuration Class.
 
 This module provides the DreamferenceConfig class which merges CLI parameters, environment
-variables, `.dreamference/config.yaml`, and system defaults into a unified settings object.
+variables, the configuration file (`ConfigPathResolver`) and system defaults into one object.
 """
 
 import os
@@ -91,7 +91,7 @@ RETIRED_KEYS: Final[frozenset] = frozenset({"cave_mode", "mightling_cave_mode"})
 class DreamferenceConfig:
     """
     Unified configuration manager implementing the 4-tier precedence hierarchy:
-    CLI Parameters > Environment Variables > `.dreamference/config.yaml` > System Defaults.
+    CLI Parameters > Environment Variables > the configuration file (`dreamference.toml`, …) > System Defaults.
     """
 
     def __init__(
@@ -514,7 +514,7 @@ class DreamferenceConfig:
 
     def save_config(self, target_path: Optional[Path] = None) -> Path:
         """
-        Saves current active configuration parameters to YAML or JSON config file.
+        Saves current active configuration parameters to the TOML, YAML or JSON config file.
 
         Args:
             target_path (Optional[Path]): Target output file path. Defaults to self.config_file_path.

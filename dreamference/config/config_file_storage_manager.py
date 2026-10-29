@@ -2,7 +2,7 @@
 Configuration File Serialization & Storage Manager.
 
 This module provides the ConfigFileStorageManager class handling loading and saving
-Dreamference configuration dictionaries to YAML or JSON formats.
+Dreamference configuration dictionaries to TOML, YAML or JSON files.
 """
 
 import json
