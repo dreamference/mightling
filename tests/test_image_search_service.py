@@ -188,6 +188,29 @@ def test_a_row_whose_file_was_collected_reads_as_absent(tmp_path):
     assert store.persist("http://img.example/a.jpg", _jpeg("red"), "a", 1) == file_id
 
 
+def test_rewriting_a_stored_image_never_leaves_a_half_written_file_to_serve(tmp_path, monkeypatch):
+    import builtins
+    import dreamference.chat.image_search_service as service_module
+
+    store = ImageStore(str(tmp_path))
+    file_id = store.persist("http://img.example/a.jpg", _jpeg("red"), "a", 1)
+    original = pathlib.Path(store.path(file_id)).read_bytes()
+    seen = []
+    real_open = builtins.open
+
+    def watching_open(file, mode="r", *args, **kwargs):
+        handle = real_open(file, mode, *args, **kwargs)
+        if "w" in mode:
+            # What a reader serving the image would get while the new bytes are being written.
+            seen.append(pathlib.Path(store.path(file_id)).read_bytes())
+        return handle
+
+    monkeypatch.setattr(service_module, "open", watching_open, raising=False)
+    store.persist("http://img.example/a.jpg", _jpeg("red"), "a", 1)
+    assert seen and all(content == original for content in seen)
+    assert pathlib.Path(store.path(file_id)).read_bytes() == original
+
+
 def test_garbage_collection_removes_expired_images_and_trims_to_the_volume_cap(tmp_path):
 
     store = ImageStore(str(tmp_path))
