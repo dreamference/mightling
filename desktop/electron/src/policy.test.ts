@@ -129,6 +129,7 @@ describe("the policy", () => {
     expect(airgapThread({ id: 1, method: "thread/shellCommand", params: { threadId: "t1", command: "ls" } })).toBe("t1");
     expect(airgapThread({ id: 1, method: "plugin/install", params: { pluginName: "x" } })).toBeNull();
     expect(airgapThread({ id: 1, method: "turn/start", params: { threadId: "t1" } })).toBeNull();
+    expect(airgapThread({ method: "thread/shellCommand", params: { threadId: "t1", command: "ls" } })).toBeNull();
     const asked: (string | null)[] = [];
     const sealed: PromptSource = {
       composed: (name) => name,
@@ -186,5 +187,8 @@ describe("the policy", () => {
     expect(levelMatters({ id: 1, method: "thread/shellCommand", params: {} })).toBe(true);
     expect(levelMatters({ id: 1, method: "thread/start", params: {} })).toBe(true);
     expect(levelMatters({ id: 1, method: "thread/list", params: {} })).toBe(false);
+    // An import loses its plugins at on; a notification is never vetted by level, whatever its name.
+    expect(levelMatters({ id: 1, method: POLICY.importRequest, params: {} })).toBe(true);
+    expect(levelMatters({ method: "thread/start", params: {} })).toBe(false);
   });
 });
