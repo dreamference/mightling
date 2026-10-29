@@ -476,10 +476,13 @@ function Personalization({ notice }: { notice: (error: unknown) => void }) {
   const [file, setFile] = useState<{ path: string; text: string } | null>(null);
   const [text, setText] = useState("");
   const [saved, setSaved] = useState(false);
+  // Save waits for the file: before it is read (or when reading failed) the box is empty, and saving it would erase the file.
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     bridge.readPersonal().then((answer) => {
       setFile(answer);
       setText(answer?.text ?? "");
+      setLoaded(true);
     }).catch(notice);
   }, [notice]);
   return (
@@ -489,7 +492,7 @@ function Personalization({ notice }: { notice: (error: unknown) => void }) {
       <textarea className="personal" rows={14} value={text} aria-label="Personal instructions" onChange={(event) => { setText(event.target.value); setSaved(false); }}
         placeholder="For example: answer in British English; prefer small commits." />
       <div className="buttons dialog-buttons">
-        <button className="primary" onClick={() => bridge.writePersonal(text).then(() => setSaved(true)).catch(notice)}>Save</button>
+        <button className="primary" disabled={!loaded} onClick={() => bridge.writePersonal(text).then(() => setSaved(true)).catch(notice)}>Save</button>
         {saved ? <span className="dialog-note">Saved. New threads read it.</span> : null}
       </div>
     </>
