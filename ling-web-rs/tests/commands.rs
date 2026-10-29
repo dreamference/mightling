@@ -109,7 +109,8 @@ fn run(binary: &str, args: &[&str], env: &[(&str, &str)]) -> Output {
 fn fresh_cache_dir() -> std::path::PathBuf {
     static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let run = RUNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("ling-web-tests-cache-{}-{run}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("ling-web-tests-cache-{}-{run}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -157,7 +158,16 @@ fn a_category_a_time_range_and_a_language_reach_searxng() {
     let server =
         Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
     let output = search(
-        &["--category", "social", "--time", "week", "--lang", "pt", "elétrico", "28"],
+        &[
+            "--category",
+            "social",
+            "--time",
+            "week",
+            "--lang",
+            "pt",
+            "elétrico",
+            "28",
+        ],
         &[("DREAMFERENCE_SEARXNG_URL", &server.base)],
     );
     assert!(output.status.success(), "{}", stdout(&output));
@@ -170,7 +180,10 @@ fn a_category_a_time_range_and_a_language_reach_searxng() {
     );
 
     // Anything else is refused before a request is sent.
-    let output = search(&["-c", "shopping", "q"], &[("DREAMFERENCE_SEARXNG_URL", &server.base)]);
+    let output = search(
+        &["-c", "shopping", "q"],
+        &[("DREAMFERENCE_SEARXNG_URL", &server.base)],
+    );
     assert_eq!(output.status.code(), Some(2));
     assert!(stdout(&output).contains("unknown category"));
     assert_eq!(server.requests().len(), 1);
@@ -209,7 +222,10 @@ fn at_on_neither_command_sends_anything() {
         stdout(&output),
         "❌ Web access is off in this session (/airgapped on). Only the user can change that, with /airgapped.\n"
     );
-    let output = search(&["q", "--json"], &[("DREAMFERENCE_SEARXNG_URL", &server.base), level]);
+    let output = search(
+        &["q", "--json"],
+        &[("DREAMFERENCE_SEARXNG_URL", &server.base), level],
+    );
     let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(printed["airgapped"], "on");
     let output = fetch(&[&format!("{}/page", server.base)], &[level]);
@@ -231,7 +247,11 @@ fn the_session_file_decides_and_the_user_level_file_is_not_loosened_by_the_repos
     // The session's file says `on`: nothing is sent.
     let output = search(
         &["q"],
-        &[("DREAMFERENCE_SEARXNG_URL", &server.base), ("CODEX_HOME", &home), ("CODEX_THREAD_ID", "thread-1")],
+        &[
+            ("DREAMFERENCE_SEARXNG_URL", &server.base),
+            ("CODEX_HOME", &home),
+            ("CODEX_THREAD_ID", "thread-1"),
+        ],
     );
     assert!(stdout(&output).contains("/airgapped on"));
     // A subagent has no file of its own and takes the root session's.
@@ -248,13 +268,21 @@ fn the_session_file_decides_and_the_user_level_file_is_not_loosened_by_the_repos
     // Another session is not affected.
     let output = search(
         &["q"],
-        &[("DREAMFERENCE_SEARXNG_URL", &server.base), ("CODEX_HOME", &home), ("CODEX_THREAD_ID", "thread-3")],
+        &[
+            ("DREAMFERENCE_SEARXNG_URL", &server.base),
+            ("CODEX_HOME", &home),
+            ("CODEX_THREAD_ID", "thread-3"),
+        ],
     );
     assert!(output.status.success());
     // A user-level `on` stands whatever the repository's file says.
     let user = root.join("user-home");
     std::fs::create_dir_all(user.join(".config/dreamference")).unwrap();
-    std::fs::write(user.join(".config/dreamference/config.toml"), "mightling_airgapped = \"on\"\n").unwrap();
+    std::fs::write(
+        user.join(".config/dreamference/config.toml"),
+        "mightling_airgapped = \"on\"\n",
+    )
+    .unwrap();
     let repository = root.join("dreamference.toml");
     std::fs::write(&repository, "mightling_airgapped = \"off\"\n").unwrap();
     let output = search(
@@ -274,7 +302,10 @@ fn a_sandbox_without_network_is_named_as_the_sandbox_not_as_the_level() {
     let server =
         Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
     let sandbox = ("CODEX_SANDBOX_NETWORK_DISABLED", "1");
-    let output = search(&["q"], &[("DREAMFERENCE_SEARXNG_URL", &server.base), sandbox]);
+    let output = search(
+        &["q"],
+        &[("DREAMFERENCE_SEARXNG_URL", &server.base), sandbox],
+    );
     assert_eq!(output.status.code(), Some(1));
     assert!(stdout(&output).contains("switched the sandbox's network off"));
     assert!(!stdout(&output).contains("airgapped") && !stdout(&output).contains("💡"));
@@ -335,7 +366,10 @@ fn a_repeated_search_is_answered_from_the_cache() {
         Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
     let cache = fresh_cache_dir();
     let cache = cache.to_str().unwrap();
-    let env = [("DREAMFERENCE_SEARXNG_URL", server.base.as_str()), (ling_web::cache::CACHE_DIR_ENV, cache)];
+    let env = [
+        ("DREAMFERENCE_SEARXNG_URL", server.base.as_str()),
+        (ling_web::cache::CACHE_DIR_ENV, cache),
+    ];
     let first = search(&["lisbon", "weather"], &env);
     let second = search(&["lisbon", "weather"], &env);
     assert!(first.status.success() && second.status.success());
@@ -344,10 +378,14 @@ fn a_repeated_search_is_answered_from_the_cache() {
 
     // A failed search is not kept: the next one asks again.
     let failing = Server::start(|_| {
-        let body = r#"{"results": [], "answers": [], "unresponsive_engines": [["brave", "CAPTCHA"]]}"#;
+        let body =
+            r#"{"results": [], "answers": [], "unresponsive_engines": [["brave", "CAPTCHA"]]}"#;
         response("200 OK", "application/json", body.as_bytes(), "")
     });
-    let env = [("DREAMFERENCE_SEARXNG_URL", failing.base.as_str()), (ling_web::cache::CACHE_DIR_ENV, cache)];
+    let env = [
+        ("DREAMFERENCE_SEARXNG_URL", failing.base.as_str()),
+        (ling_web::cache::CACHE_DIR_ENV, cache),
+    ];
     assert_eq!(search(&["q"], &env).status.code(), Some(1));
     assert_eq!(search(&["q"], &env).status.code(), Some(1));
     assert_eq!(failing.requests().len(), 2);
@@ -420,17 +458,25 @@ fn fetch_prints_title_and_text_and_follows_redirects() {
 fn loopback_only_agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .redirects(0)
-        .resolver(|address: &str| -> std::io::Result<Vec<std::net::SocketAddr>> {
-            match address.parse::<std::net::SocketAddr>() {
-                Ok(socket) if socket.ip().is_loopback() => Ok(vec![socket]),
-                _ => Err(std::io::Error::other(format!("not resolved in a test: {address}"))),
-            }
-        })
+        .resolver(
+            |address: &str| -> std::io::Result<Vec<std::net::SocketAddr>> {
+                match address.parse::<std::net::SocketAddr>() {
+                    Ok(socket) if socket.ip().is_loopback() => Ok(vec![socket]),
+                    _ => Err(std::io::Error::other(format!(
+                        "not resolved in a test: {address}"
+                    ))),
+                }
+            },
+        )
         .build()
 }
 
 fn walk(server: &Server, path: &str) -> Result<share_links::Walked, String> {
-    share_links::walk(&loopback_only_agent(), &format!("{}{path}", server.base), share_links::classify)
+    share_links::walk(
+        &loopback_only_agent(),
+        &format!("{}{path}", server.base),
+        share_links::classify,
+    )
 }
 
 #[test]
@@ -440,37 +486,72 @@ fn a_share_link_walk_stops_at_the_google_search_without_requesting_it() {
             response("302 Found", "text/html", b"", "Location: /hop\r\n")
         } else {
             let to = "https://www.google.com/search?kgmid=/g/11synth01&hl=pt-PT&q=Some+Synthetic+Song&shem=x";
-            response("301 Moved Permanently", "text/html", b"", &format!("Location: {to}\r\n"))
+            response(
+                "301 Moved Permanently",
+                "text/html",
+                b"",
+                &format!("Location: {to}\r\n"),
+            )
         }
     });
-    let Ok(share_links::Walked::Target { final_url, status, target }) = walk(&server, "/s/AbC123") else {
+    let Ok(share_links::Walked::Target {
+        final_url,
+        status,
+        target,
+    }) = walk(&server, "/s/AbC123")
+    else {
         panic!("the walk did not end at the search");
     };
     assert_eq!(
         target,
-        share_links::Target::Search { query: "Some Synthetic Song".into(), kgmid: Some("/g/11synth01".into()) }
+        share_links::Target::Search {
+            query: "Some Synthetic Song".into(),
+            kgmid: Some("/g/11synth01".into())
+        }
     );
-    assert!(final_url.starts_with("https://www.google.com/search?"), "{final_url}");
+    assert!(
+        final_url.starts_with("https://www.google.com/search?"),
+        "{final_url}"
+    );
     assert_eq!(status, 301);
-    assert_eq!(server.requests().len(), 2, "only the two local hops were requested");
+    assert_eq!(
+        server.requests().len(),
+        2,
+        "only the two local hops were requested"
+    );
     let page = share_links::page("https://share.google/AbC123", final_url, status, &target);
     let printed = ling_web::fetch::render_text(&page, 8000);
-    assert!(printed.starts_with("# Some Synthetic Song\n\n"), "{printed}");
-    assert!(printed.contains("ling-search \"Some Synthetic Song\""), "{printed}");
+    assert!(
+        printed.starts_with("# Some Synthetic Song\n\n"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("ling-search \"Some Synthetic Song\""),
+        "{printed}"
+    );
 }
 
 #[test]
 fn a_maps_share_link_walk_stops_at_the_place() {
     let server = Server::start(|_| {
-        let to = "https://www.google.com/maps/place/Synthetic+Caf%C3%A9/@38.7001,-9.1002,17z/data=!3m1";
-        response("302 Found", "text/html", b"", &format!("Location: {to}\r\n"))
+        let to =
+            "https://www.google.com/maps/place/Synthetic+Caf%C3%A9/@38.7001,-9.1002,17z/data=!3m1";
+        response(
+            "302 Found",
+            "text/html",
+            b"",
+            &format!("Location: {to}\r\n"),
+        )
     });
     let Ok(share_links::Walked::Target { target, .. }) = walk(&server, "/XyZ987") else {
         panic!("the walk did not end at the place");
     };
     assert_eq!(
         target,
-        share_links::Target::Place { name: "Synthetic Café".into(), coordinates: Some("38.7001, -9.1002".into()) }
+        share_links::Target::Place {
+            name: "Synthetic Café".into(),
+            coordinates: Some("38.7001, -9.1002".into())
+        }
     );
     assert_eq!(server.requests().len(), 1);
 }
@@ -481,7 +562,12 @@ fn a_share_link_that_leads_elsewhere_is_read_as_a_page() {
         if line.starts_with("GET /s ") {
             response("302 Found", "text/html", b"", "Location: /page\r\n")
         } else {
-            response("200 OK", "text/html; charset=utf-8", b"<title>Shared</title><p>Body</p>", "")
+            response(
+                "200 OK",
+                "text/html; charset=utf-8",
+                b"<title>Shared</title><p>Body</p>",
+                "",
+            )
         }
     });
     let Ok(share_links::Walked::Response(response)) = walk(&server, "/s") else {
@@ -490,8 +576,18 @@ fn a_share_link_that_leads_elsewhere_is_read_as_a_page() {
     assert_eq!(response.get_url(), format!("{}/page", server.base));
     assert_eq!(response.status(), 200);
     let body = response.into_string().unwrap();
-    let page = ling_web::fetch::page("u", "f".into(), 200, "text/html".into(), body.as_bytes(), 100);
-    assert_eq!((page.title.as_str(), page.text.as_str()), ("Shared", "Shared\nBody"));
+    let page = ling_web::fetch::page(
+        "u",
+        "f".into(),
+        200,
+        "text/html".into(),
+        body.as_bytes(),
+        100,
+    );
+    assert_eq!(
+        (page.title.as_str(), page.text.as_str()),
+        ("Shared", "Shared\nBody")
+    );
 }
 
 #[test]
@@ -527,21 +623,59 @@ fn download_saves_a_pdf_and_refuses_anything_else() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let dest = dir.join("a.pdf");
-    let output = fetch(&["--download", dest.to_str().unwrap(), &format!("{}/paper", server.base)], &[]);
+    let output = fetch(
+        &[
+            "--download",
+            dest.to_str().unwrap(),
+            &format!("{}/paper", server.base),
+        ],
+        &[],
+    );
     assert!(output.status.success(), "{}", stdout(&output));
     let saved: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     assert_eq!(saved["bytes"], 13);
     assert_eq!(saved["final_url"], format!("{}/paper", server.base));
     assert_eq!(std::fs::read(&dest).unwrap(), b"%PDF-1.4\nbody");
-    let refused = fetch(&["--download", dir.join("b.pdf").to_str().unwrap(), &format!("{}/login", server.base)], &[]);
+    let refused = fetch(
+        &[
+            "--download",
+            dir.join("b.pdf").to_str().unwrap(),
+            &format!("{}/login", server.base),
+        ],
+        &[],
+    );
     assert_eq!(refused.status.code(), Some(1));
-    assert!(stdout(&refused).starts_with("❌ not a PDF"), "{}", stdout(&refused));
+    assert!(
+        stdout(&refused).starts_with("❌ not a PDF"),
+        "{}",
+        stdout(&refused)
+    );
     assert!(!dir.join("b.pdf").exists());
-    let capped = fetch(&["--download", dir.join("c.pdf").to_str().unwrap(), "--max-bytes", "5", &format!("{}/paper", server.base)], &[]);
-    assert!(stdout(&capped).contains("larger than"), "{}", stdout(&capped));
+    let capped = fetch(
+        &[
+            "--download",
+            dir.join("c.pdf").to_str().unwrap(),
+            "--max-bytes",
+            "5",
+            &format!("{}/paper", server.base),
+        ],
+        &[],
+    );
+    assert!(
+        stdout(&capped).contains("larger than"),
+        "{}",
+        stdout(&capped)
+    );
     // At `on` nothing is sent, as for a fetch.
     let before = server.requests().len();
-    let off = fetch(&["--download", dir.join("d.pdf").to_str().unwrap(), &format!("{}/paper", server.base)], &[("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")]);
+    let off = fetch(
+        &[
+            "--download",
+            dir.join("d.pdf").to_str().unwrap(),
+            &format!("{}/paper", server.base),
+        ],
+        &[("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")],
+    );
     assert_eq!(off.status.code(), Some(1));
     assert_eq!(server.requests().len(), before);
     let _ = std::fs::remove_dir_all(&dir);
@@ -566,7 +700,11 @@ fn fetch_stops_downloading_at_the_size_cap() {
     // retry for each fetch, so the size cap is what is tested, not the runner's socket teardown.
     let fetch_once_more = |args: &[&str]| {
         let output = fetch(args, &[]);
-        if cfg!(windows) && stdout(&output).contains("os error 10054") { fetch(args, &[]) } else { output }
+        if cfg!(windows) && stdout(&output).contains("os error 10054") {
+            fetch(args, &[])
+        } else {
+            output
+        }
     };
     let output = fetch_once_more(&[&server.base, "--max-chars", "100000000", "--json"]);
     let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -642,7 +780,10 @@ fn read_fixture() -> (Server, Server) {
 #[test]
 fn read_searches_then_reads_the_top_pages_and_wraps_them() {
     let (pages, searxng) = read_fixture();
-    let output = search(&["--read", "the", "answer"], &[("DREAMFERENCE_SEARXNG_URL", &searxng.base)]);
+    let output = search(
+        &["--read", "the", "answer"],
+        &[("DREAMFERENCE_SEARXNG_URL", &searxng.base)],
+    );
     assert!(output.status.success(), "{}", stdout(&output));
     let text = stdout(&output);
     assert!(
@@ -652,8 +793,14 @@ fn read_searches_then_reads_the_top_pages_and_wraps_them() {
         )),
         "{text}"
     );
-    assert!(text.contains("# Docs\n\nDocs\nmenu\nThe answer is 42.\n</untrusted>"), "{text}");
-    assert!(text.contains("[could not read the page: request failed: HTTP 404"), "{text}");
+    assert!(
+        text.contains("# Docs\n\nDocs\nmenu\nThe answer is 42.\n</untrusted>"),
+        "{text}"
+    );
+    assert!(
+        text.contains("[could not read the page: request failed: HTTP 404"),
+        "{text}"
+    );
     assert!(text.contains("missing snippet\n</untrusted>"), "{text}");
     // The hostile page cannot close its block early: one closing tag per source.
     let flat = text.to_lowercase().replace([' ', '\n'], "");
@@ -667,13 +814,19 @@ fn read_searches_then_reads_the_top_pages_and_wraps_them() {
 #[test]
 fn read_pages_are_limited_and_json_has_the_sources() {
     let (pages, searxng) = read_fixture();
-    let output = search(&["--read", "--pages", "1", "q", "--json"], &[("DREAMFERENCE_SEARXNG_URL", &searxng.base)]);
+    let output = search(
+        &["--read", "--pages", "1", "q", "--json"],
+        &[("DREAMFERENCE_SEARXNG_URL", &searxng.base)],
+    );
     assert!(output.status.success());
     let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(printed["sources"].as_array().unwrap().len(), 1);
     assert_eq!(printed["sources"][0]["number"], 1);
     assert_eq!(printed["sources"][0]["title"], "Docs");
-    assert_eq!(printed["sources"][0]["final_url"], format!("{}/docs", pages.base));
+    assert_eq!(
+        printed["sources"][0]["final_url"],
+        format!("{}/docs", pages.base)
+    );
     assert_eq!(printed["airgapped"], "off");
     assert_eq!(pages.requests().len(), 1);
 }
@@ -683,10 +836,17 @@ fn read_sends_nothing_at_on() {
     let (pages, searxng) = read_fixture();
     let output = search(
         &["--read", "q"],
-        &[("DREAMFERENCE_SEARXNG_URL", &searxng.base), ("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")],
+        &[
+            ("DREAMFERENCE_SEARXNG_URL", &searxng.base),
+            ("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on"),
+        ],
     );
     assert_eq!(output.status.code(), Some(1));
-    assert!(stdout(&output).starts_with("❌ Web access is off"), "{}", stdout(&output));
+    assert!(
+        stdout(&output).starts_with("❌ Web access is off"),
+        "{}",
+        stdout(&output)
+    );
     assert!(searxng.requests().is_empty());
     assert!(pages.requests().is_empty());
 }

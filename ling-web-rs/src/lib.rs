@@ -55,7 +55,8 @@ pub fn refusal(level: Level, sandbox_network_disabled: bool) -> Option<&'static 
 
 /// [`refusal`] for this process's environment.
 pub fn refusal_now() -> Option<&'static str> {
-    let disabled = std::env::var_os(airgapped::SANDBOX_NETWORK_DISABLED_ENV_VAR).is_some_and(|value| !value.is_empty());
+    let disabled = std::env::var_os(airgapped::SANDBOX_NETWORK_DISABLED_ENV_VAR)
+        .is_some_and(|value| !value.is_empty());
     refusal(level(), disabled)
 }
 
