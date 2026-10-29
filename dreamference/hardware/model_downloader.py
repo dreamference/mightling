@@ -5,6 +5,7 @@ This module handles pre-flight downloads of model weights from HuggingFace Hub i
 prior to launching the model server. It prioritizes local cache to minimize HF API calls.
 """
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -626,17 +627,42 @@ class ModelDownloader:
         Args:
             cache_dir (Path): The directory to remove.
 
+        A directory kept on another disk through a link is emptied and the link kept: `rmtree`
+        refuses a link, and with `ignore_errors` it would say nothing.
+
         Returns:
-            bool: True if the directory no longer exists.
+            bool: True if the directory no longer exists (or, behind a link, is empty).
         """
         if not cache_dir.exists():
             print(f"ℹ️  Cache directory not found: {cache_dir}")
             return True
         print(f"🗑️  Clearing cache: {cache_dir}")
-        shutil.rmtree(cache_dir, ignore_errors=True)
+        if cache_dir.is_symlink():
+            if cls._empty_dir(cache_dir):
+                return True
+        else:
+            shutil.rmtree(cache_dir, ignore_errors=True)
         if cache_dir.exists():
             print(f"⚠️  Some files in {cache_dir} could not be removed (written as root by a container).")
             print(f"💡 Remove them with: sudo rm -rf {cache_dir}")
             return False
         return True
+
+    @classmethod
+    def _empty_dir(cls, directory: Path) -> bool:
+        """Removes what a directory holds and keeps the directory.
+
+        Args:
+            directory (Path): The directory (or a link to it) to empty.
+
+        Returns:
+            bool: True if it is empty now.
+        """
+        for entry in directory.iterdir():
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                with contextlib.suppress(OSError):
+                    entry.unlink()
+        return not any(directory.iterdir())
 
