@@ -105,6 +105,22 @@ def test_work_loads_nothing_from_the_network():
     assert 'headers["Content-Security-Policy"] = appConfig.csp' in protocol
 
 
+def test_work_ships_no_telemetry_sdk_and_no_updater():
+    # §8.1: no telemetry SDK in the bundle and no auto-updater; updates come from `ling update`.
+    banned = re.compile(
+        r"telemetry|analytics|sentry|statsig|posthog|segment|mixpanel|amplitude|updater|update-electron-app"
+    )
+    for folder in (Path(ELECTRON_DIR), UI_DIR):
+        package = json.loads((folder / "package.json").read_text(encoding="utf-8"))
+        names = {*package.get("dependencies", {}), *package.get("devDependencies", {})}
+        assert not [name for name in names if banned.search(name)], folder
+    assert "publishers" not in (Path(ELECTRON_DIR) / "forge.config.js").read_text(encoding="utf-8")
+    for source in [*SRC.rglob("*.ts"), *(UI_DIR / "src").rglob("*.ts*")]:
+        if ".test." in source.name:
+            continue
+        text = source.read_text(encoding="utf-8")
+        assert "autoUpdater" not in text and "electron-updater" not in text, source
+
 def test_the_bridge_sends_only_methods_the_pinned_codex_has():
     # One policy for both hosts (ASK §2.3): the app's main process compiles in the file `ling web`
     # compiles in, and runs its conformance cases (policy.test.ts).
