@@ -111,9 +111,10 @@ pub struct Resolved {
 
 /// The value of the top-level `mightling_airgapped` key in TOML text: a line `mightling_airgapped =
 /// "<value>"` before the first table header. Enough for a key this crate writes itself, and it
-/// keeps a TOML parser out of the sandbox helper.
+/// keeps a TOML parser out of the sandbox helper. A leading byte order mark is skipped: Windows
+/// PowerShell's `-Encoding UTF8` writes one, and the key must not be missed behind it.
 pub fn toml_value(text: &str) -> Option<String> {
-    for line in text.lines() {
+    for line in text.trim_start_matches('\u{feff}').lines() {
         let line = line.trim();
         if line.starts_with('[') {
             return None;
@@ -727,6 +728,152 @@ mod tests {
         assert_eq!(toml_value("[night]\nmightling_airgapped = \"on\"\n"), None);
         assert_eq!(toml_value("mightling_airgapped_other = \"on\"\n"), None);
         assert_eq!(toml_value(""), None);
+        // Windows line ends, tabs, a commented-out line and a comment holding another value.
+        assert_eq!(
+            toml_value("model = \"x\"\r\nmightling_airgapped = \"on\"\r\n").as_deref(),
+            Some("on")
+        );
+        assert_eq!(
+            toml_value("mightling_airgapped\t=\t\"on\"\n").as_deref(),
+            Some("on")
+        );
+        assert_eq!(
+            toml_value("# mightling_airgapped = \"off\"\nmightling_airgapped = \"on\"\n")
+                .as_deref(),
+            Some("on")
+        );
+        assert_eq!(
+            toml_value("mightling_airgapped = \"on\" # was \"off\"\n").as_deref(),
+            Some("on")
+        );
+        assert_eq!(
+            toml_value("  [ night ]\nmightling_airgapped = \"on\"\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_byte_order_mark_does_not_hide_the_key() {
+        // Windows PowerShell 5's `Out-File -Encoding UTF8` starts the file with one.
+        let bom = "\u{feff}mightling_airgapped = \"on\"\r\n";
+        assert_eq!(toml_value(bom).as_deref(), Some("on"));
+        assert_eq!(
+            toml_value("\u{feff}[night]\nmightling_airgapped = \"on\"\n"),
+            None
+        );
+        // The user's `on`, so written, still beats the repository's `off`.
+        let user_on = config("/home/u/.config/dreamference/config.toml", bom);
+        let repo_off = config("/repo/dreamference.toml", "mightling_airgapped = \"off\"\n");
+        let resolved = resolve_from(None, None, &[repo_off, user_on.clone()]);
+        assert_eq!(
+            (resolved.level, resolved.source),
+            (Level::On, Source::ConfigFile(user_on.0))
+        );
+    }
+
+    #[test]
+    fn two_files_at_the_same_level_name_the_first() {
+        let repo_on = config("/repo/dreamference.toml", "mightling_airgapped = \"on\"\n");
+        let user_on = config(
+            "/home/u/.config/dreamference/config.toml",
+            "mightling_airgapped = \"ON\"\n",
+        );
+        let resolved = resolve_from(None, None, &[repo_on.clone(), user_on]);
+        assert_eq!(
+            (resolved.level, resolved.source),
+            (Level::On, Source::ConfigFile(repo_on.0))
+        );
+    }
+
+    #[test]
+    fn an_invalid_value_in_one_file_does_not_hide_the_other() {
+        let user_on = config(
+            "/home/u/.config/dreamference/config.toml",
+            "mightling_airgapped = \"on\"\n",
+        );
+        // The agent writes a value no level has into the repository's file.
+        let repo_bad = config(
+            "/repo/dreamference.toml",
+            "mightling_airgapped = \"none\"\n",
+        );
+        let resolved = resolve_from(None, None, &[repo_bad, user_on.clone()]);
+        assert_eq!(
+            (resolved.level, resolved.source),
+            (Level::On, Source::ConfigFile(user_on.0))
+        );
+        assert_eq!(
+            resolved.invalid,
+            vec![
+                "ignored \"none\" from mightling_airgapped in /repo/dreamference.toml".to_string()
+            ]
+        );
+        // The other way round: the repository's `on` holds over a user file that does not parse.
+        let repo_on = config("/repo/dreamference.toml", "mightling_airgapped = \"on\"\n");
+        let user_bad = config(
+            "/home/u/.config/dreamference/config.toml",
+            "mightling_airgapped = \"yes\"\n",
+        );
+        assert_eq!(
+            resolve_from(None, None, &[repo_on, user_bad]).level,
+            Level::On
+        );
+        // An empty value is no value: it is neither a level nor named as invalid.
+        let resolved = resolve_from(
+            None,
+            None,
+            &[config(
+                "/repo/dreamference.toml",
+                "mightling_airgapped = \"\"\n",
+            )],
+        );
+        assert_eq!(
+            (resolved.level, resolved.source, resolved.invalid.len()),
+            (Level::Off, Source::Default, 0)
+        );
+    }
+
+    #[test]
+    fn an_exposed_session_file_cannot_loosen_a_sealed_or_configured_on_from_any_tier() {
+        let user_on = [config(
+            "/home/u/.config/dreamference/config.toml",
+            "mightling_airgapped = \"on\"\n",
+        )];
+        // An invalid session value falls through to the configured level, exposed or not.
+        let resolved = resolve_guarded(Some("of"), None, &user_on, false, true);
+        assert_eq!(resolved.level, Level::On);
+        // The environment is ling's own, not a file a command could write: it decides as usual.
+        let resolved = resolve_guarded(None, Some("off"), &user_on, false, true);
+        assert_eq!(
+            (resolved.level, resolved.source),
+            (Level::Off, Source::Environment)
+        );
+        // A seal wins over everything, including an exposed session file saying `off`.
+        let resolved = resolve_guarded(Some("off"), Some("off"), &[], true, true);
+        assert_eq!(
+            (resolved.level, resolved.source),
+            (Level::On, Source::Sealed)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_writable_root_that_links_to_the_seals_is_refused() {
+        let base =
+            std::env::temp_dir().join(format!("ling-airgapped-seal-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let seals = base.join("run/user/1/ling-airgapped");
+        std::fs::create_dir_all(&seals).unwrap();
+        std::os::unix::fs::symlink(base.join("run/user/1"), base.join("runtime")).unwrap();
+        // The root is named through a link; it still holds the seals.
+        let root = [base.join("runtime")];
+        let refused = refusal(false, &root, true, Some(&seals), false);
+        // A root beside the seals' folder, sharing a prefix, does not.
+        std::fs::create_dir_all(base.join("run/user/1/ling-airgapped-not")).unwrap();
+        let beside = [base.join("run/user/1/ling-airgapped-not")];
+        let allowed = refusal(false, &beside, true, Some(&seals), false);
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(refused.map(|r| r.0), Some("writable_roots"));
+        assert_eq!(allowed, None);
     }
 
     #[test]
