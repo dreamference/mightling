@@ -546,11 +546,14 @@ QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
     "sessions": QWEN38_LING_SESSIONS,
     "batch": QWEN38_LING_BATCH,
     "kv_pages": QWEN38_LING_KV_PAGES,
-    # Image input is 1.8.1's (the owner's decision of 2026-10-29): ling-serve starts with its vision
-    # tower off (`--vision off`, on an engine with the "kv-pages" feature), so /model_info says no
-    # image understanding, the launcher declares text input only, and neither the tower nor its cache
-    # takes memory from the four sessions. `--engine sglang` reads images.
-    "vision": False,
+    # Image input on ling-serve, 1.8.1's (the owner's decision of 2026-10-29; 1.8.0 said False):
+    # ling-serve starts with its vision tower on (`--vision on`, on an engine with the "kv-pages"
+    # feature), so /model_info says image understanding and the launcher declares image input. The
+    # tower's weights are in the checkpoint's bytes, and its scratch at the largest image (1,100 MB)
+    # and the embedding cache (512 MB) are in ling-serve's plan: flat, the plan grows by about 1.6 GB
+    # beside the four sessions' fixed KV; paged, the pool is sized after them, about 1.6 GB smaller.
+    # False turns the tower off again (1.8.0's state, where `server start` names `--engine sglang`).
+    "vision": True,
     # 1.8.1's per-launch switches (LingServeLaunchBuilder.switch): the KV page pool and fair pairing,
     # each off until the 10-31 night decides its default; a night arm overrides either with
     # DREAMFERENCE_LING_PAGING / DREAMFERENCE_LING_FAIR_PAIRING (0 or 1). Both act only on an engine

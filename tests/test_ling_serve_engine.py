@@ -458,13 +458,14 @@ def test_ling_serve_plan_runs_plan_only_in_the_image_and_reads_its_json_line(mon
     )
     assert "--max-context" in cmd
     # The plan is asked of the launch the server will get: a paged engine ("kv-pages" in the pinned
-    # recipe's features) is asked with the recipe's sessions, the pool and image input off; an engine
-    # before the pool with none of them, so a pin moving across LING_ENGINE_KV_PAGES_SINCE changes both.
+    # recipe's features) is asked with the recipe's sessions, the pool and image input on (1.8.1), so
+    # the tower's scratch and cache are in the plan; an engine before the pool with none of them, so a
+    # pin moving across LING_ENGINE_KV_PAGES_SINCE changes both.
     paged = "kv-pages" in (recipe.get("engine_features") or [])
     pooled = paged and bool(recipe.get("kv_pages"))
     assert ("--sessions" in cmd) == paged and ("--batch" in cmd) == paged
     assert ("--kv-pages" in cmd) == pooled
-    assert ("--vision" in cmd and cmd[cmd.index("--vision") + 1] == "off") == paged
+    assert ("--vision" in cmd and cmd[cmd.index("--vision") + 1] == "on") == paged
 
 
 def _plan_only_stdout(monkeypatch, stdout: str) -> dict | None:
@@ -634,37 +635,53 @@ def test_the_tool_call_checks_hints_name_ling_serves_own_parsing():
 # --- 1.8.0: four paged sessions, the default switch and the pin plumbing -------------------------
 
 
-def test_image_input_is_off_on_a_paged_engine_and_untouched_on_an_older_one():
-    # 1.8.0 serves text only on ling-serve (image input is 1.8.1's): `--vision off`, parsed since
-    # ling-engine 689690c, an ancestor of the page pool, so only a "kv-pages" engine is given it.
+def test_image_input_is_on_on_a_paged_engine_and_untouched_on_an_older_one():
+    # 1.8.1 reads images on ling-serve (1.8.0 said `--vision off`): `--vision on`, parsed since
+    # ling-engine 689690c, an ancestor of the page pool, so only a "kv-pages" engine is given it, and
+    # given it explicitly, so neither the start nor its plan depends on the engine's default.
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
-    assert recipe["vision"] is False
+    assert recipe["vision"] is True
     older = {**recipe, "engine_features": []}
     flat = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", older, 8000, 262144)
     assert "--vision" not in flat
-    # The 1.8.0 pin has the flag, and the recipe's paging stays off with the tower.
+    # The pin has the flag, with the pool off (1.8.0's flat sessions) or on.
     pinned = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", recipe, 8000, 262144)
-    assert flag(pinned, "--vision") == "off" and "--kv-pages" not in pinned
+    assert flag(pinned, "--vision") == "on" and "--kv-pages" not in pinned
     paged = LingServeLaunchBuilder.server_args(
         "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(), 8000, 262144
     )
-    assert flag(paged, "--vision") == "off"
-    assert LingServeLaunchBuilder.facts("img", {}, paged)["Image input"].startswith("Off")
+    assert flag(paged, "--vision") == "on"
+    assert LingServeLaunchBuilder.facts("img", {}, paged)["Image input"] == "On"
     assert "Image input" not in LingServeLaunchBuilder.facts("img", {}, flat)
-    # 1.8.1 flips the recipe: no flag, the engine's default (on).
-    on = LingServeLaunchBuilder.server_args(
-        "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(vision=True), 8000, 262144
+    # 1.8.0's state stays one key away: `--vision off`, and status names SGLang for images.
+    off = LingServeLaunchBuilder.server_args(
+        "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(vision=False), 8000, 262144
     )
-    assert "--vision" not in on
+    assert flag(off, "--vision") == "off"
+    assert LingServeLaunchBuilder.facts("img", {}, off)["Image input"].startswith("Off")
+    # A recipe without the key leaves the engine's default.
+    recipe_without = {k: v for k, v in _paged_recipe().items() if k != "vision"}
+    assert "--vision" not in LingServeLaunchBuilder.server_args(
+        "RadixArk/Qwen3.8-27B-NVFP4", recipe_without, 8000, 262144
+    )
     # SGLang's recipe has no such key and its launch reads images.
     assert "vision" not in get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG)
 
 
-def test_server_start_says_where_image_input_went(capsys):
+def test_server_start_names_sglang_for_images_only_while_ling_serve_reads_none(capsys, monkeypatch):
     from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController as Cli
 
     Cli._server_engine(DEFAULT_MODEL_ALIAS, None, from_flag=False)
-    assert "ling-serve reads no images in 1.8.0; --engine sglang" in capsys.readouterr().out
+    assert "reads no images" not in capsys.readouterr().out
+    real = ModelMatrixRegistry.get_launch_overrides
+
+    def without_vision(model, engine=None):
+        overrides = real(model, engine)
+        return {**overrides, "vision": False} if engine == ENGINE_LING else overrides
+
+    monkeypatch.setattr(ModelMatrixRegistry, "get_launch_overrides", staticmethod(without_vision))
+    Cli._server_engine(DEFAULT_MODEL_ALIAS, None, from_flag=False)
+    assert "ling-serve reads no images; --engine sglang" in capsys.readouterr().out
     Cli._server_engine(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG, from_flag=True)
     assert "reads no images" not in capsys.readouterr().out
 
@@ -830,7 +847,7 @@ def test_the_plan_only_check_follows_the_same_arguments_as_the_launch(monkeypatc
     assert plan and plan["sessions"] == 4
     cmd = seen["cmd"]
     assert cmd[-1] == "--plan-only" and "--kv-pages" in cmd and flag(cmd, "--sessions") == "4"
-    assert flag(cmd, "--vision") == "off"
+    assert flag(cmd, "--vision") == "on"
 
 
 def test_flipping_the_default_engine_is_one_constant_and_keeps_sglang_as_the_fallback():

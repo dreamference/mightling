@@ -367,7 +367,7 @@ class DreamferenceCLIController:
         print(line)
         if (chosen == ENGINE_LING and ENGINE_SGLANG in others
                 and ModelMatrixRegistry.get_launch_overrides(model, ENGINE_LING).get("vision") is False):
-            print("   ling-serve reads no images in 1.8.0; --engine sglang for image input.")
+            print("   ling-serve reads no images; --engine sglang for image input.")
         return requested
 
     @classmethod

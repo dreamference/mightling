@@ -36,9 +36,16 @@ The verdict is written into `reports/` by the bar-night agent; the cut flips onl
 
 ---
 
-**ling-serve reads images.** {{TBD: 1.8.0 starts ling-serve with `--vision off`; 1.8.1 serves image input
-on ling-serve (the recipe's `"vision"` on, the facts' "Image input" on), measured: an image question's
-answer and time against SGLang's.}}
+**ling-serve reads images.** 1.8.0 started ling-serve with image input off; 1.8.1 turns it on
+(`QWEN38_LING_RECIPE["vision"]` is True, so the launch passes `--vision on`). `/model_info` says the
+model understands images, so `ling`, the desktop app and the phone bridges send them again, and
+`ling-admin main-model inspect` shows "Image input: On". `server start` names `--engine sglang` for
+images only while a recipe turns the tower off. The tower's scratch at the largest image (1,100 MB) and
+its embedding cache (512 MB) are in ling-serve's plan: with 1.8.0's flat sessions the plan grows by about
+1.6 GB, with the page pool the pool is that much smaller; host safety checks the same plan. {{TBD:
+measured on the pinned engine: the plan with `--vision on` and off, the
+engine's image checks through the page pool and the prefix KV store, one `ling exec` with an image, and
+an image question's answer and time against SGLang's.}}
 
 **LoRA adapters on ling-serve.** {{TBD: the adapter guard (`_engine_for_adapters`) lets ling-serve serve
 installed adapters; the messages that name 1.8.1 come out; measured against SGLang's adapter serving.}}

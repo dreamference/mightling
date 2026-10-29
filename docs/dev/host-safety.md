@@ -33,7 +33,7 @@ The line, from P4d on (earlier engines print only the first four keys; extra key
  "kv_pool_bytes": 66000000000, "kv_pool_pages": 15800, "host_reserve_bytes": 16000000000}
 ```
 
-`sessions`, `batch`, `max_context` and `planned_bytes` must be integers; they are all the check reads. The plan is asked of the launch the server will get, so a paged recipe (`"kv-pages"` in `engine_features`) is planned with `--sessions`, `--batch`, `--kv-pages` and `--vision off`.
+`sessions`, `batch`, `max_context` and `planned_bytes` must be integers; they are all the check reads. The plan is asked of the launch the server will get, so a paged recipe (`"kv-pages"` in `engine_features`) is planned with `--sessions`, `--batch`, `--kv-pages` and the recipe's `--vision` (`off` in 1.8.0, `on` from 1.8.1, so the tower's scratch and embedding cache are in the plan).
 
 The 16 GB arithmetic: ling-serve keeps `--host-reserve-mb` (16 GB by default) of MemAvailable for the host, so a plan that takes everything it may is about MemAvailable - 16 GB. Adding the load peak (`max(4 GB, 0.15 x weights)` or the recipe's `load_transient_gb`) and the side services (the forge, 1 GiB) means such a plan starts only while those two stay under 16 GB, which they do for the default model (an estimated 20 GB of weights, so the 4 GB floor, plus the forge: about 5.1 GB). `test_the_pre_load_check_on_a_full_plan_turns_on_the_engines_16_gb_reserve` pins this. Measured on the bar night: {{TBD: node-b MemAvailable before start, the plan's sessions x context, planned_bytes, pool pages, the check's margin}}.
 
