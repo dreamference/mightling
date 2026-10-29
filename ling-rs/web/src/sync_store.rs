@@ -633,10 +633,6 @@ impl Store {
         if inner.tombstones.get(rollout).is_some_and(|tombstone| !tombstone.withdrawn || tombstone.by != caller.device) {
             return Err(Refusal::Gone);
         }
-        if inner.tombstones.remove(rollout).is_some() {
-            // Its owner publishes a withdrawn thread again: the withdrawal is over.
-            let _ = std::fs::remove_file(self.dir.join("tombstones").join(format!("{rollout}.json")));
-        }
         let mut record = match inner.rollouts.get(rollout).cloned() {
             Some(record) if record.owner != caller.device => {
                 return Err(Refusal::Owned { fork: fork_id(rollout, &caller.device), thread: fork_id(&record.thread, &caller.device) });
@@ -648,6 +644,7 @@ impl Store {
             return Err(Refusal::Mismatch { length: record.length, hash: record.hash.clone() });
         }
         if bytes.is_empty() {
+            self.end_withdrawal(&mut inner, rollout);
             return Ok(record);
         }
         let path = self.rollout_path(rollout);
@@ -686,10 +683,19 @@ impl Store {
         record.updated = now_secs();
         record.seq = self.next_seq(&mut inner)?;
         self.save(&record)?;
+        self.end_withdrawal(&mut inner, rollout);
         inner.rollouts.insert(rollout.to_string(), record.clone());
         drop(inner);
         self.announce(record.seq);
         Ok(record)
+    }
+
+    /// Its owner published a withdrawn thread again: the withdrawal is over. Only once the upload
+    /// is taken, so one the hub refuses leaves the thread withdrawn.
+    fn end_withdrawal(&self, inner: &mut Inner, rollout: &str) {
+        if inner.tombstones.remove(rollout).is_some() {
+            let _ = std::fs::remove_file(self.dir.join("tombstones").join(format!("{rollout}.json")));
+        }
     }
 
     /// The record of a rollout's first upload: in its thread, which it joins only if the caller
@@ -1311,8 +1317,15 @@ mod tests {
         let tombstones = store.withdraw(ID, &laptop).unwrap();
         assert!(tombstones[0].withdrawn);
         assert!(store.threads().is_empty());
+        // An upload the hub refuses leaves it withdrawn, here and after a restart.
+        assert!(matches!(store.append(ID, &laptop, &Upload { offset: 5, ..Upload::first(FILE) }, b"{}\n"), Err(Refusal::Mismatch { .. })));
+        assert!(matches!(store.append(ID, &laptop, &Upload { file: None, ..Upload::first(FILE) }, b"{}\n"), Err(Refusal::BadRequest(_))));
+        assert_eq!(store.manifest(0).tombstones.len(), 1);
+        assert_eq!(Store::open(&home).unwrap().manifest(0).tombstones.len(), 1);
         // Should the owner publish it again (its folder no longer excluded), it may.
         assert!(store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").is_ok());
+        assert!(store.manifest(0).tombstones.is_empty());
+        assert!(Store::open(&home).unwrap().manifest(0).tombstones.is_empty());
     }
 
     #[test]
