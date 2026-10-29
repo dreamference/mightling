@@ -42,7 +42,7 @@ The `ling` agent does **not** use it: it uses `ling-code` (built in `DREAMFERENC
    - **Symlinks are skipped.**
    - **A file is skipped if it is larger than `MAX_FILE_BYTES` (1 MiB), or has a NUL byte in its first 8 KiB (binary).** Everything else is decoded as UTF-8, with errors ignored.
    - **Why:** until 2026-09-29 discovery was the walk alone, with no size cap. On this repository it collected 11,565 files and 2.3 GB, 2.2 GB of it a Tauri `target/`, against 223 files and 2.4 MB now. Holding that beside a resident vLLM pushed the host under earlyoom's 5% line, and earlyoom killed vLLM's EngineCore. `ling-admin mcp` indexes on its first query, so any workspace with a Rust build tree was exposed.
-2. **Reset the database:** it clears `files`, `symbols` and `fts_context`.
+2. **Reset the database:** it clears `files`, `symbols` and `fts_context` in the same transaction as the refill in steps 3 and 4, so a run that fails or is killed midway leaves the previous tables whole.
 3. **Parse in parallel:** `ProcessPoolExecutor(max_workers=max(1, min(8, cpu_count, files // 32 + 1)))`. The pool is sized to the work, because each worker is a fork of a parent that has imported torch. Results are consumed as they arrive, inside the pool's `with`. Each worker reads the file, tokenizes it (`TFIDFCalculator.tokenize`), and extracts symbols from **`.py` files only** (`ASTSymbolExtractor`).
 4. **Persist to `.dreamference/context.db`:**
    - `files(rel_path PRIMARY KEY, abs_path, size_bytes)`;

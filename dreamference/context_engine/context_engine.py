@@ -208,13 +208,6 @@ class ContextEngine:
 
         # Step 2: Initialize SQLite schema
         conn = self.sqlite_storage.init_db()
-        with conn:
-            conn.execute("DELETE FROM files;")
-            conn.execute("DELETE FROM symbols;")
-            try:
-                conn.execute("DELETE FROM fts_context;")
-            except Exception:
-                pass
 
         # Step 3: Parallel multi-process file parsing across CPU cores (bypasses GIL)
         # Sized to the work: each worker is a fork of a parent that has imported torch, so 32 of
@@ -222,6 +215,15 @@ class ContextEngine:
         max_workers = max(1, min(8, os.cpu_count() or 4, len(files_to_index) // 32 + 1))
         file_to_content: Dict[str, str] = {}
         with ProcessPoolExecutor(max_workers=max_workers) as executor, conn:
+            # Emptied in the same transaction as the refill: emptied and committed first, a run
+            # that failed or was killed midway left the previous JSON beside an empty database,
+            # which `load_index` accepted, so full-text search found nothing until a forced re-index.
+            conn.execute("DELETE FROM files;")
+            conn.execute("DELETE FROM symbols;")
+            try:
+                conn.execute("DELETE FROM fts_context;")
+            except Exception:
+                pass
             # Step 4: Populate database records and in-memory indexes. Consumed inside the `with`,
             # so results stream rather than all being buffered by the pool's shutdown first.
             # `results` is a one-shot iterator, so contents are kept here for the embedding step:

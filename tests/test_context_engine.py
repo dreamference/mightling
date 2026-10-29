@@ -315,3 +315,44 @@ def test_a_plain_word_is_one_token_and_a_compound_keeps_its_whole_form_once():
 
     assert TFIDFCalculator.tokenize("foo") == ["foo"]
     assert TFIDFCalculator.tokenize("getUser get_user") == ["get", "user", "getuser", "get", "user", "get_user"]
+
+
+def test_an_index_run_that_fails_midway_leaves_the_previous_database_whole(tmp_path, monkeypatch):
+    # The tables were emptied and committed before the pool ran, and the JSON is written last: a
+    # crash or kill midway left the old JSON beside an empty database, which `load_index` accepted,
+    # so full-text search found nothing until a forced re-index.
+    import sqlite3
+
+    from dreamference.context_engine import context_engine, embedding_calculator
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+    for name in ("a.py", "b.py"):
+        (tmp_path / name).write_text(f"def {name[0]}lpha():\n    pass\n")
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_workspace(force_reindex=True)
+    before = engine.index_file.read_bytes()
+
+    class DyingPool:
+        def __init__(self, max_workers=None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def map(self, fn, items, chunksize=1):
+            yield fn(next(iter(items)))
+            raise RuntimeError("worker killed")
+
+    monkeypatch.setattr(context_engine, "ProcessPoolExecutor", DyingPool)
+    with pytest.raises(RuntimeError):
+        engine.index_workspace(force_reindex=True)
+    conn = sqlite3.connect(engine.sqlite_file)
+    try:
+        assert conn.execute("SELECT count(*) FROM files").fetchone()[0] == 2
+        assert conn.execute("SELECT count(*) FROM fts_context").fetchone()[0] == 2
+    finally:
+        conn.close()
+    assert engine.index_file.read_bytes() == before
