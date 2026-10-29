@@ -151,6 +151,7 @@ describe("the policy", () => {
     expect(threadPlace({ method: "thread/started", params: { thread: { id: "t1", cwd: "/work/repo" } } })).toEqual({ thread: "t1", cwd: "/work/repo" });
     expect(threadPlace({ id: 3, result: { thread: { id: "t2", cwd: "/work/other" } } })).toEqual({ thread: "t2", cwd: "/work/other" });
     expect(threadPlace({ id: 4, result: {} })).toBeNull();
+    expect(threadPlace({ method: "thread/started", params: { thread: { id: "t1" } } })).toBeNull();
   });
 
   it("refuses a reason for a request not refused at on", () => {
