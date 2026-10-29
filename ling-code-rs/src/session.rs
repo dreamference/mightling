@@ -39,15 +39,9 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
         return Ok(());
     }
     let state = repo.state_dir();
-    std::fs::create_dir_all(&state)?;
-    let lock = File::create(state.join("session.lock"))?;
-    if flock(&lock, false).is_err() {
+    let Some(_lock) = claim(&repo, crate::prompt::ready(&repo))? else {
         return Ok(()); // another session owns this repository
-    }
-    let has_index = crate::prompt::ready(&repo);
-    if !has_index {
-        let _ = std::fs::write(state.join("code_index.building"), "");
-    }
+    };
     // The launch-time run: universal and static, and executing when trusted and stale.
     let mut pending: Option<Request> = Some(if wants_exact(&repo, &settings) {
         Request::IndexExact
@@ -107,6 +101,19 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
         ticks = ticks.wrapping_add(1);
         std::thread::sleep(TICK);
     }
+}
+
+/// Takes the session lock, and marks a first build when there is no index yet; None when another
+/// session owns the repository.
+fn claim(repo: &Repo, has_index: bool) -> Result<Option<File>> {
+    let lock = repo.state_file("session.lock")?;
+    if flock(&lock, false).is_err() {
+        return Ok(None);
+    }
+    if !has_index {
+        let _ = repo.state_file("code_index.building");
+    }
+    Ok(Some(lock))
 }
 
 /// When the executing indexers may run without being asked (spec §6.3): the model server has
@@ -224,6 +231,30 @@ mod tests {
     use super::*;
 
     const HOUR: Duration = Duration::from_secs(3600);
+
+    /// The state directory is writable from inside the sandbox; the session runs outside it.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_planted_in_the_state_directory_is_never_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        let state = root.join(".dreamference");
+        std::fs::create_dir_all(&state).unwrap();
+        let repo = Repo {
+            root: root.clone(),
+            main_root: root,
+            is_git: true,
+        };
+        let target = dir.path().join("target");
+        std::fs::write(&target, "keep").unwrap();
+        std::os::unix::fs::symlink(&target, state.join("session.lock")).unwrap();
+        std::os::unix::fs::symlink(&target, state.join("code_index.building")).unwrap();
+        assert!(claim(&repo, false).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+        std::fs::remove_file(state.join("session.lock")).unwrap();
+        assert!(claim(&repo, false).unwrap().is_some());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+    }
 
     #[test]
     fn a_stopped_server_counts_after_two_probes() {

@@ -59,6 +59,16 @@ impl Repo {
         }
     }
 
+    /// Opens (creating, never truncating) a file the session keeps in the state directory.
+    ///
+    /// The directory is writable from inside the sandbox and a clone can commit it, while the
+    /// session runs outside: a symlink planted for the file, or for `.dreamference` itself, would
+    /// have it write where the symlink points. Both are refused.
+    pub fn state_file(&self, name: &str) -> std::io::Result<std::fs::File> {
+        let named = std::env::var_os("MIGHTLING_CODE_STATE_DIR").is_some();
+        open_state_file(&self.state_dir(), name, !named)
+    }
+
     /// Where the SCIP stores and their manifest live.
     pub fn scip_dir(&self) -> PathBuf {
         self.state_dir().join("scip")
@@ -205,6 +215,80 @@ pub fn no_index_yet(indexing: bool, search: bool) -> String {
         "no code index for this repository yet; {}{meanwhile}",
         run_index_command(indexing, "ling-code index")
     )
+}
+
+/// [`Repo::state_file`], for a directory that is refused as a symlink when `refuse_linked_dir`.
+fn open_state_file(
+    dir: &Path,
+    name: &str,
+    refuse_linked_dir: bool,
+) -> std::io::Result<std::fs::File> {
+    let refuse = |what: &Path| {
+        std::io::Error::other(format!(
+            "{} is not a regular file or directory; not writing through it",
+            what.display()
+        ))
+    };
+    if refuse_linked_dir && std::fs::symlink_metadata(dir).is_ok_and(|m| m.file_type().is_symlink())
+    {
+        return Err(refuse(dir));
+    }
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(name);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true);
+    // No following a symlink, and no blocking on a FIFO with no reader.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        libc::O_NOFOLLOW | libc::O_NONBLOCK,
+    );
+    let file = options.open(&path).map_err(|e| {
+        if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+            refuse(&path)
+        } else {
+            e
+        }
+    })?;
+    if !file.metadata()?.is_file() {
+        return Err(refuse(&path));
+    }
+    Ok(file)
+}
+
+#[cfg(all(test, unix))]
+mod state_file_tests {
+    use super::*;
+
+    #[test]
+    fn a_planted_symlink_is_refused_and_its_target_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "keep").unwrap();
+        let state = dir.path().join("state");
+        std::fs::create_dir(&state).unwrap();
+        std::os::unix::fs::symlink(&outside, state.join("session.lock")).unwrap();
+        assert!(open_state_file(&state, "session.lock", true).is_err());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
+        // A state directory that is itself a symlink, as a clone can commit `.dreamference`.
+        let linked = dir.path().join("linked");
+        std::os::unix::fs::symlink(&state, &linked).unwrap();
+        assert!(open_state_file(&linked, "code_index.building", true).is_err());
+        assert!(!state.join("code_index.building").exists());
+    }
+
+    #[test]
+    fn an_existing_file_is_opened_without_truncating_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        assert!(open_state_file(&state, "session.lock", true).is_ok());
+        std::fs::write(state.join("session.lock"), "kept").unwrap();
+        assert!(open_state_file(&state, "session.lock", true).is_ok());
+        assert_eq!(
+            std::fs::read_to_string(state.join("session.lock")).unwrap(),
+            "kept"
+        );
+    }
 }
 
 #[cfg(test)]
