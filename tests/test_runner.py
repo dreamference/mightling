@@ -140,3 +140,27 @@ def test_readiness_waiter_needs_health_and_a_completion(monkeypatch):
 
     monkeypatch.setattr(waiter, "_pre_warm", lambda: False)
     assert waiter.wait_for_vllm(max_wait=0) is False
+
+
+def test_readiness_waiter_warms_the_model_the_server_runs_not_the_configured_one(monkeypatch):
+    # The server may run another model than the config names (AGENTS: ask the server); a completion
+    # for the configured one answers 404, and the waiter would wait out its whole timeout.
+    import io
+    import json
+
+    from dreamference.runner import vllm_readiness_waiter as waiter_module
+
+    waiter = waiter_module.VLLMReadinessWaiter(config=DreamferenceConfig())
+    monkeypatch.setattr(waiter.vllm_manager, "get_models", lambda timeout=2.0: ["served/other-model"])
+    asked = []
+
+    class Response(io.BytesIO):
+        status = 200
+
+    def fake_urlopen(request, timeout=None):
+        asked.append(json.loads(request.data)["model"])
+        return Response(b"{}")
+
+    monkeypatch.setattr(waiter_module.urllib.request, "urlopen", fake_urlopen)
+    assert waiter._pre_warm() is True
+    assert asked == ["served/other-model"]
