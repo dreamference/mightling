@@ -176,3 +176,19 @@ def test_a_failed_engine_call_closes_its_connection(tmp_path, monkeypatch):
     assert asyncio.run(adapters.engine_call("GET", "/v1/models", None)) == (0, b"")
     assert closed == [True]
 
+
+@pytest.mark.parametrize("error", ["BadStatusLine", "IncompleteRead", "LineTooLong"])
+def test_a_port_that_does_not_speak_http_has_no_gate(monkeypatch, error):
+    import http.client
+
+    from conftest import REAL_GATE_PROBE
+
+    from dreamference.vllm_server.model_gate import ModelGate
+
+    monkeypatch.setattr(ModelGate, "probe", REAL_GATE_PROBE)
+
+    def broken(*args, **kwargs):
+        raise getattr(http.client, error)("x" if error != "IncompleteRead" else b"x")
+
+    monkeypatch.setattr("urllib.request.urlopen", broken)
+    assert ModelGate.probe("http://127.0.0.1:8000") is None
