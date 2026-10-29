@@ -1087,6 +1087,24 @@ def test_a_refused_admission_keeps_the_queue_and_says_why(setup, fake_host):
     assert "Not run: the model server at http://x is not answering" in report
 
 
+def test_a_refused_admission_still_waits_for_the_tasks_on_other_nodes(setup, fake_host, monkeypatch):
+    from dreamference.night_shift import NightShiftRemote
+    queue(setup["night"], setup["repo"])
+    FakeHost.model = None
+    elsewhere = {"id": "20261001-0100-a99", "status": "sent", "on": "spark-2"}
+    waits = []
+    monkeypatch.setattr(NightShiftRemote, "sent_tasks", classmethod(lambda cls, night_dir: [elsewhere]))
+    monkeypatch.setattr(NightShiftRemote, "hand_off", classmethod(lambda cls, night_dir, pending, notes: []))
+    monkeypatch.setattr(NightShiftRemote, "collect",
+                        classmethod(lambda cls, night_dir, sent, end, notes, wait: waits.append(wait)))
+    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"],
+                                mightling_bin=setup["ling"], vllm_host="http://x",
+                                settings=NightShiftSettings({})) == 0
+    assert waits[-1] is True
+    report = next((setup["night"] / "reports").glob("*.md")).read_text()
+    assert "Not run: the model server at http://x is not answering" in report
+
+
 def test_a_second_runner_is_refused_while_the_lock_is_held(setup, fake_host):
     queue(setup["night"], setup["repo"])
     with NightShiftQueue.runner_lock(setup["night"]) as held:
