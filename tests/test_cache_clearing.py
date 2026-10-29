@@ -107,3 +107,17 @@ def test_a_linked_cache_that_cannot_be_emptied_is_told_how_to_empty_it_not_unlin
     advice = capsys.readouterr().out
     assert f"rm -rf {link}\n" not in advice
     assert f"sudo find {link}/ -mindepth 1 -delete" in advice
+
+
+def test_the_removal_advice_for_a_path_with_a_space_names_that_path_alone(
+    tmp_path, monkeypatch, capsys
+):
+    # `sudo rm -rf /data/my models/hub` removes `/data/my` and `models/hub`.
+    import shlex
+
+    cache = tmp_path / "my models" / "hub"
+    cache.mkdir(parents=True)
+    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
+    assert ModelDownloader._remove_cache_dir(cache) is False
+    advice = capsys.readouterr().out.split("Remove them with: ", 1)[1].strip()
+    assert shlex.split(advice) == ["sudo", "rm", "-rf", str(cache)]

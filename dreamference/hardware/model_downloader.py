@@ -8,6 +8,7 @@ prior to launching the model server. It prioritizes local cache to minimize HF A
 import contextlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -706,9 +707,9 @@ class ModelDownloader:
             print(f"⚠️  Some files in {cache_dir} could not be removed (written as root by a container).")
             # `rm -rf` on a link removes the link alone and leaves the files.
             if cache_dir.is_symlink():
-                command = f"sudo find {cache_dir}/ -mindepth 1 -delete"
+                command = f"sudo find {shlex.quote(f'{cache_dir}/')} -mindepth 1 -delete"
             else:
-                command = f"sudo rm -rf {cache_dir}"
+                command = f"sudo rm -rf {shlex.quote(str(cache_dir))}"
             print(f"💡 Remove them with: {command}")
             return False
         return True
