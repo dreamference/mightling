@@ -38,6 +38,14 @@ MAX_SEQUENCE_TOKENS: Final[int] = 1024
 ENCODE_BATCH_SIZE: Final[int] = 8
 
 
+def _import_sentence_transformer() -> "type[SentenceTransformerType] | None":
+    """Imports the SentenceTransformer class: None when sentence-transformers is not installed."""
+    try:
+        return importlib.import_module("sentence_transformers").SentenceTransformer
+    except ImportError:
+        return None
+
+
 class EmbeddingCalculator:
     """
     Generates and scores dense semantic embeddings for hybrid search.
@@ -59,15 +67,16 @@ class EmbeddingCalculator:
             Optional[SentenceTransformer]: The model, or None when it is unavailable.
         """
         global SentenceTransformer
-        if SentenceTransformer is _NOT_LOADED and cls._model is None and not cls._unavailable:
+        if cls._model is None and not cls._unavailable:
+            # The import is inside the broad `except` too: a broken torch or transformers install
+            # raises other errors than ImportError on import (OSError for a missing library,
+            # RuntimeError), and they escaped into indexing and the MCP tool.
             try:
-                SentenceTransformer = importlib.import_module("sentence_transformers").SentenceTransformer
-            except ImportError:
-                SentenceTransformer = None
-        if cls._model is None and not cls._unavailable and SentenceTransformer is not None:
-            try:
-                cls._model = SentenceTransformer(EMBEDDING_MODEL, trust_remote_code=True, device=EMBEDDING_DEVICE)
-                cls._model.max_seq_length = MAX_SEQUENCE_TOKENS
+                if SentenceTransformer is _NOT_LOADED:
+                    SentenceTransformer = _import_sentence_transformer()
+                if SentenceTransformer is not None:
+                    cls._model = SentenceTransformer(EMBEDDING_MODEL, trust_remote_code=True, device=EMBEDDING_DEVICE)
+                    cls._model.max_seq_length = MAX_SEQUENCE_TOKENS
             except Exception as error:
                 cls._unavailable = True
                 print(f"⚠️  Embedding model {EMBEDDING_MODEL} is unavailable ({type(error).__name__}); "

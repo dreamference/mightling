@@ -289,3 +289,20 @@ def test_a_file_size_is_its_size_on_disk_not_after_a_lossy_decode(tmp_path):
     (tmp_path / "latin.py").write_bytes(b"name = 'caf\xe9'\n")
     idx_file, _ = _index_one(tmp_path, tmp_path / "latin.py")
     assert idx_file.size_bytes == 14
+
+
+@pytest.mark.parametrize("error", [OSError("libtorch_cuda.so: cannot open"), RuntimeError("broken")])
+def test_a_broken_sentence_transformers_install_means_keyword_search_only(monkeypatch, error):
+    # Only ImportError was caught: a torch or transformers install that raised anything else on
+    # import escaped into indexing, and the MCP tool answered -32603 instead of searching by keyword.
+    from dreamference.context_engine import embedding_calculator
+
+    def broken(name):
+        raise error
+
+    monkeypatch.setattr(embedding_calculator, "SentenceTransformer", embedding_calculator._NOT_LOADED)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_model", None)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", False)
+    monkeypatch.setattr(embedding_calculator.importlib, "import_module", broken)
+    assert embedding_calculator.EmbeddingCalculator.embed_texts(["x"]) is None
+    assert embedding_calculator.EmbeddingCalculator._unavailable
