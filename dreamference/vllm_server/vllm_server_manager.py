@@ -945,7 +945,9 @@ class VLLMServerManager:
             "-v", f"{dgx_cache}:/root/.cache/dreamference",
         ]
         if token_env:
-            cmd.extend(["-e", f"HF_TOKEN={token_env}"])
+            # By name only: Docker copies the value from the environment start_server gives the
+            # `docker run`, so the token never appears in the command it prints or in `ps`.
+            cmd.extend(["-e", "HF_TOKEN"])
         # vLLM reports hardware, model architecture, quantisation and settings to stats.vllm.ai at
         # start and every ten minutes after (no prompts). Found running on 2026-09-29; these turn
         # it off, and DO_NOT_TRACK covers the other libraries in either engine's image that honour
