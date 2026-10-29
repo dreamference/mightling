@@ -389,7 +389,8 @@ class NightShiftHost:
         marker named after the server's pid in `$CODEX_HOME/night/busy/`
         (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.3). A marker counts when its pid is alive and is
         a `ling app-server`: the installed `ling`, or the one bundled inside the desktop app
-        (desktop/electron, `<app>/resources/ling`), which has the same name and runs `app-server`;
+        (desktop/electron, `<app>/resources/ling`), which has the same name and runs `app-server`
+        (or `web`: `ling web serve` keeps the same marker);
         a server started before a build replaced the binary still counts (`executable_of`).
         Any other marker is left by a window killed hard, or names a pid since reused, and is
         deleted.
@@ -418,14 +419,15 @@ class NightShiftHost:
 
     @classmethod
     def _is_app_server(cls, pid: int, target: str) -> bool:
-        """Whether a live pid is a `ling app-server`: the installed binary, or a bundled copy.
+        """Whether a live pid is a `ling app-server` or `ling web`: the installed binary, or a copy.
 
         Args:
             pid: The process id.
             target: The installed `ling`, resolved.
 
         Returns:
-            bool: True for the installed `ling`, or a program of the same name running `app-server`.
+            bool: True for the installed `ling`, or a program of the same name running `app-server`
+                or `web`.
         """
         exe = cls.executable_of(str(pid))
         if exe == target:
@@ -436,7 +438,7 @@ class NightShiftHost:
             args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
         except OSError:
             return False
-        return b"app-server" in args
+        return b"app-server" in args or b"web" in args
 
     @classmethod
     def executable_of(cls, pid: str) -> str:
