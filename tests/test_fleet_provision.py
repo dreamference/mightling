@@ -238,6 +238,21 @@ def test_the_probe_reads_and_never_writes():
     assert "model:models--a--b" in script and "image:dreamference-vllm:1" in script
 
 
+def test_a_folder_or_image_name_with_shell_characters_is_only_a_name(tmp_path):
+    folder, image = "m; touch PWN #", "i$(touch PWN)"
+    body = FleetProbe.script([folder], [image])
+    lines = [ln for ln in body.splitlines() if ln.startswith(("[ -d", "( docker"))]
+    script = "\n".join(
+        ["v() { printf '%s=%s\\n' \"$1\" \"$2\"; }", f"hub={tmp_path}"]
+        + ["docker() { return 1; }", "sg() { return 1; }"] + lines
+    )
+
+    done = subprocess.run(["sh", "-c", script], cwd=tmp_path, capture_output=True, text=True)
+
+    assert not (tmp_path / "PWN").exists()
+    assert done.stdout.splitlines() == [f"model:{folder}=0", f"image:{image}=0"]
+
+
 def test_the_probe_output_is_parsed_and_judged():
     state = FleetProbe.parse("dgx=1\ngpu=NVIDIA GB10\ndocker_group=1\nlinger=1\navahi_file=1\n"
                              "sandbox_profile=0\nuserns_restricted=1\ntelemetry=enabled\nmodel:m1=1\nmodel:m2=0\n"

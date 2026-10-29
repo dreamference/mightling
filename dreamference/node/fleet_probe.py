@@ -65,14 +65,14 @@ class FleetProbe:
         for folder in folders:
             quoted = shlex.quote(folder)
             lines.append(
-                f'[ -d "$hub"/{quoted}/snapshots ] && v model:{folder} 1 || v model:{folder} 0'
+                f'[ -d "$hub"/{quoted}/snapshots ] && v model:{quoted} 1 || v model:{quoted} 0'
             )
         for image in images:
             quoted = shlex.quote(image)
             check = shlex.quote(f"docker image inspect {quoted} >/dev/null 2>&1")
             lines.append(
                 f"( docker image inspect {quoted} >/dev/null 2>&1 || sg docker -c {check} ) "
-                f"&& v image:{image} 1 || v image:{image} 0"
+                f"&& v image:{quoted} 1 || v image:{quoted} 0"
             )
         return "\n".join(lines) + "\n"
 
