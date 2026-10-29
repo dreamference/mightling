@@ -81,8 +81,11 @@ fn tools_list() -> Value {
 pub fn serve(repo: Repo, settings: Settings) -> Result<()> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
-    for line in stdin.lock().lines() {
-        let line = line?;
+    for line in stdin.lock().split(b'\n') {
+        // A line that is not text is no message; it never ends the session.
+        let Ok(line) = String::from_utf8(line?) else {
+            continue;
+        };
         if line.trim().is_empty() {
             continue;
         }
@@ -100,8 +103,14 @@ pub fn serve(repo: Repo, settings: Settings) -> Result<()> {
                 "serverInfo": { "name": "ling-code", "version": env!("CARGO_PKG_VERSION") }
             })),
             "tools/list" => Ok(tools_list()),
-            "tools/call" => call(&repo, &settings, &message["params"])
-                .map(|text| json!({ "content": [{ "type": "text", "text": text }] })),
+            // A tool that fails is a result the model reads (MCP), not a protocol error.
+            "tools/call" => Ok(match call(&repo, &settings, &message["params"]) {
+                Ok(text) => json!({ "content": [{ "type": "text", "text": text }] }),
+                Err(error) => json!({
+                    "content": [{ "type": "text", "text": format!("{error:#}") }],
+                    "isError": true
+                }),
+            }),
             "ping" => Ok(json!({})),
             _ => Err(anyhow::anyhow!("method not found: {method}")),
         };

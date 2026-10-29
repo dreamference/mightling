@@ -569,6 +569,47 @@ fn the_same_answers_over_mcp() {
     assert!(text.contains("exact shapes/cli.py:9"), "{text}");
 }
 
+/// One MCP session over stdio, the requests as raw lines; the answers parsed.
+fn mcp_session(f: &common::Fixture, requests: &[&[u8]]) -> Vec<serde_json::Value> {
+    use std::io::Write;
+    let mut child = f
+        .command(&["mcp"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for request in requests {
+        stdin.write_all(request).unwrap();
+        stdin.write_all(b"\n").unwrap();
+    }
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+#[test]
+fn mcp_survives_a_bad_line_and_reports_a_failed_tool_as_a_tool_error() {
+    let f = fixture();
+    let lines = mcp_session(
+        &f,
+        &[
+            b"\xff\xfe not text",
+            br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"code_nope","arguments":{}}}"#,
+            br#"{"jsonrpc":"2.0","id":2,"method":"no/such"}"#,
+        ],
+    );
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    // A tool that fails answers with a result the model reads, not "method not found".
+    assert_eq!(lines[0]["result"]["isError"], true, "{}", lines[0]);
+    let text = lines[0]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("unknown tool nope"), "{text}");
+    assert_eq!(lines[1]["error"]["code"], -32601, "{}", lines[1]);
+}
+
 #[test]
 fn a_definition_without_symbol_information_is_repaired() {
     // Drop every SymbolInformation from the recorded index, as scip-python did for tests/: the
