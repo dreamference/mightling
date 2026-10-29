@@ -598,3 +598,30 @@ def test_a_cached_model_is_sized_by_its_blobs_not_also_by_its_snapshot_links(mon
     (root / "snapshots" / "rev").mkdir(parents=True)
     (root / "snapshots" / "rev" / "model.safetensors").symlink_to("../../blobs/abc")
     assert ModelDownloader._get_cache_size(model_key) == "2.0 KB"
+
+
+def test_an_interrupted_download_is_not_taken_for_a_downloaded_model():
+    # download_model() skips the fetch for a model it finds, so a partial snapshot never resumed.
+    import json
+
+    from dreamference.hardware import ModelDownloader
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    repo = ModelMatrixRegistry.resolve_hf_repo(model_key)
+    revision = ModelMatrixRegistry.pinned_revision(model_key) or "main-rev"
+    root = ModelDownloader.get_hf_cache_dir() / ("models--" + repo.replace("/", "--"))
+    snapshot = root / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (root / "blobs").mkdir()
+    shards = ["model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"]
+    index = {"weight_map": {"a.weight": shards[0], "b.weight": shards[1]}}
+    (snapshot / "config.json").write_text("{}")
+    (snapshot / "model.safetensors.index.json").write_text(json.dumps(index))
+    (snapshot / shards[0]).write_bytes(b"\0")
+    assert ModelDownloader.is_model_downloaded(model_key, revision) is False
+    (snapshot / shards[1]).write_bytes(b"\0")
+    assert ModelDownloader.is_model_downloaded(model_key, revision) is True
+    # A blob still being written is a download that has not finished.
+    (root / "blobs" / "0123abcd.incomplete").write_bytes(b"\0")
+    assert ModelDownloader.is_model_downloaded(model_key, revision) is False

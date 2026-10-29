@@ -6,6 +6,7 @@ prior to launching the model server. It prioritizes local cache to minimize HF A
 """
 
 import contextlib
+import json
 import os
 import shutil
 import subprocess
@@ -382,7 +383,8 @@ class ModelDownloader:
                 the recipe was measured on.
 
         Returns:
-            bool: True if snapshot directory exists and is non-empty.
+            bool: True if the snapshot is non-empty, holds every shard its index names, and no
+            blob of the repository is still being written.
         """
         if not model_key:
             return False
@@ -395,12 +397,32 @@ class ModelDownloader:
         folder_name = "models--" + repo_id.replace("/", "--")
         cache_dir = cls.get_hf_cache_dir() / folder_name / "snapshots"
         revision = revision or ModelMatrixRegistry.pinned_revision(model_key)
+        if any((cache_dir.parent / "blobs").glob("*.incomplete")):
+            return False
         if revision:
-            pinned = cache_dir / revision
-            return pinned.is_dir() and any(pinned.iterdir())
-        if cache_dir.exists() and any(cache_dir.iterdir()):
-            return True
-        return False
+            return cls._snapshot_complete(cache_dir / revision)
+        return cache_dir.is_dir() and any(cls._snapshot_complete(s) for s in cache_dir.iterdir())
+
+    @classmethod
+    def _snapshot_complete(cls, snapshot: Path) -> bool:
+        """Whether a snapshot holds a whole checkpoint, as far as the files in it tell.
+
+        Args:
+            snapshot (Path): A snapshot folder in the hub cache.
+
+        Returns:
+            bool: True if it is non-empty and every shard a `*.index.json` names is present.
+        """
+        if not snapshot.is_dir() or not any(snapshot.iterdir()):
+            return False
+        for index in snapshot.glob("*.index.json"):
+            try:
+                weight_map = json.loads(index.read_text()).get("weight_map", {})
+            except (OSError, ValueError, AttributeError):
+                return False
+            if not all((snapshot / shard).is_file() for shard in set(weight_map.values())):
+                return False
+        return True
 
     @classmethod
     def download_model(
