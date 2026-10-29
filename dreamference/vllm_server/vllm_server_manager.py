@@ -185,13 +185,16 @@ class VLLMServerManager:
 
     def check_health(self, timeout: float = 0.5) -> bool:
         """
-        Performs non-blocking HTTP GET request to /v1/models to verify vLLM server health.
+        Checks that the server lists a model and answers a one-token chat completion with it.
+
+        A server lists its models before it can serve them, so `GET /v1/models` alone would call
+        a server ready that still fails the first request.
 
         Args:
-            timeout (float): Request timeout in seconds.
+            timeout (float): Timeout in seconds for each of the two requests.
 
         Returns:
-            bool: True if server returns HTTP status 200 OK.
+            bool: True if both answer HTTP 200.
         """
         # Not at the top: `ling-admin` imports this for every command (tests/test_cli_startup.py).
         import requests
