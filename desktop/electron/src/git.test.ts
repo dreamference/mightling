@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { findEditors, execProgram, openCommand, runsWhenOpened, systemDataDirs } from "./editors";
+import { findEditors, execProgram, openCommand, runsWhenOpened, systemDataDirs, terminalCommand } from "./editors";
 import * as git from "./git";
 import { programOnPath } from "./platform";
 import { nodeScript } from "./test-ling";
@@ -389,6 +389,33 @@ describe("editors", () => {
     expect(await runsWhenOpened(dir, "linux")).toBeNull();
     expect(await runsWhenOpened(path.join(dir, "missing.md"), "linux")).toBeNull();
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  // They are launched in the repository's folder: a name found through a relative PATH entry would be
+  // read against that folder, and a terminal or editor the repository ships would run.
+  it.skipIf(process.platform === "win32")("takes a terminal or an editor only from PATH's absolute folders", () => {
+    const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-editors-path-")));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-editors-home-"));
+    const saved = process.env.PATH;
+    try {
+      for (const bin of ["code", "xterm"]) {
+        fs.writeFileSync(path.join(dir, bin), "");
+        fs.chmodSync(path.join(dir, bin), 0o755);
+      }
+      // A `.desktop` entry that names its program bare.
+      fs.mkdirSync(path.join(home, ".local", "share", "applications"), { recursive: true });
+      fs.writeFileSync(path.join(home, ".local", "share", "applications", "code.desktop"), "[Desktop Entry]\nExec=code %F\n");
+      process.env.PATH = ["", ".", path.relative(process.cwd(), dir)].join(path.delimiter);
+      expect(terminalCommand(home)).toBeNull();
+      expect(findEditors(home, [])).toEqual([]);
+      process.env.PATH = dir;
+      expect(terminalCommand(home)?.command).toBe(path.join(dir, "xterm"));
+      expect(findEditors(home, []).map((editor) => editor.command)).toEqual([path.join(dir, "code")]);
+    } finally {
+      process.env.PATH = saved;
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

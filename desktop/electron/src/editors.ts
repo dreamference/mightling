@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { programOnPath } from "./platform";
 
 export interface EditorKind {
   id: string;
@@ -62,18 +63,9 @@ export function systemDataDirs(): string[] {
   return [...(process.env.XDG_DATA_DIRS || "/usr/local/share:/usr/share").split(":").filter(Boolean), "/var/lib/snapd/desktop"];
 }
 
+/** A program by its absolute place on PATH, never a relative one: editors and terminals start in a repository (platform.ts). */
 function onPath(bin: string): string | null {
-  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
-    if (!dir) continue;
-    const candidate = path.join(dir, bin);
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch {
-      // Not here.
-    }
-  }
-  return null;
+  return programOnPath(bin, process.platform, process.env.PATH ?? "");
 }
 
 /** The editors installed here, each once, in the table's order. */
@@ -100,7 +92,9 @@ export function findEditors(home: string = os.homedir(), dataDirs: string[] = sy
       const program = exec ? execProgram(exec) : null;
       if (!program) continue;
       const kind = KINDS.find((entry) => entry.bins.includes(path.basename(program)));
-      if (kind) take(kind, program);
+      // A bare `Exec=code` is looked up as a bare name would be, by its absolute place on PATH.
+      const command = path.isAbsolute(program) ? program : onPath(program);
+      if (kind && command) take(kind, command);
     }
   }
   // JetBrains Toolbox's launcher scripts.
