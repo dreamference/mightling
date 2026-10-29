@@ -682,3 +682,70 @@ def test_a_recipe_s_nested_values_are_isolated_per_call():
         first["extra_args"].append("--mutated")
         first["speculative_config"]["mutated"] = True
         assert ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, engine) == original
+
+def _tensorize_in_docker(tmp_path, monkeypatch, image_ready=True, returncode=0):
+    # Runs tensorize_model with docker present and every outside call faked; the fake `docker run`
+    # writes what the container would, at the host path of the file it was told to write.
+    import re
+    import types
+
+    from dreamference.hardware import ModelDownloader
+    from dreamference.hardware.hardware_manager import HardwareManager
+    from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    hub = tmp_path / "hub"
+    snapshot = hub / "models--org--name" / "snapshots" / "abc"
+    snapshot.mkdir(parents=True)
+    dgx = tmp_path / "home" / ".cache" / "dreamference"
+    monkeypatch.setattr(ModelDownloader, "TENSORIZER_CACHE_HOME", dgx / "tensorizer")
+    monkeypatch.setattr(ModelDownloader, "get_hf_cache_dir", classmethod(lambda cls: hub))
+    monkeypatch.setattr(ModelDownloader, "container_volume_args", classmethod(lambda cls: []))
+    monkeypatch.setattr(VLLMServerManager, "check_host_safety", classmethod(lambda cls: None))
+    monkeypatch.setattr(VLLMServerManager, "ensure_docker_image", lambda self, image=None: image_ready)
+    monkeypatch.setattr(VLLMServerManager, "_estimate_model_weights_gb", staticmethod(lambda model: 20.0))
+    monkeypatch.setattr(
+        HardwareManager,
+        "detect_gb10_hardware",
+        classmethod(lambda cls: types.SimpleNamespace(total_unified_memory_gb=128.0)),
+    )
+    monkeypatch.setattr(ModelDownloader, "is_model_downloaded", classmethod(lambda cls, *a, **k: True))
+    monkeypatch.setattr(
+        ModelDownloader, "get_model_snapshot_dir", classmethod(lambda cls, *a, **k: snapshot)
+    )
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker" if name == "docker" else None)
+    # No local tensorizer: attempt 2 fails on its import.
+    monkeypatch.setitem(sys.modules, "tensorizer", None)
+    docker_runs, written = [], []
+
+    def run(argv, *args, **kwargs):
+        if argv[0] == "docker":
+            docker_runs.append(argv)
+            mounts = dict(argv[i + 1].split(":", 1)[::-1] for i, a in enumerate(argv) if a == "-v")
+            target = re.search(r"TensorSerializer\('([^']+)'\)", argv[-1]).group(1)
+            for inside, outside in mounts.items():
+                if target.startswith(inside + "/"):
+                    host = Path(outside + target[len(inside):])
+                    written.append(host)
+                    host.parent.mkdir(parents=True, exist_ok=True)
+                    host.write_bytes(b"tensors")
+        return types.SimpleNamespace(returncode=returncode, stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", run)
+    ModelDownloader.tensorize_model(model_key, force=True)
+    return ModelDownloader.get_tensorized_dir(model_key), docker_runs, written, dgx
+
+
+def test_tensorize_runs_the_container_with_the_dreamference_cache_mounted(tmp_path, monkeypatch):
+    # `get_dgx_cache_dir` did not exist: the AttributeError was swallowed and the container never ran.
+    tdir, docker_runs, written, dgx = _tensorize_in_docker(tmp_path, monkeypatch)
+    assert len(docker_runs) == 1
+    assert f"{dgx}:/root/.cache/dreamference" in docker_runs[0]
+    assert written and all(path.is_relative_to(tdir) for path in written)
+    assert (tdir / "model.tensors").read_bytes() == b"tensors"
+
+
+def test_a_failed_container_leaves_no_tensors_file(tmp_path, monkeypatch):
+    tdir, docker_runs, _, _ = _tensorize_in_docker(tmp_path, monkeypatch, returncode=1)
+    assert docker_runs
+    assert not (tdir / "model.tensors").exists() and not (tdir / "model.tensors.partial").exists()
