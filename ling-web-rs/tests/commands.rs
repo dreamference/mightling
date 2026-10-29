@@ -754,6 +754,13 @@ fn a_page_cut_at_the_size_cap_is_marked_truncated() {
     let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(!printed["text"].as_str().unwrap().contains("end"));
     assert_eq!(printed["truncated"], true);
+    // The text is short, so the footer names the size cap, not the character limit.
+    assert!(
+        stdout(&fetch(&[&server.base], &[]))
+            .ends_with("start\n\n[truncated: the page is larger than 5242880 bytes]\n"),
+        "{}",
+        stdout(&fetch(&[&server.base], &[]))
+    );
 }
 
 #[test]
