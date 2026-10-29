@@ -47,7 +47,7 @@ class NodeBrowser:
         best: Dict[str, Dict[str, str]] = {}
         order: List[str] = []
         for line in output.splitlines():
-            fields = line.split(";")
+            fields = line.split(";", 9)
             if len(fields) < 10 or fields[0] != "=" or fields[4] != service_type:
                 continue
             interface = fields[1]

@@ -2883,3 +2883,14 @@ def test_a_nodes_records_cannot_name_a_different_address_or_port():
 
     assert (node["address"], node["port"], node["host"]) == ("10.0.0.5", "8000", "spark.local")
     assert (node["name"], node["interface"], node["node"]) == ("spark", "eth0", "n1")
+
+
+def test_a_semicolon_inside_a_nodes_records_does_not_cut_them_short():
+    line = (
+        "=;eth0;IPv4;spark;_mightling-node._tcp;local;spark.local;10.0.0.5;8000;"
+        '"node=n1" "version=1.0;beta" "remote=a;b"'
+    )
+
+    (node,) = NodeBrowser.parse(line)
+
+    assert (node["version"], node["remote"]) == ("1.0;beta", "a;b")
