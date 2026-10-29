@@ -22,6 +22,7 @@ Cloudflare's API, lego and the box go through the seams of `RemotePublicCertific
 """
 
 import logging
+import re
 import urllib.parse
 from pathlib import Path
 from typing import Any, Final
@@ -45,6 +46,11 @@ DNS_TTL: Final[int] = 300
 # pushed to the box (so a renewal pushes only a new certificate).
 RECORD_KEYS: Final[tuple[str, ...]] = ("relay_name", "relay_pushed")
 
+# A DNS label as hostnames use it: ASCII letters, digits and hyphens, never a hyphen at either end
+# (a leading one would read as an option where the name becomes an argument), 63 characters at most.
+DNS_LABEL: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+MAX_NAME: Final[int] = 253
+
 
 class RemoteRelayCertificate:
     """The relay's name, its DNS records, its certificate, and putting it on the box."""
@@ -63,8 +69,9 @@ class RemoteRelayCertificate:
         labels = relay_name.split(".")
         return (
             relay_name != dns_name
+            and len(relay_name) <= MAX_NAME
             and len(labels) >= 3  # noqa: PLR2004 - a label and a registrable domain
-            and all(label and label.replace("-", "").isalnum() for label in labels)
+            and all(DNS_LABEL.fullmatch(label) for label in labels)
         )
 
     @classmethod
