@@ -162,6 +162,9 @@ export class Previews {
     const placed = this.placements.get(id);
     if (placed) this.place(id, placed.bounds, placed.visible);
     const contents = view.webContents;
+    // A peer connection's STUN and TURN traffic never passes the request rules above: no UDP for it
+    // (TURN over TCP would still go direct; the preview has no proxy).
+    contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
     // A page's new window opens in the same tab, if the rules let it.
     contents.setWindowOpenHandler(({ url: target }) => {
       if (this.decision(preview, target).verdict === "allow") void contents.loadURL(target);

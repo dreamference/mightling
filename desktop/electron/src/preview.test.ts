@@ -18,6 +18,8 @@ vi.mock("electron", () => {
     webContents = {
       id: 7,
       reloads: 0,
+      policies: [] as string[],
+      setWebRTCIPHandlingPolicy(policy: string) { this.policies.push(policy); },
       on: () => {},
       setWindowOpenHandler: () => {},
       isDestroyed: () => false,
@@ -53,5 +55,15 @@ describe("a preview at /airgapped", () => {
     expect(await asked("https://example.com/api")).toBe(true);
     expect(await asked("wss://example.com/socket")).toBe(true);
     expect(await asked("http://localhost:5173/app.js")).toBe(false);
+  });
+});
+
+describe("a preview and WebRTC", () => {
+  it("keeps a page's peer connections off UDP, which no request rule sees", async () => {
+    const previews = new Previews(() => {}, () => ({ sites: {}, devTools: false }), async () => true);
+    let view: { webContents: { policies: string[] } } | null = null;
+    const window = { contentView: { addChildView: (added: typeof view) => { view = added; } }, on: () => {} };
+    await previews.open(window as never, "rtc", "http://localhost:5173/", "thread-1");
+    expect(view!.webContents.policies).toEqual(["disable_non_proxied_udp"]);
   });
 });
