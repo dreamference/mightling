@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { findEditors, execProgram, openCommand, systemDataDirs } from "./editors";
+import { findEditors, execProgram, openCommand, runsWhenOpened, systemDataDirs } from "./editors";
 import * as git from "./git";
 
 const scratchHome = fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-home-"));
@@ -343,6 +343,41 @@ describe("editors", () => {
     expect(execProgram("env BAMF=1 subl %F")).toBe("subl");
     expect(execProgram("%F")).toBeNull();
     expect(systemDataDirs().length).toBeGreaterThan(0);
+  });
+
+  it("never hand the system a file it would run instead of open (editor/open and docs/open with no editor chosen)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-runs-"));
+    const file = (name: string, mode = 0o644) => {
+      const at = path.join(dir, name);
+      fs.writeFileSync(at, "x");
+      fs.chmodSync(at, mode);
+      return at;
+    };
+    const notes = file("notes.md");
+    const script = file("build.sh", 0o755);
+    const entry = file("app.desktop");
+    fs.symlinkSync(script, path.join(dir, "readme.txt"));
+    const app = path.join(dir, "Tool.app");
+    fs.mkdirSync(app);
+    // Windows: what ShellExecute starts, whatever the case, trailing dots and spaces, a stream, PATHEXT's own.
+    for (const name of ["setup.bat", "SETUP.EXE", "run.cmd.", "run.ps1 ", "go.lnk", "x.url", "a.hta", "s.js", "a.txt:evil.bat", "C:\\w\\tool.msi"]) {
+      expect(await runsWhenOpened(path.join(dir, name), "win32", "")).toMatch(/would run, not open/);
+    }
+    expect(await runsWhenOpened(path.join(dir, "tool.xyz"), "win32", ".COM;.EXE;.XYZ")).toMatch(/would run/);
+    for (const name of ["report.pdf", "notes.md", "photo.png", "data.csv"]) expect(await runsWhenOpened(path.join(dir, name), "win32", ".COM;.EXE")).toBeNull();
+    // macOS: an application (a folder), a Terminal script, an installer, an executable; Linux: a launcher or an executable, also behind a link.
+    expect(await runsWhenOpened(app, "darwin")).toMatch(/Tool.app would run/);
+    for (const name of ["go.command", "x.pkg", "y.fileloc"]) expect(await runsWhenOpened(path.join(dir, name), "darwin")).toMatch(/would run/);
+    expect(await runsWhenOpened(script, "darwin")).toMatch(/would run/);
+    expect(await runsWhenOpened(entry, "linux")).toMatch(/app.desktop would run/);
+    expect(await runsWhenOpened(script, "linux")).toMatch(/would run/);
+    expect(await runsWhenOpened(path.join(dir, "readme.txt"), "linux")).toMatch(/readme.txt would run/);
+    // Documents and folders open.
+    expect(await runsWhenOpened(notes, "linux")).toBeNull();
+    expect(await runsWhenOpened(notes, "darwin")).toBeNull();
+    expect(await runsWhenOpened(dir, "linux")).toBeNull();
+    expect(await runsWhenOpened(path.join(dir, "missing.md"), "linux")).toBeNull();
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 
