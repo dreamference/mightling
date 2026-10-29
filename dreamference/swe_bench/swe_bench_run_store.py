@@ -21,9 +21,6 @@ from typing import Any, Dict, Final, List, Optional
 
 from dreamference.swe_bench import swe_bench_settings
 
-# Statuses after which an instance's agent phase is over and its prediction is written.
-FINISHED_STATUSES: Final[tuple] = ("done", "empty", "stalled", "timeout", "error")
-
 _PREDICTIONS_LOCK: Final[threading.Lock] = threading.Lock()
 
 # A command that asks the index something. Naming the binary is not enough: in the first run
