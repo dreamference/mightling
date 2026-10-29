@@ -168,6 +168,8 @@ def test_the_lan_copy_authorises_an_ephemeral_key_pins_the_host_key_and_always_c
     copy = next(c for c in recipient.commands if "rsync" in c)
     assert "spark-1a2b.local ssh-ed25519 AAAAhost" in copy and "StrictHostKeyChecking=yes" in copy
     assert "owner@spark-1a2b.local:/donor/hub/models--org--m/" in copy
+    # a link the donor sends that points outside the folder is not created here
+    assert "--safe-links" in copy
     assert any("sed -i" in c and "mightling-lan-copy-" in c for c in donor.commands)
     assert any(c.startswith("rm -rf") for c in recipient.commands)
     # a failed copy still removes the key
