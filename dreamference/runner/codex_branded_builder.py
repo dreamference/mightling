@@ -47,6 +47,15 @@ REPO_ROOT: Final[str] = os.path.dirname(
 CODEX_SUBMODULE_DIR: Final[str] = os.path.join(REPO_ROOT, "codex")
 CODEX_PATCH_DIR: Final[str] = os.path.join(REPO_ROOT, "codex-patches")
 
+# The exported workspace's lockfile: upstream's own pins plus those of the crates ling-rs/ brings in,
+# which upstream's lock cannot hold. Without it every build resolved ling-rs's third-party crates
+# (pgp, mdns-sd and some fifty more) afresh from crates.io, so a release could ship whatever version
+# was newest that day. Cargo keeps every entry the lock has; it rewrites only the workspace crates'
+# own version, which stamp_version changes. It is made for one submodule commit and is refreshed
+# with it (docs/dev/codex-build.md).
+CODEX_LOCKFILE: Final[str] = str(Path(CODEX_PATCH_DIR) / "Cargo.lock")
+CODEX_LOCKFILE_COMMIT: Final[str] = "064c6b8c737f5b41d171fdda80bd9ef10ad06eb3"
+
 # The launcher crate. It is Dreamference's own Rust, so it lives here as source rather than inside a
 # patch, and is copied into the exported tree where patch 0002's dependency line expects it.
 MIGHTLING_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "ling-rs")
@@ -271,9 +280,9 @@ class CodexBrandedBuilder:
     @classmethod
     def build_key(cls) -> Optional[str]:
         """
-        Identifies a build by its inputs: the source commit, the exact bytes of every patch and of
-        every launcher source file, and the profile overrides, since changing any of those changes
-        the binary as surely as a patch does.
+        Identifies a build by its inputs: the source commit, the exact bytes of every patch, of the
+        lockfile and of every launcher source file, and the profile overrides, since changing any of
+        those changes the binary as surely as a patch does.
 
         Returns:
             Optional[str]: A short key, or None if the submodule is not checked out.
@@ -288,6 +297,7 @@ class CodexBrandedBuilder:
             digest.update(os.path.basename(patch).encode())
             with open(patch, "rb") as handle:
                 digest.update(handle.read())
+        digest.update(Path(CODEX_LOCKFILE).read_bytes())
         for path in cls.launcher_files():
             digest.update(os.path.relpath(path, MIGHTLING_CRATE_DIR).encode())
             with open(path, "rb") as handle:
@@ -442,6 +452,7 @@ class CodexBrandedBuilder:
             ignore=shutil.ignore_patterns("target"),
             copy_function=shutil.copy,
         )
+        shutil.copy(CODEX_LOCKFILE, Path(source_dir) / "codex-rs" / "Cargo.lock")
 
         for patch in cls.patches():
             # Checked first so a patch that does not fit leaves nothing half-applied behind it.
@@ -827,9 +838,9 @@ class CodexBrandedBuilder:
         environment.update(RELEASE_PROFILE_OVERRIDES)
         cached = cls.compiler_cache_environment(environment)
         environment.update(cached)
-        # No --locked: upstream's Cargo.lock records the workspace crates at version 0.0.0, which
-        # its release job bumps just before building, so Cargo rewrites those 158 entries. Every
-        # third-party version stays exactly as the lockfile pins it.
+        # No --locked: the lock records the workspace crates at one version and stamp_version sets
+        # another, so Cargo rewrites those entries. Every third-party version stays as
+        # CODEX_LOCKFILE pins it, ling-rs's crates included.
         command = [
             "cargo", "build", "--release", "--target-dir", os.path.join(BUILD_CACHE_DIR, "target"),
             "-p", "codex-cli", "--bin", CARGO_BIN_NAME,

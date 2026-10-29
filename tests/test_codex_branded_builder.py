@@ -3,6 +3,7 @@
 import os
 import subprocess
 import tempfile
+import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,7 +11,10 @@ import pytest
 
 from dreamference.runner import codex_branded_builder as builder_module
 from dreamference.runner.codex_branded_builder import (
+    CODEX_LOCKFILE,
+    CODEX_LOCKFILE_COMMIT,
     CODEX_SUBMODULE_DIR,
+    MIGHTLING_CRATE_DIR,
     CodexBrandedBuilder,
 )
 from dreamference.runner.codex_installer import CodexInstaller
@@ -51,11 +55,9 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert status.stdout == ""
 
 
-def test_the_patches_apply_to_an_export_inside_another_git_repository(tmp_path, monkeypatch):
-    # Run from a folder inside a repository, `git apply` resolves the patch's paths from that
-    # repository's top and silently skips every hunk outside the folder: the export came out
-    # unpatched and prepare_source still said it succeeded (found 2026-10-29, exporting into a
-    # worktree). Here a stand-in submodule and patch, the export inside an unrelated repository.
+@pytest.fixture
+def stand_in_codex(tmp_path, monkeypatch):
+    """A stand-in submodule, patch and launcher crate; returns the folder of an unrelated repository."""
     def git(*args, cwd):
         subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
                        cwd=cwd, check=True, capture_output=True)
@@ -80,9 +82,87 @@ def test_the_patches_apply_to_an_export_inside_another_git_repository(tmp_path, 
     monkeypatch.setattr(CodexBrandedBuilder, "source_commit", classmethod(lambda cls: commit))
     monkeypatch.setattr(CodexBrandedBuilder, "patches", classmethod(lambda cls: [str(patch_file)]))
     monkeypatch.setattr(CodexBrandedBuilder, "stamp_version", classmethod(lambda cls, manifest, version: True))
+    return outer
 
-    assert CodexBrandedBuilder.prepare_source(str(outer / "export"))
-    assert (outer / "export" / "codex-rs" / "main.rs").read_text() == "ling\n"
+
+def test_the_patches_apply_to_an_export_inside_another_git_repository(stand_in_codex):
+    # Run from a folder inside a repository, `git apply` resolves the patch's paths from that
+    # repository's top and silently skips every hunk outside the folder: the export came out
+    # unpatched and prepare_source still said it succeeded (found 2026-10-29, exporting into a
+    # worktree). Here the export is inside an unrelated repository.
+    assert CodexBrandedBuilder.prepare_source(str(stand_in_codex / "export"))
+    assert (stand_in_codex / "export" / "codex-rs" / "main.rs").read_text() == "ling\n"
+
+
+def test_the_export_builds_from_the_committed_lockfile(stand_in_codex, tmp_path, monkeypatch):
+    # Upstream's lock cannot pin the crates ling-rs/ brings in, so without this copy every build
+    # resolved them afresh from crates.io (found 2026-10-29: 55 crates, pgp and mdns-sd among them).
+    lockfile = tmp_path / "Cargo.lock"
+    lockfile.write_text("# pinned\n")
+    monkeypatch.setattr(builder_module, "CODEX_LOCKFILE", str(lockfile))
+    assert CodexBrandedBuilder.prepare_source(str(stand_in_codex / "export"))
+    assert (stand_in_codex / "export" / "codex-rs" / "Cargo.lock").read_text() == "# pinned\n"
+
+    lockfile.unlink()
+    with pytest.raises(FileNotFoundError):
+        CodexBrandedBuilder.prepare_source(str(stand_in_codex / "export"))
+
+
+def _locked_names(lock_path):
+    return {package["name"] for package in tomllib.loads(Path(lock_path).read_text())["package"]}
+
+
+def _third_party_dependencies(manifest):
+    """Yields the name of every dependency of a ling-rs manifest that comes from a registry."""
+    data = tomllib.loads(manifest.read_text())
+    kinds = ("dependencies", "build-dependencies", "dev-dependencies")
+    tables = [table.get(kind, {}) for table in [data, *data.get("target", {}).values()] for kind in kinds]
+    for name, spec in (item for table in tables for item in table.items()):
+        if not isinstance(spec, dict):
+            yield name
+        elif "path" not in spec and not spec.get("workspace"):
+            yield spec.get("package", name)
+
+
+def test_the_lockfile_pins_every_third_party_crate_of_ling_rs():
+    # Cargo builds without --locked, so a crate the lock does not name is resolved to whatever is
+    # newest on crates.io that day. A new dependency in ling-rs/ means refreshing the lock.
+    locked = _locked_names(CODEX_LOCKFILE)
+    unpinned = set()
+    for manifest in Path(MIGHTLING_CRATE_DIR).rglob("Cargo.toml"):
+        if "target" not in manifest.parts:
+            unpinned |= {
+                f"{name} ({manifest.relative_to(MIGHTLING_CRATE_DIR)})"
+                for name in _third_party_dependencies(manifest)
+                if name not in locked
+            }
+    assert not unpinned, f"refresh codex-patches/Cargo.lock (docs/dev/codex-build.md): {sorted(unpinned)}"
+
+
+def test_the_lockfile_was_made_for_the_pinned_codex():
+    # A submodule bump keeps the lock's old upstream pins until the lock is refreshed with it.
+    listed = subprocess.run(
+        ["git", "-C", builder_module.REPO_ROOT, "ls-files", "-s", "codex"], capture_output=True, text=True
+    )
+    if listed.returncode != 0 or not listed.stdout:
+        pytest.skip("not a git checkout")
+    assert listed.stdout.split()[1] == CODEX_LOCKFILE_COMMIT, "refresh codex-patches/Cargo.lock with the bump"
+
+
+def test_the_lockfile_fetches_only_from_crates_io_and_pinned_git():
+    for package in tomllib.loads(Path(CODEX_LOCKFILE).read_text())["package"]:
+        source = package.get("source", "registry+https://github.com/rust-lang/crates.io-index")
+        assert source.startswith(("registry+https://github.com/rust-lang/crates.io-index", "git+https://")), package
+
+
+@pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
+def test_the_lockfile_keeps_every_crate_upstream_pins():
+    upstream = subprocess.run(
+        ["git", "-C", CODEX_SUBMODULE_DIR, "show", f"{CODEX_LOCKFILE_COMMIT}:codex-rs/Cargo.lock"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    third_party = {package["name"] for package in tomllib.loads(upstream)["package"] if package.get("source")}
+    assert third_party <= _locked_names(CODEX_LOCKFILE)
 
 
 def test_the_codex_submodule_is_committed_as_a_submodule():
