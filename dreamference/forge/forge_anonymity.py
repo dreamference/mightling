@@ -216,10 +216,13 @@ class ForgeAnonymity:
         """
         return (
             'BEGIN { n = split(exempt, names, " "); for (i = 1; i <= n; i++) skip_name[names[i]] = 1 }\n'
-            '/^diff --git / { file = ""; skipping = 0; next }\n'
-            '/^\\+\\+\\+ / { path = substr($0, 5); if (path == "/dev/null") { file = ""; next }\n'
+            # A file's header runs from its `diff` line to its first hunk: a `+++ ` line further
+            # down is an added line that starts with `++ `, never a header.
+            '/^diff --git / { file = ""; skipping = 0; header = 1; next }\n'
+            "header && /^@@/ { header = 0; next }\n"
+            'header && /^\\+\\+\\+ / { path = substr($0, 5); if (path == "/dev/null") { file = ""; next }\n'
             '  sub(/^b\\//, "", path); file = path; skipping = (file in skip_name); if (!skipping) print file; next }\n'
-            '/^\\+/ { if (!skipping && file != "") print file ": " substr($0, 2) }\n'
+            '!header && /^\\+/ { if (!skipping && file != "") print file ": " substr($0, 2) }\n'
         )
 
     @classmethod
@@ -388,6 +391,8 @@ class ForgeAnonymity:
             # A commit naming an encoding git cannot convert is printed raw.
             errors="replace",
         )
+        # Read as bytes: text mode would turn a carriage return inside a line into a line break,
+        # and the rest of that line would read as a header or be left out.
         diff = subprocess.run(
             [
                 "git",
@@ -401,15 +406,15 @@ class ForgeAnonymity:
                 "--no-renames",
                 "--format=",
             ],
-            input="\n".join(revisions) + "\n",
+            input=("\n".join(revisions) + "\n").encode(),
             capture_output=True,
-            text=True,
             check=False,
-            errors="replace",
         )
         if meta.returncode != 0 or diff.returncode != 0:
-            raise RuntimeError((meta.stderr or diff.stderr).strip() or "git log failed")
-        return meta.stdout + cls.added_lines(diff.stdout, exempt)
+            raise RuntimeError(
+                (meta.stderr or diff.stderr.decode(errors="replace")).strip() or "git log failed"
+            )
+        return meta.stdout + cls.added_lines(diff.stdout.decode(errors="replace"), exempt)
 
     @classmethod
     def plain_paths(cls, exempt: list[str]) -> list[str]:
@@ -436,11 +441,14 @@ class ForgeAnonymity:
         """
         skipped = cls.plain_paths(exempt)
         out: list[str] = []
-        current, skipping = "", False
-        for line in patch.splitlines():
+        current, skipping, header = "", False, False
+        # Only `\n` ends a line in a patch; a header ends at the file's first hunk (`awk_program`).
+        for line in patch.split("\n"):
             if line.startswith("diff --git "):
-                current, skipping = "", False
-            elif line.startswith("+++ "):
+                current, skipping, header = "", False, True
+            elif header and line.startswith("@@"):
+                header = False
+            elif header and line.startswith("+++ "):
                 path = line[4:]
                 if path == DEV_NULL:
                     current = ""
@@ -449,7 +457,7 @@ class ForgeAnonymity:
                 skipping = current in skipped
                 if not skipping:
                     out.append(current)
-            elif line.startswith("+") and current and not skipping:
+            elif not header and line.startswith("+") and current and not skipping:
                 out.append(f"{current}: {line[1:]}")
         return "\n".join(out) + ("\n" if out else "")
 

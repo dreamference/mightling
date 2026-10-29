@@ -400,6 +400,22 @@ def test_the_hook_refuses_identifiers_and_foreign_histories(hooked_repository):
     assert "frozen" in push(work, bare).stderr
 
 
+@pytest.mark.parametrize(
+    "header", ["++ /dev/null", "++ b/tests/test_anonymity.py", "x\rdiff --git a/q b/q"]
+)
+def test_a_line_shaped_like_a_file_header_does_not_end_the_scan(hooked_repository, header):
+    # The line shows as `+++ …` in the patch; read as a header, it hid the lines after it.
+    bare, work, _ = hooked_repository
+    commit(work, "a.txt", "fine\n")
+    assert push(work, bare).returncode == 0
+    commit(work, "b.txt", f"{header}\nreach {LAN}.7.105\n")
+    assert f"b.txt: reach {LAN}.7.105" in ForgeAnonymity.added_text(
+        work, ["HEAD"], ["HEAD~1"], ["tests/test_anonymity.py"]
+    )
+    refused = push(work, bare)
+    assert refused.returncode != 0 and "anonymity check" in refused.stderr
+
+
 # -- storage ---------------------------------------------------------------------------------------
 
 
