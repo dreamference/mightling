@@ -162,7 +162,25 @@ mod tests {
     }
 
     fn proxied(url: &str, pairs: &[(&str, &str)]) -> bool {
-        proxy_for(url, env(pairs)).is_some()
+        matches!(proxy_for(url, env(pairs)), Ok(Some(_)))
+    }
+
+    #[test]
+    fn a_proxy_that_cannot_be_used_is_an_error_not_a_direct_connection() {
+        // ureq takes http, socks4, socks4a and socks5 proxies; curl's `socks5h://` is not one.
+        let unusable = [("https_proxy", "socks5h://user:secret@p:1080")];
+        let error = proxy_for("https://a.com/x", env(&unusable)).err().unwrap();
+        assert!(error.contains("https_proxy"), "{error}");
+        assert!(
+            !error.contains("secret"),
+            "the value can hold a password: {error}"
+        );
+        // A host that no_proxy names needs no proxy, so it does not fail.
+        let bypassed = [unusable[0], ("no_proxy", "a.com")];
+        assert!(matches!(
+            proxy_for("https://a.com/x", env(&bypassed)),
+            Ok(None)
+        ));
     }
 
     #[test]
