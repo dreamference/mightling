@@ -492,6 +492,19 @@ def test_the_base_digest_reads_weight_hashes_from_their_blobs_and_changes_with_a
     assert AdapterBaseDigest.compute(snapshot) != before
 
 
+def test_a_digest_cached_while_the_base_was_still_downloading_is_not_kept_once_it_is_complete():
+    # A digest taken over a snapshot that lacked a file was cached for the revision forever, so
+    # the complete base read as a permanent base mismatch.
+    snapshot = base_snapshot()
+    shard = snapshot / "model.safetensors"
+    target = shard.readlink()
+    shard.unlink()
+    partial = AdapterBaseDigest.of(BASE_REPO, BASE_REVISION, snapshot)
+    shard.symlink_to(target)
+    complete = AdapterBaseDigest.compute(snapshot)
+    assert AdapterBaseDigest.of(BASE_REPO, BASE_REVISION, snapshot) == complete != partial
+
+
 def test_an_adapter_id_names_its_base_entry():
     assert ModelMatrixRegistry.key_for_served_id(f"{BASE_REPO}+rust") == DEFAULT_MODEL_ALIAS
 
