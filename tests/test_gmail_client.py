@@ -684,3 +684,15 @@ def test_an_oauth_state_is_taken_once_and_expires(monkeypatch):
     GmailSearchService.new_state("gmail", "new")
     assert stale not in service_module.OAUTH_STATES and len(service_module.OAUTH_STATES) == 1
     assert GmailSearchService.take_state(stale) is None
+
+
+def test_an_empty_environment_variable_leaves_the_file_to_decide_as_on_the_rust_side(tmp_path, monkeypatch):
+    # `mightling_gmail_enabled` in ling-rs skips an empty DREAMFERENCE_MIGHTLING_GMAIL; Python took
+    # it for "off", so the launcher advertised Gmail while the Python side turned it off.
+    from dreamference.config import DreamferenceConfig
+
+    cfg_file = tmp_path / "d.toml"
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_GMAIL", "")
+    assert DreamferenceConfig(config_file=str(cfg_file)).mightling_gmail is True
+    cfg_file.write_text("mightling_gmail = false\n", encoding="utf-8")
+    assert DreamferenceConfig(config_file=str(cfg_file)).mightling_gmail is False

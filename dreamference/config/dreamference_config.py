@@ -300,7 +300,7 @@ class DreamferenceConfig:
         env_mightling_gmail = os.getenv("DREAMFERENCE_MIGHTLING_GMAIL")
         if mightling_gmail is not None:
             self.mightling_gmail: bool = mightling_gmail
-        elif env_mightling_gmail is not None:
+        elif env_mightling_gmail:  # empty is unset, as in the Rust launcher
             self.mightling_gmail = env_mightling_gmail.lower() in ("1", "true", "yes")
         else:
             self.mightling_gmail = bool(self.file_data.get("mightling_gmail", DEFAULT_MIGHTLING_GMAIL))
