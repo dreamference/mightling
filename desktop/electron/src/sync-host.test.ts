@@ -141,7 +141,7 @@ function scriptedLing(dir: string, askFolder: string): string {
   return nodeScript(dir, "ling", `const fs = require("fs");
 const args = process.argv.slice(2);
 if (args[0] === "airgapped") {
-  process.stdout.write("Airgapped: off (stub)\\n");
+  process.stdout.write('{"level":"off","tier":"default","source":"stub","invalid":[]}\\n');
   process.exit(0);
 }
 if (args[0] === "prompt") {

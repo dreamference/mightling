@@ -36,7 +36,7 @@ if (args[0] === "prompt") {
   process.exit(0);
 }
 if (args[0] === "airgapped") {
-  process.stdout.write("Airgapped: " + (process.env.STUB_AIRGAPPED || "off") + " (stub)\\n");
+  process.stdout.write('{"level":"' + (process.env.STUB_AIRGAPPED || "off") + '","tier":"default","source":"stub","invalid":[]}\\n');
   process.exit(0);
 }
 const log = ${JSON.stringify(path.join(dir, "received.jsonl"))};
@@ -286,7 +286,7 @@ describe("incognito questions (DESKTOP_PARITY_CLAUDE §4.3)", () => {
     const lingPath = nodeScript(dir, "ling", `const fs = require("fs");
 const args = process.argv.slice(2);
 if (args[0] === "prompt") { process.stdout.write("COMPOSED " + args[2]); process.exit(0); }
-if (args[0] === "airgapped") { process.stdout.write("Airgapped: off (stub)\\n"); process.exit(0); }
+if (args[0] === "airgapped") { process.stdout.write('{"level":"off","tier":"default","source":"stub","invalid":[]}\\n'); process.exit(0); }
 let buf = "";
 process.stdin.on("data", (chunk) => {
   buf += chunk;

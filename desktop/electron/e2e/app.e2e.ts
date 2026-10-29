@@ -44,7 +44,7 @@ function standIn(home: string): string {
 const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(path.join(home, "runs.jsonl"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
 if (process.argv.includes("app-server")) fs.writeFileSync(${JSON.stringify(path.join(home, "server.pid"))}, String(process.pid));
-if (process.argv[2] === "airgapped") { console.log("Airgapped: off (default)"); process.exit(0); }
+if (process.argv[2] === "airgapped") { console.log('{"level":"off","tier":"default","source":"default","invalid":[]}'); process.exit(0); }
 if (process.argv[2] === "prompt") { process.stdout.write("THE ASK PROMPT"); process.exit(0); }
 const log = ${JSON.stringify(path.join(home, "received.jsonl"))};
 const rl = require("readline").createInterface({ input: process.stdin });
