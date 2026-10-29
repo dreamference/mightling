@@ -114,3 +114,13 @@ describe("a terminal tab drawn in another window (DESKTOP_ELECTRON §13)", () =>
     expect(seen.reduce((sum, bytes) => sum + bytes.length, 0)).toBeLessThanOrEqual(1024 * 1024);
   });
 });
+
+describe("a terminal's text for the thread", () => {
+  it("keeps a character whose bytes came in two deltas", () => {
+    const hub = new TerminalHub(new ScriptedServer({}).client);
+    for (const byte of [0xc3, 0xa9]) {
+      hub.deliver({ method: "command/exec/outputDelta", params: { processId: "p1", stream: "stdout", deltaBase64: btoa(String.fromCharCode(byte)), capReached: false } } as never);
+    }
+    expect(hub.tail("p1", 5)).toBe("é");
+  });
+});

@@ -58,6 +58,8 @@ export class TerminalHub {
   private readonly pending = new Map<string, Uint8Array[]>();
   /** Each tab's recent output as text, for Send to the thread. */
   private readonly recent = new Map<string, string>();
+  /** Each tab's decoder, so a character split across two deltas is kept whole. */
+  private readonly decoders = new Map<string, TextDecoder>();
   /** Tabs whose view waits for what the tab showed so far: their output meanwhile is in it. */
   private readonly seeding = new Set<string>();
   private next = 1;
@@ -73,7 +75,9 @@ export class TerminalHub {
     if (notification.method !== "command/exec/outputDelta") return false;
     const { processId, deltaBase64 } = notification.params;
     const bytes = decode(deltaBase64);
-    const text = (this.recent.get(processId) ?? "") + new TextDecoder().decode(bytes);
+    let decoder = this.decoders.get(processId);
+    if (!decoder) this.decoders.set(processId, decoder = new TextDecoder());
+    const text = (this.recent.get(processId) ?? "") + decoder.decode(bytes, { stream: true });
     this.recent.set(processId, text.length > PENDING_KEPT ? text.slice(text.length - PENDING_KEPT) : text);
     const sink = this.sinks.get(processId);
     if (sink) sink(bytes);
@@ -154,6 +158,7 @@ export class TerminalHub {
     this.sinks.delete(processId);
     this.pending.delete(processId);
     this.recent.delete(processId);
+    this.decoders.delete(processId);
   }
 
   /** A tab's last `lines` lines of output as plain text, for the composer. */
