@@ -562,6 +562,26 @@ async fn rich_drafts_and_answers_are_blocks_and_a_refusal_falls_back_to_html() {
     assert_eq!(stand.bodies("sendMessageDraft").len(), 1);
 }
 
+/// A rich answer in two messages whose second Telegram refuses: that part goes as plain text, and
+/// the first, already shown, is not sent again.
+#[tokio::test]
+async fn a_refused_later_part_of_a_rich_answer_goes_as_plain_text() {
+    use ling_chat::telegram::Style;
+    let second: Answer = Arc::new(|method, _, index| match (method, index) {
+        ("sendRichMessage", 1) => (StatusCode::BAD_REQUEST, json!({ "ok": false, "error_code": 400, "description": "Bad Request: can't parse blocks" })),
+        _ => ok(json!({ "message_id": 1 })),
+    });
+    let (stand, api) = stand_in(second).await;
+    let renderer = Renderer::styled(api, Style { rich: true });
+    let markdown = format!("{}\n\n{}\n\nThe end, with **bold** and [a link](https://example.org/x).", "a".repeat(20_000), "b".repeat(12_000));
+    renderer.render(Outbound::Message { chat: "telegram:111".into(), markdown }).await;
+    assert_eq!(stand.bodies("sendRichMessage").len(), 2);
+    let plain: String = stand.bodies("sendMessage").iter().map(|m| m["text"].as_str().unwrap_or_default().to_string()).collect();
+    assert!(plain.starts_with("bbbb") && plain.ends_with("The end, with bold and a link (https://example.org/x)."), "{}", &plain[plain.len().saturating_sub(80)..]);
+    assert_eq!(plain.matches('b').count(), 12_000 + 1, "the whole part");
+    assert!(!plain.contains("aaaa"), "the first part is not sent again");
+}
+
 const MINI_APP: &str = "https://node.example.ts.net/";
 
 /// The Mini App (MOONSHOT §15): with an address set, `/app` is offered and every paired user's

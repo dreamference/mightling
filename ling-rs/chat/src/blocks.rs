@@ -365,6 +365,40 @@ pub fn split(blocks: Vec<Value>, max_chars: usize, max_blocks: usize) -> Vec<Vec
     messages
 }
 
+/// Blocks as plain text, for a part Telegram refused as rich blocks: the words and the links' addresses.
+pub fn plain_text(blocks: &[Value]) -> String {
+    blocks.iter().map(block_text).filter(|text| !text.is_empty()).collect::<Vec<_>>().join("\n\n")
+}
+
+fn block_text(block: &Value) -> String {
+    if let Some(blocks) = block.get("blocks").and_then(Value::as_array) {
+        return plain_text(blocks);
+    }
+    if let Some(items) = block.get("items").and_then(Value::as_array) {
+        return items.iter().map(|item| format!("- {}", block_text(item).replace('\n', "\n  "))).collect::<Vec<_>>().join("\n");
+    }
+    if let Some(rows) = block.get("cells").and_then(Value::as_array) {
+        let row = |row: &Value| row.as_array().map(|cells| cells.iter().map(block_text).collect::<Vec<_>>().join(" | ")).unwrap_or_default();
+        return rows.iter().map(row).collect::<Vec<_>>().join("\n");
+    }
+    inline_text(block.get("text").unwrap_or(&Value::Null))
+}
+
+fn inline_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts.iter().map(inline_text).collect(),
+        Value::Object(part) => {
+            let text = inline_text(part.get("text").unwrap_or(&Value::Null));
+            match part.get("url").and_then(Value::as_str) {
+                Some(url) if url != text => format!("{text} ({url})"),
+                _ => text,
+            }
+        }
+        _ => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

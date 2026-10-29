@@ -703,7 +703,7 @@ impl Renderer {
         }
         let parts = blocks::split(blocks::to_blocks(markdown), blocks::MESSAGE_CHARS, blocks::MESSAGE_BLOCKS);
         for (n, part) in parts.into_iter().enumerate() {
-            let params = in_topic(json!({ "chat_id": chat_id, "rich_message": { "blocks": part } }), topic);
+            let params = in_topic(json!({ "chat_id": chat_id, "rich_message": { "blocks": &part } }), topic);
             match self.api.call("sendRichMessage", params).await {
                 Ok(_) => {}
                 Err(err) if n == 0 => {
@@ -713,7 +713,15 @@ impl Renderer {
                     eprintln!("ling chat: Telegram refused a rich message ({err}); sending it as HTML");
                     return false;
                 }
-                Err(err) => eprintln!("ling chat: Telegram refused part of a rich answer: {err}"),
+                // The parts before are on screen: this one goes as plain text, not lost.
+                Err(err) => {
+                    eprintln!("ling chat: Telegram refused part of a rich answer ({err}); sending it as plain text");
+                    for text in render::split(&blocks::plain_text(&part), MESSAGE_LIMIT) {
+                        if let Err(err) = self.api.call("sendMessage", in_topic(json!({ "chat_id": chat_id, "text": text }), topic)).await {
+                            eprintln!("ling chat: Telegram refused an answer: {err}");
+                        }
+                    }
+                }
             }
         }
         true
