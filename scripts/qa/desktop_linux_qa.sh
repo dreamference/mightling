@@ -44,7 +44,13 @@ log() { echo "== $*"; }
 # The latest release, from the web page's redirect rather than the API: unauthenticated API calls
 # share 60 an hour with every other machine behind the same public address, and `ling update` and
 # install.sh need theirs.
-latest="$(curl -fsSI -m 30 -o /dev/null -w '%{redirect_url}' "$REPO_URL/releases/latest" | sed -E 's#.*/tag/v?##')"
+# release_tag URL: the tag a `/releases/latest` redirect points at, empty when there is none (with no
+# published release the page redirects to `/releases`, which has no `/tag/` part).
+release_tag() {
+    [[ "$1" == */tag/* ]] && sed -E 's#.*/tag/v?##' <<< "$1"
+    return 0
+}
+latest="$(release_tag "$(curl -fsSI -m 30 -o /dev/null -w '%{redirect_url}' "$REPO_URL/releases/latest")")"
 log "latest release: ${latest:-unknown}"
 
 # A check that met GitHub's rate limit for unauthenticated calls proves nothing about Mightling: it
@@ -82,7 +88,10 @@ fi
 t=$(started)
 mkdir -p "$SCRATCH_HOME"
 ling=""
-if curl -fsSL -m 120 -o "$WORK/install.sh" "$REPO_URL/releases/latest/download/install.sh"; then
+if [[ -z "$latest" ]] && curl -fsSI -m 30 -o /dev/null "$REPO_URL/releases" 2>/dev/null; then
+    # The releases page answers but names no latest tag: nothing is published, so nothing to install.
+    result "install.sh into a throwaway HOME" skip "no published release at $REPO_URL/releases yet" "$(since "$t")"
+elif curl -fsSL -m 120 -o "$WORK/install.sh" "$REPO_URL/releases/latest/download/install.sh"; then
     # Standard input is the script bash is reading: the installer gets none. One retry: on 2026-10-28
     # the API answered once in compact JSON (install.sh reads the tag from a pretty-printed line:
     # "has no tag") and in pretty JSON a minute later.
