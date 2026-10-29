@@ -1865,6 +1865,26 @@ def test_only_paths_the_node_allows_are_bound_and_only_read_only(job_node, tmp_p
             NodeJob.validate(job_request(binds=[path]))
 
 
+def test_a_job_binds_at_most_sixteen_paths(job_node, tmp_path, monkeypatch):
+    from dreamference.node import NodeJob
+
+    root = tmp_path / "datasets"
+    paths = [str(root / f"set{i}") for i in range(17)]
+    for path in paths:
+        os.makedirs(path)
+    config = tmp_path / "home-config.toml"
+    config.write_text(f'[node]\nbindable = ["{root}"]\n')
+    monkeypatch.setattr(
+        "os.path.expanduser",
+        lambda path: (
+            str(config) if path.endswith("config.toml") else path.replace("~", os.environ["HOME"])
+        ),
+    )
+    assert NodeJob.validate(job_request(binds=paths[:16]))["binds"] == paths[:16]
+    with pytest.raises(ValueError, match="at most 16"):
+        NodeJob.validate(job_request(binds=paths))
+
+
 def test_finished_jobs_are_pruned_a_day_after_the_fetch_or_after_fourteen_days(job_node, capsys):
     from datetime import datetime, timedelta
 
