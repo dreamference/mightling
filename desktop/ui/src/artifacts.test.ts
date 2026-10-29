@@ -26,6 +26,17 @@ describe("the artifacts viewer", () => {
     expect(localReference("/w/docs/guide.md", "https://example.com/x.png")).toBeNull();
     expect(localReference("/w/docs/guide.md", "javascript:alert(1)")).toBeNull();
     expect(localReference("/w/docs/guide.md", "#part")).toBeNull();
+  });
+
+  it("resolve a Windows document's references on its own drive", () => {
+    expect(localReference("C:\\docs\\guide.md", "img/a.png")).toBe("C:/docs/img/a.png");
+    expect(localReference("C:\\docs\\guide.md", "..\\README.md")).toBe("C:/README.md");
+    expect(localReference("C:\\guide.md", "a.png")).toBe("C:/a.png");
+    expect(localReference("C:\\docs\\guide.md", "D:\\pics\\b.png")).toBe("D:/pics/b.png");
+    expect(localReference("C:\\docs\\guide.md", "file:///D:/pics/b.png")).toBe("D:/pics/b.png");
+    expect(localReference("\\\\nas\\share\\guide.md", "img/a.png")).toBe("//nas/share/img/a.png");
+    expect(isRemote("C:\\pics\\b.png")).toBe(false);
+    expect(isRemote("d:/pics/b.png")).toBe(false);
     expect(isRemote("data:image/png;base64,xx")).toBe(true);
   });
 

@@ -47,7 +47,7 @@ export function hasSource(path: string): boolean {
 
 /** A reference that would leave the machine, or a scheme that is not a file: never loaded. */
 export function isRemote(reference: string): boolean {
-  return /^[a-z][a-z0-9+.-]*:/i.test(reference) && !/^file:/i.test(reference);
+  return /^[a-z][a-z0-9+.-]*:/i.test(reference) && !/^file:/i.test(reference) && !/^[A-Za-z]:[\\/]/.test(reference);
 }
 
 /**
@@ -65,14 +65,22 @@ export function localReference(documentPath: string, reference: string): string 
   } catch {
     // kept as written
   }
-  if (!path.startsWith("/")) path = `${parentOf(documentPath)}/${path}`;
+  // A Windows document (a drive or a share), or a reference on a drive: its path in `/`, which Windows
+  // reads as well, on its own root (`C:`, `//nas/share`) that `..` never goes above.
+  const windows = /^([A-Za-z]:[\\/]|\\\\)/.test(documentPath) || /^\/?[A-Za-z]:[\\/]/.test(path);
+  if (windows) path = path.replace(/\\/g, "/").replace(/^\/(?=[A-Za-z]:\/)/, "");
+  if (!path.startsWith("/") && !(windows && /^[A-Za-z]:\//.test(path))) {
+    const folder = parentOf(documentPath);
+    path = `${windows ? folder.replace(/\\/g, "/") : folder}/${path}`;
+  }
+  const root = windows ? (/^[A-Za-z]:|^\/\/[^/]+\/[^/]+/.exec(path)?.[0] ?? "") : "";
   const parts: string[] = [];
-  for (const part of path.split("/")) {
+  for (const part of path.slice(root.length).split("/")) {
     if (part === "" || part === ".") continue;
     if (part === "..") parts.pop();
     else parts.push(part);
   }
-  return `/${parts.join("/")}`;
+  return `${root}/${parts.join("/")}`;
 }
 
 /** Elements dropped from an HTML preview, with what is in them. */
