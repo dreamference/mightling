@@ -29,7 +29,8 @@ pub const VERDICTS: &[&str] = &["accept", "reject", "reverted", "shadow_miss"];
 /// Seconds `ling exec` may run, default and maximum.
 pub const DEFAULT_AGENT_TIMEOUT_S: u64 = 1_500;
 pub const MAX_AGENT_TIMEOUT_S: u64 = 3_600;
-/// Characters of diff returned at most (about 5,000 tokens).
+/// Characters of diff returned at most (about 5,000 tokens, under the spec's 8,000); a larger
+/// diff fails the task as `too_large` and is saved to `diff.patch` in the task's folder (§4.2).
 pub const MAX_DIFF_CHARS: usize = 20_000;
 /// Characters of the agent's last message returned at most.
 pub const MAX_NOTE_CHARS: usize = 1_500;
@@ -138,6 +139,7 @@ pub struct TaskResult {
     pub reverted: Vec<String>,
     pub changed_lines: usize,
     pub diff: String,
+    /// The diff was over `MAX_DIFF_CHARS`: `diff` is empty and a note names the file holding it.
     pub diff_truncated: bool,
     pub acceptance: Option<RunTestResult>,
     pub gates: Vec<Gate>,
@@ -680,13 +682,12 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
         nargs.extend(touched.iter().map(String::as_str));
         r.changed_lines =
             parse_numstat(&tri!(git(runner, &wt, &nargs))).iter().map(|n| n.added + n.deleted).sum();
-        let (text, cut) = if diff.chars().count() > MAX_DIFF_CHARS {
-            (diff.chars().take(MAX_DIFF_CHARS).collect::<String>(), true)
+        if diff.chars().count() > MAX_DIFF_CHARS {
+            tri!(std::fs::write(task_dir.join("diff.patch"), &diff).map_err(|e| e.to_string()));
+            r.diff_truncated = true;
         } else {
-            (diff.clone(), false)
-        };
-        r.diff = text;
-        r.diff_truncated = cut;
+            r.diff = diff.clone();
+        }
         if req.class == "T2" {
             if let Some(why) = weakened_tests(&diff) {
                 violations.push("weakened_tests".to_string());
@@ -717,6 +718,13 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
     let limit = size_limit(&req.class);
     if r.changed_lines > limit {
         let note = format!("{} changed lines, the limit for {} is {limit}", r.changed_lines, req.class);
+        return Ok(log_and_return(&ledger, &repo_hash, env, finish(fail(r, "too_large", &note))));
+    }
+    if r.diff_truncated {
+        let note = format!(
+            "the diff is over {MAX_DIFF_CHARS} characters; it is not returned, the full diff is at {}",
+            task_dir.join("diff.patch").display()
+        );
         return Ok(log_and_return(&ledger, &repo_hash, env, finish(fail(r, "too_large", &note))));
     }
 
@@ -1085,6 +1093,19 @@ mod tests {
         let mut w = world(&wt);
         w.numstat = "100\t60\tsrc/a.py\n".into();
         assert_eq!(execute(&request(&wt, "T2"), &w, &env).unwrap().reason, "too_large");
+        // A diff over the cap is refused with its path, not returned cut (§4.2).
+        let (wt, env) = setup("bigdiff");
+        let mut w = world(&wt);
+        w.diff = format!(
+            "diff --git a/src/a.py b/src/a.py\n{}",
+            "+x = 1\n".repeat(MAX_DIFF_CHARS / 7 + 1)
+        );
+        let r = execute(&request(&wt, "T3"), &w, &env).unwrap();
+        assert_eq!((r.pass, r.reason.as_str(), r.diff_truncated), (false, "too_large", true));
+        assert!(r.diff.is_empty() && r.acceptance.is_none(), "refused before the acceptance test");
+        let saved = env.state_dir().join("tasks").join(&r.id).join("diff.patch");
+        assert_eq!(std::fs::read_to_string(&saved).unwrap(), w.diff);
+        assert!(r.notes.iter().any(|n| n.contains(&saved.display().to_string())), "{:?}", r.notes);
         // 160 lines is under T3's 400.
         let (wt, env) = setup("acc");
         let mut w = world(&wt);
