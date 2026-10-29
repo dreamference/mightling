@@ -150,3 +150,40 @@ def test_a_failed_benchmark_exits_with_an_error(capsys):
             DreamferenceCLIController.run_cli(["benchmark_server", "--dataset-path", "/data/sonnet.txt"])
     assert run.call_count == 1 and exit_info.value.code == 1
     assert "Benchmark failed" in capsys.readouterr().out
+
+
+def test_server_start_exits_with_an_error_when_the_server_stopped_before_it_answered(monkeypatch, capsys):
+    # The failure was printed and `server start` still exited 0, so a script went on to use a
+    # server that was not there.
+    import pytest
+
+    from dreamference.chat.google_service import GoogleService
+    from dreamference.chat.image_search_sidecar import ImageSearchSidecar
+    from dreamference.chat.speech_sidecar import SpeechSidecar
+    from dreamference.cli import dreamference_cli_controller as controller
+    from dreamference.node import NodeAdvertiser
+    from dreamference.vllm_server import DiffusionServerManager, VLLMServerManager
+
+    class Monitor:
+        server_ready = False
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    stopped = []
+    for sidecar in (GoogleService, SpeechSidecar):
+        monkeypatch.setattr(sidecar, "ensure_on_node", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(ImageSearchSidecar, "ensure_on_node", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(NodeAdvertiser, "on_server_starting", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(NodeAdvertiser, "on_server_stopped", classmethod(lambda cls, *a, **k: stopped.append(True)))
+    monkeypatch.setattr(controller, "create_model_loading_monitor", lambda *a, **k: Monitor())
+    # The container ran and its log stream ended without the server answering.
+    monkeypatch.setattr(VLLMServerManager, "start_server", lambda self, **_: None)
+    monkeypatch.setattr(DiffusionServerManager, "remove_leftover", classmethod(lambda cls, port=8001: None))
+    with pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(["server", "start", "--no-diffusion"])
+    assert exit_info.value.code == 1 and stopped == [True]
+    assert "The model server stopped before it answered" in capsys.readouterr().out

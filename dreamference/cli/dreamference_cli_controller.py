@@ -2988,6 +2988,7 @@ class DreamferenceCLIController:
                         print(f"\n❌ The model server stopped before it answered. Its log: "
                               f"docker logs dreamference-vllm-{args.port}")
                         cls._suggest_engine_fallback(args.model, engine, "to start")
+                        sys.exit(1)
 
                     # Do not block: exit after health check passes (server keeps running)
                     
