@@ -346,7 +346,7 @@ def test_saving_replaces_the_file_whole_through_a_link_and_keeps_its_mode(tmp_pa
     def broken(data, handle):
         handle.write("model = ")
         raise RuntimeError("disk full")
-    monkeypatch.setattr(storage.toml, "dump", broken)
+    monkeypatch.setattr(storage.optional_module("toml"), "dump", broken)
     with pytest.raises(RuntimeError):
         storage.ConfigFileStorageManager.save_config_dict(link, {"model": "z"})
     assert real.read_text(encoding="utf-8") == 'model = "y"\n'
