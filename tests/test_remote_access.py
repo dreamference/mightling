@@ -980,6 +980,18 @@ def test_box_only_on_a_finished_setup_keeps_its_record(seams):
     assert record["node_peer"] is True and "box_only" not in record
 
 
+def test_box_only_under_another_name_records_the_new_box(seams, monkeypatch, capsys):
+    """The finished record was kept whole, so it went on naming the old box."""
+    assert RemoteAccess.setup(BOX, yes=True) == 0
+    monkeypatch.setattr(RemoteCertificateAuthority, "permits", classmethod(lambda cls, d: True))
+    other = "relay2.example.org"
+    capsys.readouterr()
+    assert RemoteAccess.setup(other, yes=True, box_only=True) == 0
+    record = RemoteSettings.read()
+    assert record["dns_name"] == other and record["box_only"] is True
+    assert f"ling-admin remote setup {other}" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     "destination", ["192.0.2.7", "root@192.0.2.7", "[2001:db8::1]", "two words", "-oProxyCommand=x"]
 )
