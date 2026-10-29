@@ -260,7 +260,7 @@ class DocsIndexSetup:
             if (
                 not pathlib.Path(target).is_file()
                 or not pathlib.Path(stamp).is_file()
-                or pathlib.Path(stamp).open().read().strip() != sha
+                or pathlib.Path(stamp).read_text().strip() != sha
             ):
                 out.append(name)
         for _, sha, name in MODEL_FILES:

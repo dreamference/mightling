@@ -3,12 +3,14 @@ run-time files `ling-admin docs setup` installs, and the docs egress scenario's 
 here downloads anything or runs strace: fetches are stubbed, traces are text.
 """
 
+import gc
 import hashlib
 import io
 import os
 import pathlib
 import re
 import tarfile
+import warnings
 import zipfile
 
 import pytest
@@ -138,6 +140,17 @@ def test_setup_installs_each_pinned_file_once(pinned):
     assert DocsIndexSetup.missing("aarch64") == []
     assert DocsIndexSetup.install("aarch64") is True
     assert len(fetched) == 7, "nothing is fetched again"
+
+
+def test_checking_the_pins_closes_every_stamp_it_reads(pinned):
+    # A stamp opened and left to the collector is a ResourceWarning on every check, which
+    # `missing_ocr()`, the same check for OCR's files, never had.
+    assert DocsIndexSetup.install("aarch64") is True
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert DocsIndexSetup.missing("aarch64") == []
+        gc.collect()
+    assert not [w for w in caught if issubclass(w.category, ResourceWarning)]
 
 
 def test_a_failed_ocr_download_leaves_the_index_installed(pinned):
