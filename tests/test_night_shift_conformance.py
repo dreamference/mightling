@@ -4,6 +4,7 @@ Each test names the section it pins. Nothing here starts a systemd scope, a mode
 `ling`: the scope and the process are stand-ins, and every queue lives under `tmp_path`.
 """
 
+import json
 import os
 import re
 import shutil
@@ -319,3 +320,35 @@ def test_a_recurring_template_id_is_r_and_twelve_hex_digits(tmp_path):
     repo.mkdir()
     template = NightShiftRecurring.add(tmp_path / "night", repo, "Bump the dependencies", "daily")
     assert re.fullmatch(r"r[0-9a-f]{12}", template["id"])
+
+
+# -- §4: first in, first out within a repository -----------------------------------------------------
+
+
+def test_tasks_queued_in_the_same_minute_keep_the_order_they_were_queued_in(tmp_path):
+    # An id is the minute and a random suffix, so two tasks of one minute sort by chance; the time
+    # each was queued (history[0], RFC 3339 with an offset) decides, and a record without one comes
+    # first, by id, as before.
+    tasks = tmp_path / "night" / "tasks"
+    tasks.mkdir(parents=True)
+    queued = {
+        "20261001-0100-fff": "2026-10-01T01:00:05+01:00",
+        "20261001-0100-000": "2026-10-01T01:00:40+01:00",
+        # The same instant written in another offset, a second later.
+        "20261001-0100-777": "2026-10-01T00:00:41+00:00",
+        "20261001-0100-888": None,
+    }
+    for task_id, at in queued.items():
+        history = [{"at": at, "status": "queued"}] if at else []
+        (tasks / f"{task_id}.json").write_text(json.dumps({"id": task_id, "history": history}))
+    (tasks / "20261001-0059-aaa.json").write_text(
+        json.dumps({"id": "20261001-0059-aaa", "history": [{"at": "not a time"}]})
+    )
+    order = [task["id"] for task in NightShiftQueue.tasks(tmp_path / "night")]
+    assert order == [
+        "20261001-0059-aaa",
+        "20261001-0100-888",
+        "20261001-0100-fff",
+        "20261001-0100-000",
+        "20261001-0100-777",
+    ]

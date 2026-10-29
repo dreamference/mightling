@@ -55,7 +55,27 @@ class NightShiftQueue:
             record = cls._read(path)
             if record is not None:
                 records.append(record)
-        return sorted(records, key=lambda task: task.get("id", ""))
+        return sorted(records, key=cls._queued_order)
+
+    @classmethod
+    def _queued_order(cls, task: dict[str, Any]) -> tuple:
+        """Sorts tasks in the order they were queued (spec §4, first in, first out).
+
+        An id carries only the minute and a random suffix, so tasks of one minute are told apart
+        by the time of their first history entry. A record without a readable one sorts first, by id.
+
+        Args:
+            task: The task record.
+
+        Returns:
+            tuple: The queue time as a POSIX timestamp, then the id.
+        """
+        history = task.get("history") or [{}]
+        try:
+            queued = datetime.fromisoformat(str(history[0].get("at"))).timestamp()
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            queued = float("-inf")
+        return queued, str(task.get("id", ""))
 
     @classmethod
     def read(cls, night_dir: Path, task_id: str) -> Optional[Dict[str, Any]]:
