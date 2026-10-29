@@ -155,8 +155,13 @@ class NodePowerCycle:
         try:
             still_on = bool(cls._plug(node, plug, via, OFF).get("on"))
         except OSError as error:
-            print(f"⚠️  The reply to 'off' was lost ({error}); making sure the plug is on again.")
-            still_on = False
+            # Also what a plug that took the command and stayed on raises: ask it again.
+            try:
+                still_on = bool(cls._plug(node, plug, via, STATUS).get("on"))
+            except OSError:
+                still_on = False
+            if not still_on:
+                print(f"⚠️  The reply to 'off' was lost ({error}); making sure the plug is on again.")
         if still_on:
             print("❌ The plug still reports itself on; nothing more was done.")
             return False
