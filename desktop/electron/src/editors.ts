@@ -124,40 +124,70 @@ export function openCommand(editor: Editor, file: string, line: number | null): 
   return { command: editor.command, args: kind.at(file, at) };
 }
 
-/** What Windows runs when it is opened (ShellExecute), beside `PATHEXT`'s own list. */
-const WINDOWS_RUNS = new Set([
-  ".exe", ".com", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".msi", ".msp", ".msc", ".scr", ".pif",
-  ".cpl", ".lnk", ".url", ".reg", ".hta", ".jar", ".py", ".pyw", ".pyz", ".pyzw", ".sh", ".bash", ".inf", ".scf", ".appref-ms", ".application", ".appx", ".appxbundle", ".msix",
-  ".msixbundle", ".appinstaller", ".settingcontent-ms", ".library-ms", ".search-ms", ".diagcab", ".gadget", ".xll",
+/**
+ * The only file types the app hands to the system's own app (`shell.openPath`): documents, on
+ * every platform. The same kinds `ling web` shows or downloads at `/docs/`
+ * (ling-rs/web/src/documents.rs), plus JSON, logs and images. Left out on purpose: HTML and SVG
+ * (script in a browser; `ling web` never serves HTML inline), RTF and the legacy and macro Office
+ * formats, and everything a system runs, mounts or installs.
+ */
+export const DOCUMENT_TYPES: ReadonlySet<string> = new Set([
+  ".txt", ".md", ".markdown", ".rst", ".org", ".tex", ".log", ".csv", ".tsv", ".json",
+  ".pdf",
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".avif",
+  ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp",
 ]);
-/** What a Mac launches, installs or runs in Terminal when it is opened. */
-const MAC_RUNS = new Set([".app", ".command", ".jar", ".py", ".pyw", ".tool", ".terminal", ".pkg", ".mpkg", ".workflow", ".action", ".prefpane", ".saver", ".fileloc", ".inetloc", ".webloc"]);
-/** What a Linux desktop launches when it is opened. */
-const LINUX_RUNS = new Set([".desktop", ".appimage", ".jar"]);
 
 /**
- * Why the system would run `file` rather than open it (null when it would open it): the system's
- * choice for a file is `shell.openPath`, which on Windows starts a `.bat` or an `.exe`, on a Mac a
- * `.app` or a `.command`, and on Linux a `.desktop` entry or an executable. A path the page names
- * comes from an answer or a file the agent wrote, so the user's "open" must never become "run".
+ * Why `target` is not opened with the system's app (null when it is). A path the page names comes
+ * from an answer or a file the agent wrote, and the system's choice for a file runs, mounts or
+ * installs far more types than anyone can list (a `.chm`, an `.iso`, a `.docm`, a `.dmg`, a
+ * `.mobileconfig`, whatever an installed app registers), so only `DOCUMENT_TYPES` open: a regular
+ * file, under its own name and behind any link, with no executable bit. A folder (`kind`
+ * "folder") opens in the file manager unless a Mac would launch it as a bundle (`Tool.app`).
  */
-export async function runsWhenOpened(file: string, platform: NodeJS.Platform = process.platform, pathext: string = process.env.PATHEXT ?? ""): Promise<string | null> {
-  const name = await fs.promises.realpath(file).catch(() => file);
-  const stat = await fs.promises.stat(name).catch(() => null);
-  const ext = (candidate: string) => path.extname(candidate).toLowerCase();
-  const names = [file, name].map((candidate) => (platform === "win32" ? path.win32.basename(candidate) : path.basename(candidate)));
-  const why = `${names[0]} would run, not open: choose an editor in the review pane to open it`;
-  if (platform === "win32") {
-    // Windows drops a name's trailing dots and spaces (`run.bat.` is `run.bat`); a stream (`a.txt:b`) is never a document.
-    if (names.some((candidate) => candidate.includes(":"))) return why;
-    const runs = new Set([...WINDOWS_RUNS, ...pathext.split(";").map((entry) => entry.trim().toLowerCase()).filter((entry) => entry.startsWith("."))]);
-    return names.some((candidate) => runs.has(ext(candidate.replace(/[. ]+$/, "")))) ? why : null;
+export async function whyNotOpened(target: string, kind: "document" | "folder" = "document", platform: NodeJS.Platform = process.platform, pathext: string = process.env.PATHEXT ?? ""): Promise<string | null> {
+  const real = await fs.promises.realpath(target).catch(() => null);
+  const stat = real === null ? null : await fs.promises.stat(real).catch(() => null);
+  const names = [target, real ?? target].map((candidate) => (platform === "win32" ? path.win32.basename(candidate) : path.basename(candidate)));
+  if (!stat) return `${names[0]} is not there`;
+  // Windows drops a name's trailing dots and spaces (`run.bat.` is `run.bat`).
+  const ext = (candidate: string) => path.extname(platform === "win32" ? candidate.replace(/[. ]+$/, "") : candidate).toLowerCase();
+  if (kind === "folder") {
+    if (!stat.isDirectory()) return `${names[0]} is not a folder`;
+    return platform === "darwin" && names.some((candidate) => ext(candidate) !== "") ? `${names[0]} is a bundle a Mac would launch, not a folder: shown in its folder instead` : null;
   }
-  const runs = platform === "darwin" ? MAC_RUNS : LINUX_RUNS;
-  if (names.some((candidate) => runs.has(ext(candidate)))) return why;
-  // An executable is run (a Mac opens it in Terminal; a file manager may launch it); a folder opens in the file manager.
-  if (stat?.isFile() && (stat.mode & 0o111) !== 0) return why;
+  const why = `${names[0]} is not a document type the system opens from here (text, PDF, an image, an Office file without macros): shown in its folder instead; choose an editor in the review pane to open it`;
+  if (!stat.isFile()) return why;
+  // A stream (`a.txt:b`) is never a document; PATHEXT names what Windows runs, even an allowed type.
+  if (platform === "win32" && names.some((candidate) => candidate.includes(":"))) return why;
+  const runs = platform === "win32" ? new Set(pathext.split(";").map((entry) => entry.trim().toLowerCase())) : new Set<string>();
+  if (!names.every((candidate) => DOCUMENT_TYPES.has(ext(candidate)) && !runs.has(ext(candidate)))) return why;
+  // An executable is run (a Mac opens it in Terminal; a file manager may launch it).
+  if (platform !== "win32" && (stat.mode & 0o111) !== 0) return why;
   return null;
+}
+
+/** The part of Electron's `shell` that opens or shows a path. */
+export interface SystemShell {
+  openPath(target: string): Promise<string>;
+  showItemInFolder(target: string): void;
+}
+
+/**
+ * Opens `target` with the system's app when `whyNotOpened` allows it; otherwise shows it in its
+ * folder and throws why, so the page tells the user it was shown, not opened. A path that is not
+ * there is neither.
+ */
+export async function openOrReveal(target: string, system: SystemShell, kind: "document" | "folder" = "document", platform: NodeJS.Platform = process.platform, pathext: string = process.env.PATHEXT ?? ""): Promise<void> {
+  const why = await whyNotOpened(target, kind, platform, pathext);
+  if (why === null) {
+    const failed = await system.openPath(target);
+    if (failed) throw new Error(failed);
+    return;
+  }
+  if (await fs.promises.lstat(target).then(() => true, () => false)) system.showItemInFolder(target);
+  throw new Error(why);
 }
 
 /** Terminal emulators and how each is told where to start; the first found is used. */

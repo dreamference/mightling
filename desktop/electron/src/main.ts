@@ -25,7 +25,7 @@ import { auditPreview, type WorkTarget } from "./args";
 import { webUrl } from "./links";
 import { codexHome, findLing } from "./bridge";
 import { officePreview } from "./office";
-import { findEditors, openCommand, runsWhenOpened, terminalCommand, type Editor } from "./editors";
+import { findEditors, openCommand, openOrReveal, terminalCommand, type Editor } from "./editors";
 import { environments, writeEnvironment } from "./environments";
 import * as git from "./git";
 import * as prs from "./prs";
@@ -914,11 +914,8 @@ export async function main(options: MainOptions): Promise<void> {
         // A citation of the user's documents: the id goes to `ling docs locate`, the file it names to the system.
         const ling = findLing(resourcesPath());
         if (!ling) throw new Error("ling is not installed");
-        const doc = await locate(ling, message.doc);
-        const runs = await runsWhenOpened(doc);
-        if (runs) throw new Error(runs);
-        const failed = await shell.openPath(doc);
-        if (failed) throw new Error(failed);
+        // Only a document type opens with the system's app; anything else is shown in its folder (editors.ts).
+        await openOrReveal(await locate(ling, message.doc), shell);
         return null;
       }
       case "docs/status":
@@ -987,8 +984,8 @@ export async function main(options: MainOptions): Promise<void> {
         return root ? git.originUrl(root) : null;
       }
       case "open/folder": {
-        const failed = await shell.openPath(await folder(message.dir));
-        if (failed) throw new Error(failed);
+        // In the file manager; a Mac's bundle (`Tool.app`) is a folder it would launch, so it is shown instead.
+        await openOrReveal(await folder(message.dir), shell, "folder");
         return null;
       }
       case "editors/list":
@@ -1001,11 +998,8 @@ export async function main(options: MainOptions): Promise<void> {
         const file = path.join(base, git.insidePath(base, message.path));
         const editor = (editors ?? (editors = findEditors())).find((entry) => entry.id === message.editor);
         if (!editor) {
-          // The system's choice for the file's type, unless the system would run it (editors.ts).
-          const runs = await runsWhenOpened(file);
-          if (runs) throw new Error(runs);
-          const failed = await shell.openPath(file);
-          if (failed) throw new Error(failed);
+          // The system's app for a document type; anything else is shown in its folder (editors.ts).
+          await openOrReveal(file, shell);
           return null;
         }
         const { command, args } = openCommand(editor, file, message.line);
