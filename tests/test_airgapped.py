@@ -161,6 +161,15 @@ def test_a_named_config_file_replaces_the_working_directorys(tmp_path, monkeypat
     assert DreamferenceConfig.resolve_airgapped_level(cwd) == "off"
 
 
+def test_a_config_path_that_is_not_a_file_is_passed_over_without_a_word(tmp_path, capsys, monkeypatch):
+    # The MCP server asks here and speaks JSON-RPC on stdout, so a warning printed for a directory
+    # would break its stream; a FIFO in that place would block the read for good.
+    cwd = _two_files(tmp_path, monkeypatch, None, 'mightling_airgapped = "on"\n')
+    (cwd / "dreamference.toml").mkdir()
+    assert DreamferenceConfig.resolve_airgapped_level(cwd) == "on"
+    assert capsys.readouterr().out == ""
+
+
 # -- the MCP server's web tools follow the level ---------------------------------------------------
 
 def test_at_on_the_mcp_web_tools_send_nothing(monkeypatch):
