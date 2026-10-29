@@ -416,14 +416,27 @@ impl Tab {
     }
 }
 
-/// Defense in depth: refuses a `bridge=1` session's `turn/start` or `turn/steer` on a repository
-/// thread whose record's `bridge` is `telegram` or `discord` (CHAT_REPOS §2, §5.3).
+/// The requests that put input into an existing thread, each naming it in `params.threadId`.
+const BRIDGE_REPO_INPUT_REQUESTS: [&str; 8] = [
+    "turn/start",
+    "turn/steer",
+    "thread/queue/add",
+    "thread/queue/update",
+    "thread/queue/start",
+    "thread/goal/set",
+    "thread/shellCommand",
+    "review/start",
+];
+
+/// Defense in depth: refuses a `bridge=1` session's request that puts input into a repository
+/// thread (a turn, a steer, a queued message, a goal, a shell command or a review) when the
+/// thread's record's `bridge` is `telegram` or `discord` (CHAT_REPOS §2, §5.3).
 pub fn check_bridge_repo_turn(server: &Server, bridge: bool, vetted: &Value) -> Result<(), String> {
     if !bridge {
         return Ok(());
     }
     let method = vetted.get("method").and_then(Value::as_str);
-    if !matches!(method, Some("turn/start") | Some("turn/steer")) {
+    if !method.is_some_and(|m| BRIDGE_REPO_INPUT_REQUESTS.contains(&m)) {
         return Ok(());
     }
     let Some(thread_id) = vetted.pointer("/params/threadId").and_then(Value::as_str) else {

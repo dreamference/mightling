@@ -9191,8 +9191,17 @@ mod tests {
                 .contains(&json!("org/widget"))
         );
 
-        // 2. Defense in depth: bridge=1 session cannot send turn/start or turn/steer on Telegram checkout
-        for method in ["turn/start", "turn/steer"] {
+        // 2. Defense in depth: bridge=1 session cannot put input into a Telegram checkout's thread
+        for method in [
+            "turn/start",
+            "turn/steer",
+            "thread/queue/add",
+            "thread/queue/update",
+            "thread/queue/start",
+            "thread/goal/set",
+            "thread/shellCommand",
+            "review/start",
+        ] {
             let msg = json!({
                 "id": 1,
                 "method": method,
@@ -9203,6 +9212,8 @@ mod tests {
             let res_owner = crate::relay::check_bridge_repo_turn(&server, false, &msg);
             assert!(res_owner.is_ok(), "{method} from owner tab must be allowed");
         }
+        let read = json!({ "id": 2, "method": "thread/read", "params": { "threadId": app_thread } });
+        assert!(crate::relay::check_bridge_repo_turn(&server, true, &read).is_ok(), "reading is not input");
 
         // 3. ApprovalWaiting deduplicated across two tabs, and ApprovalDeclineSoon after 9 minutes
         let tab1 = Arc::new(crate::relay::Shared::for_tab(101));
