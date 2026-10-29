@@ -228,3 +228,28 @@ def test_toml_strings_with_escaped_quotes_are_read_as_written(tmp_path):
     assert ConfigFileStorageManager.load_config_dict(path) == {"a": '""no::,off1,', "b": '"'}
     DreamferenceConfig(config_file=str(path), hf_token='""token').save_config()
     assert DreamferenceConfig(config_file=str(path)).hf_token == '""token'
+
+
+def test_a_toml_file_the_launcher_reads_is_read_here_too(tmp_path):
+    # The toml 0.10 parser (TOML 0.5) refused a byte order mark and a mixed array, both of which
+    # the Rust launcher and tomllib read, and the whole file then counted as empty.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    path = tmp_path / "dreamference.toml"
+    path.write_text('﻿model = "x"\n', encoding="utf-8")
+    assert ConfigFileStorageManager.load_config_dict(path) == {"model": "x"}
+    path.write_text('model = "x"\nports = [1, "a"]\n', encoding="utf-8")
+    assert ConfigFileStorageManager.load_config_dict(path) == {"model": "x", "ports": [1, "a"]}
+
+
+def test_saving_never_overwrites_a_file_it_could_not_read(tmp_path):
+    # Reading a broken file gives {}, so saving into it kept none of its tables and keys.
+    import pytest
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    path = tmp_path / "dreamference.toml"
+    text = 'model = "x"\n[night]\nwindow = \n'
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="dreamference.toml"):
+        ConfigFileStorageManager.save_config_dict(path, {"model": "y"})
+    assert path.read_text(encoding="utf-8") == text

@@ -39,20 +39,7 @@ class ConfigFileStorageManager:
         if not path.exists():
             return {}
         try:
-            # `utf-8-sig`: an editor that saves a byte order mark (Notepad does) would otherwise make
-            # TOML read the first key as "\ufeffkey", so that setting, often the air-gap level, was
-            # silently ignored, and make JSON refuse the whole file.
-            with open(path, "r", encoding="utf-8-sig") as f:
-                if path.suffix == ".toml":
-                    loaded = cls._load_toml(f.read())
-                elif yaml and path.suffix in (".yaml", ".yml"):
-                    loaded = yaml.safe_load(f) or {}
-                else:
-                    loaded = json.load(f) or {}
-            if not isinstance(loaded, dict):
-                # A file that is only a list or a word has no settings; every caller reads a mapping.
-                raise ValueError("not a table of settings; ignoring it")
-            return loaded
+            return cls.parse_config_file(path)
         except Exception as e:
             print(f"⚠️ Error reading Mightling config file ({path}): {e}")
             return {}
@@ -73,6 +60,36 @@ class ConfigFileStorageManager:
             return toml.loads(text)
 
     @classmethod
+    def parse_config_file(cls, path: Path) -> Dict[str, Any]:
+        """
+        Parses a configuration file, raising when it cannot.
+
+        TOML goes through `tomllib` (TOML 1.0, what the Rust launcher's parser and the other Python
+        readers of the file accept), and a leading byte order mark is skipped: the `toml` package
+        (TOML 0.5) refused both a mark and a mixed array, and the whole file then read as empty.
+
+        Args:
+            path (Path): File path to parse.
+
+        Returns:
+            Dict[str, Any]: The file's contents.
+        """
+        # `utf-8-sig`: an editor that saves a byte order mark (Notepad does) would otherwise make
+        # TOML read the first key as "\ufeffkey", so that setting, often the air-gap level, was
+        # silently ignored, and make JSON refuse the whole file.
+        text = path.read_text(encoding="utf-8-sig")
+        if path.suffix == ".toml":
+            loaded = cls._load_toml(text)
+        elif yaml and path.suffix in (".yaml", ".yml"):
+            loaded = yaml.safe_load(text) or {}
+        else:
+            loaded = json.loads(text) or {}
+        if not isinstance(loaded, dict):
+            # A file that is only a list or a word has no settings; every caller reads a mapping.
+            raise ValueError("not a table of settings; ignoring it")
+        return loaded
+
+    @classmethod
     def save_config_dict(cls, path: Path, data: Dict[str, Any]) -> Path:
         """
         Saves configuration key-value dictionary to YAML, JSON, or TOML file on disk.
@@ -89,7 +106,12 @@ class ConfigFileStorageManager:
         # saved: until 2026-10-01 `main-model set` and `init` silently removed Night Shift's
         # settings by rewriting the file from the flat keys alone.
         if path.is_file():
-            tables = {key: value for key, value in cls.load_config_dict(path).items()
+            # A file that does not parse would read as {} and lose everything below.
+            try:
+                existing = cls.parse_config_file(path)
+            except Exception as e:
+                raise ValueError(f"{path} could not be read, so it was not overwritten: {e}") from e
+            tables = {key: value for key, value in existing.items()
                       if isinstance(value, dict) and key not in data}
             data = {**data, **tables}
         if toml and path.suffix == ".toml":
