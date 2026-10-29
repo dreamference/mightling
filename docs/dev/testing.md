@@ -36,8 +36,10 @@ stand-in under its own `tmp_path` and passes its path (`FAKE_MIGHTLING` in `test
 the `strace` stand-ins in `test_egress_audit.py`); a test that needs a server starts one on a free
 port. The one opt-out is the marker `installed_binary` (registered in `pyproject.toml`): it is set
 on the whole of `test_mightling_slash_commands.py`, whose point is the built `ling`, and whose live
-tests skip on their own while no server answers or the gate is closed. Mark nothing else with it
-without a reason of the same kind.
+tests skip on their own while no server answers or the gate is closed; on the whole of
+`test_loop_guard_binary.py`, which runs the built binary against a stand-in server; and on the one
+test of `test_turn_end_compaction_bench.py` that drives the installed `ling` against a stand-in
+(only with `MIGHTLING_TEC_DRY_RUN=1`). Mark nothing else with it without a reason of the same kind.
 
 Since 2026-10-27 no test reaches the network: conftest stubs `ReleaseAssetDownloader.ensure` (answers "complete", so `server start` proceeds) and makes `download` and `_fetch` fail the test, and the socket guard above refuses any connection to an address that is not loopback. Before that, `server start` tests downloaded the ScaleSearch drafter's release assets from GitHub for real and the suite hung. A test of the downloader restores the three from the `REAL_RELEASE_*` names (`_release_server` in `test_hardware.py`).
 

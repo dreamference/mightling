@@ -2,9 +2,9 @@
 
 Developer notes behind the egress-audit line in `AGENTS.md`. Spec: `specs/DREAMFERENCE_MIGHTLING_EGRESS.md` §10. The channels it found are listed in [launcher.md](launcher.md#channels-to-the-vendor-closed).
 
-`ling-admin audit egress` is the trace that found the upstream vendor's channels, as a command (`dreamference/audit/`). It runs one real `ling exec` under `strace -f -e trace=connect,sendto,sendmsg,sendmmsg,execve` in a throwaway repository and `CODEX_HOME`, and passes only if every IP destination is an allowlisted loopback port (the model server, Gmail on 8767, SearXNG on 8888, image search on 8768), no DNS query was sent and no git command reached a network; exit 0, 1 or 2 (the trace itself failed, which is never a pass).
+`ling-admin audit egress` is the trace that found the upstream vendor's channels, as a command (`dreamference/audit/`). It runs one real `ling exec` under `strace -f -qq -yy -e trace=connect,sendto,sendmsg,sendmmsg,execve,write,writev -s 256` in a throwaway repository and `CODEX_HOME`, and passes only if every IP destination is an allowlisted loopback port (the model server, Gmail on 8767, SearXNG on 8888, image search on 8768), no DNS query was sent and no git command reached a network; exit 0, 1 or 2 (the trace itself failed, which is never a pass).
 
-Two things the parser had to learn from a recording: glibc sends lookups with `sendmmsg` (untraced, a query leaves no name), and a connect to `127.0.0.53:53` is loopback yet still a query that leaves the machine.
+Three things the parser had to learn from a recording: glibc sends lookups with `sendmmsg` (untraced, a query left no name); a connect to `127.0.0.53:53` is loopback yet still a query that leaves the machine; and a `connect()` on a UDP socket sends nothing (Chromium's IPv6 reachability check to `[2001:4860:4860::8888]:443`), so with `-yy`'s socket labels it is recorded under `route_lookups`, and only the first payload on that socket (`send*`, or `write`/`writev`) makes it a destination (`strace_parser.py`).
 
 Modes:
 

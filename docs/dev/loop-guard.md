@@ -51,7 +51,7 @@ LOOP_GUARD_CORPUS=/tmp/corpus.jsonl cargo test --release -p ling-loop-guard --te
 
 ## What happens on a stop
 
-`ling-rs/src/loop_guard.rs` is a `ModelRequestContributor` and `ModelResponseInterceptor`, Codex's own extension points, installed from `airgapped::install`, so it costs no patch bytes (the series is at 44,952 of its 45,000 cap). The interceptor wraps each response stream:
+`ling-rs/src/loop_guard.rs` is a `ModelRequestContributor` and `ModelResponseInterceptor`, Codex's own extension points, installed from `airgapped::install`, so it costs no patch bytes (the series was at 44,952 of its 45,000 cap when it was built). The interceptor wraps each response stream:
 
 1. The response is cut: the upstream stream is dropped, which closes the connection and stops the server generating; the watched item is finished with its text up to where the loop began (the first copy kept).
 2. Tool calls are held until the response completes. A response the server ends as incomplete (the cap, or ling-engine's repetition stop) has its tool calls dropped, so a call cut short is never run. Codex would turn `response.incomplete` into a retryable stream error and send the same request up to five times more; the guard turns it into a stop instead.
