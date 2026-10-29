@@ -5,7 +5,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelState {
@@ -101,8 +101,22 @@ fn model_container_present() -> bool {
         .unwrap_or(false)
 }
 
-/// A minimal HTTP/1.1 GET: `(status, body)`, or None when nothing answers within 2 s.
+/// A minimal HTTP/1.1 GET: `(status, body)`, or None when nothing answers within 2 s or the answer
+/// passes 16 MiB. A server that never stops sending is cut off after 5 s.
 pub fn http_get(base_url: &str, path: &str) -> Option<(u16, String)> {
+    get_bounded(base_url, path, Duration::from_secs(5), 16 << 20)
+}
+
+/// [`http_get`] with the whole answer read within `deadline`, and at most `cap` bytes of it: the
+/// session runs this outside any memory cap, so a server must not be able to fill memory or hold
+/// it.
+fn get_bounded(
+    base_url: &str,
+    path: &str,
+    deadline: Duration,
+    cap: usize,
+) -> Option<(u16, String)> {
+    let deadline = Instant::now() + deadline;
     let rest = base_url.strip_prefix("http://")?;
     let host_port = rest.split('/').next()?;
     let address = if host_port.contains(':') {
@@ -116,7 +130,21 @@ pub fn http_get(base_url: &str, path: &str) -> Option<(u16, String)> {
     let request = format!("GET {path} HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).ok()?;
     let mut response = Vec::new();
-    stream.read_to_end(&mut response).ok();
+    let mut chunk = [0u8; 64 << 10];
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        stream
+            .set_read_timeout(Some(left.min(Duration::from_secs(2))))
+            .ok()?;
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) if response.len() + n > cap => return None,
+            Ok(n) => response.extend_from_slice(&chunk[..n]),
+        }
+    }
     let text = String::from_utf8_lossy(&response);
     let status = text.split_whitespace().nth(1)?.parse().ok()?;
     let body = text
@@ -154,6 +182,38 @@ mod tests {
             }
         });
         format!("http://{address}")
+    }
+
+    /// A server that answers the request and then sends `piece` every `pause` until hung up on.
+    fn stream_forever(piece: &'static [u8], pause: Duration) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let _ = stream.read(&mut [0u8; 1024]);
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n");
+                while stream.write_all(piece).is_ok() {
+                    std::thread::sleep(pause);
+                }
+            }
+        });
+        format!("http://{address}")
+    }
+
+    #[test]
+    fn a_server_that_never_stops_sending_is_cut_off() {
+        let flood = stream_forever(&[b'x'; 4096], Duration::ZERO);
+        let started = Instant::now();
+        assert_eq!(
+            get_bounded(&flood, "/metrics", Duration::from_secs(20), 1 << 20),
+            None
+        );
+        let trickle = stream_forever(b"x", Duration::from_millis(50));
+        let (status, body) =
+            get_bounded(&trickle, "/metrics", Duration::from_millis(400), 1 << 20).unwrap();
+        assert_eq!(status, 200);
+        assert!(body.len() < 100, "{}", body.len());
+        assert!(started.elapsed() < Duration::from_secs(15));
     }
 
     #[test]
