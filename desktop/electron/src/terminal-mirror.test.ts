@@ -37,6 +37,7 @@ describe("the terminal mirror", () => {
     mirror.observe(output("term-1", "x".repeat(BACKLOG_BYTES)));
     const kept = Buffer.from(mirror.backlog("term-1"), "base64");
     expect(kept.length).toBe(BACKLOG_BYTES);
+    expect(BACKLOG_BYTES).toBe(256 * 1024);
     expect(kept.toString().endsWith("x")).toBe(true);
     mirror.forget("term-1");
     expect(mirror.backlog("term-1")).toBe("");

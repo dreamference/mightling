@@ -76,6 +76,12 @@ def test_the_app_window_alone_has_ipc_and_only_for_itself():
     assert 'contents.on("will-attach-webview", (event) => event.preventDefault());' in work
     preload = (SRC / "preload.ts").read_text(encoding="utf-8")
     assert "contextBridge.exposeInMainWorld" in preload and "require(" not in preload.replace('require("electron")', "")
+    # One bridge object and the window type, nothing else; and the theme waits for the document
+    # element when the preload runs before it exists (§10, seen on macOS).
+    assert preload.count("contextBridge.exposeInMainWorld(") == 2
+    assert 'exposeInMainWorld("electronBridge",' in preload
+    assert 'exposeInMainWorld("mightlingWindowType", "electron")' in preload
+    assert 'document.addEventListener("DOMContentLoaded", applyTheme, { once: true });' in preload
 
 
 
@@ -127,6 +133,11 @@ def test_the_agent_is_spawned_as_the_codex_app_spawns_its_own():
     assert 'LOG_FORMAT: "json"' in server and 'RUST_LOG: process.env.RUST_LOG ?? "warn"' in server
     bridge = (SRC / "bridge.ts").read_text(encoding="utf-8")
     assert "app.asar.unpacked" in bridge and "MIGHTLING_BIN" in bridge
+    # The resources folder goes first on the agent's PATH, so it finds the bundled host and `rg`.
+    assert (
+        "if (this.resourcesPath) env.PATH = `${this.resourcesPath}${path.delimiter}${env.PATH ?? \"\"}`;"
+        in server
+    )
 
 
 def test_the_packages_are_installed_before_every_make():

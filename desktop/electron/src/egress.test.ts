@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({ app: { commandLine: { appendSwitch: vi.fn() } }, session: {} }));
 
-import { app } from "electron";
+import { app, session } from "electron";
 
-import { SWITCHES, applySwitches } from "./egress";
+import { SWITCHES, applySessionRules, applySwitches } from "./egress";
 
 describe("the switches that keep Chromium quiet", () => {
   it("are the Codex app's background-networking set plus Cast discovery, always applied", () => {
@@ -53,5 +53,43 @@ describe("the permissions a page gets", () => {
     expect(grantsCheck("media", "app://-", { mediaType: "video" })).toBe(false);
     expect(grantsCheck("media", "http://localhost:3100", { mediaType: "audio" })).toBe(false);
     expect(grantsCheck("clipboard-sanitized-write", "app://-", {})).toBe(true);
+  });
+});
+
+describe("the session rules", () => {
+  /** The default session, its handlers recorded; `dictionaryFails`: an Electron that refuses the download URL. */
+  const fakeSession = (dictionaryFails: boolean) => {
+    const ses = {
+      setPermissionRequestHandler: vi.fn(),
+      setPermissionCheckHandler: vi.fn(),
+      setSpellCheckerDictionaryDownloadURL: vi.fn(() => {
+        if (dictionaryFails) throw new Error("not supported");
+      }),
+      setSpellCheckerEnabled: vi.fn(),
+    };
+    (session as unknown as { defaultSession: typeof ses }).defaultSession = ses;
+    return ses;
+  };
+
+  it("send no permission request or check past the rule, and point the dictionary download at the app's own scheme", () => {
+    const ses = fakeSession(false);
+    applySessionRules();
+    expect(ses.setSpellCheckerDictionaryDownloadURL).toHaveBeenCalledWith("app://-/dictionaries/");
+    expect(ses.setSpellCheckerEnabled).not.toHaveBeenCalled();
+    const request = ses.setPermissionRequestHandler.mock.calls[0][0] as (contents: unknown, permission: string, callback: (granted: boolean) => void, details: unknown) => void;
+    const answers: boolean[] = [];
+    request(null, "geolocation", (granted) => answers.push(granted), { requestingUrl: "app://-/index.html" });
+    request(null, "media", (granted) => answers.push(granted), { mediaTypes: ["audio"], requestingUrl: "app://-/index.html" });
+    request(null, "media", (granted) => answers.push(granted), { mediaTypes: ["audio"], requestingUrl: "https://example.com/" });
+    expect(answers).toEqual([false, true, false]);
+    const check = ses.setPermissionCheckHandler.mock.calls[0][0] as (contents: unknown, permission: string, origin: string, details: unknown) => boolean;
+    expect(check(null, "notifications", "app://-", {})).toBe(false);
+    expect(check(null, "media", "app://-", { mediaType: "audio" })).toBe(true);
+  });
+
+  it("turn spellcheck off when the download URL cannot be set, so no dictionary is fetched from elsewhere", () => {
+    const ses = fakeSession(true);
+    applySessionRules();
+    expect(ses.setSpellCheckerEnabled).toHaveBeenCalledWith(false);
   });
 });

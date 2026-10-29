@@ -73,6 +73,15 @@ def test_electron_is_pinned_exactly_and_stock():
         package = json.load(handle)
     assert package["devDependencies"]["electron"] == "42.11.11"
     assert package["main"] == ".vite/build/early-bootstrap.cjs"
+    # Forge and the fuses are pinned exactly too (§3.2), and the Linux launcher is ours.
+    forge = {
+        name: version
+        for name, version in package["devDependencies"].items()
+        if name.startswith("@electron-forge/")
+    }
+    assert forge and set(forge.values()) == {"8.0.1"}
+    assert package["devDependencies"]["@electron/fuses"] == "2.1.3"
+    assert package["desktopName"] == "mightling.desktop"
     with Path(UI_DIR / "package.json").open() as handle:
         assert not any(
             name.startswith("@tauri-apps") for name in json.load(handle)["devDependencies"]
@@ -130,6 +139,15 @@ def test_the_fuses_are_the_codex_apps():
     # No SUID sandbox helper is shipped and none of the Codex app's extras are depended on.
     assert '"chrome-sandbox"' in forge
     assert "libtss2" not in forge and "libusb" not in forge
+    # On a Mac flipping them breaks the ad-hoc signature, which fuses then redoes (§10).
+    assert "resetAdHocDarwinSignature: darwin," in forge
+
+
+def test_a_mac_gets_its_application_menu_and_a_menu_bar_sized_tray_icon():
+    # §10: `appMenu` comes first on darwin, and the tray icon is 18 points high there, not 32.
+    shell = (ELECTRON / "src" / "shell.ts").read_text(encoding="utf-8")
+    assert '...(process.platform === "darwin" ? [{ role: "appMenu" } as const] : []),' in shell
+    assert 'if (process.platform === "darwin") icon = icon.resize({ height: 18 });' in shell
 
 
 def test_the_package_writes_the_apparmor_profile_and_the_command():
@@ -138,6 +156,8 @@ def test_the_package_writes_the_apparmor_profile_and_the_command():
     postinst = (ELECTRON / "linux" / "postinst").read_text(encoding="utf-8")
     assert 'profile mightling "/usr/lib/mightling/Mightling" flags=(unconfined) {' in postinst
     assert "userns," in postinst
+    # Written and loaded, where AppArmor runs.
+    assert 'apparmor_parser -r -T -W "$PROFILE"' in postinst
     assert (
         "cat > /usr/bin/ling-app" in postinst
         and 'exec /usr/lib/mightling/Mightling "$@"' in postinst
@@ -393,6 +413,28 @@ def test_the_bundled_binaries_come_from_the_installed_build(tmp_path):
         patch("dreamference.chat.desktop_runner.RESOURCES_DIR", resources),
     ):
         assert DesktopRunner.copy_bundled_binaries() is False
+
+
+def test_a_ripgrep_on_path_rides_along_with_the_bundled_binaries(tmp_path):
+    # The agent's fuzzy file search needs `rg` (§3): the one on PATH is packaged beside `ling`.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("ling", "codex-code-mode-host"):
+        (bin_dir / name).write_bytes(b"#!/bin/sh\n")
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "rg").write_bytes(b"rg\n")
+    resources = tmp_path / "resources"
+    with (
+        patch(
+            "dreamference.runner.codex_branded_builder.CodexBrandedBuilder.executable_path",
+            return_value=str(bin_dir / "ling"),
+        ),
+        patch("dreamference.chat.desktop_runner.RESOURCES_DIR", resources),
+        patch("shutil.which", return_value=str(tmp_path / "tools" / "rg")),
+    ):
+        assert DesktopRunner.copy_bundled_binaries() is True
+    assert sorted(p.name for p in resources.iterdir()) == ["codex-code-mode-host", "ling", "rg"]
+    assert (resources / "rg").read_bytes() == b"rg\n"
 
 
 def test_a_rustup_installed_this_run_is_put_on_path():

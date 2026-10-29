@@ -121,6 +121,17 @@ describe("the bridge", () => {
     fs.writeFileSync(path.join(resources, "ling"), "");
     expect(findLing(resources, env, "linux")).toBe(path.join(resources, "ling"));
     expect(findLing(resources, { ...env, MIGHTLING_BIN: path.join(bin, "ling") }, "linux")).toBe(path.join(bin, "ling"));
+    // Then the unpacked asar, and last ~/.local/bin, where install.sh puts it.
+    const unpacked = path.join(resources, "app.asar.unpacked");
+    fs.mkdirSync(unpacked);
+    fs.writeFileSync(path.join(unpacked, "ling"), "");
+    fs.mkdirSync(path.join(dir, ".local", "bin"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".local", "bin", "ling"), "");
+    fs.rmSync(path.join(resources, "ling"));
+    expect(findLing(resources, env, "linux")).toBe(path.join(unpacked, "ling"));
+    expect(findLing(path.join(dir, "elsewhere"), env, "linux")).toBe(path.join(bin, "ling"));
+    expect(findLing(null, { PATH: "/nowhere", HOME: dir }, "linux")).toBe(path.join(dir, ".local", "bin", "ling"));
+    expect(findLing(null, { PATH: "/nowhere" }, "linux")).toBeNull();
     // Windows (Phase 3 item 12): ling.exe, bundled or where install.ps1 puts it.
     fs.writeFileSync(path.join(bin, "ling.exe"), "");
     expect(findLing(null, { LOCALAPPDATA: "/nowhere", PATH: bin }, "win32")).toBe(path.join(bin, "ling.exe"));

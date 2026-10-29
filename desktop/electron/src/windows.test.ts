@@ -262,3 +262,36 @@ describe("the window hub", () => {
     expect(() => paneAction({ kind: "openFile", path: "" }, "t1")).toThrow("must be named");
   });
 });
+
+describe("the composer's methods", () => {
+  // Every method that starts, steers or stops a turn, or changes what the thread does next (§13).
+  const METHODS = [
+    "turn/start", "turn/steer", "turn/interrupt", "thread/shellCommand", "review/start", "thread/compact/start", "thread/revert",
+    "thread/queue/add", "thread/queue/update", "thread/queue/delete", "thread/queue/reorder", "thread/queue/start",
+    "thread/goal/set", "thread/goal/clear",
+  ];
+
+  it("are the spec's list, and reading, naming or archiving a thread is not among them", () => {
+    expect([...COMPOSER_METHODS].sort()).toEqual([...METHODS].sort());
+    for (const open of ["thread/read", "thread/list", "thread/name/set", "thread/archive", "command/exec"]) expect(COMPOSER_METHODS.has(open)).toBe(false);
+  });
+
+  it("are sent from the thread's owner alone: never from another window showing it, never from a pane", () => {
+    const hub = new WindowHub();
+    hub.open("1", "full");
+    hub.open("2", "full");
+    hub.open("3", "pane");
+    hub.show("1", "t1");
+    hub.show("2", "t1");
+    METHODS.forEach((method, index) => {
+      const message = { id: index + 1, method, params: { threadId: "t1" } };
+      expect(() => hub.outgoing("2", message), method).toThrow("in another window");
+      expect(() => hub.outgoing("3", message), method).toThrow("a detached pane has no composer");
+      expect(hub.outgoing("1", message).send, method).toEqual({ ...message, id: `1␟${index + 1}` });
+    });
+    // A thread nobody shows yet, and a read from a window that does not own the thread, go through.
+    expect(hub.outgoing("2", { id: 99, method: "turn/start", params: { threadId: "t2" } }).send).not.toBeNull();
+    expect(hub.outgoing("2", { id: 100, method: "thread/read", params: { threadId: "t1" } }).send).not.toBeNull();
+    expect(() => hub.outgoing("missing", { id: 1, method: "thread/read", params: {} })).toThrow("only the app's windows");
+  });
+});
