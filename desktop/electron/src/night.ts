@@ -94,7 +94,8 @@ function run(ling: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const started = command(ling, args);
     execFile(started.file, started.args, { cwd, timeout: 30_000, shell: started.shell, windowsHide: true }, (error, stdout, stderr) => {
-      const output = String(stdout || stderr).trim();
+      // A failure says why on stderr; a success's answer is on stdout.
+      const output = String(error ? stderr.trim() || stdout : stdout || stderr).trim();
       if (error && !output) reject(new Error(error.message));
       else if (error) reject(new Error(output));
       else resolve(output);

@@ -51,6 +51,14 @@ describe("Night Shift for the Scheduled view", () => {
     }
   });
 
+  // A failing ling night says why on stderr, after whatever it printed on stdout.
+  it.skipIf(process.platform === "win32")("reports what a failing ling night says on stderr", async () => {
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-fail-")));
+    const ling = nodeScript(home, "ling", 'console.log("Checking the queue"); console.error("error: the queue is locked"); process.exit(1);\n');
+    await expect(addTask(ling, home, "x", null)).rejects.toThrow("the queue is locked");
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
   it("queues and drops through ling night, never writing a task itself", async () => {
     // The real path, as ling reports where it runs: macOS links /var to /private/var, Windows may hand out a short (8.3) name.
     const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-cli-")));
