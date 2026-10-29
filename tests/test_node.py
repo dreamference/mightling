@@ -2270,7 +2270,8 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
         sys.executable,
         "-c",
         "import sys; from dreamference.node.node_model_sync import NodeModelSync; "
-        f"sys.exit(NodeModelSync.receive({SYNC_KEY!r}, 10**9))",
+        # the size the sender declared, the last word of `model-receive <key> <size>`
+        f"sys.exit(NodeModelSync.receive({SYNC_KEY!r}, int(sys.argv[1])))",
     ]
     # The receiver checks the real disk; a CI runner has less free than the copy's margin.
     receiver[2] = PLENTY_OF_DISK + receiver[2]
@@ -2283,6 +2284,7 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
                 "env",
                 *[f"{k}={v}" for k, v in environment.items()],
                 *receiver,
+                request.split()[-1],
             ]
         ),
     )
