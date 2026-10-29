@@ -684,3 +684,41 @@ def test_an_oauth_state_is_taken_once_and_expires(monkeypatch):
     GmailSearchService.new_state("gmail", "new")
     assert stale not in service_module.OAUTH_STATES and len(service_module.OAUTH_STATES) == 1
     assert GmailSearchService.take_state(stale) is None
+
+
+def test_a_message_id_that_is_not_a_gmail_id_never_reaches_imap(monkeypatch):
+    # imaplib sends arguments unquoted: a CR/LF in the id would start a command of its own.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    sent = []
+
+    class Conn:
+        def uid(self, *args):
+            sent.append(args)
+            return "OK", [b""]
+
+        def logout(self):
+            pass
+
+    monkeypatch.setattr(
+        GmailSearchService, "_open_mailboxes", classmethod(lambda cls: ({"b@y.com": Conn()}, None, [])),
+    )
+    for bad in ("b@y.com|1\r\nA1 SELECT INBOX", "1\r\nA2 EXPUNGE", "b@y.com|1 OR ALL", "b@y.com|"):
+        assert GmailSearchService.message(bad) == {"error": "Message not found"}
+    assert sent == []
+
+
+def test_a_search_with_a_line_break_is_never_sent_as_a_quoted_string():
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    sent = []
+
+    class Conn:
+        literal = None
+
+        def uid(self, *args):
+            sent.append(args)
+            return "NO", [b"CHARSET unsupported"]
+
+    assert GmailSearchService._search_uids(Conn(), 'x"\r\nA1 EXPUNGE') == []
+    assert all("\n" not in arg and "\r" not in arg for args in sent for arg in args)
