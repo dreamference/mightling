@@ -880,6 +880,53 @@ async fn a_closed_tab_lets_go_of_the_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_device_narrowed_or_revoked_with_its_tab_open_is_held_to_it_on_the_next_message() {
+    let scratch = scratch("ws-revoke");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let config = config(&scratch.dir, port, Vec::new());
+    let mut app_server = fake_app_server(&config.socket).await;
+    let server = Server::new(config).unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = tokio::spawn(server::serve(server.clone(), vec![listener], async move {
+        let _ = stopped.await;
+    }));
+
+    let state = server.config.state_dir.clone();
+    let (_, token) = auth::add_device(&state, "phone").unwrap();
+    let cookie = format!("{}={token}", auth::DEVICE_COOKIE);
+    let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let mut upgrade = format!("ws://127.0.0.1:{port}/ws").into_client_request_with_origin(port);
+    upgrade.headers_mut().insert(header::COOKIE, cookie.parse().unwrap());
+    let (websocket, _) = tokio_tungstenite::client_async(upgrade, tcp).await.unwrap();
+    let (sink, stream) = websocket.split();
+    let mut browser = Browser { sink, stream, next: 0 };
+    let started = browser.call(json!({ "type": "work/start" })).await;
+    assert!(started.get("error").is_none(), "{started}");
+    let turn = |id: u64| json!({ "type": "work/send", "message": { "id": id, "method": "turn/start", "params": { "threadId": "thr-1", "input": [] } } });
+    let sent = browser.call(turn(1)).await;
+    assert!(sent.get("error").is_none(), "{sent}");
+    assert_eq!(next_frame(&mut app_server).await.0["method"], "turn/start");
+
+    // Narrowed to watch: the open tab may no longer start work (SYNC §5.1, O4).
+    auth::set_scope(&state, "phone", auth::Scope::Watch).unwrap();
+    let refused = browser.call(turn(2)).await;
+    assert!(refused["error"].as_str().is_some_and(|e| e.contains("watch")), "{refused}");
+
+    // Revoked: the open tab is refused and closed, as its next request over HTTP would be.
+    auth::set_scope(&state, "phone", auth::Scope::Control).unwrap();
+    auth::revoke_device(&state, "phone").unwrap();
+    let revoked = browser.call(turn(3)).await;
+    assert!(revoked["error"].as_str().is_some_and(|e| e.contains("revoked")), "{revoked}");
+    assert!(tokio::time::timeout(Duration::from_millis(500), app_server.recv()).await.is_err());
+    let closed = tokio::time::timeout(Duration::from_secs(10), browser.stream.next()).await.unwrap();
+    assert!(!matches!(closed, Some(Ok(Message::Text(_)))), "{closed:?}");
+
+    let _ = stop.send(());
+    serving.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn with_nothing_listening_the_server_starts_the_app_server_and_reports_why_it_failed() {
     let scratch = scratch("spawn");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

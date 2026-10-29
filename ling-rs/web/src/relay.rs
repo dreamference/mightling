@@ -146,13 +146,16 @@ pub async fn run_tab(socket: WebSocket, server: Arc<Server>) {
 
 pub async fn run_tab_for_device(socket: WebSocket, server: Arc<Server>, device_name: Option<String>) {
     let bridge = device_name.as_deref().is_some_and(ask::is_bridge_device);
-    run_tab_with_bridge(socket, server, device_name, bridge, false).await;
+    run_tab_with_bridge(socket, server, None, bridge, false).await;
 }
 
+/// `device_token`: the cookie of the paired device the tab was opened with, looked up again for
+/// every message, so a device revoked or narrowed to `watch` while its tab is open is held to it
+/// at once, as its next HTTP request is.
 pub async fn run_tab_with_bridge(
     socket: WebSocket,
     server: Arc<Server>,
-    _device_name: Option<String>,
+    device_token: Option<String>,
     bridge: bool,
     watch: bool,
 ) {
@@ -200,6 +203,13 @@ pub async fn run_tab_with_bridge(
         };
         let Ok(call) = serde_json::from_str::<Value>(text.as_str()) else { continue };
         let id = call.get("call").cloned().unwrap_or(Value::Null);
+        if let Some(token) = device_token.as_deref() {
+            let Some(device) = crate::auth::device_for_token(&tab.server.config.state_dir, token) else {
+                let _ = out.send(json!({ "answer": id, "error": "This device's pairing was revoked." }));
+                break;
+            };
+            tab.watch = device.scope == crate::auth::Scope::Watch;
+        }
         let answer = match tab.handle(call.get("message").cloned().unwrap_or(Value::Null)).await {
             Ok(result) => json!({ "answer": id, "result": result }),
             Err(error) => json!({ "answer": id, "error": error }),

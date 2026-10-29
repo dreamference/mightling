@@ -840,12 +840,14 @@ fn refuse_watch(server: &Server, headers: &HeaderMap) -> Option<Response> {
 }
 
 async fn websocket(State(server): State<Arc<Server>>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
-    let device_name = server.paired_device_name(&headers);
+    let device_token = server
+        .paired_device_name(&headers)
+        .and_then(|_| auth::cookie(header_str(&headers, header::COOKIE), auth::DEVICE_COOKIE).map(str::to_string));
     let bridge = server.is_bridge_caller(&headers);
     let watch = server.watch_device(&headers);
     upgrade
         .max_message_size(64 << 20)
-        .on_upgrade(move |socket| crate::relay::run_tab_with_bridge(socket, server, device_name, bridge, watch))
+        .on_upgrade(move |socket| crate::relay::run_tab_with_bridge(socket, server, device_token, bridge, watch))
 }
 
 /// The user-level air-gap level, for clients that cannot read the user's configuration: the Signal
