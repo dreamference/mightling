@@ -1168,9 +1168,8 @@ impl Hub {
         let Ok(value) = self.agent.web(&format!("/api/night/reports?after={after}"), None).await else { return };
         let latest = value.get("latest").and_then(Value::as_str).map(str::to_string);
         if seen.is_none() {
-            if let Some(latest) = latest {
-                let _ = crate::store::write_private(&seen_file, &latest);
-            }
+            // No report yet is noted too ("" is before any), or the first one would only be noted.
+            let _ = crate::store::write_private(&seen_file, latest.as_deref().unwrap_or_default());
             return;
         }
         let reports = value.get("reports").and_then(Value::as_array).cloned().unwrap_or_default();

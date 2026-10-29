@@ -964,6 +964,60 @@ async fn the_morning_report_is_pushed_once_to_the_messengers_named() {
 }
 
 
+/// A node with no report yet at the first look still gets the first one pushed when it comes.
+#[tokio::test]
+async fn the_first_report_is_pushed_when_there_was_none_at_the_first_look() {
+    let dir = scratch("reports-none");
+    let (agent, mut commands) = AgentHandle::channel();
+    let looks = Arc::new(Mutex::new(0u32));
+    let counted = looks.clone();
+    tokio::spawn(async move {
+        let script = default_script();
+        while let Some(command) = commands.recv().await {
+            match command {
+                AgentCommand::Request { method, params, reply } => {
+                    let _ = reply.send(script(&method, &params));
+                }
+                AgentCommand::Web { path, reply, .. } => {
+                    let answer = if path.starts_with("/api/night/reports") {
+                        let mut n = counted.lock().unwrap();
+                        *n += 1;
+                        if *n == 1 {
+                            json!({ "reports": [], "latest": null })
+                        } else if path.ends_with("after=") {
+                            json!({ "reports": [{ "name": "2026-10-22.md", "text": "## app\n- done" }], "latest": "2026-10-22.md" })
+                        } else {
+                            json!({ "reports": [], "latest": "2026-10-22.md" })
+                        }
+                    } else {
+                        json!({})
+                    };
+                    let _ = reply.send(Ok(answer));
+                }
+                _ => {}
+            }
+        }
+    });
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+    let mut hub = Hub::new(HubConfig::new(dir), agent, Box::new(|| false));
+    hub.add_adapter("matrix", out_tx);
+    hub.on_inbound(text("matrix:!r:x", "hello")).await;
+    hub.push_reports().await;
+    hub.push_reports().await;
+    hub.push_reports().await;
+    let mut pushed = Vec::new();
+    while let Ok(out) = out_rx.try_recv() {
+        if let Outbound::Message { markdown, .. } = out
+            && markdown.contains("Night Shift's report")
+        {
+            pushed.push(markdown);
+        }
+    }
+    assert_eq!(*looks.lock().unwrap(), 3);
+    assert_eq!(pushed.len(), 1, "the first report, once: {pushed:?}");
+    assert!(pushed[0].starts_with("**Night Shift's report** (2026-10-22)"), "{pushed:?}");
+}
+
 /// Sync's notices go to Signal and Matrix chats by default, once each, nothing old after a fresh
 /// start, and never to Telegram unless named.
 #[tokio::test]
