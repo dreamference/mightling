@@ -115,7 +115,7 @@ class AdapterCommand:
         base = AdapterVerifier.served_base(config.vllm_host, config.model)
         handlers = {
             "list": cls._list,
-            "install": lambda args, base: cls._install(args, base, config.hf_token),
+            "install": lambda args, base: cls._install(args, base, config),
             "remove": cls._remove,
             "verify": cls._verify,
         }
@@ -181,7 +181,7 @@ class AdapterCommand:
 
     @classmethod
     def _install(
-        cls, args: argparse.Namespace, base: dict[str, str] | None, token: str | None = None
+        cls, args: argparse.Namespace, base: dict[str, str] | None, config: DreamferenceConfig
     ) -> int:
         """`adapter install <name>[@<version>] | --repo <org>/<repo>@<commit> [--third-party]`.
 
@@ -199,7 +199,7 @@ class AdapterCommand:
         confirm = cls._confirm if args.third_party else None
         try:
             entry = AdapterInstaller.install(
-                args.name, args.repo, base, confirm=confirm, token=token
+                args.name, args.repo, base, confirm=confirm, token=config.hf_token
             )
         except ValueError as error:
             print(f"❌ {error}. Nothing was installed.")
@@ -211,11 +211,11 @@ class AdapterCommand:
             f"✅ Installed {entry['display_name']} {entry['version']} as `{entry['name']}`{flag}."
         )
         print(RESTART_HINT.format(name=entry["name"]))
-        cls._warn_if_ling(base)
+        cls._warn_if_ling(base, config)
         return 0
 
     @classmethod
-    def _warn_if_ling(cls, base: dict[str, str] | None) -> None:
+    def _warn_if_ling(cls, base: dict[str, str] | None, config: DreamferenceConfig) -> None:
         """Warns when the engine the next `server start` resolves is ling-serve, which serves no adapters."""
         from dreamference.hardware import ModelMatrixRegistry
         from dreamference.hardware.model_matrix_registry import ENGINE_LING
@@ -223,7 +223,7 @@ class AdapterCommand:
         if base is None:
             return
         engines = ModelMatrixRegistry.engines(base["key"])
-        engine = DreamferenceConfig().server_engine or (engines[0] if engines else None)
+        engine = config.server_engine or (engines[0] if engines else None)
         if engine == ENGINE_LING:
             print(
                 "⚠️  The engine configured for this model is ling-serve, which cannot serve adapters yet: "
