@@ -1981,7 +1981,7 @@ pub fn parse_http_response(raw: &[u8]) -> Result<(u16, Vec<u8>), String> {
     }
 
     if chunked {
-        Ok((status, decode_chunked(body)))
+        decode_chunked(body).map(|body| (status, body))
     } else if let Some(len) = content_length {
         if body.len() < len {
             return Err("truncated HTTP body from forge".to_string());
@@ -1992,15 +1992,21 @@ pub fn parse_http_response(raw: &[u8]) -> Result<(u16, Vec<u8>), String> {
     }
 }
 
-fn decode_chunked(mut input: &[u8]) -> Vec<u8> {
+/// Decodes a chunked body; a body that ends before its last (zero-size) chunk is an error.
+fn decode_chunked(mut input: &[u8]) -> Result<Vec<u8>, String> {
+    let truncated = || "truncated chunked HTTP body from forge".to_string();
     let mut out = Vec::new();
-    while let Some(end) = input.windows(2).position(|w| w == b"\r\n") {
+    loop {
+        let end = input.windows(2).position(|w| w == b"\r\n").ok_or_else(truncated)?;
         let header = String::from_utf8_lossy(&input[..end]);
         let size_hex = header.split(';').next().unwrap_or("").trim();
-        let Ok(size) = usize::from_str_radix(size_hex, 16) else { break };
+        let size = usize::from_str_radix(size_hex, 16).map_err(|_| "invalid chunk size from forge".to_string())?;
         input = &input[end + 2..];
-        if size == 0 || input.len() < size {
-            break;
+        if size == 0 {
+            return Ok(out);
+        }
+        if input.len() < size {
+            return Err(truncated());
         }
         out.extend_from_slice(&input[..size]);
         input = &input[size..];
@@ -2008,7 +2014,6 @@ fn decode_chunked(mut input: &[u8]) -> Vec<u8> {
             input = &input[2..];
         }
     }
-    out
 }
 
 /// Checks that `[chat_repos] enabled` is true, the phone token exists, and `GET /api/v1/version`
@@ -8719,6 +8724,14 @@ mod tests {
         let (st, again, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(again["repo"], Value::Null, "{body}");
+    }
+
+    #[test]
+    fn a_chunked_forge_reply_cut_short_is_an_error() {
+        assert_eq!(decode_chunked(b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"), Ok(b"hello world".to_vec()));
+        for cut in [&b"5\r\nhello\r\n"[..], b"5\r\nhel", b"5\r\nhello\r\n6\r\n wo", b"zz\r\nhello\r\n0\r\n\r\n"] {
+            assert!(decode_chunked(cut).is_err(), "{}", String::from_utf8_lossy(cut));
+        }
     }
 
     #[tokio::test]
