@@ -317,7 +317,7 @@ Queue up to 5 bounded tasks from QA findings, failing CI tests and open spec ite
 | Option | Description |
 |---|---|
 | `--dry-run` | Say what would be queued; queue nothing. |
-| `--max` | Tasks at most (1 to 5; default [night] autofill_max) |
+| `--max` | Tasks at most (default [night] autofill_max). One of: `1`, `2`, `3`, `4`, `5`. |
 
 #### `ling-admin night pause`
 
