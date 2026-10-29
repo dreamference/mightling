@@ -5,7 +5,7 @@ control plane runs on the node and one rented box that sees only ciphertext. Not
 user who never runs `remote setup`: no unit, no container, no advertisement key, no port.
 
 `setup` is idempotent: run again, it keeps the CA, the secret, the token and the peers, reissues
-nothing that is still valid, and redeploys the box (which is how a replaced box is set up). `remove`
+the two server certificates under the same CA, and redeploys the box (which is how a replaced box is set up). `remove`
 undoes the box and the tunnel and keeps the node's CA and peers, so a new box under the same name
 needs no re-enrolment; `--purge` deletes them too and takes the node out of the overlay.
 
