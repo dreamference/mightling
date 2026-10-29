@@ -351,6 +351,38 @@ def test_an_old_release_without_the_optional_commands_still_installs(tmp_path, r
     assert not (tmp_path / ".local/bin/ling-search").exists()
 
 
+def test_the_signal_bridge_is_installed_beside_ling_without_a_link(tmp_path, release_server):
+    # `ling signal …` finds its bridge beside ling, as Codex finds its Code Mode host
+    # (specs/DREAMFERENCE_SETUP.md §3.2).
+    names = ("ling", "codex-code-mode-host", "ling-signal", "ling-delegate")
+    result = run_install(tmp_path, release_server(binaries(names)), "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    for name in names:
+        assert (tmp_path / ".local/share/dreamference/mightling/bin" / name).is_file(), name
+    assert not (tmp_path / ".local/bin/ling-signal").exists()
+    assert not (tmp_path / ".local/bin/codex-code-mode-host").exists()
+    assert (tmp_path / ".local/bin/ling-delegate").is_symlink()
+
+
+@pytest.mark.parametrize("repo, env_token, sent", [
+    ("", None, None),                         # the public repository: gh's login is not asked
+    ("test/ling", None, "Bearer from-gh"),    # a fork: a logged-in gh's token is used
+    ("test/ling", "from-env", "Bearer from-env"),   # GH_TOKEN wins over gh
+], ids=["public", "fork", "env-token"])
+def test_a_gh_login_is_used_only_for_a_fork(tmp_path, release_server, repo, env_token, sent):
+    # A gh login carries far more access than reading a release (specs/DREAMFERENCE_SETUP.md §3.2).
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    (fake_bin / "gh").write_text(f'#!/bin/sh\necho "$*" >> "{tmp_path}/gh.log"\necho from-gh\n')
+    (fake_bin / "gh").chmod(0o755)
+    server = release_server(binaries())
+    result = run_install(tmp_path, server, "--role", "client", token=env_token,
+                         env_extra={"MIGHTLING_RELEASE_REPO": repo})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert {auth for _, auth in server.requests} == {sent}
+    assert (tmp_path / "gh.log").exists() == (sent == "Bearer from-gh")
+
+
 def test_a_download_that_fails_its_checksum_installs_nothing(tmp_path, release_server):
     # The last archive is the tampered one: the ones before it passed, and must not be placed.
     result = run_install(tmp_path, release_server(binaries(corrupt="ling-fetch")), "--role", "client")
