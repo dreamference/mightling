@@ -206,3 +206,10 @@ def test_the_policy_has_the_sizes_the_spec_states():
     text = SPEC.read_text(encoding="utf-8")
     sizes = [len(policy[key]) for key in ("allowedRequests", "allowedNotifications", "droppedThreadFields")]
     assert "({} requests, {} notification, {} dropped thread fields".format(*sizes) in text, sizes
+
+
+def test_the_app_server_starts_as_the_spec_states():
+    # §1.5: `<resources>/ling -c features.code_mode_host=true app-server` with `LOG_FORMAT=json`.
+    server = (REPO / "desktop" / "electron" / "src" / "server.ts").read_text(encoding="utf-8")
+    assert 'command(ling, ["-c", "features.code_mode_host=true", "app-server"])' in server
+    assert 'LOG_FORMAT: "json"' in server
