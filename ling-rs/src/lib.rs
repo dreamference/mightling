@@ -936,13 +936,19 @@ pub fn configured_vllm_host() -> Option<String> {
 /// Whether a model server URL names this machine: the Gmail service and the other node-only
 /// pieces are asked for only then.
 pub fn host_is_local(host: &str) -> bool {
-    let rest = host.trim().trim_start_matches("http://").trim_start_matches("https://");
+    let host = host.trim();
+    let rest = ["http://", "https://"]
+        .iter()
+        .find(|scheme| host.get(..scheme.len()).is_some_and(|start| start.eq_ignore_ascii_case(scheme)))
+        .map_or(host, |scheme| &host[scheme.len()..]);
     let name = if let Some(bracketed) = rest.strip_prefix('[') {
         bracketed.split(']').next().unwrap_or_default()
     } else {
         rest.split(['/', ':']).next().unwrap_or_default()
     };
-    matches!(name.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0")
+    // Any loopback address (127.0.1.1 is how Debian names the machine itself), or the any-address.
+    name.eq_ignore_ascii_case("localhost")
+        || name.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified())
 }
 
 /// Whether to advertise Gmail to the model: `DREAMFERENCE_MIGHTLING_GMAIL`, then `mightling_gmail` in the
@@ -2116,10 +2122,10 @@ mod tests {
 
     #[test]
     fn only_a_loopback_host_is_this_machine() {
-        for host in ["http://localhost:8000", "http://127.0.0.1:8000/", "http://[::1]:8000", "localhost"] {
+        for host in ["http://localhost:8000", "http://127.0.0.1:8000/", "http://[::1]:8000", "localhost", "HTTP://LocalHost:8000", "http://127.0.1.1:8000", "https://[::1]:8000/v1"] {
             assert!(host_is_local(host), "{host}");
         }
-        for host in ["http://192.168.50.105:8000", "http://gx10-1a2b.local:8000", "http://[fd00::2]:8000", ""] {
+        for host in ["http://192.168.50.105:8000", "http://gx10-1a2b.local:8000", "http://[fd00::2]:8000", "", "http://127.example.com:8000", "http://localhost.example.com"] {
             assert!(!host_is_local(host), "{host}");
         }
     }
