@@ -82,6 +82,7 @@ export function addressOf(typed: string): string | null {
   const text = typed.trim();
   if (!text) return null;
   if (text.startsWith("/")) return `file://${text}`;
+  if (/^[A-Za-z]:[\\/]/.test(text)) return `file:///${text.replace(/\\/g, "/")}`;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^(about|data):/i.test(text)) return text;
   // `localhost:5173`, `gx10.local/x`, `example.com`: http for this machine and the LAN, https beyond.
   const host = text.split(/[/:?#]/)[0];
