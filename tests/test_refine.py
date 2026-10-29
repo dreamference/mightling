@@ -52,6 +52,10 @@ def test_the_setting_resolves_through_the_same_tiers_as_the_launchers(tmp_path, 
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_REFINE", "")
     config.write_text('mightling_refine = "yes"\n')
     assert DreamferenceConfig(config_file=str(config)).mightling_refine is False
+    # A blank one too: the launcher trims the value before it looks at it.
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_REFINE", "  ")
+    config.write_text("mightling_refine = true\n")
+    assert DreamferenceConfig(config_file=str(config)).mightling_refine is True
 
 
 def test_the_version_resolves_through_the_same_tiers_and_skips_what_is_not_one(tmp_path, monkeypatch):

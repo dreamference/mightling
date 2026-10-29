@@ -338,12 +338,12 @@ class DreamferenceConfig:
                 break
 
         # Refine mode, through the same tiers and the same reading of a value as the launcher's:
-        # an empty variable counts as unset, anything else is on only if it says so.
-        env_refine = os.getenv("DREAMFERENCE_MIGHTLING_REFINE")
+        # an empty (or blank) variable counts as unset, anything else is on only if it says so.
+        env_refine = (os.getenv("DREAMFERENCE_MIGHTLING_REFINE") or "").strip()
         if mightling_refine is not None:
             self.mightling_refine: bool = mightling_refine
         elif env_refine:
-            self.mightling_refine = env_refine.strip().lower() in ("1", "true", "yes", "on")
+            self.mightling_refine = env_refine.lower() in ("1", "true", "yes", "on")
         else:
             file_refine = self.file_data.get("mightling_refine", DEFAULT_MIGHTLING_REFINE)
             self.mightling_refine = file_refine if isinstance(file_refine, bool) else DEFAULT_MIGHTLING_REFINE
