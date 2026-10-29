@@ -5,7 +5,8 @@
 the chat template, at the pinned revision. A weight file in the hub cache is a link to a blob named
 by the sha256 of its content (Hugging Face's LFS object id, which `NodeModelSync` already relies
 on), so the 21 GB of weights are never read: their hashes are their link targets. The small files
-are hashed. The result is cached by (repository, revision), so it is computed once per revision.
+are hashed. The result is cached by (repository, revision, the files present), so it is computed
+once per revision and again only when a download adds a file.
 """
 
 import hashlib
@@ -41,11 +42,12 @@ class AdapterBaseDigest:
         return Path("~/.cache/dreamference/adapters").expanduser() / CACHE_FILE
 
     @classmethod
-    def listing(cls, snapshot: Path) -> list[str]:
+    def listing(cls, snapshot: Path, hashed: bool = True) -> list[str]:
         """The canonical listing the digest is taken over.
 
         Args:
             snapshot: The base's snapshot folder.
+            hashed: False puts `-` for every hash, which reads no file.
 
         Returns:
             list[str]: `<sha256>  <path>` lines, sorted by path.
@@ -55,7 +57,7 @@ class AdapterBaseDigest:
             relative = path.relative_to(snapshot).as_posix()
             if path.is_dir() or not any(fnmatch(path.name, pattern) for pattern in COVERED):
                 continue
-            lines.append(f"{cls.file_hash(path)}  {relative}")
+            lines.append(f"{cls.file_hash(path) if hashed else '-'}  {relative}")
         return lines
 
     @classmethod
@@ -103,7 +105,10 @@ class AdapterBaseDigest:
         Returns:
             str: `sha256:<hex>`.
         """
-        key = f"{repo}@{revision}"
+        # The files present are part of the key: a snapshot still being downloaded lacks some,
+        # and its digest must not stand for the complete one.
+        names = "\n".join(line.split("  ", 1)[1] for line in cls.listing(snapshot, hashed=False))
+        key = f"{repo}@{revision}#{hashlib.sha256(names.encode('utf-8')).hexdigest()[:16]}"
         cache = cls._read_cache()
         cached = cache.get(key)
         if isinstance(cached, str):

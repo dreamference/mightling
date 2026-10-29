@@ -4,8 +4,8 @@ diff --git a/codex-rs/app-server/src/request_processors/apps_processor.rs b/code
 @@ -72,2 +72,7 @@ impl AppsRequestProcessor {
  
 +        if config.features.enabled(Feature::Apps) && let Some(apps) = ling_launcher::apps::list() {
-+            let apps = AppToolPolicyEvaluator::new(&config.config_layer_stack).apply_app_enabled_state(serde_json::from_value(apps).unwrap_or_default());
-+            let start = params.cursor.as_deref().and_then(|cursor| cursor.parse().ok()).unwrap_or(0);
++            let apps = AppToolPolicyEvaluator::new(&config.config_layer_stack).apply_app_enabled_state(serde_json::from_value(apps).map_err(|err| internal_error(format!("invalid app list: {err}")))?);
++            let start = match params.cursor.as_deref() { Some(cursor) => cursor.parse().map_err(|_| invalid_request(format!("invalid cursor: {cursor}")))?, None => 0 };
 +            return paginate_apps(&apps, start, params.limit).map(Some);
 +        }
          let auth = self.auth_manager.auth().await;

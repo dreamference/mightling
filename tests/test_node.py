@@ -1278,6 +1278,25 @@ def test_the_stricter_of_the_two_airgap_levels_applies(monkeypatch):
     assert NodeJob.validate(job_request())["airgapped"] == "off"
 
 
+def test_a_repository_config_cannot_loosen_the_user_level_airgap_of_a_node_job(tmp_path, monkeypatch):
+    # The agent can write the repository's dreamference.toml; the user-level file's `on` must
+    # still reach the request and the node's own level, as it reaches the launcher.
+    from dreamference.node import NodeJob, NodeJobSender
+
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_CONFIG_PATH", raising=False)
+    user_level = Path.home() / ".config" / "dreamference" / "config.toml"
+    user_level.parent.mkdir(parents=True, exist_ok=True)
+    user_level.write_text('mightling_airgapped = "on"\n')
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    (repo / "dreamference.toml").write_text('mightling_airgapped = "off"\n')
+    monkeypatch.chdir(repo)
+    assert NodeJobSender.compose(str(repo), "a" * 40, ["true"], None, None, None)["airgapped"] == "on"
+    assert NodeJob.node_airgap_level() == "on"
+
+
 def test_the_sandbox_writes_only_the_worktree_hides_the_home_folder_and_the_gpu(tmp_path):
     from dreamference.node import NodeJob
 

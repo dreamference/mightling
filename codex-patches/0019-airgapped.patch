@@ -22,7 +22,7 @@ diff --git a/codex-rs/linux-sandbox/Cargo.toml b/codex-rs/linux-sandbox/Cargo.to
 diff --git a/codex-rs/linux-sandbox/src/linux_run_main.rs b/codex-rs/linux-sandbox/src/linux_run_main.rs
 --- a/codex-rs/linux-sandbox/src/linux_run_main.rs
 +++ b/codex-rs/linux-sandbox/src/linux_run_main.rs
-@@ -394,6 +394,11 @@
+@@ -394,13 +394,26 @@
  ) -> Result<EffectivePermissions, ResolvePermissionProfileError> {
 -    let permission_profile =
 +    let mut permission_profile =
@@ -34,8 +34,23 @@ diff --git a/codex-rs/linux-sandbox/src/linux_run_main.rs b/codex-rs/linux-sandb
 +    }
 +    let (mut file_system_sandbox_policy, network_sandbox_policy) =
          permission_profile.to_runtime_permissions();
-+    file_system_sandbox_policy.entries.extend(ling_airgapped::host_sockets_at(on).into_iter().filter_map(|p| codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(p).ok()).map(|p| FileSystemSandboxEntry::new(p.into(), FileSystemAccessMode::Deny)));
++    seal_file_system(&mut file_system_sandbox_policy, on, ling_airgapped::host_sockets_at(on));
      Ok(EffectivePermissions {
+         permission_profile,
+         file_system_sandbox_policy,
+         network_sandbox_policy,
+     })
+ }
+ 
++/// Denies the host control sockets. A full-write disk would skip bwrap, and with it the denials.
++fn seal_file_system(policy: &mut FileSystemSandboxPolicy, on: bool, sockets: Vec<std::path::PathBuf>) {
++    if on && matches!(policy.kind, codex_protocol::protocol::FileSystemSandboxKind::Unrestricted) {
++        *policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry::new(FileSystemPath::Special { value: FileSystemSpecialPath::Root }, FileSystemAccessMode::Write)]);
++    }
++    policy.entries.extend(sockets.into_iter().filter_map(|p| codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(p).ok()).map(|p| FileSystemSandboxEntry::new(p.into(), FileSystemAccessMode::Deny)));
++}
++
+ fn ensure_inner_stage_mode_is_valid(apply_seccomp_then_exec: bool, use_legacy_landlock: bool) {
 diff --git a/codex-rs/sandboxing/src/policy_transforms.rs b/codex-rs/sandboxing/src/policy_transforms.rs
 --- a/codex-rs/sandboxing/src/policy_transforms.rs
 +++ b/codex-rs/sandboxing/src/policy_transforms.rs

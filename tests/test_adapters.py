@@ -494,6 +494,19 @@ def test_the_base_digest_reads_weight_hashes_from_their_blobs_and_changes_with_a
     assert AdapterBaseDigest.compute(snapshot) != before
 
 
+def test_a_digest_cached_while_the_base_was_still_downloading_is_not_kept_once_it_is_complete():
+    # A digest taken over a snapshot that lacked a file was cached for the revision forever, so
+    # the complete base read as a permanent base mismatch.
+    snapshot = base_snapshot()
+    shard = snapshot / "model.safetensors"
+    target = shard.readlink()
+    shard.unlink()
+    partial = AdapterBaseDigest.of(BASE_REPO, BASE_REVISION, snapshot)
+    shard.symlink_to(target)
+    complete = AdapterBaseDigest.compute(snapshot)
+    assert AdapterBaseDigest.of(BASE_REPO, BASE_REVISION, snapshot) == complete != partial
+
+
 def test_an_adapter_id_names_its_base_entry():
     assert ModelMatrixRegistry.key_for_served_id(f"{BASE_REPO}+rust") == DEFAULT_MODEL_ALIAS
 
@@ -712,6 +725,69 @@ def test_an_installed_set_that_cannot_be_read_is_not_replaced_by_one_entry():
     with pytest.raises(ValueError, match=r"installed\.json"):
         AdapterStore.drop("rust")
     assert path.read_text(encoding="utf-8") == text
+    assert AdapterStore.entries() == {}
+
+
+def test_an_entry_that_cannot_be_written_leaves_the_installed_set_and_no_staging_file():
+    AdapterStore.put({"name": "rust", "repo": "x/rust", "commit": COMMIT})
+    before = AdapterStore.path().read_text(encoding="utf-8")
+    with pytest.raises(TypeError):
+        AdapterStore.put({"name": "go", "repo": object()})
+    assert AdapterStore.path().read_text(encoding="utf-8") == before
+    assert sorted(
+        p.name for p in AdapterStore.folder().iterdir() if not p.name.endswith(".lock")
+    ) == ["installed.json"]
+
+
+def test_two_concurrent_changes_to_the_installed_set_both_land(monkeypatch):
+    # `ling-admin adapter install` and a node's adapter sync both read, change and rewrite the
+    # file; unlocked, the one that wrote last dropped the other's entry.
+    import threading
+    import time
+
+    write = AdapterStore._write.__func__
+    first_reached, go = threading.Event(), threading.Event()
+
+    def held_write(cls, entries):
+        if not first_reached.is_set():
+            first_reached.set()
+            go.wait(5)
+        write(cls, entries)
+
+    monkeypatch.setattr(AdapterStore, "_write", classmethod(held_write))
+    first = threading.Thread(target=AdapterStore.put, args=({"name": "rust", "commit": COMMIT},))
+    first.start()
+    assert first_reached.wait(5)
+    second = threading.Thread(target=AdapterStore.put, args=({"name": "go", "commit": COMMIT},))
+    second.start()
+    time.sleep(0.3)
+    go.set()
+    first.join(5)
+    second.join(5)
+    assert sorted(AdapterStore.entries()) == ["go", "rust"]
+
+
+@pytest.mark.parametrize("header", [[], ["q_proj"], "text", 7, None])
+def test_a_safetensors_header_that_is_not_an_object_is_refused_as_not_safetensors(tmp_path, header):
+    text = json.dumps(header).encode()
+    weights = tmp_path / "adapter_model.safetensors"
+    weights.write_bytes(struct.pack("<Q", len(text)) + text)
+    with pytest.raises(ValueError, match="is not a safetensors file"):
+        AdapterVerifier.check_tensors(weights, {"q_proj"})
+
+
+def test_an_install_by_repository_checks_the_disk_before_fetching(keys, remote, monkeypatch):
+    import types
+
+    source, fetched = remote
+    make_adapter(source, keys)
+    monkeypatch.setattr(
+        "dreamference.hardware.adapter_installer.shutil.disk_usage",
+        lambda path: types.SimpleNamespace(total=4 << 40, used=4 << 40, free=1 << 30),
+    )
+    with pytest.raises(ValueError, match=r"the disk has 1\.0 GiB free"):
+        AdapterInstaller.install(None, f"{ADAPTER_REPO}@{COMMIT}", served(base_snapshot()))
+    assert fetched == []
     assert AdapterStore.entries() == {}
 
 

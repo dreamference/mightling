@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from dreamference.node.node_identity import NodeIdentity
-from dreamference.node.node_job import DEFAULT_MEMORY, DEFAULT_TIME, JOB_ID
+from dreamference.node.node_job import DEFAULT_MEMORY, DEFAULT_TIME, JOB_ID, NodeJob
 from dreamference.node.node_pairing import NodePairing
 from dreamference.runner.safe_git import SafeGit
 
@@ -131,8 +131,11 @@ class NodeJobSender:
             Dict[str, Any]: The request.
         """
         from dreamference.config import DreamferenceConfig
+        # The stricter of this instance's file and the launcher's two: the repository's
+        # dreamference.toml, which the agent can write, never loosens the user-level file.
         try:
-            level = DreamferenceConfig().mightling_airgapped
+            level = NodeJob.stricter(DreamferenceConfig().mightling_airgapped,
+                                     DreamferenceConfig.resolve_airgapped_level())
         except Exception:
             level = "on"
         return {

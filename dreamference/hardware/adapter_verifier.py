@@ -159,6 +159,10 @@ class AdapterVerifier:
                 header = json.loads(handle.read(length).decode("utf-8"))
         except (OSError, struct.error, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError(f"{WEIGHTS_FILE} is not a safetensors file ({error})") from error
+        if not isinstance(header, dict):
+            raise ValueError(
+                f"{WEIGHTS_FILE} is not a safetensors file (its header is not an object)"
+            )
         tensors = {key: value for key, value in header.items() if key != SAFETENSORS_METADATA}
         if not tensors:
             raise ValueError(f"{WEIGHTS_FILE} holds no tensors")

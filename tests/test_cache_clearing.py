@@ -91,3 +91,19 @@ def test_the_hub_cli_fallback_gets_the_token_in_its_environment_not_its_argv(mon
     ((cmd, kw),) = calls
     assert "hf_argv_secret" not in " ".join(cmd)
     assert kw["env"]["HF_TOKEN"] == "hf_argv_secret"
+
+
+def test_a_linked_cache_that_cannot_be_emptied_is_told_how_to_empty_it_not_unlink_it(
+    tmp_path, monkeypatch, capsys
+):
+    # `sudo rm -rf <link>` removes the link alone: the root-owned files stay on the other disk.
+    disk = tmp_path / "big-disk" / "tensorizer"
+    disk.mkdir(parents=True)
+    (disk / "model.tensors").write_bytes(b"\0")
+    link = tmp_path / "tensorizer"
+    link.symlink_to(disk)
+    monkeypatch.setattr(ModelDownloader, "_empty_dir", classmethod(lambda cls, path: False))
+    assert ModelDownloader._remove_cache_dir(link) is False
+    advice = capsys.readouterr().out
+    assert f"rm -rf {link}\n" not in advice
+    assert f"sudo find {link}/ -mindepth 1 -delete" in advice
