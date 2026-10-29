@@ -420,8 +420,14 @@ pub fn set_choice(repo: &Repo, submodule: &Submodule, choice: Option<Choice>) ->
         .or_insert_with(|| toml::Value::Table(toml::Table::new()));
     as_table(submodules)?;
     let submodules = submodules.as_table_mut().unwrap();
-    // One entry per submodule, under its path; an older entry under its name goes.
-    submodules.remove(&submodule.name);
+    // One entry per submodule, under its path; an older entry under its name goes, unless that
+    // name is another submodule's path.
+    if !list(&repo.root)
+        .iter()
+        .any(|entry| entry.1 == submodule.name)
+    {
+        submodules.remove(&submodule.name);
+    }
     submodules.remove(&submodule.path);
     match choice {
         Some(Choice::Include) => submodules.insert(
@@ -547,6 +553,7 @@ pub fn evaluate_with(
     if listed.is_empty() {
         return Vec::new();
     }
+    let paths: Vec<String> = listed.iter().map(|entry| entry.1.clone()).collect();
     let our_remote = superproject_remote(&repo.root);
     let authors = Authors::of(&repo.root);
     let mut out: Vec<Submodule> = Vec::new();
@@ -678,7 +685,13 @@ pub fn evaluate_with(
         // An explicit choice beats the tests.
         match choices
             .iter()
-            .find(|(key, _)| *key == submodule.path || *key == submodule.name)
+            .find(|(key, _)| *key == submodule.path)
+            // An older entry under the name, unless that name is another submodule's path.
+            .or_else(|| {
+                choices
+                    .iter()
+                    .find(|(key, _)| *key == submodule.name && !paths.contains(key))
+            })
             .map(|(_, choice)| *choice)
         {
             Some(Choice::Include) => {
