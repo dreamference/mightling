@@ -69,6 +69,16 @@ def test_fetch_stops_reading_a_body_at_the_download_ceiling(online):
     assert outcome["text"] == "a" * 10 and outcome["truncated"] is True
 
 
+def test_fetch_reports_a_page_cut_at_the_download_ceiling_as_truncated(online):
+    # The text left after the markup is short, but the page went on past the ceiling: only the
+    # length of the text was compared with `max_chars`, so the cut page read as whole.
+    online.return_value = Page(
+        b"<p>hi</p><script>" + b"x" * (MAX_DOWNLOAD_BYTES * 2) + b"</script>"
+    )
+    outcome = WebTools.fetch("https://example.org")
+    assert outcome["text"] == "hi" and outcome["truncated"] is True
+
+
 def test_fetch_reduces_html_to_its_title_and_readable_text(online):
     online.return_value = Page(
         b"<html><head><title> The title </title><style>p {}</style></head>"

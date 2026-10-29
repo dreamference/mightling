@@ -179,7 +179,8 @@ class WebTools:
             url (str): URL to retrieve.
 
         Returns:
-            requests.Response: The response, with `_body` holding at most MAX_DOWNLOAD_BYTES.
+            requests.Response: The response, with `_body` holding at most MAX_DOWNLOAD_BYTES and
+            `_cut` telling whether the body was cut there.
         """
         with _within_deadline() as session:
             response = session.get(
@@ -191,10 +192,12 @@ class WebTools:
             response.raise_for_status()
             chunks: List[bytes] = []
             total = 0
+            response._cut = False  # type: ignore[attr-defined]
             for chunk in response.iter_content(8192):
                 chunks.append(chunk)
                 total += len(chunk)
                 if total >= MAX_DOWNLOAD_BYTES:
+                    response._cut = True  # type: ignore[attr-defined]
                     break
         response._body = b"".join(chunks)  # type: ignore[attr-defined]
         return response
@@ -290,7 +293,8 @@ class WebTools:
             "content_type": content_type,
             "title": title,
             "text": text[:limit],
-            "truncated": len(text) > limit,
+            # A page cut at the download ceiling is truncated however short its text is.
+            "truncated": len(text) > limit or getattr(response, "_cut", False),
         }
 
     @classmethod
