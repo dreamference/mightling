@@ -185,7 +185,7 @@ class RemoteSettings:
         try:
             with os.fdopen(descriptor, "w") as handle:
                 handle.write(text)
-            os.replace(temporary, path)
+            Path(temporary).replace(path)
         except BaseException:
             Path(temporary).unlink(missing_ok=True)
             raise
