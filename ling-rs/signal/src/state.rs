@@ -309,6 +309,14 @@ mod tests {
         assert_eq!(load_cookie(&dir).as_deref(), Some("mightling_device=abc"));
         write_status(&dir.join("run"), &json!({"running": true})).unwrap();
         assert_eq!(std::fs::read_to_string(dir.join("run/status.json")).unwrap(), r#"{"running":true}"#);
+        #[cfg(unix)]
+        {
+            // The one file meant for the user, so not private like the others.
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join("run/status.json")).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o644);
+        }
+        assert!(!dir.join("run/.status.json.tmp").exists(), "written under a temporary name, then renamed");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
