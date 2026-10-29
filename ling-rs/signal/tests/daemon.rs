@@ -43,8 +43,13 @@ fn fake_signal_cli(dir: &Path, log: &Path, messages: &[Value]) -> PathBuf {
 
 /// The same, refusing every edit when `edits` is false (as a signal-cli that cannot edit would).
 fn fake_signal_cli_editing(dir: &Path, log: &Path, messages: &[Value], edits: bool) -> PathBuf {
-    let path = dir.join("signal-cli");
     let refuse = if edits { "" } else { r#"*'"editTimestamp"'*) echo "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-1,\"message\":\"no edits\"},\"id\":$id}" ;;"# };
+    fake_signal_cli_refusing(dir, log, messages, refuse)
+}
+
+/// The same, with `refuse` (a `case` branch) answering before any other.
+fn fake_signal_cli_refusing(dir: &Path, log: &Path, messages: &[Value], refuse: &str) -> PathBuf {
+    let path = dir.join("signal-cli");
     let incoming = dir.join("incoming.jsonl");
     std::fs::write(&incoming, messages.iter().map(|m| m.to_string() + "\n").collect::<String>()).unwrap();
     let script = format!(
@@ -460,5 +465,49 @@ async fn a_ling_web_that_opens_and_refuses_the_agent_is_tried_less_and_less_ofte
         tries += 1;
     }
     assert!((2..=4).contains(&tries), "{tries} connections in ten seconds");
+    daemon.abort();
+}
+
+#[tokio::test]
+async fn an_owner_whose_identities_cannot_be_read_is_not_told_their_safety_number_changed() {
+    let dir = Scratch(std::env::temp_dir().join(format!("ling-signal-daemon-identities-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    let state = dir.0.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let log = dir.0.join("signal-cli.log");
+    let (seen_tx, _seen) = tokio::sync::mpsc::unbounded_channel();
+    let port = fake_ling_web(seen_tx, "off").await;
+    let refuse = r#"*'"method":"listIdentities"'*) echo "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-1,\"message\":\"the store is busy\"},\"id\":$id}" ;;"#;
+    Config {
+        mode: Mode::Dedicated,
+        account: "+15550000".to_string(),
+        own_uuid: Some("bridge".to_string()),
+        owner: Some(Owner { aci: "owner".to_string(), fingerprint: "fp-owner".to_string() }),
+        binding: None,
+        port,
+        node: "test-node".to_string(),
+        signal_cli: fake_signal_cli_refusing(&dir.0, &log, &dedicated_messages()[1..], refuse),
+        signal_cli_env: vec![],
+        signal_cli_version: "0.14.9".to_string(),
+        vision: false,
+        instance: None,
+        user: None,
+    }
+    .save(&state)
+    .unwrap();
+    ling_signal::state::save_cookie(&state, "mightling_device=test").unwrap();
+    let runtime = dir.0.join("run");
+    let daemon = {
+        let (state, runtime) = (state.clone(), runtime.clone());
+        tokio::spawn(async move { ling_signal::serve::serve(&state, Some(&runtime)).await })
+    };
+    // The owner's message arrives after two seconds; the status is written every five.
+    tokio::time::sleep(Duration::from_millis(7_500)).await;
+    let all = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(all.contains(r#""method":"listIdentities""#), "the owner's identity was asked for:\n{all}");
+    let conversation: Value = std::fs::read_to_string(state.join("conversation.json")).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
+    assert_eq!(conversation["identityRefusals"].as_u64().unwrap_or(0), 0, "no safety number changed: {conversation}");
+    let status = std::fs::read_to_string(runtime.join("status.json")).unwrap();
+    assert!(!status.contains("safety number") && status.contains("the store is busy"), "{status}");
     daemon.abort();
 }

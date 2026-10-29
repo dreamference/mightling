@@ -408,10 +408,11 @@ impl Daemon {
         }
     }
 
-    /// The owner's current identity fingerprint, if signal-cli trusts it.
-    async fn fingerprint(&self, aci: &str) -> Option<String> {
-        let identities = self.signal.call("listIdentities", json!({})).await.ok()?;
-        rpc::trusted_fingerprint(&identities, aci)
+    /// The owner's current identity fingerprint, if signal-cli trusts it; Err when signal-cli
+    /// could not say.
+    async fn fingerprint(&self, aci: &str) -> Result<Option<String>, String> {
+        let identities = self.signal.call("listIdentities", json!({})).await?;
+        Ok(rpc::trusted_fingerprint(&identities, aci))
     }
 
     async fn on_signal(&mut self, params: Value) {
@@ -425,7 +426,19 @@ impl Daemon {
         let sender = envelope.source_uuid.clone().unwrap_or_default();
         // Linked mode needs no identity key (gate.rs, `check_linked`), and asking for one for every
         // message of every conversation on the owner's account would be work done on their mail.
-        let fingerprint = if sender.is_empty() || self.linked() { None } else { self.fingerprint(&sender).await };
+        let fingerprint = if sender.is_empty() || self.linked() {
+            None
+        } else {
+            match self.fingerprint(&sender).await {
+                Ok(fingerprint) => fingerprint,
+                // Not a changed safety number: the message is left, and the journal says why.
+                Err(err) => {
+                    self.note_error(format!("signal-cli could not list the identities, so a message was not read: {err}"));
+                    self.forget(&downloaded);
+                    return;
+                }
+            }
+        };
         let now = now_ms();
         match self.gate.check(&envelope, &self.config.mode, fingerprint.as_deref(), now) {
             Verdict::Accept(message) => {
