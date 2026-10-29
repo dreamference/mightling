@@ -1678,6 +1678,25 @@ def test_a_failed_setup_fails_the_job_and_a_missing_module_is_called_an_environm
     assert "environment failure" in record["note"] and record["environment"].startswith("none")
 
 
+def test_a_setup_cannot_make_the_node_write_through_a_link_it_left(job_node, tmp_path):
+    from dreamference.node import NodeJob
+
+    # The setup runs sandboxed with its environment folder writable; the node writes the folder's
+    # `.complete` marker after it, outside the sandbox. A link left there must not be followed:
+    # with the setup text in the marker, it would write a key line into `authorized_keys`.
+    victim = tmp_path / "authorized_keys"
+    victim.write_text("restricted line\n")
+    setup = f'ln -s {victim} "$MIGHTLING_ENV/.complete"\nssh-ed25519 AAAA attacker || true'
+    job = NodeJob.submit(
+        job_request(commit=job_node["commit"], command=["true"], setup=setup), "/x"
+    )
+    assert NodeJob.execute(job["id"]) == 0
+    assert victim.read_text() == "restricted line\n"
+    (env_dir,) = [path for path in (NodeJob.jobs_dir() / "envs").glob("calc-*") if path.is_dir()]
+    marker = env_dir / ".complete"
+    assert not marker.is_symlink() and marker.read_text() == setup + "\n"
+
+
 def test_out_files_are_kept_beside_the_job_and_never_committed(job_node, capsysbinary):
     import io
     import tarfile
@@ -1712,6 +1731,53 @@ def test_out_files_are_kept_beside_the_job_and_never_committed(job_node, capsysb
     for changes in ({"out": "../x"}, {"out": "/etc"}, {"out": "a b"}):
         with pytest.raises(ValueError, match="--out"):
             NodeJob.validate(job_request(**changes))
+
+
+def test_a_job_cannot_make_the_node_run_its_git_hooks(job_node, tmp_path):
+    from dreamference.node import NodeJob
+
+    # The job's changes are committed by the node, outside the sandbox. A job that replaced the
+    # worktree's `.git` with a repository of its own once had its hooks run there, as the node's
+    # user: an escape from the sandbox.
+    ran = tmp_path / "hook-ran"
+    hook = f"#!/bin/sh\ntouch {ran}\n"
+    script = (
+        "rm .git && git init -q . && "
+        f"for name in pre-commit post-checkout; do printf '{hook}' > .git/hooks/$name; "
+        "chmod +x .git/hooks/$name; done; echo two >> data.txt"
+    )
+    job = NodeJob.submit(
+        job_request(commit=job_node["commit"], command=["bash", "-c", script]), "/x"
+    )
+    assert NodeJob.execute(job["id"]) == 0
+    assert not ran.exists()
+    assert NodeJob.read(job["id"])["branch"] == f"job/{job['id']}"
+    changed = subprocess.run(
+        ["git", "--git-dir", str(job_node["repo"]), "show", "--name-only", "--format=",
+         f"job/{job['id']}"],
+        capture_output=True, text=True,
+    ).stdout.split()
+    assert changed == ["data.txt"]
+
+
+def test_out_cannot_reach_outside_the_worktree_through_a_link(job_node, tmp_path):
+    from dreamference.node import NodeJob
+
+    # `--out x/.ssh` with `x` a link the job left (or committed) to the node user's home: the node
+    # once moved the folder it named out of the home and `job-out` sent it to the client.
+    home = tmp_path / "home-of-the-node"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "id_ed25519").write_text("private\n")
+    job = NodeJob.submit(
+        job_request(
+            commit=job_node["commit"], out="x/.ssh", command=["ln", "-s", str(home), "x"]
+        ),
+        "/x",
+    )
+    assert NodeJob.execute(job["id"]) == 0
+    assert (home / ".ssh" / "id_ed25519").read_text() == "private\n"
+    assert NodeJob.read(job["id"])["out_files"] == 0
+    assert not (NodeJob.job_dir(job["id"]) / "out").exists()
 
 
 def test_out_files_come_back_and_a_hostile_archive_cannot_write_outside(
@@ -2253,7 +2319,8 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
         sys.executable,
         "-c",
         "import sys; from dreamference.node.node_model_sync import NodeModelSync; "
-        f"sys.exit(NodeModelSync.receive({SYNC_KEY!r}, 0))",
+        # the size the sender declared, the last word of `model-receive <key> <size>`
+        f"sys.exit(NodeModelSync.receive({SYNC_KEY!r}, int(sys.argv[1])))",
     ]
     # The receiver checks the real disk; a CI runner has less free than the copy's margin.
     receiver[2] = PLENTY_OF_DISK + receiver[2]
@@ -2266,6 +2333,7 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
                 "env",
                 *[f"{k}={v}" for k, v in environment.items()],
                 *receiver,
+                request.split()[-1],
             ]
         ),
     )
@@ -2300,7 +2368,7 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
 PLENTY_OF_DISK = "import shutil, types; shutil.disk_usage = lambda path: types.SimpleNamespace(total=4 << 40, used=2 << 40, free=2 << 40); "
 
 
-def receive(monkeypatch, hub, members, size=0):
+def receive(monkeypatch, hub, members, size=None):
     import io
     import shutil
     import sys
@@ -2319,9 +2387,13 @@ def receive(monkeypatch, hub, members, size=0):
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         for name, data in members:
             info = tarfile.TarInfo(name)
+            if isinstance(data, str):  # a link to `data`
+                info.type, info.linkname, data = tarfile.SYMTYPE, data, b""
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(buffer.getvalue())))
+    if size is None:  # what the sender declares: the bytes of its plain files
+        size = sum(len(data) for _, data in members if isinstance(data, bytes))
     return NodeModelSync.receive(SYNC_KEY, size)
 
 
@@ -2355,6 +2427,57 @@ def test_the_receiving_node_decides_what_lands_in_its_cache(tmp_path, monkeypatc
 
     assert NodeServe.serve("model-receive not-a-model 10") == 2
     assert NodeServe.serve(f"model-receive {SYNC_KEY} lots") == 2
+
+
+def test_a_copy_cannot_reach_outside_its_model_folder_through_a_link(tmp_path, monkeypatch, capsys):
+    import hashlib
+
+    from dreamference.node import NodeModelSync
+
+    # Each of these once landed in the hub beside the model's folder, where `_merge` kept it: a
+    # client could plant the files of a model the owner had not downloaded yet.
+    folder = "models--" + NodeModelSync.repos(SYNC_KEY)[0].replace("/", "--")
+    hub = tmp_path / "hub"
+    escapes = [
+        [(f"{folder}/l", ".."), (f"{folder}/l/models--evil--m/config.json", b"{}")],
+        [(f"{folder}/snapshots/l", "../.."), (f"{folder}/snapshots/l/stray", b"x")],
+        [(f"{folder}/here", "."), (f"{folder}/here/up", ".."), (f"{folder}/here/up/stray", b"x")],
+        [(f"..{folder}/stray", b"x")],
+        [(f"./{folder}/blobs/x", "/etc/passwd")],
+    ]
+    for members in escapes:
+        assert receive(monkeypatch, hub, members) == 1, members
+        assert list(hub.iterdir()) == [], members
+    assert "not a folder of this model" in capsys.readouterr().err
+    # The cache's own links, from a snapshot to its blob, still arrive.
+    good = b"weights"
+    digest = hashlib.sha256(good).hexdigest()
+    snapshot = f"{folder}/snapshots/{'a' * 40}"
+    members = [
+        (f"{folder}/blobs/{digest}", good),
+        (f"{snapshot}/model.bin", f"../../blobs/{digest}"),
+        (f"{snapshot}/sub/tokenizer.bin", f"../../../blobs/{digest}"),
+    ]
+    assert receive(monkeypatch, hub, members) == 0
+    assert (hub / snapshot / "model.bin").read_bytes() == good
+    assert (hub / snapshot / "sub" / "tokenizer.bin").read_bytes() == good
+
+
+def test_a_copy_cannot_carry_more_than_it_declared(tmp_path, monkeypatch, capsys):
+    import hashlib
+
+    from dreamference.node import NodeModelSync
+
+    # The free-space check is made for the declared size; `model-receive <key> 0` followed by an
+    # endless stream once filled the node's disk.
+    folder = "models--" + NodeModelSync.repos(SYNC_KEY)[0].replace("/", "--")
+    hub = tmp_path / "hub"
+    good = b"weights"
+    members = [(f"{folder}/blobs/{hashlib.sha256(good).hexdigest()}", good)]
+    assert receive(monkeypatch, hub, members, size=len(good) - 1) == 1
+    assert "more than the 6 bytes it declared" in capsys.readouterr().err
+    assert list(hub.iterdir()) == []
+    assert receive(monkeypatch, hub, members, size=len(good)) == 0
 
 
 def test_enable_without_avahi_installs_it_or_publishes_nothing(machine, monkeypatch, capsys):

@@ -560,7 +560,7 @@ def test_a_node_installs_a_signed_adapter_it_receives(tmp_path, keys, monkeypatc
         AdapterVerifier, "served_base", classmethod(lambda cls, h, m: served(base_snapshot()))
     )
     monkeypatch.setattr("sys.stdin", Stdin(adapter_tar(staged_repo(tmp_path, keys))))
-    assert NodeAdapterSync.receive(["rust", ADAPTER_REPO, COMMIT, "100"]) == 0
+    assert NodeAdapterSync.receive(["rust", ADAPTER_REPO, COMMIT, "100000"]) == 0
     assert AdapterStore.get("rust")["trust"] == "dreamference"
 
 
@@ -584,7 +584,7 @@ def test_a_node_serving_another_base_keeps_the_adapter_as_a_base_mismatch(
 
     monkeypatch.setattr(AdapterVerifier, "served_base", classmethod(lambda cls, h, m: None))
     monkeypatch.setattr("sys.stdin", Stdin(adapter_tar(staged_repo(tmp_path, keys))))
-    assert NodeAdapterSync.receive(["rust", ADAPTER_REPO, COMMIT, "100"]) == 0
+    assert NodeAdapterSync.receive(["rust", ADAPTER_REPO, COMMIT, "100000"]) == 0
     assert "base mismatch" in capsys.readouterr().out
 
 
