@@ -221,6 +221,30 @@ describe("local environments", () => {
     expect((await environments(source, "linux")).problems[0]).toMatch(/^\.mightling\/environment\.toml: /);
   });
 
+  // The editor shows this platform's scripts; what it writes back keeps the other platforms' overrides and
+  // the keys it does not show, of the setup and of each action it still has.
+  it("keep the other platforms' scripts when the environment is saved", async () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), "ling-env-keep-"));
+    fs.mkdirSync(path.join(project, ".mightling", "environments"), { recursive: true });
+    fs.writeFileSync(path.join(project, WRITE_FILE), [
+      'name = "Mine"', 'extra = 1', "[setup]", 'script = "uv sync"', 'macos = "brew bundle"',
+      "[[actions]]", 'name = "Serve"', 'icon = "globe"', 'script = "uv run serve"', 'windows = "uv run serve.cmd"',
+      "[[actions]]", 'name = "Tests"', 'script = "pytest"', 'linux = "pytest -x"',
+    ].join("\n"));
+    await writeEnvironment(project, { name: "Mine", setup: "uv sync --frozen", actions: [
+      { name: "Serve", icon: "globe", script: "uv run serve --reload" }, { name: "Tests", icon: "test", script: "pytest -q" }, { name: "Lint", icon: "tool", script: "ruff check" },
+    ] }, "linux");
+    const text = fs.readFileSync(path.join(project, WRITE_FILE), "utf8");
+    const linux = readEnvironment(text, WRITE_FILE, "linux");
+    expect(linux.setup).toBe("uv sync --frozen");
+    expect(linux.actions.map((action) => action.script)).toEqual(["uv run serve --reload", "pytest -q", "ruff check"]);
+    expect(readEnvironment(text, WRITE_FILE, "darwin").setup).toBe("brew bundle");
+    expect(readEnvironment(text, WRITE_FILE, "win32").actions[0].script).toBe("uv run serve.cmd");
+    // The Linux override is what Linux ran, so it is the one replaced; the shared script stays for the others.
+    expect(readEnvironment(text, WRITE_FILE, "darwin").actions[1].script).toBe("pytest");
+    expect(text).toContain("extra = 1");
+  });
+
   // A cloned project chooses what its files are: a link there is not written through to the user's own files.
   it("write the environment into the project, not through a link it holds", async () => {
     const project = fs.mkdtempSync(path.join(os.tmpdir(), "ling-env-link-"));

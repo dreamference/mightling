@@ -110,8 +110,23 @@ export interface EnvironmentEdit {
   actions: { name: string; icon: string; script: string }[];
 }
 
-/** Writes Mightling's environment file, `.mightling/environments/default.toml`; never `.codex/`. */
-export async function writeEnvironment(project: string, edit: unknown): Promise<string> {
+/** `existing` (a script or a table of them) with this platform's script set to `script`: the key it was read from is the one replaced. */
+function withScript(existing: unknown, script: string, platform: NodeJS.Platform): Table {
+  const table: Table = isTable(existing) ? { ...existing } : {};
+  const key = platformKey(platform);
+  const own = table[key];
+  if (typeof own === "string" && own.trim()) table[key] = script;
+  else if (isTable(own) && typeof own.script === "string") table[key] = { ...own, script };
+  else table[["script", "command", "cmd", "run"].find((name) => typeof table[name] === "string") ?? "script"] = script;
+  return table;
+}
+
+/**
+ * Writes Mightling's environment file, `.mightling/environments/default.toml`; never `.codex/`. The edit holds this
+ * platform's scripts: the file's other keys, the other platforms' overrides among them, are kept, of the setup and of
+ * each action still there (matched by name).
+ */
+export async function writeEnvironment(project: string, edit: unknown, platform: NodeJS.Platform = process.platform): Promise<string> {
   if (!isTable(edit)) throw new Error("an environment is an object");
   const name = typeof edit.name === "string" && edit.name.trim() ? edit.name.trim().slice(0, 100) : "Default";
   const setup = typeof edit.setup === "string" ? edit.setup.slice(0, 64 * 1024) : "";
@@ -123,13 +138,34 @@ export async function writeEnvironment(project: string, edit: unknown): Promise<
       script: entry.script.slice(0, 16 * 1024),
     }];
   });
-  const document: Table = { name };
-  if (setup.trim()) document.setup = { script: setup };
-  if (actions.length) document.actions = actions;
   const target = path.join(project, WRITE_FILE);
   // The project's folders may be links: the file goes inside the project, and replaces a link rather than writing through it.
   for (let folder = path.dirname(WRITE_FILE); folder !== "."; folder = path.dirname(folder)) {
     if ((await userFs.lstatOrNull(path.join(project, folder)))?.isSymbolicLink()) throw new Error(`${folder} is a link, not a folder of the project`);
+  }
+  // The file as it is, read only when it is a file of its own (never through a link) and parses.
+  let before: Table = {};
+  if ((await userFs.lstatOrNull(target))?.isFile()) {
+    try {
+      const parsed = parse(await userFs.readText(target));
+      if (isTable(parsed)) before = parsed;
+    } catch (error) {
+      if (error instanceof userFs.UserFsTimeout) throw error;
+    }
+  }
+  const document: Table = { ...before, name };
+  delete document.setup_script;
+  delete document.setupScript;
+  delete document.setup;
+  delete document.actions;
+  if (setup.trim()) document.setup = withScript(before.setup ?? before.setup_script ?? before.setupScript, setup, platform);
+  const unused = (Array.isArray(before.actions) ? before.actions : []).filter(isTable);
+  if (actions.length) {
+    document.actions = actions.map((action) => {
+      const at = unused.findIndex((entry) => entry.name === action.name);
+      const old = at >= 0 ? unused.splice(at, 1)[0] : {};
+      return { ...withScript(old, action.script, platform), name: action.name, icon: action.icon };
+    });
   }
   await userFs.mkdir(path.dirname(target));
   const header = "# Mightling's local environment for this project (setup when a worktree is made; actions in the\n# app's top bar). Read by the Mightling desktop app; .codex/ environments are read too.\n";
