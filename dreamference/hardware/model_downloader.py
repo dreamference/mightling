@@ -101,6 +101,15 @@ class ModelDownloader:
         return cls.TENSORIZER_CACHE_HOME
 
     @classmethod
+    def get_dgx_cache_dir(cls) -> Path:
+        """Gets the Dreamference cache directory, the one the tensorizer cache sits in.
+
+        Returns:
+            Path: The directory a serialization container mounts at /root/.cache/dreamference.
+        """
+        return cls.TENSORIZER_CACHE_HOME.parent
+
+    @classmethod
     def get_model_snapshot_dir(cls, model_key: str) -> Optional[Path]:
         """
         Gets the local HuggingFace snapshot directory for the given model key.
@@ -243,7 +252,6 @@ class ModelDownloader:
         # Attempt 1: Try containerized vllm-tensorizer if Docker is available
         if shutil.which("docker"):
             try:
-                dgx_cache = os.path.expanduser("~/.cache/dreamference")
                 hf_base = cls.get_hf_cache_dir()
                 dgx_base = cls.get_dgx_cache_dir()
                 
@@ -295,7 +303,7 @@ class ModelDownloader:
                         f"--memory-swap={container_mem_gb:.0f}g",
                         f"--oom-score-adj={CONTAINER_OOM_SCORE_ADJ}",
                         *cls.container_volume_args(),
-                        "-v", f"{dgx_cache}:/root/.cache/dreamference",
+                        "-v", f"{dgx_base}:/root/.cache/dreamference",
                         "--entrypoint", "python3",
                         DEFAULT_VLLM_IMAGE,
                         "-c",
