@@ -275,8 +275,6 @@ QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
     "container_headroom_gb": 24.0,
     "tool_call_parser": "qwen3_coder",
     "reasoning_parser": "qwen3",
-    # Files a particular engine reads beside the checkpoint and the drafter (get_engine_assets).
-    "engine_assets": [QWEN38_SPARSE_HEAD_ASSET],
     "speculative_config": {
         "method": "DFLASH",
         "model": QWEN38_DRAFTER_REPO,
@@ -500,6 +498,9 @@ QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
     "docker_image": QWEN38_LING_IMAGE,
     "engine_commit": QWEN38_LING_ENGINE_COMMIT,
     "engine_features": list(QWEN38_LING_ENGINE_FEATURES),
+    # Files a particular engine reads beside the checkpoint and the drafter (get_engine_assets):
+    # the sparse head, from an engine whose engine_features names "sparse-head".
+    "engine_assets": [QWEN38_SPARSE_HEAD_ASSET],
     "revision": QWEN38_SGLANG_RECIPE["revision"],
     # ling-serve's --max-context: the KV and state of each resident session are allocated at this
     # size at start. SGLang's 262,144, by the owner's decision of 2026-10-26; the nights served
