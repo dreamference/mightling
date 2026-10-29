@@ -96,3 +96,49 @@ def test_the_switch_brings_it_all_back(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exit_info:
         DreamferenceCLIController.run_cli(["diffusion-model"])
     assert exit_info.value.code == 1 and "usage: ling-admin diffusion-model" in capsys.readouterr().out
+
+
+def test_endpoints_name_the_diffusion_url_only_when_switched_on(monkeypatch, capsys):
+    import socket
+
+    def no_network(*_a, **_k):
+        raise OSError("no network in tests")
+
+    monkeypatch.setattr(socket, "socket", no_network)  # the LAN-IP probe falls back to localhost
+    DreamferenceCLIController.run_cli(["endpoints"])
+    out = capsys.readouterr().out
+    assert "localhost:8000/v1" in out and "8001" not in out and "diffusion" not in out.lower()
+    monkeypatch.setattr(model_matrix_registry, "DIFFUSION_ENABLED", True)
+    DreamferenceCLIController.run_cli(["endpoints"])
+    assert "localhost:8001/v1" in capsys.readouterr().out
+
+
+def test_with_the_switch_on_the_sidecar_starts_before_the_main_model(monkeypatch):
+    # FAST_TOOLS §6: the main model's pre-flight reads free memory, so the sidecar must already be
+    # resident when it runs.
+    from dreamference.cli import dreamference_cli_controller as controller
+    calls = []
+
+    class Monitor:
+        server_ready = False
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    def main_model(self, **_):
+        calls.append("main")
+        raise SystemExit(1)
+
+    monkeypatch.setattr(model_matrix_registry, "DIFFUSION_ENABLED", True)
+    monkeypatch.setattr(controller, "create_model_loading_monitor", lambda *a, **k: Monitor())
+    monkeypatch.setattr(VLLMServerManager, "start_server", main_model)
+    monkeypatch.setattr(DiffusionServerManager, "remove_leftover",
+                        classmethod(lambda cls, port=8001: calls.append("leftover")))
+    monkeypatch.setattr(DiffusionServerManager, "start_server",
+                        lambda self, **k: calls.append(("diffusion", k["port"])) or True)
+    with pytest.raises(SystemExit):
+        DreamferenceCLIController.run_cli(["server", "start"])
+    assert calls == [("diffusion", 8001), "main"]
