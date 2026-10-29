@@ -475,7 +475,13 @@ fn declared(dir: &Path) -> Vec<(String, String)> {
         .filter_map(|entry| {
             let (key, value) = entry.split_once('\n')?;
             let name = key.strip_prefix("submodule.")?.strip_suffix(".path")?;
-            Some((name.to_string(), value.trim_end_matches('/').to_string()))
+            let value = value.trim_end_matches('/');
+            // The file is the repository's own text: a path must stay inside it.
+            let inside = !value.is_empty()
+                && Path::new(value)
+                    .components()
+                    .all(|c| matches!(c, std::path::Component::Normal(_)));
+            inside.then(|| (name.to_string(), value.to_string()))
         })
         .collect()
 }
@@ -486,12 +492,17 @@ fn declared(dir: &Path) -> Vec<(String, String)> {
 /// superproject's `modules/`).
 fn list(root: &Path) -> Vec<(String, String, PathBuf, bool)> {
     let mut out = Vec::new();
+    let real_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut pending: Vec<(PathBuf, String)> = vec![(root.to_path_buf(), String::new())];
     while let Some((dir, prefix)) = pending.pop() {
         for (name, rel) in declared(&dir) {
             let path = format!("{prefix}{rel}");
             let checkout = root.join(&path);
-            let checked_out = checkout.join(".git").exists();
+            // A link the repository ships may point anywhere; a checkout lies inside the root.
+            let checked_out = checkout.join(".git").exists()
+                && checkout
+                    .canonicalize()
+                    .is_ok_and(|real| real.starts_with(&real_root));
             if checked_out {
                 pending.push((checkout, format!("{path}/")));
             }
