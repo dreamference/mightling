@@ -1562,6 +1562,9 @@ class VLLMServerManager:
                     f"after a speculative-depth change, remove {VLLM_CACHE_HOME}/torch_compile_cache "
                     f"by hand."
                 )
+                # The old signature stays, so the next launch sees the mismatch and tries again;
+                # recording the new one would mark the stale graph as current for good.
+                return False
 
         try:
             VLLM_CACHE_HOME.mkdir(parents=True, exist_ok=True)
