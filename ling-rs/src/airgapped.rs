@@ -857,7 +857,8 @@ pub fn full_access_refusal<T: std::fmt::Display>(thread_id: Option<T>, preset: &
     (resolve(thread_id.as_deref()).level == Level::On).then(|| FULL_ACCESS_DISABLED.to_string())
 }
 
-/// [`command`] inside a TUI session, which knows whether it runs in Full Access (`full_access`).
+/// [`command`] inside a TUI session, which knows whether it runs with no sandbox (`full_access`):
+/// Full Access, or a profile of its own that has none.
 /// There `/airgapped on` is refused, not claimed: the sandbox is what enforces it, and Full Access
 /// has none.
 pub fn session_command<T: std::fmt::Display>(thread_id: Option<T>, args: &str, full_access: bool) -> Vec<String> {
@@ -872,11 +873,11 @@ pub fn session_command<T: std::fmt::Display>(thread_id: Option<T>, args: &str, f
         _ => None,
     };
     if wanted == Some(Level::On) {
-        return full_access_lines("Airgapped not changed: this session runs in Full Access.");
+        return full_access_lines("Airgapped not changed: this session runs with no sandbox, like Full Access.");
     }
     let mut lines = command(thread_id.as_deref(), args);
     if words.is_empty() && resolve(thread_id.as_deref()).level == Level::On {
-        lines.extend(full_access_lines("NOT ENFORCED in this session: it runs in Full Access."));
+        lines.extend(full_access_lines("NOT ENFORCED in this session: it runs with no sandbox, like Full Access."));
     }
     lines
 }
@@ -1247,7 +1248,7 @@ mod tests {
         // In Full Access, `on` is refused for the session and as the default, with the reason.
         for args in ["on", "ON", "default on"] {
             let lines = session_command(None::<String>, args, true);
-            assert!(lines[0].starts_with("Airgapped not changed: this session runs in Full Access."), "{args}");
+            assert!(lines[0].starts_with("Airgapped not changed: this session runs with no sandbox, like Full Access."), "{args}");
             assert!(lines[0].contains("incompatible") && lines[1].contains("/permissions"), "{args}");
         }
         // Everything else is the ordinary command.

@@ -1,0 +1,19 @@
+diff --git a/codex-rs/linux-sandbox/src/linux_run_main_tests.rs b/codex-rs/linux-sandbox/src/linux_run_main_tests.rs
+--- a/codex-rs/linux-sandbox/src/linux_run_main_tests.rs
++++ b/codex-rs/linux-sandbox/src/linux_run_main_tests.rs
+@@ -774,2 +774,15 @@ fn valid_inner_stage_modes_do_not_panic() {
+     );
+ }
++
++#[test]
++fn airgapped_full_write_disk_keeps_bwrap_so_the_host_sockets_stay_denied() {
++    let socket = std::env::temp_dir().join("docker.sock");
++    let mut sealed = FileSystemSandboxPolicy::unrestricted();
++    seal_file_system(&mut sealed, /*on*/ true, vec![socket]);
++    assert!(!sealed.has_full_disk_write_access());
++    assert!(sealed.entries.iter().any(|entry| entry.access == codex_protocol::permissions::FileSystemAccessMode::Deny));
++
++    let mut open = FileSystemSandboxPolicy::unrestricted();
++    seal_file_system(&mut open, /*on*/ false, Vec::new());
++    assert_eq!(open, FileSystemSandboxPolicy::unrestricted());
++}

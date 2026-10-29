@@ -439,14 +439,17 @@ class CodexBrandedBuilder:
             copy_function=shutil.copy,
         )
 
+        # Inside another repository, `git apply` reads the paths from that repository's top and
+        # silently skips every hunk outside `source_dir`; the ceiling keeps it out of any repository.
+        env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(Path(source_dir).absolute().parent.resolve())}
         for patch in cls.patches():
             # Checked first so a patch that does not fit leaves nothing half-applied behind it.
-            check = subprocess.run(["git", "apply", "--check", patch], cwd=source_dir, check=False)
+            check = subprocess.run(["git", "apply", "--check", patch], cwd=source_dir, env=env, check=False)
             if check.returncode != 0:
                 print(f"❌ {os.path.basename(patch)} does not apply to codex {commit[:12]}.")
                 print(f"💡 The patches are written against {CODEX_RELEASE_TAG}; refresh them after a submodule bump.")
                 return False
-            subprocess.run(["git", "apply", patch], cwd=source_dir, check=True)
+            subprocess.run(["git", "apply", patch], cwd=source_dir, env=env, check=True)
         return cls.stamp_version(os.path.join(source_dir, "codex-rs", "Cargo.toml"), cls.mightling_version())
 
     @classmethod
