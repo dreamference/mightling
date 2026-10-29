@@ -173,3 +173,18 @@ def test_a_default_host_and_agent_are_not_fossilised_into_the_config(tmp_path):
     config.save_config()
     assert ConfigFileStorageManager.load_config_dict(cfg_file) == {
         "vllm_host": "http://spark-2.local:8000", "agent_runner": "cline"}
+
+
+def test_a_valid_toml_file_the_old_reader_refused_still_turns_the_air_gap_on(tmp_path, monkeypatch):
+    # Valid TOML that the `toml` package refused (a mixed-type array), misread (an escaped
+    # quoted key) or missed (a byte order mark): each read as `off`, the Rust resolver as `on`.
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    for text in (
+        'x = [1, "a"]\nmightling_airgapped = "on"\n',
+        '"\\u006dightling_airgapped" = "on"\n',
+        '﻿mightling_airgapped = "on"\n',
+    ):
+        path = tmp_path / "dreamference.toml"
+        path.write_text(text, encoding="utf-8")
+        monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(path))
+        assert DreamferenceConfig.resolve_airgapped_level() == "on", text

@@ -6,6 +6,7 @@ Dreamference configuration dictionaries to YAML or JSON formats.
 """
 
 import json
+import tomllib
 from pathlib import Path
 from typing import Dict, Any
 
@@ -38,10 +39,19 @@ class ConfigFileStorageManager:
         if not path.exists():
             return {}
         try:
+            if path.suffix == ".toml":
+                # tomllib reads every valid TOML file, as the Rust readers do; the older `toml`
+                # package refuses some (a mixed-type array anywhere) and misreads others (an
+                # escaped quoted key), so it is only the fallback for text tomllib refuses.
+                text = path.read_text(encoding="utf-8-sig")
+                try:
+                    return tomllib.loads(text)
+                except tomllib.TOMLDecodeError:
+                    if toml is None:
+                        raise
+                    return toml.loads(text)
             with open(path, "r", encoding="utf-8") as f:
-                if toml and path.suffix == ".toml":
-                    return toml.load(f)
-                elif yaml and path.suffix in (".yaml", ".yml"):
+                if yaml and path.suffix in (".yaml", ".yml"):
                     return yaml.safe_load(f) or {}
                 else:
                     return json.load(f) or {}
