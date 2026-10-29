@@ -89,7 +89,7 @@ function standIn(home: string, askRoot: string): string {
   const ling = path.join(home, "ling");
   fs.writeFileSync(ling, `#!/usr/bin/env node
 const threads = ${JSON.stringify(threads(home, askRoot))};
-if (process.argv[2] === "airgapped") { console.log("Airgapped: off (default)"); process.exit(0); }
+if (process.argv[2] === "airgapped") { console.log('{"level":"off","tier":"default","source":"default","invalid":[]}'); process.exit(0); }
 if (process.argv[2] === "prompt") { process.stdout.write("THE ASK PROMPT"); process.exit(0); }
 const say = (message) => console.log(JSON.stringify(message));
 const usage = { totalTokens: 41210, inputTokens: 39000, cachedInputTokens: 30000, cacheWriteInputTokens: 0, outputTokens: 2210, reasoningOutputTokens: 800 };

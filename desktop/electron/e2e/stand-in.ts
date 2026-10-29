@@ -90,7 +90,7 @@ export function writeStandIn(home: string, askRoot: string): string {
 const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(path.join(home, "runs.jsonl"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
 // Airgapped on while the test has left a file saying so (links.e2e.ts).
-if (process.argv[2] === "airgapped") { console.log("Airgapped: " + (fs.existsSync(${JSON.stringify(path.join(home, "airgapped-on"))}) ? "on" : "off") + " (default)"); process.exit(0); }
+if (process.argv[2] === "airgapped") { console.log('{"level":"' + (fs.existsSync(${JSON.stringify(path.join(home, "airgapped-on"))}) ? "on" : "off") + '","tier":"default","source":"default","invalid":[]}'); process.exit(0); }
 if (process.argv[2] === "prompt") { process.stdout.write("THE ASK PROMPT"); process.exit(0); }
 if (process.argv[2] === "docs") {
   // ling docs add|remove|reindex|status --json, over a file of collections (a project's knowledge, DESKTOP_PARITY_CLAUDE §4.7).
