@@ -384,3 +384,20 @@ def test_data_set_aside_today_is_kept_although_the_folder_itself_is_old():
     os.utime(aside, (months_ago, months_ago))
     assert ForgeMove.prune_old_data() == []
     assert aside.is_dir()
+
+
+@pytest.mark.parametrize("stops, starts", [(False, True), (True, False)])
+def test_a_record_that_does_not_become_a_mirror_answers_one(stops, starts, monkeypatch):
+    ForgeSettings.update_state(role=ROLE_RECORD)
+    ForgeMove.freeze(True)
+    ForgeSettings.data_dir().mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        ForgeService,
+        "systemctl",
+        classmethod(lambda cls, *a: subprocess.CompletedProcess(a, 0 if stops else 1, "", "")),
+    )
+    monkeypatch.setattr(ForgeService, "setup", classmethod(lambda cls, show_password=True: starts))
+    assert ForgeMove.serve_become_mirror("node-b-1a2b", "node-b") == 1
+    if not stops:
+        assert ForgeSettings.data_dir().is_dir(), "a running forge's data was moved aside"
+        assert ForgeSettings.role() == ROLE_RECORD

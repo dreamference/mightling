@@ -36,6 +36,8 @@ NODE_ID_SEPARATOR: Final[str] = "-"
 # What `forge move` accepts for "this node" on a mirror that pulls the role over.
 HERE_NAMES: Final[tuple[str, ...]] = ("here",)
 HAND_OVER_TIMEOUT_S: Final[int] = 7200
+# `systemctl stop`'s status for a unit that is not loaded: nothing of it runs.
+UNIT_NOT_LOADED: Final[int] = 5
 # Besides letters and digits, what a node id or host name may hold.
 NAME_PUNCTUATION: Final[str] = "-."
 
@@ -143,16 +145,23 @@ class ForgeMove:
         return 0 if result["ok"] else 1
 
     @classmethod
-    def become_mirror(cls, record_node: str, record_name: str) -> None:
+    def become_mirror(cls, record_node: str, record_name: str) -> bool:
         """Do this node's half of the flip: move data and secrets aside, start a fresh mirror.
 
         Args:
             record_node: The new record's node id.
             record_name: Its name.
+
+        Returns:
+            bool: True when the fresh mirror is set up. A forge that does not stop keeps its data
+            and its role.
         """
         from dreamference.forge.forge_service import ForgeService
 
-        ForgeService.systemctl("stop", UNIT)
+        stopped = ForgeService.systemctl("stop", UNIT)
+        if stopped.returncode not in (0, UNIT_NOT_LOADED):
+            print(f"❌ The forge here did not stop, so it keeps its data: {stopped.stderr.strip()}")
+            return False
         stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
         data = ForgeSettings.data_dir()
         if data.exists():
@@ -168,7 +177,7 @@ class ForgeMove:
             previous_data=str(data.with_name(f"data.record-{stamp}")),
             mirrors_synced_at=None,
         )
-        ForgeService.setup(show_password=False)
+        return ForgeService.setup(show_password=False)
 
     @classmethod
     def move(cls, name: str | None, back: bool = False) -> int:
@@ -181,7 +190,6 @@ class ForgeMove:
         Returns:
             int: 0 when the target is the record with every ref, 1 otherwise.
         """
-        from dreamference.forge.forge_mirrors import ForgeMirrors
         from dreamference.forge.forge_service import ForgeService
 
         if ForgeSettings.role() == ROLE_MIRROR and (
@@ -210,10 +218,27 @@ class ForgeMove:
                 f"❌ The move stopped: {answer.get('error')}. This node is still the forge of record, unfrozen."
             )
             return 1
-        cls.become_mirror(target["node"], target_name)
+        return cls.follow(target["node"], target_name)
+
+    @classmethod
+    def follow(cls, record_node: str, record_name: str) -> int:
+        """The end of a move from here: this node becomes the new record's mirror.
+
+        Args:
+            record_node: The new record's node id.
+            record_name: Its name.
+
+        Returns:
+            int: 0 when this node is the new record's mirror, 1 otherwise.
+        """
+        from dreamference.forge.forge_mirrors import ForgeMirrors
+
+        if not cls.become_mirror(record_node, record_name):
+            print(f"❌ {record_name} is the forge of record, but this node is not its mirror yet.")
+            return 1
         ForgeMirrors.sync()
         print(
-            f"✅ {target_name} is the forge of record; this node is a mirror of it. Its old data is kept beside "
+            f"✅ {record_name} is the forge of record; this node is a mirror of it. Its old data is kept beside "
             "the new (30 days for `forge move --back`)."
         )
         return 0
@@ -440,8 +465,7 @@ class ForgeMove:
         if ForgeSettings.role() != ROLE_RECORD or not cls.frozen_flag().exists():
             sys.stderr.write("refused: this node is not a frozen forge of record\n")
             return 2
-        cls.become_mirror(node_id, name)
-        return 0
+        return 0 if cls.become_mirror(node_id, name) else 1
 
     @classmethod
     def promote(cls, name: str | None) -> int:
