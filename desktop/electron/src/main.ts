@@ -800,12 +800,16 @@ export async function main(options: MainOptions): Promise<void> {
         return appWindows.get(own.webContents.id)?.target ?? { cwd: null, thread: null };
       case "work/airgapped": {
         const ling = findLing(resourcesPath());
+        // The page asks after `/airgapped` and on a thread's change: open preview tabs read the level again too.
+        void previews.recheck().catch(() => {});
         return ling ? airgapped(ling, message.thread) : { level: "off", source: "ling is not installed" };
       }
       case "work/airgapped-default": {
         const ling = findLing(resourcesPath());
         if (!ling) throw new Error("ling is not installed");
-        return setDefault(ling, message.level);
+        const lines = await setDefault(ling, message.level);
+        await previews.recheck().catch(() => {});
+        return lines;
       }
       case "context-menu":
         showContextMenu(own, message);
