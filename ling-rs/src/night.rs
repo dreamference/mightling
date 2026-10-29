@@ -274,7 +274,7 @@ pub fn run_cli(args: &[String]) -> i32 {
     }
     let failed = matches!(request, Request::Usage(_));
     for line in run(&dir, request, &cwd) {
-        println!("{}", printable(&line));
+        println!("{line}");
     }
     i32::from(failed) * 2
 }
@@ -306,8 +306,14 @@ fn runner_present() -> bool {
         || ling_node_locator::home_dir().is_some_and(|home| home.join(".local/bin/ling-admin").exists())
 }
 
-/// Does what `request` asks, in queue directory `dir`, for the repository containing `cwd`.
+/// Does what `request` asks, in queue directory `dir`, for the repository containing `cwd`. Every
+/// line is `printable`: the shell form prints it, and the TUI's history writes a line's text to the
+/// terminal as it is.
 pub fn run(dir: &Path, request: Request, cwd: &Path) -> Vec<String> {
+    lines(dir, request, cwd).iter().map(|line| printable(line)).collect()
+}
+
+fn lines(dir: &Path, request: Request, cwd: &Path) -> Vec<String> {
     let repo = match repo_root(cwd) {
         Some(repo) => repo,
         None if matches!(request, Request::Usage(_)) => PathBuf::new(),
@@ -802,6 +808,23 @@ mod tests {
     fn a_printed_line_keeps_no_terminal_escape() {
         let line = "done\u{1b}]52;c;aGk=\u{7} \u{1b}[8mhidden\u{9b}2J\r\tend";
         assert_eq!(printable(line), "done]52;c;aGk= [8mhidden2J\tend");
+    }
+
+    #[test]
+    fn the_tui_command_shows_a_task_without_its_terminal_escapes() {
+        // `/night show` in the TUI goes through `run` as the shell form does: the agent's last
+        // message in the task's result must not reach the terminal as an OSC 52.
+        let (repo, dir) = repo("escape");
+        let added = run(&dir, Request::from_line("add Rename a function"), &repo);
+        assert!(added[0].starts_with("Queued "), "{added:?}");
+        let mut task = tasks_for(&dir, &repo).remove(0);
+        let id = text(&task, "id");
+        task["result"] = json!({"last_message": "done\u{1b}]52;c;aGk=\u{7}"});
+        let path = dir.join("tasks").join(format!("{id}.json"));
+        std::fs::write(&path, task.to_string()).unwrap_or_default();
+        let shown = run(&dir, Request::Show(id), &repo);
+        assert!(shown.iter().any(|line| line == "  last_message: done]52;c;aGk="), "{shown:?}");
+        assert!(!shown.iter().any(|line| line.chars().any(|c| c.is_control() && c != '\t')));
     }
 
     fn scratch(name: &str) -> PathBuf {
