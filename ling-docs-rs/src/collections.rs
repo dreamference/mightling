@@ -93,18 +93,27 @@ impl DocsToml {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let staging = path.with_extension("toml.new");
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&staging)?;
-        file.write_all(HEADER.as_bytes())?;
-        file.write_all(toml::to_string_pretty(self)?.as_bytes())?;
-        file.sync_all()?;
-        std::fs::rename(&staging, path)?;
-        Ok(())
+        // A staging file of this save's own: two writers (`ling docs add` beside the session) never
+        // share one, and one left behind with another mode is not reused.
+        static SAVES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = SAVES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let staging = path.with_extension(format!("toml.{}-{n}.new", std::process::id()));
+        let written = (|| -> Result<()> {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&staging)?;
+            file.write_all(HEADER.as_bytes())?;
+            file.write_all(toml::to_string_pretty(self)?.as_bytes())?;
+            file.sync_all()?;
+            std::fs::rename(&staging, path)?;
+            Ok(())
+        })();
+        if written.is_err() {
+            let _ = std::fs::remove_file(&staging);
+        }
+        written
     }
 
     pub fn save(&self) -> Result<()> {
@@ -500,6 +509,27 @@ mod tests {
         assert!(docs
             .add(&home.join("notes"), Some("Bad Name"), &home)
             .is_err());
+    }
+
+    #[test]
+    fn a_save_writes_its_own_staging_file_mode_600() {
+        // Another writer's staging file, left behind or half written, mode 644: not reused.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("docs.toml");
+        let stale = dir.path().join("docs.toml.new");
+        std::fs::write(&stale, "half written").unwrap();
+        std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let mut docs = DocsToml::default();
+        docs.collections
+            .push(Collection::new("notes", dir.path().join("notes")));
+        docs.save_to(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(DocsToml::load_from(&path).unwrap().collections.len(), 1);
+        assert_eq!(std::fs::read_to_string(&stale).unwrap(), "half written");
+        let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().collect();
+        assert_eq!(left.len(), 2, "no staging file of its own is left");
     }
 
     #[test]
