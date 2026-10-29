@@ -209,7 +209,15 @@ class ForgeSettings:
         if not written:
             out += ([""] if out else []) + ["[forge]", f"enabled = {value}"]
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(out) + "\n")
+        # The node's whole config: written beside it and swapped in, never truncated in place.
+        staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        with staging.open("w") as handle:
+            handle.write("\n".join(out) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.exists():
+            staging.chmod(path.stat().st_mode & 0o777)
+        staging.replace(path)
 
     @classmethod
     def state_path(cls) -> Path:
