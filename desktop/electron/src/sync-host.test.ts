@@ -55,6 +55,8 @@ class Hub {
   private commands: unknown[] = [];
   private held: http.ServerResponse[] = [];
   failures = 0;
+  /** Posts that carry events go unanswered (a hub gone quiet). */
+  stall = false;
   base = "";
   private readonly server = http.createServer((request, response) => {
     let body = "";
@@ -69,6 +71,7 @@ class Hub {
         return;
       }
       const wait = Number(url.searchParams.get("wait") ?? "0");
+      if (this.stall && (this.posts[this.posts.length - 1].body.events ?? []).length > 0) return void this.held.push(response);
       if (this.commands.length > 0 || wait === 0) return this.answer(response);
       this.held.push(response);
       setTimeout(() => {
@@ -533,6 +536,23 @@ describe("the sync host", () => {
     expect(gaps[3]).toBeGreaterThanOrEqual(145);
     expect(gaps[3]).toBeLessThan(400);
     expect(r.host.currentBackoff).toBe(0);
+  });
+
+  it("forgets with the server what a post in flight carried: a new server's host does not send it", async () => {
+    const r = await rig("stop-in-flight");
+    r.host.start();
+    await until(() => offered(r.hub));
+    r.hub.stall = true;
+    r.emit({ method: "turn/started", params: { threadId: "t-1", turn: { id: "turn-old" } } });
+    const sent = () => r.hub.events.filter((event) => JSON.stringify(event).includes("turn-old")).length;
+    await until(() => sent() === 1);
+    r.host.stop();
+    r.hub.stall = false;
+    await pause(100);
+    r.host.start();
+    await until(() => r.hub.posts.filter((post) => (post.body.models ?? []).length > 0).length >= 2);
+    await pause(300);
+    expect(sent()).toBe(1);
   });
 
   it("stops with the server: nothing more is posted", async () => {
