@@ -63,11 +63,23 @@ pub fn request_or_run(repo: &Repo, settings: &Settings, exact: bool, wait: bool)
         }
         return Ok(());
     }
-    let pid = spawn_supervisor(repo, &plan)?;
+    let Some(pid) = spawn_supervisor_unless_running(repo, &plan)? else {
+        println!("{ANOTHER_SUPERVISOR}");
+        return Ok(());
+    };
     println!(
         "indexing in the background (supervisor pid {pid}); `ling-code status` reports progress"
     );
     Ok(())
+}
+
+/// [`spawn_supervisor`], unless another supervisor holds the lock (its child would stand down at
+/// once, after the caller had said indexing started); None then.
+fn spawn_supervisor_unless_running(repo: &Repo, plan: &plan::Plan) -> Result<Option<u32>> {
+    if claim_supervisor(&plan.state_dir)?.is_none() {
+        return Ok(None);
+    }
+    spawn_supervisor(repo, plan).map(Some)
 }
 
 /// Writes the plan and starts `ling-code supervise <plan>` detached: its own session, stdio to a
@@ -273,6 +285,28 @@ mod tests {
         assert!(claim_supervisor(dir.path()).unwrap().is_none());
         drop(first);
         assert!(claim_supervisor(dir.path()).unwrap().is_some());
+    }
+
+    /// `ling-code index` must not report a background run that would stand down at once.
+    #[test]
+    fn no_supervisor_is_spawned_while_another_holds_the_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo {
+            root: dir.path().to_path_buf(),
+            main_root: dir.path().to_path_buf(),
+            is_git: false,
+        };
+        let plan = plan::Plan {
+            repo_root: repo.root.clone(),
+            main_root: repo.root.clone(),
+            state_dir: repo.state_dir(),
+            vllm_host: "http://127.0.0.1:9".into(),
+            wait_idle_s: 0,
+            runs: Vec::new(),
+        };
+        let _held = claim_supervisor(&plan.state_dir).unwrap().unwrap();
+        assert_eq!(spawn_supervisor_unless_running(&repo, &plan).unwrap(), None);
+        assert!(!repo.state_dir().join("plans").exists(), "no plan written");
     }
 
     #[test]
