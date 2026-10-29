@@ -171,6 +171,20 @@ def test_a_change_is_committed_on_its_branch_and_the_checkout_is_untouched(setup
     assert record["session"]
 
 
+def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
+    # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
+    # writable unless the config names `writable_roots`: a hostile task could plant a skill there
+    # that every later session of the user's is told about. Every `exec` names no extra root.
+    run_task(setup, monkeypatch, "stall_then_act")
+    execs = [call for call in calls(setup) if call[0] == "exec"]
+    assert len(execs) >= 2
+    for call in execs:
+        pairs = [call[index + 1] for index, arg in enumerate(call[:-1]) if arg == "-c"]
+        assert "sandbox_workspace_write.writable_roots=[]" in pairs, call
+        tail = call.index("resume") if "resume" in call else len(call) - 1
+        assert call.index("sandbox_workspace_write.writable_roots=[]") < tail
+
+
 def test_night_prompt_names_the_system_prompt_of_every_session_of_the_task(setup, monkeypatch):
     # `[night] prompt` (prompt spec §7): set, every `ling exec` of the task starts under it;
     # unset, the runner adds nothing and the configured prompt applies.

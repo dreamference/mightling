@@ -419,6 +419,9 @@ class NightShiftTaskRun:
             # The task's share of the KV pool. On the command line it beats the launcher's own limit,
             # which is sized for one interactive session, not for several tasks sharing the pool.
             command += ["-c", f"model_auto_compact_token_limit={self.context_budget}"]
+        # The worktree only: the launcher's default extra root, `$CODEX_HOME/skills`, is the user's
+        # own on a local task, and a skill planted there is read by every later session.
+        command += ["-c", "sandbox_workspace_write.writable_roots=[]"]
         command += ["resume", self.session, prompt] if resume and self.session else [prompt]
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         offset = self.log_path.stat().st_size if self.log_path.exists() else 0
