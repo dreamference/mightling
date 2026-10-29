@@ -110,6 +110,10 @@ impl WorkspaceSandbox {
 #[derive(Clone, Debug)]
 pub struct Policy {
     pub allowed_requests: BTreeSet<String>,
+    /// The requests a phone bridge (`ling chat`, a Signal bridge device) may send: opening, reading
+    /// and naming threads and their turns. Everything else on `allowed_requests` (a command, a
+    /// config write, a file, a plugin) is the owner's own window's.
+    pub bridge_allowed_requests: BTreeSet<String>,
     pub allowed_notifications: BTreeSet<String>,
     pub thread_openers: BTreeSet<String>,
     pub dropped_thread_fields: Vec<String>,
@@ -173,6 +177,7 @@ impl Policy {
         let value: Value = serde_json::from_str(text).map_err(|err| format!("policy.json: {err}"))?;
         let policy = Policy {
             allowed_requests: strings(&value, "allowedRequests")?.into_iter().collect(),
+            bridge_allowed_requests: strings(&value, "bridgeAllowedRequests")?.into_iter().collect(),
             allowed_notifications: strings(&value, "allowedNotifications")?.into_iter().collect(),
             thread_openers: strings(&value, "threadOpeners")?.into_iter().collect(),
             dropped_thread_fields: strings(&value, "droppedThreadFields")?,
@@ -252,6 +257,9 @@ impl Policy {
         if !policy.repo_prompts.is_disjoint(&policy.scratch_prompts) {
             return Err("policy.json: a repo prompt cannot also be a scratch prompt".to_string());
         }
+        if !policy.bridge_allowed_requests.is_subset(&policy.allowed_requests) {
+            return Err("policy.json: every request a phone bridge may send must be allowed".to_string());
+        }
         if !policy.airgapped_refused_requests.is_subset(&policy.allowed_requests) {
             return Err("policy.json: every request refused at airgapped on must be allowed at off".to_string());
         }
@@ -296,6 +304,9 @@ impl Policy {
             (Some(method), Some(_)) => {
                 if !self.allowed_requests.contains(&method) {
                     return Err(format!("the Mightling UI does not send {method}"));
+                }
+                if prompts.is_bridge() && !self.bridge_allowed_requests.contains(&method) {
+                    return Err(format!("a phone bridge does not send {method}"));
                 }
                 if self.airgapped_refused_requests.contains(&method) && prompts.airgapped_on(airgap_thread(&object)) {
                     return Err(self.airgapped_refusal_reasons.get(&method).cloned().unwrap_or_else(|| {
