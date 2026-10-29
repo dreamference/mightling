@@ -677,6 +677,14 @@ fn read_command(argv: &[&str]) -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
+    // Read while the child runs: one that fills the pipe waits for a reader, not for its exit.
+    let mut stdout = child.stdout.take()?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut output = String::new();
+        let read = std::io::Read::read_to_string(&mut stdout, &mut output);
+        let _ = sender.send(read.ok().map(|_| output));
+    });
     let deadline = Instant::now() + WIFI_READ_TIMEOUT;
     let status = loop {
         match child.try_wait() {
@@ -689,8 +697,10 @@ fn read_command(argv: &[&str]) -> Option<String> {
             }
         }
     };
-    let mut output = String::new();
-    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut output).ok()?;
+    // A child that left the pipe open in a process of its own still ends at the deadline.
+    let output = receiver
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .ok()??;
     status.success().then_some(output)
 }
 
