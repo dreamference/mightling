@@ -408,6 +408,19 @@ mod tests {
     }
 
     #[test]
+    fn a_location_of_only_a_query_or_a_fragment_keeps_the_path() {
+        let base = "https://share.google/dir/AbC?x=1#top";
+        assert_eq!(
+            resolve_location(base, "?y=2"),
+            "https://share.google/dir/AbC?y=2"
+        );
+        assert_eq!(
+            resolve_location(base, "#end"),
+            "https://share.google/dir/AbC?x=1#end"
+        );
+    }
+
+    #[test]
     fn percent_decoding_keeps_what_is_not_an_escape() {
         assert_eq!(percent_decode("a+b%20c", true), "a b c");
         assert_eq!(percent_decode("a+b", false), "a+b");
