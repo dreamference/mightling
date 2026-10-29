@@ -1629,6 +1629,25 @@ def test_a_failed_setup_fails_the_job_and_a_missing_module_is_called_an_environm
     assert "environment failure" in record["note"] and record["environment"].startswith("none")
 
 
+def test_a_setup_cannot_make_the_node_write_through_a_link_it_left(job_node, tmp_path):
+    from dreamference.node import NodeJob
+
+    # The setup runs sandboxed with its environment folder writable; the node writes the folder's
+    # `.complete` marker after it, outside the sandbox. A link left there must not be followed:
+    # with the setup text in the marker, it would write a key line into `authorized_keys`.
+    victim = tmp_path / "authorized_keys"
+    victim.write_text("restricted line\n")
+    setup = f'ln -s {victim} "$MIGHTLING_ENV/.complete"\nssh-ed25519 AAAA attacker || true'
+    job = NodeJob.submit(
+        job_request(commit=job_node["commit"], command=["true"], setup=setup), "/x"
+    )
+    assert NodeJob.execute(job["id"]) == 0
+    assert victim.read_text() == "restricted line\n"
+    (env_dir,) = [path for path in (NodeJob.jobs_dir() / "envs").glob("calc-*") if path.is_dir()]
+    marker = env_dir / ".complete"
+    assert not marker.is_symlink() and marker.read_text() == setup + "\n"
+
+
 def test_out_files_are_kept_beside_the_job_and_never_committed(job_node, capsysbinary):
     import io
     import tarfile

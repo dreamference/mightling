@@ -809,12 +809,32 @@ class NodeJob:
                         None,
                         f"the environment's setup command failed (exit {code}); its output is in the log",
                     )
-                (env_dir / ".complete").write_text(setup + "\n")
+                cls._mark_complete(env_dir / ".complete", setup)
                 sink.write(b"--- setup done\n")
                 record["environment"] = f"{key} (built)"
                 return env_dir, None
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)
+
+    @classmethod
+    def _mark_complete(cls, marker: Path, setup: str) -> None:
+        """
+        Writes the environment's marker. The setup ran with this folder writable, so whatever it
+        left at the marker's name is removed first and the marker is created afresh, never
+        written through: a link there would have the node write any file of its user, such as
+        `~/.ssh/authorized_keys`, with the client's setup text.
+
+        Args:
+            marker: The `.complete` file in the environment folder.
+            setup: The setup command, which the marker holds.
+        """
+        if marker.is_dir() and not marker.is_symlink():
+            shutil.rmtree(marker)
+        elif marker.is_symlink() or marker.exists():
+            marker.unlink()
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        with os.fdopen(os.open(marker, flags, 0o644), "w") as handle:
+            handle.write(setup + "\n")
 
     @classmethod
     def missing_module(cls, log: Path) -> bool:
