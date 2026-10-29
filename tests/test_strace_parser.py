@@ -82,3 +82,10 @@ def test_git_options_and_their_values_are_not_the_subcommand(args, subcommand):
 def test_a_udp_payload_on_an_unknown_socket_without_a_peer_counts_nowhere():
     trace = StraceParser.parse('9 write(31<UDP:[555]>, "x", 1) = 1\n')
     assert trace.destinations == {} and trace.lines == 1
+
+
+def test_only_a_query_for_one_question_names_it_in_lower_case():
+    payload = query(b"\x05Audit\x07EXAMPLE\x03com\x00")
+    assert StraceParser.dns_query_name(payload) == "audit.example.com"
+    assert StraceParser.dns_query_name(payload[:4] + b"\x00\x00" + payload[6:]) is None
+    assert StraceParser.dns_query_name(payload[:4] + b"\x00\x02" + payload[6:]) is None

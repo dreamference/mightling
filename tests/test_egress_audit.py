@@ -1052,3 +1052,34 @@ def test_a_payload_sent_with_sendmsg_or_writev_reaches_its_destination(send):
     trace = StraceParser.parse('5 execve("/bin/true", ["true"], 0x0 /* 1 var */) = 0\n' + send)
     assert trace.destinations == {"192.0.2.7:443": 1}
     assert EgressAudit.judge(trace, ALLOWED, replied=True).status == FAIL
+
+
+QUERY = r"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x0baudit-probe\x07example\x03com\x00\x00\x01\x00\x01"
+
+
+def test_a_query_on_a_resolver_socket_is_read_when_strace_splits_its_sendmmsg():
+    # The descriptor is on the first line, the messages on the resumed one: only both together
+    # say this is a query to the resolver the socket was connected to.
+    trace = StraceParser.parse(
+        '5 connect(7<UDP:[1234]>, {sa_family=AF_INET, sin_port=htons(53), '
+        'sin_addr=inet_addr("127.0.0.53")}, 16) = 0\n'
+        '5 sendmmsg(7<UDP:[127.0.0.1:40000->127.0.0.53:53]>,  <unfinished ...>\n'
+        '6 write(2</dev/null>, "x", 1) = 1\n'
+        '5 <... sendmmsg resumed>[{msg_hdr={msg_name=NULL, msg_namelen=0, '
+        f'msg_iov=[{{iov_base="{QUERY}", iov_len=40}}], msg_iovlen=1, msg_controllen=0, msg_flags=0}}, '
+        'msg_len=40}], 1, 0) = 1\n'
+    )
+    assert trace.dns_names == {"audit-probe.example.com": 1}
+
+
+def test_a_query_in_a_later_message_of_a_sendmmsg_is_read():
+    trace = StraceParser.parse(
+        '5 sendmmsg(7<UDP:[1234]>, [{msg_hdr={msg_name={sa_family=AF_INET, sin_port=htons(443), '
+        'sin_addr=inet_addr("192.0.2.7")}, msg_namelen=16, msg_iov=[{iov_base="x", iov_len=1}], '
+        'msg_iovlen=1, msg_controllen=0, msg_flags=0}, msg_len=1}, '
+        '{msg_hdr={msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, '
+        f'msg_namelen=16, msg_iov=[{{iov_base="{QUERY}", iov_len=40}}], msg_iovlen=1, msg_controllen=0, '
+        'msg_flags=0}, msg_len=40}], 2, 0) = 2\n'
+    )
+    assert trace.destinations == {"192.0.2.7:443": 1} and trace.dns_servers == {"127.0.0.53:53": 1}
+    assert trace.dns_names == {"audit-probe.example.com": 1}
