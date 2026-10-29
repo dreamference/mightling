@@ -16,6 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from dreamference.cli.error_voice import ORDINARY_ERRORS, describe_error
 from dreamference.cli.adapter_command import ADAPTER_COMMAND, AdapterCommand
 from dreamference.config import DreamferenceConfig, ProxyBypass
 from dreamference.config.dreamference_config import DEFAULT_MODEL, DEFAULT_DIFFUSION_MODEL
@@ -1955,7 +1956,23 @@ class DreamferenceCLIController:
         return argv
 
     @classmethod
-    def run_cli(cls, argv: Optional[List[str]] = None) -> None:
+    def run_cli(cls, argv: list[str] | None = None) -> None:
+        """Runs `dispatch_cli` and shows an ordinary failure as one line and exit status 1.
+
+        Args:
+            argv (Optional[List[str]]): Arguments to parse; None reads `sys.argv`.
+        """
+        try:
+            cls.dispatch_cli(argv)
+        except ORDINARY_ERRORS as error:
+            line = describe_error(error)
+            if line is None:
+                raise
+            print(f"❌ {line}")
+            sys.exit(1)
+
+    @classmethod
+    def dispatch_cli(cls, argv: Optional[List[str]] = None) -> None:
         """
         Main execution entrypoint for CLI command parsing and subcommand dispatching.
 
