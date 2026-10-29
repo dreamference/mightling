@@ -1849,7 +1849,11 @@ class VLLMServerManager:
         if not engine_plans and actual_free_gb < required_gb:
             # The arena is a fraction of total memory, so the fix is expressed as the fraction
             # that would fit — otherwise the operator is left to work backwards from four numbers.
-            max_utilization = max(0.0, (actual_free_gb - transient_gb) / actual_total_gb)
+            # Rounded down, so the printed figure itself passes this check.
+            max_utilization = max(
+                0.0, (actual_free_gb - transient_gb - side_gb) / actual_total_gb * 100 // 1 / 100
+            )
+            fits_alone = arena_gb <= actual_free_gb
             _abort(
                 "Not enough memory to start vLLM.",
                 f"   Arena:       {arena_gb:.2f} GB "
@@ -1860,7 +1864,12 @@ class VLLMServerManager:
                 + f"   Required:    {required_gb:.2f} GB\n"
                 f"   Available:   {actual_free_gb:.2f} GB\n"
                 f"   Missing:     {required_gb - actual_free_gb:.2f} GB\n\n"
-                f"The arena alone would fit; the load peak is what does not. Either free memory on\n"
+                + (
+                    "The arena alone would fit; the load peak is what does not."
+                    if fits_alone
+                    else "The arena alone does not fit."
+                )
+                + " Either free memory on\n"
                 f"the host (closing the desktop session recovers the most), or lower this model's\n"
                 f"gpu_memory_utilization to at most {max_utilization:.2f}.",
             )
