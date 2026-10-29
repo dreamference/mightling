@@ -217,19 +217,22 @@ exit 0
 ''',
     "ditto": r'''cp -R "$1" "$2"''',
     "xattr": r'''echo "xattr $*" >> "$HOME/xattr.log"''',
-    # $HOME/upgrades: the `Inst` lines of `apt-get -s full-upgrade`.
+    # $HOME/upgrades: the `Inst` lines of `apt-get -s full-upgrade`; $HOME/apt-fail: the upgrade fails.
     "apt-get": r'''
 echo "apt-get $*" >> "$HOME/apt.log"
 case " $* " in
     *" -s "*) cat "$HOME/upgrades" 2>/dev/null;;
+    *" -y full-upgrade "*) [ -f "$HOME/apt-fail" ] && exit 100;;
     *" install "*python3-venv*) touch "$HOME/venv-installed";;
 esac
 exit 0
 ''',
     # $HOME/firmware.json: what `get-updates --json` prints; without it, nothing to update (exit 2).
+    # $HOME/fwupd-fail: `update` fails.
     "fwupdmgr": r'''
 echo "fwupdmgr $*" >> "$HOME/fwupd.log"
 case "$1" in get-updates) [ -f "$HOME/firmware.json" ] && cat "$HOME/firmware.json" || exit 2;; esac
+case "$1" in update) [ -f "$HOME/fwupd-fail" ] && exit 1;; esac
 exit 0
 ''',
     # A logged-in gh when FAKE_GH_TOKEN is set (its token), logged out otherwise; each call is logged.
@@ -696,6 +699,20 @@ def test_at_a_terminal_the_password_and_the_updates_are_asked_once_at_the_start(
     assert "terminal" not in logged(tmp_path, "admin.log")
 
 
+
+@pytest.mark.parametrize("failing, reboot", [(("apt-fail", "fwupd-fail"), False), (("apt-fail",), True)])
+def test_the_reboot_is_asked_for_only_when_an_update_went_in(tmp_path, release_server, failing, reboot):
+    # Both updates failing used to end with "Reboot now to finish the updates" all the same.
+    env = {**fresh_gb10(tmp_path), "FAKE_SUDO": "password"}
+    for name in failing:
+        (tmp_path / name).write_text("")
+    result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10", env_extra=env,
+                         terminal_input="secret\ny\n")
+    out = result.stdout
+    assert result.returncode == 1, out + result.stderr
+    assert "❌ system packages" in out
+    assert ("sudo reboot" in out) == reboot, out
+
 def test_the_update_question_defaults_to_no(tmp_path, release_server):
     env = {**fresh_gb10(tmp_path), "FAKE_SUDO": "password"}
     result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10", env_extra=env,
@@ -798,6 +815,7 @@ def test_an_option_without_its_value_is_named(tmp_path, release_server):
         result = run_install(tmp_path, release_server(binaries()), option)
         assert result.returncode == 1
         assert f"{option} needs a value" in result.stderr, result.stderr
+
 
 
 def test_help_under_a_pipe_says_where_the_help_is(tmp_path):
