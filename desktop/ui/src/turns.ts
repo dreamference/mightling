@@ -200,5 +200,5 @@ export async function commitMessage(client: RpcClient, listen: Listen, root: str
 
 /** A model's commit message without the fences or quotes it was asked to leave out. */
 export function cleanMessage(text: string): string {
-  return text.trim().replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").replace(/^"([\s\S]*)"$/, "$1").trim();
+  return text.trim().replace(/^```[\w+.#-]*[^\S\n]*\n?/, "").replace(/\n?```$/, "").replace(/^"([\s\S]*)"$/, "$1").trim();
 }
