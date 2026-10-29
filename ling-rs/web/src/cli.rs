@@ -313,8 +313,10 @@ fn open_browser(url: &str) -> bool {
         .is_ok()
 }
 
+/// The word after `flag`; `Some("")` when the flag ends the line, so that a bare flag is refused.
 fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
-    args.iter().position(|arg| arg == flag).and_then(|index| args.get(index + 1)).map(String::as_str)
+    let index = args.iter().position(|arg| arg == flag)?;
+    Some(args.get(index + 1).map_or("", String::as_str))
 }
 
 /// The argument `ling web <args>` does not take, if any: an unknown flag, a stray word, or `--port`
@@ -712,6 +714,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_port_flag_without_a_number_is_refused_not_ignored() {
+        let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        let port = |words: &[&str]| flag_value(&args(words), "--port").map(str::parse::<u16>);
+        assert_eq!(port(&["--lan"]), None, "no flag: the default port");
+        assert_eq!(port(&["--port", "8790"]), Some(Ok(8790)));
+        assert!(matches!(port(&["--port"]), Some(Err(_))), "a bare --port is an error, not the default");
     }
 
     #[test]
