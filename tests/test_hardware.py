@@ -114,7 +114,12 @@ def test_declares_own_quantization():
 
 def test_flexible_model_alias_resolution():
     from dreamference.hardware import resolve_model_hf_repo, get_model_launch_overrides, model_declares_own_quantization
-    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+    from dreamference.hardware.model_matrix_registry import (
+        ENGINE_LING,
+        QWEN38_DEFAULT_ENGINE,
+        QWEN38_LING_FLAT_CONTEXT,
+        ModelMatrixRegistry,
+    )
 
     aliases = [
         "qwen3.8-27b-nvfp4-dflash2",
@@ -127,7 +132,10 @@ def test_flexible_model_alias_resolution():
         assert spec is not None, f"Failed to get spec for {name}"
         assert spec.hf_repo_id == "RadixArk/Qwen3.8-27B-NVFP4"
         assert resolve_model_hf_repo(name) == "RadixArk/Qwen3.8-27B-NVFP4"
-        assert get_model_launch_overrides(name).get("max_model_len") == 262144
+        # The default engine's context: ling-serve's four flat sessions at 1.8.0, SGLang's 262,144.
+        assert get_model_launch_overrides(name).get("max_model_len") == (
+            QWEN38_LING_FLAT_CONTEXT if QWEN38_DEFAULT_ENGINE == ENGINE_LING else 262144
+        )
         assert model_declares_own_quantization(name) is True
 
 def test_download_model_functions():

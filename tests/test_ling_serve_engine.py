@@ -23,6 +23,7 @@ from dreamference.hardware.model_matrix_registry import (
     ENGINE_LING,
     ENGINE_SGLANG,
     QWEN38_LING_ENGINE_COMMIT,
+    QWEN38_LING_FLAT_CONTEXT,
     QWEN38_LING_IMAGE,
     QWEN38_SGLANG_IMAGE,
 )
@@ -81,9 +82,12 @@ def test_the_image_is_pinned_by_digest_and_the_engine_commit_is_a_full_hash():
 
 def test_both_engines_serve_the_same_checkpoint_and_context():
     ling = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
-    sglang = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)
+    sglang = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG)
     assert ling["revision"] == sglang["revision"]
-    assert ling["max_model_len"] == sglang["max_model_len"] == 262144
+    assert sglang["max_model_len"] == 262144
+    # Flat at 1.8.0 (the pool off), ling-serve's four sessions share three full contexts' positions.
+    assert ling["kv_pages"] is False and ling["max_model_len"] == QWEN38_LING_FLAT_CONTEXT
+    assert QWEN38_LING_FLAT_CONTEXT * 4 == 262144 * 3 and QWEN38_LING_FLAT_CONTEXT % 2048 == 0
     assert ling["speculative_config"]["num_speculative_tokens"] == 12
     # The same memory envelope: the container cap does not change with the engine.
     assert ling["gpu_memory_utilization"] == sglang["gpu_memory_utilization"]
@@ -115,7 +119,7 @@ def test_ling_serve_runs_inside_the_same_guarded_container_with_the_nights_flags
         "models--RadixArk--Qwen3.8-27B-NVFP4/snapshots/52d1adc5f38aa5ebf099c29ed7025ba34cfbb854"
     )
     assert flag(server, "--served-model-name") == SERVED_ID
-    assert flag(server, "--max-context") == "262144"
+    assert flag(server, "--max-context") == str(QWEN38_LING_FLAT_CONTEXT)
     assert flag(server, "--draft-block") == "12"
     assert "--graphs" in server and "--pdl" in server
     # Flags ling-serve does not have exit it with status 2 (`unknown argument`).
@@ -305,7 +309,7 @@ def test_the_drift_check_compares_ling_serve_with_its_own_recipe():
     assert Cli._detect_recipe_drift(DEFAULT_MODEL_ALIAS, 8000, sglang) == {
         "Recipe Match": "Running flags match the registry recipe"
     }
-    drifted = [a if a != "262144" else "65536" for a in running]
+    drifted = [a if a != str(QWEN38_LING_FLAT_CONTEXT) else "65536" for a in running]
     rows = Cli._detect_recipe_drift(DEFAULT_MODEL_ALIAS, 8000, drifted)
     assert "  drift --max-context" in rows
 
@@ -458,7 +462,7 @@ def test_ling_serve_plan_runs_plan_only_in_the_image_and_reads_its_json_line(mon
     # before the pool with none of them, so a pin moving across LING_ENGINE_KV_PAGES_SINCE changes both.
     paged = "kv-pages" in (recipe.get("engine_features") or [])
     pooled = paged and bool(recipe.get("kv_pages"))
-    assert ("--sessions" in cmd) == pooled
+    assert ("--sessions" in cmd) == paged and ("--batch" in cmd) == paged
     assert ("--kv-pages" in cmd) == pooled
     assert ("--vision" in cmd and cmd[cmd.index("--vision") + 1] == "off") == paged
 
@@ -711,10 +715,13 @@ def test_the_recipe_asks_for_four_sessions_but_an_engine_without_the_pool_does_n
     older = {**recipe, "engine_features": []}
     flat = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", older, 8000, 262144)
     assert not {"--sessions", "--batch", "--kv-pages"} & set(flat)
-    # At the 1.8.0 pin (paged engine, recipe's kv_pages off): the flat slots, nothing that turns the
-    # pool on or asks for four full flat contexts.
-    off = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", recipe, 8000, 262144)
-    assert not {"--sessions", "--batch", "--kv-pages"} & set(off)
+    # At the 1.8.0 pin (paged engine, recipe's kv_pages off): four flat slots at the recipe's flat
+    # context, nothing that turns the pool on.
+    off = VLLMServerManager().build_launch_command(
+        model=DEFAULT_MODEL_ALIAS, gate=True, engine=ENGINE_LING
+    )
+    assert flag(off, "--sessions") == flag(off, "--batch") == "4"
+    assert flag(off, "--max-context") == str(QWEN38_LING_FLAT_CONTEXT) and "--kv-pages" not in off
     assert "--vision" in off
     paged = LingServeLaunchBuilder.server_args(
         "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(), 8000, 262144
@@ -760,7 +767,8 @@ def test_server_status_reports_sessions_and_paging():
         8000,
         262144,
     )
-    assert "Sessions" not in LingServeLaunchBuilder.facts("img", {}, flat)
+    flat_facts = LingServeLaunchBuilder.facts("img", {}, flat)
+    assert flat_facts["Sessions"] == "4 (batch 4)" and "KV cache" not in flat_facts
 
 
 def test_the_plan_only_check_follows_the_same_arguments_as_the_launch(monkeypatch):

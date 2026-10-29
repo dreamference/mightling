@@ -439,21 +439,28 @@ QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ("kv-pages", "sparse-head"
 # pages, reclaim of idle sessions, the last resort), which is what lets four sessions at 262,144 tokens
 # fit where the flat KV cannot (~19 GB each). A ling-engine recipe lists "kv-pages" in `engine_features`
 # exactly when its `engine_commit` descends from it (tests/test_hardware.py checks that against the
-# submodule), and only then, with the recipe's `kv_pages` on, does the launch pass `--sessions`/`--batch`
-# and `--kv-pages` (an engine before it either exits 2 on `--kv-pages` or, flat, would allocate four full
-# contexts). P4d's merge keeps the flat slots the default and takes `--kv-pages` (and `--no-kv-pages`), so
-# this commit stays the boundary for the flags; the recipe's `kv_pages` decides whether the launch passes them.
+# submodule), and only then does the launch pass `--sessions`/`--batch`, with `--kv-pages` when the
+# recipe's `kv_pages` is on (an engine before it exits 2 on `--kv-pages`, and its auto-size is not the
+# plan these flags were measured against). P4d's merge keeps the flat slots the default and takes
+# `--kv-pages` (and `--no-kv-pages`), so this commit stays the boundary for the flags.
 LING_ENGINE_KV_PAGES_SINCE: Final[str] = "f180b44a40369d7dd03f9ae97e7fa8be4ece1380"
 
-# The sessions and the batch the recipe asks of a paged engine (1.8.0: four conversations at the full
-# context, the owner's bar of 2026-10-28; BATCHING §5.3 P4d). `--sessions` and `--batch` are parsed by
-# every ling-serve since 8d112d0, but without the "kv-pages" feature they stay the engine's own
-# (auto-sized from MemAvailable at the 262,144 context, at most four, on an engine that has auto-size).
+# The sessions and the batch the recipe asks of an engine with the "kv-pages" feature: four
+# conversations at once (the owner's bar of 2026-10-28; BATCHING §5.3 P4d), flat at 1.8.0 and paged
+# from 1.8.1. `--sessions` and `--batch` are parsed by every ling-serve since 8d112d0, but without the
+# feature they stay the engine's own (auto-sized from MemAvailable, at most four).
 QWEN38_LING_SESSIONS: Final[int] = 4
 # Whether the recipe turns the page pool on. Off at 1.8.0 (see the recipe); the pinned engine
 # (P4d merged) is flat by default and takes `--kv-pages` only when asked.
 QWEN38_LING_KV_PAGES: Final[bool] = False
 QWEN38_LING_BATCH: Final[int] = 4
+# Each flat session's context when the pool is off (the coordinator's decision of 2026-10-29: 1.8.0
+# serves four flat sessions, paging off): the 786,432 positions of three flat sessions at 262,144,
+# shared by four (a multiple of 2,048). Its plan, 4 x 13.4 GB beside 27.8 GB of weights and scratch,
+# is 81.2 GB, below the 82.4 GB of the three at 262,144 the engine chose by itself (`--plan-only`
+# in the pinned image, 2026-10-29). Given both `--sessions` and `--max-context`, the engine sizes
+# nothing: a host that cannot hold the plan refuses the start (exit 3) rather than serve fewer.
+QWEN38_LING_FLAT_CONTEXT: Final[int] = 196608
 
 # The engine `server start` uses when neither `--engine` nor `server_engine` says. THE 1.8.0 SWITCH,
 # made: ENGINE_LING makes ling-serve the default and SGLang the `--engine sglang` fallback; nothing
@@ -507,10 +514,11 @@ QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
     "engine_assets": [QWEN38_SPARSE_HEAD_ASSET],
     "revision": QWEN38_SGLANG_RECIPE["revision"],
     # ling-serve's --max-context: the KV and state of each resident session are allocated at this
-    # size at start. SGLang's 262,144, by the owner's decision of 2026-10-26; the nights served
-    # 65,536, so the long-context checks of the live test (start within the container's cap, a
-    # ~205K-token needle, decode speed, ling-run --spec-check at this length) prove it before release.
-    "max_model_len": 262144,
+    # size at start. SGLang's 262,144 with the page pool on (the owner's decision of 2026-10-26);
+    # flat, QWEN38_LING_FLAT_CONTEXT, so that four sessions fit (1.8.0). The nights served 65,536, so
+    # the long-context checks of the live test (start within the container's cap, a long needle,
+    # decode speed, ling-run --spec-check at this length) prove it before release.
+    "max_model_len": 262144 if QWEN38_LING_KV_PAGES else QWEN38_LING_FLAT_CONTEXT,
     "gpu_memory_utilization": 0.50,
     "container_headroom_gb": 24.0,
     # The formats ling-serve parses, compiled in (no flags): named for `status` and the start
@@ -527,11 +535,12 @@ QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
     # programmatic dependent launch. Tree verification, the megakernel stages, two sessions and a
     # batch of two are the engine's defaults at QWEN38_LING_ENGINE_COMMIT.
     "extra_args": ["--graphs", "--pdl"],
-    # Four conversations at once (QWEN38_LING_SESSIONS/BATCH), applied only with `kv_pages` on, on an
-    # engine that has the KV page pool ("kv-pages" in `engine_features`). `kv_pages` is OFF at 1.8.0
-    # (the owner's decision of 2026-10-29: paged passes about 5% slower, ranges overlapping): the launch
-    # gives no `--kv-pages`, `--sessions` or `--batch`, and the engine's flat slots, auto-sized from the
-    # host's memory, serve. 1.8.1 turns it on (specs/DREAMFERENCE_RELEASE_1.8.1.md).
+    # Four conversations at once (QWEN38_LING_SESSIONS/BATCH), on an engine that has the KV page pool
+    # ("kv-pages" in `engine_features`). `kv_pages` is OFF at 1.8.0 (the owner's decision of
+    # 2026-10-29: paged passes about 5% slower, ranges overlapping): the launch gives `--sessions 4
+    # --batch 4` and no `--kv-pages`, so four flat slots at QWEN38_LING_FLAT_CONTEXT serve (the
+    # coordinator's decision of 2026-10-29). 1.8.1 turns the pool on at 262,144
+    # (specs/DREAMFERENCE_RELEASE_1.8.1.md).
     "sessions": QWEN38_LING_SESSIONS,
     "batch": QWEN38_LING_BATCH,
     "kv_pages": QWEN38_LING_KV_PAGES,
