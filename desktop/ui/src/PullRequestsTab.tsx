@@ -91,11 +91,18 @@ export function PullRequestsTab(props: {
   const [creating, setCreating] = useState<Creating | null>(null);
   const [writing, setWriting] = useState(false);
 
+  // Only the newest list is shown: an older repository's answer that comes in late is dropped.
+  const loads = useRef(0);
   const load = useCallback(() => {
     if (!root) return;
+    const mine = ++loads.current;
     setList(null);
     setError(null);
-    bridge.prs.list(root, inbox, thread).then(setList).catch((failure) => { setList([]); setError(failure instanceof Error ? failure.message : String(failure)); });
+    bridge.prs.list(root, inbox, thread).then((found) => mine === loads.current && setList(found)).catch((failure) => {
+      if (mine !== loads.current) return;
+      setList([]);
+      setError(failure instanceof Error ? failure.message : String(failure));
+    });
   }, [root, inbox, thread]);
   useEffect(load, [load]);
 
