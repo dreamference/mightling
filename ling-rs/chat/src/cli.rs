@@ -192,12 +192,12 @@ pub fn user_airgapped(user_config: &Path) -> bool {
 }
 
 /// Whether `args` has words after what its command takes: `ling chat stop now` and
-/// `ling chat telegram off --yes` are refused, not run as `stop` and `off`.
+/// `ling chat telegram off --yes` (or `discord off --yes`) are refused, not run as `stop` and `off`.
 fn has_extra_words(args: &[String]) -> bool {
     let takes = match (args.first().map(String::as_str), args.get(1).map(String::as_str)) {
         (Some("serve" | "start" | "stop" | "status"), _) => 1,
-        (Some("telegram"), Some("setup" | "pair" | "users" | "off")) => 2,
-        (Some("telegram"), Some("remove")) => 3,
+        (Some("telegram" | "discord"), Some("setup" | "pair" | "users" | "off")) => 2,
+        (Some("telegram" | "discord"), Some("remove")) => 3,
         _ => return false,
     };
     args.len() > takes
@@ -712,7 +712,7 @@ mod tests {
     #[test]
     fn a_command_refuses_an_unknown_flag_and_a_stray_word() {
         let words = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        for command in [&["serve"][..], &["start"], &["stop"], &["status"], &["telegram", "setup"], &["telegram", "pair"], &["telegram", "users"], &["telegram", "off"]] {
+        for command in [&["serve"][..], &["start"], &["stop"], &["status"], &["telegram", "setup"], &["telegram", "pair"], &["telegram", "users"], &["telegram", "off"], &["discord", "setup"], &["discord", "pair"], &["discord", "users"], &["discord", "off"]] {
             for extra in ["--bogus-flag", "stray"] {
                 let mut line = command.to_vec();
                 line.push(extra);
@@ -722,6 +722,8 @@ mod tests {
         }
         assert!(has_extra_words(&words(&["telegram", "remove", "42", "--bogus-flag"])));
         assert!(!has_extra_words(&words(&["telegram", "remove", "42"])));
+        assert!(has_extra_words(&words(&["discord", "remove", "42", "--bogus-flag"])));
+        assert!(!has_extra_words(&words(&["discord", "remove", "42"])));
     }
 
     #[test]
