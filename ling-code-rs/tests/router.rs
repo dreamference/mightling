@@ -344,6 +344,27 @@ fn an_unknown_store_schema_is_not_read() {
 }
 
 #[test]
+fn a_store_whose_own_tables_were_swapped_for_a_view_is_not_read() {
+    // The fingerprint leaves ling-code's own tables out, so a store shipped in a clone could make
+    // `puffin_names` a view, and a recursive one never ends.
+    let f = fixture();
+    let db = f.repo.scip_dir().join("scip-python-shapes.db");
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute_batch(
+            "ALTER TABLE puffin_names RENAME TO puffin_names_kept;
+             CREATE VIEW puffin_names AS SELECT symbol_id, name FROM puffin_names_kept;",
+        )
+        .unwrap();
+    let (_, out) = f.run(&["refs", "make_circle"]);
+    assert!(
+        out.contains("exact layer unavailable: scip-python:shapes"),
+        "{out}"
+    );
+    assert!(!out.contains("exact shapes/"), "{out}");
+}
+
+#[test]
 fn an_unknown_graph_schema_is_not_read() {
     let f = fixture();
     rusqlite::Connection::open(&f.graph_db)

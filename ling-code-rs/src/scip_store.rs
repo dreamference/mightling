@@ -111,16 +111,20 @@ impl ScipStore {
                 rebuild_hint()
             );
         }
-        let has_names: bool = conn
-            .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE name = 'puffin_names'",
-                [],
-                |r| r.get::<_, i64>(0),
-            )
-            .map(|n| n > 0)?;
-        if !has_names {
+        // The fingerprint leaves ling-code's own tables out, and a store shipped in a clone could
+        // make one a view (a recursive one never ends) or a virtual table: they must be exactly
+        // what `postprocess` writes.
+        let puffin = puffin_schema(&conn)?;
+        if puffin.is_empty() {
             bail!(
                 "{} has not been post-processed; {}",
+                path.display(),
+                rebuild_hint()
+            );
+        }
+        if puffin != expected_puffin_schema()? {
+            bail!(
+                "{} holds ling-code tables this ling-code did not write; {}",
                 path.display(),
                 rebuild_hint()
             );
@@ -509,6 +513,38 @@ pub fn schema_fingerprint(conn: &Connection) -> Result<String> {
     Ok(hex(&hasher.finalize()))
 }
 
+/// ling-code's own tables, as [`postprocess`] creates them. The text is what `sqlite_master` keeps,
+/// so it must not change without a rebuild: [`ScipStore::open`] compares it.
+const PUFFIN_TABLES: &str = "CREATE TABLE puffin_names (symbol_id INTEGER NOT NULL, name TEXT NOT NULL);
+         CREATE TABLE puffin_relationships (symbol_id INTEGER NOT NULL, target TEXT NOT NULL,
+             is_reference INTEGER NOT NULL, is_implementation INTEGER NOT NULL, is_type_definition INTEGER NOT NULL);
+         CREATE TABLE puffin_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);";
+
+/// The indexes [`postprocess`] adds once the tables are filled.
+const PUFFIN_INDEXES: &str = "CREATE INDEX puffin_names_name ON puffin_names(name);
+         CREATE INDEX puffin_relationships_target ON puffin_relationships(target);";
+
+/// The `sqlite_master` rows of ling-code's own objects, which [`schema_fingerprint`] leaves out.
+fn puffin_schema(conn: &Connection) -> Result<Vec<[String; 4]>> {
+    let mut stmt = conn.prepare(
+        "SELECT type, name, tbl_name, coalesce(sql, '') FROM sqlite_master
+         WHERE name LIKE 'puffin\\_%' ESCAPE '\\' OR tbl_name LIKE 'puffin\\_%' ESCAPE '\\'
+         ORDER BY type, name",
+    )?;
+    let rows = stmt
+        .query_map([], |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?]))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// [`puffin_schema`] of a store [`postprocess`] wrote.
+fn expected_puffin_schema() -> Result<Vec<[String; 4]>> {
+    let conn = Connection::open_in_memory()?;
+    conn.execute_batch(PUFFIN_TABLES)?;
+    conn.execute_batch(PUFFIN_INDEXES)?;
+    puffin_schema(&conn)
+}
+
 /// Adds ling-code's own tables to a freshly converted store: descriptor names and, from the
 /// `.scip` file itself, relationships. Run once, at index time, on the `.new` file before it is
 /// renamed into place.
@@ -516,12 +552,9 @@ pub fn postprocess(db: &Path, scip_file: &Path) -> Result<()> {
     let mut conn = Connection::open(db)?;
     let tx = conn.transaction()?;
     tx.execute_batch(
-        "DROP TABLE IF EXISTS puffin_names; DROP TABLE IF EXISTS puffin_relationships; DROP TABLE IF EXISTS puffin_meta;
-         CREATE TABLE puffin_names (symbol_id INTEGER NOT NULL, name TEXT NOT NULL);
-         CREATE TABLE puffin_relationships (symbol_id INTEGER NOT NULL, target TEXT NOT NULL,
-             is_reference INTEGER NOT NULL, is_implementation INTEGER NOT NULL, is_type_definition INTEGER NOT NULL);
-         CREATE TABLE puffin_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
+        "DROP TABLE IF EXISTS puffin_names; DROP TABLE IF EXISTS puffin_relationships; DROP TABLE IF EXISTS puffin_meta;",
     )?;
+    tx.execute_batch(PUFFIN_TABLES)?;
     {
         let mut select = tx.prepare("SELECT id, symbol FROM global_symbols")?;
         let mut insert =
@@ -558,10 +591,7 @@ pub fn postprocess(db: &Path, scip_file: &Path) -> Result<()> {
             }
         }
     }
-    tx.execute_batch(
-        "CREATE INDEX puffin_names_name ON puffin_names(name);
-         CREATE INDEX puffin_relationships_target ON puffin_relationships(target);",
-    )?;
+    tx.execute_batch(PUFFIN_INDEXES)?;
     tx.execute(
         "INSERT INTO puffin_meta (k, v) VALUES ('postprocessed', '1')",
         [],
