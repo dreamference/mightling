@@ -123,16 +123,46 @@ class SweBenchEvaluator:
         noop_file.write_text("".join(
             json.dumps({"instance_id": i, "model_name_or_path": NOOP_MODEL, "model_patch": NOOP_PATCH}) + "\n"
             for i in to_grade))
+        finished: dict[str, bool] = {}
         for run_id, predictions in ((VALIDATE_GOLD_RUN, None), (VALIDATE_NOOP_RUN, noop_file)):
-            SweBenchHarness.evaluate(work, dataset_file, run_id, to_grade, predictions,
-                                     settings.eval_workers, settings.eval_timeout_s, settings.eval_memory)
+            finished[run_id] = SweBenchHarness.evaluate(work, dataset_file, run_id, to_grade, predictions,
+                                                        settings.eval_workers, settings.eval_timeout_s,
+                                                        settings.eval_memory)
         for instance_id in to_grade:
             gold = SweBenchHarness.instance_report(work, VALIDATE_GOLD_RUN, "gold", instance_id)
             noop = SweBenchHarness.instance_report(work, VALIDATE_NOOP_RUN, NOOP_MODEL, instance_id)
-            problem = cls.validation_problem(gold, noop)
-            SweBenchImages.record_validation(instance_id, images[instance_id], digests[instance_id], problem)
-            outcome[instance_id] = problem
+            outcome[instance_id] = cls.judge(instance_id, images[instance_id], digests[instance_id],
+                                             (gold, noop), finished)
         return outcome
+
+    @classmethod
+    def judge(cls, instance_id: str, image: str, digest: str | None,
+              verdicts: tuple, finished: dict[str, bool]) -> str | None:
+        """Records an instance's validation from its two verdicts, unless the harness gave none.
+
+        A report missing because its harness run stopped before the end is no verdict: a rejection
+        is kept until `--force`, so the instance is left to the next validation instead.
+
+        Args:
+            instance_id: The instance.
+            image: The image it was validated in.
+            digest: That image's digest.
+            verdicts: The reports for the reference and the no-op patch, each None if none was written.
+            finished: Each validation run id to whether the harness ran it to the end.
+
+        Returns:
+            str | None: Why it is not validated; None when it is.
+        """
+        gold, noop = verdicts
+        if gold is None:
+            unjudged = not finished[VALIDATE_GOLD_RUN]
+        else:
+            unjudged = bool(gold.get("resolved")) and noop is None and not finished[VALIDATE_NOOP_RUN]
+        if unjudged:
+            return "not validated yet: swebench eval did not run to the end"
+        problem = cls.validation_problem(gold, noop)
+        SweBenchImages.record_validation(instance_id, image, digest, problem)
+        return problem
 
     @classmethod
     def no_image(cls, instance_id: str, builds_here: bool) -> str:

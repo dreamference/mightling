@@ -1489,6 +1489,18 @@ def test_an_image_that_cannot_be_pulled_is_not_recorded_as_rejected(bench):
     assert SweBenchImages.rejected() == {}
 
 
+def test_a_harness_that_stops_before_the_end_rejects_no_instance(bench, monkeypatch):
+    """A harness run that exits non-zero without a report leaves its instances unjudged.
+
+    A rejection is kept until `--force`, so a crash of the harness is no verdict on the instance.
+    """
+    monkeypatch.setattr(SweBenchHarness, "evaluate", classmethod(lambda cls, *args: False))
+    monkeypatch.setattr(SweBenchHarness, "instance_report", classmethod(lambda cls, *args: None))
+    outcome = SweBenchEvaluator.validate("verified", ["acme__widget-1"], bench["settings"])
+    assert outcome["acme__widget-1"].startswith("not validated yet")
+    assert SweBenchImages.rejected() == {}
+
+
 def test_validation_decides_from_the_two_verdicts():
     problem = SweBenchEvaluator.validation_problem
     assert problem({"resolved": True}, {"resolved": False}) is None
