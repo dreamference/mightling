@@ -320,3 +320,32 @@ def test_saving_writes_no_token_and_no_level_that_came_from_the_environment(tmp_
     config = DreamferenceConfig(hf_token="hf_on_the_command_line")
     config.save_config()
     assert ConfigFileStorageManager.load_config_dict(saved)["hf_token"] == "hf_on_the_command_line"
+
+
+def test_saving_replaces_the_file_whole_through_a_link_and_keeps_its_mode(tmp_path, monkeypatch):
+    # The file was truncated and rewritten in place: a launcher reading it meanwhile, or a save
+    # that failed half-way, saw an empty or partial file (the Rust side writes atomically). A
+    # config kept as a link into a dotfiles folder must stay a link, and a 0600 file 0600.
+    import os
+    import pytest
+    from dreamference.config import config_file_storage_manager as storage
+
+    real = tmp_path / "dotfiles" / "config.toml"
+    real.parent.mkdir()
+    real.write_text('model = "x"\n', encoding="utf-8")
+    real.chmod(0o600)
+    link = tmp_path / "config.toml"
+    link.symlink_to(real)
+    storage.ConfigFileStorageManager.save_config_dict(link, {"model": "y"})
+    assert link.is_symlink() and storage.ConfigFileStorageManager.load_config_dict(real) == {"model": "y"}
+    assert real.stat().st_mode & 0o777 == 0o600
+    assert sorted(os.listdir(real.parent)) == ["config.toml"]
+
+    def broken(data, handle):
+        handle.write("model = ")
+        raise RuntimeError("disk full")
+    monkeypatch.setattr(storage.toml, "dump", broken)
+    with pytest.raises(RuntimeError):
+        storage.ConfigFileStorageManager.save_config_dict(link, {"model": "z"})
+    assert real.read_text(encoding="utf-8") == 'model = "y"\n'
+    assert sorted(os.listdir(real.parent)) == ["config.toml"]

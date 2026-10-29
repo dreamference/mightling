@@ -6,6 +6,7 @@ Dreamference configuration dictionaries to YAML or JSON formats.
 """
 
 import json
+import os
 import tomllib
 from pathlib import Path
 from typing import Any, Dict, Iterable
@@ -118,13 +119,24 @@ class ConfigFileStorageManager:
             owned = set(owned)
             kept = {key: value for key, value in existing.items() if key not in data and key not in owned}
             data = {**data, **kept}
-        if toml and path.suffix == ".toml":
-            with open(path, "w", encoding="utf-8") as f:
-                toml.dump(data, f)
-        elif yaml and path.suffix in (".yaml", ".yml"):
-            with open(path, "w", encoding="utf-8") as f:
-                yaml.dump(data, f, default_flow_style=False)
-        else:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+        # Written beside the file and renamed over it, as the Rust launcher's write_atomically
+        # does: a reader never sees a truncated file, and a failed write leaves the old one. A
+        # link (a dotfiles folder) is followed, so it stays a link, and the file keeps its mode.
+        target = path.resolve()
+        staging = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        mode = target.stat().st_mode & 0o7777 if target.is_file() else None
+        try:
+            with open(os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666), "w", encoding="utf-8") as f:
+                if mode is not None:
+                    os.fchmod(f.fileno(), mode)
+                if toml and path.suffix == ".toml":
+                    toml.dump(data, f)
+                elif yaml and path.suffix in (".yaml", ".yml"):
+                    yaml.dump(data, f, default_flow_style=False)
+                else:
+                    json.dump(data, f, indent=2)
+            os.replace(staging, target)
+        except BaseException:
+            staging.unlink(missing_ok=True)
+            raise
         return path
