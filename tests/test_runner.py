@@ -1,10 +1,21 @@
 import os
+
+import pytest
+
 from dreamference.config import DreamferenceConfig
 from dreamference.runner import (
     ClineRunner, ClineInstaller,
     ContinueRunner, ContinueInstaller,
     OpenHandsRunner, OpenHandsInstaller
 )
+from dreamference.vllm_server import VLLMServerManager
+
+
+@pytest.fixture(autouse=True)
+def _no_served_models(monkeypatch):
+    # No server answers /v1/models here; a test that wants one stubs it on its own.
+    monkeypatch.setattr(VLLMServerManager, "get_models", lambda self, timeout=2.0: [])
+
 
 def test_cline_runner_clinerules_creation(tmp_path):
     orig_cwd = os.getcwd()
@@ -101,6 +112,7 @@ def test_openhands_stays_on_this_machine_and_off_port_3000(monkeypatch):
     monkeypatch.setattr(OpenHandsInstaller, "is_docker_available", classmethod(lambda cls: True))
     monkeypatch.setattr(OpenHandsInstaller, "pull_image_if_missing", classmethod(lambda cls: True))
     monkeypatch.setattr(DockerBridge, "gateway", classmethod(lambda cls: "172.17.0.1"))
+    monkeypatch.setattr(runner.vllm_manager, "get_models", lambda timeout=2.0: ["served/other-model"])
     monkeypatch.setattr("subprocess.run", lambda *a, **k: None)
     calls = []
     monkeypatch.setattr("subprocess.call", lambda cmd, **k: calls.append(cmd) or 0)
@@ -110,21 +122,25 @@ def test_openhands_stays_on_this_machine_and_off_port_3000(monkeypatch):
     assert cmd[cmd.index("-p") + 1] == f"127.0.0.1:{OPENHANDS_HOST_PORT}:3000"
     assert OPENHANDS_HOST_PORT != 3000
     assert "LLM_BASE_URL=http://172.17.0.1:8000/v1" in cmd
+    # The model the server runs, not the configured one (AGENTS.md: ask the server).
+    assert "LLM_MODEL=openai/served/other-model" in cmd
 
 
-def test_agents_only_name_the_model_the_server_serves(tmp_path):
-    # The draft model is vLLM's internal speculative head, not a served model. Continue's
-    # autocomplete used to send requests naming it.
+def test_agents_name_the_model_the_server_runs_not_the_configured_one(tmp_path, monkeypatch):
+    # AGENTS.md: ask the server which model runs. A request naming another id answers 404, and
+    # the draft model, vLLM's internal speculative head, is never served at all (Continue's
+    # autocomplete used to name it).
     import json
-    from dreamference.config import DreamferenceConfig
-    from dreamference.hardware import resolve_model_hf_repo
 
+    monkeypatch.setattr(VLLMServerManager, "get_models", lambda self, timeout=2.0: ["served/other-model"])
+    monkeypatch.chdir(tmp_path)
     config = DreamferenceConfig(config_file=str(tmp_path / "d.toml"), model="qwen3.8-27b-nvfp4-dflash2",
                                 draft_model="qwen3.8-27b-dflash2-draft")
-    served = resolve_model_hf_repo(config.model)
 
     cont = json.loads(ContinueRunner(config=config).ensure_continue_config().read_text())
-    assert cont["tabAutocompleteModel"]["model"] == served
+    assert cont["models"][0]["model"] == "served/other-model"
+    assert cont["tabAutocompleteModel"]["model"] == "served/other-model"
+    assert "Model ID: served/other-model" in ClineRunner(config=config).ensure_clinerules().read_text()
 
 
 def test_readiness_waiter_needs_health_and_a_completion(monkeypatch):
@@ -140,6 +156,29 @@ def test_readiness_waiter_needs_health_and_a_completion(monkeypatch):
 
     monkeypatch.setattr(waiter, "_pre_warm", lambda: False)
     assert waiter.wait_for_vllm(max_wait=0) is False
+
+
+def test_readiness_waiter_keeps_its_limit_when_the_wall_clock_steps_back(monkeypatch):
+    # The limit was measured on the wall clock, so a clock step (NTP, a resume from suspend)
+    # lengthened or shortened the wait.
+    from types import SimpleNamespace
+
+    from dreamference.runner import VLLMReadinessWaiter
+    from dreamference.runner import vllm_readiness_waiter as waiter_module
+
+    waiter = VLLMReadinessWaiter(config=DreamferenceConfig())
+    monkeypatch.setattr(waiter.vllm_manager, "check_health", lambda timeout=None: False)
+    elapsed, wall = [0.0], [1_000_000.0]
+
+    def sleep(seconds):
+        elapsed[0] += seconds
+        wall[0] -= 3600.0  # the wall clock steps back an hour on every poll
+        assert elapsed[0] <= 100, "still waiting after 100 s on a 10 s limit"
+
+    monkeypatch.setattr(waiter_module, "time", SimpleNamespace(
+        sleep=sleep, time=lambda: wall[0], monotonic=lambda: elapsed[0]))
+    assert waiter.wait_for_vllm(max_wait=10) is False
+    assert elapsed[0] <= 12
 
 
 def test_readiness_waiter_warms_the_model_the_server_runs_not_the_configured_one(monkeypatch):
@@ -175,3 +214,21 @@ def test_continue_keeps_a_config_it_cannot_read_before_writing_its_own(tmp_path,
 
     ContinueRunner(config=DreamferenceConfig()).ensure_continue_config()
     assert (tmp_path / ".continue" / "config.json.bak").read_text(encoding="utf-8") == original
+
+
+def test_openhands_refuses_a_workspace_whose_path_docker_would_misread(tmp_path, monkeypatch, capsys):
+    # `-v source:target` splits on ':', so docker refused the mount with an error about its mode.
+    from dreamference.runner.openhands_installer import OpenHandsInstaller
+
+    workspace = tmp_path / "a:b"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runner = OpenHandsRunner(config=DreamferenceConfig())
+    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
+    monkeypatch.setattr(OpenHandsInstaller, "is_docker_available", classmethod(lambda cls: True))
+    monkeypatch.setattr(OpenHandsInstaller, "pull_image_if_missing", classmethod(lambda cls: True))
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("no container may start"))
+    monkeypatch.setattr("subprocess.call", lambda *a, **k: pytest.fail("no container may start"))
+
+    assert runner.run_session() == 1
+    assert "':'" in capsys.readouterr().out

@@ -16,7 +16,7 @@ from typing import Optional, Dict, Any
 from dreamference.config import DreamferenceConfig
 from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.continue_installer import ContinueInstaller
-from dreamference.hardware import resolve_model_hf_repo
+from dreamference.runner.vllm_readiness_waiter import VLLMReadinessWaiter
 
 class ContinueRunner:
     """
@@ -45,7 +45,7 @@ class ContinueRunner:
         continue_dir.mkdir(parents=True, exist_ok=True)
         config_path = continue_dir / "config.json"
 
-        hf_model = resolve_model_hf_repo(self.config.model)
+        hf_model = VLLMReadinessWaiter.served_model(self.vllm_manager, self.config.model)
         # The endpoint serves exactly one model. The draft model is a speculative head vLLM uses
         # internally, not a model it serves, and the old 1.5B fallback was never served either, so
         # every autocomplete request named a model that did not exist.
@@ -104,10 +104,9 @@ class ContinueRunner:
             int: Subprocess exit code (0 for success).
         """
         # Step 1: Ensure local vLLM endpoint is online
-        if not self.vllm_manager.check_health():
-            from dreamference.runner.vllm_readiness_waiter import VLLMReadinessWaiter
-            if not VLLMReadinessWaiter(config=self.config).wait_for_vllm():
-                return 1
+        waiter = VLLMReadinessWaiter(config=self.config)
+        if not self.vllm_manager.check_health() and not waiter.wait_for_vllm():
+            return 1
 
         # Step 2: Ensure VS Code and Continue extension are installed
         if not ContinueInstaller.is_vscode_installed():

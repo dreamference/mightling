@@ -183,6 +183,10 @@ WEB_UI_IGNORED: Final[frozenset] = frozenset({"node_modules", "dist"})
 RUSTY_V8_RELEASE_URL: Final[str] = "https://github.com/openai/codex/releases/download/rusty-v8-v{version}"
 RUSTY_V8_PROFILE: Final[str] = "ptrcomp_sandbox_release"
 
+# How long a download may wait for the next bytes before it gives up. A slow link still finishes;
+# a server that stops sending no longer hangs the build.
+DOWNLOAD_TIMEOUT_SECONDS: Final[float] = 60.0
+
 
 class CodexBrandedBuilder:
     """
@@ -439,18 +443,37 @@ class CodexBrandedBuilder:
             copy_function=shutil.copy,
         )
 
-        # Inside another repository, `git apply` reads the paths from that repository's top and
-        # silently skips every hunk outside `source_dir`; the ceiling keeps it out of any repository.
-        env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(Path(source_dir).absolute().parent.resolve())}
         for patch in cls.patches():
             # Checked first so a patch that does not fit leaves nothing half-applied behind it.
-            check = subprocess.run(["git", "apply", "--check", patch], cwd=source_dir, env=env, check=False)
-            if check.returncode != 0:
+            if cls.git_apply(source_dir, "--check", patch).returncode != 0:
                 print(f"❌ {os.path.basename(patch)} does not apply to codex {commit[:12]}.")
                 print(f"💡 The patches are written against {CODEX_RELEASE_TAG}; refresh them after a submodule bump.")
                 return False
-            subprocess.run(["git", "apply", patch], cwd=source_dir, env=env, check=True)
+            cls.git_apply(source_dir, patch).check_returncode()
         return cls.stamp_version(os.path.join(source_dir, "codex-rs", "Cargo.toml"), cls.mightling_version())
+
+    @classmethod
+    def git_apply(cls, source_dir: str, *args: str) -> subprocess.CompletedProcess:
+        """Runs `git apply` in an export, which is no repository of its own.
+
+        Git looks for one above it: in a home directory that is a git work tree (dotfiles) it
+        reads every `diff --git` path against that repository's top, skips them all and still
+        exits 0. The ceiling keeps the search in the export, and an inherited `GIT_DIR` or
+        `GIT_WORK_TREE` would outrank it.
+
+        Args:
+            source_dir (str): The export to patch.
+            *args (str): `git apply`'s arguments.
+
+        Returns:
+            subprocess.CompletedProcess: The finished `git apply`.
+        """
+        env = {
+            name: value for name, value in os.environ.items()
+            if name not in ("GIT_DIR", "GIT_WORK_TREE")
+        }
+        env["GIT_CEILING_DIRECTORIES"] = str(Path(source_dir).resolve().parent)
+        return subprocess.run(["git", "apply", *args], cwd=source_dir, env=env, check=False)
 
     @classmethod
     def mightling_version(cls) -> str:
@@ -523,6 +546,24 @@ class CodexBrandedBuilder:
         return True
 
     @classmethod
+    def download(cls, url: str, path: str) -> None:
+        """Downloads `url` to `path`, giving up on a server that stops sending.
+
+        `urlretrieve` takes no timeout, and no default is set, so a stalled connection hung the
+        build for good. The timeout bounds each read, not the whole download; a TimeoutError is an
+        OSError, which the callers already report.
+
+        Args:
+            url (str): The file to fetch.
+            path (str): Where to write it.
+        """
+        import urllib.request
+
+        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response, \
+                Path(path).open("wb") as handle:
+            shutil.copyfileobj(response, handle)
+
+    @classmethod
     def host_target(cls) -> str:
         """
         Returns the Rust target triple of this machine, which is the one Codex is built for.
@@ -587,7 +628,6 @@ class CodexBrandedBuilder:
                 Cargo, or None if the files could not be fetched or failed verification.
         """
         import re
-        import urllib.request
 
         with open(os.path.join(source_dir, "codex-rs", "Cargo.toml")) as handle:
             pinned = re.search(r'^v8 = "=([\d.]+)"', handle.read(), re.M)
@@ -628,7 +668,7 @@ class CodexBrandedBuilder:
                 return path
             print(f"📥 Fetching {name}...")
             try:
-                urllib.request.urlretrieve(f"{base_url}/{name}", path)
+                cls.download(f"{base_url}/{name}", path)
             except OSError as error:
                 print(f"❌ Could not download {name}: {error}")
                 return None
@@ -1085,13 +1125,14 @@ class CodexBrandedBuilder:
         `ling-docs` at their executables.
 
         `ling` so it works from any shell; the others so the model can run the web and mail
-        commands its prompt names from the shell `ling` gives it. A web command is linked only
-        once its binary is installed, so a link never dangles. Nothing on Windows, where the
-        install directory itself is on PATH.
+        commands its prompt names from the shell `ling` gives it. A command is linked only once
+        its binary is installed, so a link never dangles. Nothing on Windows, where the install
+        directory itself is on PATH.
         """
         if IS_WINDOWS:
             return
-        cls._link(cls.executable_path(), PATH_LINK)
+        if Path(cls.executable_path()).is_file():
+            cls._link(cls.executable_path(), PATH_LINK)
         script = cls.console_script_path("ling-admin")
         if script:
             cls._link(script, ADMIN_PATH_LINK)

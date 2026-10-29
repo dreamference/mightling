@@ -42,7 +42,7 @@ class VLLMReadinessWaiter:
             bool: True once the server is healthy and answers a completion, False on timeout or
                 cancellation.
         """
-        start_time = time.time()
+        start_time = time.monotonic()
         print(f"⏳ Waiting for local vLLM server at {self.config.vllm_host} to become available...")
 
         while True:
@@ -62,7 +62,7 @@ class VLLMReadinessWaiter:
                 print(f"\n⛔ {gate.get('message')}")
                 return False
 
-            if max_wait is not None and (time.time() - start_time) > max_wait:
+            if max_wait is not None and (time.monotonic() - start_time) > max_wait:
                 print(f"\n❌ Timed out waiting for vLLM server after {max_wait} seconds.")
                 print("💡 Start vLLM in another terminal via: `ling-admin server start`")
                 return False
@@ -70,6 +70,26 @@ class VLLMReadinessWaiter:
             sys.stdout.write(".")
             sys.stdout.flush()
             time.sleep(poll_interval)
+
+    @staticmethod
+    def served_model(vllm_manager: VLLMServerManager, model: str) -> str:
+        """Names the model the server runs, as an agent's requests must.
+
+        Not the one the config names (AGENTS.md: ask the server): a request for any other id
+        answers 404. Without an answer, the configured model's repo ID, not its alias, which the
+        server never names itself after.
+
+        Args:
+            vllm_manager (VLLMServerManager): The manager of the server the agent talks to.
+            model (str): The configured model key.
+
+        Returns:
+            str: The first id in `/v1/models`, or the configured model's repo ID.
+        """
+        from dreamference.hardware import resolve_model_hf_repo
+
+        served = vllm_manager.get_models(timeout=2.0)
+        return served[0] if served else resolve_model_hf_repo(model)
 
     def _pre_warm(self) -> bool:
         """
@@ -82,14 +102,8 @@ class VLLMReadinessWaiter:
             bool: True if the completion returned HTTP 200, False otherwise.
         """
         try:
-            from dreamference.hardware import resolve_model_hf_repo
-
-            # The model the server runs, not the one the config names (AGENTS.md: ask the server):
-            # a request for any other id answers 404 and this never passes. Without an answer, the
-            # configured model's repo ID, not its alias, which the server never names itself after.
-            served = self.vllm_manager.get_models(timeout=2.0)
             payload = {
-                "model": served[0] if served else resolve_model_hf_repo(self.config.model),
+                "model": self.served_model(self.vllm_manager, self.config.model),
                 "messages": [{"role": "user", "content": "Ready?"}],
                 "max_tokens": 1,
                 "temperature": 0.0,
