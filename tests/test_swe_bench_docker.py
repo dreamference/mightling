@@ -1,4 +1,6 @@
-"""`SweBenchDocker`, the one place the benchmark runs `docker`, and `SweBenchRuntime`, the copy of
+"""Tests for `SweBenchDocker` and `SweBenchRuntime`.
+
+`SweBenchDocker` is the one place the benchmark runs `docker`; `SweBenchRuntime` is the copy of
 `ling` mounted into every instance container.
 
 `subprocess.run` is replaced in each test (or `SweBenchDocker.run`, for the methods built on it),
@@ -6,6 +8,7 @@ so nothing here runs `docker`, `ldd` or `patchelf`.
 """
 
 import json
+import pathlib
 import subprocess
 
 import pytest
@@ -38,7 +41,9 @@ def test_a_timed_out_docker_command_returns_its_partial_output_as_text(monkeypat
     assert result.returncode == 124
     assert result.stdout == "note: partial\n"
     assert result.stderr == "timed out"
-    assert "tree: equal" not in result.stdout  # what the instance run asks of it, without a TypeError
+    assert (
+        "tree: equal" not in result.stdout
+    )  # what the instance run asks of it, without a TypeError
 
 
 def test_a_timed_out_docker_command_with_no_output_returns_empty_text(monkeypatch):
@@ -70,13 +75,17 @@ def test_standard_input_is_closed_unless_text_is_given(monkeypatch):
 
 
 def test_an_image_is_named_by_its_repository_digest_or_else_its_id(monkeypatch):
-    answers = iter([
-        subprocess.CompletedProcess([], 0, '["acme/widget@sha256:abc"] sha256:id1\n', ""),
-        subprocess.CompletedProcess([], 0, "[] sha256:id2\n", ""),
-        subprocess.CompletedProcess([], 0, "<no value> sha256:id3\n", ""),
-        subprocess.CompletedProcess([], 1, "", "No such image"),
-    ])
-    monkeypatch.setattr(SweBenchDocker, "run", classmethod(lambda cls, args, timeout=None: next(answers)))
+    answers = iter(
+        [
+            subprocess.CompletedProcess([], 0, '["acme/widget@sha256:abc"] sha256:id1\n', ""),
+            subprocess.CompletedProcess([], 0, "[] sha256:id2\n", ""),
+            subprocess.CompletedProcess([], 0, "<no value> sha256:id3\n", ""),
+            subprocess.CompletedProcess([], 1, "", "No such image"),
+        ]
+    )
+    monkeypatch.setattr(
+        SweBenchDocker, "run", classmethod(lambda cls, args, timeout=None: next(answers))
+    )
 
     assert SweBenchDocker.image_digest("acme/widget") == "sha256:abc"
     assert SweBenchDocker.image_digest("built") == "sha256:id2"
@@ -94,13 +103,16 @@ def docker_answering(monkeypatch, networks):
             record = networks.get(args[2])
             if record is None:
                 return subprocess.CompletedProcess(args, 1, "", "not found")
-            return subprocess.CompletedProcess(args, 0, record if isinstance(record, str) else
-                                               json.dumps([record]), "")
+            return subprocess.CompletedProcess(
+                args, 0, record if isinstance(record, str) else json.dumps([record]), ""
+            )
         if args[:3] == ["network", "create", "--internal"]:
             if "refuse" in networks:
                 return subprocess.CompletedProcess(args, 1, "", "denied")
-            networks[args[3]] = {"Internal": True, "IPAM": {"Config": [{"Subnet": "172.30.0.0/16",
-                                                                        "Gateway": "172.30.0.1"}]}}
+            networks[args[3]] = {
+                "Internal": True,
+                "IPAM": {"Config": [{"Subnet": "172.30.0.0/16", "Gateway": "172.30.0.1"}]},
+            }
             return subprocess.CompletedProcess(args, 0, "", "")
         raise AssertionError(f"unexpected docker {args}")
 
@@ -119,8 +131,10 @@ def test_the_network_is_created_internal_and_its_gateway_found(monkeypatch):
 def test_a_network_that_is_not_internal_is_never_used(monkeypatch):
     # The containers run an agent with the sandbox off: a network with a route out would let it
     # reach the internet, so an existing one of the same name that is not internal is refused.
-    calls = docker_answering(monkeypatch, {"swebench": {
-        "Internal": False, "IPAM": {"Config": [{"Gateway": "172.17.0.1"}]}}})
+    calls = docker_answering(
+        monkeypatch,
+        {"swebench": {"Internal": False, "IPAM": {"Config": [{"Gateway": "172.17.0.1"}]}}},
+    )
 
     assert SweBenchDocker.ensure_network("swebench") is None
     assert not any(args[:2] == ["network", "create"] for args in calls)
@@ -130,7 +144,10 @@ def test_a_network_that_cannot_be_made_or_has_no_gateway_is_none(monkeypatch):
     docker_answering(monkeypatch, {"refuse": True})
     assert SweBenchDocker.ensure_network("swebench") is None
 
-    docker_answering(monkeypatch, {"swebench": {"Internal": True, "IPAM": {"Config": [{"Subnet": "10.0.0.0/8"}]}}})
+    docker_answering(
+        monkeypatch,
+        {"swebench": {"Internal": True, "IPAM": {"Config": [{"Subnet": "10.0.0.0/8"}]}}},
+    )
     assert SweBenchDocker.ensure_network("swebench") is None
 
     docker_answering(monkeypatch, {"swebench": "not json", "empty": "[]"})
@@ -144,8 +161,10 @@ def test_a_network_that_cannot_be_made_or_has_no_gateway_is_none(monkeypatch):
 
 @pytest.fixture
 def host(tmp_path, monkeypatch):
-    """An installed `ling` with its code-mode host, the libraries `ldd` names, and a `patchelf`
-    stand-in that records its calls (or fails when `host.fail` is set)."""
+    """An installed `ling` with its code-mode host, `ldd` libraries and a `patchelf` stand-in.
+
+    The stand-in records its calls, or fails when `host.fail` is set.
+    """
     from dreamference.swe_bench import swe_bench_runtime, swe_bench_settings
 
     monkeypatch.setattr(swe_bench_settings, "CACHE_DIR", tmp_path / "cache")
@@ -157,10 +176,16 @@ def host(tmp_path, monkeypatch):
     system.mkdir()
     for name in ("ld-linux-aarch64.so.1", "libc.so.6", "libm.so.6", "libgcc_s.so.1"):
         (system / name).write_bytes(name.encode())
-    monkeypatch.setattr(SweBenchRuntime, "host_libraries", classmethod(lambda cls, binary: (
-        str(system / "ld-linux-aarch64.so.1"),
-        [str(system / name) for name in ("libc.so.6", "libm.so.6", "libgcc_s.so.1")],
-    )))
+    monkeypatch.setattr(
+        SweBenchRuntime,
+        "host_libraries",
+        classmethod(
+            lambda cls, binary: (
+                str(system / "ld-linux-aarch64.so.1"),
+                [str(system / name) for name in ("libc.so.6", "libm.so.6", "libgcc_s.so.1")],
+            )
+        ),
+    )
     state = type("Host", (), {"ling": str(install / "ling"), "patchelf": [], "fail": False})()
 
     def run(command, **kwargs):
@@ -182,8 +207,12 @@ def test_the_runtime_is_built_once_per_installed_binaries(host):
     assert (runtime / "lib" / "libc.so.6").read_bytes() == b"libc.so.6"
     # Each copy is pointed at the loader and libraries under the container's mount.
     assert len(host.patchelf) == 2
-    assert host.patchelf[0][1:5] == ["--set-interpreter", "/opt/ling/lib/ld-linux-aarch64.so.1",
-                                     "--set-rpath", "/opt/ling/lib"]
+    assert host.patchelf[0][1:5] == [
+        "--set-interpreter",
+        "/opt/ling/lib/ld-linux-aarch64.so.1",
+        "--set-rpath",
+        "/opt/ling/lib",
+    ]
 
     assert SweBenchRuntime.ensure(host.ling, "/venv/bin/patchelf") == built
     assert len(host.patchelf) == 2  # unchanged binaries: nothing rebuilt
@@ -191,7 +220,7 @@ def test_the_runtime_is_built_once_per_installed_binaries(host):
 
 def test_a_new_build_of_ling_rebuilds_the_runtime(host):
     first = SweBenchRuntime.ensure(host.ling, "patchelf")
-    with open(host.ling, "wb") as handle:
+    with pathlib.Path(host.ling).open("wb") as handle:
         handle.write(b"ling v2")
 
     second = SweBenchRuntime.ensure(host.ling, "patchelf")
@@ -202,7 +231,7 @@ def test_a_new_build_of_ling_rebuilds_the_runtime(host):
 
 def test_a_failed_build_keeps_the_runtime_that_was_there(host, capsys):
     first = SweBenchRuntime.ensure(host.ling, "patchelf")
-    with open(host.ling, "wb") as handle:
+    with pathlib.Path(host.ling).open("wb") as handle:
         handle.write(b"ling v2")
     host.fail = True
 
@@ -218,10 +247,15 @@ def test_a_failed_build_keeps_the_runtime_that_was_there(host, capsys):
 def test_ldd_output_without_a_loader_is_refused(monkeypatch):
     from dreamference.swe_bench import swe_bench_runtime
 
-    ldd = "\tlibc.so.6 => /lib/libc.so.6 (0x1)\n\tlibm.so.6 => /lib/libm.so.6 (0x2)\n" \
-          "\tlibgcc_s.so.1 => /lib/libgcc_s.so.1 (0x3)\n"
-    monkeypatch.setattr(swe_bench_runtime.subprocess, "run",
-                        lambda command, **kw: subprocess.CompletedProcess(command, 0, ldd, ""))
+    ldd = (
+        "\tlibc.so.6 => /lib/libc.so.6 (0x1)\n\tlibm.so.6 => /lib/libm.so.6 (0x2)\n"
+        "\tlibgcc_s.so.1 => /lib/libgcc_s.so.1 (0x3)\n"
+    )
+    monkeypatch.setattr(
+        swe_bench_runtime.subprocess,
+        "run",
+        lambda command, **kw: subprocess.CompletedProcess(command, 0, ldd, ""),
+    )
 
     with pytest.raises(ValueError, match="unexpected"):
         SweBenchRuntime.host_libraries("/x/ling")

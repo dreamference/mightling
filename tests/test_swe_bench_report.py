@@ -1,9 +1,10 @@
-"""`SweBenchReport`'s arithmetic: the split of the unresolved verdicts, the lines that report it,
-and what the model gate did. The run store and the logs it reads are stand-ins, so nothing here
-needs a run on disk.
+"""`SweBenchReport`'s arithmetic, with stand-ins for the run store and its logs.
+
+The split of the unresolved verdicts, the lines that report it, and what the model gate did;
+nothing here needs a run on disk.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -24,7 +25,8 @@ def logged(monkeypatch):
     """The test counts each instance's grading log shows; records the model each was looked up by."""
     counts, models = {}, {}
 
-    def read(cls, store, number, variant, result, instance_id, model):
+    def read(cls, *args):
+        instance_id, model = args[-2:]
         models[instance_id] = model
         return counts.get(instance_id)
 
@@ -45,16 +47,19 @@ def test_each_unresolved_instance_gets_the_first_cause_that_applies(logged):
         "no-log": {"applied": True},
         "nothing-failed": {"applied": True},
     }
-    counts.update({
-        "broke-both": {"p2p_failed": 3, "f2p_failed": 1},
-        "broke": {"p2p_failed": 1, "f2p_failed": 0},
-        "unfixed": {"p2p_failed": 0, "f2p_failed": 2},
-        "nothing-failed": {"p2p_failed": 0, "f2p_failed": 0},
-    })
+    counts.update(
+        {
+            "broke-both": {"p2p_failed": 3, "f2p_failed": 1},
+            "broke": {"p2p_failed": 1, "f2p_failed": 0},
+            "unfixed": {"p2p_failed": 0, "f2p_failed": 2},
+            "nothing-failed": {"p2p_failed": 0, "f2p_failed": 0},
+        }
+    )
     store = Store([{"instance_id": "broke", "model_name_or_path": "ling-b"}])
 
-    causes = SweBenchReport.unresolved_causes(store, {"model_name_or_path": "ling-a"}, 2, None,
-                                              results, list(results))
+    causes = SweBenchReport.unresolved_causes(
+        store, {"model_name_or_path": "ling-a"}, 2, None, results, list(results)
+    )
 
     assert causes == {
         "empty": ["empty"],
@@ -73,26 +78,39 @@ def test_each_unresolved_instance_gets_the_first_cause_that_applies(logged):
 
 
 def test_before_grading_no_instance_has_a_cause(logged):
-    causes = SweBenchReport.unresolved_causes(Store(), {}, None, None, {"a": {"applied": True}}, ["a"])
+    causes = SweBenchReport.unresolved_causes(
+        Store(), {}, None, None, {"a": {"applied": True}}, ["a"]
+    )
 
     assert all(value in ([], {}) for value in causes.values())
 
 
 def test_the_causes_lines_count_against_the_graded_instances():
-    causes = {"broke": ["a", "b"], "broke_unfixed": ["b"], "p2p_failed": {"a": 1, "b": 4},
-              "not_fixed": ["c", "d", "e"], "empty": ["f"], "not_applied": [], "unknown": ["g"]}
+    causes = {
+        "broke": ["a", "b"],
+        "broke_unfixed": ["b"],
+        "p2p_failed": {"a": 1, "b": 4},
+        "not_fixed": ["c", "d", "e"],
+        "empty": ["f"],
+        "not_applied": [],
+        "unknown": ["g"],
+    }
 
     lines = SweBenchReport.causes_lines(causes, 16)
 
-    assert lines[0] == ("Broke a passing test 2 of 16 graded (12.5%), 1 of them not fixing the issue "
-                        "either: a (1 PASS_TO_PASS), b (4 PASS_TO_PASS)")
+    assert lines[0] == (
+        "Broke a passing test 2 of 16 graded (12.5%), 1 of them not fixing the issue "
+        "either: a (1 PASS_TO_PASS), b (4 PASS_TO_PASS)"
+    )
     assert lines[1].startswith("Did not fix          3:")
     assert lines[2] == "Graded empty         1: no patch to grade (f)"
     assert lines[3].startswith("No test results      1,") and lines[3].endswith(": g")
     assert len(lines) == 4  # no line for a cause nobody has
     assert SweBenchReport.causes_lines(causes, 0) == []
 
-    clean = dict(causes, broke=[], broke_unfixed=[], p2p_failed={}, empty=[], unknown=[], not_applied=["h"])
+    clean = dict(
+        causes, broke=[], broke_unfixed=[], p2p_failed={}, empty=[], unknown=[], not_applied=["h"]
+    )
     assert SweBenchReport.causes_lines(clean, 3) == [
         "Broke a passing test 0 of 3 graded (0.0%)",
         "Did not fix          3: a FAIL_TO_PASS test still fails, every PASS_TO_PASS test passes",
@@ -100,21 +118,33 @@ def test_the_causes_lines_count_against_the_graded_instances():
     ]
 
 
-@pytest.mark.parametrize("seconds, said", [
-    (0, "0 s"), (59.9, "59 s"), (60, "1 min 0 s"), (400, "6 min 40 s"),
-    (3599, "59 min 59 s"), (3600, "1 h 0 min"), (61800, "17 h 10 min"), (90061, "25 h 1 min"),
-])
+@pytest.mark.parametrize(
+    "seconds, said",
+    [
+        (0, "0 s"),
+        (59.9, "59 s"),
+        (60, "1 min 0 s"),
+        (400, "6 min 40 s"),
+        (3599, "59 min 59 s"),
+        (3600, "1 h 0 min"),
+        (61800, "17 h 10 min"),
+        (90061, "25 h 1 min"),
+    ],
+)
 def test_durations_read_in_the_largest_unit_that_fits(seconds, said):
     assert SweBenchReport.duration(seconds) == said
 
 
 def held(monkeypatch, sessions, pauses=()):
-    monkeypatch.setattr(SweBenchGateHold, "read", classmethod(
-        lambda cls, store: {"sessions": list(sessions), "pauses": list(pauses)}))
+    monkeypatch.setattr(
+        SweBenchGateHold,
+        "read",
+        classmethod(lambda cls, store: {"sessions": list(sessions), "pauses": list(pauses)}),
+    )
 
 
 def started_at(epoch):
-    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+    return datetime.fromtimestamp(epoch, UTC).strftime("%Y-%m-%dT%H:%M:%S%z")
 
 
 def test_a_run_from_before_the_gate_says_nothing_about_it(monkeypatch):
@@ -136,8 +166,11 @@ def test_the_gate_line_tells_a_whole_run_from_part_of_one(monkeypatch):
 
 def test_the_instances_that_ran_during_a_pause_are_named(monkeypatch):
     base = 1_790_000_000
-    held(monkeypatch, [{"gate": "in force"}],
-         [{"start": base + 1000, "end": base + 1600}, {"start": base + 5000, "end": base + 4000}])
+    held(
+        monkeypatch,
+        [{"gate": "in force"}],
+        [{"start": base + 1000, "end": base + 1600}, {"start": base + 5000, "end": base + 4000}],
+    )
     states = {
         "before": {"started": started_at(base), "wall_s": 1000},  # ends as the pause starts
         "across": {"started": started_at(base + 900), "wall_s": 200},
@@ -147,7 +180,7 @@ def test_the_instances_that_ran_during_a_pause_are_named(monkeypatch):
         "unfinished": {"started": started_at(base + 1100)},
     }
 
-    gate, paused = SweBenchReport.gate_lines(Store(), states, list(states) + ["never-started"])
+    _, paused = SweBenchReport.gate_lines(Store(), states, [*states, "never-started"])
 
     # A pause that ends before it starts counts as no time at all.
     assert paused.startswith("Gate paused         2 time(s), 10 min 0 s in all (")

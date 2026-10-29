@@ -218,6 +218,7 @@ def test_readiness_waiter_stops_on_an_interrupt(monkeypatch):
 
 def test_readiness_pre_warm_asks_for_one_token_of_the_served_checkpoint(monkeypatch):
     import json
+
     from dreamference.runner import VLLMReadinessWaiter, vllm_readiness_waiter
 
     waiter = VLLMReadinessWaiter(config=DreamferenceConfig(model="qwen3.8-27b-nvfp4-dflash2", vllm_host="http://gb10:9000"))

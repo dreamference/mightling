@@ -1,5 +1,7 @@
-"""`SweBenchHarness` pieces that need no harness: the dataset file it grades against, the eval
-script's per-file reset, and the memory cap on its grading containers. `docker` is a stand-in.
+"""`SweBenchHarness` pieces that need no harness; `docker` is a stand-in.
+
+The dataset file it grades against, the eval script's per-file reset, and the memory cap on its
+grading containers.
 """
 
 import json
@@ -20,11 +22,13 @@ class Ticks:
 
 
 def test_each_grading_container_of_this_run_is_capped_once(monkeypatch):
-    listings = iter([
-        "sweb.eval.acme__widget-1.ling-7\nsweb.eval.acme__widget-2.ling-77\n",
-        "sweb.eval.acme__widget-1.ling-7\nsweb.eval.acme__widget-3.ling-7\nsweb.eval.other.x.ling-7b\n",
-        "",
-    ])
+    listings = iter(
+        [
+            "sweb.eval.acme__widget-1.ling-7\nsweb.eval.acme__widget-2.ling-77\n",
+            "sweb.eval.acme__widget-1.ling-7\nsweb.eval.acme__widget-3.ling-7\nsweb.eval.other.x.ling-7b\n",
+            "",
+        ]
+    )
     calls = []
 
     def run(cls, args, timeout=None):
@@ -46,22 +50,31 @@ def test_each_grading_container_of_this_run_is_capped_once(monkeypatch):
 
 
 def test_the_cap_loop_ends_as_soon_as_grading_does(monkeypatch):
-    monkeypatch.setattr(SweBenchDocker, "run", classmethod(lambda cls, args, timeout=None: (_ for _ in ()).throw(
-        AssertionError("docker asked after the stop"))))
+    monkeypatch.setattr(
+        SweBenchDocker,
+        "run",
+        classmethod(
+            lambda cls, args, timeout=None: (_ for _ in ()).throw(
+                AssertionError("docker asked after the stop")
+            )
+        ),
+    )
 
     SweBenchHarness._cap_containers("ling-7", "8g", Ticks(0))
 
 
 def test_a_reset_line_with_options_or_no_files_is_left_alone():
     base = "0123abc"
-    script = "\n".join([
-        f"git checkout {base} tests/a.py",
-        f"git checkout {base} -- tests/b.py",
-        f"git checkout {base} ",
-        f"git checkout {base}",
-        f"  git checkout {base} tests/c.py",
-        "git checkout fedcba tests/d.py",
-    ])
+    script = "\n".join(
+        [
+            f"git checkout {base} tests/a.py",
+            f"git checkout {base} -- tests/b.py",
+            f"git checkout {base} ",
+            f"git checkout {base}",
+            f"  git checkout {base} tests/c.py",
+            "git checkout fedcba tests/d.py",
+        ]
+    )
 
     lines = SweBenchHarness.per_file_reset(script, base).split("\n")
 
@@ -77,13 +90,19 @@ def test_a_test_file_name_cannot_break_out_of_the_reset_loop():
 
 def test_the_dataset_file_leaves_out_rows_without_an_image(tmp_path):
     rows = [
-        {"instance_id": "a", "image": "upstream/a", "eval_script": "git checkout b1 t.py", "base_commit": "b1"},
+        {
+            "instance_id": "a",
+            "image": "upstream/a",
+            "eval_script": "git checkout b1 t.py",
+            "base_commit": "b1",
+        },
         {"instance_id": "b", "image": "upstream/b"},
         {"instance_id": "c", "image": "upstream/c", "eval_script": "pytest"},
     ]
 
-    written = SweBenchHarness.write_dataset_file(tmp_path / "deep" / "d.jsonl", rows,
-                                                 {"a": "local/a", "b": "", "c": "local/c"})
+    written = SweBenchHarness.write_dataset_file(
+        tmp_path / "deep" / "d.jsonl", rows, {"a": "local/a", "b": "", "c": "local/c"}
+    )
 
     assert written == ["a", "c"]
     a, c = (json.loads(line) for line in (tmp_path / "deep" / "d.jsonl").read_text().splitlines())

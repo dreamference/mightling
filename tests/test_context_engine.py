@@ -163,7 +163,7 @@ def test_one_file_is_read_in_process_as_the_index_workers_read_it(tmp_path):
     (tmp_path / "broken.py").write_text("def broken(:\n")
 
     indexed, content = engine._process_single_file(source)
-    assert indexed.rel_path == os.path.join("pkg", "mod.py") and content.startswith("class Loader")
+    assert indexed.rel_path == str(Path("pkg") / "mod.py") and content.startswith("class Loader")
     assert [(s.name, s.symbol_type, s.signature, s.docstring) for s in indexed.symbols] == [
         ("Loader", "class", "class Loader", "Loads."),
         ("load", "function", "def load(self, path)", None),

@@ -15,7 +15,13 @@ from dreamference.mcp_server.web_tools import AIRGAPPED_ON_MESSAGE, SEARXNG_STAR
 class FakePage:
     """A streamed response: `chunks` are what `iter_content` yields, counted as they are read."""
 
-    def __init__(self, chunks, content_type="text/html; charset=utf-8", status=200, url="https://example.com/"):
+    def __init__(
+        self,
+        chunks,
+        content_type="text/html; charset=utf-8",
+        status=200,
+        url="https://example.com/",
+    ):
         self.chunks = list(chunks)
         self.read = 0
         self.headers = {"Content-Type": content_type}
@@ -38,15 +44,18 @@ def online(monkeypatch):
     monkeypatch.setattr(WebTools, "airgapped_level", classmethod(lambda cls: "off"))
 
 
-@pytest.mark.parametrize("url", [
-    "file:///etc/passwd",
-    "gopher://example.com/1",
-    "ftp://example.com/file",
-    "/etc/passwd",
-    "example.com/page",
-    "http:///no-host",
-    "",
-])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "gopher://example.com/1",
+        "ftp://example.com/file",
+        "/etc/passwd",
+        "example.com/page",
+        "http:///no-host",
+        "",
+    ],
+)
 def test_fetch_refuses_anything_but_an_http_address_without_a_request(url):
     # The scheme check is what keeps `web_fetch` from reading local files.
     with patch.object(web_tools.requests, "get") as get:
@@ -65,9 +74,11 @@ def test_fetch_sends_nothing_at_air_gap_on(monkeypatch):
 
 
 def test_fetch_reduces_html_to_its_title_and_readable_text():
-    html = (b"<html><head><title> Release notes </title><style>p{color:red}</style>"
-            b"<script>track()</script></head><body><nav>Home | About</nav>"
-            b"<p>First   paragraph.</p>\n\n\n<p>Second paragraph.</p></body></html>")
+    html = (
+        b"<html><head><title> Release notes </title><style>p{color:red}</style>"
+        b"<script>track()</script></head><body><nav>Home | About</nav>"
+        b"<p>First   paragraph.</p>\n\n\n<p>Second paragraph.</p></body></html>"
+    )
     page = FakePage([html], url="https://example.com/notes")
     with patch.object(web_tools.requests, "get", return_value=page) as get:
         outcome = WebTools.fetch("https://example.com/notes")
@@ -76,7 +87,11 @@ def test_fetch_reduces_html_to_its_title_and_readable_text():
     assert outcome["title"] == "Release notes"
     assert "First paragraph." in outcome["text"] and "Second paragraph." in outcome["text"]
     assert "track()" not in outcome["text"] and "color:red" not in outcome["text"]
-    assert (outcome["status"], outcome["final_url"], outcome["truncated"]) == (200, "https://example.com/notes", False)
+    assert (outcome["status"], outcome["final_url"], outcome["truncated"]) == (
+        200,
+        "https://example.com/notes",
+        False,
+    )
 
 
 def test_fetch_hands_back_text_that_is_not_markup_as_it_is():
@@ -87,7 +102,9 @@ def test_fetch_hands_back_text_that_is_not_markup_as_it_is():
     assert outcome["title"] == "" and outcome["text"] == source.decode()
 
 
-@pytest.mark.parametrize("max_chars, kept", [(5, 5), (0, 1), (-40, 1), (10**9, web_tools.MAX_CHARS_CEILING)])
+@pytest.mark.parametrize(
+    "max_chars, kept", [(5, 5), (0, 1), (-40, 1), (10**9, web_tools.MAX_CHARS_CEILING)]
+)
 def test_fetch_clamps_the_text_it_returns(max_chars, kept):
     body = b"x" * (web_tools.MAX_CHARS_CEILING + 10)
     with patch.object(web_tools.requests, "get", return_value=FakePage([body], "text/plain")):
@@ -144,7 +161,9 @@ def test_search_sends_nothing_for_an_empty_query_or_at_air_gap_on(monkeypatch):
 
 def test_search_keeps_at_most_the_results_asked_for():
     response = MagicMock()
-    response.json.return_value = {"results": [{"title": f"t{n}", "url": f"https://e/{n}"} for n in range(5)]}
+    response.json.return_value = {
+        "results": [{"title": f"t{n}", "url": f"https://e/{n}"} for n in range(5)]
+    }
     with patch.object(web_tools.requests, "get", return_value=response):
         two = WebTools.search("python", max_results=2)
         at_least_one = WebTools.search("python", max_results=0)

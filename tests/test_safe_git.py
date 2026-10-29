@@ -354,13 +354,32 @@ def test_the_rust_helper_and_the_desktop_app_pin_the_same_keys():
 
 def test_flags_follow_the_subcommand_after_any_global_option():
     assert SafeGit.safe_flags(["--no-pager", "-p", "diff", "HEAD"]) == [
-        "--no-pager", "-p", "diff", "--no-ext-diff", "--no-textconv", "HEAD",
+        "--no-pager",
+        "-p",
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "HEAD",
     ]
-    assert SafeGit.safe_flags(["--git-dir", "x.git", "--work-tree", "w", "--namespace", "n", "show"]) == [
-        "--git-dir", "x.git", "--work-tree", "w", "--namespace", "n", "show", "--no-ext-diff", "--no-textconv",
+    assert SafeGit.safe_flags(
+        ["--git-dir", "x.git", "--work-tree", "w", "--namespace", "n", "show"]
+    ) == [
+        "--git-dir",
+        "x.git",
+        "--work-tree",
+        "w",
+        "--namespace",
+        "n",
+        "show",
+        "--no-ext-diff",
+        "--no-textconv",
     ]
     assert SafeGit.safe_flags(["--config-env", "core.pager=P", "--git-dir=x.git", "pull"]) == [
-        "--config-env", "core.pager=P", "--git-dir=x.git", "pull", "--upload-pack=git-upload-pack",
+        "--config-env",
+        "core.pager=P",
+        "--git-dir=x.git",
+        "pull",
+        "--upload-pack=git-upload-pack",
     ]
     # An option's value that looks like a subcommand is not one.
     assert SafeGit.safe_flags(["-C", "push", "status"]) == ["-C", "push", "status"]
@@ -380,8 +399,11 @@ def test_network_subcommands_get_the_longer_timeout(monkeypatch):
 
     def run(command, **kwargs):
         if "config" not in command:
-            timeouts[next(word for word in command if word in ("fetch", "status", "push", "clone", "log"))] = \
-                kwargs["timeout"]
+            timeouts[
+                next(
+                    word for word in command if word in ("fetch", "status", "push", "clone", "log")
+                )
+            ] = kwargs["timeout"]
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(subprocess, "run", run)
@@ -389,9 +411,13 @@ def test_network_subcommands_get_the_longer_timeout(monkeypatch):
         SafeGit.run(["-c", "x=y", subcommand])
     SafeGit.run(["log"], timeout=3)
 
-    assert timeouts == {"fetch": safe_git.NETWORK_TIMEOUT_S, "status": safe_git.DEFAULT_TIMEOUT_S,
-                        "push": safe_git.NETWORK_TIMEOUT_S, "clone": safe_git.NETWORK_TIMEOUT_S,
-                        "log": 3}
+    assert timeouts == {
+        "fetch": safe_git.NETWORK_TIMEOUT_S,
+        "status": safe_git.DEFAULT_TIMEOUT_S,
+        "push": safe_git.NETWORK_TIMEOUT_S,
+        "clone": safe_git.NETWORK_TIMEOUT_S,
+        "log": 3,
+    }
 
 
 def test_a_missing_git_is_exit_127_in_text_or_bytes(monkeypatch):
@@ -407,7 +433,9 @@ def test_a_missing_git_is_exit_127_in_text_or_bytes(monkeypatch):
 
 
 def test_driver_names_are_not_blanked_when_git_cannot_list_the_config(monkeypatch, tmp_path):
-    answers = iter([OSError("exec format error"), subprocess.CompletedProcess([], 128, b"", b"not a repo")])
+    answers = iter(
+        [OSError("exec format error"), subprocess.CompletedProcess([], 128, b"", b"not a repo")]
+    )
 
     def run(command, **kwargs):
         answer = next(answers)
@@ -421,19 +449,39 @@ def test_driver_names_are_not_blanked_when_git_cannot_list_the_config(monkeypatc
 
 
 def test_only_the_repositorys_own_driver_programs_are_blanked(monkeypatch, tmp_path):
-    listing = b"\0".join([
-        b"local", b"filter.lfs.smudge\ngit-lfs smudge",
-        b"local", b"filter.lfs.required\ntrue",
-        b"worktree", b"diff.pdf.textconv\npdftotext",
-        b"global", b"diff.mine.command\nmy-diff",  # the owner's own config is theirs
-        b"local", b"merge.ours.driver\ntrue",
-        b"command", b"submodule.lib.update\n!sh run",
-        b"local", b"core.pager\nless",  # not a driver
-        b"local", b"filter.smudge\nx",  # no driver name
-    ]) + b"\0"
-    monkeypatch.setattr(subprocess, "run", lambda command, **kw: subprocess.CompletedProcess(command, 0, listing, b""))
+    listing = (
+        b"\0".join(
+            [
+                b"local",
+                b"filter.lfs.smudge\ngit-lfs smudge",
+                b"local",
+                b"filter.lfs.required\ntrue",
+                b"worktree",
+                b"diff.pdf.textconv\npdftotext",
+                b"global",
+                b"diff.mine.command\nmy-diff",  # the owner's own config is theirs
+                b"local",
+                b"merge.ours.driver\ntrue",
+                b"command",
+                b"submodule.lib.update\n!sh run",
+                b"local",
+                b"core.pager\nless",  # not a driver
+                b"local",
+                b"filter.smudge\nx",  # no driver name
+            ]
+        )
+        + b"\0"
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **kw: subprocess.CompletedProcess(command, 0, listing, b""),
+    )
 
     assert SafeGit.driver_overrides(tmp_path) == [
-        "diff.pdf.textconv=", "filter.lfs.required=false", "filter.lfs.smudge=",
-        "merge.ours.driver=false", "submodule.lib.update=none",
+        "diff.pdf.textconv=",
+        "filter.lfs.required=false",
+        "filter.lfs.smudge=",
+        "merge.ours.driver=false",
+        "submodule.lib.update=none",
     ]
