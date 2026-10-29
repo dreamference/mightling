@@ -41,7 +41,7 @@ from dreamference.night_shift.chooser_candidate import ChooserCandidate
 from dreamference.night_shift.night_shift_chooser import JUDGE_TIMEOUT_S, Compare, NightShiftChooser
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
-from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
+from dreamference.night_shift.night_shift_task_run import DONE, NO_HOOKS, NightShiftTaskRun
 from dreamference.runner.safe_git import SafeGit
 
 # Statuses of an attempt that ended without a candidate, worst last: what the task becomes when no
@@ -115,6 +115,8 @@ class NightShiftBestOfN:
         # The model server the scheduler counts this task against (set by the runner).
         self.lane_host: str | None = None
         self.current: NightShiftTaskRun | None = None
+        # Each attempt's run by number: the chosen one commits its own worktree (`_commit`).
+        self.attempt_runs: dict[int, NightShiftTaskRun] = {}
         self.judging = False
         self.attempts: int = int(task.get("attempts") or 0)
         self.started = time.time()
@@ -254,6 +256,7 @@ class NightShiftBestOfN:
                 self.current = None
             outcome = attempt.outcome or {"attempt": number, "status": status, "result": {}}
             outcome["paths"] = (str(attempt.worktree), attempt.branch)
+            self.attempt_runs[number] = attempt
             # Every attempt's logs stay in `logs/`, named in the record, whichever is chosen.
             outcome["log"] = str(attempt.log_path)
             if attempt.test_log_path.exists():
@@ -433,13 +436,23 @@ class NightShiftBestOfN:
         """Commits the chosen attempt as `night/<id>`; removes every attempt's worktree and the others' branches."""
         result = dict(chosen["result"])
         worktree, branch = chosen["paths"]
-        first_line = (self.text.strip().splitlines() or ["task"])[0][:72]
-        code, output = self._git(Path(worktree), "commit", "-q", "-m", f"night: {first_line}")
-        if code != 0:
+        # The commit's hooks run in the attempt's sandbox (`NightShiftTaskRun.commit_staged`).
+        run = self.attempt_runs[chosen["attempt"]]
+        self.current = run
+        try:
+            outcome, output = run.commit_staged()
+        finally:
+            self.current = None
+        if outcome != DONE:
             self._discard(outcomes)
+            interrupted = outcome == INTERRUPTED
             return self._finish(
-                "failed",
-                note=f"git commit failed: {output.strip()[-300:]}",
+                INTERRUPTED if interrupted else "failed",
+                note=(
+                    "the window closed during the commit; the task starts over next night"
+                    if interrupted
+                    else f"git commit failed: {output.strip()[-300:]}"
+                ),
                 result={
                     **result,
                     **self._timing(outcomes),
@@ -599,6 +612,6 @@ class NightShiftBestOfN:
         return record.get("status") in ("cancel-requested", "cancelled")
 
     def _git(self, cwd: Path, *args: str) -> tuple[int, str]:
-        # The worktree is the agent's to write: no config-named program runs (SafeGit).
-        result = SafeGit.run(args, cwd)
+        # The worktree is the agent's to write: no config-named program runs (SafeGit), and no hook.
+        result = SafeGit.run([*NO_HOOKS, *args], cwd)
         return result.returncode, result.stdout + result.stderr

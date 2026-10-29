@@ -5,7 +5,9 @@ transient systemd scope with a memory cap, so neither the user's checkout nor th
 at risk. The runner, not the agent, commits: the agent's sandbox cannot write the repository's
 `.git`, and nothing is merged, pushed or rebased. The runner's own test run executes code the agent
 wrote, so it goes through the same sandbox as the agent's commands (`ling sandbox`), with a
-policy the runner fixes: nothing the agent wrote runs with the user's full rights.
+policy the runner fixes: nothing the agent wrote runs with the user's full rights. So does the
+commit, whose hooks are files the agent could write (`commit_in_sandbox`); the runner's own `git`
+on the host runs no hook at all.
 
 A task handed over by another node (`remote` in its record, specs/DREAMFERENCE_MIGHTLING_NODE.md
 §13.5) runs every process inside bubblewrap as well: the node owner's home folder is an empty
@@ -14,14 +16,19 @@ namespace is the host's, because `ling exec` reaches this node's model server on
 agent's commands are confined by Codex's own sandbox inside that, as on any node.
 """
 
+import json
 import os
 import re
 import shlex
+import shutil
 import signal
+import stat
 import subprocess
+import tempfile
 import threading
 import time
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -72,6 +79,18 @@ PROMPT_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_PROMPT"
 # every `ling exec` it starts is told to stay one session whatever the configuration says.
 REFINE_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_REFINE"
 TEST_TAIL_LINES: Final[int] = 200
+# The commit's own budget, its hooks included: it may start after the task's deadline has passed.
+COMMIT_TIMEOUT_S: Final[int] = 300
+# Every `git` the runner runs on the host: the hooks are the agent's to write (`.husky/_`, a
+# relative `core.hooksPath`), and they run only inside the task's sandbox (`commit_in_sandbox`).
+NO_HOOKS: Final[tuple[str, str]] = ("-c", "core.hooksPath=/dev/null")
+# What `_run_capped` returns for a command it stopped, and the outcomes of `commit_in_sandbox`.
+TIMED_OUT: Final[str] = "timeout"
+DONE: Final[str] = "done"
+INTERRUPTED: Final[str] = "interrupted"
+# The answers `commit_in_sandbox` asks `git rev-parse` for: common dir, hooks, worktree config, format.
+_PATHS_ASKED: Final[int] = 4
+_OBJECT_ID: Final[re.Pattern] = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 class NightShiftTaskRun:
@@ -155,6 +174,8 @@ class NightShiftTaskRun:
         self.log_path = night_dir / "logs" / f"{self.task_id}.jsonl"
         self.last_message_path = night_dir / "logs" / f"{self.task_id}.last.txt"
         self.test_log_path = night_dir / "logs" / f"{self.task_id}.test.log"
+        # What the sandboxed commit and its hooks printed (`commit_in_sandbox`).
+        self.commit_log_path = night_dir / "logs" / f"{self.task_id}.commit.log"
         if self.remote:
             # Written by `ling` from inside the sandbox, where only the task's own home is writable.
             from dreamference.night_shift.night_shift_remote import NightShiftRemote
@@ -181,6 +202,7 @@ class NightShiftTaskRun:
             self.diff_path: Path = night_dir / "logs" / f"{self.task_id}{suffix}.diff"
             # Each attempt's test output is its own, so the report can point at every one.
             self.test_log_path = night_dir / "logs" / f"{self.task_id}{suffix}.test.log"
+            self.commit_log_path = night_dir / "logs" / f"{self.task_id}{suffix}.commit.log"
 
     @property
     def unit_prefix(self) -> str:
@@ -522,7 +544,32 @@ class NightShiftTaskRun:
             result = self._result(test_command, test_source, test_result)
             result.update(self._staged_change(stage=False))
             return self._finish("candidate", result=result)
+        outcome, detail = self.commit_staged()
+        if outcome == INTERRUPTED:
+            return self._interrupted()
+        if outcome != DONE:
+            return self._finish(
+                "failed",
+                note=f"git commit failed: {detail.strip()[-300:]}",
+                result=self._result(test_command, test_source, test_result),
+            )
+        stat = self._git(self.repo, "diff", "--stat", f"{self.base}..{self.branch}")[1].rstrip()
+        self._git(self.repo, "worktree", "remove", "--force", str(self.worktree))
+        result = self._result(test_command, test_source, test_result)
+        result["branch"] = self.branch
+        result["diff_stat"] = stat
+        return self._finish("done", result=result)
+
+    def commit_staged(self) -> tuple[str, str]:
+        """Commits what is staged in the worktree on `self.branch` as `night: <the task's first line>`.
+
+        Returns:
+            tuple[str, str]: As `commit_in_sandbox`. A task from another machine commits on the
+            host with no hook, as a node job does (`NodeJob._commit`): its hooks are a client's,
+            in a repository the runner made.
+        """
         first_line = (self.text.strip().splitlines() or ["task"])[0][:72]
+        message = f"night: {first_line}"
         identity: list[str] = []
         if self.author:
             # A task from another machine is committed as its sender, in a job repository that has
@@ -533,21 +580,169 @@ class NightShiftTaskRun:
                 "-c",
                 f"user.email={self.author.get('email')}",
             ]
-        code, output = self._git(
-            self.worktree, *identity, "commit", "-q", "-m", f"night: {first_line}"
+        if not self.remote:
+            return self.commit_in_sandbox(message, identity)
+        code, output = self._git(self.worktree, *identity, "commit", "-q", "-m", message)
+        return (DONE, "") if code == 0 else ("failed", output)
+
+    def commit_in_sandbox(self, message: str, identity: Sequence[str] = ()) -> tuple[str, str]:
+        """Commits what is staged in the worktree on `self.branch`, its hooks run in the task's sandbox.
+
+        The hooks are files the agent could write (`.husky/_`, a relative `core.hooksPath`, a
+        script a hook calls), so they run where the agent's own commands ran: `ling sandbox` with
+        the task's `/airgapped` level, under its scope, with the worktree and one scratch folder
+        writable. The repository's own `.git` is not writable there, so the commit is made in a
+        scratch repository that borrows its objects (`objects/info/alternates`) and its config
+        (`include.path`) and starts from the worktree's index and branch; inside the sandbox it is
+        written into a bundle. The host then only reads: it copies the bundle without following a
+        link, unbundles it with no hook, checks that its one ref is a single commit on top of the
+        branch, and moves the branch.
+
+        Args:
+            message: The commit message.
+            identity: `-c user.name=… -c user.email=…`, for a task committed as its sender.
+
+        Returns:
+            tuple[str, str]: ("done", the commit id), ("failed", why) or ("interrupted", "") when
+            the runner was stopped during the commit.
+        """
+        head = self._git(self.repo, "rev-parse", "--verify", f"refs/heads/{self.branch}^{{commit}}")
+        tree = self._git(self.worktree, "write-tree")
+        found = SafeGit.run(
+            [
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+                "--git-path",
+                "hooks",
+                "--git-path",
+                "config.worktree",
+                "--show-object-format",
+            ],
+            self.worktree,
         )
-        if code != 0:
-            return self._finish(
-                "failed",
-                note=f"git commit failed: {output.strip()[-300:]}",
-                result=self._result(test_command, test_source, test_result),
-            )
-        stat = self._git(self.repo, "diff", "--stat", f"{self.base}..{self.branch}")[1].rstrip()
-        self._git(self.repo, "worktree", "remove", "--force", str(self.worktree))
-        result = self._result(test_command, test_source, test_result)
-        result["branch"] = self.branch
-        result["diff_stat"] = stat
-        return self._finish("done", result=result)
+        lines = found.stdout.splitlines()
+        if head[0] != 0 or tree[0] != 0 or found.returncode != 0 or len(lines) != _PATHS_ASKED:
+            return "failed", (head[1] if head[0] else tree[1] if tree[0] else found.stderr)
+        head_id, tree_id = head[1].strip(), tree[1].strip()
+        common, hooks, worktree_config, object_format = lines
+        scratch_parent = self.night_dir / "scratch"
+        scratch_parent.mkdir(parents=True, exist_ok=True)
+        scratch = Path(tempfile.mkdtemp(prefix=f"{self.task_id}-", dir=scratch_parent))
+        received = scratch_parent / f"{scratch.name}.bundle"
+        repo, bundle = scratch / "repo", scratch / "commit.bundle"
+        ref = f"refs/heads/{self.branch}"
+        try:
+            init = ["init", "-q", "--bare", "--template=", f"--object-format={object_format}"]
+            result = SafeGit.run([*NO_HOOKS, *init, str(repo)])
+            if result.returncode != 0:
+                return "failed", result.stdout + result.stderr
+            (repo / "objects" / "info").mkdir(parents=True, exist_ok=True)
+            (repo / "objects" / "info" / "alternates").write_text(f"{common}/objects\n")
+            for args in (
+                ["--git-dir", str(repo), "config", "--add", "include.path", f"{common}/config"],
+                *(
+                    [["--git-dir", str(repo), "config", "--add", "include.path", worktree_config]]
+                    if Path(worktree_config).is_file()
+                    else []
+                ),
+                ["--git-dir", str(repo), "config", "core.bare", "false"],
+                ["--git-dir", str(repo), "update-ref", ref, head_id],
+                ["--git-dir", str(repo), "symbolic-ref", "HEAD", ref],
+                ["--git-dir", str(repo), "--work-tree", str(self.worktree), "read-tree", tree_id],
+            ):
+                result = SafeGit.run([*NO_HOOKS, *args])
+                if result.returncode != 0:
+                    return "failed", result.stdout + result.stderr
+            commit = [
+                "--work-tree",
+                str(self.worktree),
+                "-c",
+                f"core.hooksPath={self.worktree / hooks}",
+                *identity,
+                "commit",
+                "-q",
+                "-m",
+                message,
+            ]
+            pack = ["bundle", "create", str(bundle), ref, f"^{head_id}"]
+            # Both command lines are made before the hooks run: making one reads the scratch
+            # repository's config (`SafeGit.driver_overrides`), which a hook can rewrite.
+            level = self._fix_level()
+            steps = [
+                self.sandboxed_command(
+                    self.mightling_bin,
+                    SafeGit.command(args, git_dir=repo),
+                    level,
+                    self.session,
+                    writable_roots=[str(scratch)],
+                )
+                for args in (commit, pack)
+            ]
+            # The commit has its own budget, past the task's deadline: the work is done by then.
+            self.deadline = max(self.deadline, time.time() + COMMIT_TIMEOUT_S)
+            append = False
+            for command, extra_env in steps:
+                code = self._run_capped(
+                    command,
+                    self.worktree,
+                    self.commit_log_path,
+                    timeout=COMMIT_TIMEOUT_S,
+                    append=append,
+                    extra_env=extra_env,
+                )
+                append = True
+                timed_out = code == TIMED_OUT
+                if timed_out and self.stop_event.is_set():
+                    return INTERRUPTED, ""
+                if code != 0:
+                    tail = self.commit_log_path.read_text(errors="replace")[-600:]
+                    return "failed", f"timed out after {COMMIT_TIMEOUT_S} s" if timed_out else tail
+            return self._receive(bundle, received, ref, head_id)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+            received.unlink(missing_ok=True)
+
+    def _receive(self, bundle: Path, received: Path, ref: str, head_id: str) -> tuple[str, str]:
+        """Moves the branch to the commit in `bundle`, which the sandbox wrote and may be hostile.
+
+        Args:
+            bundle: The bundle in the scratch folder.
+            received: Where the host keeps its own copy, outside every folder the sandbox wrote.
+            ref: The branch's full ref name.
+            head_id: The branch's commit before the commit.
+
+        Returns:
+            tuple[str, str]: ("done", the commit id) or ("failed", why).
+        """
+        try:
+            source = os.open(bundle, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError as error:
+            return "failed", f"the commit left no bundle: {error}"
+        try:
+            if not stat.S_ISREG(os.fstat(source).st_mode):
+                return "failed", "the commit's bundle is not a regular file"
+            with os.fdopen(os.dup(source), "rb") as reader, received.open("wb") as writer:
+                shutil.copyfileobj(reader, writer)
+        finally:
+            os.close(source)
+        unbundled = SafeGit.run([*NO_HOOKS, "bundle", "unbundle", str(received)], self.repo)
+        output = unbundled.stdout
+        tips = [line.split() for line in output.splitlines() if line.strip()]
+        if (
+            unbundled.returncode != 0
+            or len(tips) != 1
+            or tips[0][1:] != [ref]
+            or not _OBJECT_ID.fullmatch(tips[0][0])
+        ):
+            why = (output + unbundled.stderr).strip()[-200:]
+            return "failed", f"the commit's bundle does not hold one {ref}: {why}"
+        tip = tips[0][0]
+        parents = self._git(self.repo, "rev-list", "--parents", "-n", "1", tip)
+        if parents[0] != 0 or parents[1].split() != [tip, head_id]:
+            return "failed", f"the commit is not one commit on top of {head_id[:12]}"
+        code, output = self._git(self.repo, "update-ref", ref, tip, head_id)
+        return ("done", tip) if code == 0 else ("failed", output)
 
     def _staged_change(self, stage: bool = True) -> dict[str, Any]:
         """An attempt's change, staged in its worktree: the diff written to `diff_path`, and its stat."""
@@ -761,8 +956,9 @@ class NightShiftTaskRun:
                 continue
 
     def _git(self, cwd: Path, *args: str) -> tuple[int, str]:
-        # The worktree is the agent's to write: no config-named program runs (SafeGit).
-        result = SafeGit.run(args, cwd)
+        # The worktree is the agent's to write: no config-named program runs (SafeGit), and no
+        # hook, whichever folder `core.hooksPath` names (`NO_HOOKS`).
+        result = SafeGit.run([*NO_HOOKS, *args], cwd)
         return result.returncode, result.stdout + result.stderr
 
     def remote_sandbox(self, command: list[str], extra_env: dict[str, str]) -> list[str]:
@@ -833,14 +1029,7 @@ class NightShiftTaskRun:
     def sandboxed_test_command(
         cls, mightling_bin: str, test_command: str, level: str, session: str | None
     ) -> tuple[list[str], dict[str, str]]:
-        """Wraps the test command in the sandbox the agent's own commands run in.
-
-        The test command executes what the agent wrote, unattended, so it gets the agent's rights
-        and no more: writes inside the worktree and `/tmp` only, the rest of the machine read-only.
-        The policy is fixed here and not inherited from `~/.mightling/config.toml`: that file lists
-        `~/.mightling/skills` as writable for the skill installer, and a test run that could write
-        there could leave instructions behind for every later session. Only the `/airgapped`
-        level comes from outside.
+        """The test command in the agent's sandbox (`sandboxed_command`).
 
         Args:
             mightling_bin: The `ling` executable.
@@ -851,20 +1040,50 @@ class NightShiftTaskRun:
         Returns:
             Tuple[List[str], Dict[str, str]]: The command line, and variables to set for it.
         """
+        return cls.sandboxed_command(mightling_bin, ["bash", "-c", test_command], level, session)
+
+    @classmethod
+    def sandboxed_command(
+        cls,
+        mightling_bin: str,
+        command: list[str],
+        level: str,
+        session: str | None,
+        writable_roots: Sequence[str] = (),
+    ) -> tuple[list[str], dict[str, str]]:
+        """Wraps a command in the sandbox the agent's own commands run in.
+
+        The test run and the commit's hooks execute what the agent wrote, unattended, so they get
+        the agent's rights and no more: writes inside the worktree, `/tmp` and `writable_roots`
+        only, the rest of the machine read-only. The policy is fixed here and not inherited from
+        `~/.mightling/config.toml`: that file lists `~/.mightling/skills` as writable for the
+        skill installer, and a command that could write there could leave instructions behind for
+        every later session. Only the `/airgapped` level comes from outside.
+
+        Args:
+            mightling_bin: The `ling` executable.
+            command: What runs in the sandbox (the test run, the commit).
+            level: The `/airgapped` level in force (`airgapped_level`).
+            session: The task's session id, which the sandbox helper looks the level up by.
+            writable_roots: Folders writable beside the working directory (the commit's scratch
+                repository); none for the test run.
+
+        Returns:
+            Tuple[List[str], Dict[str, str]]: The command line, and variables to set for it.
+        """
         sealed = level == SEALED
+        roots = ", ".join(json.dumps(str(root)) for root in writable_roots)
         command = [
             mightling_bin,
             "sandbox",
             "-c",
             'sandbox_mode="workspace-write"',
             "-c",
-            "sandbox_workspace_write.writable_roots=[]",
+            f"sandbox_workspace_write.writable_roots=[{roots}]",
             "-c",
             f"sandbox_workspace_write.network_access={'false' if sealed else 'true'}",
             "--",
-            "bash",
-            "-c",
-            test_command,
+            *command,
         ]
         # The sandbox helper (patch 0019) resolves the level again by itself, from the variable the
         # runner sets for every command of the task and from the session's own file if it has one.

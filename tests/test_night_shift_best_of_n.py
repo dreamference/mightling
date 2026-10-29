@@ -17,7 +17,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from test_night_shift import FakeHost, fake_host, git, queue, setup  # noqa: F401 - fixtures
+from test_night_shift import (  # noqa: F401 - fixtures
+    HOSTILE_HOOK,
+    FakeHost,
+    fake_host,
+    git,
+    queue,
+    setup,
+)
 
 from dreamference.night_shift import (
     ChooserCandidate,
@@ -41,6 +48,7 @@ FAKE_BON = textwrap.dedent("""\
     args = sys.argv[1:]
     if args[0] == "sandbox":
         command = args[args.index("--") + 1:]
+        os.environ["FAKE_MIGHTLING_SANDBOXED"] = "1"
         os.execvp(command[0], command)
     with open(os.environ["FAKE_MIGHTLING_CALLS"], "a") as log:
         log.write(json.dumps(args) + "\\n")
@@ -172,6 +180,29 @@ def test_the_regression_filter_picks_the_attempt_whose_tests_pass_and_only_it_is
     execs = [json.loads(line) for line in bon["calls"].read_text().splitlines()]
     assert [c[c.index("-C") + 1].rsplit("-", 1)[1] for c in execs] == ["a1", "a2", "a3"]
     assert not any("resume" in c for c in execs)
+
+
+def test_the_chosen_attempts_commit_runs_its_hooks_in_the_sandbox(bon, monkeypatch, tmp_path):
+    # The repository's hooks are its own tracked files (`.husky/_`): every attempt's worktree has
+    # them, and the runner's `worktree add` and commit on the host must not run them.
+    escaped = tmp_path / "escaped.txt"
+    monkeypatch.setenv("NIGHT_HOOK_ESCAPED", str(escaped))
+    hooks = bon["repo"] / ".husky" / "_"
+    hooks.mkdir(parents=True)
+    for name in ("pre-commit", "post-checkout", "reference-transaction"):
+        (hooks / name).write_text(HOSTILE_HOOK)
+        (hooks / name).chmod(0o755)
+    git(bon["repo"], "add", "-A")
+    git(bon["repo"], "commit", "-q", "-m", "hooks")
+    git(bon["repo"], "config", "core.hooksPath", ".husky/_")
+    escaped.unlink(missing_ok=True)  # The setup's own commit ran them, outside the runner.
+    status, record, _ = run_best_of(bon, monkeypatch, ["bad", "good", "bad"])
+    assert status == "done", record["result"]
+    assert not escaped.exists(), escaped.read_text()
+    branch = record["result"]["branch"]
+    assert git(bon["repo"], "show", f"{branch}:hooked.txt").stdout == "hooked\n"
+    assert git(bon["repo"], "show", f"{branch}:hello.txt").stdout == "hi\n"
+    assert not any((bon["night"] / "worktrees").iterdir())
 
 
 def test_when_every_attempt_passes_the_judge_picks_and_the_report_names_every_attempt(

@@ -22,8 +22,10 @@ program it names loses to the `-c` pairs.
 
 Repository hooks RUN (`core.hooksPath` is not overridden and nothing passes `--no-verify`): the
 owner's choice of 2026-10-28, "allow all for now". The known risk is that a hook the agent wrote
-into `.git/hooks` runs on the host; see docs/dev/host-safety.md. One more window stays: a driver
-name added between the config read and the command.
+into `.git/hooks` runs on the host; see docs/dev/host-safety.md. Night Shift is the exception
+(2026-10-29): its host-side calls pass `core.hooksPath=/dev/null` and its commit runs the hooks in
+the task's sandbox (`NightShiftTaskRun.commit_in_sandbox`). One more window stays: a driver name
+added between the config read and the command.
 """
 
 import os
