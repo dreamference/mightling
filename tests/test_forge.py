@@ -690,6 +690,17 @@ def test_airgapped_on_stops_the_mirror(monkeypatch):
     assert "airgapped" in ForgeGithubMirror.status()["stopped"]
 
 
+def test_a_boolean_or_a_byte_order_mark_still_reads_as_airgapped():
+    # The Rust resolver reads both files as `on`; the mirror read them as `off`.
+    config = Path("~/.mightling/config.toml").expanduser()
+    config.parent.mkdir(parents=True, exist_ok=True)
+    for text in ("mightling_airgapped = true\n", '\ufeffmightling_airgapped = "on"\n'):
+        config.write_text(text, encoding="utf-8")
+        assert ForgeGithubMirror.airgapped(), text
+    config.write_text("mightling_airgapped = false\n")
+    assert not ForgeGithubMirror.airgapped()
+
+
 # -- the phone account (§2.7) ------------------------------------------------------------------------
 
 
