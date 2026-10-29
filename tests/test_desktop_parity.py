@@ -5,6 +5,9 @@ the grouped list beside them and, in a checkout with the submodule, the pinned C
 agree, so a Codex bump that moves a method fails here until the spec and the policy are reviewed),
 and the policy coverage (every method a §2 row ships through is in ling-rs/web/policy.json or on
 the list of methods Phase 2 still has to add, with the item that adds it).
+
+And three of the spec's own statements, held against the files they describe: §2.19's shortcut
+table against keymap.json, §2.3's slash commands against composer.ts, and the policy's sizes.
 """
 
 import json
@@ -140,3 +143,66 @@ def test_every_phase_2_method_is_allowed_or_listed():
     assert not set(NOT_ADDED) & allowed, "a method Mightling refuses is in the policy"
     refused_at_on = set(json.loads(POLICY.read_text(encoding="utf-8"))["airgappedRefusedRequests"])
     assert OFF_ONLY <= refused_at_on <= allowed
+
+
+def section(start: str, end: str) -> str:
+    text = SPEC.read_text(encoding="utf-8")
+    return text[text.index(start):text.index(end)]
+
+
+# §2.19's bindings in the spelling keymap.json uses.
+KEY_NAMES = {"Esc": "Escape", "↑": "ArrowUp", "←": "ArrowLeft", "→": "ArrowRight"}
+DASH = "\u2013"  # the en dash of a range: Ctrl+1\u20139
+COMBO = re.compile(r"(?:(?:Ctrl|Alt|Shift|Super)\+)*"
+                   rf"(?:F\d+|Enter|Esc|Tab|PageUp|PageDown|[↑←→]|[A-Z0-9](?:{DASH}\d)?|[,/\[\]=\-`.])")
+
+
+def spec_bindings() -> dict[str, list[str]]:
+    """§2.19's table: each row's action and the bindings its last column names, ranges expanded."""
+    found: dict[str, list[str]] = {}
+    for line in section("### 2.19", "### 2.20").splitlines():
+        cells = cells_of(line) if line.startswith("|") else []
+        if len(cells) != 3 or cells[0] == "Group" or cells[2].startswith("---"):
+            continue
+        # Drop the asides (`(and mouse back / forward)`, the view switch's history) but keep `(or …)`.
+        binding = re.sub(r"\((?!or )[^)]*\)", "", cells[2].replace("BACKTICK", "`"))
+        binding = binding.replace("Page Up / Down", "PageUp / Ctrl+PageDown").replace("Ctrl+, ;", "Ctrl+, ; ")
+        keys = []
+        for combo in COMBO.findall(binding):
+            head, _, last = combo.rpartition("+")
+            if DASH in last:
+                low, high = last.split(DASH)
+                keys += [f"{head}+{n}" for n in range(int(low), int(high) + 1)]
+            elif head:
+                keys.append(f"{head}+{KEY_NAMES.get(last, last)}")
+            elif last not in ",/[]=-`.":  # a bare `/` separates two bindings
+                keys.append(KEY_NAMES.get(last, last))
+        found[cells[1]] = keys
+    return found
+
+
+def test_the_keymap_has_every_binding_of_the_spec_table():
+    bound = {key for action in json.loads((Path(UI_DIR) / "src" / "keymap.json").read_text(encoding="utf-8"))["actions"]
+             for key in action["keys"]}
+    rows = spec_bindings()
+    assert len(rows) >= 30 and sum(len(keys) for keys in rows.values()) >= 70, "the §2.19 parse is broken"
+    missing = {action: sorted(set(keys) - bound) for action, keys in rows.items() if set(keys) - bound}
+    assert not missing, f"§2.19 bindings keymap.json lacks: {missing}"
+
+
+def test_the_composer_offers_the_slash_commands_the_spec_lists():
+    row = next(line for line in section("### 2.3", "### 2.4").splitlines() if line.startswith("| Slash commands"))
+    stated = set(re.findall(r"`/([a-z]+)`", cells_of(row)[2]))
+    gone = {"cavemode", "prompt"}  # removed on 2026-10-28, and never added
+    assert gone <= stated
+    composer = (Path(UI_DIR) / "src" / "composer.ts").read_text(encoding="utf-8")
+    listed = composer[composer.index("export const SLASH_COMMANDS"):]
+    offered = set(re.findall(r'\{ name: "([a-z]+)"', listed[:listed.index("\n];")]))
+    assert offered == stated - gone
+
+
+def test_the_policy_has_the_sizes_the_spec_states():
+    policy = json.loads(POLICY.read_text(encoding="utf-8"))
+    text = SPEC.read_text(encoding="utf-8")
+    sizes = [len(policy[key]) for key in ("allowedRequests", "allowedNotifications", "droppedThreadFields")]
+    assert "({} requests, {} notification, {} dropped thread fields".format(*sizes) in text, sizes
