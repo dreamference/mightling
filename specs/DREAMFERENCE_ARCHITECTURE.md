@@ -94,7 +94,7 @@ Every field in `DreamferenceConfig.__init__` resolves, highest priority first:
 - `sglang_launch_builder.py`, `sglang_runtime_patcher.py`: what follows the image for a model whose recipe names `engine: sglang`, and host-side runtime patching of container Python files verified by SHA-256; `ling_serve_launch_builder.py`: what follows the image for `engine: ling` (`ling-serve`); the `docker run` prefix, and so the host-safety layer, is shared across engines.
 - `model_gate.py`, `model_gate_service.py`, `model_gate_adapters.py`, `model_gate_guard.py`, `adapter_serving.py`: the model gate container (`dreamference-model-gate-<port>`) in front of the engine, LoRA adapter routing, and the loop-guard/SWE-bench admission proxy.
 - `chat_template_patcher.py`: patches a checkpoint's chat template on a copy at launch, from the registry entry's `chat_template_patches`; a non-matching anchor stops the start.
-- `vllm_launch_options.py`, `tool_call_canary.py`, `wifi_power_save.py`: flag merging, post-boot `/v1/responses` tool-call check, and Wi-Fi power-save check.
+- `tool_call_canary.py`, `wifi_power_save.py`: the post-boot `/v1/responses` tool-call check and the Wi-Fi power-save check.
 - `model_loading_monitor.py`, `vllm_startup_monitor.py`, `vllm_log_streamer.py`, `vllm_server_status.py`, `diagnostics.py`: load progress and status.
 - **Host safety:** unified memory means a bad load can freeze the whole host. Two layers guard against it:
   - `check_host_safety()` (`host_safety_setup.py`, `sandbox_prerequisite.py`) runs *before* the load (swap, sysctl, earlyoom/systemd-oomd);
