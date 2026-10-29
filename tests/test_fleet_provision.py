@@ -937,6 +937,28 @@ def test_bundle_from_release_downloads_with_gh_and_caches_tagged_release(
     assert "v1.8.0" in gh_calls[3]
 
 
+def test_a_release_download_that_broke_off_is_downloaded_again(tmp_path, monkeypatch):
+    from dreamference.node import fleet_bundle as bundle_module
+    from dreamference.node.fleet_bundle import FleetBundle
+
+    monkeypatch.setattr(bundle_module, "BUNDLE_ROOT", str(tmp_path / "bundles"))
+    monkeypatch.setattr(bundle_module.shutil, "which", lambda name: "/usr/bin/gh")
+    gh_calls = []
+
+    def fake_gh(argv, **kwargs):
+        # The checksums arrive before the download breaks off: gh writes assets as it goes.
+        gh_calls.append(argv)
+        dest = Path(argv[argv.index("-D") + 1])
+        (dest / f"ling-{FleetBundle.target()}.sha256sums").write_text("ok\n", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 1 if len(gh_calls) == 1 else 0, "", "connection reset")
+
+    monkeypatch.setattr(bundle_module.subprocess, "run", fake_gh)
+    assert FleetBundle.from_release("1.7.0") is None
+    bundle = FleetBundle.from_release("1.7.0")
+    assert bundle is not None and FleetBundle.version(bundle) == "v1.7.0"
+    assert len(gh_calls) == 2
+
+
 def test_bundle_rejects_empty_release_version_and_passes_valid_version(
     tmp_path, monkeypatch, capsys
 ):

@@ -196,7 +196,9 @@ class FleetBundle:
         tag = f"v{version.lstrip('v')}" if version else cls.latest_tag()
         bundle = Path(BUNDLE_ROOT) / f"bundle-{tag}"
         target = cls.target()
-        if (bundle / f"ling-{target}.sha256sums").is_file():
+        # VERSION is written only once gh has finished: the checksums alone arrive before a
+        # download that breaks off.
+        if (bundle / "VERSION").is_file():
             return tag
         bundle.mkdir(parents=True, exist_ok=True)
         command = [
