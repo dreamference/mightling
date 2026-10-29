@@ -55,16 +55,23 @@ def _gb10_manager(monkeypatch, available, side=0.0, transient=5.0):
     monkeypatch.setattr(mgr, "_evict_model_page_cache", lambda model: 0.0)
     monkeypatch.setattr(mgr, "_estimate_model_weights_gb", lambda model: 20.0)
     monkeypatch.setattr(mgr, "load_transient_gb", lambda model, weights: (transient, "test"))
-    monkeypatch.setattr(mgr, "side_service_allowance", lambda: [("the forge", side)] if side else [])
+    monkeypatch.setattr(
+        mgr, "side_service_allowance", lambda: [("the forge", side)] if side else []
+    )
     monkeypatch.setattr(vsm.subprocess, "check_output", lambda *a, **k: "")
     monkeypatch.setattr(
         HardwareManager,
         "detect_gb10_hardware",
         classmethod(
             lambda cls: HardwareTelemetry(
-                is_gb10=True, gpu_name="NVIDIA GB10", driver_version="0", arch="aarch64",
-                total_unified_memory_gb=128.0, available_memory_gb=available,
-                used_memory_gb=128.0 - available, vram_gb=0.0,
+                is_gb10=True,
+                gpu_name="NVIDIA GB10",
+                driver_version="0",
+                arch="aarch64",
+                total_unified_memory_gb=128.0,
+                available_memory_gb=available,
+                used_memory_gb=128.0 - available,
+                vram_gb=0.0,
             )
         ),
     )
@@ -213,10 +220,12 @@ def test_the_canary_reads_utf8_events_whatever_charset_the_stream_names():
     import requests
     from test_tool_call_canary import call_item, check, message_item, stream
 
-    # "х" is D1 85 in UTF-8; read as ISO-8859-1 (requests' default for text/*), the 0x85 is NEL,
+    # U+0445 is D1 85 in UTF-8; read as ISO-8859-1 (requests' default for text/*), the 0x85 is NEL,
     # a line break to str.splitlines(), and the event it was in came apart.
-    events = stream(message_item("Погода: х"), call_item())
-    body = "".join(f"event: {e['type']}\ndata: {json.dumps(e, ensure_ascii=False)}\n\n" for e in events)
+    events = stream(message_item("weather: \u0445"), call_item())
+    body = "".join(
+        f"event: {e['type']}\ndata: {json.dumps(e, ensure_ascii=False)}\n\n" for e in events
+    )
     response = requests.Response()
     response.status_code = 200
     response.headers["Content-Type"] = "text/event-stream"

@@ -6,6 +6,7 @@ This module provides the VLLMServerManager class which handles building vLLM ser
 polling HTTP health checks, and capturing logs.
 """
 
+import contextlib
 import os
 import re
 import sys
@@ -2092,16 +2093,22 @@ class VLLMServerManager:
             return None
 
     def _abandon_launch(self, port: int) -> None:
-        """Takes down what start_server set up around an engine that did not start: the watchdog,
-        and the gate, which alone would hold the public port and answer every request 502."""
+        """Takes down what start_server set up around an engine that did not start.
+
+        That is the watchdog, and the gate, which alone would hold the public port and answer
+        every request 502.
+
+        Args:
+            port: The public port of the launch.
+        """
         if self.watchdog is not None:
             self.watchdog.stop()
             self.watchdog = None
         from dreamference.vllm_server.model_gate import ModelGate
-        try:
+
+        # No docker means no gate; the launch's own error is the one to report.
+        with contextlib.suppress(OSError):
             ModelGate.stop(port)
-        except OSError:
-            pass  # No docker, so no gate; the launch's own error is the one to report.
 
     def stop_server(self, port: int = 8000) -> None:
         """
