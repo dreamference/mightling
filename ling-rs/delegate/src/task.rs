@@ -15,6 +15,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::exclude::{Rules, dependency_change, is_manifest, lockfile};
 use crate::exec::{
     RunSpec, Runner, StatusEntry, check_relative, delegate_ling_bin, git, ignored_paths,
     is_build_artifact, linked_worktree, main_checkout, parse_numstat, sandbox_check, sandbox_env,
@@ -51,6 +52,8 @@ pub struct TaskEnv {
     /// address. Unset, `ling` finds the model server through the launcher's own tiers.
     pub node: Option<String>,
     pub ling_bin: String,
+    /// The user's `~/.config/dreamference/config.toml`, read for `[claude_plugin] exclude`.
+    pub user_config: Option<PathBuf>,
 }
 
 impl TaskEnv {
@@ -67,7 +70,18 @@ impl TaskEnv {
             .unwrap_or(2);
         let node = std::env::var("DREAMFERENCE_DELEGATE_NODE").ok().filter(|v| !v.trim().is_empty());
         let ling_bin = delegate_ling_bin();
-        Self { codex_home, max_parallel, node, ling_bin }
+        let user_config = std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+            .map(|c| c.join("dreamference").join("config.toml"));
+        Self {
+            codex_home,
+            max_parallel,
+            node,
+            ling_bin,
+            user_config,
+        }
     }
 
     fn state_dir(&self) -> PathBuf {
@@ -130,7 +144,8 @@ pub struct TaskResult {
     pub id: String,
     pub class: String,
     pub pass: bool,
-    /// `ok`, or why it failed: `agent`, `committed`, `scope`, `test_files`, `weakened_tests`,
+    /// `ok`, or why it failed: `excluded` (a protected path), `dependencies` (a lockfile or a
+    /// dependency section), `agent`, `committed`, `scope`, `test_files`, `weakened_tests`,
     /// `too_large`, `acceptance`, `gate`, `empty`.
     pub reason: String,
     /// The allowed files that changed.
@@ -234,7 +249,7 @@ pub fn build_prompt(req: &TaskRequest, accept: &RunTestRequest) -> String {
          FILES YOU MAY CHANGE (no others; a change anywhere else is reverted and the task fails)\n{}\n\n\
          DONE WHEN this command passes{cwd}: {cmd}\n\n\
          RULES\n- Run the command yourself and stop when it passes.\n- Do not commit, stash, reset, \
-         switch branches or touch git state.\n- {tests}\n- Add no dependency and change no lockfile.\n\
+         switch branches or touch git state.\n- {tests}\n- Add no dependency and change no lockfile: such a change rejects the whole task.\n\
          - If the steps cannot be done within the allowed files, stop and say why in your last message.",
         steps.join("\n"),
         req.allowed_files.iter().map(|f| format!("- {f}")).collect::<Vec<_>>().join("\n"),
@@ -500,6 +515,81 @@ fn revert(runner: &dyn Runner, wt: &Path, e: &StatusEntry) -> Result<(), String>
     }
 }
 
+/// Why the declared scope touches a protected path or names a lockfile, if it does. A folder is
+/// checked by its name and by every file git tracks under it.
+fn scope_protected(
+    runner: &dyn Runner,
+    wt: &Path,
+    allowed: &[String],
+    rules: &Rules,
+) -> Result<(), String> {
+    for entry in allowed {
+        let name = entry.trim_end_matches('/');
+        if let Some(rule) = rules.matching(name) {
+            return Err(format!(
+                "the scope touches a protected path: {}",
+                rule.explain(name)
+            ));
+        }
+        if let Some(what) = lockfile(name) {
+            return Err(format!(
+                "the scope names {name}, {what}; a task never changes a lockfile or a dependency list"
+            ));
+        }
+        if entry.ends_with('/') {
+            let tracked = git(runner, wt, &["ls-files", "-z", "--", name])?;
+            for path in tracked.split('\0').filter(|p| !p.is_empty()) {
+                if let Some(rule) = rules.matching(path) {
+                    return Err(format!(
+                        "the scope {entry} holds a protected path: {}",
+                        rule.explain(path)
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The first change that touches a protected path (`excluded`) or a dependency
+/// (`dependencies`), with the rule it breaks in plain words. A manifest's old content comes
+/// from HEAD and is compared section by section with what the model left.
+fn protected_change(
+    runner: &dyn Runner,
+    wt: &Path,
+    entries: &[StatusEntry],
+    new_ignored: &[String],
+    rules: &Rules,
+) -> Option<(&'static str, String)> {
+    let paths = entries
+        .iter()
+        .map(|e| e.path.as_str())
+        .chain(new_ignored.iter().map(String::as_str));
+    for path in paths.clone() {
+        if let Some(rule) = rules.matching(path) {
+            return Some(("excluded", rule.explain(path)));
+        }
+    }
+    for path in paths {
+        if lockfile(path).is_none() && !is_manifest(path) {
+            continue;
+        }
+        let code = entries
+            .iter()
+            .find(|e| e.path == path)
+            .map_or('?', |e| e.code);
+        let before = match code {
+            '?' | 'A' | 'R' => None,
+            _ => git(runner, wt, &["show", &format!("HEAD:{path}")]).ok(),
+        };
+        let after = std::fs::read_to_string(wt.join(path)).ok();
+        if let Some(why) = dependency_change(path, before.as_deref(), after.as_deref()) {
+            return Some(("dependencies", why));
+        }
+    }
+    None
+}
+
 fn fail(mut r: TaskResult, reason: &str, note: &str) -> TaskResult {
     r.pass = false;
     r.reason = reason.to_string();
@@ -520,6 +610,16 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
             "repo": repo_hash, "status": "refused", "reason": why}));
         Err(why)
     };
+
+    // The protected paths (§6.1), fixed before the model runs: a scope that touches one is
+    // refused, and so is a lockfile.
+    let rules = match Rules::load(&wt, env.user_config.as_deref()) {
+        Ok(r) => r,
+        Err(e) => return refuse(format!("the protected-path rules cannot be read: {e}")),
+    };
+    if let Err(e) = scope_protected(runner, &wt, &req.allowed_files, &rules) {
+        return refuse(e);
+    }
 
     match benchmark_running(runner) {
         Ok(Some(unit)) => return refuse(format!("a benchmark run is active ({unit}); the model is not available for tasks now")),
@@ -633,6 +733,36 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
         _ => {}
     }
     let entries = tri!(status_entries(runner, &wt));
+    let new_ignored: Vec<String> = tri!(ignored_paths(runner, &wt))
+        .into_iter()
+        .filter(|p| !ignored_before.contains(p) && !is_build_artifact(p))
+        .collect();
+    // A protected path or a dependency change, whatever the scope said, rejects the whole diff:
+    // every change goes, in scope or not (§6.1, §6.2 item 5).
+    if let Some((reason, why)) = protected_change(runner, &wt, &entries, &new_ignored, &rules) {
+        for e in &entries {
+            tri!(revert(runner, &wt, e));
+            r.reverted.push(e.path.clone());
+        }
+        for path in &new_ignored {
+            tri!(revert(
+                runner,
+                &wt,
+                &StatusEntry {
+                    path: path.trim_end_matches('/').to_string(),
+                    code: '?'
+                }
+            ));
+            r.reverted.push(path.clone());
+        }
+        let note = format!("{why}; the whole diff is rejected and every change reverted");
+        return Ok(log_and_return(
+            &ledger,
+            &repo_hash,
+            env,
+            finish(fail(r, reason, &note)),
+        ));
+    }
     let mut touched: Vec<String> = Vec::new();
     let mut violations: Vec<String> = Vec::new();
     for e in &entries {
@@ -652,10 +782,7 @@ pub fn execute(req: &TaskRequest, runner: &dyn Runner, env: &TaskEnv) -> Result<
     }
     // New ignored files (a `conftest.py` behind a `.gitignore` rule) are invisible to the status
     // above and to the diff; anything but build output is the model's and goes.
-    for path in tri!(ignored_paths(runner, &wt)) {
-        if ignored_before.contains(&path) || is_build_artifact(&path) {
-            continue;
-        }
+    for path in new_ignored {
         tri!(revert(runner, &wt, &StatusEntry { path: path.trim_end_matches('/').to_string(), code: '?' }));
         r.notes.push(format!("{path} is new and ignored by a .gitignore rule, so not in the diff; removed"));
         r.reverted.push(path);
@@ -834,6 +961,10 @@ mod tests {
         ignored_after: String,
         /// The extra environment `ling exec` got.
         exec_env: RefCell<Vec<(String, String)>>,
+        /// (path, content) at HEAD, for `git show HEAD:<path>`.
+        head_files: Vec<(&'static str, &'static str)>,
+        /// `git ls-files -z` output.
+        tracked: String,
     }
 
     impl Runner for World {
@@ -888,6 +1019,20 @@ mod tests {
                 let v = if h.len() > 1 { h.remove(0) } else { h[0].clone() };
                 return ok(&format!("{v}\n"));
             }
+            if let Some(path) = j.strip_prefix("git show HEAD:") {
+                return match self.head_files.iter().find(|(p, _)| *p == path) {
+                    Some((_, c)) => ok(c),
+                    None => Ok(RunOutput {
+                        exit: Some(128),
+                        output: "fatal: no such path".into(),
+                        timed_out: false,
+                        elapsed_s: 0,
+                    }),
+                };
+            }
+            if j.starts_with("git ls-files") {
+                return ok(&self.tracked);
+            }
             if j.contains("--numstat") {
                 return ok(&self.numstat);
             }
@@ -913,6 +1058,7 @@ mod tests {
             max_parallel: 2,
             node: None,
             ling_bin: "ling".into(),
+            user_config: None,
         };
         (wt, env)
     }
@@ -935,6 +1081,8 @@ mod tests {
             ignored: RefCell::new("!! .mypy_cache/\0".into()),
             ignored_after: "!! .mypy_cache/\0".into(),
             exec_env: RefCell::new(vec![]),
+            head_files: vec![],
+            tracked: String::new(),
         }
     }
 
@@ -1237,5 +1385,177 @@ mod tests {
             assert!(is_test_path(p), "{p}");
         }
         assert!(!is_test_path("src/contest.py") && !is_test_path("src/latest.rs"));
+    }
+
+    fn ledger_text(env: &TaskEnv) -> String {
+        std::fs::read_to_string(env.state_dir().join("ledger.jsonl")).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_scope_on_a_protected_path_is_refused_before_anything_runs() {
+        let (wt, env) = setup("excl-before");
+        let mut w = world(&wt);
+        let mut req = request(&wt, "T3");
+        req.allowed_files = vec!["src/a.py".into(), "install.sh".into()];
+        let e = execute(&req, &w, &env).unwrap_err();
+        assert!(e.contains("install.sh is protected: it matches the built-in rule `install.sh` (the installers)"), "{e}");
+        assert!(
+            !w.log.borrow().iter().any(|l| l.starts_with("ling exec")),
+            "{:?}",
+            w.log.borrow()
+        );
+        assert!(ledger_text(&env).contains("\"refused\""));
+        // A folder in scope is refused when a protected file is tracked under it.
+        w.tracked = "src/a.py\0src/sandbox_policy.py\0".into();
+        req.allowed_files = vec!["src/".into()];
+        let e = execute(&req, &w, &env).unwrap_err();
+        assert!(
+            e.contains("src/sandbox_policy.py is protected") && e.contains("(sandboxing)"),
+            "{e}"
+        );
+        // A lockfile is never in scope.
+        req.allowed_files = vec!["desktop/ui/package-lock.json".into()];
+        let e = execute(&req, &w, &env).unwrap_err();
+        assert!(e.contains("npm's lockfile"), "{e}");
+        assert!(!w.log.borrow().iter().any(|l| l.starts_with("ling exec")));
+    }
+
+    #[test]
+    fn the_config_adds_protected_paths_and_cannot_remove_a_default() {
+        let (wt, mut env) = setup("excl-config");
+        let w = world(&wt);
+        std::fs::write(
+            wt.join("dreamference.toml"),
+            "[claude_plugin]\nexclude = [\"src/a.py\"]\n",
+        )
+        .unwrap();
+        let e = execute(&request(&wt, "T3"), &w, &env).unwrap_err();
+        assert!(e.contains("src/a.py is protected: it matches `src/a.py`, a `[claude_plugin] exclude` rule in dreamference.toml"), "{e}");
+        std::fs::remove_file(wt.join("dreamference.toml")).unwrap();
+        let user = wt.parent().unwrap().join("config.toml");
+        std::fs::write(
+            &user,
+            "[claude_plugin]\nexclude = [\"!**\", \"!install.sh\"]\n",
+        )
+        .unwrap();
+        env.user_config = Some(user.clone());
+        let mut req = request(&wt, "T3");
+        req.allowed_files = vec!["install.sh".into()];
+        let e = execute(&req, &w, &env).unwrap_err();
+        assert!(e.contains("the built-in rule `install.sh`"), "{e}");
+        // A config that cannot be read refuses rather than running with fewer rules.
+        std::fs::write(&user, "[claude_plugin]\nexclude = 3\n").unwrap();
+        let e = execute(&request(&wt, "T3"), &w, &env).unwrap_err();
+        assert!(e.contains("not a list"), "{e}");
+        assert!(!w.log.borrow().iter().any(|l| l.starts_with("ling exec")));
+    }
+
+    #[test]
+    fn a_diff_touching_a_protected_path_is_rejected_and_every_change_reverted() {
+        let (wt, env) = setup("excl-after");
+        let mut w = world(&wt);
+        w.writes = vec![
+            ("src/a.py", "x = 1\n"),
+            ("ling-rs/src/airgapped.rs", "// off\n"),
+        ];
+        w.status_after = " M src/a.py\0?? ling-rs/src/airgapped.rs\0".into();
+        let r = execute(&request(&wt, "T3"), &w, &env).unwrap();
+        assert!(!r.pass);
+        assert_eq!(r.reason, "excluded");
+        assert!(r.files.is_empty() && r.diff.is_empty(), "{r:?}");
+        assert_eq!(r.reverted, vec!["src/a.py", "ling-rs/src/airgapped.rs"]);
+        assert!(r.acceptance.is_none() && r.gates.is_empty());
+        let notes = r.notes.join("\n");
+        assert!(notes.contains("ling-rs/src/airgapped.rs is protected: it matches the built-in rule `**/*airgap*` (/airgapped)"), "{notes}");
+        assert!(!wt.join("ling-rs/src/airgapped.rs").exists());
+        assert!(
+            w.log
+                .borrow()
+                .iter()
+                .any(|l| l.contains("checkout HEAD -- src/a.py"))
+        );
+        assert!(ledger_text(&env).contains("\"excluded\""));
+    }
+
+    #[test]
+    fn a_protected_file_new_under_a_folder_in_scope_is_rejected_whatever_the_scope_said() {
+        let (wt, env) = setup("excl-folder");
+        let mut w = world(&wt);
+        w.tracked = "src/a.py\0".into();
+        w.writes = vec![
+            ("src/a.py", "x = 1\n"),
+            ("src/egress_rules.py", "ALLOW = ['*']\n"),
+        ];
+        w.status_after = " M src/a.py\0?? src/egress_rules.py\0".into();
+        let mut req = request(&wt, "T3");
+        req.allowed_files = vec!["src/".into()];
+        let r = execute(&req, &w, &env).unwrap();
+        assert_eq!(r.reason, "excluded");
+        assert!(r.files.is_empty() && r.reverted.contains(&"src/egress_rules.py".to_string()));
+        assert!(
+            r.notes
+                .join("\n")
+                .contains("(the egress allowlists and the egress audit)")
+        );
+        assert!(!wt.join("src/egress_rules.py").exists());
+    }
+
+    #[test]
+    fn a_lockfile_or_dependency_change_is_rejected_and_every_change_reverted() {
+        let (wt, env) = setup("deps-lock");
+        let mut w = world(&wt);
+        w.writes = vec![("src/a.py", "x = 1\n"), ("Cargo.lock", "# new\n")];
+        w.status_after = " M src/a.py\0?? Cargo.lock\0".into();
+        let r = execute(&request(&wt, "T3"), &w, &env).unwrap();
+        assert_eq!(r.reason, "dependencies");
+        assert!(r.files.is_empty() && r.diff.is_empty());
+        assert!(
+            r.notes
+                .join("\n")
+                .contains("Cargo.lock is Cargo's lockfile"),
+            "{:?}",
+            r.notes
+        );
+        assert!(!wt.join("Cargo.lock").exists());
+
+        // A manifest in scope may change, but not its dependencies.
+        let before = "[package]\nname = \"a\"\n\n[dependencies]\nserde = \"1\"\n";
+        let mut req = request(&wt, "T3");
+        req.allowed_files = vec!["Cargo.toml".into()];
+        let mut w = world(&wt);
+        w.head_files = vec![("Cargo.toml", before)];
+        w.writes = vec![(
+            "Cargo.toml",
+            "[package]\nname = \"a\"\n\n[dependencies]\nserde = \"1\"\nregex = \"1\"\n",
+        )];
+        w.status_after = " M Cargo.toml\0".into();
+        let r = execute(&req, &w, &env).unwrap();
+        assert_eq!(r.reason, "dependencies");
+        assert!(
+            r.notes
+                .join("\n")
+                .contains("Cargo.toml: the dependency section dependencies changed"),
+            "{:?}",
+            r.notes
+        );
+        *w.status.borrow_mut() = String::new();
+        w.writes = vec![(
+            "Cargo.toml",
+            "[package]\nname = \"a\"\ndescription = \"b\"\n\n[dependencies]\nserde = \"1\"\n",
+        )];
+        let r = execute(&req, &w, &env).unwrap();
+        assert!(r.pass, "{:?}", r.notes);
+
+        // A new package.json brings its dependencies with it.
+        let mut w = world(&wt);
+        req.allowed_files = vec!["web/".into()];
+        w.writes = vec![(
+            "web/package.json",
+            "{\"dependencies\": {\"left-pad\": \"1\"}}",
+        )];
+        w.status_after = "?? web/package.json\0".into();
+        let r = execute(&req, &w, &env).unwrap();
+        assert_eq!(r.reason, "dependencies");
+        assert!(!wt.join("web/package.json").exists());
     }
 }

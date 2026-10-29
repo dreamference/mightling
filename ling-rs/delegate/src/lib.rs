@@ -12,6 +12,7 @@
 
 pub mod classes;
 pub mod cli;
+pub mod exclude;
 pub mod exec;
 pub mod lookup;
 pub mod mcp;
