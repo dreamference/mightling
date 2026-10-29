@@ -24,6 +24,7 @@ an interactive `ling-admin` run, only where that folder exists and Onyx's contai
 
 import json
 import os
+import pathlib
 import subprocess
 import sys
 from collections.abc import Callable
@@ -68,7 +69,7 @@ class RetiredWebChat:
     @classmethod
     def deployed(cls) -> bool:
         """True if an Onyx deployment folder exists: a cheap check before asking Docker."""
-        return os.path.isdir(ONYX_DEPLOYMENT_DIR)
+        return pathlib.Path(ONYX_DEPLOYMENT_DIR).is_dir()
 
     @classmethod
     def containers(cls) -> list[str]:
@@ -213,7 +214,7 @@ class RetiredWebChat:
         files: list[str] = []
         for name in ONYX_COMPOSE_FILES:
             path = os.path.join(ONYX_DEPLOYMENT_DIR, name)
-            if os.path.isfile(path):
+            if pathlib.Path(path).is_file():
                 files += ["-f", path]
         if not files:
             return None
@@ -364,7 +365,7 @@ class RetiredWebChat:
     @classmethod
     def _declined(cls) -> bool:
         try:
-            with open(DECISION_FILE) as handle:
+            with pathlib.Path(DECISION_FILE).open() as handle:
                 return bool(json.load(handle).get("declined"))
         except (OSError, ValueError, AttributeError):
             return False
@@ -372,8 +373,8 @@ class RetiredWebChat:
     @classmethod
     def _remember_declined(cls) -> None:
         try:
-            os.makedirs(os.path.dirname(DECISION_FILE), exist_ok=True)
-            with open(DECISION_FILE, "w") as handle:
+            pathlib.Path(os.path.dirname(DECISION_FILE)).mkdir(exist_ok=True, parents=True)
+            with pathlib.Path(DECISION_FILE).open("w") as handle:
                 json.dump({"declined": True}, handle)
         except OSError:
             pass

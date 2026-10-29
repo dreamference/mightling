@@ -156,7 +156,7 @@ class NightShiftQueue:
         """
         night_dir.mkdir(parents=True, exist_ok=True)
         # Opened for appending: truncating here would erase the name of a run that holds it.
-        with open(night_dir / "runner.lock", "a") as handle:
+        with Path(night_dir / "runner.lock").open("a") as handle:
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -205,7 +205,7 @@ class NightShiftQueue:
         path = (night_dir or cls.night_dir()) / "runner.lock"
         if not path.exists():
             return False
-        with open(path, "a") as handle:
+        with Path(path).open("a") as handle:
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -222,7 +222,7 @@ class NightShiftQueue:
     @contextmanager
     def _locked(cls, path: Path) -> Iterator[None]:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a") as handle:
+        with Path(path).open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             try:
                 yield
@@ -241,4 +241,4 @@ class NightShiftQueue:
     def _write_atomically(cls, path: Path, record: dict[str, Any]) -> None:
         staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         staging.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
-        os.replace(staging, path)
+        Path(staging).replace(path)

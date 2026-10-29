@@ -15,8 +15,10 @@ writes it. Everything that touches Docker, systemd, Tailscale or HTTP goes throu
 `_http`, so the tests replace those two and nothing else.
 """
 
+import contextlib
 import json
 import os
+import pathlib
 import re
 import secrets
 import string
@@ -111,7 +113,7 @@ class MatrixHomeserver:
     @classmethod
     def _load(cls, name: str) -> dict[str, Any]:
         try:
-            with open(cls._path(name), encoding="utf-8") as handle:
+            with pathlib.Path(cls._path(name)).open(encoding="utf-8") as handle:
                 value = json.load(handle)
             return value if isinstance(value, dict) else {}
         except (OSError, ValueError):
@@ -121,13 +123,13 @@ class MatrixHomeserver:
     def _save(cls, name: str, value: dict[str, Any]) -> None:
         """Writes a file readable only by the user, replacing it whole."""
         directory = cls.chat_dir()
-        os.makedirs(directory, exist_ok=True)
-        os.chmod(directory, 0o700)
+        pathlib.Path(directory).mkdir(exist_ok=True, parents=True)
+        pathlib.Path(directory).chmod(0o700)
         staging = cls._path(f"{name}.tmp-{os.getpid()}")
         fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(value, handle, indent=2)
-        os.replace(staging, cls._path(name))
+        pathlib.Path(staging).replace(cls._path(name))
 
     # -- Tailscale ------------------------------------------------------------------------------
 
@@ -205,7 +207,7 @@ class MatrixHomeserver:
         ]
         for key, value in env.items():
             argv += ["-e", f"{key}={value}"]
-        return argv + [MATRIX_IMAGE]
+        return [*argv, MATRIX_IMAGE]
 
     @classmethod
     def ensure_network(cls) -> bool:
@@ -289,9 +291,9 @@ class MatrixHomeserver:
     def install_proxy(cls, target: str) -> bool:
         """Writes the proxy units, then (re)starts them. Returns True on success."""
         directory = cls.unit_dir()
-        os.makedirs(directory, exist_ok=True)
+        pathlib.Path(directory).mkdir(exist_ok=True, parents=True)
         for name, text in cls.proxy_units(target).items():
-            with open(os.path.join(directory, name), "w", encoding="utf-8") as handle:
+            with pathlib.Path(os.path.join(directory, name)).open("w", encoding="utf-8") as handle:
                 handle.write(text)
         steps = [
             ["systemctl", "--user", "daemon-reload"],
@@ -547,14 +549,10 @@ class MatrixHomeserver:
         cls._run(["docker", "volume", "rm", MATRIX_VOLUME], timeout=120)
         cls._run(["docker", "network", "rm", MATRIX_NETWORK], timeout=60)
         for name in ("matrix.json", "matrix-admin.json", "matrix-state.json"):
-            try:
-                os.remove(cls._path(name))
-            except FileNotFoundError:
-                pass
+            with contextlib.suppress(FileNotFoundError):
+                pathlib.Path(cls._path(name)).unlink()
         for name in (PROXY_SOCKET_UNIT, PROXY_SERVICE_UNIT):
-            try:
-                os.remove(os.path.join(cls.unit_dir(), name))
-            except FileNotFoundError:
-                pass
+            with contextlib.suppress(FileNotFoundError):
+                pathlib.Path(os.path.join(cls.unit_dir(), name)).unlink()
         print("✅ The Matrix homeserver and its accounts are deleted.")
         return 0

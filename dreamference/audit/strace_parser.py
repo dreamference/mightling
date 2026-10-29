@@ -230,7 +230,7 @@ class StraceParser:
             if subcommand == "ls-remote" and "--get-url" in argv:
                 return
             if subcommand in NETWORKED_GIT:
-                trace.networked_git.append(" ".join([name] + argv[1:])[:300])
+                trace.networked_git.append(" ".join([name, *argv[1:]])[:300])
 
     @classmethod
     def git_subcommand(cls, args: list[str]) -> str | None:

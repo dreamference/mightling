@@ -186,11 +186,9 @@ class SweBenchPatchFilter:
             if line.startswith("@@"):
                 break
             path = None
-            if line.startswith("--- ") or line.startswith("+++ "):
+            if line.startswith(("--- ", "+++ ")):
                 path = cls._strip(line[4:], prefixed=True)
-            elif line.startswith("rename from ") or line.startswith("rename to "):
-                path = cls._strip(line.split(" ", 2)[2], prefixed=False)
-            elif line.startswith("copy from ") or line.startswith("copy to "):
+            elif line.startswith(("rename from ", "rename to ", "copy from ", "copy to ")):
                 path = cls._strip(line.split(" ", 2)[2], prefixed=False)
             if path:
                 found.append(path)
@@ -212,6 +210,6 @@ class SweBenchPatchFilter:
             text = text[1:-1].replace('\\"', '"').replace("\\\\", "\\")
         if text == "/dev/null":
             return None
-        if prefixed and (text.startswith("a/") or text.startswith("b/")):
+        if prefixed and (text.startswith(("a/", "b/"))):
             text = text[2:]
         return text or None

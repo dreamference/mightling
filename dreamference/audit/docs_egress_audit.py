@@ -208,7 +208,8 @@ class DocsEgressAudit:
                 "-o",
                 trace_path,
                 ling_docs,
-            ] + args
+                *args,
+            ]
             try:
                 result = subprocess.run(
                     command,

@@ -24,6 +24,7 @@ from every session in silence: Codex logs the failed start and the model answers
 
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import urllib.error
@@ -129,7 +130,7 @@ class ImageSearchMcp:
     def secret(cls) -> str | None:
         """The sidecar's shared secret, or None when image search is not set up."""
         try:
-            with open(IMAGE_SEARCH_SECRET_FILE) as handle:
+            with pathlib.Path(IMAGE_SEARCH_SECRET_FILE).open() as handle:
                 return handle.read().strip() or None
         except OSError:
             return None
@@ -172,9 +173,9 @@ class ImageSearchMcp:
     def seal_dir(cls) -> str | None:
         """Where sessions held at `on` leave their seals (`ling-rs/airgapped`)."""
         runtime = os.environ.get("XDG_RUNTIME_DIR", "")
-        if not (os.path.isabs(runtime) and os.path.isdir(runtime)):
+        if not (pathlib.Path(runtime).is_absolute() and pathlib.Path(runtime).is_dir()):
             runtime = f"/run/user/{os.getuid()}"
-            if not os.path.isdir(runtime):
+            if not pathlib.Path(runtime).is_dir():
                 return None
         return os.path.join(runtime, SEAL_DIR_NAME)
 
@@ -197,7 +198,7 @@ class ImageSearchMcp:
             return False
         for name in names:
             try:
-                with open(os.path.join(folder, name)) as handle:
+                with pathlib.Path(os.path.join(folder, name)).open() as handle:
                     if handle.read().strip() == str(pid):
                         return True
             except OSError:

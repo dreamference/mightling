@@ -15,6 +15,7 @@ them when they are missing, the way it names a missing `strace`.
 import glob
 import json
 import os
+import pathlib
 import signal
 import time
 from typing import Final
@@ -62,7 +63,7 @@ class TuiSession:
             home (str): The throwaway `CODEX_HOME`.
             repo (str): The throwaway repository.
         """
-        with open(os.path.join(home, "config.toml"), "a") as handle:
+        with pathlib.Path(os.path.join(home, "config.toml")).open("a") as handle:
             handle.write(
                 f'[projects.{json.dumps(os.path.realpath(repo))}]\ntrust_level = "trusted"\n'
             )
@@ -81,7 +82,7 @@ class TuiSession:
         """
         for path in glob.glob(os.path.join(home, "sessions", "**", "*.jsonl"), recursive=True):
             try:
-                with open(path, errors="replace") as handle:
+                with pathlib.Path(path).open(errors="replace") as handle:
                     for line in handle:
                         try:
                             event = json.loads(line)

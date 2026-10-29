@@ -9,6 +9,7 @@ the gateway, on a port of its own, and forwards each connection to that one node
 nowhere else. It lives as long as the run.
 """
 
+import contextlib
 import socket
 import threading
 from typing import Final
@@ -55,10 +56,8 @@ class SweBenchRelay:
         """Stops accepting; connections in flight end with their peers."""
         self._closed.set()
         if self._server is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._server.close()
-            except OSError:
-                pass
 
     def _accept(self) -> None:
         while not self._closed.is_set():
@@ -87,12 +86,8 @@ class SweBenchRelay:
             pass
         finally:
             for end in (sink, source):
-                try:
+                with contextlib.suppress(OSError):
                     end.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
             # Each direction closes only its source once both ends are shut.
-            try:
+            with contextlib.suppress(OSError):
                 source.close()
-            except OSError:
-                pass

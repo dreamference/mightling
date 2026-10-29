@@ -234,9 +234,9 @@ class EgressAudit:
         """
         repo = os.path.join(work_dir, "repo")
         home = os.path.join(work_dir, "home")
-        os.makedirs(repo)
-        os.makedirs(home)
-        with open(os.path.join(repo, "README.md"), "w") as handle:
+        Path(repo).mkdir(parents=True)
+        Path(home).mkdir(parents=True)
+        with Path(os.path.join(repo, "README.md")).open("w") as handle:
             handle.write("A throwaway repository for `ling-admin audit egress`.\n")
         git = [
             "git",
@@ -250,7 +250,7 @@ class EgressAudit:
         for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "audit"]):
             subprocess.run(git + args, cwd=repo, capture_output=True, check=False)
         config = os.path.join(work_dir, "config.toml")
-        with open(config, "w") as handle:
+        with Path(config).open("w") as handle:
             handle.write(
                 f"vllm_host = {json.dumps(vllm_host)}\ncode_index_enabled = false\nmightling_docs = false\n"
             )
@@ -312,7 +312,7 @@ class EgressAudit:
             return cls._read_trace(trace_path), bool(outcome["replied"]), trace_path
         if session == APP:
             scratch_home = os.path.join(work_dir, "home-dir")
-            os.makedirs(scratch_home)
+            Path(scratch_home).mkdir(parents=True)
             env.update(
                 {
                     "HOME": scratch_home,
@@ -323,9 +323,9 @@ class EgressAudit:
             # The preview tab under audit (DESKTOP_PARITY §5): the audit's page, which reaches for the internet.
             if cls.preview_url:
                 env["MIGHTLING_APP_AUDIT_PREVIEW"] = cls.preview_url
-            command = strace[:-1] + [str(app_bin)]
+            command = [*strace[:-1], str(app_bin)]
         else:
-            command = strace + ["exec", "--skip-git-repo-check", "-o", reply_path, prompt]
+            command = [*strace, "exec", "--skip-git-repo-check", "-o", reply_path, prompt]
         exited = None
         try:
             # Its own process group, so a session that never answers is stopped with everything
@@ -353,8 +353,8 @@ class EgressAudit:
             pass
         if session == APP:
             return cls._read_trace(trace_path), exited == 0, trace_path
-        replied = os.path.isfile(reply_path) and bool(
-            open(reply_path, errors="replace").read().strip()
+        replied = Path(reply_path).is_file() and bool(
+            Path(reply_path).open(errors="replace").read().strip()
         )
         return cls._read_trace(trace_path), replied, trace_path
 
@@ -404,8 +404,8 @@ class EgressAudit:
         """
         run_dir = os.path.join(work_dir, "run")
         user_home = os.path.join(work_dir, "user")
-        os.makedirs(run_dir, mode=0o700)
-        os.makedirs(user_home)
+        Path(run_dir).mkdir(mode=0o700, parents=True)
+        Path(user_home).mkdir(parents=True)
         env.update({"HOME": user_home, "XDG_RUNTIME_DIR": run_dir})
         image_search = cls.prepare_image_search(user_home)
         cls.image_turn = (
@@ -422,7 +422,7 @@ class EgressAudit:
         server_file = os.path.join(home, "web", "server.json")
         try:
             server = subprocess.Popen(
-                strace + ["web", "serve", "--port", str(port)],
+                [*strace, "web", "serve", "--port", str(port)],
                 cwd=repo,
                 env=env,
                 stdin=subprocess.DEVNULL,
@@ -436,12 +436,12 @@ class EgressAudit:
         try:
             deadline = time.monotonic() + WEB_START_TIMEOUT_S
             while (
-                not os.path.isfile(server_file)
+                not Path(server_file).is_file()
                 and server.poll() is None
                 and time.monotonic() < deadline
             ):
                 time.sleep(0.2)
-            if os.path.isfile(server_file):
+            if Path(server_file).is_file():
                 try:
                     ask = subprocess.run(
                         [mightling_bin, "web", "ask", "--port", str(port), prompt],
@@ -492,11 +492,11 @@ class EgressAudit:
             f"import sys; sys.path.insert(0, {root!r}); sys.argv[0] = 'ling-admin'; "
             "from dreamference.cli import main; main()"
         )
-        with open(path, "w") as handle:
+        with Path(path).open("w") as handle:
             handle.write(
                 f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -I -c {shlex.quote(code)} "$@"\n'
             )
-        os.chmod(path, 0o755)
+        Path(path).chmod(0o755)
 
     @classmethod
     def prepare_image_search(cls, user_home: str) -> bool:
@@ -517,18 +517,18 @@ class EgressAudit:
 
         from dreamference.chat.image_search_sidecar import IMAGE_SEARCH_SECRET_FILE
 
-        if not os.path.isfile(IMAGE_SEARCH_SECRET_FILE):
+        if not Path(IMAGE_SEARCH_SECRET_FILE).is_file():
             return False
         config = os.path.join(user_home, ".config", "dreamference")
         secret = os.path.join(config, "image-search", "secret")
         bin_dir = os.path.join(user_home, ".local", "bin")
         try:
-            os.makedirs(os.path.dirname(secret), mode=0o700, exist_ok=True)
+            Path(os.path.dirname(secret)).mkdir(mode=0o700, exist_ok=True, parents=True)
             shutil.copyfile(IMAGE_SEARCH_SECRET_FILE, secret)
-            os.chmod(secret, 0o600)
-            with open(os.path.join(config, "node-id"), "w") as handle:
+            Path(secret).chmod(0o600)
+            with Path(os.path.join(config, "node-id")).open("w") as handle:
                 handle.write(f"{uuid.uuid4()}\n")
-            os.makedirs(bin_dir, exist_ok=True)
+            Path(bin_dir).mkdir(exist_ok=True, parents=True)
             cls.write_admin(os.path.join(bin_dir, "ling-admin"))
         except OSError:
             return False
@@ -619,8 +619,8 @@ class EgressAudit:
     @classmethod
     def _read_trace(cls, trace_path: str) -> EgressTrace:
         text = ""
-        if os.path.isfile(trace_path):
-            with open(trace_path, errors="replace") as handle:
+        if Path(trace_path).is_file():
+            with Path(trace_path).open(errors="replace") as handle:
                 text = handle.read()
         return StraceParser.parse(text)
 
@@ -636,8 +636,8 @@ class EgressAudit:
         from dreamference.runner.codex_installer import CodexInstaller
 
         try:
-            with open(
-                os.path.join(CodexInstaller.home_dir(), "chat", name), encoding="utf-8"
+            with Path(os.path.join(CodexInstaller.home_dir(), "chat", name)).open(
+                encoding="utf-8"
             ) as handle:
                 value = json.load(handle)
         except (OSError, ValueError):
@@ -853,9 +853,9 @@ class EgressAudit:
             version = ""
         binary = os.path.realpath(mightling_bin)
         binary_sha256 = None
-        if os.path.isfile(binary):
+        if Path(binary).is_file():
             digest = hashlib.sha256()
-            with open(binary, "rb") as handle:
+            with Path(binary).open("rb") as handle:
                 for block in iter(lambda: handle.read(1 << 20), b""):
                     digest.update(block)
             binary_sha256 = digest.hexdigest()
@@ -863,17 +863,18 @@ class EgressAudit:
         # (a build without one patch, say) has none, and must not be credited with the installed one's.
         build_key = ""
         stamp = os.path.join(INSTALL_DIR, BUILD_STAMP_NAME)
-        if binary == os.path.realpath(CodexBrandedBuilder.executable_path()) and os.path.isfile(
-            stamp
+        if (
+            binary == os.path.realpath(CodexBrandedBuilder.executable_path())
+            and Path(stamp).is_file()
         ):
-            with open(stamp) as handle:
+            with Path(stamp).open() as handle:
                 build_key = handle.read().strip()
         matches = bool(build_key) and build_key == CodexBrandedBuilder.build_key()
         patches: dict[str, str] | None = None
         if matches:
             patches = {}
             for path in CodexBrandedBuilder.patches():
-                with open(path, "rb") as handle:
+                with Path(path).open("rb") as handle:
                     patches[os.path.basename(path)] = hashlib.sha256(handle.read()).hexdigest()
         return {
             "mightling_version": version,
@@ -1115,7 +1116,7 @@ class EgressAudit:
         from dreamference.runner.codex_installer import CodexInstaller
 
         directory = os.path.join(CodexInstaller.home_dir(), "audit")
-        os.makedirs(directory, exist_ok=True)
+        Path(directory).mkdir(exist_ok=True, parents=True)
         now = datetime.datetime.now().astimezone()
         path = os.path.join(directory, f"{now:%Y%m%d-%H%M%S}-{session}.json")
         result = {
@@ -1128,7 +1129,7 @@ class EgressAudit:
             **asdict(trace),
             **identity,
         }
-        with open(path, "w") as handle:
+        with Path(path).open("w") as handle:
             json.dump(result, handle, indent=2)
             handle.write("\n")
         return path

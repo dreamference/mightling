@@ -25,6 +25,7 @@ conditions the runner wrote, live in `<directory>` (the instance's scratch, on t
 import fcntl
 import json
 import os
+import pathlib
 import re
 import shlex
 import sys
@@ -157,14 +158,16 @@ class SweBenchIssueGate:
             there (outside `.git`); None for anything else, `/tmp` and new files included.
         """
         path = path.strip().strip("'\"")
-        if not path or path.startswith("-") or path.startswith("/dev/"):
+        if not path or path.startswith(("-", "/dev/")):
             return None
-        full = os.path.normpath(path if os.path.isabs(path) else os.path.join(cwd or root, path))
+        full = os.path.normpath(
+            path if pathlib.Path(path).is_absolute() else os.path.join(cwd or root, path)
+        )
         root = os.path.normpath(root)
         if not full.startswith(root + os.sep):
             return None
         relative = full[len(root) + 1 :]
-        if relative.split(os.sep)[0] == ".git" or not os.path.isfile(full):
+        if relative.split(os.sep)[0] == ".git" or not pathlib.Path(full).is_file():
             return None
         return relative
 
@@ -275,8 +278,7 @@ class SweBenchIssueGate:
             program = os.path.basename(words[0])
             if program in ("sed", "perl") and any(
                 word == "-i"
-                or word.startswith("-i")
-                or word.startswith("--in-place")
+                or word.startswith(("-i", "--in-place"))
                 or (program == "perl" and word.startswith("-") and "i" in word[1:])
                 for word in words[1:]
             ):
@@ -371,9 +373,13 @@ class SweBenchIssueGate:
                     script = argument.split("::")[0]
                     if script.startswith("-") or not script.endswith(".py"):
                         continue
-                    path = script if os.path.isabs(script) else os.path.join(cwd or "/", script)
+                    path = (
+                        script
+                        if pathlib.Path(script).is_absolute()
+                        else os.path.join(cwd or "/", script)
+                    )
                     try:
-                        with open(path, errors="replace") as handle:
+                        with pathlib.Path(path).open(errors="replace") as handle:
                             pieces.append(handle.read(SCRIPT_LIMIT))
                     except OSError:
                         pieces.append(None)
@@ -453,7 +459,7 @@ class SweBenchIssueGate:
                 and cls.runs_example(command, cwd, conditions["examples"])
             ):
                 state["last_example_run"] = seq
-                state["example_runs"] = (state.get("example_runs", []) + [seq])[-KEEP:]
+                state["example_runs"] = ([*state.get("example_runs", []), seq])[-KEEP:]
             return None
         unread = [target for target in targets if target["id"] not in reads]
         if "first_edit" not in state:
@@ -482,8 +488,10 @@ class SweBenchIssueGate:
         state["edits"] = state.get("edits", 0) + 1
         state["last_edit"] = seq
         state["edit_log"] = (
-            state.get("edit_log", [])
-            + [{"seq": seq, "kind": edit["kind"], "paths": edit["paths"][:10]}]
+            [
+                *state.get("edit_log", []),
+                {"seq": seq, "kind": edit["kind"], "paths": edit["paths"][:10]},
+            ]
         )[-KEEP:]
         return None
 
@@ -560,17 +568,17 @@ class SweBenchIssueGate:
         Returns:
             Optional[str]: The reason to block, or None.
         """
-        with open(os.path.join(directory, LOCK_FILE), "a") as lock:
+        with pathlib.Path(os.path.join(directory, LOCK_FILE)).open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             state_path = os.path.join(directory, STATE_FILE)
             try:
-                with open(state_path) as handle:
+                with pathlib.Path(state_path).open() as handle:
                     state = json.load(handle)
             except (OSError, ValueError):
                 state = {}
             counts = state.setdefault("invocations", {})
             try:
-                with open(os.path.join(directory, CONDITIONS_FILE)) as handle:
+                with pathlib.Path(os.path.join(directory, CONDITIONS_FILE)).open() as handle:
                     conditions = json.load(handle)
             except (OSError, ValueError):
                 # No conditions yet (the refine arm's study step): counted, never held.
@@ -587,13 +595,13 @@ class SweBenchIssueGate:
                     elif event == "stop":
                         reason = cls.stop(state, conditions, payload)
                 except Exception as error:  # Never hold a call on a fault of the gate's own.
-                    state["errors"] = (state.get("errors", []) + [f"{event}: {error!r}"])[-KEEP:]
+                    state["errors"] = ([*state.get("errors", []), f"{event}: {error!r}"])[-KEEP:]
                     reason = None
             state["updated"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             temporary = state_path + ".tmp"
-            with open(temporary, "w") as handle:
+            with pathlib.Path(temporary).open("w") as handle:
                 json.dump(state, handle)
-            os.replace(temporary, state_path)
+            pathlib.Path(temporary).replace(state_path)
             return reason
 
     @classmethod

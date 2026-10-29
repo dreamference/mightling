@@ -21,9 +21,8 @@ which strips less, never more. A run records the text its agent saw, so its resu
 depend on the list of the machine that reads the report.
 """
 
-import os
 import re
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Final
 
 # The phrase a name is replaced with, by kind: `[file 1]`, `[module 1]`, `[class 1]`, `[function 1]`.
@@ -67,8 +66,8 @@ class SweBenchNameStripper:
         """
         if cls._english is None:
             words: set = set()
-            if os.path.isfile(WORD_LIST):
-                with open(WORD_LIST, encoding="utf-8", errors="replace") as handle:
+            if Path(WORD_LIST).is_file():
+                with Path(WORD_LIST).open(encoding="utf-8", errors="replace") as handle:
                     words = {line.strip().lower() for line in handle if line.strip()}
             cls._english = frozenset(words)
         return cls._english

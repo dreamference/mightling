@@ -18,6 +18,7 @@ Nothing here prints: a failure is kept in `ImageSearchSidecar.problem` for the C
 
 import json
 import os
+import pathlib
 import secrets as secrets_module
 import shutil
 import subprocess
@@ -100,16 +101,16 @@ class ImageSearchSidecar:
             Optional[str]: The secret, or None if it could not be stored (see `problem`).
         """
         try:
-            if os.path.exists(IMAGE_SEARCH_SECRET_FILE):
-                with open(IMAGE_SEARCH_SECRET_FILE) as handle:
+            if pathlib.Path(IMAGE_SEARCH_SECRET_FILE).exists():
+                with pathlib.Path(IMAGE_SEARCH_SECRET_FILE).open() as handle:
                     value = handle.read().strip()
                 if value:
                     return value
-            os.makedirs(IMAGE_SEARCH_DATA_DIR, mode=0o700, exist_ok=True)
+            pathlib.Path(IMAGE_SEARCH_DATA_DIR).mkdir(mode=0o700, exist_ok=True, parents=True)
             value = secrets_module.token_urlsafe(32)
-            with open(IMAGE_SEARCH_SECRET_FILE, "w") as handle:
+            with pathlib.Path(IMAGE_SEARCH_SECRET_FILE).open("w") as handle:
                 handle.write(value)
-            os.chmod(IMAGE_SEARCH_SECRET_FILE, 0o600)
+            pathlib.Path(IMAGE_SEARCH_SECRET_FILE).chmod(0o600)
             return value
         except OSError as exc:
             cls.problem = f"Could not store the image search secret: {exc}"
@@ -125,7 +126,7 @@ class ImageSearchSidecar:
         from dreamference.chat import image_search_service
 
         try:
-            os.makedirs(IMAGE_STORE_DIR, exist_ok=True)
+            pathlib.Path(IMAGE_STORE_DIR).mkdir(exist_ok=True, parents=True)
             shutil.copyfile(
                 image_search_service.__file__, os.path.join(IMAGE_SEARCH_DATA_DIR, STAGED_SERVICE)
             )
@@ -404,9 +405,9 @@ class ImageSearchSidecar:
         Returns:
             str: One line for `ling-admin images status`.
         """
-        if not os.path.isfile(IMAGE_SEARCH_SECRET_FILE):
+        if not pathlib.Path(IMAGE_SEARCH_SECRET_FILE).is_file():
             return "Tool: not set up (run `ling-admin images start`)"
-        if not os.path.isfile(SESSION_ADMIN_LINK):
+        if not pathlib.Path(SESSION_ADMIN_LINK).is_file():
             return (
                 f"Tool: not offered: {SESSION_ADMIN_LINK} is missing (run `ling-admin codex build`)"
             )

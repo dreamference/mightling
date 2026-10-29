@@ -1087,10 +1087,13 @@ class SweBenchRunner:
         if NodeLanes.wanted(settings.nodes) == [] or not NodePairing.paired():
             return [local], []
         max_parallel = cls.max_parallel(settings, served)
-        budget = lambda pool: (
-            cls.host.parallelism(max_parallel, pool, settings.task_context),
-            None,
-        )
+
+        def budget(pool):
+            return (
+                cls.host.parallelism(max_parallel, pool, settings.task_context),
+                None,
+            )
+
         lanes, skipped = NodeLanes.lanes(vllm_host, served, settings.nodes, cls.host, budget)
         lanes[0]["parallel"] = parallel
         notes = [

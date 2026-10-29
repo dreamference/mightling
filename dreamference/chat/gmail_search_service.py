@@ -44,6 +44,7 @@ mail.
 """
 
 import base64
+import contextlib
 import email
 import email.header
 import hashlib
@@ -287,7 +288,9 @@ class GmailSearchService:
         key = cls._key(directory)
         nonce = secrets.token_bytes(16)
         data = plaintext.encode("utf-8")
-        cipher = bytes(a ^ b for a, b in zip(data, cls._keystream(key, nonce, len(data))))
+        cipher = bytes(
+            a ^ b for a, b in zip(data, cls._keystream(key, nonce, len(data)), strict=False)
+        )
         tag = hmac.new(key, nonce + cipher, hashlib.sha256).digest()[:16]
         return base64.b64encode(nonce + tag + cipher).decode("ascii")
 
@@ -315,7 +318,7 @@ class GmailSearchService:
             return None
         try:
             return bytes(
-                a ^ b for a, b in zip(cipher, cls._keystream(key, nonce, len(cipher)))
+                a ^ b for a, b in zip(cipher, cls._keystream(key, nonce, len(cipher)), strict=False)
             ).decode("utf-8")
         except UnicodeDecodeError:
             return None
@@ -847,10 +850,8 @@ class GmailSearchService:
             except Exception as failure:
                 failures.append({"account": address, "error": cls._describe(failure)})
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     connection.logout()
-                except Exception:
-                    pass
 
         answer: dict[str, Any] = {"messages": all_messages[:limit]}
         if failures:
@@ -1024,10 +1025,8 @@ class GmailSearchService:
                 return {"error": str(e)}
             finally:
                 for c in connections.values():
-                    try:
+                    with contextlib.suppress(BaseException):
                         c.logout()
-                    except:
-                        pass
             return {"error": "Message not found"}
 
         for conn in connections.values():
@@ -1041,10 +1040,8 @@ class GmailSearchService:
             except Exception:
                 pass
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     conn.logout()
-                except Exception:
-                    pass
         return {"error": "Message not found"}
 
     @classmethod
@@ -1055,10 +1052,8 @@ class GmailSearchService:
             connection (imaplib.IMAP4_SSL): The connection to close.
         """
         for step in (connection.close, connection.logout):
-            try:
+            with contextlib.suppress(imaplib.IMAP4.error, OSError):
                 step()
-            except (imaplib.IMAP4.error, OSError):
-                pass
 
     @classmethod
     def _decode_header(cls, value: str) -> str:

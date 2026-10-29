@@ -102,7 +102,7 @@ class SweBenchHarness:
     @classmethod
     def installed_version(cls) -> str | None:
         """The installed harness version, or None when there is no virtualenv."""
-        if not os.path.exists(cls.tool("python")):
+        if not Path(cls.tool("python")).exists():
             return None
         result = cls.execute(
             [
@@ -123,10 +123,10 @@ class SweBenchHarness:
             bool: True when the pinned version is installed.
         """
         wanted = swe_bench_settings.HARNESS_VERSION
-        if cls.installed_version() == wanted and os.path.exists(cls.tool("patchelf")):
+        if cls.installed_version() == wanted and Path(cls.tool("patchelf")).exists():
             return True
         cls.venv_dir().parent.mkdir(parents=True, exist_ok=True)
-        if not os.path.exists(cls.tool("python")):
+        if not Path(cls.tool("python")).exists():
             created = cls.execute([sys.executable, "-m", "venv", str(cls.venv_dir())])
             if created.returncode != 0:
                 print(f"❌ Could not create {cls.venv_dir()}: {created.stderr.strip()[-300:]}")
@@ -206,7 +206,7 @@ class SweBenchHarness:
         meta["dataset"] = swe_bench_settings.SweBenchSettings.dataset_id(dataset)
         staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         staging.write_text("\n".join(lines[1:]) + "\n")
-        os.replace(staging, path)
+        Path(staging).replace(path)
         meta_path.write_text(json.dumps(meta, indent=2) + "\n")
         return meta
 
@@ -260,7 +260,7 @@ class SweBenchHarness:
         """
         written = []
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as handle:
+        with Path(path).open("w") as handle:
             for row in rows:
                 image = images.get(row["instance_id"])
                 if not image:

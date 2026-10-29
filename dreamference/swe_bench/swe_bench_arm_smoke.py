@@ -65,7 +65,7 @@ class SweBenchArmSmoke:
         """The first line of the log that is not JSON and not the stdin notice: what `ling` said when it stopped."""
         for line in log_text.splitlines():
             line = line.strip()
-            if not line or line.startswith("{") or line.startswith("Reading additional input"):
+            if not line or line.startswith(("{", "Reading additional input")):
                 continue
             return line[:QUOTE]
         return ""

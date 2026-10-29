@@ -8,6 +8,7 @@ nothing else. The container is the sandbox: Codex's own cannot start inside one.
 the agent, collects the patch.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -1139,10 +1140,8 @@ class SweBenchInstanceRun:
         SweBenchDocker.run(["start", self.container], timeout=120)
         collected = self._script(COLLECT_SCRIPT, timeout=600)
         diff = self._read(self.scratch / "patch.diff") if collected.returncode == 0 else ""
-        try:
+        with contextlib.suppress(OSError):
             (self.scratch / RESTART_DIFF).write_text(diff)
-        except OSError:
-            pass
         record["diff_bytes"] = len(diff.encode())
         reset = self._script(RESET_SCRIPT, timeout=600)
         if reset.returncode != 0:
@@ -1193,10 +1192,8 @@ class SweBenchInstanceRun:
         snapshot = self._script(REVIEW_SNAPSHOT_SCRIPT, timeout=300)
         self._script(COLLECT_SCRIPT, timeout=600)
         before = self._read(self.scratch / "patch.diff")
-        try:
+        with contextlib.suppress(OSError):
             (self.scratch / PATCH_BEFORE_REVIEW).write_text(before)
-        except OSError:
-            pass
         resumed = self.session is not None
         record: dict[str, Any] = {
             "resumed": resumed,

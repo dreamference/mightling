@@ -195,7 +195,7 @@ class SweBenchImages:
         path.parent.mkdir(parents=True, exist_ok=True)
         staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         staging.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
-        os.replace(staging, path)
+        Path(staging).replace(path)
 
     @classmethod
     def _read_validated(cls) -> dict[str, Any]:

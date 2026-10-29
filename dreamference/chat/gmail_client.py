@@ -13,6 +13,7 @@ Every method returns the service's JSON, or a dict with `error` and `hint` in th
 
 import json
 import os
+import pathlib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -81,7 +82,7 @@ class GmailClient:
     @classmethod
     def _secret(cls) -> str | None:
         try:
-            with open(SERVICE_SECRET_PATH) as handle:
+            with pathlib.Path(SERVICE_SECRET_PATH).open() as handle:
                 return handle.read().strip() or None
         except OSError:
             return None

@@ -194,9 +194,11 @@ class NightShiftRunner:
         from dreamference.node.node_lanes import NodeLanes
         from dreamference.node.node_pairing import NodePairing
 
-        budget = lambda pool: cls.host.task_budget(
-            settings.max_parallel, pool, settings.task_context, settings.compact_at
-        )
+        def budget(pool):
+            return cls.host.task_budget(
+                settings.max_parallel, pool, settings.task_context, settings.compact_at
+            )
+
         if NodeLanes.wanted(settings.nodes) == [] or not NodePairing.paired():
             kv_pool = (cls.host.metrics(vllm_host) or {}).get("kv_pool", 0.0)
             parallel, limit = budget(kv_pool)

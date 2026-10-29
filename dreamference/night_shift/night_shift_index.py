@@ -36,7 +36,7 @@ class NightShiftIndex:
             Optional[str]: Absolute path to the binary, or None if it has not been built.
         """
         path = os.path.join(INSTALL_DIR, "bin", "ling-code")
-        return path if os.path.isfile(path) and os.access(path, os.X_OK) else None
+        return path if Path(path).is_file() and os.access(path, os.X_OK) else None
 
     @classmethod
     def refresh(cls, binary: str, repo: Path, timeout_s: float) -> str:

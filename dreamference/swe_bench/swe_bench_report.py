@@ -1288,7 +1288,7 @@ class SweBenchReport:
                 f"{(gates[1][:1] or ['no record'])[0].split('  ', 1)[-1].strip()}"
             )
         for run_name, gate in zip(
-            (name, other.name), gates if other.name != store.name else gates[:1]
+            (name, other.name), gates if other.name != store.name else gates[:1], strict=False
         ):
             if len(gate) > 1:
                 lines.append(
@@ -1453,7 +1453,7 @@ class SweBenchReport:
                         "the others ran as if there were none."
                     )
         lines += cls.guards_never_ran((ours, name), (theirs, other))
-        lines += ["", f"  {'instance':<34} {'resolved in':<16} {name:<28} {other}"] + table
+        lines += ["", f"  {'instance':<34} {'resolved in':<16} {name:<28} {other}", *table]
         return lines
 
     @classmethod
@@ -1534,7 +1534,10 @@ class SweBenchReport:
             ]
         if not pauses:
             return lines
-        stamp = lambda t: datetime.fromtimestamp(t).strftime("%m-%d %H:%M")
+
+        def stamp(t):
+            return datetime.fromtimestamp(t).strftime("%m-%d %H:%M")
+
         total = sum(max(0.0, pause["end"] - pause["start"]) for pause in pauses)
         spans = ", ".join(
             f"{stamp(pause['start'])}-{datetime.fromtimestamp(pause['end']):%H:%M}"

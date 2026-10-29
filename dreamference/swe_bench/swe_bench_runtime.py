@@ -60,7 +60,7 @@ class SweBenchRuntime:
         """
         digest = hashlib.sha256()
         for path in cls._binaries(mightling_bin):
-            with open(path, "rb") as handle:
+            with Path(path).open("rb") as handle:
                 for block in iter(lambda: handle.read(1 << 20), b""):
                     digest.update(block)
         return digest.hexdigest()
@@ -118,7 +118,7 @@ class SweBenchRuntime:
             return None
         (staging / STAMP_NAME).write_text(wanted + "\n")
         shutil.rmtree(target, ignore_errors=True)
-        os.replace(staging, target)
+        Path(staging).replace(target)
         return wanted
 
     @classmethod
@@ -160,10 +160,10 @@ class SweBenchRuntime:
     @classmethod
     def _binaries(cls, mightling_bin: str) -> list[str]:
         host = os.path.join(os.path.dirname(os.path.realpath(mightling_bin)), CODE_MODE_HOST_NAME)
-        return [os.path.realpath(mightling_bin)] + ([host] if os.path.exists(host) else [])
+        return [os.path.realpath(mightling_bin)] + ([host] if Path(host).exists() else [])
 
     @classmethod
     def installed_mightling(cls) -> str | None:
         """The installed branded `ling`, or None if it has not been built."""
         path = CodexBrandedBuilder.executable_path()
-        return path if os.path.exists(path) else None
+        return path if Path(path).exists() else None

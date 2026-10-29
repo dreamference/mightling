@@ -13,6 +13,7 @@ which instances shared the model.
 
 import json
 import os
+import pathlib
 import secrets
 import statistics
 import threading
@@ -220,4 +221,4 @@ class SweBenchGateHold:
         path.parent.mkdir(parents=True, exist_ok=True)
         staging = path.with_name(f".{GATE_RECORD}.{os.getpid()}.tmp")
         staging.write_text(json.dumps(record, indent=2) + "\n")
-        os.replace(staging, path)
+        pathlib.Path(staging).replace(path)

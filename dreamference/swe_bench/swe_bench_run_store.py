@@ -291,12 +291,12 @@ class SweBenchRunStore:
         with _PREDICTIONS_LOCK:
             torn = False
             try:
-                with open(self.predictions_path, "rb") as handle:
+                with Path(self.predictions_path).open("rb") as handle:
                     handle.seek(-1, os.SEEK_END)
                     torn = handle.read(1) != b"\n"
             except OSError:
                 pass
-            with open(self.predictions_path, "a") as handle:
+            with Path(self.predictions_path).open("a") as handle:
                 handle.write(("\n" if torn else "") + line + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -388,4 +388,4 @@ class SweBenchRunStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         staging = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         staging.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
-        os.replace(staging, path)
+        Path(staging).replace(path)

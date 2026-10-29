@@ -98,12 +98,12 @@ class SweBenchCodeIndex:
         """
         override = os.environ.get(MIGHTLING_CODE_OVERRIDE_ENV)
         if override:
-            return override if os.path.exists(override) else None
+            return override if Path(override).exists() else None
         ling = SweBenchRuntime.installed_mightling()
         if not ling:
             return None
         path = os.path.join(os.path.dirname(os.path.realpath(ling)), "ling-code")
-        return path if os.path.exists(path) else None
+        return path if Path(path).exists() else None
 
     # -- the binary for the container ----------------------------------------------------------
 
@@ -177,7 +177,7 @@ class SweBenchCodeIndex:
             return None
         (staging / STAMP_NAME).write_text(wanted + "\n")
         shutil.rmtree(target, ignore_errors=True)
-        os.replace(staging, target)
+        Path(staging).replace(target)
         return wanted
 
     # -- one instance's index ------------------------------------------------------------------

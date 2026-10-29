@@ -161,7 +161,7 @@ class SweBenchSettings:
         """
         path = path or ConfigPathResolver.resolve_path()
         try:
-            with open(path, "rb") as handle:
+            with Path(path).open("rb") as handle:
                 document = tomllib.load(handle)
         except (OSError, tomllib.TOMLDecodeError):
             return {}

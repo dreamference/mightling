@@ -24,12 +24,14 @@ therefore stay a single self-contained file.
 """
 
 import base64
+import contextlib
 import hashlib
 import io
 import ipaddress
 import json
 import math
 import os
+import pathlib
 import re
 import socket
 import sqlite3
@@ -349,7 +351,7 @@ class ImageStore:
         """
         self.data_dir = data_dir
         self.images_dir = os.path.join(data_dir, "images")
-        os.makedirs(self.images_dir, exist_ok=True)
+        pathlib.Path(self.images_dir).mkdir(exist_ok=True, parents=True)
         self._lock = threading.Lock()
         self._db = sqlite3.connect(os.path.join(data_dir, "db.sqlite"), check_same_thread=False)
         self._db.execute(
@@ -386,7 +388,7 @@ class ImageStore:
             ).fetchone()
         if not row:
             return None
-        if not os.path.exists(self.path(row[0])):
+        if not pathlib.Path(self.path(row[0])).exists():
             with self._lock:
                 self._db.execute("DELETE FROM images WHERE file_id=?", (row[0],))
                 self._db.commit()
@@ -430,7 +432,7 @@ class ImageStore:
                 payload = out.getvalue()
             except Exception:
                 pass
-        with open(self.path(file_id), "wb") as fh:
+        with pathlib.Path(self.path(file_id)).open("wb") as fh:
             fh.write(payload)
         with self._lock:
             self._db.execute(
@@ -474,7 +476,7 @@ class ImageStore:
         sizes = []
         for file_id in survivors:
             try:
-                size = os.path.getsize(self.path(file_id))
+                size = pathlib.Path(self.path(file_id)).stat().st_size
             except OSError:
                 size = 0
             sizes.append((file_id, size))
@@ -493,10 +495,8 @@ class ImageStore:
         Args:
             file_id (str): The stored image's identifier.
         """
-        try:
-            os.remove(self.path(file_id))
-        except OSError:
-            pass
+        with contextlib.suppress(OSError):
+            pathlib.Path(self.path(file_id)).unlink()
         with self._lock:
             self._db.execute("DELETE FROM images WHERE file_id=?", (file_id,))
             self._db.commit()
@@ -596,7 +596,7 @@ class SiglipClient:
         image_vecs = self._embed(uris, "image")
 
         def cosine(a: list[float], b: list[float]) -> float:
-            dot = sum(x * y for x, y in zip(a, b))
+            dot = sum(x * y for x, y in zip(a, b, strict=False))
             norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
             return dot / norm if norm else 0.0
 
@@ -826,10 +826,8 @@ class ImageSearchService:
         # the verdict is no better for the extra pixels. 256px matches what the cached-thumb
         # path already feeds the ranking.
         if self.ranker is not None and kept:
-            try:
+            with contextlib.suppress(Exception):
                 order = self.ranker.rank(query, [self._rank_thumb(t) for _, t in kept])
-            except Exception:
-                pass
 
         winners: list[dict[str, str]] = []
         chosen = set()
@@ -873,7 +871,7 @@ class ImageSearchService:
         def grab(cand: dict[str, str]) -> bytes | None:
             if "file_id" in cand:
                 try:
-                    with open(self.store.path(cand["file_id"]), "rb") as fh:
+                    with pathlib.Path(self.store.path(cand["file_id"])).open("rb") as fh:
                         payload = fh.read()
                 except OSError:
                     return None
@@ -898,7 +896,7 @@ class ImageSearchService:
                 return None
 
         fetched = list(self._pool.map(grab, candidates))
-        return [(c, t) for c, t in zip(candidates, fetched) if t]
+        return [(c, t) for c, t in zip(candidates, fetched, strict=False) if t]
 
     @staticmethod
     def _rank_thumb(payload: bytes) -> bytes:
@@ -954,7 +952,7 @@ class ImageSearchService:
             scores = self.siglip.score(query, [t for _, t in thumbs])
         except Exception:
             return thumbs[:keep]
-        ranked = sorted(zip(scores, range(len(thumbs))), key=lambda p: -p[0])
+        ranked = sorted(zip(scores, range(len(thumbs)), strict=False), key=lambda p: -p[0])
         return [thumbs[i] for _, i in ranked[:keep]]
 
     @staticmethod
@@ -1021,10 +1019,8 @@ def serve(port: int = SERVICE_PORT, secret: str | None = None) -> None:
     def gc_loop() -> None:
         while True:
             time.sleep(GC_INTERVAL_SECONDS)
-            try:
+            with contextlib.suppress(Exception):
                 service.store.collect_garbage()
-            except Exception:
-                pass
 
     threading.Thread(target=gc_loop, daemon=True).start()
 
@@ -1060,7 +1056,7 @@ def serve(port: int = SERVICE_PORT, secret: str | None = None) -> None:
             if match:
                 path = service.store.path(match.group(1))
                 try:
-                    with open(path, "rb") as fh:
+                    with pathlib.Path(path).open("rb") as fh:
                         payload = fh.read()
                 except OSError:
                     self._reply(404, {"error": "unknown image"})

@@ -78,14 +78,14 @@ class GoogleService:
 
         path = os.path.join(CREDENTIALS_DIR, SECRET_FILE_NAME)
         try:
-            if os.path.exists(path):
-                with open(path) as handle:
+            if pathlib.Path(path).exists():
+                with pathlib.Path(path).open() as handle:
                     return handle.read().strip() or None
-            os.makedirs(CREDENTIALS_DIR, mode=0o700, exist_ok=True)
+            pathlib.Path(CREDENTIALS_DIR).mkdir(mode=0o700, exist_ok=True, parents=True)
             value = secrets_module.token_urlsafe(32)
-            with open(path, "w") as handle:
+            with pathlib.Path(path).open("w") as handle:
                 handle.write(value)
-            os.chmod(path, 0o600)
+            pathlib.Path(path).chmod(0o600)
             return value
         except OSError as exc:
             cls.problem = f"Could not store the Google service's shared secret: {exc}"

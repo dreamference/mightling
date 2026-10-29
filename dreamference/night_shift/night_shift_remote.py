@@ -166,7 +166,10 @@ class NightShiftRemote:
 
         repo = Path(task["repo"])
         level = NightShiftTaskRun.airgapped_level(repo, None, night_dir.parent, repo)
-        git = lambda key: SafeGit.run(["config", key], repo).stdout.strip()
+
+        def git(key):
+            return SafeGit.run(["config", key], repo).stdout.strip()
+
         return {
             "id": task["id"],
             "repo": slug,
@@ -560,7 +563,7 @@ class NightShiftRemote:
             if keep_from + (KEEP_AFTER_FETCH if task.get("fetched") else KEEP_UNFETCHED) > now:
                 continue
             repo = task.get("repo") or ""
-            if os.path.isdir(repo):
+            if Path(repo).is_dir():
                 for ref in (f"refs/heads/{task.get('branch')}", f"refs/night/{task['id']}"):
                     SafeGit.run(["update-ref", "-d", ref], git_dir=repo)
             for path in (

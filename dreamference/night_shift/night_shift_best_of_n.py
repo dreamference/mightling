@@ -429,7 +429,7 @@ class NightShiftBestOfN:
         verdict = str(result.get("test_result") or "untested")
         if verdict == "passed":
             return 0
-        if verdict.startswith("failed") or verdict.startswith("timed out"):
+        if verdict.startswith(("failed", "timed out")):
             return 1
         return None
 

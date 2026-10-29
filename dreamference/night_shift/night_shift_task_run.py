@@ -14,6 +14,7 @@ namespace is the host's, because `ling exec` reaches this node's model server on
 agent's commands are confined by Codex's own sandbox inside that, as on any node.
 """
 
+import contextlib
 import os
 import re
 import signal
@@ -749,10 +750,8 @@ class NightShiftTaskRun:
                     ["systemctl", "--user", "kill", f"--signal={sig.name}", f"{unit}.scope"],
                     capture_output=True,
                 )
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, sig)
-            except ProcessLookupError:
-                pass
             try:
                 process.wait(timeout=KILL_GRACE_S)
                 return
@@ -894,10 +893,8 @@ class NightShiftTaskRun:
         """
         tiers: list[str | None] = []
         if session and re.fullmatch(r"[A-Za-z0-9-]+", session):
-            try:
+            with contextlib.suppress(OSError):
                 tiers.append((codex_home / "airgapped" / session).read_text())
-            except OSError:
-                pass
         tiers.append(os.environ.get(AIRGAPPED_ENV))
         for value in tiers:
             level = DreamferenceConfig.parse_airgapped_level(value)

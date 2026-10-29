@@ -45,7 +45,7 @@ class NightShiftReport:
         for repo, repo_tasks in by_repo.items():
             lines += [f"## {repo}", ""]
             for task in repo_tasks:
-                lines += cls._task_block(task) + [""]
+                lines += [*cls._task_block(task), ""]
         if tasks:
             lines += cls._review(tasks)
         if compactions:
