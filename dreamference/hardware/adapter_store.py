@@ -133,8 +133,12 @@ class AdapterStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, FILE_MODE)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump({"schema": 1, "adapters": entries}, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-        Path(staging).chmod(FILE_MODE)
-        Path(staging).replace(path)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump({"schema": 1, "adapters": entries}, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+            Path(staging).chmod(FILE_MODE)
+            Path(staging).replace(path)
+        except BaseException:
+            staging.unlink(missing_ok=True)
+            raise

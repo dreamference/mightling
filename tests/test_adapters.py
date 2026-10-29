@@ -649,3 +649,12 @@ def test_an_installed_set_that_cannot_be_read_is_not_replaced_by_one_entry():
         AdapterStore.drop("rust")
     assert path.read_text(encoding="utf-8") == text
     assert AdapterStore.entries() == {}
+
+
+def test_an_entry_that_cannot_be_written_leaves_the_installed_set_and_no_staging_file():
+    AdapterStore.put({"name": "rust", "repo": "x/rust", "commit": COMMIT})
+    before = AdapterStore.path().read_text(encoding="utf-8")
+    with pytest.raises(TypeError):
+        AdapterStore.put({"name": "go", "repo": object()})
+    assert AdapterStore.path().read_text(encoding="utf-8") == before
+    assert sorted(p.name for p in AdapterStore.folder().iterdir()) == ["installed.json"]
