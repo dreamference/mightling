@@ -298,3 +298,11 @@ def test_the_run_fills_first_only_when_switched_on_and_survives_a_failure(
         )
         assert code == 0
     assert calls == [3]
+
+
+def test_a_failing_test_whose_parameter_holds_a_space_is_not_cut_short(tmp_path: Path) -> None:
+    run = FakeRun(
+        runs=[{"databaseId": 7, "workflowName": "CI", "event": "push"}],
+        log="FAILED tests/test_a.py::test_b[x y] - boom\nFAILED tests/test_a.py::test_c[z] - boom\n",
+    )
+    assert [c.key for c in NightShiftAutofill.ci_candidates(run)] == ["ci-test:tests/test_a.py::test_c[z]"]

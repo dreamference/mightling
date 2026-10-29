@@ -232,8 +232,11 @@ class NightShiftAutofill:
             ):
                 continue
             log = gh("run", "view", str(entry.get("databaseId")), "--log-failed")
+            # A parameter is taken whole, so one with a space fails TEST_ID instead of being cut short.
             ids = dict.fromkeys(
-                match for match in re.findall(r"FAILED (\S+)", log) if TEST_ID.match(match)
+                match
+                for match in re.findall(r"FAILED ([^\s\[]+(?:\[[^\]\n]*\])?)", log)
+                if TEST_ID.match(match)
             )
             if not ids:
                 continue
