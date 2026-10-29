@@ -9,6 +9,7 @@ import subprocess
 import pytest
 
 from dreamference.chat import image_search_mcp, image_search_sidecar, speech_sidecar
+from dreamference.chat.google_service import GOOGLE_SERVICE_IMAGE
 from dreamference.chat.image_search_mcp import TOOL_NAME, ImageSearchMcp
 from dreamference.chat.image_search_sidecar import (
     IMAGE_SEARCH_CONTAINER_NAME,
@@ -88,6 +89,15 @@ def test_image_search_starts_on_the_sidecar_network_with_its_store_and_secret(mo
     assert (store / "service.py").is_file() and (store / "data" / "images").is_dir()
     # A second start keeps the secret: the MCP server and a running session read the same file.
     assert ImageSearchSidecar.secret() == secret
+
+
+def test_the_python_sidecars_run_an_image_pinned_by_digest():
+    # The Google service holds the user's OAuth tokens: a moving tag would run whatever the
+    # registry serves next with them (specs/DREAMFERENCE_DOCKER.md).
+    for image in (GOOGLE_SERVICE_IMAGE, image_search_sidecar.IMAGE_SEARCH_SERVICE_IMAGE):
+        name, _, digest = image.partition("@sha256:")
+        assert name == "python:3-slim", image
+        assert len(digest) == 64 and all(c in "0123456789abcdef" for c in digest), image
 
 
 def test_without_siglip_the_service_is_told_to_skip_the_prefilter(monkeypatch, store):
