@@ -1280,6 +1280,49 @@ mod tests {
         assert!(!sealed(&["", "../x"]));
     }
 
+    /// Run by [`a_seal_is_seen_from_a_command_working_in_any_folder`] in a child process, whose
+    /// working directory and runtime directory it sets; does nothing in a normal run.
+    #[test]
+    fn sealed_probe() {
+        if let Some(id) = std::env::var_os("LING_AIRGAPPED_SEAL_PROBE") {
+            let id = id.to_string_lossy().into_owned();
+            println!("sealed={}", sealed(&[id.as_str()]));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_seal_is_seen_from_a_command_working_in_any_folder() {
+        // Codex's sandbox helper runs in the command's own folder, which the model chooses. From
+        // `/` (or any folder above the runtime directory) the runtime directory lies in the working
+        // directory, and the seal `ling` wrote there must still hold the session at `on`.
+        let runtime =
+            std::env::temp_dir().join(format!("ling-airgapped-probe-{}", std::process::id()));
+        let id = "0199a7c2-probe";
+        std::fs::create_dir_all(runtime.join(SEAL_DIR)).unwrap();
+        std::fs::write(runtime.join(SEAL_DIR).join(id), "").unwrap();
+        let test = module_path!()
+            .split_once("::")
+            .map_or("sealed_probe".to_string(), |(_, path)| {
+                format!("{path}::sealed_probe")
+            });
+        let sealed_from = |cwd: &Path| {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([test.as_str(), "--exact", "--nocapture", "--test-threads=1"])
+                .current_dir(cwd)
+                .env("XDG_RUNTIME_DIR", &runtime)
+                .env("LING_AIRGAPPED_SEAL_PROBE", id)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).contains("sealed=true")
+        };
+        let from_root = sealed_from(Path::new("/"));
+        let from_runtime = sealed_from(&runtime);
+        let _ = std::fs::remove_dir_all(&runtime);
+        assert!(from_root, "a command working in / must see the seal");
+        assert!(from_runtime, "a command working in the runtime directory must see the seal");
+    }
+
     #[test]
     fn a_seal_holds_the_session_at_on_whatever_the_files_say() {
         // A command rewrote the session file to `off`, or deleted the key from a config file.
