@@ -21,8 +21,14 @@ PROFILES_DIR=${MIGHTLING_APPARMOR_DIR:-/etc/apparmor.d}
 SYSCTL=${MIGHTLING_USERNS_SYSCTL:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}
 # Setuid sandbox helpers Chromium browsers install as root. Without an administrator, Chromium
 # runs an unpacked build (a binary the user owns) with one named by CHROME_DEVEL_SANDBOX; `ling app`
-# does that by itself (specs/DREAMFERENCE_MIGHTLING_NO_SUDO.md). The variable is for the tests.
-HELPERS=${MIGHTLING_SANDBOX_HELPERS-/opt/google/chrome/chrome-sandbox /opt/microsoft/msedge/msedge-sandbox /opt/brave.com/brave/chrome-sandbox}
+# does that by itself (specs/DREAMFERENCE_MIGHTLING_NO_SUDO.md). The same list, in the same order,
+# as its SETUID_HELPERS (ling-rs/src/app.rs), so both name the same helper. The variable is for the
+# tests.
+DEFAULT_HELPERS="/opt/google/chrome/chrome-sandbox /opt/microsoft/msedge/msedge-sandbox
+/opt/brave.com/brave/chrome-sandbox /opt/vivaldi/vivaldi-sandbox /usr/lib/chromium/chrome-sandbox
+/usr/share/code/chrome-sandbox /usr/lib/slack/chrome-sandbox /usr/share/discord/chrome-sandbox
+/opt/Signal/chrome-sandbox"
+HELPERS=${MIGHTLING_SANDBOX_HELPERS-$DEFAULT_HELPERS}
 
 DIR=$(cd "$(dirname "$0")" && pwd -P)
 BINARY="$DIR/Mightling"

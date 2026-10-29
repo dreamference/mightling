@@ -774,6 +774,20 @@ def test_an_unpacked_build_carries_its_own_profile_script():
     assert '[ -u "$HELPER" ]' in script and 'stat -c %u "$HELPER"' in script
 
 
+def test_the_script_and_ling_app_look_for_the_same_helpers():
+    # specs/DREAMFERENCE_MIGHTLING_NO_SUDO.md §5.3: the script names the helper `ling app` would use,
+    # so both try the same browsers' helpers in the same order.
+    app = (Path(__file__).resolve().parents[1] / "ling-rs" / "src" / "app.rs").read_text(
+        encoding="utf-8"
+    )
+    table = app.split("const SETUID_HELPERS", 1)[1].split("];", 1)[0]
+    in_app = re.findall(r'\("[^"]+", "(/[^"]+)"\)', table)
+    script = SANDBOX_SCRIPT.read_text(encoding="utf-8")
+    in_script = script.split('DEFAULT_HELPERS="', 1)[1].split('"', 1)[0].split()
+    assert len(in_app) == 9
+    assert in_script == in_app
+
+
 def test_the_script_prints_the_commands_before_sudo_runs(tmp_path):
     import subprocess
 
