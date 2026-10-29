@@ -347,7 +347,14 @@ pub fn render_text(page: &FetchedPage, max_chars: i64) -> String {
     if page.truncated {
         // The limit `page` cut at, not the one asked for.
         let limit = max_chars.clamp(1, MAX_CHARS_CEILING);
-        out.push_str(&format!("\n[truncated at {limit} chars]\n"));
+        if page.text.chars().count() < limit as usize {
+            // Fewer characters than the limit: the page itself was cut at the size cap.
+            out.push_str(&format!(
+                "\n[truncated: the page is larger than {MAX_DOWNLOAD_BYTES} bytes]\n"
+            ));
+        } else {
+            out.push_str(&format!("\n[truncated at {limit} chars]\n"));
+        }
     }
     out
 }
