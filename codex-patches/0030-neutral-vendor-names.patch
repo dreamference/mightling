@@ -94,6 +94,11 @@ diff --git a/codex-rs/tui/src/chatwidget/plugin_catalog.rs b/codex-rs/tui/src/ch
 diff --git a/codex-rs/tui/src/app/background_requests.rs b/codex-rs/tui/src/app/background_requests.rs
 --- a/codex-rs/tui/src/app/background_requests.rs
 +++ b/codex-rs/tui/src/app/background_requests.rs
+@@ -949,3 +949,3 @@
+             "vertical",
+-            "OpenAI Curated",
++            "Curated",
+             vec![PluginListMarketplaceKind::Vertical],
 @@ -1002,3 +1002,3 @@
      if err.contains("api key auth is not supported") {
 -        "Sign in with ChatGPT auth; API key auth cannot load remote plugin catalogs"

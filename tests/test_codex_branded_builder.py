@@ -29,6 +29,9 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
     session = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "history_cell" / "session.rs").read_text()
     assert '"OpenAI Codex"' not in session and '"Mightling"' in session
+    # The plugin catalog's section label is what "<label> unavailable." shows when the section fails.
+    requests = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "app" / "background_requests.rs").read_text()
+    assert '"vertical",\n            "Curated",' in requests
     # The launcher crate is copied in from ling-rs/ and reached through one dependency line.
     assert (tmp_path / "src" / "codex-rs" / "ling" / "src" / "lib.rs").is_file()
     cli_manifest = (tmp_path / "src" / "codex-rs" / "cli" / "Cargo.toml").read_text()
