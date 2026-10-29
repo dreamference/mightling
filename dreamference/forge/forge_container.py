@@ -7,6 +7,7 @@ also knows the forge of record as `forge-record`, an `--add-host` entry resolved
 it starts: containers cannot resolve `.local` names, and an address is never stored.
 """
 
+import http.client
 import json
 import os
 import subprocess
@@ -252,7 +253,8 @@ class ForgeContainer:
                 status, raw = response.status, response.read()
         except urllib.error.HTTPError as error:
             status, raw = error.code, error.read()
-        except (OSError, ValueError):
+        # A reply cut off or malformed (`http.client.IncompleteRead`, `BadStatusLine`) is no answer.
+        except (OSError, ValueError, http.client.HTTPException):
             return 0, None
         text = raw.decode("utf-8", "replace")
         try:

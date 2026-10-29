@@ -999,3 +999,15 @@ def test_the_records_address_does_not_depend_on_the_order_avahi_lists_it_in(monk
     )
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
     assert ForgeService.record_address() == f"{LAN}.50.11", "else the tick restarts the mirror"
+
+
+def test_a_forge_that_breaks_off_a_reply_is_no_answer_not_a_crash(monkeypatch):
+    import http.client
+    import urllib.request
+
+    class Opener:
+        def open(self, request, timeout):
+            raise http.client.IncompleteRead(b"{")
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: Opener())
+    assert ForgeContainer.api("GET", "/version", None) == (0, None)
