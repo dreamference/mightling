@@ -2038,6 +2038,7 @@ async fn ensure_service_ready(server: &Server) -> Result<(ChatReposSettings, Str
 pub async fn fetch_forge_repos(base_url: &str, token: &str, allow_file: bool) -> Result<Vec<ForgeRepo>, String> {
     let mut all = Vec::new();
     let mut page = 1usize;
+    let mut page_size = 0usize;
     loop {
         let path = format!("/api/v1/repos/search?limit=50&page={page}");
         let (status, body) = forge_get(base_url, &path, token, FORGE_TIMEOUT).await?;
@@ -2056,7 +2057,9 @@ pub async fn fetch_forge_repos(base_url: &str, token: &str, allow_file: bool) ->
                 all.push(repo);
             }
         }
-        if count < 50 {
+        // A forge may cap pages below the 50 asked for: only an empty or a shorter page is the last.
+        page_size = page_size.max(count);
+        if count == 0 || count < page_size {
             break;
         }
         page += 1;
@@ -4505,31 +4508,39 @@ async fn find_or_create_open_pr(
     base_branch: &str,
     thread: &str,
 ) -> Result<u64, String> {
-    let list_path = format!("/api/v1/repos/{repo_name}/pulls?state=open&limit=50");
-    let (status, body) = forge_get(base_url, &list_path, token, FORGE_TIMEOUT).await?;
-    if status != 200 {
-        return Err(format!("forge returned HTTP {status} when listing pull requests"));
-    }
-    let parsed: Value = serde_json::from_slice(&body).map_err(|_| "forge returned invalid JSON for pulls".to_string())?;
-    let items = parsed
-        .as_array()
-        .or_else(|| parsed.get("data").and_then(Value::as_array))
-        .ok_or_else(|| "forge pulls response was not a list".to_string())?;
+    let mut page_size = 0usize;
+    for page in 1..=200usize {
+        let list_path = format!("/api/v1/repos/{repo_name}/pulls?state=open&limit=50&page={page}");
+        let (status, body) = forge_get(base_url, &list_path, token, FORGE_TIMEOUT).await?;
+        if status != 200 {
+            return Err(format!("forge returned HTTP {status} when listing pull requests"));
+        }
+        let parsed: Value = serde_json::from_slice(&body).map_err(|_| "forge returned invalid JSON for pulls".to_string())?;
+        let items = parsed
+            .as_array()
+            .or_else(|| parsed.get("data").and_then(Value::as_array))
+            .ok_or_else(|| "forge pulls response was not a list".to_string())?;
 
-    for item in items {
-        let head_ref = item
-            .get("head")
-            .and_then(|h| h.get("ref").and_then(Value::as_str).or_else(|| h.as_str()))
-            .unwrap_or("");
-        let base_ref = item
-            .get("base")
-            .and_then(|b| b.get("ref").and_then(Value::as_str).or_else(|| b.as_str()))
-            .unwrap_or("");
-        if head_ref == branch
-            && base_ref == base_branch
-            && let Some(num) = item.get("number").or_else(|| item.get("index")).and_then(Value::as_u64)
-        {
-            return Ok(num);
+        for item in items {
+            let head_ref = item
+                .get("head")
+                .and_then(|h| h.get("ref").and_then(Value::as_str).or_else(|| h.as_str()))
+                .unwrap_or("");
+            let base_ref = item
+                .get("base")
+                .and_then(|b| b.get("ref").and_then(Value::as_str).or_else(|| b.as_str()))
+                .unwrap_or("");
+            if head_ref == branch
+                && base_ref == base_branch
+                && let Some(num) = item.get("number").or_else(|| item.get("index")).and_then(Value::as_u64)
+            {
+                return Ok(num);
+            }
+        }
+        // As in `fetch_forge_repos`: only an empty or a shorter page is the last.
+        page_size = page_size.max(items.len());
+        if items.is_empty() || items.len() < page_size {
+            break;
         }
     }
 
@@ -5377,6 +5388,8 @@ mod tests {
         statuses: Mutex<HashMap<String, (String, u64)>>,
         default_mergeable: AtomicBool,
         requests: Mutex<Vec<(String, String, Value)>>,
+        /// Items per page in lists, as a forge admin's `MAX_RESPONSE_ITEMS` would cap them; 0 = all on page 1.
+        page_cap: std::sync::atomic::AtomicUsize,
     }
 
     impl FakeForge {
@@ -5387,6 +5400,7 @@ mod tests {
                 statuses: Mutex::new(HashMap::new()),
                 default_mergeable: AtomicBool::new(true),
                 requests: Mutex::new(Vec::new()),
+                page_cap: std::sync::atomic::AtomicUsize::new(0),
             })
         }
 
@@ -5402,6 +5416,15 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .insert(sha.to_string(), (state.to_string(), total_count));
+        }
+
+        /// The items of `page` (1-based) of `all` under the page cap.
+        fn page_of(&self, all: Vec<Value>, page: usize) -> Vec<Value> {
+            match self.page_cap.load(std::sync::atomic::Ordering::SeqCst) {
+                0 if page == 1 => all,
+                0 => Vec::new(),
+                cap => all.into_iter().skip(page.saturating_sub(1) * cap).take(cap).collect(),
+            }
         }
 
         fn set_mergeable(&self, number: u64, mergeable: bool) {
@@ -5453,18 +5476,15 @@ mod tests {
                         }
                         let page = q.get("page").and_then(|p| p.parse::<usize>().ok()).unwrap_or(1);
                         st.record("GET", &format!("/api/v1/repos/search?page={page}"), Value::Null);
-                        let body = if page == 1 {
-                            json!({ "ok": true, "data": *st.repos.lock().unwrap() })
-                        } else {
-                            json!({ "ok": true, "data": [] })
-                        };
+                        let all = st.repos.lock().unwrap().as_array().cloned().unwrap_or_default();
+                        let body = json!({ "ok": true, "data": st.page_of(all, page) });
                         (StatusCode::OK, [("content-type", "application/json")], body.to_string()).into_response()
                     }
                 }),
             )
             .route(
                 "/api/v1/repos/{owner}/{repo}/pulls",
-                get(move |headers: HeaderMap, axum::extract::Path((owner, repo)): axum::extract::Path<(String, String)>| {
+                get(move |headers: HeaderMap, axum::extract::Path((owner, repo)): axum::extract::Path<(String, String)>, Query(q): Query<HashMap<String, String>>| {
                     let st = s_pulls_list.clone();
                     async move {
                         if !check_fake_auth(&headers) {
@@ -5488,6 +5508,9 @@ mod tests {
                                 })
                             })
                             .collect();
+                        drop(pulls);
+                        let page = q.get("page").and_then(|p| p.parse::<usize>().ok()).unwrap_or(1);
+                        let list = st.page_of(list, page);
                         (StatusCode::OK, [("content-type", "application/json")], Value::Array(list).to_string()).into_response()
                     }
                 })
@@ -8936,6 +8959,29 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(again["branch"], "main");
         assert_eq!(git_stdout(&wt, &["rev-parse", "HEAD"]), head, "the unpushed commit is still main's tip");
+    }
+
+    #[tokio::test]
+    async fn forge_lists_are_read_to_the_end_when_the_forge_caps_pages_below_fifty() {
+        let repos: Vec<Value> = (0..5)
+            .map(|i| json!({ "full_name": format!("org/r{i}"), "default_branch": "main", "permissions": { "pull": true, "push": true }, "clone_url": format!("http://127.0.0.1:1/org/r{i}.git") }))
+            .collect();
+        let (forge_url, forge, _handle) = start_fake_forge_with_state(Value::Array(repos)).await;
+        forge.page_cap.store(2, std::sync::atomic::Ordering::SeqCst);
+        let listed = fetch_forge_repos(&forge_url, TEST_TOKEN, true).await.unwrap();
+        assert_eq!(listed.len(), 5, "every page of repositories is read");
+
+        // The open pull request for this branch sits on the third page.
+        {
+            let mut pulls = forge.pulls.lock().unwrap();
+            for number in 1..=5u64 {
+                let head_ref = if number == 5 { "phone/0000abcd".to_string() } else { format!("other/{number}") };
+                pulls.push(FakePull { number, repo: "org/r0".into(), head_ref, base_ref: "main".into(), title: String::new(), mergeable: true, merged: false });
+            }
+        }
+        let number = find_or_create_open_pr(&forge_url, TEST_TOKEN, "org/r0", "phone/0000abcd", "main", "0000abcd").await.unwrap();
+        assert_eq!(number, 5, "the existing pull request is found, not a second one opened");
+        assert!(!forge.requests.lock().unwrap().iter().any(|(m, _, _)| m == "POST"), "no pull request was created");
     }
 
     #[tokio::test]
