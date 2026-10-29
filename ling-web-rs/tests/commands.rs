@@ -423,6 +423,41 @@ fn search_names_the_command_that_starts_an_unreachable_searxng() {
 }
 
 #[test]
+fn a_failure_under_json_is_printed_as_json() {
+    // A script that asked for JSON reads every outcome as JSON, a failure too.
+    let unreachable = [("DREAMFERENCE_SEARXNG_URL", "http://127.0.0.1:9")];
+    let gone = Server::start(|_| response("404 Not Found", "text/html", b"gone", ""));
+    let missing = format!("{}/missing", gone.base);
+    for (output, code) in [
+        (search(&["--json", "q"], &unreachable), 1),
+        (search(&["--json", "--read", "q"], &unreachable), 1),
+        (search(&["--json", "--lang", "?", "q"], &unreachable), 2),
+        (fetch(&["--json", &missing], &[]), 1),
+        (fetch(&["--json", "file:///etc/passwd"], &[]), 1),
+        (
+            fetch(
+                &["--json", &missing],
+                &[("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")],
+            ),
+            1,
+        ),
+    ] {
+        assert_eq!(output.status.code(), Some(code), "{}", stdout(&output));
+        let printed: serde_json::Value = serde_json::from_str(&stdout(&output))
+            .unwrap_or_else(|error| panic!("{error}: {}", stdout(&output)));
+        assert!(printed["error"].is_string(), "{printed}");
+    }
+    let printed: serde_json::Value =
+        serde_json::from_str(&stdout(&search(&["--json", "q"], &unreachable))).unwrap();
+    assert!(
+        printed["hint"]
+            .as_str()
+            .unwrap()
+            .contains("ling-admin searxng start")
+    );
+}
+
+#[test]
 fn search_without_a_query_is_a_usage_error() {
     assert_eq!(search(&[], &[]).status.code(), Some(2));
 }
