@@ -2784,13 +2784,6 @@ async fn repo_off(State(server): State<Arc<Server>>, headers: HeaderMap, body: B
                 .filter(|r| r.bridge == bridge && r.chat == chat && r.repo == repo)
                 .max_by_key(|r| r.last_used)
                 .cloned()
-        })
-        .or_else(|| {
-            records
-                .iter()
-                .filter(|r| r.bridge == bridge && r.chat == chat)
-                .max_by_key(|r| r.last_used)
-                .cloned()
         });
 
     if let Some(rec) = matching_record {
@@ -8714,6 +8707,10 @@ mod tests {
         let (st, _, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(server.chat_repos.current_repo(&server.config.codex_home, "signal:+1555"), None, "/off cleared what /open set");
+        // A second /off has no repository to turn off: it names none.
+        let (st, again, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(again["repo"], Value::Null, "{body}");
     }
 
     #[tokio::test]
