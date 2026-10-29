@@ -187,15 +187,7 @@ impl Server {
     /// device's cookie. The owner token counts only on `/healthz`: a sandboxed command can read
     /// the token file, so it must open nothing else (auth.rs).
     pub fn authenticated(&self, path: &str, headers: &HeaderMap) -> bool {
-        let cookies = header_str(headers, header::COOKIE);
-        if let Some(token) = auth::cookie(cookies, auth::SESSION_COOKIE)
-            && self.sessions.lock().unwrap_or_else(|p| p.into_inner()).contains(&auth::sha256_hex(token))
-        {
-            return true;
-        }
-        if let Some(token) = auth::cookie(cookies, auth::DEVICE_COOKIE)
-            && auth::device_for_token(&self.config.state_dir, token).is_some()
-        {
+        if self.owner_session(headers) || auth::device_for_cookie(&self.config.state_dir, header_str(headers, header::COOKIE)).is_some() {
             return true;
         }
         // A sync agent's secret opens the hub's routes and nothing else (sync_hub.rs).
@@ -214,8 +206,14 @@ impl Server {
     /// Whether a request carries this machine's own session (from `ling web open`, whose link is
     /// for loopback), not a paired device's cookie: what pairing and revoking devices need.
     pub fn owner_session(&self, headers: &HeaderMap) -> bool {
-        auth::cookie(header_str(headers, header::COOKIE), auth::SESSION_COOKIE)
-            .is_some_and(|token| self.sessions.lock().unwrap_or_else(|p| p.into_inner()).contains(&auth::sha256_hex(token)))
+        self.session_token(headers).is_some()
+    }
+
+    /// The request's session cookie that is one of this machine's sessions, trying each
+    /// `ling_session` the request carries (auth::cookies).
+    pub fn session_token<'a>(&self, headers: &'a HeaderMap) -> Option<&'a str> {
+        let sessions = self.sessions.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        auth::cookies(header_str(headers, header::COOKIE), auth::SESSION_COOKIE).find(|token| sessions.contains(&auth::sha256_hex(token)))
     }
 
     /// The paired device name when the request is authenticated by a paired device cookie and not
@@ -224,8 +222,7 @@ impl Server {
         if self.owner_session(headers) {
             return None;
         }
-        let token = auth::cookie(header_str(headers, header::COOKIE), auth::DEVICE_COOKIE)?;
-        auth::device_for_token(&self.config.state_dir, token).map(|device| device.name)
+        auth::device_for_cookie(&self.config.state_dir, header_str(headers, header::COOKIE)).map(|device| device.name)
     }
 
     /// Whether the request is authenticated only by a paired device restricted to `watch`: it may
@@ -234,15 +231,17 @@ impl Server {
         if self.owner_session(headers) {
             return false;
         }
-        auth::cookie(header_str(headers, header::COOKIE), auth::DEVICE_COOKIE)
-            .and_then(|token| auth::device_for_token(&self.config.state_dir, token))
-            .is_some_and(|device| device.scope == auth::Scope::Watch)
+        auth::device_for_cookie(&self.config.state_dir, header_str(headers, header::COOKIE)).is_some_and(|device| device.scope == auth::Scope::Watch)
     }
 
     /// Whether the request carries a session cookie issued with `bridge=1` (`ling chat`).
     pub fn bridge_session(&self, headers: &HeaderMap) -> bool {
-        auth::cookie(header_str(headers, header::COOKIE), auth::SESSION_COOKIE)
-            .is_some_and(|token| self.bridge_sessions.lock().unwrap_or_else(|p| p.into_inner()).contains(&auth::sha256_hex(token)))
+        self.session_token(headers).is_some_and(|token| {
+            self.bridge_sessions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains(&auth::sha256_hex(token))
+        })
     }
 
     /// Whether the caller is a phone bridge: a `bridge=1` session (`ling chat`) or a Signal bridge device.
@@ -1249,6 +1248,59 @@ mod tests {
         assert_eq!(clean_file_name(".bashrc"), "bashrc");
         assert_eq!(clean_file_name(""), "attachment");
         assert_eq!(clean_file_name("a\u{0}b\nc.txt"), "abc.txt");
+    }
+
+    #[tokio::test]
+    async fn a_cookie_set_by_another_local_port_does_not_shadow_the_real_one() {
+        // Cookies ignore the port: another service on this host can set a `ling_session` or
+        // `ling_device` that the browser sends ahead of ours.
+        let dir = std::env::temp_dir().join(format!("ling-web-server-tossed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let state_dir = dir.join("codex").join("web");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let server = Server::new(Config {
+            codex_home: dir.join("codex"),
+            state_dir: state_dir.clone(),
+            port: 9,
+            lan_names: Vec::new(),
+            public_names: Vec::new(),
+            socket: dir.join("app.sock"),
+            launch: Launch {
+                ling: PathBuf::from("/bin/true"),
+                env: Vec::new(),
+                log: dir.join("app-server.log"),
+            },
+            images_dir: dir.join("images"),
+            speech_addr: "127.0.0.1:9".to_string(),
+            user_config: None,
+            forge_url: None,
+        })
+        .unwrap();
+        let with = |cookie: String| {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::COOKIE, HeaderValue::from_str(&cookie).unwrap());
+            headers
+        };
+        let session = auth::SESSION_COOKIE;
+        let device = auth::DEVICE_COOKIE;
+
+        let owner = with(format!("{session}=tossed; {session}={}", server.new_session_with(false)));
+        assert!(server.authenticated("/", &owner));
+        assert!(server.owner_session(&owner));
+
+        let bridge = with(format!("{session}=tossed; {session}={}", server.new_session_with(true)));
+        assert!(server.bridge_session(&bridge));
+        assert!(server.is_bridge_caller(&bridge));
+
+        let (_, token) = auth::add_device(&state_dir, "phone").unwrap();
+        let phone = with(format!("{device}=tossed; {device}={token}"));
+        assert!(server.authenticated("/", &phone));
+        assert_eq!(server.paired_device_name(&phone).as_deref(), Some("phone"));
+        assert!(crate::forge::may_sign_in(&state_dir, false, &phone));
+
+        let (watch_id, watch_token) = auth::add_device(&state_dir, "watcher").unwrap();
+        auth::set_scope(&state_dir, &watch_id, auth::Scope::Watch).unwrap();
+        assert!(server.watch_device(&with(format!("{device}=tossed; {device}={watch_token}"))));
     }
 
     #[tokio::test]

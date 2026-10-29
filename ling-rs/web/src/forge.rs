@@ -402,9 +402,7 @@ pub fn may_sign_in(state_dir: &Path, owner_session: bool, headers: &HeaderMap) -
         return true;
     }
     let cookies = headers.get(header::COOKIE).and_then(|value| value.to_str().ok());
-    auth::cookie(cookies, auth::DEVICE_COOKIE)
-        .and_then(|token| auth::device_for_token(state_dir, token))
-        .is_some_and(|device| device.scope == auth::Scope::Control)
+    auth::device_for_cookie(state_dir, cookies).is_some_and(|device| device.scope == auth::Scope::Control)
 }
 
 /// The page a `watch` device gets instead of the forge.
