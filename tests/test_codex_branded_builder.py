@@ -170,6 +170,26 @@ def test_airgapped_treats_every_profile_without_a_sandbox_like_full_access():
     assert "permission_refusal(" + no_sandbox + "p)" in app_server
 
 
+def test_masking_sees_the_size_before_normalising_and_masks_the_items_last():
+    # CONTEXT_BUDGET §4.1: the hook reads the session's size before the history is normalised,
+    # with `false` for server reasoning (the session's default), and hands the finished items to
+    # the leaf crate last, so what the model is sent is the masked view.
+    texts = {Path(p).name: Path(p).read_text() for p in CodexBrandedBuilder.patches()}
+    patch_text = texts["0021-observation-masking.patch"]
+    lines = patch_text.splitlines()
+    added = [line[1:].strip() for line in lines if line.startswith("+") and not line.startswith("+++")]
+    assert added == [
+        'ling-masking = { path = "../ling/masking" }',
+        "let size = self.get_total_token_usage(/*server_reasoning_included*/ false);",
+        "let mut items = Arc::unwrap_or_clone(self.items);",
+        "ling_masking::apply(&mut items, size, |envelope| &mut envelope.item);",
+        "items",
+    ]
+    body = patch_text[patch_text.index("+++ b/codex-rs/core/src/context_manager/history.rs") :]
+    assert ") -> Vec<ResponseItemEnvelope> {" in body
+    assert body.index("let size =") < body.index("self.normalize_history(") < body.index("ling_masking::apply(")
+
+
 def test_the_build_key_changes_with_the_patches(tmp_path):
     patch_dir = tmp_path / "patches"
     patch_dir.mkdir()
