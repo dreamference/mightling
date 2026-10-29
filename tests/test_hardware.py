@@ -374,6 +374,31 @@ def test_a_failed_release_download_leaves_nothing_half_written(monkeypatch):
     assert list((folder / "blobs").iterdir()) == []
 
 
+def test_a_connection_that_drops_mid_asset_is_a_failed_download_not_a_crash(monkeypatch):
+    # A body shorter than its Content-Length raises http.client.IncompleteRead, an HTTPException
+    # and not an OSError: `server start` crashed with a traceback and the `.incomplete` file stayed.
+    import http.client
+    import urllib.request
+
+    from dreamference.hardware import ModelDownloader
+    repo, payloads = _hosted_model(monkeypatch, {"model.safetensors": b"weights"})
+    _release_server(monkeypatch, payloads)
+
+    class Dropped:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, *args):
+            raise http.client.IncompleteRead(b"wei", 4)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout=None: Dropped())
+    assert not ModelDownloader.download_model(repo)
+    folder = ModelDownloader.get_hf_cache_dir() / "models--dreamference--test-drafter"
+    assert list((folder / "blobs").iterdir()) == []
+
+
 def test_node_sync_sends_a_release_hosted_drafter_as_a_hub_folder(monkeypatch):
     # The receiving node checks every 64-hex blob against its name: a release-hosted drafter's blobs are named so.
     from dreamference.hardware import ModelDownloader

@@ -9,6 +9,7 @@ hashed on the way, and moved into place only when the hash matches its pin.
 """
 
 import hashlib
+import http.client
 import urllib.request
 from pathlib import Path
 from typing import Any, Final
@@ -134,7 +135,8 @@ class ReleaseAssetDownloader:
                     digest.update(chunk)
                     out.write(chunk)
                     size += len(chunk)
-        except OSError as error:
+        # A body cut short raises IncompleteRead, an HTTPException rather than an OSError.
+        except (OSError, http.client.HTTPException) as error:
             partial.unlink(missing_ok=True)
             cls._say(f"❌ Could not download {pin['url']}: {error}")
             return False
