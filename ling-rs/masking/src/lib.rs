@@ -199,9 +199,14 @@ where
         return;
     }
     for (index, value) in values.iter().enumerate() {
+        // An output shorter than a maskable one was rewritten since (drop-first compaction's
+        // placeholder, COMPACTION §13.4) and stays as it is.
         let Some(id) = call_id(value).filter(|id| is_output(value) && state.masked.contains(*id)) else {
             continue;
         };
+        if output_text(value).chars().count() < policy.min_chars {
+            continue;
+        }
         let Value::Object(fields) = value else { continue };
         let mut fields = fields.clone();
         fields.insert("output".to_string(), Value::String(placeholder(&output_text(value), &copy_path(dir, id))));
