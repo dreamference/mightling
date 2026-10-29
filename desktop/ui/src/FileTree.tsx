@@ -89,8 +89,9 @@ export function FileTree(props: { root: string; client: RpcClient; listen: Liste
       next.add(dir);
       if (!listings[dir] || typeof listings[dir] === "object" && "error" in (listings[dir] as object)) {
         setListings((known) => ({ ...known, [dir]: "loading" }));
-        read(dir);
       }
+      // Read again even when it was read before: closed, it was not followed, so what changed meanwhile is not in its listing.
+      read(dir);
       follow(dir);
     }
     setOpen(next);
