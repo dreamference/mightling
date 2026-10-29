@@ -471,7 +471,15 @@ fn exclude(folder: &str) -> i32 {
 /// The agent's loop: a cycle a second until stopped, finding the hub again after five failures in
 /// a row (the node moved, or `ling web` restarted on another address).
 async fn run_agent(environment: &Environment, once: bool) -> i32 {
-    let Some(mut agent) = Agent::load(&environment.codex_home, &environment.ling, Settings::load()) else {
+    // A configuration that does not read is not "nothing excluded": wait until it is fixed.
+    let settings = match Settings::load_checked() {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!("{err}");
+            return 1;
+        }
+    };
+    let Some(mut agent) = Agent::load(&environment.codex_home, &environment.ling, settings) else {
         eprintln!("Sync is not enabled on this device: `ling sync enable`.");
         return 3;
     };
@@ -482,7 +490,10 @@ async fn run_agent(environment: &Environment, once: bool) -> i32 {
     let mut failures = 0u32;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
     loop {
-        agent.settings = Settings::load();
+        // Mid-edit or broken, the file keeps the last settings that read.
+        if let Ok(settings) = Settings::load_checked() {
+            agent.settings = settings;
+        }
         if hub.is_none() {
             match resolve_base(&agent.device, environment).await.and_then(|base| HubClient::new(&base, &agent.device.secret)) {
                 Ok(client) => hub = Some(client),

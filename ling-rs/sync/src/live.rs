@@ -488,8 +488,15 @@ pub async fn run(codex_home: PathBuf, hub: Arc<HubClient>) {
     let looker = {
         let host = host.clone();
         async move {
+            // The last `[sync]` that read: a broken file never means nothing is excluded.
+            let mut settings = None;
             loop {
-                host.look(&sockets, &Settings::load()).await;
+                if let Ok(read) = Settings::load_checked() {
+                    settings = Some(read);
+                }
+                if let Some(settings) = &settings {
+                    host.look(&sockets, settings).await;
+                }
                 tokio::time::sleep(LOOK_EVERY).await;
             }
         }
