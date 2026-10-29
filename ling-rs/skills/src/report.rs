@@ -387,6 +387,26 @@ mod tests {
     }
 
     #[test]
+    fn the_list_names_how_to_trust_a_repository_whose_skills_it_does_not_read() {
+        let fixture = Fixture::new("report-untrusted");
+        fixture.repository_skill(".claude/skills/release", "release");
+        let machine = fixture.machine();
+        let settings = Settings::default();
+
+        let text = list(&plan(&machine, &settings), &machine, &settings, false).join("\n");
+        assert!(text.contains("Linked sources: repo on, not trusted; "), "{text}");
+        assert!(text.contains("has skills for other agents (.claude/skills or .gemini/skills)"), "{text}");
+        let trust = format!("[projects.\"{}\"] trust_level = \"trusted\" in config.toml", fixture.cwd.display());
+        assert!(text.ends_with(&format!("{trust}).")), "{text}");
+
+        let config = format!("[projects.'{}']\ntrust_level = \"trusted\"\n", fixture.cwd.display());
+        std::fs::write(fixture.codex_home.join("config.toml"), config).unwrap_or_default();
+        let trusted = list(&plan(&machine, &settings), &machine, &settings, false).join("\n");
+        assert!(trusted.contains("Linked sources: repo on; "), "{trusted}");
+        assert!(!trusted.contains("trust_level"), "{trusted}");
+    }
+
+    #[test]
     fn a_staged_skill_is_shown_before_it_is_installed() {
         let fixture = Fixture::new("report-staged");
         fixture.skill(".claude/skills/comms", "comms", "");
