@@ -60,8 +60,9 @@ class NodeRemote:
                 tags.append("not paired: `ling-admin node add " + node["name"] + "` to manage it")
             if node.get("main") != "1":
                 tags.append("not a coding model")
-            if forges.get(node.get("node")):
-                tags.append(f"forge {forges[node['node']]}")
+            role = forges.get(node.get("node") or "")
+            if role:
+                tags.append(f"forge {role}")
             lines.append(f"{node['name']}  {host}/v1  {detail}  Mightling {node.get('version', '?')}  ({'; '.join(tags)})")
         return lines
 
