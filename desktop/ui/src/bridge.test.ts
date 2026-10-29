@@ -10,7 +10,7 @@ import {
   parseOpenTarget, pathForFile, popOut, preview, prs, quitApp, readBoards, recall, relaunchApp, telegram, terminals,
   toggleFullScreen, transcribe, upload, windowControl, windows, workAttach, worktrees,
 } from "./bridge";
-import { recordCheckout, resetChatRepos, setActiveChatRepoCwd } from "./repos";
+import { recordCheckout, resetChatRepos, setActiveChatRepoCwd, setChatReposFetcher } from "./repos";
 import { RpcClient, RpcError } from "./rpc";
 
 type Listener = (event: { data: unknown }) => void;
@@ -88,6 +88,20 @@ describe("the app's host", () => {
     // Without a folder named it stays the desktop app's answer, whatever thread is shown.
     setActiveChatRepoCwd(checkout);
     expect(git.available()).toBe(false);
+  });
+
+  it("names the checkout's own base as what a web branch diff is against", async () => {
+    stubWindow(undefined);
+    const checkout = "/srv/chat-repos/org/shop/web-01234567";
+    recordCheckout({ thread: "01234567", cwd: checkout, repo: "org/shop", branch: "phone/01234567", read_only: false });
+    setChatReposFetcher(async (url) => {
+      if (url.startsWith("/api/repos/state?")) {
+        return new Response(JSON.stringify({ repo: "org/shop", branch: "phone/01234567", base: "develop", ahead: 1, behind: 0, uncommitted: [] }));
+      }
+      return new Response(JSON.stringify({ diff: "diff --git a/x b/x\n" }));
+    });
+    expect((await git.diff(checkout, "branch")).against).toBe("develop");
+    expect((await git.diff(checkout, "unstaged")).against).toBeNull();
   });
 });
 

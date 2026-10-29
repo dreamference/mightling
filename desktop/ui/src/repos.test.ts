@@ -422,6 +422,7 @@ describe("G6: Diffs and review scopes for chat-repos threads", () => {
       "/api/repos/diff?thread=01234567&scope=uncommitted",
       "/api/repos/diff?thread=01234567&scope=uncommitted&path=src%2Findex.ts",
       "/api/repos/diff?thread=01234567&scope=branch",
+      "/api/repos/state?thread=01234567",
     ]);
   });
 });
