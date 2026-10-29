@@ -142,6 +142,21 @@ def test_the_windows_issue_is_only_the_workflows_own(tmp_path: Path) -> None:
     assert "author:app/github-actions" in query.split()
 
 
+def test_gh_asks_about_the_repository_it_fills(tmp_path: Path, monkeypatch: Any) -> None:
+    # The timer starts `night run` in the home folder, where `gh` finds no repository at all.
+    class Recording(FakeRun):
+        def __call__(self, args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if args[0] == "gh":
+                where.append(kwargs.get("cwd"))
+            return super().__call__(args, **kwargs)
+
+    where: list[Any] = []
+    repo = repo_with_specs(tmp_path, "nothing to do\n")
+    run = Recording(runs=[{"databaseId": 7, "workflowName": "CI", "event": "schedule"}])
+    fill_with(monkeypatch, tmp_path, repo, run, 5, dry_run=True)
+    assert len(where) == 3 and all(folder == repo for folder in where)
+
+
 def test_sensitive_findings_are_skipped(tmp_path: Path) -> None:
     night = tmp_path / "night"
     sensitive = [
