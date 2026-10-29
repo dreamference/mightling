@@ -161,7 +161,9 @@ class NodePowerCycle:
             except OSError:
                 still_on = False
             if not still_on:
-                print(f"⚠️  The reply to 'off' was lost ({error}); making sure the plug is on again.")
+                print(
+                    f"⚠️  The reply to 'off' was lost ({error}); making sure the plug is on again."
+                )
         if still_on:
             print("❌ The plug still reports itself on; nothing more was done.")
             return False
