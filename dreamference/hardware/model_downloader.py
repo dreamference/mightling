@@ -464,9 +464,9 @@ class ModelDownloader:
                 cmd = ["huggingface-cli", "download", repo_id]
                 if revision:
                     cmd.extend(["--revision", revision])
-                if token_val:
-                    cmd.extend(["--token", token_val])
-                res = subprocess.run(cmd)
+                # In the environment, not as `--token`: arguments are readable by every user (ps).
+                env = {**os.environ, "HF_TOKEN": token_val} if token_val else None
+                res = subprocess.run(cmd, env=env)
                 if res.returncode == 0:
                     cache_size = cls._get_cache_size(model_key)
                     print(f"✅ Successfully pre-downloaded {repo_id} via huggingface-cli ({cache_size})")
