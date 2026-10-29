@@ -1,5 +1,7 @@
 """Behaviour found wrong in the 2026-10-29 review of `dreamference/vllm_server/`."""
 
+import asyncio
+
 import pytest
 
 from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
@@ -312,3 +314,46 @@ def test_a_rejected_recipe_variable_stops_the_loading_monitor_and_says_why():
     # sys.exit in the monitor's thread ended only that thread, and the launch went on waiting.
     assert not monitor.monitor_thread.is_alive()
     assert monitor.fatal and "VLLM_KERNEL_PIN" in monitor.fatal
+
+
+def _fake_engine(adapters, unload_status=200):
+    """An engine that yields on every call and records which adapters it holds."""
+    held = set()
+
+    async def engine_call(method, path, payload):
+        await asyncio.sleep(0)
+        if path == "/v1/models":
+            return 200, b'{"data": []}'
+        if path == "/load_lora_adapter":
+            # A load takes a while; the other request's checks finish meanwhile.
+            await asyncio.sleep(0.05)
+            held.add(payload["lora_name"])
+            return 200, b""
+        if unload_status == 200:
+            held.discard(payload["lora_name"])
+        return unload_status, b""
+
+    adapters.engine_call = engine_call
+    adapters.files_problem = lambda entry: None
+    return held
+
+
+def _listing(*names):
+    return {"max_loaded": 1, "adapters": {name: {"path": "/" + name} for name in names}}
+
+
+def test_concurrent_loads_of_different_adapters_keep_to_the_limit(tmp_path):
+    from dreamference.vllm_server.model_gate_adapters import ModelGateAdapters
+
+    adapters = ModelGateAdapters(str(tmp_path), ("127.0.0.1", 1))
+    held = _fake_engine(adapters)
+    listing = _listing("a", "b")
+
+    async def both():
+        return await asyncio.gather(
+            adapters.ensure_loaded("a", listing), adapters.ensure_loaded("b", listing)
+        )
+
+    assert asyncio.run(both()) == [None, None]
+    # Each load made room against a count the other had not joined yet, and both stayed.
+    assert len(held) <= 1 and len(adapters.loaded) <= 1
