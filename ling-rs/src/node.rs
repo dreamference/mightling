@@ -187,12 +187,13 @@ pub fn resolve(inputs: &Inputs, browser: &dyn Browser) -> Resolution {
     }
     if let Some(name) = inputs.pinned.as_deref().filter(|name| !name.trim().is_empty()) {
         let found = browser.browse(Some(&named(name)));
-        return match found.iter().find(|advert| matches(advert, name)) {
-            Some(advert) => checked(advert.clone(), false, None),
-            None => Resolution::Refused(format!(
+        return match the_one(&found, name) {
+            Ok(Some(advert)) => checked(advert.clone(), false, None),
+            Ok(None) => Resolution::Refused(format!(
                 "{PIN_ENV}={name}: no such node on this network.{}",
                 listing(&found, None)
             )),
+            Err(message) => Resolution::Refused(format!("{PIN_ENV}={message}")),
         };
     }
     if inputs.is_node {
@@ -1346,6 +1347,20 @@ mod tests {
         let https = pick(&[], "https://spark.lan:9000").unwrap_err();
         assert!(https.contains("speaks http"), "{https}");
         assert!(pick(&[], "[fd00::2]x").is_err());
+    }
+
+    #[test]
+    fn a_name_two_nodes_answer_to_is_refused_rather_than_guessed() {
+        let twin = advert("spark-1", "99999999-cccc", "192.168.50.199");
+        let adverts = [spark1(), twin.clone(), spark2()];
+        let refused = pick(&adverts, "spark-1").unwrap_err();
+        assert!(refused.contains("11111111") && refused.contains("99999999"), "{refused}");
+        assert_eq!(pick(&adverts, "1111"), Ok(spark1().node));
+        let pinned = Inputs { pinned: Some("spark-1".into()), ..Inputs::default() };
+        match resolve(&pinned, &Fixed::new(adverts.to_vec())) {
+            Resolution::Refused(message) => assert!(message.contains("99999999"), "{message}"),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
     }
 
     #[test]
