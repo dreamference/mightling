@@ -564,6 +564,32 @@ describe("the sync host", () => {
     expect(sent()).toBe(1);
   });
 
+  // A hub given by name: the name is looked up once a session, so a rebind cannot send the secret elsewhere.
+  it("looks a hub's name up once and posts to that address, under the hub's own name", async () => {
+    const lookups: string[] = [];
+    const lookup = async (name: string) => {
+      lookups.push(name);
+      return { address: lookups.length === 1 ? new URL(r.hub.base).hostname : "203.0.113.9", family: 4 };
+    };
+    const r = await rig("pinned", { hostOptions: { lookup } });
+    const named = `http://hub.test:${new URL(r.hub.base).port}`;
+    fs.writeFileSync(path.join(r.home, "sync", "agent-status.json"), JSON.stringify({ hub: named, device: "dev-laptop", pending: 0 }));
+    r.host.start();
+    await until(() => r.hub.posts.length >= 3);
+    expect(lookups).toEqual(["hub.test"]);
+    expect(r.hub.posts.map((post) => post.headers.host)).toEqual(r.hub.posts.map(() => new URL(named).host));
+  });
+
+  it("posts nothing to a hub whose name is looked up outside the user's network", async () => {
+    const lookups: string[] = [];
+    const r = await rig("pinned-public", { hostOptions: { lookup: async (name: string) => (lookups.push(name), { address: "203.0.113.9", family: 4 }) } });
+    fs.writeFileSync(path.join(r.home, "sync", "agent-status.json"), JSON.stringify({ hub: `http://hub.test:${new URL(r.hub.base).port}`, device: "dev-laptop", pending: 0 }));
+    r.host.start();
+    await until(() => lookups.length > 0);
+    await pause(300);
+    expect(r.hub.posts).toEqual([]);
+  });
+
   it("stops with the server: nothing more is posted", async () => {
     const r = await rig("stop");
     r.host.start();
