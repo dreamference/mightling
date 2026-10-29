@@ -46,9 +46,12 @@ describe("the profile's statistics", () => {
     // the folder listed oldest first, as a file system may
     const readdir = fs.readdirSync;
     vi.spyOn(fs, "readdirSync").mockImplementation(((dir: fs.PathLike, options: never) => (readdir(dir, options) as unknown as fs.Dirent[]).sort((a, b) => a.name.localeCompare(b.name))) as typeof fs.readdirSync);
-    expect(insights(home, Date.parse("2026-10-16T18:00:00"))).toMatchObject({ lifetimeTokens: 200, currentStreak: 1 });
-    vi.restoreAllMocks();
-    fs.rmSync(home, { recursive: true, force: true });
+    try {
+      expect(insights(home, Date.parse("2026-10-16T18:00:00"))).toMatchObject({ lifetimeTokens: 200, currentStreak: 1 });
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("read and write the personal AGENTS.md", () => {
