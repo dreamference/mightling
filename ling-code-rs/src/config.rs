@@ -85,13 +85,21 @@ impl Settings {
     /// Reads the settings: `DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then
     /// `~/.config/dreamference/config.toml`, the first that exists; every key is optional.
     pub fn load(repo_root: &Path) -> Settings {
+        Settings::load_with(config_file(repo_root), |key| std::env::var(key).ok())
+    }
+
+    /// The settings from `config_path`, then the variables `env` gives, which win over the file
+    /// and apply without one.
+    fn load_with(config_path: Option<PathBuf>, env: impl Fn(&str) -> Option<String>) -> Settings {
         let mut settings = Settings {
-            config_path: config_file(repo_root),
+            config_path,
             ..Settings::default()
         };
         settings.read_file();
-        if let Some(layers) = std::env::var("MIGHTLING_CODE_LAYERS")
-            .ok()
+        if let Some(host) = env("DREAMFERENCE_VLLM_HOST") {
+            settings.vllm_host = host.trim_end_matches('/').to_string();
+        }
+        if let Some(layers) = env("MIGHTLING_CODE_LAYERS")
             .as_deref()
             .and_then(Layers::parse)
         {
@@ -171,9 +179,6 @@ impl Settings {
         {
             settings.layers = v
         }
-        if let Ok(host) = std::env::var("DREAMFERENCE_VLLM_HOST") {
-            settings.vllm_host = host.trim_end_matches('/').to_string();
-        }
     }
 }
 
@@ -225,6 +230,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_host_variable_wins_with_or_without_a_settings_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.toml");
+        let env = |key: &str| {
+            (key == "DREAMFERENCE_VLLM_HOST").then(|| "http://gpu-node:8001/".to_string())
+        };
+        let s = Settings::load_with(Some(file.clone()), env);
+        assert_eq!(s.vllm_host, "http://gpu-node:8001");
+        std::fs::write(&file, "vllm_host = \"http://127.0.0.1:9000\"\n").unwrap();
+        assert_eq!(
+            Settings::load_with(Some(file.clone()), env).vllm_host,
+            "http://gpu-node:8001"
+        );
+        assert_eq!(
+            Settings::load_with(Some(file), |_| None).vllm_host,
+            "http://127.0.0.1:9000"
+        );
+    }
+
+    #[test]
     fn layers_parse_handles_case_whitespace_and_unknown_values() {
         assert_eq!(Layers::parse("all"), Some(Layers::All));
         assert_eq!(Layers::parse("  EXACT\n"), Some(Layers::Exact));
@@ -264,9 +289,7 @@ mightling_code_layers = "exact"
             ..Settings::default()
         };
         s.read_file();
-        if std::env::var_os("DREAMFERENCE_VLLM_HOST").is_none() {
-            assert_eq!(s.vllm_host, "http://127.0.0.1:9000");
-        }
+        assert_eq!(s.vllm_host, "http://127.0.0.1:9000");
         assert_eq!(s.scan_max_files, 500);
         assert_eq!(s.scan_max_bytes, 1_048_576);
         assert_eq!(s.row_limit, 200, "clamped to 200");

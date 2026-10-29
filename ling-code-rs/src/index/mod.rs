@@ -49,6 +49,10 @@ pub fn request_or_run(repo: &Repo, settings: &Settings, exact: bool, wait: bool)
         return Ok(());
     }
     if wait {
+        let Some(_lock) = claim_supervisor(&plan.state_dir)? else {
+            println!("{ANOTHER_SUPERVISOR}");
+            return Ok(());
+        };
         for (unit, outcome) in supervisor::execute(
             &plan,
             &host,
@@ -59,11 +63,23 @@ pub fn request_or_run(repo: &Repo, settings: &Settings, exact: bool, wait: bool)
         }
         return Ok(());
     }
-    let pid = spawn_supervisor(repo, &plan)?;
+    let Some(pid) = spawn_supervisor_unless_running(repo, &plan)? else {
+        println!("{ANOTHER_SUPERVISOR}");
+        return Ok(());
+    };
     println!(
         "indexing in the background (supervisor pid {pid}); `ling-code status` reports progress"
     );
     Ok(())
+}
+
+/// [`spawn_supervisor`], unless another supervisor holds the lock (its child would stand down at
+/// once, after the caller had said indexing started); None then.
+fn spawn_supervisor_unless_running(repo: &Repo, plan: &plan::Plan) -> Result<Option<u32>> {
+    if claim_supervisor(&plan.state_dir)?.is_none() {
+        return Ok(None);
+    }
+    spawn_supervisor(repo, plan).map(Some)
 }
 
 /// Writes the plan and starts `ling-code supervise <plan>` detached: its own session, stdio to a
@@ -103,6 +119,11 @@ pub fn spawn_supervisor_child(repo: &Repo, plan: &plan::Plan) -> Result<std::pro
 /// `ling-code supervise <plan>`: execute a written plan (the detached supervisor).
 pub fn supervise(plan_path: &str) -> Result<()> {
     let plan: plan::Plan = serde_json::from_slice(&std::fs::read(plan_path)?)?;
+    let Some(_lock) = claim_supervisor(&plan.state_dir)? else {
+        println!("{ANOTHER_SUPERVISOR}");
+        let _ = std::fs::remove_file(plan_path);
+        return Ok(());
+    };
     let marker = plan.state_dir.join("code_index.running");
     let _ = std::fs::write(&marker, std::process::id().to_string());
     for (unit, outcome) in supervisor::execute(
@@ -121,6 +142,16 @@ pub fn supervise(plan_path: &str) -> Result<()> {
     let _ = std::fs::remove_file(plan.state_dir.join("code_index.building"));
     let _ = std::fs::remove_file(plan_path);
     Ok(())
+}
+
+const ANOTHER_SUPERVISOR: &str =
+    "not indexing: another supervisor is running for this repository; `ling-code status` reports it";
+
+/// The lock that keeps one supervisor per repository, across sessions and `index --wait`
+/// (spec: one run of each kind per repository); None while another holds it.
+fn claim_supervisor(state_dir: &Path) -> Result<Option<std::fs::File>> {
+    let lock = crate::paths::state_file_in(state_dir, "supervisor.lock")?;
+    Ok(host::flock(&lock, false).is_ok().then_some(lock))
 }
 
 /// Whether a supervisor for this repository is still running.
@@ -245,6 +276,38 @@ pub fn disk_use(path: &Path) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_second_supervisor_finds_the_lock_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = claim_supervisor(dir.path()).unwrap();
+        assert!(first.is_some());
+        assert!(claim_supervisor(dir.path()).unwrap().is_none());
+        drop(first);
+        assert!(claim_supervisor(dir.path()).unwrap().is_some());
+    }
+
+    /// `ling-code index` must not report a background run that would stand down at once.
+    #[test]
+    fn no_supervisor_is_spawned_while_another_holds_the_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo {
+            root: dir.path().to_path_buf(),
+            main_root: dir.path().to_path_buf(),
+            is_git: false,
+        };
+        let plan = plan::Plan {
+            repo_root: repo.root.clone(),
+            main_root: repo.root.clone(),
+            state_dir: repo.state_dir(),
+            vllm_host: "http://127.0.0.1:9".into(),
+            wait_idle_s: 0,
+            runs: Vec::new(),
+        };
+        let _held = claim_supervisor(&plan.state_dir).unwrap().unwrap();
+        assert_eq!(spawn_supervisor_unless_running(&repo, &plan).unwrap(), None);
+        assert!(!repo.state_dir().join("plans").exists(), "no plan written");
+    }
 
     #[test]
     fn disk_use_and_running_reflect_filesystem_and_process_state() {

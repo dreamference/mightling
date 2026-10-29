@@ -189,7 +189,7 @@ A submodule is indexed only when it belongs to the same organisation as the repo
   - **The submodule's URL** is the effective one: `git config submodule.<name>.url` (what `git submodule init` wrote, including the user's own override), else `.gitmodules`. It is expanded through `git ls-remote --get-url`, which applies `url.<base>.insteadOf` and makes no network request (3 ms, §2).
   - **The superproject's URL** is that of the current branch's remote (`branch.<branch>.remote`), else `origin`, else the only remote.
   - **Host and owner** are parsed from `https://`, `ssh://`, `git://` and scp-like `user@host:path` forms: the host lowercased without user information or port, and the owner the first path segment, lowercased. That is the GitHub user or organisation, the top-level GitLab group, the Bitbucket workspace and the Azure DevOps organisation.
-  - **A relative URL** (`./x`, `../x`) passes by construction, since git resolves it against the superproject's own remote. With no superproject remote there is nothing to resolve against, and the namespace test is unavailable.
+  - **A relative URL** (`./x`, `../x`) is resolved as git resolves it, against the declaring repository's remote, and the result is compared like any other: `../x` keeps the owner, `../../other/x` leaves it. With no remote to resolve against, the namespace test is unavailable.
   - **Unavailable** when either side has no remote, or the URL is a local path or `file://`. Then authorship alone decides, and trust is never inherited (below).
   - **Credentials never leave the parser.** A URL carrying user information (`https://user:token@host/…`) is printed, logged and recorded only as `host/owner/repo`.
 - **Authorship.** Most of the submodule's own recent history is written by the people who write the superproject.
@@ -592,7 +592,7 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **scip-python's environment:** a fixture repository whose `.venv/bin/python3` and `sitecustomize.py` write marker files is indexed without either marker appearing.
 - **Prompt:** the `# Code navigation` block is full when the index is ready, reduced while building, absent without a repository, and under 250 tokens.
 - **Submodules (§4.3)**, on fixture repositories built in the test's temporary directory with local bare remotes and fixed author addresses:
-  - same namespace and our authors: indexed (`yours`); same namespace and a foreign author: not indexed (`third-party`); another owner: not indexed (`other organisation`), even with our authors; a relative URL with our authors: indexed;
+  - same namespace and our authors: indexed (`yours`); same namespace and a foreign author: not indexed (`third-party`); another owner: not indexed (`other organisation`), even with our authors; a relative URL with our authors: indexed while it stays under the owner, not indexed (`other organisation`) when `../../` leaves it;
   - a shallow single-commit submodule is decided by that commit; a fork with 3 of our commits on 50 upstream ones is `third-party`;
   - no remote on either side: authorship decides, and an executing indexer never inherits trust from it;
   - URL forms: `https://`, `ssh://` with a port, scp-like, upper-case owner, an `insteadOf` rewrite, and `https://user:token@host/…`, whose token appears nowhere in the output, the logs or the manifest;

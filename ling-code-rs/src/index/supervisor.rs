@@ -360,15 +360,15 @@ fn keep_log(repo: &Repo, run: &Run, log: &Path) {
 
 fn record(repo: &Repo, run: &Run, outcome: &Outcome) -> Result<()> {
     match (run.kind, outcome) {
-        (_, Outcome::Ok) | (_, Outcome::Failed(_)) => Ok(()), // recorded where it happened, with the peak
+        (_, Outcome::Ok) => Ok(()), // recorded with the snapshot
+        // A failure the run recorded with its peak is recorded again with the same status, the
+        // peak kept; one it returned early or with an error is recorded only here.
         (Kind::Universal, _) => {
             let mut snapshot = GraphSnapshot::load(&repo.scip_dir()).unwrap_or_default();
             snapshot.status = outcome.status();
             snapshot.save(&repo.scip_dir())
         }
-        (_, Outcome::Deferred(_)) => {
-            store::record_outcome(repo, &run.indexer, &run.root, &outcome.status(), |_| {})
-        }
+        _ => store::record_outcome(repo, &run.indexer, &run.root, &outcome.status(), |_| {}),
     }
 }
 
@@ -625,6 +625,44 @@ mod tests {
             entry.peak_cap_bounded && entry.peak_rss_mb >= 1024,
             "{entry:?}"
         );
+    }
+
+    #[test]
+    fn a_run_that_installs_no_index_records_its_failure() {
+        // The last run's "ok" stays in the manifest only while it is the last run's outcome.
+        let dir = tempfile::tempdir().unwrap();
+        let host = FakeHost::new(dir.path(), 100);
+        let mut plan = repo_and_plan(dir.path(), Kind::Static, 1);
+        plan.runs[0].indexer = "scip-python".into();
+        plan.runs[0].root = "pkg".into();
+        let scip = dir.path().join("index.scip");
+        let converted = dir.path().join("index.db");
+        plan.runs[0].scip_output = Some(scip.clone());
+        plan.runs[0].converted = Some(converted.clone());
+        let repo = Repo {
+            root: plan.repo_root.clone(),
+            main_root: plan.main_root.clone(),
+            is_git: false,
+        };
+        store::record_outcome(&repo, "scip-python", "pkg", "ok", |_| {}).unwrap();
+        // Nothing written; then something written that is no index.
+        for written in [false, true] {
+            if written {
+                std::fs::write(&scip, "not an index").unwrap();
+                std::fs::write(&converted, "not a database").unwrap();
+            }
+            let out = execute(
+                &plan,
+                &host,
+                &FixedProbe(ModelState::Absent),
+                Duration::from_millis(1),
+            );
+            let Outcome::Failed(why) = &out[0].1 else {
+                panic!("{:?}", out[0].1)
+            };
+            let entry = &crate::manifest::Manifest::load(&repo.scip_dir()).runs["scip-python:pkg"];
+            assert_eq!(entry.status, format!("failed: {why}"), "written: {written}");
+        }
     }
 
     #[test]

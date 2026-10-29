@@ -394,6 +394,32 @@ fn search_outline_show() {
 }
 
 #[test]
+fn a_file_named_from_the_working_directory_or_absolutely_answers() {
+    // The model often passes `./x` or the absolute path it sees; `--path` already took both.
+    let f = fixture();
+    let absolute = f.repo.root.join("shapes/report.py");
+    for file in ["./shapes/report.py", absolute.to_str().unwrap()] {
+        let (_, out) = f.run(&["outline", file]);
+        assert!(
+            out.contains("shapes/report.py:6  function shapes.report.summary (to 9)"),
+            "{file}: {out}"
+        );
+    }
+    let absolute = f.repo.root.join("shapes/geometry.py:12");
+    for location in ["./shapes/geometry.py:12", absolute.to_str().unwrap()] {
+        let (_, out) = f.run(&["refs", location]);
+        assert!(
+            out.contains("refs shapes.geometry.Circle.area"),
+            "{location}: {out}"
+        );
+        assert!(
+            out.contains("exact shapes/report.py:9"),
+            "{location}: {out}"
+        );
+    }
+}
+
+#[test]
 fn search_reaches_into_bodies() {
     // `max` and `shape` occur only inside `largest`'s body: the graph's full-text table (names
     // and documentation) finds nothing for them, and before 2026-10-02 neither did `search`.
@@ -839,6 +865,31 @@ fn impact_of_a_diff_starts_from_every_definition_it_touches() {
     f.write("README.md", "notes\n");
     let (_, out) = f.run(&["impact", "--diff"]);
     assert!(out.contains("touches no definition"), "{out}");
+}
+
+#[test]
+fn impact_of_a_diff_ignores_the_repository_diff_prefix_settings() {
+    // `diff.noprefix` and `diff.mnemonicPrefix` change the `+++` line git prints; the changed
+    // definition is found either way.
+    let f = fixture();
+    let text = std::fs::read_to_string(f.repo.root.join("shapes/geometry.py")).unwrap();
+    f.write(
+        "shapes/geometry.py",
+        &text.replace(
+            "    return Circle(radius)",
+            "    return Circle(float(radius))",
+        ),
+    );
+    for (key, value) in [("diff.noprefix", "true"), ("diff.mnemonicPrefix", "true")] {
+        git(&f.repo.root, &["config", key, value]);
+        let (code, out) = f.run(&["impact", "--diff"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            out.contains("1 changed definitions: shapes.geometry.make_circle"),
+            "{key}: {out}"
+        );
+        git(&f.repo.root, &["config", "--unset", key]);
+    }
 }
 
 #[test]
