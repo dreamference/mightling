@@ -26,6 +26,13 @@ STEP_GRAPHS_FLAG: Final[str] = "--graphs"
 KV_PAGES_FEATURE: Final[str] = "kv-pages"
 KV_PAGES_FLAG: Final[str] = "--kv-pages"
 
+# ling-serve's switch for image input (`--vision on|off`, on by default), parsed since ling-engine
+# 689690c, an ancestor of LING_ENGINE_KV_PAGES_SINCE: an engine with the "kv-pages" feature takes it,
+# an older one exits 2 on it. A recipe with `vision: False` turns the tower off (1.8.0), so
+# /model_info reports no image understanding and the launcher declares text input only.
+VISION_FLAG: Final[str] = "--vision"
+VISION_OFF: Final[str] = "off"
+
 # What `owned_by` says in ling-serve's /v1/models.
 LING_SERVE_OWNER: Final[str] = "ling-engine"
 
@@ -106,6 +113,8 @@ class LingServeLaunchBuilder:
             if recipe.get("batch"):
                 args.extend(["--batch", str(recipe["batch"])])
             args.append(KV_PAGES_FLAG)
+            if recipe.get("vision") is False:
+                args.extend([VISION_FLAG, VISION_OFF])
         args.extend(str(a) for a in recipe.get("extra_args") or [])
         return args
 
@@ -158,4 +167,9 @@ class LingServeLaunchBuilder:
                 else {}
             ),
             **({"KV cache": "Paged"} if KV_PAGES_FLAG in args else {}),
+            **(
+                {"Image input": "Off (--engine sglang reads images)"}
+                if value(VISION_FLAG) == VISION_OFF
+                else {}
+            ),
         }

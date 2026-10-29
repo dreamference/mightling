@@ -526,6 +526,11 @@ QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
     # the KV page pool ("kv-pages" in `engine_features`).
     "sessions": QWEN38_LING_SESSIONS,
     "batch": QWEN38_LING_BATCH,
+    # Image input is 1.8.1's (the owner's decision of 2026-10-29): ling-serve starts with its vision
+    # tower off (`--vision off`, on an engine with the "kv-pages" feature), so /model_info says no
+    # image understanding, the launcher declares text input only, and neither the tower nor its cache
+    # takes memory from the four sessions. `--engine sglang` reads images.
+    "vision": False,
 }
 
 

@@ -516,6 +516,69 @@ def test_the_tool_call_checks_hints_name_ling_serves_own_parsing():
 # --- 1.8.0: four paged sessions, the default switch and the pin plumbing -------------------------
 
 
+def test_image_input_is_off_on_a_paged_engine_and_untouched_on_an_older_one():
+    # 1.8.0 serves text only on ling-serve (image input is 1.8.1's): `--vision off`, parsed since
+    # ling-engine 689690c, an ancestor of the page pool, so only a "kv-pages" engine is given it.
+    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    assert recipe["vision"] is False
+    flat = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", recipe, 8000, 262144)
+    assert "--vision" not in flat
+    paged = LingServeLaunchBuilder.server_args(
+        "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(), 8000, 262144
+    )
+    assert flag(paged, "--vision") == "off"
+    assert LingServeLaunchBuilder.facts("img", {}, paged)["Image input"].startswith("Off")
+    assert "Image input" not in LingServeLaunchBuilder.facts("img", {}, flat)
+    # 1.8.1 flips the recipe: no flag, the engine's default (on).
+    on = LingServeLaunchBuilder.server_args(
+        "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(vision=True), 8000, 262144
+    )
+    assert "--vision" not in on
+    # SGLang's recipe has no such key and its launch reads images.
+    assert "vision" not in get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG)
+
+
+def test_server_start_says_where_image_input_went(capsys):
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController as Cli
+
+    Cli._server_engine(DEFAULT_MODEL_ALIAS, None, from_flag=False)
+    assert "ling-serve reads no images in 1.8.0; --engine sglang" in capsys.readouterr().out
+    Cli._server_engine(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG, from_flag=True)
+    assert "reads no images" not in capsys.readouterr().out
+
+
+def test_the_vision_switch_is_older_than_the_page_pool():
+    # The builder gates `--vision` on "kv-pages"; that is right only while the switch's commit is an
+    # ancestor of LING_ENGINE_KV_PAGES_SINCE (checked against the submodule in a checkout).
+    import subprocess
+
+    from dreamference.hardware.model_matrix_registry import LING_ENGINE_KV_PAGES_SINCE
+
+    engine = Path(__file__).resolve().parent.parent / "ling-engine"
+    vision = "689690cd97cda7f54ff3a34cc6f602ea85bb706e"
+    known = [
+        subprocess.run(
+            ["git", "-C", str(engine), "cat-file", "-e", c + "^{commit}"], capture_output=True
+        )
+        for c in (vision, LING_ENGINE_KV_PAGES_SINCE)
+    ]
+    if any(r.returncode != 0 for r in known):
+        pytest.skip("the ling-engine submodule lacks the commits (fetch it)")
+    ancestry = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(engine),
+            "merge-base",
+            "--is-ancestor",
+            vision,
+            LING_ENGINE_KV_PAGES_SINCE,
+        ],
+        capture_output=True,
+    )
+    assert ancestry.returncode == 0
+
+
 def _paged_recipe(**changes):
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
     recipe["engine_features"] = ["kv-pages"]
@@ -551,6 +614,7 @@ def test_the_paged_launch_uses_only_flags_ling_serve_parses():
         "--sessions",
         "--batch",
         "--kv-pages",
+        "--vision",
         "--plan-only",
     }
     args = LingServeLaunchBuilder.server_args(
@@ -595,6 +659,7 @@ def test_the_plan_only_check_follows_the_same_arguments_as_the_launch(monkeypatc
     assert plan and plan["sessions"] == 4
     cmd = seen["cmd"]
     assert cmd[-1] == "--plan-only" and "--kv-pages" in cmd and flag(cmd, "--sessions") == "4"
+    assert flag(cmd, "--vision") == "off"
 
 
 def test_flipping_the_default_engine_is_one_constant_and_keeps_sglang_as_the_fallback():
