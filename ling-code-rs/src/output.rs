@@ -64,7 +64,16 @@ pub fn narrow(answer: &mut Answer, page: &Page) -> Result<()> {
 
 fn path_matches(path: &str, pattern: &str) -> bool {
     if !pattern.contains('*') {
-        return path.starts_with(pattern);
+        // The path itself, or what is under it: `src` is not a prefix of `srcx/`.
+        return match path.strip_prefix(pattern) {
+            Some(rest) => {
+                rest.is_empty()
+                    || pattern.is_empty()
+                    || pattern.ends_with('/')
+                    || rest.starts_with('/')
+            }
+            None => false,
+        };
     }
     // A minimal glob: `*` matches within a segment, `**` across segments.
     fn go(p: &[u8], s: &[u8]) -> bool {
@@ -394,6 +403,16 @@ mod tests {
         assert!(path_matches("codex-rs/core/src/lib.rs", "codex-rs/**/*.rs"));
         assert!(path_matches("a/b.py", "a/*.py"));
         assert!(!path_matches("a/c/b.py", "a/*.py"));
+    }
+
+    #[test]
+    fn a_plain_path_narrows_to_that_file_or_directory_only() {
+        assert!(path_matches("src/lib.rs", "src"));
+        assert!(path_matches("src/lib.rs", "src/"));
+        assert!(path_matches("src/lib.rs", "src/lib.rs"));
+        assert!(path_matches("src/lib.rs", ""));
+        assert!(!path_matches("srcx/lib.rs", "src"));
+        assert!(!path_matches("src/lib.rsx", "src/lib.rs"));
     }
 
     #[test]
