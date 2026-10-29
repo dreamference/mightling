@@ -167,8 +167,9 @@ export function composeInput(text: string, skills: SkillMetadata[], images: stri
   const named = new Set<string>();
   for (const match of text.matchAll(/(?:^|\s)\$([A-Za-z0-9_.:-]+)/g)) named.add(match[1]);
   for (const name of named) {
-    const skill = skills.find((s) => s.name === name && s.enabled);
-    if (skill) inputs.push({ type: "skill", name: skill.name, path: skill.path });
+    // `$deploy.` at the end of a sentence: the stop is the sentence's unless a skill is named with it.
+    const skill = skills.find((s) => s.name === name && s.enabled) ?? skills.find((s) => s.name === name.replace(/[.:-]+$/, "") && s.enabled);
+    if (skill && !inputs.some((input) => input.type === "skill" && input.name === skill.name)) inputs.push({ type: "skill", name: skill.name, path: skill.path });
   }
   for (const path of images) inputs.push({ type: "localImage", path });
   return inputs;
