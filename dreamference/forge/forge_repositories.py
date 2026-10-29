@@ -158,10 +158,16 @@ class ForgeRepositories:
             if status != HTTPStatus.OK or not isinstance(mirrors, list):
                 continue
             for mirror in mirrors:
-                ForgeContainer.api(
+                deleted, _ = ForgeContainer.api(
                     "DELETE", f"/repos/{full_name}/push_mirrors/{mirror.get('remote_name')}", token
                 )
                 kind = "PRIVATE repository" if cls.never_mirrored(repository) else "repository"
+                if deleted not in (HTTPStatus.OK, HTTPStatus.NO_CONTENT):
+                    lines.append(
+                        f"❌ Could not remove a Forgejo push mirror from the {kind} {full_name} "
+                        f"({deleted}): it may still send code out."
+                    )
+                    continue
                 lines.append(
                     f"❌ Removed a Forgejo push mirror from the {kind} {full_name}: only the GitHub "
                     "mirror job may send code out."
@@ -480,5 +486,11 @@ class ForgeRepositories:
             ForgeAccounts.admin_token(),
             {"archived": True, "private": True},
         )
+        if status != HTTPStatus.OK:
+            print(
+                f"❌ {len(bundles)} bundles are in {full_name}, but Forgejo did not make it private "
+                f"and archived ({status})."
+            )
+            return False
         print(f"✅ {len(bundles)} bundles are in {full_name} (private, archived, never mirrored).")
-        return status == HTTPStatus.OK
+        return True

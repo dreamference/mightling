@@ -16,6 +16,7 @@ import gzip
 import hashlib
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -172,17 +173,37 @@ class FleetBundle:
         if shutil.which("gh") is None:
             print("❌ --from release downloads with `gh`, which is not installed here.")
             return None
-        tag = f"v{version.lstrip('v')}" if version else None
-        bundle = Path(BUNDLE_ROOT) / f"bundle-{tag or 'latest'}"
+        try:
+            tag = cls._download(version)
+        except OSError as error:
+            print(f"❌ {error}")
+            return None
+        return Path(BUNDLE_ROOT) / f"bundle-{tag}"
+
+    @classmethod
+    def _download(cls, version: str | None) -> str:
+        """Downloads a release's assets for this target into its bundle folder, once.
+
+        Args:
+            version: `X.Y.Z`, or None for the latest release.
+
+        Returns:
+            str: The release's tag, which names the folder.
+
+        Raises:
+            OSError: The release was not found or not downloaded.
+        """
+        tag = f"v{version.lstrip('v')}" if version else cls.latest_tag()
+        bundle = Path(BUNDLE_ROOT) / f"bundle-{tag}"
         target = cls.target()
-        if (bundle / f"ling-{target}.sha256sums").is_file() and tag:
-            return bundle
+        if (bundle / f"ling-{target}.sha256sums").is_file():
+            return tag
         bundle.mkdir(parents=True, exist_ok=True)
         command = [
             "gh",
             "release",
             "download",
-            *([tag] if tag else []),
+            tag,
             "-R",
             RELEASE_REPO,
             "-D",
@@ -203,10 +224,35 @@ class FleetBundle:
         ]
         result = subprocess.run(command, capture_output=True, text=True, check=False)
         if result.returncode != 0:
-            print(f"❌ Could not download the release: {result.stderr.strip()[-300:]}")
-            return None
-        (bundle / "VERSION").write_text(f"{tag or 'latest'}\n")
-        return bundle
+            raise OSError(f"Could not download the release: {result.stderr.strip()[-300:]}")
+        (bundle / "VERSION").write_text(f"{tag}\n")
+        return tag
+
+    @classmethod
+    def latest_tag(cls) -> str:
+        """The latest release's tag.
+
+        A bundle records the tag, never "latest": a node installed from one release must not
+        look current against the next.
+
+        Returns:
+            str: The tag, `vX.Y.Z`.
+
+        Raises:
+            OSError: `gh` did not name one.
+        """
+        result = subprocess.run(
+            ["gh", "release", "view", "-R", RELEASE_REPO, "--json", "tagName", "-q", ".tagName"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        tag = result.stdout.strip()
+        if result.returncode != 0 or not re.fullmatch(r"v[0-9][0-9A-Za-z.+-]*", tag):
+            raise OSError(
+                f"Could not find the latest release: {result.stderr.strip()[-300:] or tag}"
+            )
+        return tag
 
     @classmethod
     def expected_version(cls, source: str = SOURCE_THIS) -> str | None:
@@ -278,7 +324,7 @@ class FleetBundle:
 
     @classmethod
     def _digest(cls, paths: List[Path]) -> str:
-        """The bundle's name: a digest of the binaries' sizes and times, cheap to recompute."""
+        """The bundle's name: a digest of the binaries and of the checkout's changes, cheap to recompute."""
         digest = hashlib.sha256()
         for path in paths:
             stat = path.stat()
@@ -288,6 +334,11 @@ class FleetBundle:
 
             head = SafeGit.run(["rev-parse", "HEAD"], REPO_ROOT).stdout.strip()
             dirty = SafeGit.run(["status", "--porcelain", "dreamference"], REPO_ROOT).stdout
+            # The status names a changed file the same way after every further edit: its diff
+            # is what changes. install.sh goes into the bundle too.
+            dirty += SafeGit.run(
+                ["diff", "HEAD", "--binary", "--", "dreamference", "install.sh"], REPO_ROOT
+            ).stdout
             digest.update(f"{head}:{hashlib.sha256(dirty.encode()).hexdigest()}".encode())
         except OSError:
             pass

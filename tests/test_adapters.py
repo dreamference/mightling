@@ -13,12 +13,14 @@ import shutil
 import struct
 import subprocess
 import tarfile
+import urllib.error
 from pathlib import Path
 
 import pytest
 
 from dreamference.cli.adapter_command import AdapterCommand
 from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+from dreamference.hardware import adapter_signature, adapter_verifier
 from dreamference.hardware.adapter_base_digest import AdapterBaseDigest
 from dreamference.hardware.adapter_catalog import AdapterCatalog
 from dreamference.hardware.adapter_installer import AdapterInstaller
@@ -514,6 +516,42 @@ def test_only_the_default_model_serves_adapters_never_minima():
     assert ModelMatrixRegistry.get_lora_recipe("qwen3.8-27b-minima-nvfp4-dflash2") is None
 
 
+def test_the_base_is_what_the_server_lists_not_the_configuration(monkeypatch):
+    listing = {
+        "data": [
+            {"id": "rust", "parent": BASE_REPO},
+            {"id": "minima-ai/mnma_qwen3.8_27b_nvfp4+rust"},
+            {"id": BASE_REPO},
+        ]
+    }
+    monkeypatch.setattr(
+        adapter_verifier.urllib.request,
+        "urlopen",
+        lambda url, timeout: io.BytesIO(json.dumps(listing).encode()),
+    )
+    assert AdapterVerifier.served_id("http://localhost:8000/") == "minima-ai/mnma_qwen3.8_27b_nvfp4"
+    served = AdapterVerifier.served_base("http://localhost:8000", DEFAULT_MODEL_ALIAS)
+    assert served["key"] == "qwen3.8-27b-minima-nvfp4-dflash2"
+    assert served["source"] == "server"
+
+
+def test_with_no_server_answering_the_base_is_the_configured_model_and_says_so(monkeypatch):
+    def refuse(url, timeout):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(adapter_verifier.urllib.request, "urlopen", refuse)
+    served = AdapterVerifier.served_base("http://localhost:8000", DEFAULT_MODEL_ALIAS)
+    assert served["key"] == DEFAULT_MODEL_ALIAS
+    assert served["source"] == "configuration"
+
+
+def test_without_ssh_keygen_the_check_names_the_package_to_install(monkeypatch):
+    monkeypatch.setattr(adapter_signature.shutil, "which", lambda name: None)
+    problem = AdapterSignature.problem(b"{}", b"signature")
+    assert problem == adapter_signature.MISSING_TOOL
+    assert "openssh-client" in problem
+
+
 # -- the command -------------------------------------------------------------------------------------
 
 
@@ -542,6 +580,45 @@ def test_on_a_client_the_command_names_the_node(capsys):
 
     assert AdapterCommand.run(args, Config()) == 1
     assert "installed on the node" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("argv", "env", "expected"),
+    [
+        ([], {"DREAMFERENCE_HF_TOKEN": "from-dreamference-env"}, "from-dreamference-env"),
+        ([], {"HF_TOKEN": "from-hf-env", "DREAMFERENCE_HF_TOKEN": "x"}, "from-hf-env"),
+        (["--hf-token", "from-flag"], {"HF_TOKEN": "from-hf-env"}, "from-flag"),
+        ([], {}, "from-config-file"),
+    ],
+)
+def test_install_takes_the_hub_token_in_the_model_downloads_order(
+    tmp_path, monkeypatch, argv, env, expected
+):
+    from dreamference.config import DreamferenceConfig
+    from dreamference.node.node_identity import NodeIdentity
+
+    config_file = tmp_path / "dreamference.toml"
+    config_file.write_text('hf_token = "from-config-file"\n')
+    monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(config_file))
+    for name in ("HF_TOKEN", "DREAMFERENCE_HF_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: object()))
+    monkeypatch.setattr(AdapterVerifier, "served_base", classmethod(lambda cls, host, model: None))
+    tokens = []
+
+    def install(cls, name, repo, base, confirm=None, token=None):
+        tokens.append(token)
+        raise ValueError("stopped by the test")
+
+    monkeypatch.setattr(AdapterInstaller, "install", classmethod(install))
+    args = DreamferenceCLIController.build_parser().parse_args(
+        ["adapter", "install", "rust", *argv]
+    )
+    config = DreamferenceConfig(hf_token=getattr(args, "hf_token", None))
+    assert AdapterCommand.run(args, config) == 1
+    assert tokens == [expected]
 
 
 # -- the copy to a paired node -----------------------------------------------------------------------
@@ -712,3 +789,36 @@ def test_an_install_by_repository_checks_the_disk_before_fetching(keys, remote, 
         AdapterInstaller.install(None, f"{ADAPTER_REPO}@{COMMIT}", served(base_snapshot()))
     assert fetched == []
     assert AdapterStore.entries() == {}
+
+
+def test_the_third_party_confirmation_needs_a_terminal(monkeypatch, capsys):
+    # The name was read from stdin wherever it came from, so `printf 'rust\n' | ling-admin adapter
+    # install --third-party …` installed an unsigned adapter with nobody at the terminal.
+    import io
+
+    from dreamference.cli.adapter_command import AdapterCommand
+    from dreamference.hardware.adapter_manifest import AdapterManifest
+
+    manifest = AdapterManifest(
+        name="rust",
+        display_name="Rust",
+        version="1",
+        description="d",
+        base_repo=BASE_REPO,
+        base_revision="r",
+        base_digest="d",
+        rank=8,
+        target_modules=("q_proj",),
+    )
+    piped = io.StringIO("rust\n")
+    monkeypatch.setattr("sys.stdin", piped)
+    assert AdapterCommand._confirm(manifest) is False
+    assert piped.read() == "rust\n", "nothing was read"
+    assert "terminal" in capsys.readouterr().out
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr("sys.stdin", Terminal("rust\n"))
+    assert AdapterCommand._confirm(manifest) is True

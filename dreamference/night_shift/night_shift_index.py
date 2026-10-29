@@ -10,6 +10,7 @@ against the host-wide memory budget and runs every indexer in its sandbox, so no
 decides whether a run fits.
 """
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -112,4 +113,6 @@ class NightShiftIndex:
                 continue
         # The night run started with no index scope active (admission refuses otherwise), so
         # whatever is in the slice now is this run's.
-        subprocess.run(["systemctl", "--user", "stop", INDEX_SLICE], capture_output=True, timeout=60)
+        # A stop that outlasts the timeout goes on in systemd; the night run must not end here.
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(["systemctl", "--user", "stop", INDEX_SLICE], capture_output=True, timeout=60)

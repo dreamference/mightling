@@ -77,6 +77,19 @@ def test_private_files_are_0600_in_a_0700_folder_and_remote_json_needs_a_box():
     assert RemoteSettings.read()["dns_name"] == BOX
 
 
+def test_a_private_write_that_fails_leaves_the_old_file_whole():
+    """remote.json was truncated before the new text was written: a failed write lost the record."""
+    RemoteSettings.write({"dns_name": BOX, "overlay_name": "x"})
+    before = RemoteSettings.path("remote.json").read_text()
+    with pytest.raises(UnicodeEncodeError):
+        RemoteSettings.write_private("remote.json", "\udc80")
+    assert RemoteSettings.path("remote.json").read_text() == before
+    assert RemoteSettings.read()["dns_name"] == BOX
+    assert sorted(p.name for p in RemoteSettings.folder().iterdir()) == ["remote.json"], (
+        "no temporary file is left behind"
+    )
+
+
 def test_everything_from_netbird_is_pinned_by_digest():
     assert (
         "@sha256:" in remote_settings.SERVER_IMAGE
@@ -967,6 +980,18 @@ def test_box_only_on_a_finished_setup_keeps_its_record(seams):
     assert record["node_peer"] is True and "box_only" not in record
 
 
+def test_box_only_under_another_name_records_the_new_box(seams, monkeypatch, capsys):
+    """The finished record was kept whole, so it went on naming the old box."""
+    assert RemoteAccess.setup(BOX, yes=True) == 0
+    monkeypatch.setattr(RemoteCertificateAuthority, "permits", classmethod(lambda cls, d: True))
+    other = "relay2.example.org"
+    capsys.readouterr()
+    assert RemoteAccess.setup(other, yes=True, box_only=True) == 0
+    record = RemoteSettings.read()
+    assert record["dns_name"] == other and record["box_only"] is True
+    assert f"ling-admin remote setup {other}" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     "destination", ["192.0.2.7", "root@192.0.2.7", "[2001:db8::1]", "two words", "-oProxyCommand=x"]
 )
@@ -1595,9 +1620,9 @@ def test_caa_is_written_once_and_left_alone_when_right(monkeypatch):
     assert RemotePublicCertificate.ensure_caa("remote.example.org", [ACCOUNT])
     writes = [(m, p) for m, p, _ in calls if m != "GET"]
     assert writes == [
+        ("POST", "/zones/z1/dns_records"),
+        ("POST", "/zones/z1/dns_records"),
         ("DELETE", "/zones/z1/dns_records/old"),
-        ("POST", "/zones/z1/dns_records"),
-        ("POST", "/zones/z1/dns_records"),
     ]
     assert all(
         b["name"] == "remote.example.org" and b["type"] == "CAA" for m, _, b in calls if m == "POST"

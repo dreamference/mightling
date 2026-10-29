@@ -277,6 +277,28 @@ async fn exec_sessions_and_excluded_folders_never_reach_the_hub() {
 }
 
 #[tokio::test]
+async fn a_withdrawal_that_could_not_reach_the_hub_is_tried_again() {
+    let scratch = scratch("withdraw-retry");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, ling) = device(&scratch.dir, &hub, "laptop");
+    write(&rollout_path(&laptop, THREAD), &format!("{}{}", meta_line(THREAD, "cli", "/home/u/app"), said("UserMessage", "hello")));
+    let mut agent = agent(&laptop, &ling, Settings::default());
+    agent.cycle(&client(&hub, &laptop)).await;
+    let store = hub.server.sync_store().unwrap();
+    assert_eq!(store.threads().len(), 1);
+    // The folder is excluded while the laptop is away from the node: the withdrawal fails.
+    agent.settings.exclude.push(PathBuf::from("/home/u/app"));
+    let away = HubClient::new("http://127.0.0.1:1", &DeviceFile::load(&laptop).unwrap().secret).unwrap();
+    let report = agent.cycle(&away).await;
+    assert!(!report.errors.is_empty());
+    assert_eq!(store.threads().len(), 1);
+    // Back on the node's network, the next cycle takes it off the hub.
+    let report = agent.cycle(&client(&hub, &laptop)).await;
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert!(store.threads().is_empty());
+}
+
+#[tokio::test]
 async fn a_deletion_anywhere_is_a_deletion_everywhere() {
     let scratch = scratch("delete");
     let hub = hub(&scratch.dir, true).await;

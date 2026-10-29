@@ -39,15 +39,9 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
         return Ok(());
     }
     let state = repo.state_dir();
-    std::fs::create_dir_all(&state)?;
-    let lock = File::create(state.join("session.lock"))?;
-    if flock(&lock, false).is_err() {
+    let Some(_lock) = claim(&repo, crate::prompt::ready(&repo))? else {
         return Ok(()); // another session owns this repository
-    }
-    let has_index = crate::prompt::ready(&repo);
-    if !has_index {
-        let _ = std::fs::write(state.join("code_index.building"), "");
-    }
+    };
     // The launch-time run: universal and static, and executing when trusted and stale.
     let mut pending: Option<Request> = Some(if wants_exact(&repo, &settings) {
         Request::IndexExact
@@ -77,11 +71,9 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
             ticks.is_multiple_of(PROBE_EVERY) && trigger.observe(probe.state(), Instant::now());
         if !busy {
             child = None;
-            let interval_passed = last_start
-                .map(|t| t.elapsed() >= Duration::from_secs(settings.min_interval_s))
-                .unwrap_or(true);
             if let Some(request) = pending {
-                if interval_passed || request == Request::IndexExact {
+                let interval = Duration::from_secs(settings.min_interval_s);
+                if may_start(request, last_start, interval, Instant::now()) {
                     pending = None;
                     last_start = Some(Instant::now());
                     let exact = request == Request::IndexExact || wants_exact(&repo, &settings);
@@ -107,6 +99,19 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
         ticks = ticks.wrapping_add(1);
         std::thread::sleep(TICK);
     }
+}
+
+/// Takes the session lock, and marks a first build when there is no index yet; None when another
+/// session owns the repository.
+fn claim(repo: &Repo, has_index: bool) -> Result<Option<File>> {
+    let lock = repo.state_file("session.lock")?;
+    if flock(&lock, false).is_err() {
+        return Ok(None);
+    }
+    if !has_index {
+        let _ = repo.state_file("code_index.building");
+    }
+    Ok(Some(lock))
 }
 
 /// When the executing indexers may run without being asked (spec §6.3): the model server has
@@ -161,6 +166,17 @@ impl IdleTrigger {
     fn claim(&mut self, head: String) {
         self.claimed = Some(head);
     }
+}
+
+/// Whether the coalesced request may start now (spec §9.2): a follow-up waits
+/// `code_index_min_interval` after the last start, unless it asks for `--exact`.
+fn may_start(
+    request: Request,
+    last_start: Option<Instant>,
+    interval: Duration,
+    now: Instant,
+) -> bool {
+    request == Request::IndexExact || last_start.is_none_or(|t| now.duration_since(t) >= interval)
 }
 
 /// Whether the executing indexers are due at launch: a trusted repository, or a trusted submodule
@@ -224,6 +240,30 @@ mod tests {
     use super::*;
 
     const HOUR: Duration = Duration::from_secs(3600);
+
+    /// The state directory is writable from inside the sandbox; the session runs outside it.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_planted_in_the_state_directory_is_never_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        let state = root.join(".dreamference");
+        std::fs::create_dir_all(&state).unwrap();
+        let repo = Repo {
+            root: root.clone(),
+            main_root: root,
+            is_git: true,
+        };
+        let target = dir.path().join("target");
+        std::fs::write(&target, "keep").unwrap();
+        std::os::unix::fs::symlink(&target, state.join("session.lock")).unwrap();
+        std::os::unix::fs::symlink(&target, state.join("code_index.building")).unwrap();
+        assert!(claim(&repo, false).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+        std::fs::remove_file(state.join("session.lock")).unwrap();
+        assert!(claim(&repo, false).unwrap().is_some());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+    }
 
     #[test]
     fn a_stopped_server_counts_after_two_probes() {
@@ -289,5 +329,65 @@ mod tests {
         let now = Instant::now();
         assert!(!trigger.may_claim("a", Some(now), HOUR, now + HOUR / 2));
         assert!(trigger.may_claim("a", Some(now), HOUR, now + HOUR));
+    }
+
+    /// One tick of `run`'s queue handling: drain and coalesce, then start when free and due.
+    fn tick(
+        state: &std::path::Path,
+        pending: &mut Option<Request>,
+        last_start: &mut Option<Instant>,
+        busy: bool,
+        now: Instant,
+    ) -> Option<Request> {
+        if let Some(request) = requests::drain(state) {
+            *pending = (*pending).max(Some(request));
+        }
+        let request = (*pending)?;
+        if busy || !may_start(request, *last_start, HOUR, now) {
+            return None;
+        }
+        *pending = None;
+        *last_start = Some(now);
+        Some(request)
+    }
+
+    #[test]
+    fn five_triggers_make_one_run_and_one_coalesced_follow_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path();
+        let (mut pending, mut last_start) = (None, None);
+        let now = Instant::now();
+        let mut started = Vec::new();
+        requests::append(state, Request::Index).unwrap();
+        started.extend(tick(state, &mut pending, &mut last_start, false, now));
+        // Four more while the first run is in flight, a few seconds apart.
+        for i in 1..5 {
+            requests::append(state, Request::Index).unwrap();
+            let at = now + Duration::from_secs(3 * i);
+            started.extend(tick(state, &mut pending, &mut last_start, true, at));
+        }
+        assert_eq!(pending, Some(Request::Index));
+        // The run ends; the follow-up waits for the interval since the last start.
+        let mut at = now + Duration::from_secs(60);
+        while at < now + HOUR * 2 {
+            started.extend(tick(state, &mut pending, &mut last_start, false, at));
+            at += Duration::from_secs(60);
+        }
+        assert_eq!(started, vec![Request::Index, Request::Index]);
+        assert_eq!(last_start, Some(now + HOUR));
+        assert_eq!(pending, None);
+    }
+
+    #[test]
+    fn an_exact_request_skips_the_interval() {
+        let now = Instant::now();
+        assert!(!may_start(Request::Index, Some(now), HOUR, now + HOUR / 2));
+        assert!(may_start(
+            Request::IndexExact,
+            Some(now),
+            HOUR,
+            now + HOUR / 2
+        ));
+        assert!(may_start(Request::Index, None, HOUR, now));
     }
 }

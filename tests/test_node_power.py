@@ -186,3 +186,36 @@ def test_a_direct_plug_is_used_from_here_and_the_plug_is_never_left_off(monkeypa
     )
     assert NodePowerCycle.cycle("house-1", off_seconds=5, wait_minutes=1) == 0
     assert state["tries"] == 3 and plug.on
+
+
+def test_a_plug_that_ignores_off_is_reported_and_the_node_is_not_waited_for(monkeypatch, capsys):
+    plug = FakePlug(2, stuck=True)
+    monkeypatch.setattr(NodeShellyPlug, "_get", classmethod(lambda cls, url: plug(url)))
+    NodePowerSettings.set_plug("p1", "p1.local")
+    NodePowerSettings.set_node("house-1", "p1")
+    _paired(monkeypatch, lambda name: False)
+    asked = []
+    monkeypatch.setattr(
+        node_power_cycle.NodePowerCycle,
+        "_answers",
+        classmethod(lambda cls, node: asked.append(node) or False),
+    )
+    assert NodePowerCycle.cycle("house-1", off_seconds=5, wait_minutes=1) == 1
+    out = capsys.readouterr().out
+    assert "still reports itself on" in out and "Power is back" not in out
+    assert asked == ["house-1"]
+
+
+def test_a_reply_cut_off_mid_body_is_an_oserror_like_any_other_failed_reply(monkeypatch):
+    import http.client
+    import io
+
+    from dreamference.node import node_shelly_plug
+
+    class Cut(io.BytesIO):
+        def read(self, *args):
+            raise http.client.IncompleteRead(b'{"output"')
+
+    monkeypatch.setattr(node_shelly_plug.urllib.request, "urlopen", lambda url, timeout: Cut())
+    with pytest.raises(OSError):
+        NodeShellyPlug._get("http://p.local/rpc/Switch.GetStatus?id=0")

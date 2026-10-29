@@ -8,6 +8,7 @@ server or opens the user's queue: every test has its own queue directory and rep
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -544,6 +545,17 @@ def test_test_command_detection_order(tmp_path):
     assert detect(override="true", configured="make check") == ("true", "--test")
 
 
+def test_the_venv_test_command_survives_a_space_in_the_repository_path(tmp_path):
+    # The command runs through `bash -c`, so an unquoted path splits at the space.
+    repo, tree = tmp_path / "my repo", tmp_path / "tree"
+    (tree / "tests").mkdir(parents=True)
+    (tree / "setup.py").write_text("")
+    (repo / ".venv" / "bin").mkdir(parents=True)
+    (repo / ".venv" / "bin" / "python").write_text("")
+    command, _ = NightShiftTaskRun.detect_test_command(tree, None, None, repo)
+    assert shlex.split(command) == [str(repo / ".venv/bin/python"), "-m", "pytest", "-q"]
+
+
 # -- the host ------------------------------------------------------------------------------------
 
 SGLANG_METRICS = """\
@@ -840,6 +852,22 @@ def test_window_end_is_the_next_such_time():
     assert NightShiftRunner.window_end(now, None, 30, "x") == now + timedelta(minutes=30)
 
 
+@pytest.mark.parametrize("start", [datetime(2026, 10, 24, 22, 0), datetime(2026, 3, 28, 22, 0)])
+def test_window_end_is_the_wall_clock_time_on_a_night_the_clocks_change(start, monkeypatch):
+    # The start's UTC offset is not the end's on these nights: 06:00 is 06:00 on the clock.
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        now = start.astimezone()
+        end = NightShiftRunner.window_end(now, "06:00", None, "x").astimezone()
+        assert (end.day, end.hour, end.minute) == (start.day + 1, 6, 0)
+        end = NightShiftRunner.window_end(now, None, None, "01:00-06:00").astimezone()
+        assert (end.day, end.hour) == (start.day + 1, 6)
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
 def test_an_outside_request_or_session_blocks_the_next_start(fake_host):
     settings = NightShiftSettings({})
     FakeHost.samples = [{"running": 1.0, "served": 1.0, "kv_pool": 1.0}]
@@ -1003,6 +1031,19 @@ def test_the_installed_mightling_code_is_the_only_one_used(tmp_path, monkeypatch
     assert NightShiftIndex.refresh(str(binary), tmp_path, 30) == "not refreshed (exit 4): boom"
 
 
+def test_an_index_run_past_its_time_is_stopped_even_when_systemctl_hangs(tmp_path, monkeypatch):
+    binary = tmp_path / "ling-code"
+    binary.write_text("#!/bin/sh\nexec sleep 30\n")
+    binary.chmod(0o755)
+
+    def hanging(args, **kwargs):
+        # Stopping the index slice waits for its units' own stop timeouts.
+        raise subprocess.TimeoutExpired(args, kwargs.get("timeout", 0))
+
+    monkeypatch.setattr("dreamference.night_shift.night_shift_index.subprocess.run", hanging)
+    assert NightShiftIndex.refresh(str(binary), tmp_path, 0.5).startswith("stopped after 0 min")
+
+
 def test_a_refused_admission_keeps_the_queue_and_says_why(setup, fake_host):
     queue(setup["night"], setup["repo"])
     FakeHost.model = None
@@ -1067,6 +1108,18 @@ def test_enable_writes_absolute_paths_and_the_window(tmp_path, monkeypatch):
     assert not (NightShiftScheduler.unit_dir() / "mightling-night.timer").exists()
 
 
+def test_the_service_quotes_a_path_with_a_space(monkeypatch):
+    # systemd splits ExecStart= and Environment= on whitespace unless quoted, and expands `%`.
+    import shlex
+    _, service = NightShiftScheduler.render_units("01:00-07:00", "/opt/my tools/100%/ling-admin")
+    exec_start = next(line for line in service.splitlines() if line.startswith("ExecStart="))
+    words = shlex.split(exec_start.split("=", 1)[1].replace("%%", "%"))
+    assert words == ["/opt/my tools/100%/ling-admin", "night", "run", "--until", "07:00"]
+    environment = next(line for line in service.splitlines() if line.startswith("Environment="))
+    assert len(shlex.split(environment.split("=", 1)[1])) == 1
+    assert ":/opt/my tools/100%%/:" not in environment and ":/opt/my tools/100%%:" in environment
+
+
 def test_settings_parse_durations_and_windows():
     settings = NightShiftSettings({"task_timeout": "2h", "test_timeout": 15, "window": "23:00-05:00"})
     assert settings.task_timeout_s == 7200 and settings.test_timeout_s == 900
@@ -1074,6 +1127,14 @@ def test_settings_parse_durations_and_windows():
     assert (start.hour, end.hour) == (23, 5)
     with pytest.raises(ValueError):
         NightShiftSettings.parse_duration("soon")
+
+
+def test_the_reports_review_command_quotes_a_repository_with_a_space():
+    record = {"id": "t", "repo": "/srv/my repo", "base": "a" * 40, "status": "done", "task": "x",
+              "result": {"branch": "night/t"}}
+    text = NightShiftReport.render(datetime.now().astimezone(), [record], [])
+    command = next(line for line in text.splitlines() if line.startswith("- `git -C"))
+    assert shlex.split(command[3:-1]) == ["git", "-C", "/srv/my repo", "diff", "a" * 12 + "..night/t"]
 
 
 def test_report_rows_carry_what_the_spec_lists():

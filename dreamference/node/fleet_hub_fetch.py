@@ -24,7 +24,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
-from dreamference.node.fleet_session import FleetSession
+from dreamference.node.fleet_session import AUTHORIZED_KEYS_ENDS_IN_NEWLINE, FleetSession
 from dreamference.node.node_model_sync import LFS_BLOB
 
 LOG: Final[logging.Logger] = logging.getLogger(__name__)
@@ -344,7 +344,7 @@ class FleetHubFetch:
             # `expiry-time` (the donor's own clock) ends the key even when the removal below never
             # reaches the donor: the link is failing, which is why this copy runs at all.
             authorised = donor.run(
-                "umask 077; mkdir -p ~/.ssh && "
+                f"umask 077; mkdir -p ~/.ssh && {AUTHORIZED_KEYS_ENDS_IN_NEWLINE} && "
                 f"expires=\"$(date -d '+{KEY_EXPIRY_HOURS} hours' +%Y%m%d%H%M)\" && "
                 'printf \'restrict,expiry-time="%s" %s\\n\' "$expires" '
                 f"{shlex.quote(public)} >> ~/.ssh/authorized_keys"

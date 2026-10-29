@@ -59,7 +59,8 @@ class CodeIndexSearch:
             return None
         try:
             result = subprocess.run(
-                [binary, "search", *query.split(), "--json"],
+                # `--` before the words: a word such as `--path` is a word, not an option.
+                [binary, "search", "--json", "--", *query.split()],
                 cwd=cwd or os.getcwd(), capture_output=True, text=True,
                 stdin=subprocess.DEVNULL, timeout=SEARCH_TIMEOUT_S,
             )

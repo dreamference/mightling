@@ -13,7 +13,6 @@ import sys
 import shutil
 import subprocess
 import time
-import requests
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Final
 
@@ -194,6 +193,8 @@ class VLLMServerManager:
         Returns:
             bool: True if server returns HTTP status 200 OK.
         """
+        # Not at the top: `ling-admin` imports this for every command (tests/test_cli_startup.py).
+        import requests
         try:
             url = f"{self.host}/v1/models"
             resp = requests.get(url, timeout=timeout)
@@ -226,6 +227,7 @@ class VLLMServerManager:
         Returns:
             List[str]: List of model ID strings served on endpoint.
         """
+        import requests
         try:
             url = f"{self.host}/v1/models"
             resp = requests.get(url, timeout=timeout)
@@ -253,6 +255,7 @@ class VLLMServerManager:
         if not models:
             return None
         start = time.monotonic()
+        import requests
         try:
             response = requests.post(
                 f"{self.host}/v1/chat/completions",

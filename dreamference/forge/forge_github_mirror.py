@@ -122,12 +122,18 @@ class ForgeGithubMirror:
         """Tell whether the user's `/airgapped` default is `on`.
 
         Returns:
-            bool: Whether the user's `/airgapped` default (`mightling_airgapped` in
-            `~/.mightling/config.toml`, ling-rs/airgapped) is `on`, which stops every outbound
-            mirror (§5.4).
+            bool: Whether the user's `/airgapped` default is `on`, which stops every outbound
+            mirror (§5.4): resolved as ling-rs/airgapped does for a command with no session
+            (`DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the stricter of the repository's and the
+            user-level `~/.config/dreamference/config.toml`, where `/airgapped default` writes it),
+            or `mightling_airgapped` in `~/.mightling/config.toml`.
         """
         import tomllib
 
+        from dreamference.config.dreamference_config import DreamferenceConfig
+
+        if DreamferenceConfig.resolve_airgapped_level() == AIRGAPPED_ON:
+            return True
         path = Path("~/.mightling/config.toml").expanduser()
         try:
             value = tomllib.loads(path.read_text(encoding="utf-8-sig")).get("mightling_airgapped")

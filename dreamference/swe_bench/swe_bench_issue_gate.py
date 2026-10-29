@@ -155,7 +155,7 @@ class SweBenchIssueGate:
         return relative
 
     @classmethod
-    def quoted_mask(cls, command: str) -> list[bool]:
+    def quoted_mask(cls, command: str) -> "list[bool]":
         """Per character of a shell command line, whether it sits inside quotes.
 
         Args:

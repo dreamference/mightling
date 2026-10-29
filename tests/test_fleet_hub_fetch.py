@@ -322,3 +322,29 @@ def test_rsync_with_a_file_list_sends_only_those_and_keeps_links(tmp_path):
     assert session.rsync(tmp_path, "/h/x", files=["a/b", "c"]).returncode == 0
     assert seen[0][1] == "a/b\nc\n"
     assert not list(tmp_path.glob("files-*"))
+
+
+def test_the_lan_copy_leaves_the_donors_own_key_when_its_file_has_no_final_newline(hub, tmp_path):
+    # The donor's commands run in a shell whose home is a temporary folder.
+    (tmp_path / ".ssh").mkdir()
+    keys = tmp_path / ".ssh" / "authorized_keys"
+    keys.write_text("ssh-ed25519 AAAAmine owner@laptop")
+    recipient, donor = RemoteSession(), RemoteSession()
+    donor.host = "house-2"
+
+    def recipient_run(script, input_text=None, timeout=None, **kwargs):
+        if "ssh-keygen" in script:
+            token = script.split(" -C ", 1)[1].split()[0]
+            return completed(0, f"/tmp/work\nssh-ed25519 AAAAkey {token}\n")
+        return completed(0)
+
+    def donor_run(script, input_text=None, timeout=None, **kwargs):
+        if "ssh_host_ed25519" in script:
+            return completed(0, "ssh-ed25519 AAAAhost root@x\n")
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+        return subprocess.run(["/bin/sh", "-c", script], env=env, capture_output=True, text=True)
+
+    recipient.run, donor.run = recipient_run, donor_run
+    fetch, _ = fetcher(hub, recipient)
+    assert fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
+    assert keys.read_text().splitlines() == ["ssh-ed25519 AAAAmine owner@laptop"]

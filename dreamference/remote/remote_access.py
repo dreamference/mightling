@@ -550,10 +550,11 @@ class RemoteAccess:
         ):
             return 1
         RemoteTunnel.write_known_host(dns_name, facts["host_key"])
-        # A setup that already went further keeps its record: only the box was redeployed.
+        # A setup that already went further keeps its record: only the box was redeployed. A box
+        # under another name is another box, and the rest is still to be done for it.
         record: dict[str, Any] = (
             dict(existing)
-            if existing and existing.get("node_peer")
+            if existing and existing.get("node_peer") and existing.get("dns_name") == dns_name
             else {
                 "dns_name": dns_name,
                 "overlay_name": overlay_name,

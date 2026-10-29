@@ -603,13 +603,9 @@ class SweBenchImageBuilder:
                 ["exec", "-u", "0", name, "chmod", "-R", "a+rwX", "/testbed"], timeout=1800
             )
             user = f"{os.getuid()}:{os.getgid()}"
-            for patch in (row.get("test_patch", ""), row.get("patch", "")):
-                if patch.strip():
-                    SweBenchDocker.run(
-                        ["exec", "-i", "-u", user, name, "git", "-C", "/testbed", "apply", "-"],
-                        timeout=300,
-                        input_text=patch,
-                    )
+            refused = cls.apply_patches(row, name, user)
+            if refused is not None:
+                return refused
             result = SweBenchDocker.run(
                 [
                     "exec",
@@ -633,4 +629,33 @@ class SweBenchImageBuilder:
             if failure in output:
                 at = output.index(failure)
                 return f"as the agent's user offline: …{output[max(0, at - 160) : at + 80].strip()}"
+        return None
+
+    @classmethod
+    def apply_patches(cls, row: dict[str, Any], name: str, user: str) -> str | None:
+        """Applies an instance's test patch, then its reference patch, in the check's container.
+
+        Args:
+            row: The instance's dataset row.
+            name: The running container.
+            user: The agent's user, `uid:gid`.
+
+        Returns:
+            str | None: Which patch did not apply, with git's words; None when both did. The tests
+            on a tree without them would check nothing.
+        """
+        for which, patch in (
+            ("test patch", row.get("test_patch", "")),
+            ("reference patch", row.get("patch", "")),
+        ):
+            if not patch.strip():
+                continue
+            applied = SweBenchDocker.run(
+                ["exec", "-i", "-u", user, name, "git", "-C", "/testbed", "apply", "-"],
+                timeout=300,
+                input_text=patch,
+            )
+            if applied.returncode != 0:
+                problem = ((applied.stdout or "") + (applied.stderr or "")).strip()
+                return f"the {which} does not apply as the agent's user: {problem[-200:]}"
         return None

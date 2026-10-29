@@ -184,11 +184,14 @@ class NightShiftAutofill:
         return bool(SENSITIVE.search(f"{candidate.key}\n{candidate.title}\n{candidate.detail}"))
 
     @classmethod
-    def ci_candidates(cls, run: Runner = subprocess.run) -> list[AutofillCandidate]:
+    def ci_candidates(
+        cls, run: Runner = subprocess.run, repo: Path | None = None
+    ) -> list[AutofillCandidate]:
         """Failing tests of the latest failed CI run on main, through ``gh``.
 
         Args:
             run: How a command runs (tests pass a stand-in).
+            repo: The repository ``gh`` asks about (the timer starts the run in the home folder).
 
         Returns:
             One candidate per distinct, well-formed test id (empty without ``gh`` or a failed run).
@@ -196,7 +199,9 @@ class NightShiftAutofill:
 
         def gh(*args: str) -> str:
             try:
-                done = run(["gh", *args], capture_output=True, text=True, timeout=60, check=False)
+                done = run(
+                    ["gh", *args], cwd=repo, capture_output=True, text=True, timeout=60, check=False
+                )
             except (OSError, subprocess.SubprocessError):
                 return ""
             return (done.stdout or "") if done.returncode == 0 else ""
@@ -247,13 +252,14 @@ class NightShiftAutofill:
 
     @classmethod
     def qa_candidates(
-        cls, qa_dir: Path = QA_DESKTOP_DIR, run: Runner = subprocess.run
+        cls, qa_dir: Path = QA_DESKTOP_DIR, run: Runner = subprocess.run, repo: Path | None = None
     ) -> list[AutofillCandidate]:
         """Failing checks of the latest desktop QA report, and the open Windows QA issue.
 
         Args:
             qa_dir: The desktop QA report folder (``latest.json`` in it).
             run: How a command runs (tests pass a stand-in).
+            repo: The repository ``gh`` asks about (the timer starts the run in the home folder).
 
         Returns:
             The candidates, desktop checks first.
@@ -296,6 +302,7 @@ class NightShiftAutofill:
                     "--json",
                     "number,title",
                 ],
+                cwd=repo,
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -348,8 +355,9 @@ class NightShiftAutofill:
             except OSError:
                 continue
             for number, line in enumerate(lines, 1):
-                found_item = re.match(r"\s*[-*] \[ \] (.+)", line) or re.search(
-                    r"\bTODO:\s*(.+)", line
+                # A TODO opens its line: one named mid-line is prose about TODOs, not an item.
+                found_item = re.match(r"\s*[-*] \[ \] (.+)", line) or re.match(
+                    r"\s*(?:[-*]\s+)?TODO:\s*(.+)", line
                 )
                 item = cls.clean(found_item.group(1)) if found_item else ""
                 if len(item) < MIN_ITEM_CHARS:
@@ -403,7 +411,8 @@ class NightShiftAutofill:
         for task in NightShiftQueue.tasks(night_dir):
             if task.get("status") in ("done", "no-change", "failed", "stalled", "cancelled"):
                 continue
-            match = re.match(r"\[autofill:(.+?)\]", str(task.get("task", "")))
+            # The whole first line: a parametrized test's key holds `]` itself.
+            match = re.match(r"\[autofill:(.+)\]$", str(task.get("task", "")).split("\n", 1)[0])
             if match:
                 keys.add(match.group(1))
         return keys
@@ -537,8 +546,8 @@ class NightShiftAutofill:
         if limit == 0:
             return ["Autofill: the queue already holds the night's autofilled tasks."]
         candidates = (
-            cls.ci_candidates(cls.runner)
-            + cls.qa_candidates(cls.qa_dir, cls.runner)
+            cls.ci_candidates(cls.runner, repo)
+            + cls.qa_candidates(cls.qa_dir, cls.runner, repo)
             + cls.spec_candidates(repo)
         )
         chosen, said = cls.pick(night_dir, candidates, limit, today)

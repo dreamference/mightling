@@ -97,7 +97,8 @@ pub fn csv(text: &str, tab: bool) -> Vec<Unit> {
         }
     }
     if cut {
-        lines.push(format!("[the rows after row {MAX_ROWS} are not indexed]"));
+        // `row` is the last row read: the header is row 1, so the first MAX_ROWS rows after it.
+        lines.push(format!("[the rows after row {row} are not indexed]"));
     }
     if !lines.is_empty() && lines.iter().any(|l| !l.is_empty()) {
         units.push(unit(
@@ -146,6 +147,23 @@ mod tests {
         assert_eq!(
             (units[1].line_first, units[1].line_last),
             (Some(22), Some(41))
+        );
+    }
+
+    #[test]
+    fn the_cut_notice_names_the_last_row_indexed() {
+        let mut text = String::from("n\n");
+        for i in 1..=MAX_ROWS + 5 {
+            text.push_str(&format!("{i}\n"));
+        }
+        let units = csv(&text, false);
+        let last_row = MAX_ROWS + 1;
+        let indexed = &units[units.len() - 2];
+        assert_eq!(indexed.line_last, Some(last_row as u32));
+        assert!(indexed.text.ends_with(&format!("n: {MAX_ROWS}")));
+        assert_eq!(
+            units.last().unwrap().text,
+            format!("[the rows after row {last_row} are not indexed]")
         );
     }
 

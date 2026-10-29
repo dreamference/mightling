@@ -76,12 +76,17 @@ class ContextEngine:
         """
         Checks whether file path matches ignored directory names or extensions.
 
+        Only the part below the workspace root counts: a checkout that itself lives under a
+        `build/` or `target/` directory used to have every file ignored.
+
         Args:
             path (Path): Path to evaluate.
 
         Returns:
             bool: True if path should be skipped during indexing.
         """
+        if path.is_absolute() and path.is_relative_to(self.workspace_root):
+            path = path.relative_to(self.workspace_root)
         for part in path.parts:
             if part in IGNORE_DIRS:
                 return True

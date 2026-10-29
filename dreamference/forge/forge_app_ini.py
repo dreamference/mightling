@@ -68,6 +68,8 @@ class ForgeAppIni:
         parser.optionxform = str  # type: ignore[assignment,method-assign]
         try:
             parser.read_string("[DEFAULT]\n" + cls.path(data_dir).read_text())
+        except configparser.ParsingError:
+            pass  # The lines that did parse are kept, so a stray line does not cost the secrets.
         except (OSError, configparser.Error):
             return {}
         found = {}

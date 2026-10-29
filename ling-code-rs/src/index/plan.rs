@@ -1477,6 +1477,10 @@ mod tests {
             "{}",
             run.spec.argv[2]
         );
+        // Offline, and no user site-packages.
+        for (key, value) in [("PYTHONNOUSERSITE", "1"), ("npm_config_offline", "true")] {
+            assert_eq!(env_of(&run, key), Some(value), "{key}");
+        }
         assert_eq!(run.path_prefix, "setup.py/");
         assert_eq!(
             crate::scip_store::join_normalized(&run.path_prefix, ""),
@@ -1710,6 +1714,29 @@ mod tests {
     }
 
     #[test]
+    fn codebase_memory_gets_its_own_cache_four_workers_and_three_quarters_of_its_cap() {
+        let (dir, repo) = make_repo(&[("a.py", "x = 1\n")]);
+        std::env::set_var("MIGHTLING_CODE_SCRATCH_DIR", dir.path().join("scratch"));
+        let tools = Tools {
+            codebase_memory: Some(dir.path().join("bin/codebase-memory-mcp")),
+            ..fake_tools(dir.path())
+        };
+        let run = universal_run(&repo, &Settings::default(), &tools, 0).unwrap();
+        for (key, value) in [
+            ("CBM_RUNTIME_DIR", "/tmp/cbm"),
+            ("CBM_WORKERS", "4"),
+            ("CBM_SEMANTIC_ENABLED", "0"),
+            ("CBM_MEM_BUDGET_MB", "3072"),
+        ] {
+            assert_eq!(env_of(&run, key), Some(value), "{key}");
+        }
+        assert_eq!(
+            env_of(&run, "CBM_CACHE_DIR").map(Path::new),
+            Some(crate::graph::cache_dir().as_path())
+        );
+    }
+
+    #[test]
     fn typescript_without_a_config_infers_one_into_scratch() {
         let (dir, repo) = make_repo(&[
             ("web/package.json", "{}"),
@@ -1732,6 +1759,7 @@ mod tests {
             !script.contains("--infer-tsconfig"),
             "it would write into the tree: {script}"
         );
+        assert_eq!(env_of(&run, "npm_config_offline"), Some("true"));
         // With a tsconfig, the project's own is used and nothing is written.
         let (dir2, repo2) = make_repo(&[("app/tsconfig.json", "{}"), ("app/a.ts", "export {};\n")]);
         std::env::set_var("MIGHTLING_CODE_SCRATCH_DIR", dir2.path().join("scratch"));
@@ -1884,6 +1912,7 @@ mod tests {
             own.spec.read_only.contains(&repo.root.join("own"))
                 && !own.spec.read_only.contains(&repo.root)
         );
+        assert_eq!(env_of(&own, "CARGO_NET_OFFLINE"), Some("true"));
         // In a submodule: the whole submodule copied into scratch, and the crate indexed there.
         let target = Target {
             submodule: "vendor".into(),

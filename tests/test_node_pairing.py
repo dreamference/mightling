@@ -45,6 +45,9 @@ def pairing(monkeypatch):
     monkeypatch.setattr(
         NodePairing, "ensure_key", classmethod(lambda cls: "ssh-ed25519 AAAAsender mightling-node")
     )
+    monkeypatch.setattr(
+        NodePairing, "ssh_config", classmethod(lambda cls, host: (None, NodePairing.key_path()))
+    )
     answers = {"info": answer(0, json.dumps({"node": NODE}))}
     monkeypatch.setattr(
         NodePairing, "run", classmethod(lambda cls, record, request, **_: answers[request])
@@ -165,7 +168,7 @@ def advertised(pairing, monkeypatch):
     monkeypatch.setattr(
         NodePairing,
         "authorize_on_node",
-        classmethod(lambda cls, record, key: authorised.append(record) or True),
+        classmethod(lambda cls, record, key, identity=None: authorised.append(record) or True),
     )
     return authorised
 
@@ -185,6 +188,18 @@ def test_pairing_through_a_browse_fails_when_the_new_key_gets_no_answer(
     pairing["info"] = answer(255, "", "Connection refused")
     assert not NodePairing.add("spark-1", user="owner")
     assert "did not answer through the new key: Connection refused" in capsys.readouterr().out
+    assert not NodePairing.record_path(NODE).exists()
+
+
+@pytest.mark.parametrize("info", [answer(0, "not json"), answer(0, json.dumps({"version": "1"}))])
+def test_pairing_through_a_browse_is_undone_when_the_new_key_gets_no_node_id_back(
+    advertised, pairing, info, capsys
+):
+    # As in a pairing over a session: only the node's own id through the new key confirms it.
+    pairing["info"] = info
+    assert not NodePairing.add("spark-1", user="owner")
+    assert "pairing removed" in capsys.readouterr().out
+    assert not NodePairing.record_path(NODE).exists()
 
 
 def test_pairing_through_a_browse_stops_when_the_node_does_not_authorise_the_key(
@@ -196,11 +211,32 @@ def test_pairing_through_a_browse_stops_when_the_node_does_not_authorise_the_key
         classmethod(lambda cls, name: {"node": NODE, "name": "spark-1", "address": "192.0.2.7"}),
     )
     monkeypatch.setattr(
-        NodePairing, "authorize_on_node", classmethod(lambda cls, record, key: False)
+        NodePairing, "authorize_on_node", classmethod(lambda cls, record, key, identity=None: False)
     )
     assert not NodePairing.add("spark-1", user="owner")
     assert "did not authorise" in capsys.readouterr().out
     assert not NodePairing.record_path(NODE).exists()
+
+
+def test_pairing_through_a_browse_offers_the_key_ssh_config_gives_the_name_typed(
+    pairing, monkeypatch
+):
+    # The browse answers with an address; `~/.ssh/config` names the machine by its name, and the
+    # user it gives that name is used, so the key it gives that name must be offered with it.
+    from pathlib import Path
+
+    monkeypatch.setattr(
+        NodePairing,
+        "discover",
+        classmethod(lambda cls, name: {"node": NODE, "name": "spark-1", "address": "192.0.2.7"}),
+    )
+    keys = {"spark-1": ("owner", Path("/keys/spark")), "192.0.2.7": (None, Path("/keys/default"))}
+    monkeypatch.setattr(NodePairing, "ssh_config", classmethod(lambda cls, host: keys[host]))
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, **_: calls.append(argv) or answer(0))
+    assert NodePairing.add("spark-1")
+    assert calls[0][calls[0].index("-i") + 1] == "/keys/spark"
+    assert "owner@192.0.2.7" in calls[0]
 
 
 def test_pairing_warns_when_lingering_is_off_on_the_node(advertised, pairing, capsys):
@@ -216,6 +252,9 @@ def test_pairing_stops_when_ssh_keygen_cannot_make_the_key(monkeypatch, capsys):
         classmethod(lambda cls, name: {"node": NODE, "name": "spark-1", "address": "192.0.2.7"}),
     )
     monkeypatch.setattr(NodePairing, "ensure_key", classmethod(lambda cls: None))
+    monkeypatch.setattr(
+        NodePairing, "ssh_config", classmethod(lambda cls, host: (None, NodePairing.key_path()))
+    )
     assert not NodePairing.add("spark-1", user="owner")
     assert "ssh-keygen could not create" in capsys.readouterr().out
 

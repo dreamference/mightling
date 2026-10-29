@@ -485,7 +485,11 @@ pub fn from_searxng(
     // An infobox comes first: it is the encyclopedia's summary of the subject, and the one thing a
     // search that only Wikipedia answered has. A web result for the same page is not repeated.
     let infoboxes = infobox_results(payload);
-    let boxed: Vec<String> = infoboxes.iter().map(|result| result.url.clone()).collect();
+    let boxed: Vec<String> = infoboxes
+        .iter()
+        .take(1)
+        .map(|result| result.url.clone())
+        .collect();
     let web = payload["results"]
         .as_array()
         .into_iter()
@@ -802,6 +806,36 @@ mod tests {
                 .unwrap()
                 .result_count,
             1
+        );
+    }
+
+    #[test]
+    fn a_page_only_a_second_infobox_named_is_still_a_web_result() {
+        // Only the first infobox is shown, so the second one's page must not be held back.
+        let mut payload = searxng(
+            json!([
+                {"title": "Lisbon - Wikipedia", "url": "https://en.wikipedia.org/wiki/Lisbon", "engine": "mwmbl"},
+                {"title": "Lisbon - Wikidata", "url": "https://www.wikidata.org/wiki/Q597", "content": "city", "engine": "yep"}
+            ]),
+            json!([]),
+            json!([]),
+        );
+        payload["infoboxes"] = json!([
+            {"infobox": "Lisbon", "id": "https://en.wikipedia.org/wiki/Lisbon", "content": "Capital.", "engine": "wikipedia"},
+            {"infobox": "Lisbon", "id": "https://www.wikidata.org/wiki/Q597", "content": "City.", "engine": "wikidata"}
+        ]);
+        let found = from_searxng("lisbon", &payload, 5, Level::Off).unwrap();
+        let urls: Vec<&str> = found
+            .results
+            .iter()
+            .map(|result| result.url.as_str())
+            .collect();
+        assert_eq!(
+            urls,
+            [
+                "https://en.wikipedia.org/wiki/Lisbon",
+                "https://www.wikidata.org/wiki/Q597"
+            ]
         );
     }
 

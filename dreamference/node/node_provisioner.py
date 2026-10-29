@@ -368,7 +368,7 @@ class NodeProvisioner:
         print(f"⬆️  {host}: NVIDIA's OS and firmware update, then a reboot (§10.3).")
         update = session.sudo(
             "sh -c 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade "
-            "&& fwupdmgr refresh --force; fwupdmgr upgrade -y --no-reboot-check; true'",
+            "&& { fwupdmgr refresh --force; fwupdmgr upgrade -y --no-reboot-check; true; }'",
             password,
         )
         if update.returncode != 0:

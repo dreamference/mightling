@@ -29,6 +29,8 @@ from typing import Dict, Final, List, Optional, Tuple
 from dreamference.audit.egress_trace import EgressTrace
 
 DNS_PORT: Final[int] = 53
+# The one send call that carries a vector of messages, each with its own destination.
+SENDMMSG: Final[str] = "sendmmsg"
 
 # git subcommands that reach a network (`push` beyond the spec's list: it is one too).
 NETWORKED_GIT: Final[frozenset] = frozenset({"ls-remote", "fetch", "clone", "pull", "push", "remote-https", "remote-http"})
@@ -54,6 +56,14 @@ UDP_KINDS: Final[frozenset] = frozenset({"UDP", "UDPv6", "UDPLITE", "UDPLITEv6"}
 
 # `1234 <... execve resumed>) = 0`: the result of a call another process's line interrupted.
 RESUMED_EXECVE: Final[re.Pattern] = re.compile(r"^(?:\[pid\s+(\d+)\]\s+|(\d+)\s+)?<\.\.\. execve resumed>.*\)\s*=\s*(-?\d+)")
+
+# `1234 <... sendmmsg resumed>[{msg_hdr=…}], 1, 0) = 1`: strace decodes a sendmmsg's messages only
+# once it returns, so when another line interrupted it, every address it sent to is on this line.
+RESUMED_SENDMMSG: Final[re.Pattern] = re.compile(
+    r"^(?:\[pid\s+(\d+)\]\s+|(\d+)\s+)?<\.\.\. sendmmsg resumed>(.*)$"
+)
+
+UNFINISHED: Final[str] = "<unfinished ...>"
 
 SIMPLE_ESCAPES: Final[Dict[str, int]] = {
     "n": 10, "t": 9, "r": 13, "v": 11, "f": 12, "a": 7, "b": 8, "e": 27, "\\": 92, '"': 34, "'": 39,
@@ -81,14 +91,11 @@ class StraceParser:
         udp_routes: Dict[str, str] = {}
         # An execve whose result is on a later line (`<unfinished ...>`), by pid.
         pending_execve: Dict[str, str] = {}
+        # A sendmmsg whose messages are on a later line, by pid: its descriptor so far.
+        pending_sendmmsg: dict[str, str] = {}
         for line in text.splitlines():
             line = line.strip()
-            resumed = RESUMED_EXECVE.match(line)
-            if resumed:
-                trace.lines += 1
-                started = pending_execve.pop(resumed.group(1) or resumed.group(2) or "", None)
-                if started is not None and int(resumed.group(3)) == 0:
-                    cls._read_execve(started, trace)
+            if cls._read_resumed(line, trace, pending_execve, pending_sendmmsg, resolver_sockets, udp_routes):
                 continue
             match = LINE.match(line)
             if not match:
@@ -96,13 +103,39 @@ class StraceParser:
             trace.lines += 1
             pid = match.group(1) or match.group(2) or ""
             syscall, rest = match.group(3), match.group(4)
-            if syscall == "execve" and rest.rstrip().endswith("<unfinished ...>"):
+            if syscall == "execve" and rest.rstrip().endswith(UNFINISHED):
                 pending_execve[pid] = rest
             elif syscall == "execve":
                 cls._read_execve(rest, trace)
+            elif syscall == SENDMMSG and rest.rstrip().endswith(UNFINISHED):
+                pending_sendmmsg[pid] = rest.rstrip()[:-len(UNFINISHED)]
             elif syscall in ("connect", "sendto", "sendmsg", "sendmmsg", "write", "writev"):
                 cls._read_socket_call(pid, syscall, rest, trace, resolver_sockets, udp_routes)
+        # A sendmmsg that never returned (its process was killed): its descriptor is all there is.
+        for pid, started in pending_sendmmsg.items():
+            cls._read_socket_call(pid, SENDMMSG, started, trace, resolver_sockets, udp_routes)
         return trace
+
+    @classmethod
+    def _read_resumed(cls, line: str, trace: EgressTrace, pending_execve: dict[str, str],
+                      pending_sendmmsg: dict[str, str], resolver_sockets: dict[tuple[str, str], str],
+                      udp_routes: dict[str, str]) -> bool:
+        """Reads a `<... resumed>` line of an execve or a sendmmsg; False for any other line."""
+        resumed = RESUMED_EXECVE.match(line)
+        if resumed:
+            trace.lines += 1
+            started = pending_execve.pop(resumed.group(1) or resumed.group(2) or "", None)
+            if started is not None and int(resumed.group(3)) == 0:
+                cls._read_execve(started, trace)
+            return True
+        resumed = RESUMED_SENDMMSG.match(line)
+        if resumed:
+            trace.lines += 1
+            pid = resumed.group(1) or resumed.group(2) or ""
+            sent = pending_sendmmsg.pop(pid, "") + resumed.group(3)
+            cls._read_socket_call(pid, SENDMMSG, sent, trace, resolver_sockets, udp_routes)
+            return True
+        return False
 
     @classmethod
     def _read_socket_call(cls, pid: str, syscall: str, rest: str, trace: EgressTrace,
@@ -116,7 +149,9 @@ class StraceParser:
             if udp:
                 cls._udp_payload(inner, trace, udp_routes)
             return
-        destination = cls.destination_in(rest)
+        # A sendmmsg carries several messages, each naming its own destination.
+        messages = rest.split("{msg_hdr=")[1:] if syscall == SENDMMSG else []
+        destination = cls.destination_in(messages[0] if messages else rest)
         if destination is not None:
             address, port = destination
             target = cls.format_destination(address, port)
@@ -138,6 +173,14 @@ class StraceParser:
         elif udp:
             # A payload on a connected UDP socket, which names no destination of its own.
             cls._udp_payload(inner, trace, udp_routes)
+        to_resolver = destination is not None and destination[1] == DNS_PORT
+        for message in messages[1:]:
+            other = cls.destination_in(message)
+            if other is not None:
+                counts = trace.dns_servers if other[1] == DNS_PORT else trace.destinations
+                target = cls.format_destination(*other)
+                counts[target] = counts.get(target, 0) + 1
+                to_resolver = to_resolver or other[1] == DNS_PORT
         unix = UNIX.search(rest)
         if unix:
             path = ("@" if unix.group(1) else "") + cls.unescape(unix.group(2)).decode("utf-8", "replace")
@@ -145,7 +188,7 @@ class StraceParser:
         if syscall == "connect":
             return
         # A payload sent to a resolver, named in the call or connected earlier, is a DNS query.
-        to_resolver = (destination is not None and destination[1] == DNS_PORT) or (pid, fd) in resolver_sockets
+        to_resolver = to_resolver or (pid, fd) in resolver_sockets
         if to_resolver:
             for payload in cls.strings_in(rest):
                 name = cls.dns_query_name(payload)

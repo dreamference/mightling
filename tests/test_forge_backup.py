@@ -198,6 +198,20 @@ def test_a_node_that_does_not_store_the_set_is_reported(tmp_path, monkeypatch, c
     assert "node-b did not store the backup: refused" in capsys.readouterr().out
 
 
+def test_a_node_that_does_not_answer_in_time_is_reported(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        NodePairing, "ssh_command", classmethod(lambda cls, r, q: ["ssh", "node-b", q])
+    )
+    monkeypatch.setattr(subprocess, "Popen", FakePacker)
+
+    def hung(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", hung)
+    assert ForgeBackup.send(tmp_path / NAME, {"name": "node-b"}) is False
+    assert "node-b did not store the backup in time" in capsys.readouterr().out
+
+
 def test_a_mirror_node_takes_no_backup(monkeypatch):
     ForgeSettings.update_state(role=ROLE_MIRROR)
     monkeypatch.setattr(ForgeBackup, "take", classmethod(lambda cls: pytest.fail("took a set")))

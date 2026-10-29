@@ -225,8 +225,31 @@ fn is_relative_url(url: &str) -> bool {
     url.starts_with("./") || url.starts_with("../")
 }
 
+/// A relative submodule URL resolved as git does against the declaring repository's remote:
+/// each `../` drops one component of `base`, so `../../other/x` leaves the owner.
+fn resolve_relative_url(base: &str, relative: &str) -> String {
+    let mut base = base.trim().trim_end_matches('/');
+    let mut rest = relative;
+    loop {
+        if let Some(r) = rest.strip_prefix("./") {
+            rest = r;
+        } else if let Some(r) = rest.strip_prefix("../") {
+            base = &base[..base.rfind(['/', ':']).unwrap_or(0)];
+            rest = r;
+        } else {
+            break;
+        }
+    }
+    format!("{base}/{rest}")
+}
+
 /// The superproject's remote: that of the current branch, else `origin`, else the only remote.
 fn superproject_remote(root: &Path) -> Option<RemoteId> {
+    parse_remote(&remote_url(root)?)
+}
+
+/// The URL of the remote git resolves relative submodule URLs against, `insteadOf` applied.
+fn remote_url(root: &Path) -> Option<String> {
     let remotes: Vec<String> = git(root, &["remote"])
         .ok()?
         .lines()
@@ -251,8 +274,9 @@ fn superproject_remote(root: &Path) -> Option<RemoteId> {
         .or_else(|| remotes.iter().find(|r| *r == "origin").cloned())
         .or_else(|| (remotes.len() == 1).then(|| remotes[0].clone()))?;
     // `ls-remote --get-url` applies `url.<base>.insteadOf` and makes no network request.
-    let url = git(root, &["ls-remote", "--get-url", &remote]).ok()?;
-    parse_remote(&url)
+    git(root, &["ls-remote", "--get-url", &remote])
+        .ok()
+        .map(|u| u.trim().to_string())
 }
 
 /// The addresses and organisation domains of the people who write the superproject.
@@ -580,12 +604,17 @@ pub fn evaluate_with(
         .unwrap_or_default();
         submodule.namespace = if raw_url.is_empty() || our_remote.is_none() {
             Namespace::Unavailable
-        } else if is_relative_url(&raw_url) {
-            Namespace::Same
         } else {
-            let expanded = git(&parent_dir, &["ls-remote", "--get-url", &raw_url])
-                .map(|u| u.trim().to_string())
-                .unwrap_or(raw_url);
+            let expanded = if is_relative_url(&raw_url) {
+                // Against the declaring repository's remote; none makes the namespace unknown.
+                remote_url(&parent_dir)
+                    .map(|base| resolve_relative_url(&base, &raw_url))
+                    .unwrap_or_default()
+            } else {
+                git(&parent_dir, &["ls-remote", "--get-url", &raw_url])
+                    .map(|u| u.trim().to_string())
+                    .unwrap_or(raw_url)
+            };
             match (parse_remote(&expanded), &our_remote) {
                 (Some(theirs), Some(ours)) => {
                     submodule.their_namespace = Some(theirs.namespace());
@@ -801,6 +830,22 @@ pub fn change(repo: &Repo, settings: &Settings, verb: &str, wanted: &str) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relative_urls_resolve_against_the_remote_as_git_does() {
+        let owner =
+            |base: &str, rel: &str| parse_remote(&resolve_relative_url(base, rel)).map(|r| r.owner);
+        let https = "https://example.com/acme/super.git";
+        let scp = "git@example.com:acme/super.git";
+        assert_eq!(owner(https, "../lib.git").as_deref(), Some("acme"));
+        assert_eq!(owner(scp, "./../lib.git").as_deref(), Some("acme"));
+        assert_eq!(
+            owner(https, "../../other/lib.git").as_deref(),
+            Some("other")
+        );
+        assert_eq!(owner(scp, "../../other/lib.git"), None);
+        assert_eq!(owner(https, "../../../../../x/y"), None);
+    }
 
     #[test]
     fn remotes_of_every_form_give_host_and_owner() {

@@ -21,7 +21,8 @@ pub fn escape(text: &str) -> String {
 
 /// The info string of a fence line (```` ```rust ````), when the line is one.
 fn fence(line: &str) -> Option<&str> {
-    line.trim_start().strip_prefix("```").map(str::trim)
+    // A backtick in the info string makes it inline code (```ls```), not a fence.
+    line.trim_start().strip_prefix("```").map(|rest| rest.trim_start_matches('`')).filter(|info| !info.contains('`')).map(str::trim)
 }
 
 /// Markdown to the messenger HTML subset.
@@ -168,7 +169,8 @@ pub fn split(markdown: &str, limit: usize) -> Vec<String> {
         match open {
             Some(language) if !rest.is_empty() => {
                 text.push_str("\n```");
-                reopen = format!("```{language}\n");
+                // A label that would leave no room in the next part is dropped, or nothing moves.
+                reopen = if language.chars().count() <= limit / 2 { format!("```{language}\n") } else { "```\n".to_string() };
             }
             _ => reopen.clear(),
         }
@@ -199,6 +201,13 @@ mod tests {
         assert_eq!(to_html("```\"><b\nx\n```"), "<pre>x</pre>");
         // An unclosed block is closed.
         assert_eq!(to_html("```\n**not bold**"), "<pre>**not bold**</pre>");
+    }
+
+    #[test]
+    fn backticks_around_code_on_one_line_are_not_a_fence() {
+        // The model writes ```ls -la``` inline: nothing after it may vanish into a block.
+        let html = to_html("```ls -la``` lists it\n**more**");
+        assert!(!html.contains("<pre>") && html.contains("ls -la") && html.ends_with("<b>more</b>"), "{html}");
     }
 
     #[test]
@@ -240,5 +249,18 @@ mod tests {
         let parts = split(&"x".repeat(1000), 100);
         assert!(parts.iter().all(|part| part.chars().count() <= 100));
         assert_eq!(parts.concat().len(), 1000);
+    }
+
+    #[test]
+    fn a_fence_label_about_as_long_as_the_limit_still_splits() {
+        let code: String = (0..20).map(|n| format!("let x{n} = {n};\n")).collect();
+        let text = format!("```{}\n{code}```", "x".repeat(60));
+        let (done, parts) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(split(&text, 64));
+        });
+        let parts = parts.recv_timeout(std::time::Duration::from_secs(5)).expect("split never ends");
+        assert!(parts.iter().all(|part| part.chars().count() <= 64), "{parts:?}");
+        assert!(parts.concat().contains("let x19 = 19;"), "{parts:?}");
     }
 }

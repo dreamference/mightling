@@ -424,7 +424,8 @@ fn set_default(thread_id: Option<&str>, level: Level) -> Vec<String> {
     let written = path
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&path, updated));
+        .map_err(anyhow::Error::from)
+        .and_then(|()| crate::write_through(&path, updated.as_bytes()));
     if let Err(err) = written {
         return vec![format!("Could not write {}: {err}", path.display())];
     }
@@ -1253,6 +1254,18 @@ mod tests {
         assert_eq!(session_command(None::<String>, "loud", true), vec![USAGE.to_string()]);
         assert!(session_command(None::<String>, "off", true)[0].starts_with("No session yet"));
         assert!(session_command(None::<String>, "on", false)[0].starts_with(&first_line_of_on_without_a_session()));
+    }
+
+    #[test]
+    fn a_custom_profile_writing_the_whole_disk_with_the_network_on_is_refused_at_on() {
+        use codex_protocol::permissions::{FileSystemAccessMode, FileSystemPath, FileSystemSandboxEntry, FileSystemSandboxPolicy, FileSystemSpecialPath, NetworkSandboxPolicy};
+        // `[permissions]` with `":root" = "write"` and the network on: Codex runs its commands with no
+        // sandbox, so no seal could cut their network, and `/airgapped on` must refuse it as it does Full Access.
+        let root_write = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry { path: FileSystemPath::Special { value: FileSystemSpecialPath::Root }, access: FileSystemAccessMode::Write, missing_path_behavior: None }]);
+        let profile = codex_protocol::models::PermissionProfile::from_runtime_permissions(&root_write, NetworkSandboxPolicy::Enabled);
+        let unsandboxed = codex_sandboxing::policy_transforms::runs_without_platform_sandbox(&profile);
+        assert!(unsandboxed);
+        assert!(session_command(None::<String>, "on", unsandboxed)[0].starts_with("Airgapped not changed"));
     }
 
     /// What `/airgapped on` says first with no session yet. On Windows, without the elevated

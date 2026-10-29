@@ -151,6 +151,25 @@ def test_the_patches_stay_small():
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 64_000
 
 
+def test_airgapped_treats_every_profile_without_a_sandbox_like_full_access():
+    # The air gap is enforced by the sandbox helper, and Codex runs no helper for any profile whose
+    # network is on and whose file system is fully writable: Full Access, but also a
+    # `[permissions]` profile with `":root" = "write"`. Asking only "is it Full Access?" let such a
+    # profile take `/airgapped on`, and a configured `on`, with commands that kept the network.
+    # Both checks now ask Codex's own question: does this profile get a sandbox?
+    texts = {Path(p).name: Path(p).read_text() for p in CodexBrandedBuilder.patches()}
+    no_sandbox = "codex_sandboxing::policy_transforms::runs_without_platform_sandbox("
+    tui = texts["0019-airgapped.patch"]
+    assert "PermissionProfile::Disabled)).into_iter()" not in tui
+    assert tui.count(no_sandbox + "self.config.permissions.permission_profile())") == 2
+    # The question is asked in one place, Codex's sandboxing crate, with its own unit test there.
+    assert "+pub fn runs_without_platform_sandbox(profile: &PermissionProfile) -> bool {" in tui
+    assert "+fn a_profile_writing_the_whole_disk_with_the_network_on_runs_without_a_sandbox() {" in tui
+    app_server = texts["0023-airgapped-app-server.patch"]
+    assert "permission_refusal(matches!(p, PermissionProfile::Disabled)" not in app_server
+    assert "permission_refusal(" + no_sandbox + "p)" in app_server
+
+
 def test_the_build_key_changes_with_the_patches(tmp_path):
     patch_dir = tmp_path / "patches"
     patch_dir.mkdir()
@@ -678,3 +697,57 @@ def test_the_codex_and_crate_builds_take_the_compile_cache(tmp_path, monkeypatch
             patch.object(CodexBrandedBuilder, "build_web_ui", return_value="/ui/dist"):
         assert CodexBrandedBuilder._build_locked() is False
     assert [env["RUSTC_WRAPPER"] for env in calls] == ["/x/sccache", "/x/sccache"]
+
+
+def _fake_crate(tmp_path, monkeypatch, during_build=None):
+    """A one-binary crate whose cargo build is faked; `during_build` runs while it compiles."""
+    crate = tmp_path / "crate"
+    (crate / "src").mkdir(parents=True)
+    (crate / "src" / "main.rs").write_text("fn main() {}\n")
+
+    def fake_call(command, cwd=None, env=None):
+        if during_build:
+            during_build(crate)
+        release = tmp_path / "cache" / "target" / "release"
+        release.mkdir(parents=True, exist_ok=True)
+        (release / "x").write_text("#!/bin/sh\n")
+        (release / "x").chmod(0o755)
+        return 0
+
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
+    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
+    monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
+    return crate
+
+
+def test_a_crate_edited_during_its_build_is_not_stamped_current(tmp_path, monkeypatch):
+    # The binary was compiled from the source as it was when cargo started; an edit made while it
+    # ran must leave the next run rebuilding, not stamp the old binary with the new key.
+    crate = _fake_crate(
+        tmp_path, monkeypatch, lambda crate: (crate / "src" / "main.rs").write_text("fn main() { 1; }\n")
+    )
+    assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is True
+    assert not CodexBrandedBuilder.crate_is_current(str(crate), "stamp", ("x",))
+
+
+def test_a_crate_install_leaves_another_installs_staging_file_alone(tmp_path, monkeypatch):
+    # Crate builds run outside the Codex build's lock: two `ling-admin` processes installing the
+    # same binary must not copy into, or rename away, each other's staging file.
+    crate = _fake_crate(tmp_path, monkeypatch)
+    bin_dir = tmp_path / "install" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / ".x.new").write_text("another install's copy")
+    assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is True
+    assert (bin_dir / ".x.new").read_text() == "another install's copy"
+    assert (bin_dir / "x").read_text() == "#!/bin/sh\n"
+
+
+def test_linking_leaves_another_links_staging_link_alone(tmp_path):
+    link = tmp_path / "bin" / "ling"
+    link.parent.mkdir()
+    staging = tmp_path / "bin" / "ling.new"
+    staging.symlink_to("/another/process")
+    CodexBrandedBuilder._link("/install/ling", str(link))
+    assert link.readlink() == Path("/install/ling")
+    assert staging.readlink() == Path("/another/process")

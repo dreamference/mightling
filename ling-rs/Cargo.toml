@@ -117,6 +117,9 @@ codex-config = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 # Codex's own parser of agent role files, to check the ones compat_agents.rs writes.
 codex-agent-roles = { workspace = true }
+# A custom profile's sandbox, decided exactly as Codex decides it (src/airgapped.rs's tests, patch 0019).
+codex-protocol = { workspace = true }
+codex-sandboxing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tar = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
