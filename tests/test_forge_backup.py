@@ -102,6 +102,7 @@ def test_a_dump_without_a_database_does_not_restore(tmp_path, capsys):
         archive.addfile(info, io.BytesIO(b""))
     (folder / "dump.tar.gz").write_bytes(dump.getvalue())
     (folder / "manifest.json").write_text('{"refs": {}}')
+    (folder / "secrets.json").write_text("{}")
     assert ForgeBackup.check(folder) == 1
     assert "holds no database" in capsys.readouterr().out
 
@@ -248,3 +249,20 @@ def test_the_nightly_backup_stops_after_enough_nodes_and_fails_below_that(tmp_pa
     assert status["ok"] is False and status["sent_to"] == ["node-0"]
     assert status["error"] == f"reached 1 of {BACKUP_COPIES} nodes"
     assert json.dumps(status)
+
+
+@pytest.mark.parametrize("secrets", [None, "not json"])
+def test_a_set_without_its_secrets_does_not_restore(secrets, tmp_path, repositories, capsys):  # noqa: F811
+    data = ForgeSettings.data_dir()
+    data.mkdir(parents=True)
+    (data / "old").write_text("before")
+    folder = tmp_path / "sets" / NAME
+    make_set(folder, repositories)
+    if secrets is None:
+        (folder / "secrets.json").unlink()
+    else:
+        (folder / "secrets.json").write_text(secrets)
+    # Else the push hook's denylist stays behind, and this node's old tokens face the set's forge.
+    assert ForgeBackup.install_data(folder) == (None, None)
+    assert (data / "old").read_text() == "before"
+    assert "secrets" in capsys.readouterr().out
