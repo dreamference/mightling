@@ -33,6 +33,9 @@ use crate::store::TelegramConfig;
 pub const API_ROOT: &str = "https://api.telegram.org";
 /// Telegram's limit is 4,096 characters after entities are parsed; this leaves room.
 pub const MESSAGE_LIMIT: usize = 4000;
+/// An approval's text, cut so it and its outcome fit one message: refused whole, its buttons would
+/// never be shown and the request would wait unseen.
+const APPROVAL_TEXT_LIMIT: usize = 3500;
 const DRAFT_LIMIT: usize = 4096;
 /// Drafts to one chat, every topic together, at most this often (Telegram: one message a second).
 const DRAFT_GAP_MS: u64 = 1_000;
@@ -831,6 +834,10 @@ impl Renderer {
                 let _ = self.api.call("sendMessage", params).await;
             }
             Outbound::Approval { id, text, options, .. } => {
+                let text = match text.char_indices().nth(APPROVAL_TEXT_LIMIT) {
+                    Some((end, _)) => format!("{}…", &text[..end]),
+                    None => text,
+                };
                 let keyboard = approval_keyboard(&id, &options);
                 let params = in_topic(json!({ "chat_id": chat_id, "text": render::to_html(&text), "parse_mode": "HTML", "reply_markup": keyboard }), topic);
                 // A refused render must not hide the buttons: the request would be declined unseen.

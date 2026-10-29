@@ -562,6 +562,26 @@ async fn rich_drafts_and_answers_are_blocks_and_a_refusal_falls_back_to_html() {
     assert_eq!(stand.bodies("sendMessageDraft").len(), 1);
 }
 
+/// An approval whose text is over Telegram's limit (a long question from the agent) is cut, so
+/// its buttons are shown: refused whole, the request would wait unseen.
+#[tokio::test]
+async fn a_long_approval_is_cut_to_the_limit_and_its_buttons_are_shown() {
+    let limit: Answer = Arc::new(|method, body, _| match (method, body["text"].as_str()) {
+        ("sendMessage", Some(text)) if text.chars().count() > 4096 => (StatusCode::BAD_REQUEST, json!({ "ok": false, "error_code": 400, "description": "Bad Request: message is too long" })),
+        _ => ok(json!({ "message_id": 7 })),
+    });
+    let (stand, api) = stand_in(limit).await;
+    let renderer = Renderer::new(api);
+    let text = format!("Which one?\n{}", "word ".repeat(1500));
+    renderer.render(Outbound::Approval { chat: "telegram:111".into(), id: "q1".into(), text, options: vec!["This".into(), "Decline".into()] }).await;
+    renderer.render(Outbound::ApprovalClosed { chat: "telegram:111".into(), id: "q1".into(), outcome: "Answered.".into() }).await;
+    let sent = stand.bodies("sendMessage");
+    assert_eq!(sent.len(), 1, "sent once, within the limit");
+    assert!(sent[0]["text"].as_str().unwrap().starts_with("Which one?"));
+    assert!(sent[0]["reply_markup"].is_object());
+    assert_eq!(stand.bodies("editMessageText").len(), 1, "the approval was shown, so its outcome replaces it");
+}
+
 /// A rich answer in two messages whose second Telegram refuses: that part goes as plain text, and
 /// the first, already shown, is not sent again.
 #[tokio::test]
