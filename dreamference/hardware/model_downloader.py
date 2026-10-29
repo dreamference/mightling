@@ -680,7 +680,12 @@ class ModelDownloader:
             shutil.rmtree(cache_dir, ignore_errors=True)
         if cache_dir.exists():
             print(f"⚠️  Some files in {cache_dir} could not be removed (written as root by a container).")
-            print(f"💡 Remove them with: sudo rm -rf {cache_dir}")
+            # `rm -rf` on a link removes the link alone and leaves the files.
+            if cache_dir.is_symlink():
+                command = f"sudo find {cache_dir}/ -mindepth 1 -delete"
+            else:
+                command = f"sudo rm -rf {cache_dir}"
+            print(f"💡 Remove them with: {command}")
             return False
         return True
 
