@@ -17,7 +17,14 @@ export const FINISHED = ["done", "no-change", "stalled", "failed", "cancelled", 
 export function isUnread(task: Pick<NightTask, "id" | "status" | "at">, seen: unknown, read: unknown): boolean {
   if (!FINISHED.includes(task.status)) return false;
   if (Array.isArray(read) && read.includes(task.id)) return false;
-  return typeof seen !== "string" || !seen || (task.at ?? "") > seen;
+  return typeof seen !== "string" || !seen || finishedAfter(task.at, seen);
+}
+
+/** Whether `at` is later than `seen`, as times: the queue writes local time with its offset, Mark all as read UTC. Pure. */
+function finishedAfter(at: string | null, seen: string): boolean {
+  const finished = Date.parse(at ?? "");
+  const marked = Date.parse(seen);
+  return Number.isNaN(finished) || Number.isNaN(marked) ? (at ?? "") > seen : finished > marked;
 }
 
 /** How many finished runs are unread. Pure. */
