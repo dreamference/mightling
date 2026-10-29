@@ -42,7 +42,7 @@ Bar (all four, then the owner's OK): combined rate of 4 conversations at or abov
 | Item | Owner | Blocker | Date |
 |---|---|---|---|
 | Issue 3, "Release dry run failing" (open) | nobody | Cause was two Multilingual build tests that read the runner's free disk; fixed by `21d46765` on main. The dry run at 14:59 was still running. Confirm the next run closes the issue; also one `Event loop is closed` warning in the mypy ratchet output, not a failure | 10-29 |
-| Defect list of 2026-10-19 (`specs/README.md`): seven code or note defects, none fixed (chat status ignores arguments; `audit egress --docs` ignores `--prompt`/`--json`; audit JSON name in the help; `compaction.rs` header; `FORWARDED_ENV` in `docs_index.rs`; `docs/dev/node.md` path; `--web` missing from AGENTS.md's list) | nobody | none; small, one branch | before 1.8.0 |
+| Defect list of 2026-10-19 (`specs/README.md`): seven code or note defects, all seven fixed on main since, though the table in `specs/README.md` still lists them (chat status ignores arguments; `audit egress --docs` ignores `--prompt`/`--json`; audit JSON name in the help; `compaction.rs` header; `FORWARDED_ENV` in `docs_index.rs`; `docs/dev/node.md` path; `--web` missing from AGENTS.md's list) | nobody | none; small, one branch | before 1.8.0 |
 | 1.7.2 desktop visual checks on the AMD box (8 checks at 100 % and 150 % scaling) and the icon question | owner | at the screen | owner's daily batch, 09:00 |
 | Windows preview is unsigned (patch `0024`); signing reopened | owner | company enrolment for code signing, not now | after 2.0 planning |
 | Signal test (remove and unlink first, `ling web start`) | owner | owner's time | owner's daily batch |
