@@ -517,3 +517,22 @@ def test_a_ling_engine_recipe_lists_kv_pages_exactly_when_its_commit_has_the_pag
         ["git", "-C", str(engine), "merge-base", "--is-ancestor", since, commit], capture_output=True
     ).returncode == 0
     assert ("kv-pages" in (recipe.get("engine_features") or [])) == descends, commit
+
+
+def test_a_model_refused_for_memory_is_told_the_budget_it_was_compared_against(monkeypatch):
+    # The check allows 95% of the total; the message used to call the total "available", so a
+    # model needing less than that total was refused as if it needed more.
+    from types import SimpleNamespace
+
+    from dreamference.hardware import HardwareManager
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    spec = ModelMatrixRegistry.get_spec("qwen3.8-27b-nvfp4-dflash2")
+    total = spec.min_memory_gb / 0.97
+    monkeypatch.setattr(
+        HardwareManager, "detect_gb10_hardware",
+        classmethod(lambda cls: SimpleNamespace(total_unified_memory_gb=total)),
+    )
+    valid, msg = check_model_compatibility("qwen3.8-27b-nvfp4-dflash2")
+    assert valid is False
+    assert f"{total * 0.95:.1f} GB" in msg and "available" not in msg
