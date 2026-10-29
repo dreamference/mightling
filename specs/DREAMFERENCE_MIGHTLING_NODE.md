@@ -170,7 +170,7 @@ A `mightling-node` daemon that advertises itself, serves a descriptor and revers
 `vllm_host()` in the launcher gains tiers. The first that yields a host wins:
 
 1. `DREAMFERENCE_VLLM_HOST`.
-2. `vllm_host` in `DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml` or `~/.config/dreamference/config.toml`.
+2. `vllm_host` in `DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml` or `~/.config/dreamference/config.toml`. A repository's `./dreamference.toml` may name only a server on this machine; another host there is ignored, and the user's file decides ([MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md)).
 
    *As built, `MIGHTLING_NODE=<name>` comes between tiers 2 and 3 (one node, for one command; §18.2), and the launcher's own list (`ling-rs/src/node.rs`) numbers tiers 1 and 2 as one.*
 3. **This machine is a node** (`~/.config/dreamference/node-id` exists): `http://localhost:8000`, with no discovery at all. A GB10 never browses for itself.
