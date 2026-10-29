@@ -33,6 +33,12 @@ export function GoalRow(props: {
 }) {
   const { goal } = props;
   const [text, setText] = useState(goal?.objective ?? "");
+  // Each edit starts from the goal as it is now: it may have come in, or changed, since the row opened.
+  const [wasEditing, setWasEditing] = useState(props.editing);
+  if (props.editing !== wasEditing) {
+    setWasEditing(props.editing);
+    if (props.editing) setText(goal?.objective ?? "");
+  }
   if (!goal && !props.editing) return null;
   if (props.editing) {
     return (
