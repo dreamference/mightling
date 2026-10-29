@@ -138,6 +138,9 @@ fn call(repo: &Repo, settings: &Settings, params: &Value) -> Result<String> {
         return Ok(context.status().join("\n"));
     }
     if !context.has_index() {
+        if repo.state_dir().join("code_index.building").exists() {
+            return Ok("index not ready yet: it is being built; use rg until `ling-code status` reports it ready".to_string());
+        }
         return Ok(crate::paths::no_index_yet(
             crate::paths::indexing_here(),
             false,

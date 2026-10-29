@@ -611,6 +611,21 @@ fn mcp_survives_a_bad_line_and_reports_a_failed_tool_as_a_tool_error() {
 }
 
 #[test]
+fn mcp_says_when_the_index_is_being_built() {
+    let f = fixture();
+    std::fs::remove_dir_all(f.repo.scip_dir()).unwrap();
+    std::fs::remove_file(&f.graph_db).unwrap();
+    std::fs::create_dir_all(f.repo.state_dir()).unwrap();
+    std::fs::write(f.repo.state_dir().join("code_index.building"), "").unwrap();
+    let lines = mcp_session(
+        &f,
+        &[br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"code_def","arguments":{"name":"make_circle"}}}"#],
+    );
+    let text = lines[0]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("being built"), "{text}");
+}
+
+#[test]
 fn a_definition_without_symbol_information_is_repaired() {
     // Drop every SymbolInformation from the recorded index, as scip-python did for tests/: the
     // repair restores one per defined symbol, and the rest of the index is unchanged.
