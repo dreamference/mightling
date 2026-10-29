@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from test_forge import make_set, repositories  # noqa: F401  (a fixture)
 
-from dreamference.forge import ForgeBackup, ForgeSettings
+from dreamference.forge import ForgeBackup, ForgeContainer, ForgeSettings
 from dreamference.forge.forge_settings import BACKUP_COPIES, ROLE_MIRROR, ROLE_RECORD
 from dreamference.node.node_pairing import NodePairing
 
@@ -217,6 +217,23 @@ def test_a_mirror_node_takes_no_backup(monkeypatch):
     ForgeSettings.update_state(role=ROLE_MIRROR)
     monkeypatch.setattr(ForgeBackup, "take", classmethod(lambda cls: pytest.fail("took a set")))
     assert ForgeBackup.run() == 0
+
+
+def test_a_push_during_the_dump_makes_no_set(monkeypatch, capsys):
+    dumps = ForgeSettings.data_dir() / "dumps"
+
+    def dump(cls, arguments, timeout=0):
+        (dumps / Path(arguments[-1]).name).write_bytes(b"dump")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    # The repositories' refs before the dump and after it: a push landed in between.
+    seen = iter([{"o/r": {"refs/heads/main": "a" * 40}}, {"o/r": {"refs/heads/main": "b" * 40}}])
+    monkeypatch.setattr(ForgeContainer, "forgejo", classmethod(dump))
+    monkeypatch.setattr(ForgeBackup, "repository_refs", classmethod(lambda cls, root: next(seen)))
+    assert ForgeBackup.take() is None, "a set whose manifest is not its dump's was kept"
+    assert "push" in capsys.readouterr().out
+    assert list(dumps.iterdir()) == []
+    assert not ForgeBackup.local_dir().exists() or list(ForgeBackup.local_dir().iterdir()) == []
 
 
 def test_a_failed_dump_is_recorded(monkeypatch):

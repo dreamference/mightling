@@ -120,6 +120,9 @@ class ForgeBackup:
         name = time.strftime("forge-%Y%m%d-%H%M%S", time.gmtime())
         data = ForgeSettings.data_dir()
         (data / "dumps").mkdir(parents=True, exist_ok=True)
+        # The dump runs while pushes are taken: the refs before and after it must agree, or the
+        # manifest would not be the dump's and the set would never pass its restore check.
+        before = cls.repository_refs(data / "git" / "repositories")
         result = ForgeContainer.forgejo(
             [
                 "dump",
@@ -138,9 +141,13 @@ class ForgeBackup:
             print(f"❌ forgejo dump failed: {(result.stderr or result.stdout).strip()[-300:]}")
             return None
         refs = cls.repository_refs(data / "git" / "repositories")
-        if refs is None:
+        if refs is None or before is None:
             produced.unlink()
             print("❌ git could not read a repository, so the set would have no refs to check.")
+            return None
+        if refs != before:
+            produced.unlink()
+            print("❌ A push landed during the dump, so no set was kept; the next run takes one.")
             return None
         folder = cls.local_dir() / name
         (folder / "bundles").mkdir(parents=True, exist_ok=True)
