@@ -228,6 +228,17 @@ impl Server {
         auth::device_for_token(&self.config.state_dir, token).map(|device| device.name)
     }
 
+    /// Whether the request is authenticated only by a paired device restricted to `watch`: it may
+    /// read and follow threads, and nothing it sends may start or change work (SYNC §5.1, O4).
+    pub fn watch_device(&self, headers: &HeaderMap) -> bool {
+        if self.owner_session(headers) {
+            return false;
+        }
+        auth::cookie(header_str(headers, header::COOKIE), auth::DEVICE_COOKIE)
+            .and_then(|token| auth::device_for_token(&self.config.state_dir, token))
+            .is_some_and(|device| device.scope == auth::Scope::Watch)
+    }
+
     /// Whether the request carries a session cookie issued with `bridge=1` (`ling chat`).
     pub fn bridge_session(&self, headers: &HeaderMap) -> bool {
         auth::cookie(header_str(headers, header::COOKIE), auth::SESSION_COOKIE)
@@ -552,7 +563,15 @@ async fn docs_status(State(server): State<Arc<Server>>) -> Response {
 
 /// Settings › Your documents: add a folder (`{"folder": "/abs/path"}`), remove or rebuild a
 /// collection (`{"name": "notes"}`), each through `ling docs`.
-async fn docs_change(State(server): State<Arc<Server>>, axum::extract::Path(action): axum::extract::Path<String>, body: axum::body::Bytes) -> Response {
+async fn docs_change(
+    State(server): State<Arc<Server>>,
+    axum::extract::Path(action): axum::extract::Path<String>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if let Some(refused) = refuse_watch(&server, &headers) {
+        return refused;
+    }
     let bad = |why: &str| json_response(StatusCode::BAD_REQUEST, json!({ "error": why }));
     let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else { return bad("send JSON") };
     let field = |key: &str| request.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -810,12 +829,20 @@ async fn healthz(State(server): State<Arc<Server>>) -> Response {
     )
 }
 
+/// A 403 for a `watch` device on a route that changes something (SYNC §5.1, O4).
+fn refuse_watch(server: &Server, headers: &HeaderMap) -> Option<Response> {
+    server.watch_device(headers).then(|| {
+        json_response(StatusCode::FORBIDDEN, json!({ "error": "This device may watch threads only." }))
+    })
+}
+
 async fn websocket(State(server): State<Arc<Server>>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
     let device_name = server.paired_device_name(&headers);
     let bridge = server.is_bridge_caller(&headers);
+    let watch = server.watch_device(&headers);
     upgrade
         .max_message_size(64 << 20)
-        .on_upgrade(move |socket| crate::relay::run_tab_with_bridge(socket, server, device_name, bridge))
+        .on_upgrade(move |socket| crate::relay::run_tab_with_bridge(socket, server, device_name, bridge, watch))
 }
 
 /// The user-level air-gap level, for clients that cannot read the user's configuration: the Signal
@@ -894,7 +921,10 @@ async fn night_repos(State(server): State<Arc<Server>>) -> Response {
 
 /// Queues a phone's task (`{repo, task}`), in one of the repositories `/api/night/repos` names,
 /// with `ling night add` there; the bridge asked the owner first.
-async fn night_add(State(server): State<Arc<Server>>, body: axum::body::Bytes) -> Response {
+async fn night_add(State(server): State<Arc<Server>>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    if let Some(refused) = refuse_watch(&server, &headers) {
+        return refused;
+    }
     let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
         return json_response(StatusCode::BAD_REQUEST, json!({ "error": "send {repo, task}" }));
     };
@@ -1107,6 +1137,9 @@ fn unused_path(folder: &Path, name: &str) -> PathBuf {
 /// `text` (null when none was read) and `vision`, whether the served model takes images, so a
 /// bridge knows what the model can be given (specs/DREAMFERENCE_MIGHTLING_CHAT.md §16).
 async fn upload(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>, request: Request) -> Response {
+    if let Some(refused) = refuse_watch(&server, request.headers()) {
+        return refused;
+    }
     let cap = match query.get("kind").map(String::as_str) {
         Some("image") => IMAGE_CAP,
         Some("file") | None => FILE_CAP,
