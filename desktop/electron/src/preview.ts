@@ -55,6 +55,24 @@ interface Preview {
 /** How many console lines each preview keeps, and how long one may be. */
 const CONSOLE_KEPT = 400;
 
+/**
+ * A page's new window, which this process loads into the tab: never a data: page, and a file only
+ * from a page that is a file itself. Chromium refuses a page's own link to either; a load made from
+ * here is not the page's, so it would not.
+ */
+function popUp(opener: string, target: string, decision: Decision): Decision {
+  let scheme = "";
+  try {
+    scheme = new URL(target).protocol;
+  } catch {
+    return decision;
+  }
+  if (scheme === "data:" || (scheme === "file:" && !opener.startsWith("file:"))) {
+    return { verdict: "block", site: "", reach: "refused", reason: "a page may not open a file or a data: page from here" };
+  }
+  return decision;
+}
+
 export class Previews {
   private readonly previews = new Map<string, Preview>();
   /** Where the page last asked a tab's view to be, before the view existed (an empty tab's first address). */
@@ -156,8 +174,9 @@ export class Previews {
     const contents = view.webContents;
     // A page's new window opens in the same tab, if the rules let it.
     contents.setWindowOpenHandler(({ url: target }) => {
-      if (this.decision(preview, target).verdict === "allow") void contents.loadURL(target);
-      else this.refused(id, preview, this.decision(preview, target));
+      const decision = popUp(contents.getURL(), target, this.decision(preview, target));
+      if (decision.verdict === "allow") void contents.loadURL(target);
+      else this.refused(id, preview, decision);
       return { action: "deny" };
     });
     const guard = (event: { preventDefault: () => void }, target: string) => {
