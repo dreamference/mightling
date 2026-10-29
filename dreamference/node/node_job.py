@@ -867,6 +867,12 @@ class NodeJob:
         source = tree / record["out"]
         if not source.exists() or source.is_symlink():
             return 0
+        # A link the job left above the folder (`x -> ~`, `--out x/.ssh`) would have the node move
+        # one of its own folders out for `job-out` to send. The job has ended, so nothing moves it
+        # between this check and the move.
+        root = os.path.realpath(tree)
+        if not os.path.realpath(source).startswith(root + os.sep):
+            return 0
         kept = directory / "out"
         shutil.rmtree(kept, ignore_errors=True)
         kept.mkdir(parents=True)

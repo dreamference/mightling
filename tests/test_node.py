@@ -1684,6 +1684,26 @@ def test_out_files_are_kept_beside_the_job_and_never_committed(job_node, capsysb
             NodeJob.validate(job_request(**changes))
 
 
+def test_out_cannot_reach_outside_the_worktree_through_a_link(job_node, tmp_path):
+    from dreamference.node import NodeJob
+
+    # `--out x/.ssh` with `x` a link the job left (or committed) to the node user's home: the node
+    # once moved the folder it named out of the home and `job-out` sent it to the client.
+    home = tmp_path / "home-of-the-node"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "id_ed25519").write_text("private\n")
+    job = NodeJob.submit(
+        job_request(
+            commit=job_node["commit"], out="x/.ssh", command=["ln", "-s", str(home), "x"]
+        ),
+        "/x",
+    )
+    assert NodeJob.execute(job["id"]) == 0
+    assert (home / ".ssh" / "id_ed25519").read_text() == "private\n"
+    assert NodeJob.read(job["id"])["out_files"] == 0
+    assert not (NodeJob.job_dir(job["id"]) / "out").exists()
+
+
 def test_out_files_come_back_and_a_hostile_archive_cannot_write_outside(
     tmp_path, monkeypatch, capsys
 ):
