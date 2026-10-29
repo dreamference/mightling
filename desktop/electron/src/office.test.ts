@@ -25,6 +25,15 @@ describe("office previews", () => {
     expect(args.slice(-6)).toEqual(["--nolockcheck", "--convert-to", "pdf", "--outdir", "/tmp/s/out", "/d/a.docx"]);
   });
 
+  // A read-only root still lets a process connect to a socket that has a path: the session bus under
+  // /run/user would start a process outside the sandbox, with the network.
+  it.skipIf(process.platform === "win32")("hide the sockets under /run from LibreOffice", () => {
+    const { args } = conversionCommand("/usr/bin/bwrap", "/usr/bin/soffice", "/d/a.docx", "/tmp/s");
+    const run = args.findIndex((arg, i) => arg === "--tmpfs" && args[i + 1] === "/run");
+    expect(run).toBeGreaterThan(2);
+    expect(run).toBeLessThan(args.indexOf("--bind"));
+  });
+
   it("say so without LibreOffice, and refuse what is not an office file", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "office-test-"));
     const file = path.join(dir, "a.docx");
