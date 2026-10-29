@@ -117,7 +117,8 @@ export function GitBar(props: GitBarProps) {
       setOutcome(result);
       if (result.mergeInProgress !== undefined) setMergeInProgress(result.mergeInProgress);
       if (result.mainRefused) setMainRefused(true);
-      await api.state(thread).then((fresh) => props.onStateChange?.(fresh)).catch(() => {});
+      // The thread in front may have changed meanwhile: its state is not this one's.
+      await api.state(thread).then((fresh) => { if (thread === threadRef.current) props.onStateChange?.(fresh); }).catch(() => {});
     } catch (failure: unknown) {
       setOutcome({ text: failure instanceof Error ? failure.message : String(failure) });
     } finally {
