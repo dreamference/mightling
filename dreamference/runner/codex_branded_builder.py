@@ -972,6 +972,9 @@ class CodexBrandedBuilder:
         command = ["cargo", "build", "--release", "--locked", "--target-dir", os.path.join(cache_dir, "target")]
         for name in bin_names:
             command += ["--bin", name]
+        # Keyed before the build, as the Codex build is: an edit made while cargo runs is not in
+        # this binary, so it must leave the crate stale.
+        key = cls.crate_key(crate_dir)
         print(f"🔨 Building {', '.join(bin_names)}{cls._through(cached)}...")
         if subprocess.call(command, cwd=crate_dir, env=environment) != 0:
             print(f"❌ The {os.path.basename(crate_dir)} build failed; see the cargo output above.")
@@ -984,7 +987,7 @@ class CodexBrandedBuilder:
             shutil.copy2(os.path.join(cache_dir, "target", "release", name + EXE_SUFFIX), staging)
             os.replace(staging, os.path.join(bin_dir, name + EXE_SUFFIX))
         with open(os.path.join(INSTALL_DIR, stamp_name), "w") as handle:
-            handle.write(f"{cls.crate_key(crate_dir)}\n")
+            handle.write(f"{key}\n")
         cls.link_onto_path()
         print(f"✅ Installed {', '.join(bin_names)} in {bin_dir}")
         return True

@@ -678,3 +678,35 @@ def test_the_codex_and_crate_builds_take_the_compile_cache(tmp_path, monkeypatch
             patch.object(CodexBrandedBuilder, "build_web_ui", return_value="/ui/dist"):
         assert CodexBrandedBuilder._build_locked() is False
     assert [env["RUSTC_WRAPPER"] for env in calls] == ["/x/sccache", "/x/sccache"]
+
+
+def _fake_crate(tmp_path, monkeypatch, during_build=None):
+    """A one-binary crate whose cargo build is faked; `during_build` runs while it compiles."""
+    crate = tmp_path / "crate"
+    (crate / "src").mkdir(parents=True)
+    (crate / "src" / "main.rs").write_text("fn main() {}\n")
+
+    def fake_call(command, cwd=None, env=None):
+        if during_build:
+            during_build(crate)
+        release = tmp_path / "cache" / "target" / "release"
+        release.mkdir(parents=True, exist_ok=True)
+        (release / "x").write_text("#!/bin/sh\n")
+        (release / "x").chmod(0o755)
+        return 0
+
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
+    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
+    monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
+    return crate
+
+
+def test_a_crate_edited_during_its_build_is_not_stamped_current(tmp_path, monkeypatch):
+    # The binary was compiled from the source as it was when cargo started; an edit made while it
+    # ran must leave the next run rebuilding, not stamp the old binary with the new key.
+    crate = _fake_crate(
+        tmp_path, monkeypatch, lambda crate: (crate / "src" / "main.rs").write_text("fn main() { 1; }\n")
+    )
+    assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is True
+    assert not CodexBrandedBuilder.crate_is_current(str(crate), "stamp", ("x",))
