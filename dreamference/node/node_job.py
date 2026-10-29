@@ -666,13 +666,14 @@ class NodeJob:
             added = cls._git(
                 ["--git-dir", str(repo), "worktree", "add", "--detach", str(tree), record["commit"]]
             )
-            if added.returncode != 0:
-                record["note"] = f"git worktree add failed: {added.stderr.strip()[-200:]}"
-                return 1
             # Read now, before the job runs: the job can rewrite the worktree's `.git`.
-            admin = cls._admin_dir(tree, repo)
+            admin = cls._admin_dir(tree, repo) if added.returncode == 0 else None
             if admin is None:
-                record["note"] = "git worktree add left no administrative folder in the repository"
+                record["note"] = (
+                    f"git worktree add failed: {added.stderr.strip()[-200:]}"
+                    if added.returncode != 0
+                    else "git worktree add left no administrative folder in the repository"
+                )
                 return 1
             network = record["airgapped"] != "on"
             with open(log, "ab") as sink:
@@ -823,8 +824,9 @@ class NodeJob:
 
     @classmethod
     def _mark_complete(cls, marker: Path, setup: str) -> None:
-        """
-        Writes the environment's marker. The setup ran with this folder writable, so whatever it
+        """Writes the environment's marker.
+
+        The setup ran with this folder writable, so whatever it
         left at the marker's name is removed first and the marker is created afresh, never
         written through: a link there would have the node write any file of its user, such as
         `~/.ssh/authorized_keys`, with the client's setup text.
@@ -990,14 +992,15 @@ class NodeJob:
         return removed
 
     @classmethod
-    def _admin_dir(cls, tree: Path, repo: Path) -> Optional[Path]:
-        """
+    def _admin_dir(cls, tree: Path, repo: Path) -> Path | None:
+        """Finds the worktree's administrative folder before the job can touch it.
+
         Args:
             tree: A worktree `git worktree add` has just made.
             repo: The job repository it belongs to.
 
         Returns:
-            Optional[Path]: The worktree's administrative folder in `repo` (`worktrees/<name>`),
+            Path | None: The worktree's administrative folder in `repo` (`worktrees/<name>`),
             as its `.git` file names it; None when it names anything else.
         """
         try:
@@ -1006,14 +1009,13 @@ class NodeJob:
             return None
         if not line.startswith("gitdir: "):
             return None
-        admin = Path(os.path.realpath(tree / line[len("gitdir: "):]))
+        admin = Path(os.path.realpath(tree / line.removeprefix("gitdir: ")))
         worktrees = Path(os.path.realpath(repo)) / "worktrees"
         return admin if admin.parent == worktrees and admin.is_dir() else None
 
     @classmethod
-    def _commit(cls, record: Dict[str, Any], tree: Path, admin: Path) -> Optional[str]:
-        """
-        Commits what `git status` shows on `job/<id>`; None when the job changed nothing.
+    def _commit(cls, record: Dict[str, Any], tree: Path, admin: Path) -> str | None:
+        """Commits what `git status` shows on `job/<id>`; None when the job changed nothing.
 
         This runs outside the sandbox, so git is pointed at the worktree's administrative folder
         in the job repository and never at the worktree's `.git`, which the job could have
@@ -1021,8 +1023,8 @@ class NodeJob:
         the node's user. No hook runs for a job's commit either; the owner's choice to let hooks
         run (docs/dev/host-safety.md) is about their own checkouts, not a client's job.
         """
-        location = ["--git-dir", str(admin), "-c", "core.hooksPath=/dev/null",
-                    "--work-tree", str(tree)]
+        location = ["--git-dir", str(admin), "--work-tree", str(tree)]
+        location += ["-c", "core.hooksPath=/dev/null"]
         status = cls._git([*location, "status", "--porcelain"])
         if status.returncode != 0 or not status.stdout.strip():
             return None

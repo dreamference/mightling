@@ -337,7 +337,9 @@ class FleetHubFetch:
             if hostkey.returncode != 0 or len(fields) < KEY_FIELDS:
                 return False
             if not HOST_KEY.fullmatch(" ".join(fields[:KEY_FIELDS])):
-                LOG.warning("%s gave a host key that is not an ed25519 key; no LAN copy.", donor_name)
+                LOG.warning(
+                    "%s gave a host key that is not an ed25519 key; no LAN copy.", donor_name
+                )
                 return False
             # `expiry-time` (the donor's own clock) ends the key even when the removal below never
             # reaches the donor: the link is failing, which is why this copy runs at all.
