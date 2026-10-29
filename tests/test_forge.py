@@ -1231,6 +1231,20 @@ def test_a_repository_git_cannot_read_does_not_match_the_manifest(tmp_path, monk
     assert ForgeBackup.compare(manifest, tmp_path / "repos"), "an unreadable repository passed"
 
 
+def test_a_switch_written_halfway_leaves_the_nodes_config_as_it_was(monkeypatch):
+    path = ForgeSettings.config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('[night]\nwindow = "22-06"\n')
+
+    def cut_short(self, target):
+        raise OSError("power cut")
+
+    monkeypatch.setattr(Path, "replace", cut_short)
+    with pytest.raises(OSError):
+        ForgeSettings.set_enabled(False)
+    assert path.read_text() == '[night]\nwindow = "22-06"\n', "the node's config was truncated"
+
+
 def test_the_app_ini_is_on_disk_before_it_replaces_the_old_one(tmp_path, monkeypatch):
     import os
 
