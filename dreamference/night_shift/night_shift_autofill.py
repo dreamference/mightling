@@ -43,6 +43,9 @@ COOLDOWN_DAYS: Final[int] = 14
 #: Where the ledger of what was queued lives, under the night folder.
 LEDGER: Final[str] = "autofill.json"
 
+# What a night with autofill on and nothing to add says; alone it is not worth a report.
+NO_FINDINGS: Final[str] = "Autofill: no new findings tonight."
+
 #: The marker line that starts every autofilled task; the key follows.
 MARKER: Final[str] = "[autofill:"
 
@@ -572,7 +575,7 @@ class NightShiftAutofill:
             temporary.write_text(json.dumps(ledger, indent=2, sort_keys=True) + "\n")
             temporary.replace(night_dir / LEDGER)
         if not said:
-            said.append("Autofill: no new findings tonight.")
+            said.append(NO_FINDINGS)
         return said
 
     @classmethod

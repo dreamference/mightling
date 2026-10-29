@@ -25,7 +25,7 @@ from dreamference.night_shift.night_shift_compaction_audit import NightShiftComp
 from dreamference.night_shift.night_shift_host import GIB, NIGHT_POOL_SHARE, NightShiftHost
 from dreamference.night_shift.night_shift_index import NightShiftIndex
 from dreamference.night_shift.night_shift_queue import NightShiftQueue, RUNNABLE_STATUSES
-from dreamference.night_shift.night_shift_autofill import NightShiftAutofill
+from dreamference.night_shift.night_shift_autofill import NO_FINDINGS, NightShiftAutofill
 from dreamference.night_shift.night_shift_recurring import NightShiftRecurring
 from dreamference.night_shift.night_shift_remote import NightShiftRemote
 from dreamference.night_shift.night_shift_report import NightShiftReport
@@ -104,7 +104,7 @@ class NightShiftRunner:
             pending = cls.pending_tasks(night_dir)
             sent = cls.remote.sent_tasks(night_dir)
             if not pending and not sent:
-                print(f"✅ Night Shift: nothing queued.{cls._audit_only_report(night_dir, started)}")
+                print(f"✅ Night Shift: nothing queued.{cls._audit_only_report(night_dir, started, repeating)}")
                 return 0
             print(f"🌙 Night Shift: {len(pending)} task(s) queued; window ends {end:%H:%M}.")
             notes: List[str] = list(repeating)
@@ -503,15 +503,19 @@ class NightShiftRunner:
             return [f"The audit could not run: {error}."]
 
     @classmethod
-    def _audit_only_report(cls, night_dir: Path, started: datetime) -> str:
-        """Writes a report holding only the compaction audit, when it has something to say.
+    def _audit_only_report(cls, night_dir: Path, started: datetime, notes: List[str]) -> str:
+        """Writes a taskless report, when the compaction audit or the night's notes have something to say.
+
+        Args:
+            notes: What repeating tasks and autofill said; a repeating task not queued is one.
 
         Returns:
             str: Where it went, as a sentence for the console line; "" when nothing was written.
         """
-        if not cls.compactions:
+        notes = [note for note in notes if note != NO_FINDINGS]
+        if not cls.compactions and not notes:
             return ""
-        return f" Compaction audit: {cls._write_report(night_dir, started, [], [])}"
+        return f" Report: {cls._write_report(night_dir, started, [], notes)}"
 
     @classmethod
     def _write_report(cls, night_dir: Path, started: datetime, tasks: List[Dict[str, Any]],
