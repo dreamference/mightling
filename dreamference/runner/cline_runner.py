@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any
 from dreamference.config import DreamferenceConfig
 from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.cline_installer import ClineInstaller
-from dreamference.hardware import resolve_model_hf_repo
+from dreamference.runner.vllm_readiness_waiter import VLLMReadinessWaiter
 
 class ClineRunner:
     """
@@ -39,7 +39,7 @@ class ClineRunner:
             Path: Path to written `.clinerules` file.
         """
         rules_path = Path(os.getcwd()) / ".clinerules"
-        hf_model = resolve_model_hf_repo(self.config.model)
+        hf_model = VLLMReadinessWaiter.served_model(self.vllm_manager, self.config.model)
         
         content = (
             "# Mightling Local GB10 AI Agent Rules for Cline\n\n"
@@ -73,10 +73,9 @@ class ClineRunner:
             int: Subprocess exit code (0 for success).
         """
         # Step 1: Ensure vLLM local server is online
-        if not self.vllm_manager.check_health():
-            from dreamference.runner.vllm_readiness_waiter import VLLMReadinessWaiter
-            if not VLLMReadinessWaiter(config=self.config).wait_for_vllm():
-                return 1
+        waiter = VLLMReadinessWaiter(config=self.config)
+        if not self.vllm_manager.check_health() and not waiter.wait_for_vllm():
+            return 1
 
         # Step 2: Ensure VS Code and Cline extension are installed
         if not ClineInstaller.is_vscode_installed():
@@ -91,7 +90,7 @@ class ClineRunner:
         print(f"✅ Configured Cline rules at {rules_file}")
 
         # Step 4: Display connection details for user
-        hf_model = resolve_model_hf_repo(self.config.model)
+        hf_model = VLLMReadinessWaiter.served_model(self.vllm_manager, self.config.model)
         print("\n[Cline Configuration Details]")
         print(f"  API Provider: OpenAI Compatible")
         print(f"  Base URL:     {self.config.vllm_host}/v1")

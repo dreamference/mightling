@@ -1,10 +1,21 @@
 import os
+
+import pytest
+
 from dreamference.config import DreamferenceConfig
 from dreamference.runner import (
     ClineRunner, ClineInstaller,
     ContinueRunner, ContinueInstaller,
     OpenHandsRunner, OpenHandsInstaller
 )
+from dreamference.vllm_server import VLLMServerManager
+
+
+@pytest.fixture(autouse=True)
+def _no_served_models(monkeypatch):
+    # No server answers /v1/models here; a test that wants one stubs it on its own.
+    monkeypatch.setattr(VLLMServerManager, "get_models", lambda self, timeout=2.0: [])
+
 
 def test_cline_runner_clinerules_creation(tmp_path):
     orig_cwd = os.getcwd()
@@ -101,6 +112,7 @@ def test_openhands_stays_on_this_machine_and_off_port_3000(monkeypatch):
     monkeypatch.setattr(OpenHandsInstaller, "is_docker_available", classmethod(lambda cls: True))
     monkeypatch.setattr(OpenHandsInstaller, "pull_image_if_missing", classmethod(lambda cls: True))
     monkeypatch.setattr(DockerBridge, "gateway", classmethod(lambda cls: "172.17.0.1"))
+    monkeypatch.setattr(runner.vllm_manager, "get_models", lambda timeout=2.0: ["served/other-model"])
     monkeypatch.setattr("subprocess.run", lambda *a, **k: None)
     calls = []
     monkeypatch.setattr("subprocess.call", lambda cmd, **k: calls.append(cmd) or 0)
@@ -110,21 +122,25 @@ def test_openhands_stays_on_this_machine_and_off_port_3000(monkeypatch):
     assert cmd[cmd.index("-p") + 1] == f"127.0.0.1:{OPENHANDS_HOST_PORT}:3000"
     assert OPENHANDS_HOST_PORT != 3000
     assert "LLM_BASE_URL=http://172.17.0.1:8000/v1" in cmd
+    # The model the server runs, not the configured one (AGENTS.md: ask the server).
+    assert "LLM_MODEL=openai/served/other-model" in cmd
 
 
-def test_agents_only_name_the_model_the_server_serves(tmp_path):
-    # The draft model is vLLM's internal speculative head, not a served model. Continue's
-    # autocomplete used to send requests naming it.
+def test_agents_name_the_model_the_server_runs_not_the_configured_one(tmp_path, monkeypatch):
+    # AGENTS.md: ask the server which model runs. A request naming another id answers 404, and
+    # the draft model, vLLM's internal speculative head, is never served at all (Continue's
+    # autocomplete used to name it).
     import json
-    from dreamference.config import DreamferenceConfig
-    from dreamference.hardware import resolve_model_hf_repo
 
+    monkeypatch.setattr(VLLMServerManager, "get_models", lambda self, timeout=2.0: ["served/other-model"])
+    monkeypatch.chdir(tmp_path)
     config = DreamferenceConfig(config_file=str(tmp_path / "d.toml"), model="qwen3.8-27b-nvfp4-dflash2",
                                 draft_model="qwen3.8-27b-dflash2-draft")
-    served = resolve_model_hf_repo(config.model)
 
     cont = json.loads(ContinueRunner(config=config).ensure_continue_config().read_text())
-    assert cont["tabAutocompleteModel"]["model"] == served
+    assert cont["models"][0]["model"] == "served/other-model"
+    assert cont["tabAutocompleteModel"]["model"] == "served/other-model"
+    assert "Model ID: served/other-model" in ClineRunner(config=config).ensure_clinerules().read_text()
 
 
 def test_readiness_waiter_needs_health_and_a_completion(monkeypatch):

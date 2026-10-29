@@ -14,7 +14,7 @@ from typing import Final, List, Optional
 from dreamference.config import DreamferenceConfig
 from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.openhands_installer import OpenHandsInstaller, OPENHANDS_IMAGE
-from dreamference.hardware import resolve_model_hf_repo
+from dreamference.runner.vllm_readiness_waiter import VLLMReadinessWaiter
 
 # Where the OpenHands web UI is published on the host: 3001, as since the retired Onyx web UI owned 3000.
 OPENHANDS_HOST_PORT: Final[int] = 3001
@@ -47,10 +47,9 @@ class OpenHandsRunner:
             int: Subprocess exit code (0 for success).
         """
         # Step 1: Ensure local vLLM endpoint is online
-        if not self.vllm_manager.check_health():
-            from dreamference.runner.vllm_readiness_waiter import VLLMReadinessWaiter
-            if not VLLMReadinessWaiter(config=self.config).wait_for_vllm():
-                return 1
+        waiter = VLLMReadinessWaiter(config=self.config)
+        if not self.vllm_manager.check_health() and not waiter.wait_for_vllm():
+            return 1
 
         # Step 2: Ensure Docker is running
         if not OpenHandsInstaller.is_docker_available():
@@ -61,7 +60,7 @@ class OpenHandsRunner:
         # Step 3: Pull OpenHands image
         OpenHandsInstaller.pull_image_if_missing()
 
-        hf_model = resolve_model_hf_repo(self.config.model)
+        hf_model = VLLMReadinessWaiter.served_model(self.vllm_manager, self.config.model)
         cwd = os.getcwd()
         container_name = "dreamference-openhands"
 
