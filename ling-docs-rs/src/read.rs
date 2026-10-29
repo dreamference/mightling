@@ -219,7 +219,7 @@ pub fn read(
     let units: Vec<(Option<u32>, Option<u32>, String)> =
         rows.into_iter().map(|(p, l, t, _, _)| (p, l, t)).collect();
     let path = collection.root.join(&rel).to_string_lossy().into_owned();
-    let mut out = ReadOut {
+    let out = ReadOut {
         doc_id: doc_id.to_string(),
         path,
         title,
