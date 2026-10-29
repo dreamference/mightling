@@ -37,6 +37,8 @@ REFUSAL: Final[str] = ("ling-admin node serve-job: this key may only ask for Mig
                        "(info, status, start, stop, set-model <key>, model-receive <key>, adapter-receive, "
                        "unpair, jobs, night tasks and the forge's).")
 
+# A size or an offset in a request: ASCII digits that int() takes (str.isdigit also passes "²").
+COUNT: Final[re.Pattern] = re.compile(r"[0-9]{1,19}")
 # The two git services a job's push and fetch ask for, and the only path shape they may name.
 GIT_SERVICES: Final[tuple] = ("git-receive-pack", "git-upload-pack")
 GIT_PATH: Final[re.Pattern] = re.compile(r"/?jobs/([A-Za-z0-9][A-Za-z0-9._-]{0,80})\.git")
@@ -169,7 +171,7 @@ class NodeServe:
             removed = cls.unauthorize(key_tag or "")
             print("unpaired" if removed else "no such key")
             return 0 if removed else 1
-        if operation == "model-receive" and len(arguments) == 2 and arguments[1].isdigit():
+        if operation == "model-receive" and len(arguments) == 2 and COUNT.fullmatch(arguments[1]):
             from dreamference.node.node_model_sync import NodeModelSync
             return NodeModelSync.receive(arguments[0], int(arguments[1]))
         if operation == RECEIVE_OPERATION:
@@ -283,7 +285,7 @@ class NodeServe:
                 cancelled = NodeJob.cancel(arguments[0])
                 print("cancelled" if cancelled else "the job is not running")
                 return 0 if cancelled else 1
-            if operation == "job-logs" and len(arguments) <= 2 and all(a.isdigit() for a in arguments[1:]):
+            if operation == "job-logs" and len(arguments) <= 2 and all(COUNT.fullmatch(a) for a in arguments[1:]):
                 return NodeJob.follow(arguments[0], offset=int(arguments[1]) if len(arguments) == 2 else 0)
         print(REFUSAL, file=sys.stderr)
         return 2

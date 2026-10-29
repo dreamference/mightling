@@ -25,7 +25,7 @@ from dreamference.hardware.adapter_manifest import NAME
 from dreamference.hardware.adapter_store import TRUST_DREAMFERENCE, AdapterStore
 from dreamference.hardware.adapter_verifier import AdapterVerifier
 from dreamference.node.node_model_sync import DISK_MARGIN, GIB, NodeModelSync
-from dreamference.node.node_serve import RECEIVE_OPERATION
+from dreamference.node.node_serve import COUNT, RECEIVE_OPERATION
 
 RECEIVE_ARGUMENTS: Final[int] = 4
 
@@ -153,7 +153,7 @@ class NodeAdapterSync:
         Returns:
             int: 0 when it is installed; 1 when the copy or a check failed; 2 when refused.
         """
-        if len(arguments) != RECEIVE_ARGUMENTS or not arguments[3].isdigit():
+        if len(arguments) != RECEIVE_ARGUMENTS or not COUNT.fullmatch(arguments[3]):
             cls._say(f"❌ {RECEIVE_OPERATION} takes <name> <repo> <commit> <size>.")
             return 2
         name, repo, commit, size = arguments[0], arguments[1], arguments[2], int(arguments[3])
