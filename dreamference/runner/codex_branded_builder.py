@@ -441,13 +441,35 @@ class CodexBrandedBuilder:
 
         for patch in cls.patches():
             # Checked first so a patch that does not fit leaves nothing half-applied behind it.
-            check = subprocess.run(["git", "apply", "--check", patch], cwd=source_dir, check=False)
-            if check.returncode != 0:
+            if cls.git_apply(source_dir, "--check", patch).returncode != 0:
                 print(f"❌ {os.path.basename(patch)} does not apply to codex {commit[:12]}.")
                 print(f"💡 The patches are written against {CODEX_RELEASE_TAG}; refresh them after a submodule bump.")
                 return False
-            subprocess.run(["git", "apply", patch], cwd=source_dir, check=True)
+            cls.git_apply(source_dir, patch).check_returncode()
         return cls.stamp_version(os.path.join(source_dir, "codex-rs", "Cargo.toml"), cls.mightling_version())
+
+    @classmethod
+    def git_apply(cls, source_dir: str, *args: str) -> subprocess.CompletedProcess:
+        """Runs `git apply` in an export, which is no repository of its own.
+
+        Git looks for one above it: in a home directory that is a git work tree (dotfiles) it
+        reads every `diff --git` path against that repository's top, skips them all and still
+        exits 0. The ceiling keeps the search in the export, and an inherited `GIT_DIR` or
+        `GIT_WORK_TREE` would outrank it.
+
+        Args:
+            source_dir (str): The export to patch.
+            *args (str): `git apply`'s arguments.
+
+        Returns:
+            subprocess.CompletedProcess: The finished `git apply`.
+        """
+        env = {
+            name: value for name, value in os.environ.items()
+            if name not in ("GIT_DIR", "GIT_WORK_TREE")
+        }
+        env["GIT_CEILING_DIRECTORIES"] = str(Path(source_dir).resolve().parent)
+        return subprocess.run(["git", "apply", *args], cwd=source_dir, env=env, check=False)
 
     @classmethod
     def mightling_version(cls) -> str:

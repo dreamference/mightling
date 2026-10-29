@@ -248,10 +248,10 @@ class CodexTestRunner:
             if name.endswith(".patch")
         ) if os.path.isdir(TEST_PATCHES_DIR) else []
         for patch in patches:
-            if subprocess.run(["git", "apply", "--check", patch], cwd=source_dir, check=False).returncode != 0:
+            if CodexBrandedBuilder.git_apply(source_dir, "--check", patch).returncode != 0:
                 print(f"❌ codex-tests/patches/{os.path.basename(patch)} does not apply to the test export.")
                 return False
-            subprocess.run(["git", "apply", patch], cwd=source_dir, check=True)
+            CodexBrandedBuilder.git_apply(source_dir, patch).check_returncode()
         return True
 
     @classmethod

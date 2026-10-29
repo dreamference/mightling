@@ -408,6 +408,27 @@ def test_apply_test_overlay_refuses_broken_patch(tmp_path, monkeypatch):
     assert not CodexTestRunner.apply_test_overlay(str(export))
 
 
+def test_patches_apply_to_the_export_when_the_home_is_a_git_work_tree(tmp_path, monkeypatch):
+    # The exports live under ~/.cache. In a dotfiles home git found the home's repository above
+    # the export, read every `diff --git` path against its top, skipped them all ("Skipped
+    # patch") and still exited 0: `ling` was built from unpatched upstream Codex.
+    home = tmp_path / "home"
+    export = home / ".cache" / "export"
+    (export / "codex-rs").mkdir(parents=True)
+    (export / "codex-rs" / "f.rs").write_text("upstream\n")
+    subprocess.run(["git", "init", "-q", str(home)], check=True)
+    patches = tmp_path / "patches"
+    patches.mkdir()
+    (patches / "0001-tests.patch").write_text(
+        "diff --git a/codex-rs/f.rs b/codex-rs/f.rs\n--- a/codex-rs/f.rs\n+++ b/codex-rs/f.rs\n"
+        "@@ -1 +1 @@\n-upstream\n+patched\n"
+    )
+    monkeypatch.setattr(runner_module, "SNAPSHOT_OVERLAY_DIR", str(tmp_path / "no-snaps"))
+    monkeypatch.setattr(runner_module, "TEST_PATCHES_DIR", str(patches))
+    assert CodexTestRunner.apply_test_overlay(str(export))
+    assert (export / "codex-rs" / "f.rs").read_text() == "patched\n"
+
+
 def test_snapshot_hashes_and_accept_snapshots_classify_name_only_refused_and_pending(
     tmp_path, monkeypatch
 ):
