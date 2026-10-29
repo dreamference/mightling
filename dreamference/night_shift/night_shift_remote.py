@@ -320,6 +320,11 @@ class NightShiftRemote:
         tasks_dir.mkdir(parents=True, exist_ok=True)
         path = tasks_dir / f"{task_id}.json"
         if path.exists():
+            # The same task sent again after its answer was lost (ssh 255) is already queued here.
+            existing = NightShiftQueue.read(night_dir, task_id) or {}
+            if (existing.get("base"), existing.get("task"), (existing.get("remote") or {}).get("sender")) == (
+                    base, text, str(request.get("sender") or "")[:100]):
+                return {"status": existing.get("status") or "queued", "note": "this node already holds it"}
             raise ValueError(f"a task {task_id} already exists on this node; queue it again for a new id")
         author = request.get("author") if isinstance(request.get("author"), dict) else {}
         now = NightShiftQueue.now()
