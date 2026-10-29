@@ -880,8 +880,9 @@ def test_setup_again_keeps_the_secret_and_does_not_rejoin(seams, monkeypatch):
 
 @pytest.mark.parametrize(
     "name",
-    ["", "relay", "http://relay.example.org", "relay.example.org:443", "user@relay.example.org"],
-)
+    ["", "relay", "http://relay.example.org", "relay.example.org:443", "user@relay.example.org",
+     "a.example.org\tb", "*.example.org", "a,b.example.org", "rélay.example.org", "-a.example.org"],
+)  # fmt: skip
 def test_setup_wants_a_dns_name(seams, name):
     assert RemoteAccess.setup(name, yes=True) == 2
     assert seams == []
