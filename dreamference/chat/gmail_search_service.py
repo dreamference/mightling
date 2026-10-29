@@ -245,9 +245,26 @@ class GmailSearchService:
         except OSError:
             pass
         key = secrets.token_bytes(32)
-        with open(path, "wb") as handle:
-            handle.write(key)
-        os.chmod(path, 0o600)
+        temporary = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            with open(temporary, "wb", opener=lambda name, flags: os.open(name, flags, 0o600)) as handle:
+                handle.write(key)
+            try:
+                # Appears whole or not at all, and never over a key another request made first:
+                # tokens it sealed with that key would no longer open.
+                os.link(temporary, path)
+            except FileExistsError:
+                with open(path, "rb") as handle:
+                    existing = handle.read()
+                if len(existing) == 32:
+                    return existing
+                os.replace(temporary, path)
+            except OSError:
+                # A file system without hard links: still whole, if not first-come.
+                os.replace(temporary, path)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary)
         return key
 
     @classmethod
