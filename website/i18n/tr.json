@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">önizleme</span>",
  "new.p04": "1.7.2'den itibaren <a href=\"#install\">kurulum komutu</a> Mightling'i <code>ling</code>'in yanında Uygulamalar klasörüne koyar ve diğer uygulamalar gibi açılır. Apple silicon ve Intel, macOS 12 veya üstü. <code>ling update</code> onu da günceller.",
  "new.h305": "Linux",
- "new.p06": "GB10'da <code>mightling_1.7.0_arm64.deb</code> uygulamayı, başlatıcı girdisini ve <code>ling-app</code> komutunu, ihtiyaç duyduğu korumalı alan profiliyle birlikte kurar:",
+ "new.p06": "GB10'da <code>mightling_1.7.2_arm64.deb</code> uygulamayı, başlatıcı girdisini ve <code>ling-app</code> komutunu, ihtiyaç duyduğu korumalı alan profiliyle birlikte kurar:",
  "new.p07": "Sonra uygulama menüsünden ya da <code>ling app</code> ile aç. <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">Daha fazlası</a>.",
  "new.h308": "Windows 11 <span class=\"tag\">önizleme</span>",
  "new.p09": "1.7.2'den itibaren <a href=\"#install\">PowerShell satırı</a> uygulamayı da kurar; yalnızca senin için, yönetici hakları olmadan, Başlat menüsü girdisiyle; Ayarlar → Uygulamalar'dan kaldırılır; <code>ling update</code> günceller. Smart App Control kapalı olmalı.",

@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">onyesho</span>",
  "new.p04": "Kuanzia 1.7.2, <a href=\"#install\">amri ya usakinishaji</a> inaweka Mightling kwenye Applications kando ya <code>ling</code>, na inafunguka kama programu nyingine yoyote. Apple silicon na Intel, macOS 12 au mpya zaidi. <code>ling update</code> inaisasisha.",
  "new.h305": "Linux",
- "new.p06": "Kwenye GB10, <code>mightling_1.7.0_arm64.deb</code> inasakinisha programu, kiingilio chake cha kuzindua na amri ya <code>ling-app</code>, pamoja na wasifu wa sandbox unaohitajika:",
+ "new.p06": "Kwenye GB10, <code>mightling_1.7.2_arm64.deb</code> inasakinisha programu, kiingilio chake cha kuzindua na amri ya <code>ling-app</code>, pamoja na wasifu wa sandbox unaohitajika:",
  "new.p07": "Kisha ifungue kutoka menyu ya programu, au kwa <code>ling app</code>. <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">Zaidi</a>.",
  "new.h308": "Windows 11 <span class=\"tag\">onyesho</span>",
  "new.p09": "Kuanzia 1.7.2, <a href=\"#install\">mstari wa PowerShell</a> unasakinisha programu pia, kwa ajili yako peke yako na bila haki za msimamizi, ukiwa na kiingilio kwenye menyu ya Start; Settings → Apps inaiondoa; <code>ling update</code> inaisasisha. Smart App Control lazima izimwe.",

@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">ప్రివ్యూ</span>",
  "new.p04": "1.7.2 నుండి <a href=\"#install\">ఇన్‌స్టాల్ కమాండ్</a> Mightling ను <code>ling</code> పక్కనే Applications లో ఉంచుతుంది, ఇతర యాప్‌ల్లాగే తెరుచుకుంటుంది. Apple silicon, Intel, macOS 12 లేదా ఆ తర్వాత. <code>ling update</code> దాన్ని అప్‌డేట్ చేస్తుంది.",
  "new.h305": "Linux",
- "new.p06": "GB10 మీద <code>mightling_1.7.0_arm64.deb</code> యాప్‌ను, దాని లాంచర్ ఎంట్రీని, <code>ling-app</code> కమాండ్‌ను, అవసరమైన శాండ్‌బాక్స్ ప్రొఫైల్‌తో సహా ఇన్‌స్టాల్ చేస్తుంది:",
+ "new.p06": "GB10 మీద <code>mightling_1.7.2_arm64.deb</code> యాప్‌ను, దాని లాంచర్ ఎంట్రీని, <code>ling-app</code> కమాండ్‌ను, అవసరమైన శాండ్‌బాక్స్ ప్రొఫైల్‌తో సహా ఇన్‌స్టాల్ చేస్తుంది:",
  "new.p07": "తర్వాత అప్లికేషన్ మెనూ నుండి లేదా <code>ling app</code> తో తెరవండి. <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">మరింత</a>.",
  "new.h308": "Windows 11 <span class=\"tag\">ప్రివ్యూ</span>",
  "new.p09": "1.7.2 నుండి <a href=\"#install\">PowerShell లైన్</a> యాప్‌ను కూడా ఇన్‌స్టాల్ చేస్తుంది, మీకు మాత్రమే, అడ్మినిస్ట్రేటర్ హక్కులు లేకుండా, Start మెనూ ఎంట్రీతో; Settings → Apps నుండి తొలగించవచ్చు; <code>ling update</code> అప్‌డేట్ చేస్తుంది. Smart App Control ఆఫ్‌లో ఉండాలి.",

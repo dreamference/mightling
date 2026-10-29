@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">Vorschau</span>",
  "new.p04": "Ab 1.7.2 legt <a href=\"#install\">der Installationsbefehl</a> Mightling neben <code>ling</code> in Programme, und es öffnet sich wie jede andere App. Apple Silicon und Intel, ab macOS 12. <code>ling update</code> aktualisiert es.",
  "new.h305": "Linux",
- "new.p06": "Auf dem GB10 installiert <code>mightling_1.7.0_arm64.deb</code> die App, ihren Starter-Eintrag und den Befehl <code>ling-app</code>, samt dem Sandbox-Profil, das sie braucht:",
+ "new.p06": "Auf dem GB10 installiert <code>mightling_1.7.2_arm64.deb</code> die App, ihren Starter-Eintrag und den Befehl <code>ling-app</code>, samt dem Sandbox-Profil, das sie braucht:",
  "new.p07": "Öffne sie dann über das Anwendungsmenü oder mit <code>ling app</code>. <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">Mehr</a>.",
  "new.h308": "Windows 11 <span class=\"tag\">Vorschau</span>",
  "new.p09": "Ab 1.7.2 installiert <a href=\"#install\">die PowerShell-Zeile</a> auch die App, nur für dich und ohne Administratorrechte, mit Eintrag im Startmenü; unter Einstellungen → Apps wird sie wieder entfernt; <code>ling update</code> aktualisiert sie. Die intelligente App-Steuerung muss ausgeschaltet sein.",

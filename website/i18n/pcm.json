@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">preview</span>",
  "new.p04": "From 1.7.2, <a href=\"#install\">di install command</a> dey put Mightling for Applications beside <code>ling</code>, and e dey open like any oda app. Apple silicon and Intel, macOS 12 or newer. <code>ling update</code> dey update am.",
  "new.h305": "Linux",
- "new.p06": "For di GB10, <code>mightling_1.7.0_arm64.deb</code> dey install di app, im launcher entry and di <code>ling-app</code> command, with di sandbox profile wey e need:",
+ "new.p06": "For di GB10, <code>mightling_1.7.2_arm64.deb</code> dey install di app, im launcher entry and di <code>ling-app</code> command, with di sandbox profile wey e need:",
  "new.p07": "Then open am from di application menu, or with <code>ling app</code>. <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">More</a>.",
  "new.h308": "Windows 11 <span class=\"tag\">preview</span>",
  "new.p09": "From 1.7.2, <a href=\"#install\">di PowerShell line</a> dey install di app too, for you alone and without administrator rights, with Start menu entry; Settings → Apps go remove am; <code>ling update</code> dey update am. Smart App Control must dey off.",

@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">プレビュー</span>",
  "new.p04": "1.7.2 からは、<a href=\"#install\">インストールコマンド</a>が <code>ling</code> と並べて Mightling を「アプリケーション」に入れ、ほかのアプリと同じように開けます。Apple シリコンと Intel の両方、macOS 12 以降に対応。更新は <code>ling update</code> で行います。",
  "new.h305": "Linux",
- "new.p06": "GB10 では、<code>mightling_1.7.0_arm64.deb</code> がアプリ本体、ランチャーのエントリ、<code>ling-app</code> コマンド、そして必要なサンドボックスのプロファイルをインストールします：",
+ "new.p06": "GB10 では、<code>mightling_1.7.2_arm64.deb</code> がアプリ本体、ランチャーのエントリ、<code>ling-app</code> コマンド、そして必要なサンドボックスのプロファイルをインストールします：",
  "new.p07": "そのあとはアプリケーションメニューから、または <code>ling app</code> で開きます。<a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">詳細</a>。",
  "new.h308": "Windows 11 <span class=\"tag\">プレビュー</span>",
  "new.p09": "1.7.2 からは、<a href=\"#install\">PowerShell の 1 行</a>でアプリも一緒にインストールされます。自分のユーザー専用で管理者権限は不要、スタートメニューにも登録されます。削除は「設定 → アプリ」から、更新は <code>ling update</code> です。スマート アプリ コントロール（Smart App Control）はオフにしておく必要があります。",

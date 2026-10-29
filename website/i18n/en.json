@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">preview</span>",
  "new.p04": "From 1.7.2, <a href=\"#install\">the install command</a> puts Mightling in Applications beside <code>ling</code>, and it opens like any other app. Apple silicon and Intel, macOS 12 or later. <code>ling update</code> updates it.",
  "new.h305": "Linux",
- "new.p06": "On the GB10, <code>mightling_1.7.0_arm64.deb</code> installs the app, its launcher entry and the <code>ling-app</code> command, with the sandbox profile it needs:",
+ "new.p06": "On the GB10, <code>mightling_1.7.2_arm64.deb</code> installs the app, its launcher entry and the <code>ling-app</code> command, with the sandbox profile it needs:",
  "new.p07": "Then open it from the application menu, or with <code>ling app</code>. <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">More</a>.",
  "new.h308": "Windows 11 <span class=\"tag\">preview</span>",
  "new.p09": "From 1.7.2, <a href=\"#install\">the PowerShell line</a> installs the app as well, for you alone and without administrator rights, with a Start menu entry; Settings → Apps removes it; <code>ling update</code> updates it. Smart App Control must be off.",

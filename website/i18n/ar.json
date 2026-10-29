@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">معاينة</span>",
  "new.p04": "ابتداءً من 1.7.2، <a href=\"#install\">أمر التثبيت</a> يضع Mightling في Applications بجانب <code>ling</code>، ويُفتح كأي تطبيق آخر. Apple silicon وIntel، وmacOS 12 أو أحدث. يحدّثه <code>ling update</code>.",
  "new.h305": "Linux",
- "new.p06": "على GB10، تثبّت الحزمة <code>mightling_1.7.0_arm64.deb</code> التطبيق ومدخل المشغّل والأمر <code>ling-app</code>، مع ملف العزل الذي يحتاجه:",
+ "new.p06": "على GB10، تثبّت الحزمة <code>mightling_1.7.2_arm64.deb</code> التطبيق ومدخل المشغّل والأمر <code>ling-app</code>، مع ملف العزل الذي يحتاجه:",
  "new.p07": "ثم افتحه من قائمة التطبيقات أو بالأمر <code>ling app</code>. <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">المزيد</a>.",
  "new.h308": "Windows 11 <span class=\"tag\">معاينة</span>",
  "new.p09": "ابتداءً من 1.7.2، <a href=\"#install\">سطر PowerShell</a> يثبّت التطبيق أيضًا، لك وحدك ودون صلاحيات المسؤول، مع مدخل في قائمة ابدأ؛ تزيله من الإعدادات → التطبيقات؛ ويحدّثه <code>ling update</code>. يجب إيقاف Smart App Control.",

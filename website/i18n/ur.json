@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">پری ویو</span>",
  "new.p04": "1.7.2 سے <a href=\"#install\">انسٹال کمانڈ</a> Mightling کو <code>ling</code> کے ساتھ Applications میں رکھ دیتی ہے، اور یہ کسی بھی دوسری ایپ کی طرح کھلتی ہے۔ Apple silicon اور Intel، macOS 12 یا بعد کا۔ <code>ling update</code> اسے اپ ڈیٹ کرتا ہے۔",
  "new.h305": "Linux",
- "new.p06": "GB10 پر <code>mightling_1.7.0_arm64.deb</code> ایپ، اس کی لانچر انٹری اور <code>ling-app</code> کمانڈ انسٹال کرتا ہے، ساتھ وہ سینڈ باکس پروفائل جس کی اسے ضرورت ہے:",
+ "new.p06": "GB10 پر <code>mightling_1.7.2_arm64.deb</code> ایپ، اس کی لانچر انٹری اور <code>ling-app</code> کمانڈ انسٹال کرتا ہے، ساتھ وہ سینڈ باکس پروفائل جس کی اسے ضرورت ہے:",
  "new.p07": "پھر اسے ایپلیکیشن مینو سے یا <code>ling app</code> سے کھولیں۔ <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">مزید</a>۔",
  "new.h308": "Windows 11 <span class=\"tag\">پری ویو</span>",
  "new.p09": "1.7.2 سے <a href=\"#install\">PowerShell والی لائن</a> ایپ بھی انسٹال کرتی ہے، صرف آپ کے لیے اور ایڈمنسٹریٹر کے حقوق کے بغیر، Start مینو انٹری کے ساتھ؛ Settings → Apps سے ہٹ جاتی ہے؛ <code>ling update</code> اسے اپ ڈیٹ کرتا ہے۔ Smart App Control بند ہونا چاہیے۔",

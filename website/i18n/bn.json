@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">প্রিভিউ</span>",
  "new.p04": "1.7.2 থেকে <a href=\"#install\">ইনস্টল কমান্ড</a> Mightling-কে <code>ling</code>-এর পাশে Applications-এ রেখে দেয়, আর এটি অন্য যেকোনো অ্যাপের মতোই খোলে। Apple silicon ও Intel, macOS 12 বা তার পরের সংস্করণ। <code>ling update</code> এটি আপডেট করে।",
  "new.h305": "Linux",
- "new.p06": "GB10-এ <code>mightling_1.7.0_arm64.deb</code> অ্যাপ, তার লঞ্চার এন্ট্রি ও <code>ling-app</code> কমান্ড ইনস্টল করে, সঙ্গে প্রয়োজনীয় স্যান্ডবক্স প্রোফাইল:",
+ "new.p06": "GB10-এ <code>mightling_1.7.2_arm64.deb</code> অ্যাপ, তার লঞ্চার এন্ট্রি ও <code>ling-app</code> কমান্ড ইনস্টল করে, সঙ্গে প্রয়োজনীয় স্যান্ডবক্স প্রোফাইল:",
  "new.p07": "তারপর অ্যাপ্লিকেশন মেনু থেকে খুলুন, অথবা <code>ling app</code> দিয়ে। <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">আরও</a>।",
  "new.h308": "Windows 11 <span class=\"tag\">প্রিভিউ</span>",
  "new.p09": "1.7.2 থেকে <a href=\"#install\">PowerShell-এর লাইন</a> অ্যাপটিও ইনস্টল করে, শুধু আপনার জন্য এবং অ্যাডমিনিস্ট্রেটর অধিকার ছাড়াই, Start মেনু এন্ট্রিসহ; Settings → Apps থেকে সরানো যায়; <code>ling update</code> এটি আপডেট করে। Smart App Control বন্ধ থাকতে হবে।",

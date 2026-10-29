@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">bản xem trước</span>",
  "new.p04": "Từ 1.7.2, <a href=\"#install\">lệnh cài đặt</a> đặt Mightling vào Applications cạnh <code>ling</code>, và nó mở như mọi ứng dụng khác. Hỗ trợ Apple silicon và Intel, macOS 12 trở lên. <code>ling update</code> sẽ cập nhật nó.",
  "new.h305": "Linux",
- "new.p06": "Trên GB10, <code>mightling_1.7.0_arm64.deb</code> cài ứng dụng, mục khởi chạy của nó và lệnh <code>ling-app</code>, cùng hồ sơ sandbox cần thiết:",
+ "new.p06": "Trên GB10, <code>mightling_1.7.2_arm64.deb</code> cài ứng dụng, mục khởi chạy của nó và lệnh <code>ling-app</code>, cùng hồ sơ sandbox cần thiết:",
  "new.p07": "Sau đó mở từ menu ứng dụng, hoặc bằng <code>ling app</code>. <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">Xem thêm</a>.",
  "new.h308": "Windows 11 <span class=\"tag\">bản xem trước</span>",
  "new.p09": "Từ 1.7.2, <a href=\"#install\">dòng PowerShell</a> cài luôn ứng dụng, chỉ cho riêng bạn và không cần quyền quản trị, kèm mục trong menu Start; Settings → Apps sẽ gỡ nó; <code>ling update</code> cập nhật nó. Phải tắt Smart App Control.",

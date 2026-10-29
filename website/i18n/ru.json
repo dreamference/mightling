@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">превью</span>",
  "new.p04": "Начиная с 1.7.2, <a href=\"#install\">команда установки</a> кладёт Mightling в «Программы» рядом с <code>ling</code>, и оно открывается как любое другое приложение. Apple silicon и Intel, macOS 12 или новее. <code>ling update</code> обновляет его.",
  "new.h305": "Linux",
- "new.p06": "На GB10 пакет <code>mightling_1.7.0_arm64.deb</code> ставит приложение, его запись в меню и команду <code>ling-app</code> вместе с нужным профилем песочницы:",
+ "new.p06": "На GB10 пакет <code>mightling_1.7.2_arm64.deb</code> ставит приложение, его запись в меню и команду <code>ling-app</code> вместе с нужным профилем песочницы:",
  "new.p07": "Затем откройте его из меню приложений или командой <code>ling app</code>. <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">Подробнее</a>.",
  "new.h308": "Windows 11 <span class=\"tag\">превью</span>",
  "new.p09": "Начиная с 1.7.2, <a href=\"#install\">строка PowerShell</a> ставит и приложение: только для вас, без прав администратора, с записью в меню «Пуск»; удаляется через «Параметры → Приложения»; <code>ling update</code> обновляет его. Smart App Control должен быть выключен.",

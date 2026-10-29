@@ -37,7 +37,7 @@
  "new.h303": "macOS <span class=\"tag\">samfoti</span>",
  "new.p04": "Daga 1.7.2, <a href=\"#install\">umarnin shigarwa</a> yana sanya Mightling a Applications kusa da <code>ling</code>, kuma yana buɗewa kamar kowace manhaja. Apple silicon da Intel, macOS 12 ko sama. <code>ling update</code> yana sabunta shi.",
  "new.h305": "Linux",
- "new.p06": "A kan GB10, <code>mightling_1.7.0_arm64.deb</code> yana shigar da manhajar, mazauninta a menu na farawa da umarnin <code>ling-app</code>, tare da tsarin sandbox profile da take buƙata:",
+ "new.p06": "A kan GB10, <code>mightling_1.7.2_arm64.deb</code> yana shigar da manhajar, mazauninta a menu na farawa da umarnin <code>ling-app</code>, tare da tsarin sandbox profile da take buƙata:",
  "new.p07": "Sannan ka buɗe ta daga menu na manhajoji, ko da <code>ling app</code>. <a href=\"https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run\">Ƙari</a>.",
  "new.h308": "Windows 11 <span class=\"tag\">samfoti</span>",
  "new.p09": "Daga 1.7.2, <a href=\"#install\">layin PowerShell</a> yana shigar da manhajar ita ma, don kai kaɗai kuma ba tare da haƙƙin mai gudanarwa ba, da shigarwa a menu na Start; Settings → Apps yana cire ta; <code>ling update</code> yana sabunta ta. Dole a kashe Smart App Control.",
