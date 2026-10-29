@@ -584,4 +584,37 @@ mod tests {
         assert!(!fixture.home.join(".mightling/skills/pdf").exists());
         assert!(fixture.home.join(".claude/skills/pdf/SKILL.md").is_file());
     }
+
+    #[test]
+    fn a_source_is_switched_off_and_on_and_repo_switches_both_repository_folders() {
+        let fixture = Fixture::new("sources");
+        let machine = fixture.machine();
+        let off = |agent: &str| Settings::load(&machine.codex_home).sources_off.contains(agent);
+
+        assert_eq!(
+            set_source(&machine, "repo", false),
+            Ok(vec!["Repositories' .claude/skills and .gemini/skills are no longer linked from the next ling start.".to_string()])
+        );
+        assert!(off("repo-claude") && off("repo-gemini"));
+        assert_eq!(
+            set_source(&machine, "repo", true),
+            Ok(vec!["A trusted repository's .claude/skills and .gemini/skills are linked from the next ling start.".to_string()])
+        );
+        assert!(!off("repo-claude") && !off("repo-gemini"));
+
+        // A source in the home folder: switching it on says whether its folder is there yet.
+        assert!(set_source(&machine, "hermes", false).is_ok());
+        assert!(off("hermes"));
+        assert_eq!(
+            set_source(&machine, "hermes", true),
+            Ok(vec!["Hermes Agent's skills will be linked once ~/.hermes/skills exists.".to_string()])
+        );
+        fixture.skill(".hermes/skills/research/arxiv", "arxiv", "");
+        assert_eq!(
+            set_source(&machine, "hermes", true),
+            Ok(vec!["Hermes Agent's skills (~/.hermes/skills) are linked from the next ling start.".to_string()])
+        );
+        assert!(set_source(&machine, "mallory", false).is_err());
+        assert!(Settings::load(&machine.codex_home).sources_off.is_empty());
+    }
 }
