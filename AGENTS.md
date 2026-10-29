@@ -27,7 +27,7 @@ The venv is at `.venv/`. Use `.venv/bin/python` explicitly; there is no activati
 # Install (editable)
 .venv/bin/pip install -e .
 
-# Full test suite (~2 min, no GPU, Docker or model server: every hardware, subprocess and server call is mocked)
+# Full test suite (~4 min, no GPU, Docker or model server: every hardware, subprocess and server call is mocked)
 .venv/bin/python -m pytest tests/ -q
 
 # Single file / single test
@@ -72,7 +72,7 @@ ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev
 
 ## Where things live
 
-Thirteen packages under `dreamference/` (twelve subsystems and `cli/`), each with an `__init__.py` that is a re-export facade with an explicit `__all__`:
+Fourteen packages under `dreamference/` (thirteen subsystems and `cli/`), each with an `__init__.py` that is a re-export facade with an explicit `__all__`:
 
 | Package | Role |
 | --- | --- |
@@ -98,7 +98,7 @@ Outside the package:
 | `codex/` | Submodule: the `dreamference/codex` fork, pinned to `CODEX_RELEASE_TAG` (`rust-v0.158.0`); never modified |
 | `codex-patches/` | The numbered hooks applied to an export of `codex/` |
 | `codex-tests/` | Skips, snapshot overlays and test-only patches for `ling-admin codex test` |
-| `ling-rs/` | The launcher crate compiled into `ling`, plus leaf crates (`airgapped/`, `node-locator/`, `skills/`, `masking/`, `apps/`, `web/`, and the messenger bridges `chat/` and `signal/`) and `prompts/` |
+| `ling-rs/` | The launcher crate compiled into `ling`, plus leaf crates (`airgapped/`, `node-locator/`, `delegate/`, `web/`, the messenger bridges `chat/` and `signal/`, and more) and `prompts/` |
 | `ling-web-rs/` | `ling-search` and `ling-fetch` (own lockfile, own target directory) |
 | `ling-code-rs/` | `ling-code`, the code index |
 | `ling-docs-rs/` | `ling-docs`, the local file index |
@@ -109,7 +109,7 @@ Outside the package:
 | `install.sh`, `install.ps1` | Release installers |
 | `scripts/`, `paper/`, `website/`, `images/` | Helper scripts, the paper, the one-page site, logos |
 
-`ling-admin` (`dreamference.cli:main`) has about thirty subcommand groups (`init`, `run`, `server`, `codex`, `node`, `night`, `desktop`, `audit`, …); every command rejects unknown arguments. The full list: [docs/dev/cli.md](docs/dev/cli.md).
+`ling-admin` (`dreamference.cli:main`) has over thirty subcommand groups (`init`, `run`, `server`, `codex`, `node`, `night`, `desktop`, `audit`, …); every command rejects unknown arguments. The full list: [docs/dev/cli.md](docs/dev/cli.md).
 
 `ling`, the terminal agent, is **not** Python: it is the Rust binary `CodexBrandedBuilder` builds, linked at `~/.local/bin/ling`, so every Codex flag and subcommand works natively. The old `chat` subcommand that started the agent was removed once the agent stopped being a Python wrapper; `ling-admin run "…"` remains for one-shot tasks with any configured agent. `ling-search` and `ling-fetch` are Rust binaries from `ling-web-rs/`, installed beside `ling`; `WebTools` in `mcp_server/web_tools.py` is only the MCP server's copy of the same behaviour.
 
@@ -123,7 +123,7 @@ Outside the package:
 
 **Host safety.** `check_host_safety()` refuses an unsafe host before a load; `MemoryPressureWatchdog` kills the container on PSI pressure during one, through the fastest kill path the host can still run. `ling-admin host setup` (`HostSafetySetup`) applies the fixes. Details: [docs/dev/host-safety.md](docs/dev/host-safety.md).
 
-**`ling` is Codex, built here.** `CodexBrandedBuilder` exports the pinned `codex-rs/`, copies `ling-rs/` in as `codex-rs/ling`, applies `codex-patches/`, builds `codex` (installed as `ling`), `codex-code-mode-host` and, on Linux, the Signal bridge's daemon `ling-signal` (beside `ling`, never on PATH) into `~/.local/share/dreamference/mightling/bin/`, and links `ling`, `ling-search`, `ling-fetch`, `ling-admin`, `ling-code` and `ling-docs` into `~/.local/bin`. V8 comes from the upstream vendor's `rusty-v8` release assets, checked against the submodule's manifests. Details: [docs/dev/codex-build.md](docs/dev/codex-build.md).
+**`ling` is Codex, built here.** `CodexBrandedBuilder` exports the pinned `codex-rs/`, copies `ling-rs/` in as `codex-rs/ling`, applies `codex-patches/`, builds `codex` (installed as `ling`), `codex-code-mode-host` and, on Linux, `ling-delegate` and the Signal bridge's daemon `ling-signal` (never on PATH) into `~/.local/share/dreamference/mightling/bin/`, and links `ling`, `ling-search`, `ling-fetch`, `ling-admin`, `ling-code`, `ling-docs` and `ling-delegate` into `~/.local/bin`. V8 comes from the upstream vendor's `rusty-v8` release assets, checked against the submodule's manifests. Details: [docs/dev/codex-build.md](docs/dev/codex-build.md).
 
 **The launcher** (`ling-rs/src/lib.rs`) resolves the model server, waits for it, reads the model id and `max_model_len` from `/v1/models`, writes `model_catalog.json` and `config.toml`, and prepends `--oss --local-provider openai-custom --model <id>`. `CODEX_HOME` is `~/.mightling`, never `~/.codex`, so the vendor's sign-in is never shared; patches 0013, 0015 and 0016 close the channels to the vendor. Details: [docs/dev/launcher.md](docs/dev/launcher.md); its loop guard: [docs/dev/loop-guard.md](docs/dev/loop-guard.md). System prompts are chosen by name (`default`, `high-swe`, custom): [docs/dev/prompt.md](docs/dev/prompt.md).
 
@@ -156,7 +156,7 @@ Outside the package:
 ## Conventions
 
 - **One class per file**, file named after the class in snake_case. `__init__.py` does the re-exporting; module files hold no top-level logic beyond constants.
-- **Class-level `@classmethod` over instances** for stateless helpers: the codebase has ~56 classmethods against 16 `__init__`s. `ModelMatrixRegistry` and the installers are pure classmethod namespaces.
+- **Class-level `@classmethod` over instances** for stateless helpers: the codebase has over 1,700 classmethods against ~40 `__init__`s. `ModelMatrixRegistry` and the installers are pure classmethod namespaces.
 - Module docstrings and full Google-style Args/Returns docstrings on public methods are the norm; match this density.
 - `typing.Final` annotations on module constants.
 - User-facing output goes through `rich` console or emoji-prefixed `print` (`✅ ⚠️ ❌ 🚀 💡`). Match the existing voice in CLI paths.
