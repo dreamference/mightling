@@ -354,4 +354,74 @@ process.stdin.on("data", (chunk) => {
       else process.env.MIGHTLING_BIN = savedBin;
     }
   });
+
+  it("removes the busy marker when the server is stopped or dies in the middle of a turn", async () => {
+    const dir = scratch("server-marker");
+    // A turn starts and never completes; a second thread/start ends the process in the middle of it.
+    const lingPath = nodeScript(dir, "ling", `const args = process.argv.slice(2);
+if (args[0] === "prompt") { process.stdout.write("COMPOSED " + args[2]); process.exit(0); }
+let started = 0;
+if (args[0] === "airgapped") { process.stdout.write("Airgapped: off (stub)\\n"); process.exit(0); }
+let buf = "";
+process.stdin.on("data", (chunk) => {
+  buf += chunk;
+  let nl;
+  while ((nl = buf.indexOf("\\n")) >= 0) {
+    const msg = JSON.parse(buf.slice(0, nl));
+    buf = buf.slice(nl + 1);
+    if (msg.method === "initialize") {
+      process.stdout.write(JSON.stringify({ id: msg.id, result: { userAgent: "ling" } }) + "\\n");
+    } else if (msg.method === "thread/start" && ++started > 1) {
+      process.exit(3);
+    } else if (msg.method === "thread/start") {
+      process.stdout.write(JSON.stringify({ id: msg.id, result: { thread: { id: "t-busy" } } }) + "\\n");
+      process.stdout.write(JSON.stringify({ method: "turn/started", params: { threadId: "t-busy", turn: { id: "turn-1" } } }) + "\\n");
+    }
+  }
+});
+`);
+    const busyDir = path.join(dir, "night", "busy");
+    const markers = () => (fs.existsSync(busyDir) ? fs.readdirSync(busyDir) : []);
+    const busyStates: boolean[] = [];
+    const delivered: ForView[] = [];
+    const server = new AppServer(dir, {
+      deliver: (message) => delivered.push(message),
+      busyChanged: (busy) => busyStates.push(busy),
+    });
+    const savedHome = process.env.CODEX_HOME;
+    const savedBin = process.env.MIGHTLING_BIN;
+    process.env.CODEX_HOME = dir;
+    process.env.MIGHTLING_BIN = lingPath;
+    const turn = async () => {
+      expect(server.start().started).toBe(true);
+      await server.send({ id: 1, method: "initialize", params: {} });
+      await until(() => delivered.some((m) => m.channel === "work://message" && typeof m.payload === "object" && m.payload !== null && "result" in m.payload));
+      await server.send({ method: "initialized" });
+      busyStates.length = 0;
+      await server.send({ id: 2, method: "thread/start", params: { prompt: "ask" } });
+    };
+    try {
+      await turn();
+      await until(() => busyStates.at(-1) === true);
+      expect(markers()).toHaveLength(1);
+      server.stop();
+      expect(markers()).toEqual([]);
+      expect(busyStates.at(-1)).toBe(false);
+
+      delivered.length = 0;
+      await turn();
+      await until(() => busyStates.at(-1) === true);
+      expect(markers()).toHaveLength(1);
+      await server.send({ id: 3, method: "thread/start", params: { prompt: "ask" } });
+      await until(() => delivered.some((m) => m.channel === "work://exit"));
+      expect(markers()).toEqual([]);
+      expect(busyStates.at(-1)).toBe(false);
+    } finally {
+      server.stop();
+      if (savedHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = savedHome;
+      if (savedBin === undefined) delete process.env.MIGHTLING_BIN;
+      else process.env.MIGHTLING_BIN = savedBin;
+    }
+  });
 });
