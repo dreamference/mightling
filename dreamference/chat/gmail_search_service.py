@@ -45,6 +45,7 @@ mail.
 """
 
 import base64
+import contextlib
 import datetime
 import email
 import email.header
@@ -55,8 +56,10 @@ import html
 import imaplib
 import json
 import os
+import pathlib
 import re
 import secrets
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -74,6 +77,9 @@ except ImportError:  # pragma: no cover - the container's layout
 # Inside the container the credentials directory is mounted here.
 CONFIG_DIR: Final[str] = os.environ.get("MIGHTLING_GMAIL_CONFIG", "/config")
 CREDENTIALS_NAME: Final[str] = "credentials.json"
+# Requests run on threads of their own and any of them may refresh a token: every rewrite of the
+# credentials file is a read-modify-write, one at a time.
+CREDENTIALS_LOCK: Final[threading.Lock] = threading.Lock()
 
 # The key the stored token is sealed with. See `_seal`: this is obfuscation with a clear threat
 # model, not a secret-management system.
@@ -375,19 +381,12 @@ class GmailSearchService:
 
     @classmethod
     def delete_token(cls, address: str, directory: Optional[str] = None) -> bool:
-        import os, json
-        path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
-        stored = cls._raw(directory)
-        accounts = stored.get("accounts", {})
-        if address in accounts:
-            del accounts[address]
-            try:
-                with open(path, "w") as handle:
-                    json.dump({"accounts": accounts}, handle, indent=2)
-                return True
-            except OSError:
+        with CREDENTIALS_LOCK:
+            accounts = cls._raw(directory).get("accounts", {})
+            if address not in accounts:
                 return False
-        return False
+            del accounts[address]
+            return cls._write_accounts(accounts, directory)
         
     @classmethod
     def save_token(
@@ -399,26 +398,43 @@ class GmailSearchService:
         refresh_token: str | None = None,
         scopes: list[str] | None = None,
     ) -> bool:
-        path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
-        stored = cls._raw(directory)
-        accounts = stored.get("accounts", {})
-        
-        acc = accounts.get(address, {"email": address})
-        # What the account held before: a stored token without recorded scopes was a Gmail grant.
-        previous = cls.account_scopes(acc) if acc.get("access_token") else []
-        acc["access_token"] = cls._seal(token, directory)
-        acc["expires_at"] = time.time() + max(0, lifetime - 60)
-        if refresh_token:
-            acc["refresh_token"] = cls._seal(refresh_token, directory)
-        if scopes:
-            acc["scopes"] = sorted(set(previous) | set(scopes))
-        accounts[address] = acc
-        
+        with CREDENTIALS_LOCK:
+            accounts = cls._raw(directory).get("accounts", {})
+            acc = accounts.get(address, {"email": address})
+            # What the account held before: a stored token without recorded scopes was a Gmail grant.
+            previous = cls.account_scopes(acc) if acc.get("access_token") else []
+            acc["access_token"] = cls._seal(token, directory)
+            acc["expires_at"] = time.time() + max(0, lifetime - 60)
+            if refresh_token:
+                acc["refresh_token"] = cls._seal(refresh_token, directory)
+            if scopes:
+                acc["scopes"] = sorted(set(previous) | set(scopes))
+            accounts[address] = acc
+            return cls._write_accounts(accounts, directory)
+
+    @classmethod
+    def _write_accounts(cls, accounts: dict[str, Any], directory: str | None = None) -> bool:
+        """Replaces the credentials file in one step, readable by this user only.
+
+        A reader on another request's thread, or the host's `GmailCredentials`, finds the old file
+        or the new one, never an empty one it would take for "no accounts" and write back.
+
+        Args:
+            accounts (dict[str, Any]): Every account, by address.
+            directory (str | None): Credentials directory; the mounted one by default.
+
+        Returns:
+            bool: True if the file was written.
+        """
+        path = pathlib.Path(directory or CONFIG_DIR) / CREDENTIALS_NAME
+        temporary = path.with_name(f"{CREDENTIALS_NAME}.{os.getpid()}.{threading.get_ident()}.tmp")
         try:
-            with open(path, "w") as handle:
+            with open(temporary, "w", opener=lambda name, flags: os.open(name, flags, 0o600)) as handle:
                 json.dump({"accounts": accounts}, handle, indent=2)
-            os.chmod(path, 0o600)
+            temporary.replace(path)
         except OSError:
+            with contextlib.suppress(OSError):
+                temporary.unlink()
             return False
         return True
 

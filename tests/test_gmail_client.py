@@ -640,3 +640,28 @@ def test_gmail_opens_only_accounts_granted_gmail(monkeypatch):
 
     monkeypatch.setattr(GmailSearchService, "credentials", classmethod(lambda cls, directory=None: accounts[1:]))
     assert GmailSearchService._open_mailboxes() == ({}, service_module.NOT_CONNECTED_MESSAGE, [])
+
+
+def test_saving_a_token_never_shows_another_thread_a_half_written_credentials_file(tmp_path, monkeypatch):
+    # The service answers each request on its own thread, and every request may refresh a token.
+    # Rewriting the file in place let a concurrent reader find it empty, take that for "no
+    # accounts", and write back its one account over all the others.
+    from dreamference.chat import gmail_search_service as service_module
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    directory = str(tmp_path)
+    assert GmailSearchService.save_token("a@example.com", "token-a", 3600, directory, refresh_token="refresh-a")
+    seen = []
+    real_dump = service_module.json.dump
+
+    def dump(obj, handle, **kwargs):
+        seen.append(sorted(GmailSearchService._raw(directory)["accounts"]))
+        real_dump(obj, handle, **kwargs)
+
+    monkeypatch.setattr(service_module.json, "dump", dump)
+    assert GmailSearchService.save_token("b@example.com", "token-b", 3600, directory)
+    assert GmailSearchService.delete_token("b@example.com", directory)
+    assert seen == [["a@example.com"], ["a@example.com", "b@example.com"]]
+    assert sorted(GmailSearchService._raw(directory)["accounts"]) == ["a@example.com"]
+    assert (tmp_path / "credentials.json").stat().st_mode & 0o777 == 0o600
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["credentials.json", "credentials.key"]
