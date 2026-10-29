@@ -254,6 +254,8 @@ fn string(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String
                 'n' => out.push('\n'),
                 'r' => out.push('\r'),
                 't' => out.push('\t'),
+                'b' => out.push('\u{8}'),
+                'f' => out.push('\u{c}'),
                 'u' => {
                     // A character outside the BMP is a pair of escaped UTF-16 halves.
                     let high = hex4(chars)?;
@@ -904,6 +906,12 @@ mod tests {
             let text = format!("{{\"address\": \"a\", \"name\": \"{half}\"}}");
             assert_eq!(Node::parse(&text), None, "{text}");
         }
+    }
+
+    #[test]
+    fn backspace_and_form_feed_escapes_are_the_characters_not_the_letters() {
+        let parsed = Node::parse("{\"address\": \"a\", \"name\": \"x\\by\\fz\"}").unwrap();
+        assert_eq!(parsed.name, "x\u{8}y\u{c}z");
     }
 
     #[test]
