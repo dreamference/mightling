@@ -154,6 +154,13 @@
       "pendingAfter": ["42"]
     },
     {
+      "name": "an id with neither a result nor an error is not an answer, and its request stays pending",
+      "pending": ["42"],
+      "message": {"id": 42},
+      "accept": false,
+      "pendingAfter": ["42"]
+    },
+    {
       "name": "a string id and a number id are different requests",
       "pending": ["\"42\""],
       "message": {"id": 42, "result": {}},
