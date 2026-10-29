@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { joinPath, parseFileQuery } from "./files";
+import { parseFileQuery, resolvedPath } from "./files";
 import type { FuzzyFileSearchResult } from "./protocol/FuzzyFileSearchResult";
 
 export function FileSearch(props: {
@@ -50,7 +50,7 @@ export function FileSearch(props: {
     const result = results[index];
     if (!result) return;
     props.onClose();
-    props.onOpen(result.path.startsWith("/") ? result.path : joinPath(result.root || props.root, result.path), line);
+    props.onOpen(resolvedPath(result.root || props.root, result.path), line);
   };
 
   return (

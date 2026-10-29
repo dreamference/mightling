@@ -2,7 +2,7 @@
 // the server read is decoded, named and highlighted.
 import { describe, expect, it } from "vitest";
 
-import { decodeFile, highlighted, inGitInternals, joinPath, languageOf, lineCount, parentOf, relativeTo, sizeLabel, treeEntries } from "./files";
+import { decodeFile, highlighted, inGitInternals, joinPath, languageOf, lineCount, parentOf, relativeTo, resolvedPath, sizeLabel, treeEntries } from "./files";
 import { folderError } from "./FileTree";
 import { REVIEW_TAB, fileTab, stepTab, tabLabel, withTab, withoutTab } from "./tabs";
 
@@ -59,6 +59,12 @@ describe("files", () => {
 
   it("joins, splits and shortens paths the way the tree and tabs show them", () => {
     expect(joinPath("/w/", "a.py")).toBe("/w/a.py");
+    expect(resolvedPath("/w/", "a.py")).toBe("/w/a.py");
+    expect(resolvedPath("/w", "/x/a.py")).toBe("/x/a.py");
+    expect(resolvedPath("C:\\w", "C:\\x\\a.py")).toBe("C:\\x\\a.py");
+    expect(resolvedPath("C:\\w", "d:/x/a.py")).toBe("d:/x/a.py");
+    expect(resolvedPath("C:\\w", "\\\\host\\share\\a.py")).toBe("\\\\host\\share\\a.py");
+    expect(resolvedPath(null, "a.py")).toBe("a.py");
     expect(parentOf("/w/src/a.py")).toBe("/w/src");
     expect(parentOf("/a.py")).toBe("/");
     expect(relativeTo("/w", "/w/src/a.py")).toBe("src/a.py");
