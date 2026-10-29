@@ -1014,18 +1014,26 @@ fn register(instance: &Instance, arch: &str, number: &str, voice: bool) -> bool 
         return false;
     }
     let pin = format!("{:08}", rand::random_range(0..100_000_000u32));
-    for (what, args) in [
-        ("registration lock", vec!["setPin", pin.as_str()]),
-        ("profile name", vec!["updateProfile", "--given-name", "Mightling"]),
-        ("number discovery off", vec!["updateAccount", "--discoverable-by-number", "false"]),
-    ] {
-        if let Err(output) = run_command(&setup::signal_cli_command(instance, arch, number, &args), None) {
+    lock_and_name(instance, arch, number, &pin, &mut run_command);
+    true
+}
+
+/// After the code is verified: the registration lock, the profile name and number discovery off.
+/// The PIN is kept in the state folder first and the lock set only when it was, so the number is
+/// never locked with a PIN that exists nowhere.
+fn lock_and_name(instance: &Instance, arch: &str, number: &str, pin: &str, run: &mut dyn FnMut(&[String], Option<&str>) -> Result<String, String>) {
+    let pin_path = format!("{}/pin", instance.state_dir());
+    let kept = run(&setup::as_bridge(instance, &["sh".to_string(), "-c".to_string(), format!("umask 077; cat > {pin_path}")]), Some(pin));
+    let mut steps = vec![("profile name", vec!["updateProfile", "--given-name", "Mightling"]), ("number discovery off", vec!["updateAccount", "--discoverable-by-number", "false"])];
+    match kept {
+        Ok(_) => steps.insert(0, ("registration lock", vec!["setPin", pin])),
+        Err(output) => eprintln!("⚠️  Could not keep the registration lock's PIN in {pin_path}, so the lock is not set: {}", output.trim()),
+    }
+    for (what, args) in steps {
+        if let Err(output) = run(&setup::signal_cli_command(instance, arch, number, &args), None) {
             eprintln!("⚠️  Could not set the {what}: {output}");
         }
     }
-    let pin_path = format!("{}/pin", instance.state_dir());
-    let _ = run_command(&setup::as_bridge(instance, &["sh".to_string(), "-c".to_string(), format!("umask 077; cat > {pin_path}")]), Some(&pin));
-    true
 }
 
 /// Linked mode: `signal-cli link`, its QR code shown here, until the phone has scanned it. Returns
@@ -1307,6 +1315,28 @@ mod tests {
 
         fn invocation(&self) -> Invocation {
             Invocation { bridge: std::env::current_exe().ok(), bridge_commands: false, host: self.host() }
+        }
+    }
+
+    #[test]
+    fn the_registration_lock_is_set_only_when_its_pin_was_kept() {
+        let instance = Instance::parse("default").unwrap();
+        for keeps in [true, false] {
+            let mut ran: Vec<Vec<String>> = Vec::new();
+            let mut run = |command: &[String], stdin: Option<&str>| {
+                ran.push(command.to_vec());
+                if stdin.is_some() && !keeps { Err("No space left on device".to_string()) } else { Ok(String::new()) }
+            };
+            lock_and_name(&instance, "x86_64", "+15551234567", "12345678", &mut run);
+            let pin_written = ran.iter().position(|c| c.iter().any(|a| a.ends_with("/pin")));
+            let lock_set = ran.iter().position(|c| c.iter().any(|a| a == "setPin"));
+            assert!(pin_written.is_some());
+            if keeps {
+                assert!(pin_written < lock_set, "the PIN is kept before the lock is set: {ran:?}");
+            } else {
+                assert_eq!(lock_set, None, "no lock without its PIN: {ran:?}");
+            }
+            assert!(ran.iter().any(|c| c.iter().any(|a| a == "updateProfile")));
         }
     }
 
