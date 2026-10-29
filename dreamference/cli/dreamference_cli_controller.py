@@ -1537,7 +1537,7 @@ class DreamferenceCLIController:
             "--dry-run", action="store_true", help="Say what would be queued; queue nothing")
         night_autofill_parser.add_argument(
             "--max", type=int, choices=range(1, 6), default=None, metavar="N",
-            help="Tasks at most (1 to 5; default [night] autofill_max)")
+            help="Tasks at most (default [night] autofill_max).")
         night_pause_parser = night_subparsers.add_parser("pause", help="Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate)")
         night_pause_parser.add_argument("--for", dest="duration", default="1h", help="How long: 90m, 2h, 45s, or minutes (default 1h)")
         night_subparsers.add_parser("resume", help="End a pause: the model gate refuses everyone but the benchmark run again")
