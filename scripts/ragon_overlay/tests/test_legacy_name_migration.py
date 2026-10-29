@@ -570,6 +570,72 @@ def test_a_forge_that_never_answers_is_reported_not_skipped(monkeypatch, tmp_hom
     assert not [event for event in events if event[0] == "POST"]
 
 
+def test_a_forge_that_was_off_is_moved_aside_without_enabling_or_asking_the_api(
+    monkeypatch, tmp_home
+):
+    from dreamference.forge.forge_service import ForgeService
+    from dreamference.forge.forge_settings import ForgeSettings
+
+    events = _fake_forge(monkeypatch, [200])
+    monkeypatch.setattr(
+        ForgeService,
+        "systemctl",
+        classmethod(
+            lambda cls, *args: events.append(("systemctl", *args))
+            or _Result(returncode=1 if args[0] == "is-enabled" else 0)
+        ),
+    )
+    data = ForgeSettings.data_dir()
+    (data / "mightling").mkdir(parents=True)
+    (data / "mightling/frozen").write_text("old")
+    (data / "ragon").mkdir()
+    (data / "ragon/frozen").write_text("new")
+
+    line = LegacyNameMigration.migrate_forge()
+
+    assert line and "(it was off)" in line and "kept as" in line
+    assert (data / "ragon/frozen").read_text() == "new"
+    assert (data / "mightling.pre-ragon/frozen").read_text() == "old"
+    assert not [event for event in events if event[:2] == ("systemctl", "enable")]
+    assert not [event for event in events if event[0] in ("GET", "POST")]
+    events.clear()
+    assert LegacyNameMigration.migrate_forge() is None, "a second run finds nothing to do"
+    assert events == []
+
+
+def test_a_refused_rename_is_reported_and_the_timers_are_still_enabled(monkeypatch, tmp_home):
+    from dreamference.forge.forge_container import ForgeContainer
+    from dreamference.forge.forge_service import ForgeService
+
+    units = ForgeService.unit_dir()
+    units.mkdir(parents=True)
+    (units / "mightling-forge.service").write_text("[Unit]\n")
+    events = _fake_forge(monkeypatch, [200])
+
+    def refuse(method, path, token, body=None, timeout=0):
+        events.append((method, path))
+        return (200, {}) if method == "GET" else (422, None)
+
+    monkeypatch.setattr(ForgeContainer, "api", staticmethod(refuse))
+
+    line = LegacyNameMigration.migrate_forge()
+
+    assert line and "could not rename the forge account mightling-phone (answer 422)" in line
+    enables = [event for event in events if event[:2] == ("systemctl", "enable")]
+    assert any("timer" in str(event) for event in enables), "the timers start all the same"
+
+
+def test_free_name_takes_the_next_number_and_counts_a_dangling_link_as_taken(tmp_path):
+    path = tmp_path / "state"
+    assert LegacyNameMigration.free_name(path) == path
+    path.mkdir()
+    assert LegacyNameMigration.free_name(path) == tmp_path / "state.2"
+    (tmp_path / "state.2").symlink_to(tmp_path / "nowhere")
+    assert LegacyNameMigration.free_name(path) == tmp_path / "state.3"
+    (tmp_path / "state.3").mkdir()
+    assert LegacyNameMigration.free_name(path) == tmp_path / "state.4"
+
+
 def test_an_old_service_file_is_rendered_again_with_both_types():
     text = (
         "<service-group><name>%h</name>"

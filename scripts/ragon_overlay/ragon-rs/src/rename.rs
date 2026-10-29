@@ -1836,6 +1836,101 @@ mod tests {
             assert_eq!(rewrite_unit_text(&format!("{old}\n")), format!("{new}\n"), "{old}");
         }
     }
+
+    /// Runs git with a fixed identity; false when git is missing or the command failed.
+    fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
+        let output = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@e", "-c", "init.defaultBranch=main"])
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    /// A bare repository `repo` with one commit and a worktree `tree` on branch `branch`.
+    fn git_worktree(repo: &Path, tree: &Path, branch: &str) -> bool {
+        std::fs::create_dir_all(repo).unwrap();
+        let seed = repo.with_extension("seed");
+        std::fs::create_dir_all(&seed).unwrap();
+        let ok = git_output(&seed, &["init", "-q"]).is_some()
+            && std::fs::write(seed.join("f"), "1").is_ok()
+            && git_output(&seed, &["add", "f"]).is_some()
+            && git_output(&seed, &["commit", "-q", "-m", "one"]).is_some()
+            && git_output(
+                repo,
+                &["clone", "-q", "--bare", &seed.display().to_string(), &repo.display().to_string()],
+            )
+            .is_some();
+        let _ = std::fs::remove_dir_all(&seed);
+        ok && git_output(repo, &["worktree", "add", "-q", "-b", branch, &tree.display().to_string()]).is_some()
+    }
+
+    #[test]
+    fn real_git_worktrees_under_the_home_work_after_the_move() {
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            eprintln!("git is missing: skipped");
+            return;
+        }
+        let home = scratch("git-real");
+        let old = home.join(MIGHTLING_HOME_DIR);
+        let new = home.join(crate::home::RAGON_HOME_DIR);
+        let base = old.join("chat-repos/o/r/base.git");
+        let phone = old.join("chat-repos/o/r/tg-1");
+        let night = old.join("night/worktrees/wt1");
+        std::fs::create_dir_all(night.parent().unwrap()).unwrap();
+        assert!(git_worktree(&base, &phone, "tg-1"));
+        assert!(
+            git_output(&base, &["worktree", "add", "-q", "-b", "night-1", &night.display().to_string()]).is_some()
+        );
+
+        let mut report = Report::default();
+        move_home(&home, &mut report);
+
+        let new_phone = new.join("chat-repos/o/r/tg-1");
+        let new_night = new.join("night/worktrees/wt1");
+        assert!(git_output(&new_phone, &["status", "--porcelain"]).is_some(), "{:?}", report.lines);
+        assert!(git_output(&new_night, &["status", "--porcelain"]).is_some(), "{:?}", report.lines);
+        let listing = git_output(&new.join("chat-repos/o/r/base.git"), &["worktree", "list", "--porcelain"]).unwrap();
+        assert!(listing.contains(&new_phone.display().to_string()), "{listing}");
+        assert!(listing.contains(&new_night.display().to_string()), "{listing}");
+        assert!(!listing.contains(MIGHTLING_HOME_DIR), "{listing}");
+        assert!(!listing.contains("prunable"), "{listing}");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_home_reached_through_a_symlink_is_rewritten_and_an_unrelated_gitdir_is_left() {
+        let real = scratch("symlinked-real");
+        let link = std::env::temp_dir().join(format!("ragon-rename-symlinked-link-{}", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        make_symlink(&real, &link).unwrap();
+        let old = link.join(MIGHTLING_HOME_DIR);
+        let new = link.join(crate::home::RAGON_HOME_DIR);
+        let (o, n) = (old.display().to_string(), new.display().to_string());
+        write(&link.join("proj/.git/worktrees/wt1/gitdir"), &format!("{o}/night/worktrees/wt1/.git\n"));
+        write(&old.join("night/worktrees/wt1/.git"), &format!("gitdir: {}/proj/.git/worktrees/wt1\n", link.display()));
+        let elsewhere = "gitdir: /nonexistent-ragon-place/.git/worktrees/x\n";
+        write(&old.join("night/worktrees/other/.git"), elsewhere);
+
+        let mut report = Report::default();
+        move_home(&link, &mut report);
+
+        let read = |path: PathBuf| std::fs::read_to_string(path).unwrap();
+        assert_eq!(read(link.join("proj/.git/worktrees/wt1/gitdir")), format!("{n}/night/worktrees/wt1/.git\n"));
+        assert_eq!(read(new.join("night/worktrees/other/.git")), elsewhere, "an unrelated link is not touched");
+        let line = format!("repaired the worktree {}", new.join("night/worktrees/wt1").display());
+        assert!(report.lines.contains(&line), "{line} in {:?}", report.lines);
+        // A second run: the marker is there and nothing is repaired again.
+        let mut again = Report::default();
+        move_home(&link, &mut again);
+        assert!(!again.lines.iter().any(|l| l.starts_with("repaired the worktree")), "{:?}", again.lines);
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_dir_all(&real);
+    }
 }
 
 /// A symbolic link at `link` to `target`. On Windows a file or directory link by what `target` is.
