@@ -2915,10 +2915,12 @@ class DreamferenceCLIController:
                         kv_cache_dtype=config.kv_cache_dtype,
                         api_key=args.api_key,
                         enable_auto_tool_choice=args.enable_auto_tool_choice,
-                        tool_call_parser=args.tool_call_parser,
+                        tool_call_parser=args.tool_call_parser or config.tool_call_parser,
                         reasoning_parser=getattr(args, "reasoning_parser", None),
                         moe_backend=getattr(args, "moe_backend", None),
-                        max_num_batched_tokens=args.max_num_batched_tokens,
+                        max_num_batched_tokens=(args.max_num_batched_tokens
+                                                if args.max_num_batched_tokens is not None
+                                                else config.max_num_batched_tokens),
                         guided_decoding_backend=args.guided_decoding_backend or config.guided_decoding_backend,
                         use_tensorizer=getattr(args, "tensorize", None),
                         background=True,
