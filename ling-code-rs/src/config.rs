@@ -303,12 +303,16 @@ mightling_code_layers = "exact"
         let dir = tempfile::tempdir().unwrap();
         let codex = dir.path().join("codex");
         let repo = dir.path().join("repo");
-        let link = dir.path().join("repo-link");
         let untrusted = dir.path().join("untrusted");
         std::fs::create_dir_all(&codex).unwrap();
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::create_dir_all(&untrusted).unwrap();
-        std::os::unix::fs::symlink(&repo, &link).unwrap();
+        #[cfg(unix)]
+        let link = {
+            let link = dir.path().join("repo-link");
+            std::os::unix::fs::symlink(&repo, &link).unwrap();
+            link
+        };
 
         assert!(!is_trusted_in(&codex, &repo), "missing config.toml");
 
@@ -320,6 +324,7 @@ mightling_code_layers = "exact"
         std::fs::write(codex.join("config.toml"), config).unwrap();
 
         assert!(is_trusted_in(&codex, &repo));
+        #[cfg(unix)]
         assert!(
             is_trusted_in(&codex, &link),
             "symlink resolves to canonical trusted root"

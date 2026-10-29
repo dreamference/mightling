@@ -267,6 +267,8 @@ mod tests {
             std::process::id().to_string(),
         )
         .unwrap();
+        // Only a Unix can ask whether a process is alive (paths::process_alive).
+        #[cfg(unix)]
         assert!(running(&repo));
         std::fs::write(repo.state_dir().join("code_index.running"), "999999999").unwrap();
         assert!(!running(&repo));
