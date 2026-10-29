@@ -605,3 +605,38 @@ def test_search_across_accounts_returns_the_newest_messages_of_all_of_them(monke
     found = GmailSearchService.search("invoice", 2)["messages"]
     assert [m["date"] for m in found] == dates["new@example.com"]
     assert all(m["id"].startswith("new@example.com|") for m in found)
+
+
+def test_gmail_opens_only_accounts_granted_gmail(monkeypatch):
+    # An account connected for Drive alone has no Gmail scope; logging it in to IMAP failed on
+    # every search and showed as a broken account, as the workspace reader already knew to skip.
+    from dreamference.chat import gmail_search_service as service_module
+    from dreamference.chat.gmail_search_service import DRIVE_SCOPE, GMAIL_SCOPE, GmailSearchService
+
+    opened = []
+
+    class Conn:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def authenticate(self, mechanism, responder):
+            opened.append(responder(b"").split(b"\x01")[0])
+
+        def list(self):
+            return "OK", []
+
+        def select(self, folder, readonly=False):
+            return "OK", [b"1"]
+
+    accounts = [
+        {"email": "mail@example.com", "access_token": "t1", "scopes": [GMAIL_SCOPE]},
+        {"email": "files@example.com", "access_token": "t2", "scopes": [DRIVE_SCOPE]},
+    ]
+    monkeypatch.setattr(GmailSearchService, "credentials", classmethod(lambda cls, directory=None: accounts))
+    monkeypatch.setattr(service_module.imaplib, "IMAP4_SSL", Conn)
+    connections, error, failures = GmailSearchService._open_mailboxes()
+    assert list(connections) == ["mail@example.com"] and error is None and failures == []
+    assert opened == [b"user=mail@example.com"]
+
+    monkeypatch.setattr(GmailSearchService, "credentials", classmethod(lambda cls, directory=None: accounts[1:]))
+    assert GmailSearchService._open_mailboxes() == ({}, service_module.NOT_CONNECTED_MESSAGE, [])

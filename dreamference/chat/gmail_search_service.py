@@ -557,7 +557,8 @@ class GmailSearchService:
             The open connections by address, an error when none could be opened, and one
             `{"account", "error"}` entry per account that failed.
         """
-        stored = cls.credentials()
+        # An account connected for Drive or Calendar alone cannot log in to IMAP.
+        stored = [cred for cred in cls.credentials() if GMAIL_SCOPE in (cred.get("scopes") or [GMAIL_SCOPE])]
         if not stored:
             return {}, NOT_CONNECTED_MESSAGE, []
         connections = {}
