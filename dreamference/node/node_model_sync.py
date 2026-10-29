@@ -170,7 +170,8 @@ class NodeModelSync:
         tar = subprocess.Popen(["tar", "-C", str(hub), "-cf", "-", "--exclude=*.incomplete",
                                 *[str(path.relative_to(hub)) for path in paths]], stdout=subprocess.PIPE)
         ssh = subprocess.Popen(command, stdin=tar.stdout)
-        tar.stdout.close()
+        if tar.stdout is not None:
+            tar.stdout.close()
         code = ssh.wait()
         tar.wait()
         if code != 0 or tar.returncode not in (0, None):

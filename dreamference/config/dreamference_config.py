@@ -327,7 +327,7 @@ class DreamferenceConfig:
         for candidate in (mightling_refine_version, os.getenv("DREAMFERENCE_MIGHTLING_REFINE_VERSION"),
                           self.file_data.get("mightling_refine_version")):
             version = candidate.strip().lower() if isinstance(candidate, str) else None
-            if version in MIGHTLING_REFINE_VERSIONS:
+            if version is not None and version in MIGHTLING_REFINE_VERSIONS:
                 self.mightling_refine_version = version
                 break
 

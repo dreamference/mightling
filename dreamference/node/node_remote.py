@@ -74,6 +74,8 @@ class NodeRemote:
         """
         from dreamference.night_shift.night_shift_host import GIB, NightShiftHost
         from dreamference.node.node_lanes import NodeLanes
+        available: int | None
+        total: int | None
         if node_id and node_id == mine:
             try:
                 available, total = NightShiftHost.mem_available_bytes(), NightShiftHost.mem_total_bytes()

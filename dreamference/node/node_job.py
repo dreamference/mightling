@@ -108,7 +108,7 @@ class NodeJob:
         return Path(codex_home) / "jobs"
 
     @classmethod
-    def repo_path(cls, slug: str) -> Path:
+    def repo_path(cls, slug: str | None) -> Path:
         """
         Args:
             slug: The repository's name on this node, as the sender derived it.
@@ -119,12 +119,13 @@ class NodeJob:
         Raises:
             ValueError: If the slug is not a plain name (it comes from another machine).
         """
-        if not REPO_SLUG.fullmatch(slug or "") or ".." in slug:
+        name = slug or ""
+        if not REPO_SLUG.fullmatch(name) or ".." in name:
             raise ValueError(f"not a repository name: {slug!r}")
-        return cls.jobs_dir() / "repos" / f"{slug}.git"
+        return cls.jobs_dir() / "repos" / f"{name}.git"
 
     @classmethod
-    def job_dir(cls, job_id: str) -> Path:
+    def job_dir(cls, job_id: str | None) -> Path:
         """
         Args:
             job_id: The job's id.
@@ -135,9 +136,10 @@ class NodeJob:
         Raises:
             ValueError: If the id is not a job id.
         """
-        if not JOB_ID.fullmatch(job_id or ""):
+        name = job_id or ""
+        if not JOB_ID.fullmatch(name):
             raise ValueError(f"not a job id: {job_id!r}")
-        return cls.jobs_dir() / job_id
+        return cls.jobs_dir() / name
 
     @classmethod
     def unit_name(cls, job_id: str) -> str:
@@ -222,7 +224,8 @@ class NodeJob:
         ):
             raise ValueError("--out names a folder inside the repository, such as `checkpoints`")
         binds = cls.allowed_binds(request.get("binds") or [])
-        author = request.get("author") if isinstance(request.get("author"), dict) else {}
+        asked_author = request.get("author")
+        author: dict[str, Any] = asked_author if isinstance(asked_author, dict) else {}
         return {
             "id": job_id,
             "repo": request["repo"],
@@ -894,7 +897,7 @@ class NodeJob:
                     timespec="seconds"
                 )
             finished = record.get("finished") or record.get("submitted")
-            return (datetime.fromisoformat(finished) + KEEP_UNFETCHED).isoformat(timespec="seconds")
+            return (datetime.fromisoformat(str(finished)) + KEEP_UNFETCHED).isoformat(timespec="seconds")
         except (TypeError, ValueError):
             return None
 
