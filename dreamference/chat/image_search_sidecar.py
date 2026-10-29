@@ -31,7 +31,11 @@ from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
 IMAGE_SEARCH_CONTAINER_NAME: Final[str] = "dreamference-image-search"
 IMAGE_SEARCH_HOST_PORT: Final[int] = 8768
-IMAGE_SEARCH_SERVICE_IMAGE: Final[str] = "python:3-slim"
+# Python 3.14.7 slim, the multi-architecture index, pinned by digest: the Google service holds
+# the user's OAuth tokens. Bump it for a Python security release.
+IMAGE_SEARCH_SERVICE_IMAGE: Final[str] = (
+    "python:3-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4"
+)
 # One folder holds everything: the staged service, its secret and its store (`data/`), mounted as
 # the container's `/config` and owned by the user, so `ling web` can read the images it wrote.
 IMAGE_SEARCH_DATA_DIR: Final[str] = os.path.expanduser("~/.config/dreamference/image-search")

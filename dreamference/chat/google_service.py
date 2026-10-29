@@ -23,7 +23,11 @@ from typing import ClassVar, Final
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
 GOOGLE_CONTAINER_NAME: Final[str] = "dreamference-gmail"
-GOOGLE_SERVICE_IMAGE: Final[str] = "python:3-slim"
+# Python 3.14.7 slim, the multi-architecture index, pinned by digest: the Google service holds
+# the user's OAuth tokens. Bump it for a Python security release.
+GOOGLE_SERVICE_IMAGE: Final[str] = (
+    "python:3-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4"
+)
 GOOGLE_HOST_PORT: Final[int] = 8767
 RUNNING: Final[str] = "running"
 
