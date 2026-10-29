@@ -117,6 +117,8 @@ class ContinueRunner:
         code_bin = ContinueInstaller.get_vscode_executable()
         print(f"🚀 Launching VS Code with Continue extension ({self.config.model} + Tab Autocomplete)...")
         try:
+            if code_bin is None:
+                raise FileNotFoundError("VS Code CLI (`code` or `codium`) is not in PATH")
             return subprocess.call([code_bin, os.getcwd()])
         except Exception as e:
             print(f"❌ Failed to launch VS Code: {e}")

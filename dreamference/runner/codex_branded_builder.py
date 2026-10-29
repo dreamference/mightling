@@ -422,8 +422,11 @@ class CodexBrandedBuilder:
             ["git", "-c", "core.autocrlf=false", "-C", CODEX_SUBMODULE_DIR, "archive", commit, "codex-rs"],
             stdout=subprocess.PIPE,
         )
-        extracted = cls.extract_archive(archive.stdout, source_dir)
-        archive.stdout.close()
+        archive_stream = archive.stdout
+        if archive_stream is None:
+            raise RuntimeError("git archive was started with a pipe but has no stdout")
+        extracted = cls.extract_archive(archive_stream, source_dir)
+        archive_stream.close()
         if archive.wait() != 0 or not extracted:
             print(f"❌ Could not export codex {commit[:12]} from the submodule.")
             return False
@@ -726,7 +729,7 @@ class CodexBrandedBuilder:
         Args:
             handle: The open lock file. The lock is released when it is closed.
         """
-        if IS_WINDOWS:
+        if sys.platform.startswith("win"):
             import msvcrt
             import time
 

@@ -6,19 +6,6 @@
    "attr-defined": 4,
    "list-item": 2
   },
-  "dreamference/runner/cline_runner.py": {
-   "list-item": 1
-  },
-  "dreamference/runner/codex_branded_builder.py": {
-   "attr-defined": 2,
-   "union-attr": 1
-  },
-  "dreamference/runner/codex_test_runner.py": {
-   "union-attr": 2
-  },
-  "dreamference/runner/continue_runner.py": {
-   "list-item": 1
-  },
   "dreamference/vllm_server/diffusion_openai_service.py": {
    "assignment": 1,
    "misc": 1
@@ -37,5 +24,5 @@
   }
  },
  "mypy": "2.4.0",
- "total": 56
+ "total": 49
 }

@@ -189,7 +189,10 @@ class CodexTestRunner:
             return None
         with tarfile.open(archive) as tar:
             member = tar.getmember("cargo-nextest")
-            with tar.extractfile(member) as source, open(binary, "wb") as out:
+            source = tar.extractfile(member)
+            if source is None:
+                raise tarfile.ExtractError("cargo-nextest in the archive is not a regular file")
+            with source, open(binary, "wb") as out:
                 shutil.copyfileobj(source, out)
         os.chmod(binary, 0o755)
         os.remove(archive)

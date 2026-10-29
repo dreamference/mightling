@@ -104,6 +104,8 @@ class ClineRunner:
         code_bin = ClineInstaller.get_vscode_executable()
         print(f"\n🚀 Launching VS Code with Cline extension for {self.config.model}...")
         try:
+            if code_bin is None:
+                raise FileNotFoundError("VS Code CLI (`code` or `codium`) is not in PATH")
             return subprocess.call([code_bin, os.getcwd()])
         except Exception as e:
             print(f"❌ Failed to launch VS Code: {e}")
