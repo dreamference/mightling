@@ -169,33 +169,6 @@ class ForgeContainer:
         return result.returncode == 0 and result.stdout.strip() == RUNNING_TRUE
 
     @classmethod
-    def memory_used_bytes(cls) -> int | None:
-        """Measure the container's memory use now.
-
-        Returns:
-            int | None: The container's memory use now, or None when it is not running.
-        """
-        result = cls.docker(
-            ["stats", "--no-stream", "--format", "{{json .}}", cls.name], timeout=30
-        )
-        if result.returncode != 0:
-            return None
-        try:
-            used = (
-                json.loads(result.stdout.strip().splitlines()[0])["MemUsage"].split("/")[0].strip()
-            )
-        except (ValueError, IndexError, KeyError, AttributeError):
-            return None
-        units = {"KiB": 1024, "MiB": 1024**2, "GiB": 1024**3, "B": 1}
-        for suffix, factor in units.items():
-            if used.endswith(suffix):
-                try:
-                    return int(float(used[: -len(suffix)]) * factor)
-                except ValueError:
-                    return None
-        return None
-
-    @classmethod
     def forgejo(cls, arguments: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
         """Run the `forgejo` command inside the running container, as its own user.
 
