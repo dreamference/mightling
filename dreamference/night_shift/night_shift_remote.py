@@ -252,7 +252,7 @@ class NightShiftRemote:
             try:
                 request = json.loads(base64.urlsafe_b64decode(arguments[0].encode()))
                 reply = cls.accept(request)
-            except (ValueError, TypeError) as error:
+            except (ValueError, TypeError, RecursionError) as error:
                 print(json.dumps({"error": str(error)}))
                 return 2
             print(json.dumps(reply))

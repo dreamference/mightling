@@ -1234,6 +1234,7 @@ def test_the_node_refuses_a_malformed_task_and_answers_only_about_tasks_from_oth
     for change in ({"id": "../x"}, {"repo": "../etc"}, {"base": "HEAD"}, {"task": ""}, {"task": "x" * 20001},
                    {"test": ["x"]}, {}):
         assert NightShiftRemote.serve("night-submit", [encode(dict(good, **change))]) == 2, change
+    assert NightShiftRemote.serve("night-submit", [base64.urlsafe_b64encode(b"[" * 100_000).decode()]) == 2
     assert "was not pushed" in capsys.readouterr().out
     from dreamference.node import NodeJob
     monkeypatch.setattr(NodeJob, "sandbox_blocker", classmethod(lambda cls: "this node cannot sandbox a job (uid map)"))
