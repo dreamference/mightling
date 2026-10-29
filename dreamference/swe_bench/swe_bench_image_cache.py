@@ -86,13 +86,18 @@ class SweBenchImageCache:
         """When each cached image was last used by a run.
 
         Returns:
-            dict[str, float]: Image reference to Unix time; empty when there is no record.
+            dict[str, float]: Image reference to Unix time; empty when there is no record. An
+            entry that is not a time is left out.
         """
         try:
             record = json.loads(swe_bench_settings.IMAGE_CACHE_RECORD.read_text())
         except (OSError, ValueError):
             return {}
-        return {str(k): float(v) for k, v in record.items()} if isinstance(record, dict) else {}
+        times: dict[str, float] = {}
+        for image, when in record.items() if isinstance(record, dict) else []:
+            if isinstance(when, (int, float)) and not isinstance(when, bool):
+                times[str(image)] = float(when)
+        return times
 
     @classmethod
     def touch(cls, images: list[str]) -> None:

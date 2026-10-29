@@ -107,3 +107,9 @@ def test_an_indented_comment_in_a_cached_list_names_no_image(tmp_path):
     lists = tmp_path / "list.txt"
     lists.write_text("acme__widget-1\n    # acme__widget-2 is out\n")
     assert SweBenchImageCache.cached_images(settings(lists)) == {f"{REPO}:acme-widget-1"}
+
+
+def test_a_record_entry_that_is_not_a_time_is_left_out_not_a_traceback(disk):
+    swe_bench_settings.IMAGE_CACHE_RECORD.parent.mkdir(parents=True, exist_ok=True)
+    swe_bench_settings.IMAGE_CACHE_RECORD.write_text('{"a": 1.5, "b": null, "c": "soon"}')
+    assert SweBenchImageCache.last_used() == {"a": 1.5}
