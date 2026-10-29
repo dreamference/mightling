@@ -61,6 +61,10 @@ fn scratch(tag: &str) -> std::path::PathBuf {
 }
 
 fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubConfig)) -> Rig {
+    rig_with(tag, script, Box::new(move || airgapped), tweak)
+}
+
+fn rig_with(tag: &str, script: Script, airgap: Box<dyn Fn() -> bool + Send>, tweak: impl FnOnce(&mut HubConfig)) -> Rig {
     let dir = scratch(tag);
     let (agent, mut commands) = AgentHandle::channel();
     let log = Log::default();
@@ -157,7 +161,7 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
     let mut config = HubConfig::new(dir.clone());
     config.draft_interval = Duration::from_millis(10);
     tweak(&mut config);
-    let mut hub = Hub::new(config, agent, Box::new(move || airgapped));
+    let mut hub = Hub::new(config, agent, airgap);
     let (tg_tx, telegram) = mpsc::unbounded_channel();
     let (mx_tx, matrix) = mpsc::unbounded_channel();
     hub.add_adapter("telegram", tg_tx);
@@ -849,6 +853,35 @@ async fn no_file_is_offered_at_air_gap_on() {
     assert!(rig.log.params("madeFiles").is_empty());
     while let Ok(out) = rig.matrix.try_recv() {
         assert!(!matches!(out, Outbound::Approval { .. }), "{out:?}");
+    }
+}
+
+/// CHAT §3: the air gap is read at every message, not only once a minute, and again before an
+/// offered file leaves for an off-node messenger.
+#[tokio::test]
+async fn the_air_gap_is_read_at_every_message_and_before_a_file_is_sent() {
+    let gap = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let read = gap.clone();
+    let mut rig = rig_with("airgap-flip", default_script(), Box::new(move || read.load(std::sync::atomic::Ordering::SeqCst)), |_| {});
+    rig.inbound.send(text(CHAT, "make a report")).unwrap();
+    settle().await;
+    let items = json!([{ "type": "agentMessage", "id": "m", "text": "Done: report.md.", "phase": "final_answer" }]);
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": items } }))).unwrap();
+    let id = loop {
+        if let Outbound::Approval { id, .. } = next_settled(&mut rig.telegram).await {
+            break id;
+        }
+    };
+    gap.store(true, std::sync::atomic::Ordering::SeqCst);
+    rig.inbound.send(text(CHAT, "and another")).unwrap();
+    let notice = next_settled(&mut rig.telegram).await;
+    assert!(matches!(notice, Outbound::Notice { ref text, .. } if text.contains("air gap is on")), "{notice:?}");
+    rig.inbound.send(Inbound::Answer { chat: CHAT.into(), approval: id, choice: 0 }).unwrap();
+    settle().await;
+    assert_eq!(rig.log.params("turn/start").len(), 1, "nothing relayed with the gap on");
+    assert!(rig.log.params("madeFile").is_empty(), "no file leaves with the gap on");
+    while let Ok(out) = rig.telegram.try_recv() {
+        assert!(!matches!(out, Outbound::File { .. }), "{out:?}");
     }
 }
 
