@@ -2176,7 +2176,8 @@ class VLLMServerManager:
         loading_status = None
         if not healthy:
             import subprocess
-            port = self.host.split(":")[-1] if ":" in self.host else "8000"
+            from urllib.parse import urlparse
+            port = urlparse(self.host).port or 8000
             container_name = f"dreamference-vllm-{port}"
             try:
                 res = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", container_name], capture_output=True, text=True)

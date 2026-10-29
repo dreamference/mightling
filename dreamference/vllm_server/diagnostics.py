@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 from typing import Optional
+from urllib.parse import urlparse
 
 class ContainerDiagnostics:
     """
@@ -18,7 +19,7 @@ class ContainerDiagnostics:
             return None
         try:
             # Extract port from host for container name
-            port = self.host.split(":")[-1] if ":" in self.host else "8000"
+            port = urlparse(self.host).port or 8000
             container_name = f"dreamference-vllm-{port}"
             result = subprocess.run(
                 ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}|{{.CPUPerc}}|{{.BlockIO}}", container_name],

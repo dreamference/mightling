@@ -125,6 +125,34 @@ def test_a_repeated_earlyoom_flag_is_read_as_earlyoom_reads_it(argv, fault):
         assert result is not None and fault in result
 
 
+def _docker_targets(monkeypatch, module):
+    """Records the container each docker command names, and answers as if none were running."""
+    import subprocess
+
+    targets = []
+
+    def run(argv, *args, **kwargs):
+        targets.extend(arg for arg in argv if arg.startswith("dreamference-vllm-"))
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/" + name, raising=False)
+    return targets
+
+
+@pytest.mark.parametrize("host", ["http://localhost", "http://localhost:8000/"])
+def test_the_container_name_comes_from_the_port_of_any_host_url(monkeypatch, host):
+    from dreamference.vllm_server import diagnostics
+
+    # One subprocess module serves both callers, so the one patch covers the manager too.
+    targets = _docker_targets(monkeypatch, diagnostics)
+    diagnostics.ContainerDiagnostics(host).get_diagnostics_line()
+    mgr = VLLMServerManager(host=host)
+    monkeypatch.setattr(mgr, "check_health", lambda: False)
+    mgr.get_server_status()
+    assert targets and set(targets) == {"dreamference-vllm-8000"}
+
+
 class _FakeWatchdog:
     def __init__(self, container, on_trip):
         self.stopped = False
