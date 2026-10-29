@@ -138,6 +138,19 @@ def test_a_stray_line_in_app_ini_does_not_cost_the_secrets(tmp_path):
     assert ForgeAppIni.read_secrets(tmp_path) == secrets
 
 
+def test_a_forge_systemd_would_not_stop_is_not_reported_off(monkeypatch, capsys):
+    # The container would still be published on the LAN.
+    monkeypatch.setattr(
+        ForgeService,
+        "systemctl",
+        classmethod(lambda cls, *a: subprocess.CompletedProcess(a, 1, "", "Job timed out")),
+    )
+    monkeypatch.setattr(ForgeService, "advertise", classmethod(lambda cls, role: None))
+    assert ForgeService.off() == 1
+    out = capsys.readouterr().out
+    assert "✅" not in out and "Job timed out" in out
+
+
 def test_secrets_are_private_and_the_role_is_kept():
     path = ForgeSettings.write_secret("owner-password", "x" * 24)
     assert oct(path.stat().st_mode & 0o777) == "0o600"
