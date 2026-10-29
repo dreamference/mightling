@@ -188,8 +188,19 @@ pub fn unit_text(ling: &Path) -> String {
          \n\
          [Install]\n\
          WantedBy=default.target\n",
-        ling.display()
+        exec_path(ling)
     )
+}
+
+/// A path as one ExecStart word: `%` and `$` doubled so systemd does not expand them, and quoted
+/// when it holds a space, a quote or a backslash, which systemd would otherwise split or read.
+fn exec_path(path: &Path) -> String {
+    let path = path.display().to_string().replace('%', "%%").replace('$', "$$");
+    if path.chars().any(|c| c.is_whitespace() || c == '"' || c == '\'' || c == '\\') {
+        format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        path
+    }
 }
 
 fn systemctl(args: &[&str]) -> Result<(), String> {
@@ -571,6 +582,14 @@ mod tests {
         assert_eq!(host_of("http://gx10-1a2b.local:8000"), "gx10-1a2b.local");
         assert_eq!(host_of("http://[fd00::5]:8000/v1"), "fd00::5");
         assert_eq!(host_of("gx10.local"), "gx10.local");
+    }
+
+    #[test]
+    fn the_unit_quotes_a_binary_path_with_spaces() {
+        // systemd splits ExecStart on spaces and expands `%` and `$`.
+        let text = unit_text(Path::new("/home/u/My Tools/100%/ling"));
+        assert!(text.contains("ExecStart=\"/home/u/My Tools/100%%/ling\" sync agent\n"), "{text}");
+        assert!(unit_text(Path::new("/x/$HOME/ling")).contains("ExecStart=/x/$$HOME/ling sync agent\n"));
     }
 
     #[test]

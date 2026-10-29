@@ -91,8 +91,19 @@ pub fn unit_text(ling: &Path) -> String {
          \n\
          [Install]\n\
          WantedBy=default.target\n",
-        ling.display()
+        exec_path(ling)
     )
+}
+
+/// A path as one ExecStart word: `%` and `$` doubled so systemd does not expand them, and quoted
+/// when it holds a space, a quote or a backslash, which systemd would otherwise split or read.
+fn exec_path(path: &Path) -> String {
+    let path = path.display().to_string().replace('%', "%%").replace('$', "$$");
+    if path.chars().any(|c| c.is_whitespace() || c == '"' || c == '\'' || c == '\\') {
+        format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        path
+    }
 }
 
 fn systemctl(args: &[&str]) -> Result<(), String> {
@@ -692,6 +703,14 @@ async fn discord_off(dir: &Path) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_unit_quotes_a_binary_path_with_spaces() {
+        // systemd splits ExecStart on spaces and expands `%` and `$`.
+        let text = unit_text(Path::new("/home/u/My Tools/100%/ling"));
+        assert!(text.contains("ExecStart=\"/home/u/My Tools/100%%/ling\" chat serve\n"), "{text}");
+        assert!(unit_text(Path::new("/x/$HOME/ling")).contains("ExecStart=/x/$$HOME/ling chat serve\n"));
+    }
 
     #[test]
     fn the_unit_runs_the_bridge_after_the_web_server() {
