@@ -2540,12 +2540,22 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
 
     let (created_new_worktree, candidate_thread, candidate_worktree_dir, candidate_branch) =
         if let Some(existing) = &existing_snapshot {
+            // A checkout opened while the repository was read-only has no branch: it gets its
+            // `phone/<thread>` once the repository is writable, or push, PR and merge refuse it.
             let branch = if forge_repo.read_only {
                 None
             } else {
-                existing.branch.clone()
+                existing.branch.clone().or_else(|| Some(format!("phone/{}", existing.thread)))
             };
             let wt_dir = PathBuf::from(&existing.dir);
+            if let (true, None, Some(name)) = (wt_dir.join(".git").exists(), &existing.branch, &branch) {
+                let on = run_git_checked(&server, Some(&wt_dir), &["symbolic-ref", "-q", "--short", "HEAD"], false).await;
+                if !on.is_ok_and(|out| out.trim() == name.as_str())
+                    && let Err(err) = run_git_checked(&server, Some(&wt_dir), &["checkout", "-b", name], false).await
+                {
+                    return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }));
+                }
+            }
             if !wt_dir.join(".git").exists() {
                 if let Err(err) = ensure_worktree(
                     &server,
@@ -2607,6 +2617,8 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
                 item.base = forge_repo.default_branch.clone();
                 if forge_repo.read_only {
                     item.branch = None;
+                } else if item.branch.is_none() && item.dir == candidate_dir_str {
+                    item.branch = candidate_branch.clone();
                 }
                 let rec = item.clone();
                 match save_index(&server.config.codex_home, &records) {
@@ -2625,6 +2637,8 @@ async fn open_repo(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
             item.base = forge_repo.default_branch.clone();
             if forge_repo.read_only {
                 item.branch = None;
+            } else if item.branch.is_none() && item.dir == candidate_dir_str {
+                item.branch = candidate_branch.clone();
             }
             let winner = item.clone();
             match save_index(&server.config.codex_home, &records) {
@@ -5315,7 +5329,7 @@ mod tests {
     }
 
     struct FakeForge {
-        repos: Value,
+        repos: Mutex<Value>,
         pulls: Mutex<Vec<FakePull>>,
         statuses: Mutex<HashMap<String, (String, u64)>>,
         default_mergeable: AtomicBool,
@@ -5325,7 +5339,7 @@ mod tests {
     impl FakeForge {
         fn new(repos: Value) -> Arc<Self> {
             Arc::new(Self {
-                repos,
+                repos: Mutex::new(repos),
                 pulls: Mutex::new(Vec::new()),
                 statuses: Mutex::new(HashMap::new()),
                 default_mergeable: AtomicBool::new(true),
@@ -5397,7 +5411,7 @@ mod tests {
                         let page = q.get("page").and_then(|p| p.parse::<usize>().ok()).unwrap_or(1);
                         st.record("GET", &format!("/api/v1/repos/search?page={page}"), Value::Null);
                         let body = if page == 1 {
-                            json!({ "ok": true, "data": st.repos })
+                            json!({ "ok": true, "data": *st.repos.lock().unwrap() })
                         } else {
                             json!({ "ok": true, "data": [] })
                         };
@@ -8615,6 +8629,43 @@ mod tests {
         let (st, _, body) = post_json(&server, &cookie, "/api/repos/off", json!({ "bridge": "signal", "chat": "signal:+1555" })).await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(server.chat_repos.current_repo(&server.config.codex_home, "signal:+1555"), None, "/off cleared what /open set");
+    }
+
+    #[tokio::test]
+    async fn a_read_only_checkout_gets_its_phone_branch_once_the_repo_is_writable() {
+        let s = scratch("ro-to-rw");
+        let bare = make_bare_repo(&s.dir, "org/rorepo");
+        let listing = |push: bool| {
+            json!([{
+                "full_name": "org/rorepo",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": push, "admin": false },
+                "clone_url": format!("file://{}", bare.display()),
+            }])
+        };
+        let (forge_url, forge, _forge_task) = start_fake_forge_with_state(listing(false)).await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+        let open = json!({ "repo": "org/rorepo", "bridge": "signal", "chat": "c1" });
+        let (st, opened, body) = post_json(&server, &cookie, "/api/repos/open", open.clone()).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(opened["read_only"], true);
+        assert!(opened["branch"].is_null());
+        let thread = opened["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(opened["cwd"].as_str().unwrap());
+
+        *forge.repos.lock().unwrap() = listing(true);
+        server.chat_repos.invalidate_listing_cache().await;
+        let (st, again, body) = post_json(&server, &cookie, "/api/repos/open", open).await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(again["thread"], json!(thread));
+        assert_eq!(again["read_only"], false);
+        assert_eq!(again["branch"], json!(format!("phone/{thread}")), "{again}");
+        assert_eq!(git_stdout(&wt, &["symbolic-ref", "--short", "HEAD"]).trim(), format!("phone/{thread}"));
     }
 
     #[tokio::test]
