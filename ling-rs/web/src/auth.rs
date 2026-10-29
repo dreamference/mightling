@@ -85,35 +85,58 @@ pub fn private_dir(path: &Path) -> std::io::Result<()> {
 
 /// Writes a file readable only by the user, replacing it whole.
 pub fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        private_dir(parent)?;
-    }
-    // Unique per call: two threads of one server may write the same file at once.
-    let staging = path.with_extension(format!("tmp-{}-{}", std::process::id(), random_hex(4)));
-    {
-        #[cfg(unix)]
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        options.mode(0o600);
-        use std::io::Write;
-        let mut file = options.open(&staging)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-    }
+    let staging = stage_private(path, text)?;
     std::fs::rename(&staging, path)
 }
 
-/// The owner token, created on first use.
+/// `text` in a private file beside `path`, under a name unique to this call: two threads of one
+/// server may write the same file at once.
+fn stage_private(path: &Path, text: &str) -> std::io::Result<PathBuf> {
+    if let Some(parent) = path.parent() {
+        private_dir(parent)?;
+    }
+    let staging = path.with_extension(format!("tmp-{}-{}", std::process::id(), random_hex(4)));
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    use std::io::Write;
+    let mut file = options.open(&staging)?;
+    file.write_all(text.as_bytes())?;
+    file.sync_all()?;
+    Ok(staging)
+}
+
+/// The owner token, created on first use. Callers creating it at once all get the first one
+/// published: it is linked into place, which fails when another caller's is already there.
 pub fn owner_token(state: &Path) -> std::io::Result<String> {
     let path = state.join("token");
-    match std::fs::read_to_string(&path) {
-        Ok(text) if !text.trim().is_empty() => Ok(text.trim().to_string()),
-        _ => {
-            let token = random_hex(32);
-            write_private(&path, &token)?;
+    if let Ok(text) = std::fs::read_to_string(&path)
+        && !text.trim().is_empty()
+    {
+        return Ok(text.trim().to_string());
+    }
+    let token = random_hex(32);
+    let staging = stage_private(&path, &token)?;
+    let linked = std::fs::hard_link(&staging, &path);
+    match linked {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&staging);
             Ok(token)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => match std::fs::read_to_string(&path) {
+            Ok(text) if !text.trim().is_empty() => {
+                let _ = std::fs::remove_file(&staging);
+                Ok(text.trim().to_string())
+            }
+            // An empty file (an earlier write cut short) is replaced.
+            _ => std::fs::rename(&staging, &path).map(|()| token),
+        },
+        Err(err) => {
+            let _ = std::fs::remove_file(&staging);
+            Err(err)
         }
     }
 }
@@ -433,6 +456,28 @@ mod tests {
         {
             assert_eq!(mode(&state.join("token")), 0o600);
             assert_eq!(mode(&state), 0o700);
+        }
+    }
+
+    /// Processes starting at once (the server, `ling web open`, a bridge) all get the one token.
+    #[test]
+    fn callers_creating_the_owner_token_at_once_get_the_same_one() {
+        for round in 0..20 {
+            let state = scratch(&format!("token-race-{round}"));
+            let start = std::sync::Arc::new(std::sync::Barrier::new(8));
+            let callers: Vec<_> = (0..8)
+                .map(|_| {
+                    let (state, start) = (state.clone(), start.clone());
+                    std::thread::spawn(move || {
+                        start.wait();
+                        owner_token(&state).unwrap()
+                    })
+                })
+                .collect();
+            let tokens: BTreeSet<String> = callers.into_iter().map(|caller| caller.join().unwrap()).collect();
+            assert_eq!(tokens.len(), 1, "round {round}: {tokens:?}");
+            assert_eq!(std::fs::read_to_string(state.join("token")).unwrap().trim(), tokens.first().unwrap());
+            let _ = std::fs::remove_dir_all(&state);
         }
     }
 
