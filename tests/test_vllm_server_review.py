@@ -192,3 +192,15 @@ def test_a_port_that_does_not_speak_http_has_no_gate(monkeypatch, error):
 
     monkeypatch.setattr("urllib.request.urlopen", broken)
     assert ModelGate.probe("http://127.0.0.1:8000") is None
+
+
+def test_the_diffusion_sidecar_answers_a_body_that_is_not_an_object_with_400():
+    import requests
+    from test_diffusion_server import _serve, _StubRunner
+
+    server, base = _serve(_StubRunner())
+    try:
+        resp = requests.post(f"{base}/v1/completions", data=b"[1]", timeout=5)
+        assert resp.status_code == 400
+    finally:
+        server.shutdown()
