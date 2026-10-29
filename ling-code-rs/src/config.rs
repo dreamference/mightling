@@ -160,3 +160,95 @@ pub fn is_trusted_in(codex_home: &Path, root: &Path) -> bool {
             && entry.get("trust_level").and_then(toml::Value::as_str) == Some("trusted")
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layers_parse_handles_case_whitespace_and_unknown_values() {
+        assert_eq!(Layers::parse("all"), Some(Layers::All));
+        assert_eq!(Layers::parse("  EXACT\n"), Some(Layers::Exact));
+        assert_eq!(Layers::parse("both"), None);
+        assert_eq!(Layers::parse(""), None);
+        let mut s = Settings::default();
+        assert!(!s.exact_only());
+        s.layers = Layers::Exact;
+        assert!(s.exact_only());
+    }
+
+    #[test]
+    fn settings_read_file_parses_fields_and_clamps_row_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("dreamference.toml");
+        std::fs::write(
+            &file,
+            r#"
+vllm_host = "http://127.0.0.1:9000/"
+code_index_scan_max_files = 500
+code_index_scan_max_bytes = 1048576
+code_index_row_limit = 999
+code_index_max_files = 10000
+code_index_memory_ceiling_mb = 8192
+code_index_small_ceiling_mb = 2048
+code_index_min_interval_s = 120
+code_index_stale_commits = 5
+code_index_submodule_max_files = 300
+mightling_code_semantic = true
+code_index_enabled = false
+mightling_code_layers = "exact"
+"#,
+        )
+        .unwrap();
+        let mut s = Settings { config_path: Some(file.clone()), ..Settings::default() };
+        s.read_file();
+        if std::env::var_os("DREAMFERENCE_VLLM_HOST").is_none() {
+            assert_eq!(s.vllm_host, "http://127.0.0.1:9000");
+        }
+        assert_eq!(s.scan_max_files, 500);
+        assert_eq!(s.scan_max_bytes, 1_048_576);
+        assert_eq!(s.row_limit, 200, "clamped to 200");
+        assert_eq!(s.max_files, 10_000);
+        assert_eq!(s.memory_ceiling_mb, 8192);
+        assert_eq!(s.small_ceiling_mb, 2048);
+        assert_eq!(s.min_interval_s, 120);
+        assert_eq!(s.stale_commits, 5);
+        assert_eq!(s.submodule_max_files, 300);
+        assert!(s.semantic);
+        assert!(!s.enabled);
+        assert_eq!(s.layers, Layers::Exact);
+
+        std::fs::write(&file, "code_index_row_limit = 0\ncode_index_memory_ceiling_mb = -5\n").unwrap();
+        let mut s2 = Settings { config_path: Some(file), ..Settings::default() };
+        s2.read_file();
+        assert_eq!(s2.row_limit, 1, "clamped to 1");
+        assert_eq!(s2.memory_ceiling_mb, Settings::default().memory_ceiling_mb, "negative values are ignored");
+    }
+
+    #[test]
+    fn is_trusted_in_requires_matching_canonical_path_and_trusted_level() {
+        let dir = tempfile::tempdir().unwrap();
+        let codex = dir.path().join("codex");
+        let repo = dir.path().join("repo");
+        let link = dir.path().join("repo-link");
+        let untrusted = dir.path().join("untrusted");
+        std::fs::create_dir_all(&codex).unwrap();
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(&untrusted).unwrap();
+        std::os::unix::fs::symlink(&repo, &link).unwrap();
+
+        assert!(!is_trusted_in(&codex, &repo), "missing config.toml");
+
+        let config = format!(
+            "[projects.{:?}]\ntrust_level = \"trusted\"\n[projects.{:?}]\ntrust_level = \"untrusted\"\n",
+            repo.to_string_lossy(),
+            untrusted.to_string_lossy()
+        );
+        std::fs::write(codex.join("config.toml"), config).unwrap();
+
+        assert!(is_trusted_in(&codex, &repo));
+        assert!(is_trusted_in(&codex, &link), "symlink resolves to canonical trusted root");
+        assert!(!is_trusted_in(&codex, &untrusted));
+        assert!(!is_trusted_in(&codex, &dir.path().join("other")));
+    }
+}

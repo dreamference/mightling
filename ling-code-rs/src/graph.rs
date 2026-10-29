@@ -304,3 +304,156 @@ fn fts_query(text: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_schema(conn: &Connection) {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE store_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+            CREATE TABLE edges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project TEXT NOT NULL,
+                source_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                properties TEXT DEFAULT '{}',
+                UNIQUE(project, source_id, target_id, type)
+            );
+            CREATE TABLE file_hashes (
+                project TEXT NOT NULL,
+                rel_path TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                mtime_ns INTEGER NOT NULL DEFAULT 0,
+                size INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (project, rel_path)
+            );
+            CREATE TABLE index_coverage (
+                project TEXT NOT NULL,
+                rel_path TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                files INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (project, rel_path)
+            );
+            CREATE TABLE nodes (
+                id INTEGER PRIMARY KEY,
+                project TEXT NOT NULL,
+                label TEXT NOT NULL,
+                name TEXT NOT NULL,
+                qualified_name TEXT NOT NULL,
+                file_path TEXT DEFAULT '',
+                start_line INTEGER DEFAULT 0,
+                end_line INTEGER DEFAULT 0,
+                properties TEXT DEFAULT '{}',
+                UNIQUE(project, qualified_name)
+            );
+            CREATE VIRTUAL TABLE nodes_fts USING fts5(
+                name, qualified_name, file_path,
+                content='nodes', content_rowid='id',
+                tokenize='unicode61'
+            );
+            CREATE TABLE projects (
+                name TEXT PRIMARY KEY,
+                root_path TEXT NOT NULL,
+                indexed_at TEXT NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn project_name_node_display_and_fts_query_normalize_identifiers() {
+        assert_eq!(project_name(Path::new("/a/b--c/d")), "a-b-c-d");
+        let n = Node {
+            id: 1,
+            label: "Function".into(),
+            name: "run".into(),
+            qualified_name: "a-b.pkg.run".into(),
+            file_path: "src/lib.rs".into(),
+            start_line: 10,
+            end_line: 20,
+        };
+        assert_eq!(n.display("a-b"), "pkg.run");
+        assert_eq!(n.display("other"), "a-b.pkg.run");
+        assert_eq!(fts_query("  foo_bar::baz(\"qux\") "), "\"foo_bar\"* \"baz\"* \"qux\"*");
+        assert_eq!(fts_query("..."), "");
+    }
+
+    #[test]
+    fn graph_store_queries_nodes_edges_outline_enclosing_and_coverage() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("custom.db");
+        let conn = Connection::open(&db_path).unwrap();
+        create_schema(&conn);
+        let proj = project_name(dir.path());
+        conn.execute("INSERT INTO store_meta VALUES ('mutation_gen', 'gen-7')", []).unwrap();
+        conn.execute("INSERT INTO projects VALUES (?1, ?2, '2026-10-28T00:00:00Z')", params![&proj, dir.path().to_string_lossy()]).unwrap();
+        conn.execute(
+            "INSERT INTO nodes VALUES (1, ?1, 'Function', 'caller', ?2, 'src/lib.rs', 5, 25, '{}')",
+            params![&proj, format!("{proj}.src.caller")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO nodes VALUES (2, ?1, 'Function', 'callee', ?2, 'src/lib.rs', 30, 40, '{}')",
+            params![&proj, format!("{proj}.src.callee")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO nodes VALUES (3, ?1, 'Variable', 'local_var', ?2, 'src/lib.rs', 8, 8, '{}')",
+            params![&proj, format!("{proj}.src.local_var")],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')", []).unwrap();
+        conn.execute(
+            "INSERT INTO edges VALUES (1, ?1, 1, 2, 'CALLS', '{\"line\": 12, \"candidates\": 2}')",
+            params![&proj],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO file_hashes VALUES (?1, 'src/lib.rs', 'abc', 100, 50), (?1, '.codebase-memory/graph.db', 'ign', 1, 1)",
+            params![&proj],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO index_coverage VALUES (?1, 'vendor', 'not_indexed_dir', 'ignored', 10)",
+            params![&proj],
+        )
+        .unwrap();
+
+        assert_eq!(find_by_root(dir.path(), dir.path()), Some((db_path.clone(), proj.clone())));
+
+        let store = GraphStore { conn, project: proj, path: db_path };
+        assert_eq!(store.mutation_gen(), "gen-7");
+        assert_eq!(store.indexed_at(), "2026-10-28T00:00:00Z");
+        assert_eq!(store.candidates(&["callee".into()]).unwrap().len(), 1);
+        assert_eq!(store.candidates(&["src".into(), "callee".into()]).unwrap().len(), 1);
+        assert!(store.candidates(&["other".into(), "callee".into()]).unwrap().is_empty());
+
+        let incoming = store.incoming(2, &["CALLS"]).unwrap();
+        assert_eq!(incoming.len(), 1);
+        assert_eq!((incoming[0].other.name.as_str(), incoming[0].line, incoming[0].candidates), ("caller", Some(12), 2));
+
+        let outgoing = store.outgoing(1, &["CALLS"]).unwrap();
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(outgoing[0].other.name, "callee");
+
+        let outline = store.outline("src/lib.rs").unwrap();
+        assert_eq!(outline.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), vec!["caller", "callee"], "Variable excluded from outline");
+
+        assert_eq!(store.enclosing("src/lib.rs", 12).unwrap().unwrap().name, "caller");
+        assert!(store.enclosing("src/lib.rs", 1).unwrap().is_none());
+
+        assert_eq!(store.search("call", 10).unwrap().len(), 2);
+        assert!(store.search("   ", 10).unwrap().is_empty());
+
+        let hashes = store.file_hashes().unwrap();
+        assert_eq!(hashes.len(), 1);
+        assert!(hashes.contains_key("src/lib.rs"));
+
+        assert_eq!(store.not_indexed().unwrap(), BTreeSet::from(["vendor".to_string()]));
+    }
+}

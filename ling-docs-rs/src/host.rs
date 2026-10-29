@@ -483,4 +483,33 @@ mod tests {
         assert_eq!(SLICE, "mightling-index.slice");
         assert!(SystemdHost.lock_dir().ends_with("mightling-index"));
     }
+
+    #[test]
+    fn ceilings_default_earlyoom_reserve_and_over_cap_scopes_behave_safely() {
+        struct NoEarlyOomHost(FakeHost);
+        impl Host for NoEarlyOomHost {
+            fn mem_available(&self) -> u64 { self.0.mem_available() }
+            fn mem_total(&self) -> u64 { self.0.mem_total() }
+            fn earlyoom_percent(&self) -> Option<f64> { None }
+            fn live_scopes(&self) -> Vec<LiveScope> { self.0.live_scopes() }
+            fn set_slice_limits(&self, m: u64) -> Result<()> { self.0.set_slice_limits(m) }
+            fn can_create_scopes(&self) -> bool { true }
+            fn start_scope(&self, u: &str, c: u64, a: &[String], l: &Path) -> Result<Child> { self.0.start_scope(u, c, a, l) }
+            fn freeze(&self, u: &str) -> Result<()> { self.0.freeze(u) }
+            fn thaw(&self, u: &str) -> Result<()> { self.0.thaw(u) }
+            fn stop(&self, u: &str) -> Result<()> { self.0.stop(u) }
+            fn lock_dir(&self) -> PathBuf { self.0.lock_dir() }
+        }
+        assert_eq!((Kind::Extract.ceiling(), Kind::Embed.ceiling(), Kind::Ocr.ceiling()), (GIB, 2 * GIB, 2 * GIB));
+        assert_eq!((need(Kind::Extract, 0), need(Kind::Embed, 0), need(Kind::Ocr, 0)), (256 * MIB, 1536 * MIB, GIB));
+        assert_eq!(need(Kind::Ocr, 5000), 2 * GIB);
+
+        let dir = tempfile::tempdir().unwrap();
+        let host = NoEarlyOomHost(FakeHost::new(dir.path(), 50));
+        let r = reserve(&host);
+        assert!(r > 10 * GIB && r < 11 * GIB);
+        host.0.scopes.lock().unwrap().push(LiveScope { unit: "over".into(), cap: GIB, current: 2 * GIB });
+        let admitted = admit(&host, need(Kind::Ocr, 0), Kind::Ocr.ceiling()).unwrap().unwrap();
+        assert_eq!(admitted.cap, 2 * GIB);
+    }
 }

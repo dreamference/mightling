@@ -271,3 +271,107 @@ fn is_same(path: &Path, meta: &std::fs::Metadata, stamp: Option<&FileStamp>) -> 
     }
     sha256_file(path).as_deref() == Some(stamp.sha256.as_str())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_repo(dir: &Path, is_git: bool) -> Repo {
+        Repo {
+            root: dir.to_path_buf(),
+            main_root: dir.to_path_buf(),
+            is_git,
+        }
+    }
+
+    #[test]
+    fn stat_layer_changes_detects_modified_deleted_scoped_and_excluded_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = test_repo(dir.path(), false);
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::create_dir_all(dir.path().join("other")).unwrap();
+        let keep = dir.path().join("src/keep.rs");
+        let edit = dir.path().join("src/edit.rs");
+        let gone = dir.path().join("src/gone.rs");
+        let out = dir.path().join("other/out.rs");
+        for (p, body) in [(&keep, "fn a() {}\n"), (&edit, "fn b() {}\n"), (&gone, "fn c() {}\n"), (&out, "fn d() {}\n")] {
+            std::fs::write(p, body).unwrap();
+        }
+        let mut stamps = HashMap::new();
+        for rel in ["src/keep.rs", "src/edit.rs", "src/gone.rs", "other/out.rs"] {
+            stamps.insert(rel.to_string(), FileStamp::of(&repo.abs(rel)).unwrap());
+        }
+        std::fs::write(&edit, "fn b() { 1 }\n").unwrap();
+        std::fs::remove_file(&gone).unwrap();
+        std::fs::write(&out, "fn d() { 2 }\n").unwrap();
+
+        let mut git = GitView::new(&repo);
+        let cs = layer_changes(&repo, &mut git, None, &[], &stamps, Some("src/"), &|p| p.ends_with("ignored.rs"));
+        assert_eq!(cs.method, Method::Stat);
+        assert!(cs.is_fresh("src/keep.rs"));
+        assert!(!cs.is_fresh("src/edit.rs"));
+        assert!(!cs.is_fresh("src/gone.rs"));
+        assert_eq!(cs.changed, BTreeSet::from(["src/edit.rs".to_string()]));
+        assert_eq!(cs.deleted, BTreeSet::from(["src/gone.rs".to_string()]));
+    }
+
+    #[test]
+    fn is_same_falls_back_to_sha256_when_mtime_differs_but_size_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.rs");
+        std::fs::write(&file, "const X: i32 = 1;\n").unwrap();
+        let mut stamp = FileStamp::of(&file).unwrap();
+        let meta = std::fs::metadata(&file).unwrap();
+        assert!(is_same(&file, &meta, Some(&stamp)));
+
+        // Different mtime, identical content and size: still matches via SHA-256 fallback.
+        stamp.mtime_ns = stamp.mtime_ns.wrapping_add(1_000_000);
+        assert!(is_same(&file, &meta, Some(&stamp)));
+
+        // Different content of the same byte length with shifted mtime: detected by SHA-256.
+        std::fs::write(&file, "const X: i32 = 2;\n").unwrap();
+        let meta2 = std::fs::metadata(&file).unwrap();
+        stamp.mtime_ns = mtime_ns(&meta2).wrapping_add(1_000_000);
+        assert!(!is_same(&file, &meta2, Some(&stamp)));
+        assert!(!is_same(&file, &meta2, None));
+    }
+
+    #[test]
+    fn git_layer_changes_uses_git_diff_status_and_dirty_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = |args: &[&str]| {
+            assert!(std::process::Command::new("git").current_dir(dir.path()).args(args).status().unwrap().success());
+        };
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "test@example.local"]);
+        run(&["config", "user.name", "test"]);
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn b() {}\n").unwrap();
+        run(&["add", "a.rs", "b.rs"]);
+        run(&["commit", "-q", "-m", "init"]);
+
+        let repo = Repo { root: dir.path().to_path_buf(), main_root: dir.path().to_path_buf(), is_git: true };
+        let mut stamps = HashMap::new();
+        stamps.insert("a.rs".into(), FileStamp::of(&repo.abs("a.rs")).unwrap());
+        stamps.insert("b.rs".into(), FileStamp::of(&repo.abs("b.rs")).unwrap());
+
+        let commit = git(&repo.root, &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        let mut git_view = GitView::with_included(&repo, Vec::new());
+        let fresh = layer_changes(&repo, &mut git_view, Some(&commit), &[], &stamps, None, &|_| false);
+        assert_eq!(fresh.method, Method::Git);
+        assert!(fresh.is_fresh("a.rs") && fresh.is_fresh("b.rs"));
+
+        // Modify a tracked file and add an untracked file.
+        std::fs::write(dir.path().join("a.rs"), "fn a() { 42 }\n").unwrap();
+        std::fs::write(dir.path().join("new.rs"), "fn n() {}\n").unwrap();
+        let mut git_view = GitView::with_included(&repo, Vec::new());
+        let dirty = layer_changes(&repo, &mut git_view, Some(&commit), &[], &stamps, None, &|_| false);
+        assert_eq!(dirty.method, Method::Git);
+        assert_eq!(dirty.changed, BTreeSet::from(["a.rs".into(), "new.rs".into()]));
+        assert!(dirty.deleted.is_empty());
+
+        // Unknown commit falls back to Method::Stat.
+        let fallback = layer_changes(&repo, &mut git_view, Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), &[], &stamps, None, &|_| false);
+        assert_eq!(fallback.method, Method::Stat);
+    }
+}

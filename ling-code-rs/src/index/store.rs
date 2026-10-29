@@ -106,3 +106,53 @@ pub fn record_outcome(repo: &Repo, indexer: &str, root: &str, status: &str, upda
     update(entry);
     manifest.save(&dir)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slug_and_key_format_root_names() {
+        assert_eq!(slug("rust-analyzer", ""), "rust-analyzer-root");
+        assert_eq!(slug("scip-python", "pkg/sub dir"), "scip-python-pkg-sub-dir");
+        assert_eq!(key("scip-python", "pkg"), "scip-python:pkg");
+    }
+
+    #[test]
+    fn stamp_root_walks_non_git_tree_skipping_hidden_target_and_node_modules() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo { root: dir.path().to_path_buf(), main_root: dir.path().to_path_buf(), is_git: false };
+        for d in ["src", ".git", "target/debug", "node_modules/pkg"] {
+            std::fs::create_dir_all(dir.path().join(d)).unwrap();
+        }
+        std::fs::write(dir.path().join("src/lib.rs"), "pub fn a() {}\n").unwrap();
+        std::fs::write(dir.path().join(".hidden"), "x").unwrap();
+        std::fs::write(dir.path().join("target/debug/out"), "x").unwrap();
+        std::fs::write(dir.path().join("node_modules/pkg/index.js"), "x").unwrap();
+
+        let stamps = stamp_root(&repo, "");
+        assert_eq!(stamps.keys().cloned().collect::<Vec<_>>(), vec!["src/lib.rs".to_string()]);
+    }
+
+    #[test]
+    fn record_outcome_initializes_and_preserves_previous_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo { root: dir.path().to_path_buf(), main_root: dir.path().to_path_buf(), is_git: false };
+        record_outcome(&repo, "scip-python", "pkg", "ok", |e| {
+            e.commit = Some("abc123".into());
+            e.store = "scip-python-pkg.db".into();
+        })
+        .unwrap();
+        record_outcome(&repo, "scip-python", "pkg", "deferred: memory", |e| {
+            e.peak_rss_mb = 512;
+        })
+        .unwrap();
+        let manifest = Manifest::load(&repo.scip_dir());
+        let entry = &manifest.runs["scip-python:pkg"];
+        assert_eq!(entry.status, "deferred: memory");
+        assert_eq!(entry.commit.as_deref(), Some("abc123"), "last good commit preserved");
+        assert_eq!(entry.store, "scip-python-pkg.db", "last good store preserved");
+        assert_eq!(entry.path_prefix, "pkg/");
+        assert_eq!(entry.peak_rss_mb, 512);
+    }
+}

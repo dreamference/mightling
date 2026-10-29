@@ -202,3 +202,45 @@ pub fn disk_use(path: &Path) -> u64 {
         Err(_) => 0,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disk_use_and_running_reflect_filesystem_and_process_state() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(disk_use(&dir.path().join("missing")), 0);
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("a"), b"1234").unwrap();
+        std::fs::write(dir.path().join("sub/b"), b"123456").unwrap();
+        assert_eq!(disk_use(dir.path()), 10);
+
+        let repo = Repo { root: dir.path().to_path_buf(), main_root: dir.path().to_path_buf(), is_git: false };
+        assert!(!running(&repo));
+        std::fs::create_dir_all(repo.state_dir()).unwrap();
+        std::fs::write(repo.state_dir().join("code_index.running"), std::process::id().to_string()).unwrap();
+        assert!(running(&repo));
+        std::fs::write(repo.state_dir().join("code_index.running"), "999999999").unwrap();
+        assert!(!running(&repo));
+    }
+
+    #[test]
+    fn write_cbmignore_preserves_user_lines_and_strips_empty_managed_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repo { root: dir.path().to_path_buf(), main_root: dir.path().to_path_buf(), is_git: false };
+        let cbm = dir.path().join(".cbmignore");
+        std::fs::write(
+            &cbm,
+            format!("custom_dir/\n{CBMIGNORE_BEGIN}\nold_sub/\n{CBMIGNORE_END}\n"),
+        )
+        .unwrap();
+        write_cbmignore(&repo, &Settings::default()).unwrap();
+        assert_eq!(std::fs::read_to_string(&cbm).unwrap(), "custom_dir/");
+
+        // When only the managed block was present and no submodules are excluded, the file is removed.
+        std::fs::write(&cbm, format!("{CBMIGNORE_BEGIN}\nold_sub/\n{CBMIGNORE_END}\n")).unwrap();
+        write_cbmignore(&repo, &Settings::default()).unwrap();
+        assert!(!cbm.exists());
+    }
+}

@@ -628,4 +628,19 @@ mod tests {
         assert_eq!(title_of("/home/u/work/Master%20Agreement.pdf"), "Master Agreement");
         assert_eq!(title_of("https://arxiv.org/pdf/1706.03762"), "1706.03762");
     }
+
+    #[test]
+    fn disabled_collections_and_directories_are_refused_by_resolve_local() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().canonicalize().unwrap();
+        let work = home.join("work");
+        let disabled_root = home.join("Archive");
+        std::fs::create_dir_all(work.join("subdir")).unwrap();
+        std::fs::create_dir_all(&disabled_root).unwrap();
+        std::fs::write(disabled_root.join("old.pdf"), b"%PDF-1.4").unwrap();
+        let mut col = Collection::new("archive", disabled_root.clone());
+        col.enabled = false;
+        assert!(resolve_local(&disabled_root.join("old.pdf").to_string_lossy(), &work, &[col], &home).is_err(), "disabled collection root does not grant access");
+        assert!(resolve_local("subdir", &work, &[], &home).unwrap_err().contains("not a file"));
+    }
 }

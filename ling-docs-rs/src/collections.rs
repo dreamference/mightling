@@ -383,4 +383,25 @@ mod tests {
         assert!(DocsToml::load_from(&path).is_err());
         assert_eq!(DocsToml::load_from(&dir.path().join("missing.toml")).unwrap(), DocsToml::default());
     }
+
+    #[test]
+    fn collection_names_are_validated_and_enable_disable_round_trips() {
+        for good in ["documents", "a", "work_2026-q4"] {
+            assert!(validate_name(good).is_ok(), "{good}");
+        }
+        for bad in ["", "-bad", "_bad", "Bad", "a/b", "a..b", "pdf-0123456789ab", &"x".repeat(65)] {
+            assert!(validate_name(bad).is_err(), "{bad}");
+        }
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::create_dir_all(home.join("papers/sub")).unwrap();
+        let mut docs = DocsToml::default();
+        docs.add(&home.join("papers"), Some("papers"), &home).unwrap();
+        assert!(docs.add(&home.join("papers/sub"), Some("sub"), &home).is_err(), "overlapping collection root is refused");
+        docs.collections[0].enabled = false;
+        assert_eq!(docs.enabled().count(), 0);
+        docs.collections[0].enabled = true;
+        assert_eq!(docs.enabled().count(), 1);
+        assert!(docs.remove("unknown").is_err());
+    }
 }

@@ -274,4 +274,21 @@ mod tests {
         assert!(estimate_tokens("咖啡咖啡") >= 4);
         assert!(estimate_tokens(&"word ".repeat(100)) >= 100);
     }
+
+    #[test]
+    fn single_line_locators_reverse_ranges_and_clipping_respect_bounds() {
+        assert_eq!(parse_locator("lines 10").unwrap(), Locator::Lines(10, 209));
+        assert_eq!(parse_locator("L10").unwrap(), Locator::Lines(10, 209));
+        assert_eq!(parse_locator("slide 4, lines 10-20").unwrap(), Locator::Lines(10, 20));
+        assert!(parse_locator("lines 20-10").is_err(), "reversed range");
+        assert!(parse_locator("lines 0-5").is_err(), "0-based line range");
+        assert!(parse_doc_id("documents:not_a_number").is_err());
+
+        let short = "short text";
+        assert_eq!(clip(short, 50), short);
+        let long = "word ".repeat(500);
+        let clipped = clip(&long, 50);
+        assert!(clipped.ends_with("[… page cut at the output limit]"));
+        assert!(clipped.len() < long.len());
+    }
 }

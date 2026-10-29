@@ -501,4 +501,30 @@ mod tests {
         assert_eq!(Kind::of("photo.heic"), None, "no pure-Rust decoder");
         assert_eq!(hash(&pdf).unwrap().len(), 64);
     }
+
+    #[test]
+    fn collection_globs_max_size_and_image_flag_filter_candidates() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("keep/a.md"), b"hello");
+        write(&root.join("keep/big.md"), &[b'x'; 2 * 1024 * 1024]);
+        write(&root.join("keep/scan.png"), b"\x89PNG\r\n\x1a\n");
+        write(&root.join("drop/b.md"), b"hello");
+        let mut c = Collection::new("docs", root);
+        c.include = vec!["keep/**".into()];
+        c.exclude = vec!["**/scan*".into()];
+        c.max_file_mb = 1;
+        let found = walk(&c, &home, true);
+        assert_eq!(found.candidates.iter().map(|x| x.rel.as_str()).collect::<Vec<_>>(), ["keep/a.md"]);
+        assert_eq!(found.skipped["collection globs"], 2);
+        assert_eq!(found.skipped["too large"], 1);
+
+        // With images=false, image files are counted as "type not read".
+        c.include.clear();
+        c.exclude.clear();
+        let no_images = walk(&c, &home, false);
+        assert!(!no_images.candidates.iter().any(|x| x.kind == Kind::Image));
+        assert_eq!(no_images.skipped["type not read"], 1);
+    }
 }

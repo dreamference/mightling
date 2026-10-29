@@ -138,4 +138,22 @@ mod tests {
         }
         assert!(args.contains(&"--clearenv".to_string()));
     }
+
+    #[test]
+    fn binds_are_sorted_by_depth_deduplicated_and_checked_only_before_double_dash() {
+        let mut s = spec();
+        s.read_only = vec![
+            "/home/u/src/repo/sub".into(),
+            "/home/u/src/repo".into(),
+            "/home/u/src/repo".into(),
+        ];
+        s.writable_outside_scratch = vec![("/home/u/.cache/cbm".into(), "graph cache".into())];
+        s.argv = vec!["cmd".into(), "--bind".into(), "/etc".into(), "/etc".into()];
+        let args = bwrap_args(&s);
+        let parent_pos = args.iter().position(|a| a == "/home/u/src/repo").unwrap();
+        let child_pos = args.iter().position(|a| a == "/home/u/src/repo/sub").unwrap();
+        assert!(parent_pos < child_pos, "parent mount must precede child mount");
+        assert_eq!(args.iter().filter(|a| a.as_str() == "/home/u/src/repo").count(), 3, "two for --ro-bind + one for --chdir");
+        assert!(unexpected_writable(&args, &s).is_empty(), "--bind after `--` and writable_outside_scratch are allowed");
+    }
 }

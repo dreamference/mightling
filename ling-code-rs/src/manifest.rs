@@ -178,3 +178,66 @@ pub fn now_rfc3339() -> String {
     let y = yoe + era * 400 + i64::from(mo <= 2);
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_stamp_and_sha256_record_file_metadata_and_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hello.txt");
+        std::fs::write(&path, b"abc").unwrap();
+        let stamp = FileStamp::of(&path).unwrap();
+        assert_eq!(stamp.size, 3);
+        assert_eq!(stamp.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert!(stamp.mtime_ns > 0);
+        assert!(FileStamp::of(&dir.path().join("missing")).is_none());
+    }
+
+    #[test]
+    fn manifest_and_graph_snapshot_round_trip_atomically_and_tolerate_bad_json() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(Manifest::load(dir.path()).runs.is_empty());
+        assert!(GraphSnapshot::load(dir.path()).is_none());
+
+        let mut manifest = Manifest::default();
+        manifest.runs.insert(
+            "scip-rust:.".into(),
+            RunEntry {
+                indexer: "scip-rust".into(),
+                version: "1.0".into(),
+                root: ".".into(),
+                commit: Some("abc123".into()),
+                status: "ok".into(),
+                store: "scip-rust-root.db".into(),
+                run_id: "1-2".into(),
+                ..Default::default()
+            },
+        );
+        manifest.save(dir.path()).unwrap();
+        let loaded = Manifest::load(dir.path());
+        assert_eq!(loaded.runs["scip-rust:."].store, "scip-rust-root.db");
+
+        let snap = GraphSnapshot {
+            commit: Some("abc123".into()),
+            dirty_files: vec!["src/lib.rs".into()],
+            finished: now_rfc3339(),
+            status: "ok".into(),
+            peak_rss_mb: 256,
+            peak_cap_bounded: true,
+        };
+        assert!(snap.finished.ends_with('Z') && snap.finished.contains('T'));
+        snap.save(dir.path()).unwrap();
+        let loaded_snap = GraphSnapshot::load(dir.path()).unwrap();
+        assert_eq!(loaded_snap.commit.as_deref(), Some("abc123"));
+        assert_eq!(loaded_snap.dirty_files, vec!["src/lib.rs"]);
+        assert_eq!(loaded_snap.peak_rss_mb, 256);
+
+        // Corrupt files fall back cleanly rather than panicking.
+        std::fs::write(dir.path().join("manifest.json"), "{not json").unwrap();
+        std::fs::write(dir.path().join("graph.json"), "{not json").unwrap();
+        assert!(Manifest::load(dir.path()).runs.is_empty());
+        assert!(GraphSnapshot::load(dir.path()).is_none());
+    }
+}

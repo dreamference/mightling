@@ -399,6 +399,33 @@ mod tests {
     }
 
     #[test]
+    fn reserve_falls_back_to_default_earlyoom_and_uncapped_live_scopes_saturate() {
+        struct NoEarlyOomHost(FakeHost);
+        impl Host for NoEarlyOomHost {
+            fn mem_available(&self) -> u64 { self.0.mem_available() }
+            fn mem_total(&self) -> u64 { self.0.mem_total() }
+            fn earlyoom_percent(&self) -> Option<f64> { None }
+            fn live_scopes(&self) -> Vec<LiveScope> { self.0.live_scopes() }
+            fn set_slice_limits(&self, m: u64) -> Result<()> { self.0.set_slice_limits(m) }
+            fn can_create_scopes(&self) -> bool { true }
+            fn start_scope(&self, u: &str, c: u64, a: &[String], l: &Path) -> Result<Child> { self.0.start_scope(u, c, a, l) }
+            fn freeze(&self, u: &str) -> Result<()> { self.0.freeze(u) }
+            fn thaw(&self, u: &str) -> Result<()> { self.0.thaw(u) }
+            fn stop(&self, u: &str) -> Result<()> { self.0.stop(u) }
+            fn lock_dir(&self) -> PathBuf { self.0.lock_dir() }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let host = NoEarlyOomHost(FakeHost::new(dir.path(), 50));
+        // Default 5% of 121 GiB + 4 GiB margin.
+        let r = reserve(&host);
+        assert!(r > 10 * GIB && r < 11 * GIB);
+        // A live scope whose current exceeds its cap contributes 0 headroom, not underflow.
+        host.0.scopes.lock().unwrap().push(LiveScope { unit: "over".into(), cap: 2 * GIB, current: 3 * GIB });
+        let admitted = admit(&host, need(Kind::Universal, 0), 4 * GIB).unwrap().unwrap();
+        assert_eq!(admitted.cap, 4 * GIB);
+    }
+
+    #[test]
     fn one_executing_run_on_the_host() {
         let dir = tempfile::tempdir().unwrap();
         let host = FakeHost::new(dir.path(), 100);

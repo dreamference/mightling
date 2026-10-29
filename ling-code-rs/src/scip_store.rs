@@ -775,4 +775,62 @@ mod tests {
         super::put_len_field(&mut whole, 2, &named);
         assert_eq!(super::repair_missing_symbol_information(&whole).unwrap().0, whole);
     }
+
+    #[test]
+    fn decode_chunk_relationships_and_symbol_repair_handle_wire_formats() {
+        let mut doc = Vec::new();
+        super::put_len_field(&mut doc, 1, b"src/lib.rs");
+
+        // Occurrence 1: legacy packed range [line=4, col=2, end_col=8], definition of `pkg/Foo#`.
+        let mut occ1 = Vec::new();
+        let mut packed = Vec::new();
+        for v in [4u64, 2, 8] {
+            super::put_varint(&mut packed, v);
+        }
+        super::put_len_field(&mut occ1, 1, &packed);
+        super::put_len_field(&mut occ1, 2, b"scip-rust cargo pkg 0.1.0 Foo#");
+        super::put_varint(&mut occ1, 3 << 3);
+        super::put_varint(&mut occ1, super::ROLE_DEFINITION as u64);
+        super::put_len_field(&mut doc, 2, &occ1);
+
+        // Occurrence 2: typed SingleLineRange (field 8) [line=9, col=5], local definition (ignored by repair).
+        let mut occ2 = Vec::new();
+        super::put_len_field(&mut occ2, 2, b"local 1");
+        super::put_varint(&mut occ2, 3 << 3);
+        super::put_varint(&mut occ2, super::ROLE_DEFINITION as u64);
+        let mut range = Vec::new();
+        super::put_varint(&mut range, 1 << 3);
+        super::put_varint(&mut range, 9);
+        super::put_varint(&mut range, 2 << 3);
+        super::put_varint(&mut range, 5);
+        super::put_len_field(&mut occ2, 8, &range);
+        super::put_len_field(&mut doc, 2, &occ2);
+
+        let compressed = zstd::encode_all(&doc[..], 1).unwrap();
+        let decoded = super::decode_chunk(&compressed).unwrap();
+        assert_eq!(decoded.len(), 2);
+        assert_eq!((decoded[0].line, decoded[0].column, decoded[0].roles), (4, 2, super::ROLE_DEFINITION));
+        assert_eq!((decoded[1].line, decoded[1].column, decoded[1].symbol.as_str()), (9, 5, "local 1"));
+
+        // Repair adds SymbolInformation for `Foo#` (non-local definition without info), not for `local 1`.
+        let mut index = Vec::new();
+        super::put_len_field(&mut index, 2, &doc);
+        let (repaired, added) = super::repair_missing_symbol_information(&index).unwrap();
+        assert_eq!(added, 1);
+        assert_eq!(super::repair_missing_symbol_information(&repaired).unwrap().1, 0, "idempotent");
+
+        // External symbol (field 3 on Index) with an implementation relationship.
+        let mut rel = Vec::new();
+        super::put_len_field(&mut rel, 1, b"scip-rust cargo pkg 0.1.0 Trait#");
+        super::put_varint(&mut rel, 3 << 3);
+        super::put_varint(&mut rel, 1);
+        let mut info = Vec::new();
+        super::put_len_field(&mut info, 1, b"scip-rust cargo pkg 0.1.0 Foo#");
+        super::put_len_field(&mut info, 4, &rel);
+        super::put_len_field(&mut index, 3, &info);
+        let rels = super::relationships(&index).unwrap();
+        assert_eq!(rels.len(), 1);
+        assert_eq!(rels[0].0, "scip-rust cargo pkg 0.1.0 Foo#");
+        assert!(rels[0].1.is_implementation && !rels[0].1.is_reference);
+    }
 }

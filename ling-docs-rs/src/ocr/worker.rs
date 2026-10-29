@@ -121,3 +121,27 @@ pub fn worker(jobs: &Path, out: &Path, lib_dir: &Path, ocr_dir: &Path, threads: 
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unit_locators_distinguish_images_from_pdf_pages_and_non_ocr_kinds_fail() {
+        let img_unit = unit(Kind::Image, 1, "hello".into());
+        assert_eq!((img_unit.loc.as_str(), img_unit.page, img_unit.heading.as_str()), (IMAGE_LOC, Some(1), OCR_HEADING));
+        let pdf_unit = unit(Kind::Pdf, 7, "page seven".into());
+        assert_eq!((pdf_unit.loc.as_str(), pdf_unit.page), ("p.7", Some(7)));
+
+        let dir = tempfile::tempdir().unwrap();
+        let jobs = dir.path().join("jobs.jsonl");
+        let out = dir.path().join("out.jsonl");
+        let bad_job = OcrJob { id: 9, path: dir.path().join("a.md"), kind: Kind::Markdown, pages: vec![1] };
+        std::fs::write(&jobs, format!("{}\n", serde_json::to_string(&bad_job).unwrap())).unwrap();
+        worker(&jobs, &out, dir.path(), dir.path(), 1).unwrap();
+        let events: Vec<Event> = std::fs::read_to_string(&out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], Event::Start { id: 9 }));
+        assert!(matches!(&events[1], Event::OcrFailed { id: 9, error } if error.contains("markdown files are not read by OCR")));
+    }
+}

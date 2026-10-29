@@ -1650,6 +1650,69 @@ mod tests {
                     diff --git a/old.py b/old.py\n--- a/old.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-x\n";
         assert_eq!(diff_ranges(diff), vec![("a.py".to_string(), 3, 4), ("a.py".to_string(), 11, 11)]);
     }
+
+    #[test]
+    fn path_classifiers_word_starts_and_row_dedup_prioritize_exact_matches() {
+        assert!(super::is_code_path("src/main.rs"));
+        assert!(!super::is_code_path("README.md"));
+        assert!(!super::is_code_path("Cargo.lock"));
+        assert!(!super::is_code_path("Makefile"));
+
+        assert!(super::starts_a_word("wall_time_ms", "time"));
+        assert!(super::starts_a_word("time_s", "time"));
+        assert!(!super::starts_a_word("runtime", "time"));
+
+        assert!(super::is_test_path("tests/router.rs"));
+        assert!(super::is_test_path("pkg/test_auth.py"));
+        assert!(super::is_test_path("pkg/auth_test.go"));
+        assert!(super::is_test_path("ui/app.spec.ts"));
+        assert!(!super::is_test_path("src/contest.rs"));
+
+        let row = |tag: super::Tag, path: &str, line: u32, detail: &str| super::Row {
+            tag: Some(tag),
+            path: path.into(),
+            line,
+            detail: detail.into(),
+        };
+        let deduped = super::dedup(vec![
+            row(super::Tag::Text, "a.rs", 10, "text"),
+            row(super::Tag::Exact, "a.rs", 10, "exact"),
+            row(super::Tag::Heuristic, "b.rs", 5, "graph"),
+        ]);
+        assert_eq!(deduped.len(), 2);
+        assert_eq!((deduped[0].path.as_str(), deduped[0].tag, deduped[0].detail.as_str()), ("a.rs", Some(super::Tag::Exact), "exact"));
+        assert_eq!((deduped[1].path.as_str(), deduped[1].tag), ("b.rs", Some(super::Tag::Heuristic)));
+
+        let summary = super::per_file(&[
+            row(super::Tag::Exact, "b.rs", 1, ""),
+            row(super::Tag::Exact, "a.rs", 1, ""),
+            row(super::Tag::Exact, "b.rs", 2, ""),
+        ]);
+        assert_eq!(summary, vec![("b.rs".into(), 2), ("a.rs".into(), 1)]);
+    }
+
+    #[test]
+    fn role_labels_impl_labels_and_defining_lines_are_recognized() {
+        assert_eq!(super::role_label(super::ROLE_DEFINITION | super::ROLE_WRITE), "definition");
+        assert_eq!(super::role_label(super::ROLE_IMPORT), "import");
+        assert_eq!(super::role_label(super::ROLE_WRITE), "write");
+        assert_eq!(super::role_label(super::ROLE_READ), "read");
+        assert_eq!(super::role_label(0), "reference");
+
+        assert_eq!(super::impl_block_label("rust-analyzer cargo p 0.1.0 impl#[Circle][Shape]"), "impl Shape for Circle");
+        assert_eq!(super::impl_block_label("rust-analyzer cargo p 0.1.0 impl#[Circle]"), "impl Circle");
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = crate::paths::Repo { root: dir.path().to_path_buf(), main_root: dir.path().to_path_buf(), is_git: false };
+        std::fs::write(
+            dir.path().join("sample.py"),
+            "async def compute(x):\n    return compute(x - 1)\nclass Widget:\n    pass\n",
+        )
+        .unwrap();
+        assert!(super::defines_on_line(&repo, "sample.py", 1, "compute"));
+        assert!(!super::defines_on_line(&repo, "sample.py", 2, "compute"));
+        assert!(super::defines_on_line(&repo, "sample.py", 3, "Widget"));
+    }
 }
 
 /// Groups rows by file (for §7.2's per-file summary).

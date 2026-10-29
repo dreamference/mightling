@@ -493,4 +493,29 @@ mod tests {
         assert!(s.contains("notice period is ninety days"), "{s}");
         assert!(s.chars().count() <= 302);
     }
+
+    #[test]
+    fn document_filters_match_globs_extensions_kinds_and_modification_times() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = store::open_rw(&dir.path().join("c.db")).unwrap();
+        conn.execute(
+            "INSERT INTO documents(id, path, kind, size, mtime_ns, status, title) VALUES
+             (1, 'contracts/acme.pdf', 'pdf', 10, 2000000000000, 'ok', 'Acme'),
+             (2, 'notes/todo.md', 'markdown', 10, 500000000000, 'ok', 'Todo'),
+             (3, 'contracts/bad.pdf', 'pdf', 10, 3000000000000, 'failed: x', 'Bad')",
+            [],
+        )
+        .unwrap();
+
+        assert!(allowed_docs(&conn, &Filters::default()).unwrap().is_none());
+
+        let by_glob = allowed_docs(&conn, &Filters { path_glob: Some("contracts/**".into()), ..Default::default() }).unwrap().unwrap();
+        assert_eq!(by_glob, HashSet::from([1]));
+
+        let by_ext = allowed_docs(&conn, &Filters { kind: Some(".md".into()), ..Default::default() }).unwrap().unwrap();
+        assert_eq!(by_ext, HashSet::from([2]));
+
+        let by_time = allowed_docs(&conn, &Filters { modified_after: Some(1000), ..Default::default() }).unwrap().unwrap();
+        assert_eq!(by_time, HashSet::from([1]));
+    }
 }

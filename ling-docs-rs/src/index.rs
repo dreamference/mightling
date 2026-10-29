@@ -1206,4 +1206,75 @@ mod tests {
         drop(file);
         assert!(!night_shift_active(dir.path()));
     }
+
+    #[test]
+    fn reconcile_keeps_vectors_when_only_chunking_changes_and_clears_when_model_changes() {
+        struct NamedEmbedder(&'static str, usize);
+        impl crate::embed::Embed for NamedEmbedder {
+            fn dim(&self) -> usize { self.1 }
+            fn name(&self) -> &str { self.0 }
+            fn embed(&self, _text: &str) -> Result<Vec<f32>> { Ok(vec![1.0; self.1]) }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("c.db");
+        let events = dir.path().join("events.jsonl");
+        let done = Event::Done {
+            id: 1,
+            result: crate::extract::Extracted {
+                title: Some("Doc".into()),
+                pages: None,
+                pages_read: None,
+                needs_ocr: Vec::new(),
+                units: vec![crate::extract::Unit {
+                    loc: "lines 1-2".into(),
+                    page: None,
+                    line_first: Some(1),
+                    line_last: Some(2),
+                    heading: String::new(),
+                    group: None,
+                    text: "alpha beta gamma".into(),
+                }],
+            },
+        };
+        let conn = store::open_rw(&db).unwrap();
+        conn.execute("INSERT INTO documents(id, path, kind, size, mtime_ns, status, title) VALUES (1, 'a.md', 'markdown', 10, 1, 'pending', 'a')", []).unwrap();
+        drop(conn);
+        std::fs::write(&events, format!("{}\n", serde_json::to_string(&done).unwrap())).unwrap();
+
+        let mut log = Vec::new();
+        let (written, embedded) = index_worker("docs", &db, &events, &NamedEmbedder("m1", 4), &crate::chunk::Words, &mut log).unwrap();
+        assert_eq!((written, embedded), (1, 1));
+
+        let mut conn = store::open_rw(&db).unwrap();
+        // Changing chunking metadata re-chunks while keeping existing vectors for unchanged text.
+        store::set_meta(&conn, "chunking", "old-chunking").unwrap();
+        reconcile(&mut conn, &NamedEmbedder("m1", 4), &crate::chunk::Words, &mut log).unwrap();
+        let missing: i64 = conn.query_row("SELECT count(*) FROM chunks WHERE vector IS NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(missing, 0, "unchanged chunk text preserves its vector across re-chunking");
+
+        // Changing the model name invalidates all vectors.
+        reconcile(&mut conn, &NamedEmbedder("m2", 4), &crate::chunk::Words, &mut log).unwrap();
+        let missing: i64 = conn.query_row("SELECT count(*) FROM chunks WHERE vector IS NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(missing, 1, "model change clears vectors");
+    }
+
+    #[test]
+    fn sh_quote_escapes_single_quotes_and_read_new_waits_for_newline() {
+        assert_eq!(sh_quote("a'b"), "'a'\\''b'");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let e = serde_json::to_string(&Event::Start { id: 7 }).unwrap();
+        // Partial line without trailing newline is not consumed yet.
+        std::fs::write(&path, &e).unwrap();
+        let mut offset = 0;
+        assert!(read_new(&path, &mut offset).unwrap().is_empty());
+        assert_eq!(offset, 0);
+        append_event(&path, &Event::Failed { id: 8, error: "bad".into() }).unwrap();
+        // Now the first line (joined with the second) has a newline; write clean lines to verify offset tracking.
+        std::fs::write(&path, format!("{e}\n")).unwrap();
+        let mut offset = 0;
+        let read = read_new(&path, &mut offset).unwrap();
+        assert_eq!(read.len(), 1);
+        assert!(offset > 0);
+    }
 }

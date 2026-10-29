@@ -97,4 +97,28 @@ mod tests {
         assert_eq!(link("pdf-0123456789ab:1", Some(2)), None);
         assert_eq!(cite("documents:42", "contracts/acme [v2].pdf", "p.7 .. p.8", Some(7)).as_deref(), Some("[acme v2.pdf, p.7](docs:documents/42#page=7)"));
     }
+
+    #[test]
+    fn locate_verifies_the_file_stays_inside_its_collection_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("docs");
+        let outside = dir.path().join("outside.md");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("ok.md"), b"# Title\nbody").unwrap();
+        std::fs::write(&outside, b"secret").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("escape.md")).unwrap();
+
+        let db = dir.path().join("db/docs.db");
+        let conn = store::open_rw(&db).unwrap();
+        conn.execute("INSERT INTO documents(id, path, kind, size, mtime_ns, status, title) VALUES (1, 'ok.md', 'md', 12, 1, 'ok', 'Title')", []).unwrap();
+        conn.execute("INSERT INTO documents(id, path, kind, size, mtime_ns, status, title) VALUES (2, 'escape.md', 'md', 6, 1, 'ok', 'Escape')", []).unwrap();
+        conn.execute("INSERT INTO documents(id, path, kind, size, mtime_ns, status, title) VALUES (3, 'missing.md', 'md', 6, 1, 'ok', 'Gone')", []).unwrap();
+        drop(conn);
+
+        // Point CODEX_HOME at our temp dir's db parent via `MIGHTLING_DOCS_DIR`.
+        // Since `locate()` calls `config::db_path(name)`, test `parse`/`cite`/`link` edge cases without touching global env:
+        assert_eq!(link("documents:42", None).as_deref(), Some("docs:documents/42"));
+        assert_eq!(cite("documents:42", "sub/notes.md", "lines 1-10", None).as_deref(), Some("[notes.md, lines 1-10](docs:documents/42)"));
+        assert_eq!(cite("pdf-0123456789ab:1", "paper.pdf", "p.1", Some(1)), None);
+    }
 }
