@@ -695,22 +695,11 @@ fn fetch_refuses_anything_but_http() {
 fn fetch_stops_downloading_at_the_size_cap() {
     let body = vec![b'a'; 6 * 1024 * 1024];
     let server = Server::start(move |_| response("200 OK", "text/plain", &body, ""));
-    // On x86-64 Windows the stand-in's connection is sometimes reset before the first bytes are
-    // read (os error 10054; runs 37628134383, 40346887496 and 40468864329, never elsewhere): one
-    // retry for each fetch, so the size cap is what is tested, not the runner's socket teardown.
-    let fetch_once_more = |args: &[&str]| {
-        let output = fetch(args, &[]);
-        if cfg!(windows) && stdout(&output).contains("os error 10054") {
-            fetch(args, &[])
-        } else {
-            output
-        }
-    };
-    let output = fetch_once_more(&[&server.base, "--max-chars", "100000000", "--json"]);
+    let output = fetch(&[&server.base, "--max-chars", "100000000", "--json"], &[]);
     let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(printed["text"].as_str().unwrap().len(), 100_000);
     assert_eq!(printed["truncated"], true);
-    let output = fetch_once_more(&[&server.base, "--max-chars", "10"]);
+    let output = fetch(&[&server.base, "--max-chars", "10"], &[]);
     assert!(
         stdout(&output).ends_with("aaaaaaaaaa\n\n[truncated at 10 chars]\n"),
         "stdout: {:?}\nstderr: {}",
