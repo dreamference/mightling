@@ -2315,8 +2315,19 @@ async fn run_git_diff_capped(
             let _ = child.kill().await;
             let _ = child.wait().await;
             buf.truncate(MAX_DIFF_OUTPUT_BYTES);
-            while !buf.is_empty() && std::str::from_utf8(&buf).is_err() {
-                buf.pop();
+            // Drop only a character the cut split; a byte that is not UTF-8 earlier on (a Latin-1
+            // file) is the lossy conversion's, not a reason to drop everything after it.
+            if let Some(back) = buf.iter().rev().take(4).position(|byte| byte & 0xC0 != 0x80) {
+                let lead = buf.len() - 1 - back;
+                let width = match buf[lead] {
+                    0xC0..=0xDF => 2,
+                    0xE0..=0xEF => 3,
+                    0xF0..=0xF7 => 4,
+                    _ => 1,
+                };
+                if lead + width > buf.len() {
+                    buf.truncate(lead);
+                }
             }
             let mut text = String::from_utf8_lossy(&buf).into_owned();
             text.push_str(DIFF_CUT_SUFFIX);
@@ -8556,6 +8567,20 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::FORBIDDEN, "{p_body}");
         assert!(p_body.contains("ling chat repos allow-main org/trunkrepo"), "{p_body}");
+    }
+
+    #[tokio::test]
+    async fn a_cut_diff_keeps_everything_before_the_cut_even_after_a_byte_that_is_not_utf8() {
+        let s = scratch("diff-latin1");
+        let (server, _probe) = test_server(&s.dir, None, false);
+        let mut text = "Caf".as_bytes().to_vec();
+        text.push(0xE9); // Latin-1, not UTF-8
+        text.extend_from_slice(b"\n");
+        text.extend_from_slice("€ abcdefghijklmnopqrstuvwxyz\n".repeat(MAX_DIFF_OUTPUT_BYTES / 30 + 500).as_bytes());
+        std::fs::write(s.dir.join("big.txt"), text).unwrap();
+        let diff = run_git_diff_capped(&server, &s.dir, &["diff", "--no-index", "--", "/dev/null", "big.txt"], false).await.unwrap();
+        assert!(diff.ends_with(DIFF_CUT_SUFFIX), "the diff was cut");
+        assert!(diff.len() > MAX_DIFF_OUTPUT_BYTES - 8, "only the split character is dropped: {} bytes", diff.len());
     }
 
     #[tokio::test]
