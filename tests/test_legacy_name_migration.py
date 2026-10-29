@@ -261,3 +261,18 @@ def test_authorized_keys_is_replaced_whole_or_not_at_all(tmp_path):
     assert KEY_COMMENT in keys.read_text() and "AAAAmine" in keys.read_text()
     assert oct(keys.stat().st_mode & 0o777) == "0o600"
     assert [entry.name for entry in keys.parent.iterdir()] == [keys.name]
+
+
+def test_an_old_key_beside_its_new_name_is_dropped_not_doubled(tmp_path):
+    # Renaming it beside the new key wrote the key twice, which no TOML reader loads: every
+    # setting in the file fell back to its default.
+    import tomllib
+
+    config = tmp_path / "config.toml"
+    config.write_text(
+        'puffin_airgapped = "off"\nmightling_airgapped = "on"\npuffin_model = "m"\n'
+        '[night]\nmightling_airgapped = "x"\n[forge]\npuffin_airgapped = "on"\n')
+    assert LegacyNameMigration.rewrite_keys(config)
+    assert tomllib.loads(config.read_text()) == {
+        "mightling_airgapped": "on", "mightling_model": "m",
+        "night": {"mightling_airgapped": "x"}, "forge": {"mightling_airgapped": "on"}}

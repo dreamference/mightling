@@ -160,7 +160,8 @@ class LegacyNameMigration:
     @classmethod
     def rewrite_keys(cls, path: Path) -> bool:
         """
-        Rewrites `puffin_<key> =` lines to `mightling_<key> =`, whole-line key matches only.
+        Rewrites `puffin_<key> =` lines to `mightling_<key> =`, whole-line key matches only. An old
+        key whose new name is already set in the same table is dropped: the new one is what is read.
 
         Args:
             path: A `dreamference.toml`-style file; a missing one is not an error.
@@ -171,8 +172,25 @@ class LegacyNameMigration:
         if not path.is_file():
             return False
         text = path.read_text()
-        pattern = re.compile(rf"^(\s*){LEGACY_KEY_PREFIX}([A-Za-z0-9_]+)(\s*=)", re.M)
-        new = pattern.sub(rf"\g<1>{KEY_PREFIX}\g<2>\g<3>", text)
+        key = re.compile(rf"^(\s*)({LEGACY_KEY_PREFIX}|{KEY_PREFIX})([A-Za-z0-9_]+)(\s*=)")
+        lines = text.splitlines(keepends=True)
+        tables: List[str] = []
+        table = ""
+        for line in lines:
+            if re.match(r"\s*\[", line):
+                table = line.strip()
+            tables.append(table)
+        current = {(table, match.group(3)) for line, table in zip(lines, tables)
+                   if (match := key.match(line)) and match.group(2) == KEY_PREFIX}
+        out: List[str] = []
+        for line, table in zip(lines, tables):
+            match = key.match(line)
+            if match and match.group(2) == LEGACY_KEY_PREFIX:
+                if (table, match.group(3)) in current:
+                    continue
+                line = key.sub(rf"\g<1>{KEY_PREFIX}\g<3>\g<4>", line, count=1)
+            out.append(line)
+        new = "".join(out)
         if new == text:
             return False
         path.write_text(new)
