@@ -49,7 +49,7 @@ def test_a_command_group_without_a_subcommand_prints_its_help(capsys):
     import pytest
 
     # `diffusion-model` is absent while diffusion is switched off (tests/test_diffusion_switched_off.py).
-    for group in ("server", "clear", "model", "main-model", "desktop", "images", "voice"):
+    for group in ("server", "clear", "model", "main-model", "desktop", "images", "voice", "adapter"):
         with pytest.raises(SystemExit) as exit_info:
             DreamferenceCLIController.run_cli([group])
         assert exit_info.value.code == 1, group

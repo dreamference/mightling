@@ -13,12 +13,14 @@ import shutil
 import struct
 import subprocess
 import tarfile
+import urllib.error
 from pathlib import Path
 
 import pytest
 
 from dreamference.cli.adapter_command import AdapterCommand
 from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+from dreamference.hardware import adapter_signature, adapter_verifier
 from dreamference.hardware.adapter_base_digest import AdapterBaseDigest
 from dreamference.hardware.adapter_catalog import AdapterCatalog
 from dreamference.hardware.adapter_installer import AdapterInstaller
@@ -499,6 +501,42 @@ def test_an_adapter_id_names_its_base_entry():
 def test_only_the_default_model_serves_adapters_never_minima():
     assert ModelMatrixRegistry.get_lora_recipe(DEFAULT_MODEL_ALIAS)["max_lora_rank"] == 16
     assert ModelMatrixRegistry.get_lora_recipe("qwen3.8-27b-minima-nvfp4-dflash2") is None
+
+
+def test_the_base_is_what_the_server_lists_not_the_configuration(monkeypatch):
+    listing = {
+        "data": [
+            {"id": "rust", "parent": BASE_REPO},
+            {"id": "minima-ai/mnma_qwen3.8_27b_nvfp4+rust"},
+            {"id": BASE_REPO},
+        ]
+    }
+    monkeypatch.setattr(
+        adapter_verifier.urllib.request,
+        "urlopen",
+        lambda url, timeout: io.BytesIO(json.dumps(listing).encode()),
+    )
+    assert AdapterVerifier.served_id("http://localhost:8000/") == "minima-ai/mnma_qwen3.8_27b_nvfp4"
+    served = AdapterVerifier.served_base("http://localhost:8000", DEFAULT_MODEL_ALIAS)
+    assert served["key"] == "qwen3.8-27b-minima-nvfp4-dflash2"
+    assert served["source"] == "server"
+
+
+def test_with_no_server_answering_the_base_is_the_configured_model_and_says_so(monkeypatch):
+    def refuse(url, timeout):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(adapter_verifier.urllib.request, "urlopen", refuse)
+    served = AdapterVerifier.served_base("http://localhost:8000", DEFAULT_MODEL_ALIAS)
+    assert served["key"] == DEFAULT_MODEL_ALIAS
+    assert served["source"] == "configuration"
+
+
+def test_without_ssh_keygen_the_check_names_the_package_to_install(monkeypatch):
+    monkeypatch.setattr(adapter_signature.shutil, "which", lambda name: None)
+    problem = AdapterSignature.problem(b"{}", b"signature")
+    assert problem == adapter_signature.MISSING_TOOL
+    assert "openssh-client" in problem
 
 
 # -- the command -------------------------------------------------------------------------------------
