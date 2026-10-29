@@ -8,9 +8,9 @@ variables, `.dreamference/config.yaml`, and system defaults into a unified setti
 import os
 import re
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple, Final
+from typing import Dict, Any, Optional, Final
 
-from dreamference.hardware import MODEL_MATRIX, check_model_compatibility
+from dreamference.hardware import MODEL_MATRIX
 from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS, DEFAULT_DIFFUSION_MODEL_ALIAS
 from dreamference.config.config_path_resolver import ConfigPathResolver
 from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
@@ -512,15 +512,3 @@ class DreamferenceConfig:
         """
         from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
         return VLLMServerManager().resolve_tool_call_parser(self.model)
-
-    def validate_model(self) -> Tuple[bool, str]:
-        """
-        Validates selected main and draft models against GB10 hardware memory specs.
-
-        Returns:
-            Tuple[bool, str]: Tuple of (is_valid, validation_message).
-        """
-        if self.draft_model:
-            from dreamference.hardware import check_speculative_compatibility
-            return check_speculative_compatibility(self.model, self.draft_model)
-        return check_model_compatibility(self.model)
