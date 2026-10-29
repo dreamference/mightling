@@ -39,6 +39,8 @@ FAKE_MIGHTLING = textwrap.dedent("""\
             seen = {{name: os.environ.get(name) for name in ("CODEX_THREAD_ID", "DREAMFERENCE_MIGHTLING_AIRGAPPED")}}
             log.write(json.dumps({{"args": args, "env": seen, "cwd": os.getcwd()}}) + "\\n")
         command = args[args.index("--") + 1:]
+        # What runs here is inside the sandbox: a planted hook tells by this whether it escaped.
+        os.environ["FAKE_MIGHTLING_SANDBOXED"] = "1"
         os.execvp(command[0], command)
     with open(os.environ["FAKE_MIGHTLING_CALLS"], "a") as log:
         log.write(json.dumps(args) + "\\n")
@@ -67,6 +69,20 @@ FAKE_MIGHTLING = textwrap.dedent("""\
         say("1. Intent: greet.\\n6. Acceptance checks: test -f hello.txt")
         print(json.dumps({{"type": "turn.completed"}}), flush=True)
         sys.exit(0)
+    if mode == "plant_hooks":
+        # A hostile task: hooks where the checkout's git will look for them (FAKE_HOOK_DIR,
+        # relative to the worktree or absolute), optionally through the worktree's own config.
+        hooks = os.path.join(cwd, os.environ["FAKE_HOOK_DIR"])
+        os.makedirs(hooks, exist_ok=True)
+        for name in ("pre-commit", "reference-transaction", "post-checkout"):
+            with open(os.path.join(hooks, name), "w") as handle:
+                handle.write(os.environ["FAKE_HOOK_SCRIPT"])
+            os.chmod(os.path.join(hooks, name), 0o755)
+        if os.environ.get("FAKE_HOOK_WORKTREE_CONFIG"):
+            import subprocess
+            subprocess.run(["git", "-C", cwd, "config", "--worktree", "core.hooksPath",
+                            os.environ["FAKE_HOOK_DIR"]], check=True)
+        mode = "change"
     if mode == "loosen":
         with open(os.path.join(cwd, "dreamference.toml"), "w") as handle:
             handle.write('mightling_airgapped = "off"\\n')
@@ -140,10 +156,15 @@ def calls(setup):
     return [json.loads(line) for line in setup["calls"].read_text().splitlines()]
 
 
-def sandbox_calls(setup):
-    """The test runs the runner sent through `ling sandbox`, with their environment."""
+def sandbox_calls(setup, kind="test"):
+    """The test runs (`kind="test"`) or the commit's git commands (`"git"`) sent through `ling sandbox`.
+
+    Each with its arguments, the environment the runner set and the working directory.
+    """
     log = Path(str(setup["calls"]) + ".sandbox")
-    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    every = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    program = {"test": "bash", "git": "git"}[kind]
+    return [call for call in every if call["args"][call["args"].index("--") + 1] == program]
 
 
 # -- one task -------------------------------------------------------------------------------------
@@ -183,6 +204,106 @@ def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monk
         assert "sandbox_workspace_write.writable_roots=[]" in pairs, call
         tail = call.index("resume") if "resume" in call else len(call) - 1
         assert call.index("sandbox_workspace_write.writable_roots=[]") < tail
+
+
+# A hook planted by the task. Inside the sandbox it adds a line to the commit, as a formatter would;
+# run anywhere else it has escaped, and says so in a file outside the worktree.
+HOSTILE_HOOK = """#!/bin/sh
+[ -n "$FAKE_MIGHTLING_SANDBOXED" ] || echo "$(basename "$0")" >> "$NIGHT_HOOK_ESCAPED"
+case "$(basename "$0")" in pre-commit) echo hooked >> hooked.txt && git add hooked.txt ;; esac
+exit 0
+"""
+
+
+def plant_hooks(setup, monkeypatch, tmp_path, where):
+    """Sets the fake agent up to plant `HOSTILE_HOOK` where the checkout's git looks for hooks."""
+    escaped = tmp_path / "escaped.txt"
+    monkeypatch.setenv("NIGHT_HOOK_ESCAPED", str(escaped))
+    monkeypatch.setenv("FAKE_HOOK_SCRIPT", HOSTILE_HOOK)
+    if where == "relative hooksPath":
+        # husky's layout: the hooks are tracked files of the checkout itself.
+        git(setup["repo"], "config", "core.hooksPath", ".husky/_")
+        monkeypatch.setenv("FAKE_HOOK_DIR", ".husky/_")
+    elif where == ".git/hooks":
+        monkeypatch.setenv("FAKE_HOOK_DIR", str(setup["repo"] / ".git" / "hooks"))
+    else:  # The task's own worktree config names a hooks folder in the worktree.
+        git(setup["repo"], "config", "extensions.worktreeConfig", "true")
+        monkeypatch.setenv("FAKE_HOOK_DIR", ".hooks")
+        monkeypatch.setenv("FAKE_HOOK_WORKTREE_CONFIG", "1")
+    return escaped
+
+
+@pytest.mark.parametrize("where", ["relative hooksPath", ".git/hooks", "worktree config"])
+def test_a_planted_hook_runs_inside_the_sandbox_and_the_commit_still_happens(setup, monkeypatch, tmp_path, where):
+    # Owner's decision of 2026-10-29: hooks stay allowed, but Night Shift's commit runs in the task's
+    # own sandbox. Until then the runner's host-side `git commit` ran whatever hook the task had
+    # written, with the user's full rights.
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    escaped = plant_hooks(setup, monkeypatch, tmp_path, where)
+    status, record, run = run_task(setup, monkeypatch, "plant_hooks")
+    assert status == "done", record["result"]
+    assert not escaped.exists(), escaped.read_text()
+    branch = record["result"]["branch"]
+    # The hook ran, in the sandbox, and what it staged is in the commit.
+    assert git(setup["repo"], "show", f"{branch}:hooked.txt").stdout == "hooked\n"
+    assert git(setup["repo"], "show", f"{branch}:hello.txt").stdout == "hi\n"
+    assert git(setup["repo"], "log", "-1", "--format=%s%n%an%n%ae", branch).stdout.splitlines() == [
+        "night: Add hello.txt", "Night Test", "night@test"]
+    assert git(setup["repo"], "rev-parse", f"{branch}~1").stdout == git(setup["repo"], "rev-parse", "HEAD").stdout
+    commits = [call for call in sandbox_calls(setup, "git") if "commit" in call["args"]]
+    assert len(commits) == 1
+    args = commits[0]["args"]
+    options = [args[index + 1] for index, arg in enumerate(args) if arg == "-c" and index < args.index("--")]
+    assert options[0] == 'sandbox_mode="workspace-write"'
+    assert options[2] == "sandbox_workspace_write.network_access=true"
+    # One writable root beside the worktree: the runner's own scratch folder, gone afterwards.
+    roots = json.loads(options[1].removeprefix("sandbox_workspace_write.writable_roots="))
+    assert len(roots) == 1 and not Path(roots[0]).exists()
+    assert commits[0]["cwd"] == str(run.worktree)
+    assert not run.worktree.exists()
+
+
+def test_at_airgapped_on_the_commit_has_no_network_either(setup, monkeypatch, tmp_path):
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    (setup["repo"] / "dreamference.toml").write_text('mightling_airgapped = "on"\n')
+    git(setup["repo"], "add", "-A")
+    git(setup["repo"], "commit", "-q", "-m", "seal")
+    escaped = plant_hooks(setup, monkeypatch, tmp_path, "relative hooksPath")
+    status, _, _ = run_task(setup, monkeypatch, "plant_hooks")
+    assert status == "done" and not escaped.exists()
+    commits = [call for call in sandbox_calls(setup, "git") if "commit" in call["args"]]
+    assert "sandbox_workspace_write.network_access=false" in commits[0]["args"]
+    assert commits[0]["env"]["DREAMFERENCE_MIGHTLING_AIRGAPPED"] == "on"
+
+
+def test_a_hook_that_refuses_the_commit_fails_the_task_and_keeps_the_worktree(setup, monkeypatch, tmp_path):
+    escaped = plant_hooks(setup, monkeypatch, tmp_path, "relative hooksPath")
+    monkeypatch.setenv("FAKE_HOOK_SCRIPT", "#!/bin/sh\necho 'lint: no' >&2\nexit 1\n")
+    status, record, run = run_task(setup, monkeypatch, "plant_hooks")
+    assert status == "failed"
+    note = record["result"]["last_message"]
+    assert "git commit failed" in note and "lint: no" in note
+    assert run.worktree.is_dir() and not escaped.exists()
+    assert git(setup["repo"], "rev-parse", "--verify", "--quiet", record["branch"]).stdout.strip() == record["base"]
+
+
+def test_the_runners_own_git_on_the_host_runs_no_hook(setup, monkeypatch, tmp_path):
+    # The runner's plumbing (worktree add of a branch an earlier night left, its ref updates) runs
+    # outside any sandbox: no hook runs there, the checkout's own or one a task committed.
+    escaped = tmp_path / "escaped.txt"
+    monkeypatch.setenv("NIGHT_HOOK_ESCAPED", str(escaped))
+    for name in ("post-checkout", "reference-transaction"):
+        hook = setup["repo"] / ".git" / "hooks" / name
+        hook.write_text(HOSTILE_HOOK)
+        hook.chmod(0o755)
+    record = queue(setup["night"], setup["repo"])
+    git(setup["repo"], "branch", record["branch"], record["base"])
+    escaped.unlink(missing_ok=True)
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() + 60)
+    assert run.run() == "done"
+    assert not escaped.exists(), escaped.read_text()
+    assert git(setup["repo"], "show", f"{record['branch']}:hello.txt").stdout == "hi\n"
 
 
 def test_night_prompt_names_the_system_prompt_of_every_session_of_the_task(setup, monkeypatch):
