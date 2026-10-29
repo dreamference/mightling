@@ -43,11 +43,14 @@ export function ProjectDialog(props: {
 
   const save = async () => {
     if (!name.trim()) return notice("Give the project a name.");
+    // A folder typed but not yet added with Enter is saved too, not dropped.
+    const pending = typed.trim();
+    const sent = pending && !roots.some((root) => root.path === pending) ? [...roots, { path: pending }] : roots;
     setSaving(true);
     try {
       const answer = project
-        ? await client.request("project/update", { projectId: project.id, name: name.trim(), roots, metadata: withMetadata(project.metadata, { [INSTRUCTIONS_KEY]: instructions.trim() }) })
-        : await client.request("project/create", { name: name.trim(), roots, metadata: withMetadata({}, { [INSTRUCTIONS_KEY]: instructions.trim() }), idempotencyKey: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` });
+        ? await client.request("project/update", { projectId: project.id, name: name.trim(), roots: sent, metadata: withMetadata(project.metadata, { [INSTRUCTIONS_KEY]: instructions.trim() }) })
+        : await client.request("project/create", { name: name.trim(), roots: sent, metadata: withMetadata({}, { [INSTRUCTIONS_KEY]: instructions.trim() }), idempotencyKey: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` });
       props.onSaved((answer as { project: Project }).project);
     } catch (error) {
       notice(error);
