@@ -23,11 +23,11 @@ diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/ch
 @@ -539,2 +539,3 @@ impl ChatWidget {
              SlashCommand::Night => self.add_plain_history_lines(ling_launcher::night::command("", &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
 +            SlashCommand::Node => self.app_event_tx.send(AppEvent::LingNode(String::new(), self.thread_id)),
-             SlashCommand::Airgapped => self.add_plain_history_lines(ling_launcher::airgapped::session_command(self.thread_id, "", { let (f, n) = self.config.permissions.permission_profile().to_runtime_permissions(); !codex_sandboxing::policy_transforms::should_require_platform_sandbox(&f, n, false) }).into_iter().map(ratatui::text::Line::from).collect()),
+             SlashCommand::Airgapped => self.add_plain_history_lines(ling_launcher::airgapped::session_command(self.thread_id, "", codex_sandboxing::policy_transforms::runs_without_platform_sandbox(self.config.permissions.permission_profile())).into_iter().map(ratatui::text::Line::from).collect()),
 @@ -783,2 +784,3 @@ impl ChatWidget {
              SlashCommand::Night => self.add_plain_history_lines(ling_launcher::night::command(trimmed, &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
 +            SlashCommand::Node => self.app_event_tx.send(AppEvent::LingNode(trimmed.to_string(), self.thread_id)),
-             SlashCommand::Airgapped => self.add_plain_history_lines(ling_launcher::airgapped::session_command(self.thread_id, trimmed, { let (f, n) = self.config.permissions.permission_profile().to_runtime_permissions(); !codex_sandboxing::policy_transforms::should_require_platform_sandbox(&f, n, false) }).into_iter().map(ratatui::text::Line::from).collect()),
+             SlashCommand::Airgapped => self.add_plain_history_lines(ling_launcher::airgapped::session_command(self.thread_id, trimmed, codex_sandboxing::policy_transforms::runs_without_platform_sandbox(self.config.permissions.permission_profile())).into_iter().map(ratatui::text::Line::from).collect()),
 @@ -1276,2 +1278,3 @@ impl ChatWidget {
              | SlashCommand::Tui
 +            | SlashCommand::Node

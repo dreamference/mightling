@@ -158,13 +158,16 @@ def test_airgapped_treats_every_profile_without_a_sandbox_like_full_access():
     # profile take `/airgapped on`, and a configured `on`, with commands that kept the network.
     # Both checks now ask Codex's own question: does this profile get a sandbox?
     texts = {Path(p).name: Path(p).read_text() for p in CodexBrandedBuilder.patches()}
-    no_sandbox = "!codex_sandboxing::policy_transforms::should_require_platform_sandbox(&f, n, false)"
+    no_sandbox = "codex_sandboxing::policy_transforms::runs_without_platform_sandbox("
     tui = texts["0019-airgapped.patch"]
     assert "PermissionProfile::Disabled)).into_iter()" not in tui
-    assert tui.count("permission_profile().to_runtime_permissions(); " + no_sandbox) == 2
+    assert tui.count(no_sandbox + "self.config.permissions.permission_profile())") == 2
+    # The question is asked in one place, Codex's sandboxing crate, with its own unit test there.
+    assert "+pub fn runs_without_platform_sandbox(profile: &PermissionProfile) -> bool {" in tui
+    assert "+fn a_profile_writing_the_whole_disk_with_the_network_on_runs_without_a_sandbox() {" in tui
     app_server = texts["0023-airgapped-app-server.patch"]
     assert "permission_refusal(matches!(p, PermissionProfile::Disabled)" not in app_server
-    assert "p.to_runtime_permissions(); " + no_sandbox in app_server
+    assert "permission_refusal(" + no_sandbox + "p)" in app_server
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
