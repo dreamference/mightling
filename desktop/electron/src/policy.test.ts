@@ -26,6 +26,18 @@ interface Case {
   workspaceSandbox?: Partial<WorkspaceSandbox>;
 }
 
+/** A page's source with nothing recorded: no thread is an Ask or repository thread, airgapped is off. */
+const PLAIN: PromptSource = {
+  composed: (name) => name,
+  newScratchFolder: () => "SCRATCH/1",
+  scratchFolderOf: () => null,
+  airgappedOn: () => false,
+  repoCheckout: () => null,
+  repoThreadCwd: () => null,
+  repoThreadFullAccess: () => false,
+  isBridge: () => false,
+};
+
 describe("the policy", () => {
   it("is the file ling web compiles in", () => {
     const file = JSON.parse(fs.readFileSync(path.join(WEB, "policy.json"), "utf8"));
@@ -115,6 +127,13 @@ describe("the policy", () => {
     // A source that cannot tell a Work folder keeps every Ask fork in its folder.
     expect(vet("thread/fork", "ask-7", "WORK/repo", source()).cwd).toBe("ASK/ask-7");
     expect(vet("thread/fork", "ask-7", "WORK/repo", source(() => false)).cwd).toBe("ASK/ask-7");
+  });
+
+  it("knows a resumed Ask thread's prompt by its folder's name, <prompt>-<hex>, and by no shorter prefix", () => {
+    const resumed = (folder: string) =>
+      vetOutgoing({ id: 1, method: "thread/resume", params: { threadId: "t1" } }, new Set(), { ...PLAIN, scratchFolderOf: () => folder }).params as Record<string, unknown>;
+    expect((resumed("/scratch/chat-1a2b").config as Record<string, unknown>).approval_policy).toBe("never");
+    expect(resumed("/scratch/chatter-1a2b").config).toBeUndefined();
   });
 
   it("names the prompt to compose before vetting, and only an allowed one other than default", () => {
