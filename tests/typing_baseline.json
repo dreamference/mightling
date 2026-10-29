@@ -1,8 +1,5 @@
 {
  "counts": {
-  "dreamference/cli/code_index_setup.py": {
-   "union-attr": 1
-  },
   "dreamference/cli/dreamference_cli_controller.py": {
    "arg-type": 15,
    "assignment": 3,
@@ -40,5 +37,5 @@
   }
  },
  "mypy": "2.4.0",
- "total": 57
+ "total": 56
 }

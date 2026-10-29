@@ -172,10 +172,11 @@ class CodeIndexSetup:
                     member = next(
                         (m for m in tar.getmembers() if m.isfile() and os.path.basename(m.name) == tool.member), None
                     )
-                    if member is None:
+                    member_file = tar.extractfile(member) if member is not None else None
+                    if member_file is None:
                         print(f"❌ {tool.name}: the archive has no {tool.member}")
                         return False
-                    content = tar.extractfile(member).read()
+                    content = member_file.read()
             except tarfile.TarError as error:
                 print(f"❌ {tool.name}: unreadable archive: {error}")
                 return False
