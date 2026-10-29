@@ -54,3 +54,40 @@ def test_paths_resolved_from_home_at_import_are_redirected_in_tests():
     for path in (vllm_server_manager.VLLM_CACHE_HOME, codex_branded_builder.INSTALL_DIR, codex_branded_builder.PATH_LINK):
         assert not str(path).startswith(REAL_HOME + os.sep), path
         assert str(path).startswith(os.environ["HOME"]), path
+
+
+def test_a_hub_kept_on_another_disk_through_a_link_is_emptied_and_stays_linked(tmp_path, monkeypatch):
+    # `rmtree` refuses a link, and with ignore_errors said nothing: nothing was cleared, and the
+    # message blamed root-owned files and suggested `sudo rm -rf`.
+    hf, _dream = _layout(tmp_path, monkeypatch)
+    disk = tmp_path / "big-disk" / "hub"
+    disk.parent.mkdir()
+    (hf / "hub").rename(disk)
+    (hf / "hub").symlink_to(disk)
+    assert ModelDownloader.clear_cache() is True
+    assert (hf / "hub").is_symlink() and disk.is_dir() and list(disk.iterdir()) == []
+    assert (hf / "token").read_text() == "hf_secret"
+
+
+def test_the_hub_cli_fallback_gets_the_token_in_its_environment_not_its_argv(monkeypatch):
+    # An argument is readable by every user of the machine through `ps` and /proc.
+    import subprocess
+
+    import huggingface_hub
+
+    def no_library(**kwargs):
+        raise RuntimeError("offline")
+
+    calls = []
+    monkeypatch.setattr(ModelDownloader, "is_model_downloaded", classmethod(lambda cls, *a: False))
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", no_library)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
+    def run(cmd, **kw):
+        calls.append((cmd, kw))
+        return subprocess.CompletedProcess(cmd, 1)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    ModelDownloader.download_model("org/model", hf_token="hf_argv_secret")
+    ((cmd, kw),) = calls
+    assert "hf_argv_secret" not in " ".join(cmd)
+    assert kw["env"]["HF_TOKEN"] == "hf_argv_secret"

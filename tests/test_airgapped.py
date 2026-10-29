@@ -122,6 +122,24 @@ def test_the_environment_decides_before_the_files_and_an_invalid_value_falls_thr
     assert DreamferenceConfig.resolve_airgapped_level(cwd) == "on"
 
 
+def test_a_file_the_toml_parser_refuses_still_names_its_level_as_on_the_rust_side(tmp_path, monkeypatch):
+    # ling-rs/airgapped reads the key line by line (`toml_value`), so a byte order mark (PowerShell's
+    # `-Encoding UTF8`), a TOML 1.0 mixed array or a syntax error further down does not hide it.
+    # The Python copy parsed the whole file and read every one of these as `off`.
+    resolve = DreamferenceConfig.resolve_airgapped_level
+    for name, user_text in {
+        "bom": '﻿mightling_airgapped = "on"\n',
+        "mixed array": 'mightling_airgapped = "on"\nports = [1, "a"]\n',
+        "syntax error": 'mightling_airgapped = "on"\nmodel = \n',
+        "comment": 'mightling_airgapped = "On" # set by /airgapped default\n[night]\nbroken =\n',
+    }.items():
+        cwd = _two_files(tmp_path / name, monkeypatch, None, user_text)
+        assert resolve(cwd) == "on", name
+    # The key counts only before the first table header, as there.
+    cwd = _two_files(tmp_path / "table", monkeypatch, None, '[night]\nmightling_airgapped = "on"\n')
+    assert resolve(cwd) == "off"
+
+
 def test_a_named_config_file_replaces_the_working_directorys(tmp_path, monkeypatch):
     cwd = _two_files(tmp_path, monkeypatch, 'mightling_airgapped = "on"\n', None)
     named = tmp_path / "named.toml"
