@@ -985,8 +985,13 @@ class CodexBrandedBuilder:
             # name is this install's own: crate builds run outside the Codex build's lock.
             fd, staging = tempfile.mkstemp(dir=bin_dir, prefix=f".{name}.", suffix=".new")
             os.close(fd)
-            shutil.copy2(os.path.join(cache_dir, "target", "release", name + EXE_SUFFIX), staging)
-            os.replace(staging, os.path.join(bin_dir, name + EXE_SUFFIX))
+            try:
+                shutil.copy2(os.path.join(cache_dir, "target", "release", name + EXE_SUFFIX), staging)
+                os.replace(staging, os.path.join(bin_dir, name + EXE_SUFFIX))
+            except BaseException:
+                # A name of this install's own: left behind, it would stay there for good.
+                Path(staging).unlink(missing_ok=True)
+                raise
         with open(os.path.join(INSTALL_DIR, stamp_name), "w") as handle:
             handle.write(f"{key}\n")
         cls.link_onto_path()

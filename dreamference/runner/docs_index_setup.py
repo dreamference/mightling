@@ -227,10 +227,15 @@ class DocsIndexSetup:
         """Writes `target` through a temporary file renamed over it, so a running query keeps its copy."""
         pathlib.Path(os.path.dirname(target)).mkdir(exist_ok=True, parents=True)
         fd, staging = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".ling-docs-")
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-        pathlib.Path(staging).chmod(0o644)
-        pathlib.Path(staging).replace(target)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+            pathlib.Path(staging).chmod(0o644)
+            pathlib.Path(staging).replace(target)
+        except BaseException:
+            # Each staging name is new, so one left by a failed write (a full disk) would stay.
+            pathlib.Path(staging).unlink(missing_ok=True)
+            raise
 
     @classmethod
     def _say(cls, message: str) -> None:
