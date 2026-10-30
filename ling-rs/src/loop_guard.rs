@@ -1057,6 +1057,24 @@ mod tests {
     }
 
     #[test]
+    fn a_cut_reasoning_keeps_no_summary_the_server_opened_it_with() {
+        let (nudged, _) = memory();
+        let mut events = looping_reasoning(12);
+        events[0] = Ok(ResponseEvent::OutputItemAdded(item(
+            json!({"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "Checking the cache"}], "content": []}),
+        )));
+        let out = run(events, nudged, true);
+        let summaries: Vec<_> = out
+            .iter()
+            .filter_map(|e| match e {
+                Ok(ResponseEvent::OutputItemDone(ResponseItem::Reasoning { summary, .. })) => Some(summary.len()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(summaries, vec![0]);
+    }
+
+    #[test]
     fn with_the_detector_off_only_the_cap_is_handled() {
         let (nudged, _) = memory();
         let out = run(looping_reasoning(12), nudged, false);
