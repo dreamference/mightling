@@ -581,6 +581,18 @@ def test_a_mac_is_never_installed_as_a_node(tmp_path, release_server):
     assert server.requests == []
 
 
+@pytest.mark.parametrize("uname_s, uname_m, said", [
+    ("MINGW64_NT-10.0-26100", "x86_64", "on Windows use install.ps1"),
+    ("Linux", "riscv64", "unsupported processor: riscv64"),
+])
+def test_a_system_or_processor_without_binaries_is_refused_before_anything_is_downloaded(
+        tmp_path, release_server, uname_s, uname_m, said):
+    server = release_server(binaries())
+    result = run_install(tmp_path, server, "--role", "client", uname_s=uname_s, uname_m=uname_m)
+    assert result.returncode == 1 and said in result.stderr
+    assert server.requests == []
+
+
 # -- the desktop app on a Mac ------------------------------------------------------------------
 
 def mac_release(target="aarch64-apple-darwin", listed=None):
