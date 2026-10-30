@@ -601,3 +601,12 @@ def test_a_node_missing_from_the_list_after_pairing_fails_the_step(monkeypatch):
     provisioner.results["new-node"] = {"host": "new-node", "done": [], "node": "n-new"}
     assert role.listed("new-node", None) is True
     assert "failed" not in provisioner.results["new-node"]
+
+
+@pytest.mark.parametrize("text", ["[true]", "true", '"advertise"'])
+def test_a_node_settings_file_that_is_not_an_object_keeps_every_bind_on_loopback(text):
+    from dreamference.node.node_settings import NodeSettings
+
+    NodeSettings.path().parent.mkdir(parents=True, exist_ok=True)
+    NodeSettings.path().write_text(text)
+    assert NodeSettings.load() == {"advertise": False, "web": False}
