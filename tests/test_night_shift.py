@@ -1480,6 +1480,10 @@ def test_parallelism_is_at_least_one_and_a_compaction_limit_never_negative():
     assert settings.max_parallel == 1 and settings.compact_at == 0
 
 
+def test_a_task_has_no_negative_nudges_and_at_least_one_token_of_context():
+    settings = NightShiftSettings({"nudges": -1, "task_context": 0})
+    assert settings.nudges == 0 and settings.task_context == 1
+
 
 def test_the_reports_review_command_quotes_a_repository_with_a_space():
     record = {"id": "t", "repo": "/srv/my repo", "base": "a" * 40, "status": "done", "task": "x",
