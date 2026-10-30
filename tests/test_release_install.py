@@ -990,6 +990,17 @@ def test_opt_outs_are_said_as_such_and_need_no_root(tmp_path, release_server):
     assert "skipped" not in result.stdout.lower()
 
 
+def test_without_host_setup_python3_venv_is_installed_only_by_a_sudo_that_asks_nothing(tmp_path, release_server):
+    # What `node provision` runs, with no terminal: a sudo that wants a password is not asked,
+    # and the missing python3-venv is named instead.
+    env = {"FAKE_NO_VENV": "1", "FAKE_SUDO": "password"}
+    result = run_install(tmp_path, release_server(node_release()), "--role", "node", "--no-advertise",
+                         "--no-host-setup", "--no-model", env_extra=env)
+    assert result.returncode == 1
+    assert "install python3-venv (sudo apt install python3-venv)" in result.stderr
+    assert logged(tmp_path, "apt.log") == ""
+
+
 WITH_DOCS = ("ling", "codex-code-mode-host", "ling-search", "ling-fetch", "ling-code", "ling-docs")
 
 
