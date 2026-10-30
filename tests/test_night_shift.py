@@ -1086,6 +1086,43 @@ def test_one_wait_is_noted_once_whatever_its_figures(fake_host, monkeypatch):
     assert "11.6 GiB" in waits[0] and "session is open" in waits[1] and "11.7 GiB" in waits[2]
 
 
+@pytest.mark.parametrize("task_timeout, deadline", [("5s", 1005.0), ("2h", 1012.0)])
+def test_the_window_closing_stops_the_running_task_and_leaves_the_rest_queued(fake_host, monkeypatch,
+                                                                              task_timeout, deadline):
+    # A task stops at its own timeout or the window's end, whichever comes first; at the window's
+    # end the running one is asked to stop and the ones not started stay queued.
+    import threading
+    from dreamference.night_shift.night_shift_best_of_n import NightShiftBestOfN
+    runs = []
+
+    class Run:
+        in_model = False
+        current_unit = None
+
+        def __init__(self, deadline, window_end):
+            self.stop_event = threading.Event()
+            self.deadline, self.window_end, self.stopped = deadline, window_end, False
+
+        def run(self):
+            self.stopped = self.stop_event.wait(10)
+
+    def task_run(cls, night_dir, task, settings, mightling_bin, deadline, **kwargs):
+        runs.append(Run(deadline, kwargs.get("window_end")))
+        return runs[-1]
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
+    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(lambda seconds: clock.update(now=clock["now"] + seconds)))
+    monkeypatch.setattr(NightShiftBestOfN, "task_run", classmethod(task_run))
+    notes = []
+    end = datetime.fromtimestamp(1012.0).astimezone()
+    NightShiftRunner.schedule(Path("/nonexistent"), [{"id": f"t{i}", "repo": "r"} for i in range(3)],
+                              NightShiftSettings({"task_timeout": task_timeout}), "ling", "http://x", end, 1, notes)
+    assert len(runs) == 1
+    assert runs[0].deadline == deadline and runs[0].window_end == 1012.0
+    assert runs[0].stopped
+    assert "The window closed with 2 task(s) not started; they stay queued." in notes
+
+
 def test_a_whole_night_runs_three_tasks_and_writes_the_report(setup, fake_host, monkeypatch):
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     for index in range(3):
