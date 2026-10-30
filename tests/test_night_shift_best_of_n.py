@@ -428,6 +428,17 @@ def test_a_commit_that_fails_fails_the_task_and_keeps_no_attempt(bon, monkeypatc
     assert not any((bon["night"] / "worktrees").iterdir())
 
 
+def test_a_task_dropped_before_it_starts_counts_no_attempt(bon, monkeypatch):
+    record = queue(bon["night"], bon["repo"], test=TEST)
+    NightShiftQueue.update(bon["night"], record["id"],
+                           lambda task: NightShiftQueue.set_status(task, "cancel-requested"))
+    run = NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60, best_of=3)
+    assert run.run() == "cancelled"
+    after = NightShiftQueue.read(bon["night"], record["id"])
+    assert (after["attempts"], after["result"]) == (0, None)
+    assert not bon["calls"].exists()
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
