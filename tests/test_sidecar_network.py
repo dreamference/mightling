@@ -177,3 +177,16 @@ def test_searxng_reports_a_container_docker_could_not_create(docker, capsys):
     docker(failing={("docker", "run", "-d"): "pull access denied"})
     assert not SearxngSidecar.start()
     assert "pull access denied" in capsys.readouterr().out
+
+
+def test_searxng_is_not_created_when_its_network_cannot_be(docker, capsys):
+    fake = docker(failing={("docker", "network", "create"): "permission denied"})
+    assert not SearxngSidecar.start()
+    assert not fake.commands("docker", "run")
+    assert f"Could not create the Docker network {SIDECAR_NETWORK}" in capsys.readouterr().out
+
+
+def test_a_container_docker_cannot_inspect_has_no_other_networks_and_no_published_address(docker):
+    docker(failing={("docker", "inspect"): "No such object"})
+    assert SearxngSidecar.extra_networks() == []
+    assert SearxngSidecar.published_address() == ""
