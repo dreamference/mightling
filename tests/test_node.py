@@ -646,7 +646,13 @@ def test_the_authorised_line_forces_one_command_and_forbids_the_rest():
         assert restriction in line.split(" ssh-ed25519 ")[0]
     assert line.endswith(" mightling-node")  # the sender's own comment is not kept
     assert "owner@laptop" not in line
-    for bad in ("", "not a key", "ssh-ed25519", PUBLIC_KEY + "\nssh-ed25519 AAAA second", "rm -rf /"):
+    for bad in (
+        "",
+        "not a key",
+        "ssh-ed25519",
+        PUBLIC_KEY + "\nssh-ed25519 AAAA second",
+        "rm -rf /",
+    ):
         with pytest.raises(ValueError):
             NodePairing.authorized_line(bad, "/x node serve-job")
     with pytest.raises(ValueError):
@@ -710,7 +716,10 @@ def handlers_that_record(monkeypatch):
     from dreamference.node.node_model_sync import NodeModelSync
 
     called = []
-    record = lambda name: classmethod(lambda cls, *args, **_: called.append((name, *args)) or 0)
+
+    def record(name):
+        return classmethod(lambda cls, *args, **_: called.append((name, *args)) or 0)
+
     monkeypatch.setattr(NodeServe, "run_admin", record("run_admin"))
     monkeypatch.setattr(NodeServe, "unauthorize", record("unauthorize"))
     monkeypatch.setattr(NodeServe, "subsystem_operation", record("subsystem_operation"))
