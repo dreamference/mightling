@@ -1518,6 +1518,94 @@ fn the_pdf_block_follows_the_tools_pdfium_and_the_docs_setting() {
     assert_eq!(block(&["prompt-block", "--tools"], &lib, Some("false")), "");
 }
 
+/// A host short of memory, or without a user systemd to cap a run.
+struct TightHost {
+    dir: PathBuf,
+    scopes: bool,
+}
+
+impl Host for TightHost {
+    fn mem_available(&self) -> u64 {
+        1 << 30
+    }
+    fn mem_total(&self) -> u64 {
+        121 << 30
+    }
+    fn earlyoom_percent(&self) -> Option<f64> {
+        Some(5.0)
+    }
+    fn live_scopes(&self) -> Vec<LiveScope> {
+        Vec::new()
+    }
+    fn set_slice_limits(&self, _: u64) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn can_create_scopes(&self) -> bool {
+        self.scopes
+    }
+    fn start_scope(&self, unit: &str, _: u64, _: &[String], _: &Path) -> anyhow::Result<Child> {
+        panic!("{unit} was started on a host that cannot cover it")
+    }
+    fn freeze(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn thaw(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn stop(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn lock_dir(&self) -> PathBuf {
+        self.dir.clone()
+    }
+}
+
+/// `pdf_search`'s run defers at once, with the reason, when the host-wide budget cannot cover
+/// the extractor or no scope can cap it (PDF_SEARCH §3.5); nothing is started.
+#[test]
+fn a_pdf_run_defers_for_memory_and_without_a_user_systemd() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    std::fs::write(home.join("paper.pdf"), pdf_pages(&[&["Text"]], None)).unwrap();
+    for (scopes, why) in [
+        (true, "memory: the host-wide budget cannot cover"),
+        (false, "no user systemd"),
+    ] {
+        let host = TightHost {
+            dir: home.join("locks"),
+            scopes,
+        };
+        let env = Env {
+            host: &host,
+            settings: Settings::default(),
+            user_home: home.clone(),
+            exe: exe(),
+            lib_dir: home.join("no-lib"),
+            model_dir: home.join("no-model"),
+            ocr_dir: home.join("no-ocr"),
+            sandbox: false,
+            worker_args: vec!["--test-embedder".into()],
+            poll: Duration::from_millis(20),
+        };
+        let indexed = index::index_file(
+            &env,
+            "pdf-0123456789ab",
+            "paper.pdf",
+            "paper",
+            &home.join("paper.pdf"),
+            None,
+            Duration::ZERO,
+        )
+        .unwrap();
+        match indexed {
+            index::FileIndexed::Stopped(Outcome::Deferred(reason)) => {
+                assert!(reason.starts_with(why), "{reason}")
+            }
+            _ => panic!("{why}: not deferred"),
+        }
+    }
+}
+
 #[test]
 fn the_cache_is_evicted_by_age_and_size_and_spares_what_is_in_use() {
     let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
