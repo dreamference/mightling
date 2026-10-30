@@ -326,3 +326,76 @@ def test_the_other_agents_exit_1_without_the_program_they_run_in(
     monkeypatch.setattr("subprocess.call", lambda *a, **k: pytest.fail("nothing may start"))
 
     assert runner.run_session() == 1
+
+
+@pytest.mark.parametrize(
+    ("module", "installer", "install"),
+    [
+        ("cline_installer", ClineInstaller, "install_cline_if_missing"),
+        ("continue_installer", ContinueInstaller, "install_continue_if_missing"),
+    ],
+)
+def test_an_extension_install_without_vs_code_runs_nothing_and_fails(module, installer, install, monkeypatch):
+    import importlib
+
+    installer_module = importlib.import_module(f"dreamference.runner.{module}")
+    monkeypatch.setattr(installer_module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(installer_module.subprocess, "run", lambda *a, **k: pytest.fail("nothing may run"))
+    assert getattr(installer, install)() is False
+
+
+@pytest.mark.parametrize(
+    ("module", "installer", "install"),
+    [
+        ("cline_installer", ClineInstaller, "install_cline_if_missing"),
+        ("continue_installer", ContinueInstaller, "install_continue_if_missing"),
+    ],
+)
+def test_a_failed_extension_install_is_judged_by_the_extension_list(module, installer, install, monkeypatch):
+    import importlib
+    import subprocess
+
+    installer_module = importlib.import_module(f"dreamference.runner.{module}")
+    monkeypatch.setattr(installer_module.shutil, "which", lambda name: "/usr/bin/code" if name == "code" else None)
+    ran = []
+
+    def run(command, **kwargs):
+        ran.append(command[1])
+        if command[1] == "--install-extension":
+            return subprocess.CompletedProcess(command, 1)
+        return subprocess.CompletedProcess(command, 0, stdout="ms-python.python\n")
+
+    monkeypatch.setattr(installer_module.subprocess, "run", run)
+    assert getattr(installer, install)() is False
+    assert "--install-extension" in ran
+
+    def broken(command, **kwargs):
+        if command[1] == "--install-extension":
+            raise OSError("code crashed")
+        return subprocess.CompletedProcess(command, 1, stdout="")
+
+    monkeypatch.setattr(installer_module.subprocess, "run", broken)
+    assert getattr(installer, install)() is False
+
+
+def test_openhands_pulls_nothing_without_a_running_docker(monkeypatch):
+    import subprocess
+
+    from dreamference.runner import openhands_installer
+
+    monkeypatch.setattr(openhands_installer.shutil, "which", lambda name: None)
+    monkeypatch.setattr(openhands_installer.subprocess, "run", lambda *a, **k: pytest.fail("no docker to run"))
+    assert OpenHandsInstaller.pull_image_if_missing() is False
+
+    # Docker answers, but `docker ps` is refused (no socket permission): still no pull.
+    monkeypatch.setattr(openhands_installer.shutil, "which", lambda name: "/usr/bin/docker")
+    asked = []
+
+    def run(command, **kwargs):
+        asked.append(command[1])
+        assert command[1] != "pull", "pulled without a usable docker"
+        return subprocess.CompletedProcess(command, 1, stdout="")
+
+    monkeypatch.setattr(openhands_installer.subprocess, "run", run)
+    assert OpenHandsInstaller.pull_image_if_missing() is False
+    assert "pull" not in asked
