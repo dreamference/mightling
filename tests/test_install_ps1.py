@@ -317,6 +317,17 @@ def test_signing_is_required_from_the_cut_over_on_and_for_a_tag_that_is_not_a_ve
     ]
 
 
+def test_each_binary_is_unpacked_only_after_its_own_checksum_matches():
+    text = script()
+    loop = text[text.index("foreach ($Name in $Wanted) {") :]
+    unpacked = loop.index("Expand-Gzip $Archive")
+    for guard in (
+        'if (-not $Sums.ContainsKey($Asset)) { Fail "$SumsName has no checksum for $Asset',
+        'if ($Actual -ne $Sums[$Asset]) { Fail "$Asset does not match its checksum',
+    ):
+        assert loop.index(guard) < unpacked, guard
+
+
 def code_lines() -> list:
     """install.ps1's lines without comments, the elevated script's included."""
     lines = []
