@@ -1326,4 +1326,25 @@ mod tests {
         assert_eq!(prune(&home, &repo), 1);
         assert_eq!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default(), "changed\n");
     }
+
+    #[test]
+    fn a_session_is_named_by_a_prefix_of_its_id_or_its_branch_but_not_ambiguously() {
+        let fixture = Fixture::new("names");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (first, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        let (second, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(first.checkout.join("one.py"), "1\n").unwrap_or_default();
+        std::fs::write(second.checkout.join("two.py"), "2\n").unwrap_or_default();
+        let shared = first.id.chars().zip(second.id.chars()).take_while(|(a, b)| a == b).count();
+        let (lines, code) = command(&home, &repo, &format!("apply {}", &first.id[..shared]), false);
+        assert_eq!(code, 1);
+        assert!(lines[0].contains("names several worktree sessions"), "{lines:?}");
+        assert!(!repo.join("one.py").exists() && !repo.join("two.py").exists());
+        let (lines, code) = command(&home, &repo, &format!("apply {}", &first.id[..shared + 1]), false);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(repo.join("one.py").is_file());
+        let (lines, code) = command(&home, &repo, &format!("apply {}", second.branch), false);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(repo.join("two.py").is_file());
+    }
 }
