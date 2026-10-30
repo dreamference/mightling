@@ -740,3 +740,17 @@ def test_the_proxy_socket_is_enabled_after_the_old_proxy_stops_and_a_failed_step
     assert MatrixHomeserver.start() == 1
     assert "loopback proxy" in capsys.readouterr().out
     assert not machine.argv("tailscale", "serve")
+
+
+def test_start_stops_when_docker_refuses_to_create_the_internal_network(machine, capsys):
+    real = machine.run
+
+    def run(argv, timeout=120, env=None):
+        if argv[:3] == ["docker", "network", "create"]:
+            return subprocess.CompletedProcess(argv, 1, "", "Pool overlaps with other one")
+        return real(argv, timeout, env)
+
+    machine.run = run
+    assert MatrixHomeserver.start() == 1
+    assert "internal Docker network" in capsys.readouterr().out
+    assert not machine.argv("docker", "run")
