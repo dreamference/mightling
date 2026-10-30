@@ -2028,6 +2028,15 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn the_listing_brings_the_adapters_on_the_base() {
+        let base = stand_in(&[("/v1/models", "200 OK", &gate_models().to_string())]);
+        let (served, adapters) = served_listing(&reqwest::Client::new(), &base, None).await.unwrap();
+        assert_eq!(served.id, ADAPTER_BASE);
+        assert_eq!(adapters, adapter::listed(&gate_models(), ADAPTER_BASE));
+        assert_eq!(adapters.len(), 2);
+    }
+
     #[test]
     fn the_base_is_the_entry_without_a_parent() {
         let mut body = gate_models();
