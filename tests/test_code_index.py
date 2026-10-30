@@ -62,6 +62,43 @@ def test_a_tool_installs_only_from_its_pinned_archive(tmp_path, monkeypatch):
     assert len(downloads) == 2
 
 
+@pytest.mark.parametrize(
+    "download",
+    [
+        pytest.param(OSError("network is unreachable"), id="no-download"),
+        pytest.param(_archive("README", b"not the tool"), id="no-member"),
+        pytest.param(b"not a gzip archive", id="unreadable"),
+    ],
+)
+def test_a_tool_that_cannot_be_had_installs_nothing(download, tmp_path, monkeypatch):
+    monkeypatch.setattr(code_setup, "INSTALL_DIR", str(tmp_path / "install"))
+    data = b"" if isinstance(download, OSError) else download
+
+    def fetch(cls, url):
+        if isinstance(download, OSError):
+            raise download
+        return download
+
+    tool = PinnedTool(hashlib.sha256(data).hexdigest(), "scip", "0.10.0", "https://github.com/x/scip.tar.gz", "scip")
+    monkeypatch.setattr(CodeIndexSetup, "_download", classmethod(fetch))
+    assert CodeIndexSetup.install_tool(tool) is False
+    bin_dir = tmp_path / "install" / "bin"
+    assert not bin_dir.exists() or list(bin_dir.iterdir()) == [], "no binary, no stamp"
+    assert not CodeIndexSetup.is_installed(tool)
+
+
+def test_an_unreadable_dotnet_package_installs_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(code_setup, "INSTALL_DIR", str(tmp_path / "install"))
+    monkeypatch.setattr(code_setup, "INDEXERS_DIR", str(tmp_path / "indexers"))
+    package = b"not a zip"
+    tool = PinnedTool(hashlib.sha256(package).hexdigest(), "scip-dotnet", "0.2.14", "https://api.nuget.org/x.nupkg", "tools/")
+    monkeypatch.setattr(CodeIndexSetup, "_download", classmethod(lambda cls, url: package))
+    monkeypatch.setattr(CodeIndexSetup, "dotnet_major", classmethod(lambda cls, dotnet: 9))
+    assert CodeIndexSetup.install_tool(tool) is False
+    assert not (tmp_path / "indexers" / "scip-dotnet").exists()
+    assert not CodeIndexSetup.is_installed(tool)
+
+
 def test_scip_python_installs_from_the_lockfile_without_scripts(tmp_path, monkeypatch):
     monkeypatch.setattr(code_setup, "INDEXERS_DIR", str(tmp_path / "indexers"))
     node = tmp_path / "node"
