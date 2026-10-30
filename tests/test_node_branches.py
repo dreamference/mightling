@@ -4,6 +4,9 @@ Nothing here reaches another machine or changes this one: sockets stay in the te
 folder, and every ssh, plug or subprocess call is a stand-in.
 """
 
+import argparse
+import io
+import json
 import os
 import socket
 import struct
@@ -13,7 +16,16 @@ from pathlib import Path
 
 import pytest
 
-from dreamference.node import NodeJob, node_job
+from dreamference.node import (
+    NodeJob,
+    NodePairing,
+    NodePowerCycle,
+    NodePowerSettings,
+    NodeShellyPlug,
+    node_job,
+    node_power_cycle,
+    node_shelly_plug,
+)
 from dreamference.node.fleet_askpass import FleetAskpass
 from dreamference.node.fleet_session import FleetSession
 
@@ -214,3 +226,200 @@ def test_cancelling_a_job_under_a_unit_stops_that_unit(monkeypatch):
     assert NodeJob.read("20261002-1400-aaa")["status"] == "cancelled"
     assert not NodeJob.cancel("20261002-1400-aaa")
     assert len(seen) == 1
+
+
+# -- power: the plug table's refusals, the plug's replies, the cycle's fallbacks
+
+
+def test_a_plug_with_a_bad_name_channel_or_generation_is_not_saved():
+    assert "not a plug name" in NodePowerSettings.set_plug("bad name!", "p.local")
+    for channel, generation in ((-1, 2), (0, 3)):
+        refused = NodePowerSettings.set_plug(
+            "p1", "p.local", channel=channel, generation=generation
+        )
+        assert refused == "channel is 0 or more, generation is 1 or 2"
+    assert NodePowerSettings.load()["plugs"] == {}
+
+
+@pytest.mark.parametrize(("plug", "via"), [("bad/plug", None), ("p1", "bad via"), ("p1", "../x")])
+def test_a_node_entry_with_a_bad_plug_or_neighbour_name_is_not_saved(plug, via):
+    NodePowerSettings.set_plug("p1", "p.local")
+    assert NodePowerSettings.set_node("house-1", plug, via=via) is not None
+    assert NodePowerSettings.load()["nodes"] == {}
+
+
+def power_arguments(**fields):
+    arguments = {"plug": "p1", "host": "p.local", "kind": "shelly", "channel": 0, "generation": 2}
+    arguments.update(name="house-1", via=None)
+    arguments.update(fields)
+    return argparse.Namespace(**arguments)
+
+
+def test_power_config_exit_codes_say_usage_shown_refused_or_saved(capsys):
+    assert NodePowerSettings.configure(None, power_arguments()) == 2
+    assert "usage:" in capsys.readouterr().out
+    assert NodePowerSettings.configure("plug", power_arguments(plug="bad name!")) == 1
+    assert capsys.readouterr().out.startswith("❌")
+    assert NodePowerSettings.load()["plugs"] == {}
+    assert NodePowerSettings.configure("plug", power_arguments()) == 0
+    assert NodePowerSettings.configure("node", power_arguments()) == 0
+    assert capsys.readouterr().out.count("✅ Saved.") == 2
+    assert NodePowerSettings.configure("show", power_arguments()) == 0
+    assert json.loads(capsys.readouterr().out) == NodePowerSettings.load()
+
+
+def test_power_dispatch_sends_config_to_the_table_and_cycle_to_the_plug(monkeypatch):
+    cycles = []
+    monkeypatch.setattr(
+        NodePowerCycle,
+        "cycle",
+        classmethod(lambda cls, name, **kwargs: cycles.append((name, kwargs)) or 7),
+    )
+    shown = power_arguments(node_command="power-config", power_config_command="show")
+    assert NodePowerSettings.dispatch(shown) == 0
+    assert cycles == []
+    cycled = power_arguments(node_command="power-cycle", off_seconds=9, force=True, wait_minutes=2)
+    assert NodePowerSettings.dispatch(cycled) == 7
+    assert cycles == [("house-1", {"off_seconds": 9, "force": True, "wait_minutes": 2})]
+
+
+class Reply(io.BytesIO):
+    """An HTTP reply body that works as `urlopen`'s context manager."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_a_plug_reply_that_is_not_a_json_object_is_an_oserror(monkeypatch):
+    bodies = [b'{"output": true}', b"[1, 2]", b"not json"]
+    monkeypatch.setattr(
+        node_shelly_plug.urllib.request, "urlopen", lambda url, timeout: Reply(bodies.pop(0))
+    )
+    assert NodeShellyPlug._get("http://p.local/rpc/Switch.GetStatus?id=0") == {"output": True}
+    for _ in range(2):
+        with pytest.raises(OSError):
+            NodeShellyPlug._get("http://p.local/rpc/Switch.GetStatus?id=0")
+
+
+def test_a_plug_reply_without_a_true_or_false_state_is_an_oserror(monkeypatch):
+    monkeypatch.setattr(NodeShellyPlug, "_get", classmethod(lambda cls, url: {"output": "on"}))
+    with pytest.raises(OSError, match="names no switch state"):
+        NodeShellyPlug.state("p.local")
+
+
+def test_an_unknown_plug_generation_is_refused_before_any_request(monkeypatch):
+    urls = []
+    monkeypatch.setattr(NodeShellyPlug, "_get", classmethod(lambda cls, url: urls.append(url)))
+    with pytest.raises(ValueError):
+        NodeShellyPlug.switch("p.local", False, generation=3)
+    assert urls == []
+
+
+@pytest.fixture
+def neighbour(monkeypatch):
+    """`house-2` is paired and relays plug commands; `replies` decides each `power-plug` answer."""
+    records = {"house-2": {"node": "n2", "name": "house-2", "user": "u", "address": "b"}}
+    sent, replies = [], {}
+
+    def run(cls, record, request, **kwargs):
+        sent.append((record["name"], request))
+        return subprocess.CompletedProcess([], *replies.get(request, (0, '{"on": true}\n', "")))
+
+    monkeypatch.setattr(
+        NodePairing, "find", classmethod(lambda cls, name, browse=True: records.get(name))
+    )
+    monkeypatch.setattr(NodePairing, "run", classmethod(run))
+    monkeypatch.setattr(node_power_cycle.time, "sleep", lambda seconds: None)
+    return sent, replies
+
+
+def test_a_neighbour_that_is_not_paired_or_fails_never_gets_off(neighbour, capsys):
+    sent, replies = neighbour
+    NodePowerSettings.set_node("house-1", "p1", via="house-3")
+    assert NodePowerCycle.cycle("house-1", force=True) == 1
+    assert "house-3 is not a paired node" in capsys.readouterr().out
+    assert sent == []
+    NodePowerSettings.set_node("house-1", "p1", via="house-2")
+    replies["power-plug p1 status"] = (255, "", "permission denied\n")
+    assert NodePowerCycle.cycle("house-1", force=True) == 1
+    assert "could not be reached: permission denied" in capsys.readouterr().out
+    assert [request for _, request in sent] == ["power-plug p1 status"]
+
+
+def test_a_node_that_is_not_paired_or_cannot_be_asked_does_not_answer(neighbour, monkeypatch):
+    assert not NodePowerCycle._answers("house-9")
+
+    def broken(cls, record, request, **kwargs):
+        raise subprocess.TimeoutExpired("ssh", 5)
+
+    monkeypatch.setattr(NodePairing, "run", classmethod(broken))
+    assert not NodePowerCycle._answers("house-2")
+
+
+def scripted_plug(monkeypatch, script):
+    """`_plug` answers each action from `script[action]` in turn: a dict, or an OSError to raise."""
+    actions = []
+
+    def plug(cls, node, plug, via, action):
+        actions.append(action)
+        answer = script[action].pop(0)
+        if isinstance(answer, OSError):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(NodePowerCycle, "_plug", classmethod(plug))
+    monkeypatch.setattr(node_power_cycle.time, "sleep", lambda seconds: None)
+    return actions
+
+
+@pytest.mark.parametrize("second_status", [{"on": False}, OSError("still no answer")])
+def test_a_lost_off_reply_still_turns_the_plug_on_again(monkeypatch, capsys, second_status):
+    actions = scripted_plug(
+        monkeypatch,
+        {
+            "status": [{"on": True, "power_w": 40.0}, second_status],
+            "off": [OSError("timed out")],
+            "on": [{"on": True}],
+        },
+    )
+    assert NodePowerCycle._cut_and_restore("house-1", "p1", None, 5)
+    assert actions == ["status", "off", "status", "on"]
+    assert "reply to 'off' was lost (timed out)" in capsys.readouterr().out
+
+
+def test_on_is_retried_until_the_plug_reports_on(monkeypatch, capsys):
+    actions = scripted_plug(
+        monkeypatch,
+        {
+            "status": [{"on": True}],
+            "off": [{"on": False}],
+            "on": [{"on": False}, OSError("busy"), {"on": True}],
+        },
+    )
+    assert NodePowerCycle._cut_and_restore("house-1", "p1", None, 5)
+    assert actions == ["status", "off", "on", "on", "on"]
+    assert "did not take 'on' yet (busy)" in capsys.readouterr().out
+
+
+def test_a_plug_that_never_comes_back_on_is_reported_off_after_five_tries(monkeypatch, capsys):
+    actions = scripted_plug(
+        monkeypatch,
+        {"status": [{"on": True}], "off": [{"on": False}], "on": [OSError("gone")] * 5},
+    )
+    assert not NodePowerCycle._cut_and_restore("house-1", "p1", None, 5)
+    assert actions.count("on") == node_power_cycle.RESTORE_TRIES
+    assert "THE PLUG IS OFF" in capsys.readouterr().out
+
+
+def test_a_node_that_stays_dark_after_the_cycle_fails_the_command(monkeypatch, capsys):
+    NodePowerSettings.set_plug("p1", "p.local")
+    NodePowerSettings.set_node("house-1", "p1")
+    monkeypatch.setattr(
+        NodePowerCycle, "_cut_and_restore", classmethod(lambda cls, *arguments: True)
+    )
+    monkeypatch.setattr(NodePowerCycle, "_answers", classmethod(lambda cls, node: False))
+    assert NodePowerCycle.cycle("house-1", wait_minutes=0) == 1
+    assert "did not answer in 0 min" in capsys.readouterr().out
