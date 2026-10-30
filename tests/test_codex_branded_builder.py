@@ -1394,3 +1394,13 @@ def test_ling_is_current_only_under_a_stamp_for_its_inputs(tmp_path, monkeypatch
     assert CodexBrandedBuilder.is_current() is False
     (tmp_path / "build-key").unlink()
     assert CodexBrandedBuilder.is_current() is False
+
+
+@pytest.mark.parametrize("damage", ["missing", "not-executable"])
+def test_ling_without_a_runnable_code_mode_host_is_not_current(tmp_path, monkeypatch, damage):
+    host = _installed_ling(tmp_path, monkeypatch)
+    if damage == "missing":
+        host.unlink()
+    else:
+        host.chmod(0o644)
+    assert CodexBrandedBuilder.is_current() is False
