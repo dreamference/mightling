@@ -1044,7 +1044,8 @@ def test_watchdog_trip_deadline_fits_inside_the_freeze_window(monkeypatch):
     # time — which is exactly why the previous 15s hold never fired.
     from dreamference.vllm_server import psi_watchdog
 
-    assert 10.0 + psi_watchdog.PSI_TRIP_DURATION_S <= 20.0
+    # The hold is only checked once a sample, so the last interval counts against the window too.
+    assert 10.0 + psi_watchdog.PSI_TRIP_DURATION_S + psi_watchdog.PSI_SAMPLE_INTERVAL_S <= 20.0
 
 def test_watchdog_declines_to_start_without_psi(monkeypatch):
     from dreamference.vllm_server import psi_watchdog
