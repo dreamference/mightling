@@ -154,8 +154,17 @@ def score(scenario: dict, turns: list[Turn], records: list[dict], web_log: list[
     if len(turns) < wanted_turns:
         failures.append(f"{len(turns)} of {wanted_turns} turns ran")
     cuts = [r for r in records if r.get("cut")]
-    for record in cuts:
-        failures.append(f"turn {record['turn']} cut ({record['cut']} after {record['seconds']} s)")
+    # A cut turn is a loop when the loop measures agree on what it wrote, else a stall (§5.5).
+    cut_as = [
+        "loop"
+        if r["turn"] < len(turns) and metrics.loop_report(turns[r["turn"]].answer)["loop"]
+        else "stall"
+        for r in cuts
+    ]
+    for record, kind in zip(cuts, cut_as, strict=True):
+        failures.append(
+            f"turn {record['turn']} cut ({record['cut']} after {record['seconds']} s): a {kind}"
+        )
     last = turns[-1] if turns else Turn()
     calls = sum(len(t.calls) for t in turns)
     final_turn_calls = len(last.calls)
@@ -201,6 +210,7 @@ def score(scenario: dict, turns: list[Turn], records: list[dict], web_log: list[
         "max_30gram_repeats": max((r["max_30gram_repeats"] for r in loops), default=0),
         "loop": any(r["loop"] for r in loops),
         "cut": [r["cut"] for r in cuts],
+        "cut_as": cut_as,
     }
     return Result(not failures, failures, columns)
 
