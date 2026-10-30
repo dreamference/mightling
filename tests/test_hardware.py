@@ -399,6 +399,28 @@ def test_a_connection_that_drops_mid_asset_is_a_failed_download_not_a_crash(monk
     assert list((folder / "blobs").iterdir()) == []
 
 
+def test_a_snapshot_link_another_download_makes_at_the_same_time_does_not_fail_this_one(monkeypatch):
+    # The link was unlinked, then made: a second run that made it in between failed this one
+    # with FileExistsError, and a reader in that gap found the file missing.
+    from dreamference.hardware import ModelDownloader, ReleaseAssetDownloader
+    repo, payloads = _hosted_model(monkeypatch, {"model.safetensors": b"weights"})
+    _release_server(monkeypatch, payloads)
+    assert ReleaseAssetDownloader.download(repo)
+    folder = ModelDownloader.get_hf_cache_dir() / "models--dreamference--test-drafter"
+    snapshot = folder / "snapshots" / "models-2026-01-01"
+    final = snapshot / "model.safetensors"
+    real = Path.symlink_to
+
+    def other_run_links_first(self, target, *args, **kwargs):
+        if not final.is_symlink():
+            real(final, target)
+        real(self, target, *args, **kwargs)
+    monkeypatch.setattr(Path, "symlink_to", other_run_links_first)
+    assert ReleaseAssetDownloader.download(repo)
+    assert ReleaseAssetDownloader.is_present(repo)
+    assert [path.name for path in snapshot.iterdir()] == ["model.safetensors"]
+
+
 def test_node_sync_sends_a_release_hosted_drafter_as_a_hub_folder(monkeypatch):
     # The receiving node checks every 64-hex blob against its name: a release-hosted drafter's blobs are named so.
     from dreamference.hardware import ModelDownloader
