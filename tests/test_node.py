@@ -702,6 +702,41 @@ def test_serve_job_refuses_everything_that_is_not_an_operation(monkeypatch, caps
     assert "may only ask for Mightling node operations" in capsys.readouterr().err
 
 
+def handlers_that_record(monkeypatch):
+    """Every handler a request can reach, recording its call; the job store knows every id."""
+    from dreamference.node import NodeJob, NodeServe
+    from dreamference.node.node_adapter_sync import NodeAdapterSync
+    from dreamference.node.node_model_sync import NodeModelSync
+
+    called = []
+    record = lambda name: classmethod(lambda cls, *args, **_: called.append((name, *args)) or 0)
+    monkeypatch.setattr(NodeServe, "run_admin", record("run_admin"))
+    monkeypatch.setattr(NodeServe, "unauthorize", record("unauthorize"))
+    monkeypatch.setattr(NodeServe, "subsystem_operation", record("subsystem_operation"))
+    monkeypatch.setattr(NodeModelSync, "receive", record("model-receive"))
+    monkeypatch.setattr(NodeAdapterSync, "receive", record("adapter-receive"))
+    for name in ("submit", "follow", "cancel", "mark_fetched", "send_out"):
+        monkeypatch.setattr(NodeJob, name, record(name))
+    monkeypatch.setattr(NodeJob, "read", classmethod(lambda cls, job_id: {"id": job_id}))
+    return called
+
+
+def test_an_operation_with_one_word_more_reaches_no_handler(monkeypatch):
+    from dreamference.node import NodeServe
+
+    called = handlers_that_record(monkeypatch)
+    for request in (
+        "stop now",
+        "unpair me",
+        "model-receive qwen3.8-27b-nvfp4-dflash2 10 10",
+        "job-submit e30= e30=",
+        "job-cancel 20261002-1200-abc now",
+        "job-logs 20261002-1200-abc 10 10",
+    ):
+        assert NodeServe.serve(request) == 2, request
+    assert called == []
+
+
 def test_serve_job_runs_this_nodes_own_mightling_admin(monkeypatch, capsys):
     from dreamference.node import NodeServe
 
