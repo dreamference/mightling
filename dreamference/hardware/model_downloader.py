@@ -55,12 +55,13 @@ class ModelDownloader:
         """
         Gets the HuggingFace hub cache directory, where snapshot_download writes.
 
-        `HF_HUB_CACHE` when set, otherwise `hub` under the home from get_hf_home().
+        `HF_HUB_CACHE` when set, then its older name `HUGGINGFACE_HUB_CACHE` (which
+        huggingface_hub still honours), otherwise `hub` under the home from get_hf_home().
 
         Returns:
             Path: HuggingFace hub cache directory path.
         """
-        hub_cache = os.getenv("HF_HUB_CACHE")
+        hub_cache = os.getenv("HF_HUB_CACHE") or os.getenv("HUGGINGFACE_HUB_CACHE")
         if hub_cache:
             return Path(hub_cache).expanduser()
         return cls.get_hf_home() / "hub"

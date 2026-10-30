@@ -699,6 +699,18 @@ def test_a_cache_path_docker_cannot_mount_is_refused_by_name(tmp_path, monkeypat
         ModelDownloader.container_volume_args()
 
 
+def test_the_hub_cache_follows_the_legacy_variable_huggingface_hub_still_honours(tmp_path, monkeypatch):
+    # snapshot_download writes to HUGGINGFACE_HUB_CACHE when HF_HUB_CACHE is unset; the host
+    # looked under HF_HOME instead and never found what it had downloaded.
+    from dreamference.hardware import ModelDownloader
+
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "legacy"))
+    assert ModelDownloader.get_hf_cache_dir() == tmp_path / "legacy"
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "current"))
+    assert ModelDownloader.get_hf_cache_dir() == tmp_path / "current"
+
+
 def test_a_recipe_s_nested_values_are_isolated_per_call():
     import copy
 

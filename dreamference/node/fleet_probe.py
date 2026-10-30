@@ -43,7 +43,7 @@ v model "$m"
 r="$(docker inspect -f '{{.State.Running}}' dreamference-searxng 2>/dev/null \
   || sg docker -c "docker inspect -f '{{.State.Running}}' dreamference-searxng" 2>/dev/null)"
 v searxng "$r"
-hub="${HF_HUB_CACHE:-${HF_HOME:-$HOME/.cache/huggingface}/hub}"
+hub="${HF_HUB_CACHE:-${HUGGINGFACE_HUB_CACHE:-${HF_HOME:-$HOME/.cache/huggingface}/hub}}"
 v hub "$hub"
 """
 
