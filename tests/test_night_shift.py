@@ -1460,6 +1460,13 @@ def test_settings_parse_durations_and_windows():
         NightShiftSettings.parse_window("23:00-05:00 tomorrow")
 
 
+def test_a_duration_without_a_unit_is_minutes_and_one_with_trailing_words_is_refused():
+    assert NightShiftSettings({"task_timeout": "30"}).task_timeout_s == 1800
+    with pytest.raises(ValueError):
+        NightShiftSettings.parse_duration("90m later")
+
+
+
 def test_the_reports_review_command_quotes_a_repository_with_a_space():
     record = {"id": "t", "repo": "/srv/my repo", "base": "a" * 40, "status": "done", "task": "x",
               "result": {"branch": "night/t"}}
