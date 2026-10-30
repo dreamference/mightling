@@ -1086,4 +1086,10 @@ mod tests {
         assert!(SearchOptions::new(None, None, Some("de-chxyz")).is_err());
         assert!(SearchOptions::new(None, None, Some("de-chx")).is_ok());
     }
+
+    #[test]
+    fn a_language_holds_only_letters_and_dashes() {
+        assert!(SearchOptions::new(None, None, Some("en-;x")).is_err());
+        assert!(SearchOptions::new(None, None, Some("en-1")).is_err());
+    }
 }
