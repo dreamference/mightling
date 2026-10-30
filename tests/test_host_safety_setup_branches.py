@@ -143,3 +143,14 @@ def test_the_sandbox_is_not_judged_without_bubblewrap_or_user_systemd(monkeypatc
     for present in [("systemd-run",), ("bwrap",)]:
         monkeypatch.setattr(host_safety_setup.shutil, "which", _which(*present))
         assert HostSafetySetup.sandbox_works() is None
+
+
+def test_a_swaps_line_that_is_short_or_not_numbers_is_skipped(monkeypatch):
+    _files(monkeypatch, {"/proc/swaps": (
+        "Filename Type Size Used Priority\n"
+        "/swapfile file\n"
+        "/dev/sda2 partition big 0 -2\n"
+        "/swapfile file 16777216 1048576 -3\n")})
+
+    assert HostSafetySetup.swap_areas() == [
+        {"name": "/swapfile", "type": "file", "size_gb": 16.0, "used_gb": 1.0}]
