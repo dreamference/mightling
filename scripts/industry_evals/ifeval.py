@@ -168,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-jail", action="store_true", help="tests only")
     parser.add_argument("--no-model", action="store_true", help="tests only")
     args = parser.parse_args(argv)
+    if args.no_jail and not args.no_model:
+        parser.error("--no-jail is for tests with no model: a real run is always jailed")
     cache, runs = Path(args.cache), Path(args.runs)
     if not (cache / "manifest.json").exists():
         print(f"❌ Nothing set up in {cache}: run setup_cache.py ifeval first.", file=sys.stderr)

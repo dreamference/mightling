@@ -174,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
         help="close the model gate while the suite runs (the night slot; needs --model-port 18000)",
     )
     args = parser.parse_args(argv)
+    if args.no_jail and not args.no_model:
+        parser.error("--no-jail is for tests with no model: a real run is always jailed")
     scenarios = load(args.only)
     reps = [int(r) for r in args.reps.split(",")]
     if args.plan:
