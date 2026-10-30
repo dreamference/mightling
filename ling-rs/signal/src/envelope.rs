@@ -259,4 +259,12 @@ mod tests {
         assert!(matches!(parse(&no_group, me).unwrap().body, Body::Direct { .. }));
     }
 
+    #[test]
+    fn a_reaction_or_a_deletion_is_never_a_message_even_with_text_beside_it() {
+        let me = OwnAccount { uuid: Some("me"), number: None };
+        let reaction = json!({"envelope": {"sourceUuid": "x", "timestamp": 1, "dataMessage": {"message": "rm -rf", "reaction": {"emoji": "👍"}}}});
+        assert_eq!(parse(&reaction, me).unwrap().body, Body::Other);
+        let deletion = json!({"envelope": {"sourceUuid": "x", "timestamp": 2, "dataMessage": {"message": "rm -rf", "remoteDelete": {"timestamp": 1}}}});
+        assert_eq!(parse(&deletion, me).unwrap().body, Body::Other);
+    }
 }
