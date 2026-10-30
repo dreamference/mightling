@@ -548,4 +548,16 @@ mod tests {
         assert_eq!(bad[0]["error"]["code"], -32700);
         assert!(bad[0]["id"].is_null());
     }
+
+    #[test]
+    fn the_schemas_refuse_unknown_arguments_and_limits_below_one() {
+        for app in App::ALL {
+            for tool in tools(app) {
+                assert_eq!(tool["inputSchema"]["additionalProperties"], false, "{}", tool["name"]);
+                if let Some(limit) = tool["inputSchema"]["properties"].get("limit") {
+                    assert_eq!(limit["minimum"], 1, "{}", tool["name"]);
+                }
+            }
+        }
+    }
 }
