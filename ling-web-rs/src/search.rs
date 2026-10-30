@@ -1106,4 +1106,10 @@ mod tests {
         let options = SearchOptions::new(Some(" Social Media "), None, None).unwrap();
         assert_eq!(options.searxng_category(), "social media");
     }
+
+    #[test]
+    fn a_time_range_is_read_without_case_or_spaces() {
+        let options = SearchOptions::new(None, Some(" Week "), None).unwrap();
+        assert_eq!(options.time_range.as_deref(), Some("week"));
+    }
 }
