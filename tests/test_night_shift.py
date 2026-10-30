@@ -1026,6 +1026,11 @@ def test_one_steady_request_keeps_the_model_busy(fake_host, monkeypatch):
     assert "session is open" in NightShiftRunner.wait_for_idle("http://x", "ling", 1, far_end())
 
 
+def test_a_silent_metrics_endpoint_never_counts_as_idle(fake_host):
+    FakeHost.samples = [None]
+    assert "/metrics does not answer" in NightShiftRunner.wait_for_idle("http://x", "ling", 0, far_end())
+
+
 def test_round_robin_alternates_repositories():
     tasks = [{"id": i, "repo": repo} for i, repo in enumerate("AAAB")]
     assert [task["id"] for task in NightShiftRunner.round_robin(tasks)] == [0, 3, 1, 2]
