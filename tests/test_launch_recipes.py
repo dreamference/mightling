@@ -190,3 +190,13 @@ def test_an_engine_the_model_has_no_recipe_for_is_refused(vllm_recipes):
     )
     assert ModelMatrixRegistry.get_launch_overrides("") == {}
     assert ModelMatrixRegistry.get_launch_overrides("not-a-registered-model") == {}
+
+
+def test_a_key_is_found_whatever_its_case_padding_and_separators(vllm_recipes):
+    spec = ModelMatrixRegistry.MATRIX["test-vllm-nvfp4"]
+    assert ModelMatrixRegistry.get_spec("\ttest-vllm-nvfp4\n") is spec
+    assert ModelMatrixRegistry.get_spec("TEST_VLLM_NVFP4") is spec
+    # A repository id with its separators swapped, and a display name without its spaces.
+    assert ModelMatrixRegistry.get_spec("example/vllm_moe_nvfp4") is spec
+    assert ModelMatrixRegistry.get_spec("TestvLLMrecipe(NVFP4+self-speculation)") is spec
+    assert ModelMatrixRegistry.get_spec("example/vllm-moe") is None
