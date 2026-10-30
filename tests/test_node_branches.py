@@ -13,15 +13,20 @@ import struct
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from dreamference.hardware.adapter_verifier import AdapterVerifier
 from dreamference.node import (
+    NodeAdapterSync,
     NodeJob,
+    NodeModelSync,
     NodePairing,
     NodePowerCycle,
     NodePowerSettings,
     NodeShellyPlug,
+    node_adapter_sync,
     node_job,
     node_power_cycle,
     node_shelly_plug,
@@ -423,3 +428,99 @@ def test_a_node_that_stays_dark_after_the_cycle_fails_the_command(monkeypatch, c
     monkeypatch.setattr(NodePowerCycle, "_answers", classmethod(lambda cls, node: False))
     assert NodePowerCycle.cycle("house-1", wait_minutes=0) == 1
     assert "did not answer in 0 min" in capsys.readouterr().out
+
+
+# -- model and adapter sync: what is refused before anything is copied
+
+
+def a_matrix_key():
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    return next(iter(ModelMatrixRegistry.MATRIX))
+
+
+PAIRED = {"node": "n2", "name": "house-2", "user": "u", "address": "house-2.local"}
+
+
+def test_a_model_sync_to_an_unknown_key_or_node_copies_nothing(monkeypatch, capsys):
+    asked = []
+    monkeypatch.setattr(
+        NodePairing, "find", classmethod(lambda cls, name, browse=True: asked.append(name))
+    )
+    assert NodeModelSync.sync("house-2", "no-such-model") == 1
+    assert "not a key of the model matrix" in capsys.readouterr().out
+    assert asked == []
+    assert NodeModelSync.sync("house-2", a_matrix_key()) == 1
+    assert "house-2 is not a paired node" in capsys.readouterr().out
+
+
+def test_a_model_sync_to_a_given_address_pins_that_address(monkeypatch, tmp_path, capsys):
+    reached = []
+
+    def ssh_command(cls, record, request):
+        reached.append(record)
+        raise LookupError("stop here")
+
+    monkeypatch.setattr(NodePairing, "find", classmethod(lambda cls, name, browse=True: PAIRED))
+    monkeypatch.setattr(NodePairing, "ssh_command", classmethod(ssh_command))
+    monkeypatch.setattr(NodeModelSync, "hub", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(NodeModelSync, "repos", classmethod(lambda cls, key: ["org/model"]))
+    monkeypatch.setattr(NodeModelSync, "members", classmethod(lambda cls, hub, repo: []))
+    assert NodeModelSync.sync("house-2", a_matrix_key(), address="house-2-qsfp.local") == 1
+    assert reached[0]["address"] == "house-2-qsfp.local" and reached[0]["address_fixed"]
+    assert "stop here" in capsys.readouterr().out
+    assert PAIRED["address"] == "house-2.local"  # the stored record is not changed
+
+
+def test_only_content_addressed_blobs_are_checked_against_their_name(tmp_path):
+    blobs = tmp_path / "models--org--m" / "blobs"
+    blobs.mkdir(parents=True)
+    (blobs / ("ab" * 20)).write_text("a git blob is named by sha1 and not hashed here")
+    assert NodeModelSync._verify(tmp_path) is None
+    (blobs / ("cd" * 32)).write_text("not what the name says")
+    assert "does not match its checksum" in NodeModelSync._verify(tmp_path)
+
+
+def test_adapters_go_only_to_a_paired_node_and_to_the_address_given(monkeypatch):
+    sent = []
+    monkeypatch.setattr(NodeAdapterSync, "signed_for", classmethod(lambda cls, key: []))
+    assert NodeAdapterSync.send_to("house-2", "m") == (0, [])
+    monkeypatch.setattr(NodeAdapterSync, "signed_for", classmethod(lambda cls, key: [{}]))
+    monkeypatch.setattr(
+        NodeAdapterSync,
+        "send",
+        classmethod(lambda cls, record, key: sent.append(record) or (0, [])),
+    )
+    monkeypatch.setattr(NodePairing, "find", classmethod(lambda cls, name, browse=True: None))
+    assert NodeAdapterSync.send_to("house-2", "m") == (1, ["❌ house-2 is not a paired node."])
+    assert sent == []
+    monkeypatch.setattr(NodePairing, "find", classmethod(lambda cls, name, browse=True: PAIRED))
+    assert NodeAdapterSync.send_to("house-2", "m", address="house-2-qsfp.local") == (0, [])
+    assert NodeAdapterSync.send_to("house-2", "m") == (0, [])
+    assert sent[0]["address"] == "house-2-qsfp.local" and sent[0]["address_fixed"]
+    assert sent[1] == PAIRED
+
+
+def test_an_adapter_too_big_for_the_disk_is_refused_before_staging(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(NodeModelSync, "hub", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(
+        node_adapter_sync.shutil,
+        "disk_usage",
+        lambda path: SimpleNamespace(total=1, used=1, free=0),
+    )
+    assert NodeAdapterSync.receive(["style", "org/style", "a" * 40, "1"]) == 2
+    assert "too little free space" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_adapter_whose_manifest_names_another_is_refused(monkeypatch, tmp_path):
+    class Manifest:
+        name = "other"
+
+    def check_files(cls, snapshot, signed):
+        assert signed
+        return Manifest()
+
+    monkeypatch.setattr(AdapterVerifier, "check_files", classmethod(check_files))
+    assert NodeAdapterSync._check(tmp_path, "style") == "the manifest names other, not style"
+    assert NodeAdapterSync._check(tmp_path, "other") is None
