@@ -688,4 +688,28 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn a_download_cap_beyond_the_ceiling_is_held_to_it() {
+        let pdf = [b"%PDF-1.7\n".as_slice(), &[b'x'; 100]].concat();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/a.pdf", listener.local_addr().unwrap());
+        let body = pdf.clone();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let _ = std::io::Read::read(&mut stream, &mut request);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/pdf\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = std::io::Write::write_all(&mut stream, &[head.as_bytes(), &body].concat());
+        });
+        let dir = std::env::temp_dir().join(format!("ling-fetch-ceiling-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let downloaded = download_pdf(&url, &dir.join("a.pdf"), u64::MAX);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(downloaded.map(|d| d.bytes), Ok(pdf.len() as u64));
+    }
 }
