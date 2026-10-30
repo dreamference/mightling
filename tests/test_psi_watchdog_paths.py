@@ -73,7 +73,9 @@ def test_a_kernel_without_psi_gives_no_reading_and_no_sample(pressure_file):
     assert wd.tripped is False
 
 
-def test_avg10_at_the_default_limit_starts_the_spike_clock(pressure_file, monkeypatch, no_docker_cli):
+def test_avg10_at_the_default_limit_starts_the_spike_clock(
+    pressure_file, monkeypatch, no_docker_cli
+):
     # The limit is where danger begins, so a reading at it counts as over.
     pressure_file.write_text("full avg10=60.00 avg60=0.00 avg300=0.00 total=1\n")
     monkeypatch.setattr(psi_watchdog, "time", SimpleNamespace(monotonic=lambda: 100.0))
