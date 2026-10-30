@@ -248,7 +248,6 @@ export function PreviewTab(props: PreviewTabProps) {
   );
 }
 
-/** The address bar's text as a URL (preview-rules.ts `addressOf` is the app's copy of the rule). */
 /** How many addresses a tab's history keeps for its suggestions. */
 export const HISTORY_KEPT = 30;
 
@@ -267,12 +266,21 @@ export function commentLine(picked: { selector: string; text: string; url: strin
   return `On the page ${picked.url}, the element ${where}: ${comment.trim()}`;
 }
 
+/**
+ * The address bar's text as a URL (preview-rules.ts `addressOf` and `reachOf` are the app's copy of
+ * the rule): http for this machine and the LAN, https beyond, a path (Windows' too) a file.
+ */
 export function addressOf(typed: string): string | null {
   const text = typed.trim();
   if (!text) return null;
   if (text.startsWith("/")) return `file://${text}`;
+  if (/^[A-Za-z]:[\\/]/.test(text)) return `file:///${text.replace(/\\/g, "/")}`;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^(about|data):/i.test(text)) return text;
-  const host = text.split(/[/:?#]/)[0].toLowerCase();
-  const local = host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || !host.includes(".") || /^(127|10|192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(host);
+  const host = text.split(/[/:?#]/)[0].toLowerCase().replace(/\.$/, "");
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host);
+  const [a, b] = v4 ? [Number(v4[1]), Number(v4[2])] : [-1, -1];
+  const local = v4
+    ? a === 127 || a === 0 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127)
+    : host === "localhost" || /\.(localhost|local|lan|home\.arpa)$/.test(host) || !host.includes(".");
   return `${local ? "http" : "https"}://${text}`;
 }
