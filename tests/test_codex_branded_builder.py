@@ -1731,3 +1731,10 @@ def test_force_rebuilds_a_current_crate_and_without_it_the_links_are_refreshed(t
     assert build() is True and len(calls) == 1
     assert linked == [1]
     assert build(force=True) is True and len(calls) == 2
+
+
+def test_a_crate_is_not_built_without_rust(tmp_path, monkeypatch):
+    crate = _fake_crate(tmp_path, monkeypatch)
+    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: False))
+    monkeypatch.setattr(builder_module.subprocess, "call", lambda *a, **k: pytest.fail("cargo ran"))
+    assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is False
