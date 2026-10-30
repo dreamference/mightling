@@ -688,6 +688,16 @@ mod tests {
     }
 
     #[test]
+    fn the_drop_switch_reads_every_spelling_and_a_blank_one_is_unset() {
+        let table = |text: &str| text.parse::<toml::Table>().unwrap_or_default();
+        for word in ["yes", "on", "ON", "True"] {
+            assert!(drop_enabled(Some(word), &table("")), "{word}");
+        }
+        // An empty variable says nothing: the config file's setting applies.
+        assert!(drop_enabled(Some(""), &table("mightling_drop_old_outputs = true")));
+    }
+
+    #[test]
     fn drop_first_compaction_measures_against_the_limit_the_session_uses() {
         // SWE-bench's `-c` after the launcher's, as the benchmark's command line has it.
         let bench = args(&["ling", "-c", "model_auto_compact_token_limit=94144", "exec", "-c", "model_auto_compact_token_limit=49152", "hi"]);
