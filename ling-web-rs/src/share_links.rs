@@ -546,4 +546,12 @@ mod tests {
         );
         assert_eq!(classify("https://www.google.com/search?q="), None);
     }
+
+    #[test]
+    fn a_coordinate_segment_does_not_name_the_place() {
+        assert_eq!(
+            classify("https://www.google.com/maps/place/@38.7,-9.1,14z?q=Synthetic+Park"),
+            place("Synthetic Park", Some("38.7, -9.1"))
+        );
+    }
 }
