@@ -168,6 +168,22 @@ async fn messages_from_allowed_users_reach_the_hub_after_the_first_sync() {
     let _ = stand;
 }
 
+/// The bot never answers itself, even when its own account is on the allowed list by mistake: its
+/// answers would come back as questions and it would talk to itself without end.
+#[tokio::test]
+async fn the_bots_own_messages_are_ignored_even_when_it_is_on_the_allowed_list() {
+    let (stand, root) = stand_in().await;
+    let (dir, mut config) = setup("own-echo", &root);
+    config.allowed.push(BOT.to_string());
+    let (hub, mut inbound) = mpsc::unbounded_channel();
+    let (syncer, _) = ling_chat::matrix::pair_for_tests(MatrixApi::new(&root, "bot-token"), dir, BOT, hub);
+    syncer.handle(&config, &message("!dm:x", BOT, "an answer"), false).await;
+    assert!(inbound.try_recv().is_err());
+    syncer.handle(&config, &message("!dm:x", OWNER, "a question"), false).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "matrix:!dm:x".into(), text: "a question".into() });
+    let _ = stand;
+}
+
 /// An image (with a caption, Matrix 1.10 style) is downloaded and reaches the hub as media; a
 /// voice message is named as dropped.
 #[tokio::test]
