@@ -1451,6 +1451,12 @@ def test_the_service_quotes_a_path_with_a_space(monkeypatch):
     assert ":/opt/my tools/100%%/:" not in environment and ":/opt/my tools/100%%:" in environment
 
 
+def test_the_service_quotes_a_path_with_a_quote_but_no_space():
+    import shlex
+    _, service = NightShiftScheduler.render_units("01:00-07:00", "/opt/it's/ling-admin")
+    exec_start = next(line for line in service.splitlines() if line.startswith("ExecStart="))
+    assert shlex.split(exec_start.split("=", 1)[1])[0] == "/opt/it's/ling-admin"
+
 
 def test_settings_parse_durations_and_windows():
     settings = NightShiftSettings({"task_timeout": "2h", "test_timeout": 15, "window": "23:00-05:00"})
