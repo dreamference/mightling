@@ -103,3 +103,14 @@ def test_a_warm_up_the_server_refuses_or_cannot_aim_is_no_warm_up(monkeypatch):
     monkeypatch.setattr(requests, "post", lambda *a, **k: _Response(200))
     elapsed = mgr.warm_up(timeout=0.1)
     assert elapsed is not None and elapsed >= 0.0
+
+
+def test_reserved_memory_is_asked_of_the_container_only_while_one_runs(monkeypatch):
+    mgr = VLLMServerManager()
+    asked = []
+    monkeypatch.setattr(mgr.diagnostics, "get_diagnostics_line", lambda: asked.append(1) or "CPU 3%")
+    mgr.process = None
+    assert mgr.get_container_reserved_memory() is None
+    assert asked == []
+    mgr.process = object()
+    assert mgr.get_container_reserved_memory() == "CPU 3%"
