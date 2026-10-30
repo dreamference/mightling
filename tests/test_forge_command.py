@@ -259,3 +259,37 @@ def test_repositories_that_cannot_be_listed_are_reported_as_unreadable(monkeypat
     assert ForgeCommand.repository_lines() == [
         "Repositories: unreadable (the forge did not list /repos/search (HTTP 500))"
     ]
+
+
+@pytest.mark.parametrize(
+    ("backup", "enabled", "lines"),
+    [
+        (None, False, ["Last backup: never", "GitHub mirror: off"]),
+        (
+            {"set": "s-1", "at": None, "error": "disk full"},
+            False,
+            ["Last backup: s-1 never, sent to no node ⚠️ disk full", "GitHub mirror: off"],
+        ),
+        (
+            {"set": "s-1", "at": None, "sent_to": ["n-2"]},
+            True,
+            ["Last backup: s-1 never, sent to n-2", "GitHub mirror: every branch, last run never"],
+        ),
+    ],
+)
+def test_the_record_reports_its_last_backup_and_github_mirror(monkeypatch, backup, enabled, lines):
+    monkeypatch.setattr(ForgeBackup, "status", classmethod(lambda cls: backup))
+    monkeypatch.setattr(
+        ForgeGithubMirror, "settings", classmethod(lambda cls: {"enabled": enabled})
+    )
+    monkeypatch.setattr(ForgeGithubMirror, "status", classmethod(lambda cls: None))
+    assert ForgeCommand.record_lines() == lines
+
+
+def test_a_stopped_or_failing_github_mirror_says_so(monkeypatch):
+    monkeypatch.setattr(forge_command.time, "time", lambda: 1000.0)
+    assert ForgeCommand.github_summary({"stopped": "token revoked", "at": 990}) == (
+        "STOPPED 10 s ago: token revoked"
+    )
+    last = {"at": 990, "repositories": {"o/a": {"ok": True}, "o/b": {"ok": False}}}
+    assert ForgeCommand.github_summary(last) == "last run 10 s ago, problems in o/b"
