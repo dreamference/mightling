@@ -124,4 +124,11 @@ mod tests {
         assert_eq!(with_summary_cap(plain.clone(), "compact_prompt = \"Mine\"\n", Some(800)), plain);
         assert_eq!(with_summary_cap(plain.clone(), "experimental_compact_prompt_file = \"/p.md\"\n", Some(800)), plain);
     }
+
+    #[test]
+    fn the_bound_follows_codexs_prompt_after_one_blank_line() {
+        let text = prompt(800);
+        let rest = text.strip_prefix(codex_prompts::SUMMARIZATION_PROMPT.trim_end()).unwrap_or_default();
+        assert!(rest.starts_with("\n\nKeep the summary under 800 words."), "{rest:?}");
+    }
 }
