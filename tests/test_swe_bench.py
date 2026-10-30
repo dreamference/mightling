@@ -3617,6 +3617,15 @@ def test_a_gate_once_in_force_is_reported_in_force_after_its_probe_goes_quiet(ho
     assert [session["gate"] for session in gate_record()["sessions"]] == ["in force"]
 
 
+def test_a_pause_is_recorded_only_for_the_part_inside_the_hold(hold):
+    hold.started = time.time() - 100
+    # Began before the hold and still running: from the hold's start to now.
+    FakeGate.pause = {"since": hold.started - 50, "until": time.time() + 100}
+    hold.tick()
+    record = gate_record()
+    assert record["pauses"] == [{"start": hold.started, "end": record["sessions"][-1]["end"]}]
+
+
 def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
     from dreamference.vllm_server.model_gate import ModelGate
 
