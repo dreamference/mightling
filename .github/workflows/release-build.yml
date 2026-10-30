@@ -234,7 +234,7 @@ jobs:
           cd "$HOME/.cache/dreamference/puffin-codex/src/codex-rs"
           CARGO_TARGET_DIR="$HOME/.cache/dreamference/puffin-codex/target" \
           CARGO_PROFILE_RELEASE_DEBUG=none CARGO_PROFILE_RELEASE_STRIP=debuginfo \
-            ~/.cargo/bin/cargo test --release -p ling-signal -p ling-chat -p ling-sync -p ling-loop-guard
+            cargo test --release -p ling-signal -p ling-chat -p ling-sync -p ling-loop-guard
       - name: Package
         run: |
           bin="$(dirname "$(python -c 'from dreamference.runner.codex_branded_builder import CodexBrandedBuilder as B; print(B.executable_path())')")"
