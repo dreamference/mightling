@@ -407,6 +407,55 @@ def test_no_listener_on_the_socket_is_not_a_kill(docker_socket):
     assert MemoryPressureWatchdog("test-container")._kill_via_docker_socket() is False
 
 
+@pytest.fixture
+def fake_socket(monkeypatch):
+    """Stands in for the socket module, so the default path can be named without reaching it."""
+    log = []
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def settimeout(self, seconds):
+            log.append(("timeout", seconds))
+
+        def connect(self, path):
+            log.append(("connect", path))
+
+        def sendall(self, data):
+            log.append(("send", data))
+
+        def recv(self, size):
+            return b"HTTP/1.1 204 No Content\r\n\r\n"
+
+    monkeypatch.setattr(
+        psi_watchdog,
+        "socket",
+        SimpleNamespace(
+            AF_UNIX=socket.AF_UNIX,
+            SOCK_STREAM=socket.SOCK_STREAM,
+            timeout=socket.timeout,
+            socket=lambda *args: Conn(),
+        ),
+    )
+    return log
+
+
+def test_without_docker_host_the_kill_goes_to_dockerds_socket_with_a_timeout(
+    monkeypatch, fake_socket
+):
+    # A stalled dockerd must not hold the watchdog forever.
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    assert MemoryPressureWatchdog("test-container")._kill_via_docker_socket() is True
+    assert fake_socket[:2] == [
+        ("timeout", psi_watchdog.DOCKER_KILL_TIMEOUT_S),
+        ("connect", "/var/run/docker.sock"),
+    ]
+
+
 def _killed_directly(tmp_path, monkeypatch):
     """A root watchdog whose direct SIGKILL reaches every PID of the container."""
     procs = tmp_path / "cgroup.procs"
