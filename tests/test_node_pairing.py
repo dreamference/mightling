@@ -90,8 +90,9 @@ def test_a_node_advertising_something_that_is_not_a_node_id_is_not_found_by_a_br
 
 
 def test_a_record_is_never_named_by_something_that_is_not_a_node_id():
-    with pytest.raises(ValueError):
-        NodePairing.record_path("../x")
+    for bad in ("../x", f"{NODE}/../../x", f"{NODE}.json"):  # the whole name is the id
+        with pytest.raises(ValueError):
+            NodePairing.record_path(bad)
     assert NodePairing.record_path(NODE).name == f"{NODE}.json"
 
 
