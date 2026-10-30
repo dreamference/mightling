@@ -145,6 +145,44 @@ pub fn record_outcome(
 mod tests {
     use super::*;
 
+    /// The staging names are predictable: a symlink planted under one is replaced, not written
+    /// through.
+    #[cfg(unix)]
+    #[test]
+    fn an_install_never_writes_through_a_planted_staging_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        let repo = Repo {
+            root: root.clone(),
+            main_root: root,
+            is_git: false,
+        };
+        let converted = dir.path().join("converted.db");
+        rusqlite::Connection::open(&converted)
+            .unwrap()
+            .execute_batch("CREATE TABLE global_symbols (id INTEGER PRIMARY KEY, symbol TEXT);")
+            .unwrap();
+        let scip_file = dir.path().join("index.scip");
+        std::fs::write(&scip_file, b"").unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "keep").unwrap();
+        let scip_dir = repo.scip_dir();
+        std::fs::create_dir_all(&scip_dir).unwrap();
+        let stem = slug("scip-python", "pkg");
+        std::os::unix::fs::symlink(&outside, scip_dir.join(format!(".{stem}.db.new"))).unwrap();
+        let entry = RunEntry {
+            indexer: "scip-python".into(),
+            root: "pkg".into(),
+            ..Default::default()
+        };
+        let entry = install(&repo, entry, &converted, &scip_file).unwrap();
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
+        assert!(std::fs::symlink_metadata(scip_dir.join(&entry.store))
+            .unwrap()
+            .is_file());
+    }
+
     #[test]
     fn slug_and_key_format_root_names() {
         assert_eq!(slug("rust-analyzer", ""), "rust-analyzer-root");
