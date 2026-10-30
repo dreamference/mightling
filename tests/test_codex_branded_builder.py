@@ -1331,3 +1331,17 @@ def test_a_failed_v8_download_stops_the_fetch(tmp_path, monkeypatch):
     export, _, _ = _v8_release(tmp_path, monkeypatch)
     monkeypatch.setattr(CodexBrandedBuilder, "download", classmethod(offline))
     assert CodexBrandedBuilder.fetch_rusty_v8(export) is None
+
+
+@pytest.mark.parametrize("missing", [V8_ARCHIVE, V8_BINDING])
+def test_a_checksum_file_that_omits_a_v8_file_stops_the_fetch(tmp_path, monkeypatch, missing):
+    kept = V8_BINDING if missing == V8_ARCHIVE else V8_ARCHIVE
+    checksums = f"{'2' * 64}  {kept}\n".encode()
+    export, _, downloaded = _v8_release(
+        tmp_path,
+        monkeypatch,
+        served={V8_CHECKSUMS: checksums},
+        manifest=f"{_digest(checksums)}  {V8_CHECKSUMS}\n",
+    )
+    assert CodexBrandedBuilder.fetch_rusty_v8(export) is None
+    assert downloaded == [V8_CHECKSUMS]
