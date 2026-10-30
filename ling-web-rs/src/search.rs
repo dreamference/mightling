@@ -1062,4 +1062,11 @@ mod tests {
             .collect();
         assert_eq!(urls, ["https://en.wikipedia.org/wiki/Lisbon"]);
     }
+
+    #[test]
+    fn answers_with_every_engine_failing_are_not_an_error() {
+        let payload = searxng(json!([]), json!(["42"]), json!([["brave", "CAPTCHA"]]));
+        let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
+        assert_eq!((found.result_count, found.answers.len()), (0, 1));
+    }
 }
