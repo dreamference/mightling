@@ -49,3 +49,11 @@ def test_an_option_value_before_the_subcommand_does_not_hide_a_fetch(option):
     # Each of these takes the next word as its value; read as the subcommand, it would hide the fetch.
     trace = StraceParser.parse(execve("/usr/bin/git", "git", option, "value", "fetch", "origin"))
     assert trace.networked_git == [f"git {option} value fetch origin"]
+
+
+def test_a_line_without_a_pid_is_still_read():
+    # strace without `-f` prints no pid: a single traced process's connect must still count.
+    trace = StraceParser.parse(
+        'connect(3<TCP:[700]>, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("192.0.2.7")}, 16) = 0\n'
+    )
+    assert trace.destinations == {"192.0.2.7:443": 1}
