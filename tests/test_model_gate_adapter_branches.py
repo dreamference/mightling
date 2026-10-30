@@ -95,3 +95,7 @@ def test_a_chunked_answer_is_joined_and_stops_at_its_last_chunk():
     answer = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n1\r\nc\r\n0\r\n\r\n2\r\nzz\r\n"
 
     assert ModelGateAdapters.parse_response(answer) == (200, b"abc")
+
+
+def test_a_chunk_size_that_is_not_hex_ends_the_body():
+    assert ModelGateAdapters.dechunk(b"2\r\nab\r\nzz\r\ncd\r\n") == b"ab"
