@@ -321,6 +321,7 @@ def test_a_days_template_runs_on_its_weekdays_only() -> None:
         (["night", "every", "--help"], None),
         (["night", "every"], None),
         (["night", "add", "night", "every", "--daily"], None),
+        (["node", "every", "--daily", "x"], None),
         (["run", "night every --daily"], None),
     ],
 )
