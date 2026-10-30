@@ -523,6 +523,21 @@ mod state_file_tests {
         // Refused, not dropped, though the rest names a file in the tree.
         assert_eq!(repo.source_text("../src/lib.rs"), None);
     }
+
+    #[test]
+    fn an_absolute_source_path_is_refused_not_read_from_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "fn main() {}\n").unwrap();
+        let repo = Repo {
+            root: root.clone(),
+            main_root: root,
+            is_git: false,
+        };
+        assert!(repo.source_text("src/lib.rs").is_some());
+        assert_eq!(repo.source_text("/src/lib.rs"), None);
+    }
 }
 
 #[cfg(test)]
