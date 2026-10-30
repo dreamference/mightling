@@ -87,6 +87,21 @@ def test_a_failed_clear_is_tried_again_on_the_next_launch(
     assert len(docker_runs[0]) == 2
 
 
+def test_a_changed_signature_without_a_cache_has_nothing_to_clear(
+    vllm_recipes, cache_home, docker_runs
+):
+    # No graph was ever compiled here, so there is no container to start; the signature moves on.
+    cache_home.mkdir(parents=True)
+    (cache_home / ".compile_signature").write_text(
+        "example/vllm-dflash-int4-AutoRound|dflash|example/vllm-dflash-drafter|8"
+    )
+    assert VLLMServerManager._reset_stale_compile_cache("test-vllm-dflash") is False
+    assert docker_runs[0] == []
+    assert (
+        cache_home / ".compile_signature"
+    ).read_text() == VLLMServerManager._compile_cache_signature("test-vllm-dflash")
+
+
 def test_an_unreadable_signature_counts_as_none(vllm_recipes, cache_home, docker_runs):
     # A directory where the file should be: reading it fails, which must not stop the launch.
     (cache_home / ".compile_signature").mkdir(parents=True)
