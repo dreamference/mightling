@@ -5589,6 +5589,33 @@ def test_a_remote_server_leaves_this_gate_open_even_when_the_network_has_a_subne
     assert sessions[0]["gate"].startswith("open: ")
 
 
+def test_a_run_whose_network_is_not_internal_starts_no_container(bench, monkeypatch, capsys):
+    docker = bench["docker"]
+
+    def run_on_open_network(args, timeout=None, input_text=None):
+        if args[:2] == ["network", "inspect"]:
+            docker.calls.append(list(args))
+            config = {"Gateway": "172.30.0.1", "Subnet": "172.30.0.0/16"}
+            return subprocess.CompletedProcess(
+                args, 0, json.dumps([{"Internal": False, "IPAM": {"Config": [config]}}]), ""
+            )
+        return docker.run(args, timeout, input_text)
+
+    monkeypatch.setattr(
+        SweBenchDocker, "run", classmethod(lambda cls, *a, **k: run_on_open_network(*a, **k))
+    )
+    assert run(bench, instances=["acme__widget-1"]) == 1
+    assert not [call for call in docker.calls if call[0] == "run"]
+    assert "Could not create the internal Docker network" in capsys.readouterr().out
+
+
+# -- image chunks, shards and their merge (150-task nights, 2026-10-20) ---------------------------
+
+def graded_batches(harness, since=0):
+    return [sorted(call[i + 1] for i, word in enumerate(call) if word == "-i")
+            for call in harness.calls[since:] if "-p" in call and "to-grade.jsonl" in call[call.index("-p") + 1]]
+
+
 def test_the_image_chunk_defaults_to_25_and_is_read_from_the_config():
     assert SweBenchSettings({}).image_chunk == 25
     assert SweBenchSettings({"image_chunk": 10}).image_chunk == 10
