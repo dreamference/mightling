@@ -870,6 +870,19 @@ def test_a_cuda_package_is_named_among_nvidias_updates(tmp_path, release_server)
     assert "NVIDIA (DGX, CUDA, driver): cuda-compat-13-0\n" in result.stdout
 
 
+def test_a_device_with_several_newer_firmware_releases_is_one_update(tmp_path, release_server):
+    # fwupd lists every newer release of a device; `fwupdmgr update` installs one of them.
+    env = fresh_gb10(tmp_path)
+    one = '          "Version" : "1.22"\n        }\n'
+    two = '          "Version" : "1.22"\n        },\n        {\n          "Version" : "1.21"\n        }\n'
+    assert one in FIRMWARE_JSON
+    (tmp_path / "firmware.json").write_text(FIRMWARE_JSON.replace(one, two))
+    result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10", env_extra=env)
+    out = result.stdout
+    assert result.returncode == 0, out + result.stderr
+    assert "2 firmware update(s)" in out and out.count("USB-C PD Controller:") == 1
+
+
 def test_a_failed_step_is_named_in_the_summary_and_the_exit_code(tmp_path, release_server):
     (tmp_path / "groups-db").write_text("tester docker\n")
     result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10",
