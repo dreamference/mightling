@@ -838,4 +838,18 @@ mod tests {
         let short = outputs(MIN_MASKABLE_CHARS - 1);
         assert_eq!(plan_move(&policy(), &short, &State::default(), 1_000_000, &scratch.0), Some(vec![]));
     }
+
+    #[test]
+    fn a_short_output_among_the_last_does_not_take_the_place_of_a_kept_one() {
+        let scratch = Scratch::new("short-late");
+        let mut items = history(30, 20);
+        // The last output is short: the ten kept whole are the ten long ones before it.
+        let last = items.len() - 1;
+        items[last].item =
+            json!({"type": "function_call_output", "call_id": "call_029", "output": "Process exited with code 0\nOutput:\nok"});
+        run(&scratch.0, &mut items, 1_000_000);
+        let gone = masked(&items);
+        assert_eq!(gone.len(), 29 - KEEP_RECENT);
+        assert_eq!(gone.last(), Some(&(2 + 2 * (28 - KEEP_RECENT))));
+    }
 }
