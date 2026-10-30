@@ -80,6 +80,16 @@ mod tests {
         let long = "x".repeat(5_000);
         let capped = "x".repeat(1_021) + "...";
         assert_eq!(line_cost("a", &long, "/p"), line_cost("a", &capped, "/p"));
+        // Exactly the limit, counted in characters, is kept whole; one more is cut to 1,021 and "...".
+        assert_eq!(truncated(&"x".repeat(1_024)), "x".repeat(1_024));
+        assert_eq!(truncated(&"ß".repeat(1_024)), "ß".repeat(1_024));
+        assert_eq!(truncated(&"x".repeat(1_025)), "x".repeat(1_021) + "...");
+    }
+
+    #[test]
+    fn an_empty_description_leaves_no_space_for_it() {
+        // "- pdf: (file: /s/pdf/SKILL.mdx)\n" is 32 bytes; with a second space it would be 33.
+        assert_eq!(line_cost("pdf", "", "/s/pdf/SKILL.mdx"), 8);
     }
 
     #[test]
