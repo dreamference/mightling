@@ -189,6 +189,43 @@ def test_server_start_exits_with_an_error_when_the_server_stopped_before_it_answ
     assert "The model server stopped before it answered" in capsys.readouterr().out
 
 
+def test_server_start_stops_a_load_that_cannot_succeed_and_exits_with_an_error(monkeypatch, capsys):
+    # The log showed a fatal load error: the server is stopped rather than waited for, and a script
+    # learns that it failed.
+    import pytest
+
+    from dreamference.chat.google_service import GoogleService
+    from dreamference.chat.image_search_sidecar import ImageSearchSidecar
+    from dreamference.chat.speech_sidecar import SpeechSidecar
+    from dreamference.cli import dreamference_cli_controller as controller
+    from dreamference.node import NodeAdvertiser
+    from dreamference.vllm_server import DiffusionServerManager, VLLMServerManager
+
+    class Monitor:
+        server_ready = False
+        fatal = "VLLM_KERNEL_PIN names a kernel this image lacks"
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    stopped = []
+    for sidecar in (GoogleService, SpeechSidecar, ImageSearchSidecar):
+        monkeypatch.setattr(sidecar, "ensure_on_node", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(NodeAdvertiser, "on_server_starting", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(NodeAdvertiser, "on_server_stopped", classmethod(lambda cls, *a, **k: None))
+    monkeypatch.setattr(controller, "create_model_loading_monitor", lambda *a, **k: Monitor())
+    monkeypatch.setattr(VLLMServerManager, "start_server", lambda self, **_: None)
+    monkeypatch.setattr(VLLMServerManager, "stop_server", lambda self, port=8000: stopped.append(port))
+    monkeypatch.setattr(DiffusionServerManager, "remove_leftover", classmethod(lambda cls, port=8001: None))
+    with pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(["server", "start", "--no-diffusion"])
+    assert exit_info.value.code == 1 and stopped == [8000]
+    assert "VLLM_KERNEL_PIN names a kernel this image lacks" in capsys.readouterr().out
+
+
 def test_codex_stop_reports_a_daemon_that_did_not_stop(capsys):
     # The stop command's exit code was ignored: "stopped" was printed and the command exited 0.
     import subprocess
