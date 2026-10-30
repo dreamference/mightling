@@ -389,6 +389,21 @@ def test_stopping_a_command_stops_the_processes_it_started(setup):
             pass
 
 
+def test_a_running_task_keeps_only_what_is_left_of_its_memory_allowance(fake_host, monkeypatch):
+    class Running:
+        in_model = False
+        lane_host = "http://x"
+        current_unit = "night-t"
+    gib = 1024 ** 3
+    asked = []
+    monkeypatch.setattr(FakeHost, "scope_memory_current", classmethod(lambda cls, unit: asked.append(unit) or 4 * gib))
+    # 8 GiB allowed, 4 used: 4 more held back, and one more task needs 8 GiB plus the 8 GiB reserve.
+    monkeypatch.setattr(FakeHost, "available", 20 * gib)
+    settings = NightShiftSettings({"task_memory": "8G"})
+    assert NightShiftRunner.start_blocker("http://x", "p", [(None, Running())], settings) is None
+    assert asked == ["night-t.scope"]
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
