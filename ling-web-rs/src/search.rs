@@ -1032,4 +1032,18 @@ mod tests {
         let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
         assert_eq!(found.results[0].url, "https://www.wikidata.org/wiki/Q597");
     }
+
+    #[test]
+    fn an_infobox_without_an_engine_has_no_engines() {
+        let mut payload = searxng(json!([]), json!([]), json!([]));
+        payload["infoboxes"] =
+            json!([{"infobox": "Lisbon", "id": "https://en.wikipedia.org/wiki/Lisbon"}]);
+        let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
+        assert_eq!(found.results[0].engine, "");
+        assert!(
+            found.results[0].engines.is_empty(),
+            "{:?}",
+            found.results[0].engines
+        );
+    }
 }
