@@ -17,6 +17,7 @@ TIER_VARIABLES = (
     "DREAMFERENCE_CONFIG_PATH",
     "DREAMFERENCE_MIGHTLING_AIRGAPPED",
     "DREAMFERENCE_VLLM_HOST",
+    "DREAMFERENCE_DIFFUSION_MODEL",
 )
 
 
@@ -238,3 +239,20 @@ def test_every_reader_ignores_the_same_network_keys():
         found = re.search(r"NETWORK_KEYS: &\[&str\] = &\[([^\]]*)\]", (root / reader).read_text())
         assert found, reader
         assert set(re.findall(r'"([^"]+)"', found.group(1))) == NETWORK_KEYS, reader
+
+
+@pytest.mark.parametrize("source", ["argument", "environment", "file"])
+def test_a_diffusion_model_chosen_at_the_default_is_still_written(tmp_path, monkeypatch, source):
+    # As for `model`: a choice that equals today's default stays in the file, so the workspace does
+    # not follow the default when it moves.
+    path = tmp_path / "dreamference.toml"
+    chosen = DreamferenceConfig(config_file=str(tmp_path / "none.toml")).diffusion_model
+    arguments = {}
+    if source == "argument":
+        arguments["diffusion_model"] = chosen
+    elif source == "environment":
+        monkeypatch.setenv("DREAMFERENCE_DIFFUSION_MODEL", chosen)
+    else:
+        path.write_text(f'diffusion_model = "{chosen}"\n')
+    DreamferenceConfig(config_file=str(path), **arguments).save_config()
+    assert _saved(path)["diffusion_model"] == chosen
