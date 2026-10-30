@@ -4,7 +4,10 @@ The run and the session are stand-ins: no ssh, sudo, docker or `ssh-keygen` comm
 command a step sends is recorded and answered by the first marker it contains.
 """
 
+import json
 import subprocess
+
+import pytest
 
 from dreamference.node.node_provisioner import NodeProvisioner
 from dreamference.node.node_role_provisioner import (
@@ -71,3 +74,30 @@ def test_a_user_name_sudoers_would_misread_installs_no_drop_in():
     assert steps.sudoers(HOST, session) is False
     assert run.results[HOST]["failed"] == "sudoers"
     assert sent(session, INSTALL) == [] and sent(session, "cat /etc/sudoers.d") == []
+
+
+# The docker daemon file
+
+
+@pytest.mark.parametrize(
+    "answer", [(1, "", "Permission denied"), (0, "{not json", ""), (0, '{"runtimes": []}', "")]
+)
+def test_a_daemon_json_that_cannot_be_read_or_parsed_is_left_alone(answer):
+    steps, run = role()
+    session = Session({"daemon.json; fi": answer})
+    assert steps.docker_daemon(HOST, session) is False
+    assert run.results[HOST]["failed"] == "docker daemon.json"
+    assert run.results[HOST]["reason"].startswith("left alone")
+    assert sent(session, INSTALL) == [] and sent(session, "restart docker") == []
+
+
+def test_an_nvidia_runtime_already_there_is_kept_and_one_with_no_path_is_replaced():
+    own = {"path": "/usr/local/bin/nvidia-container-runtime", "args": ["--debug"]}
+    merged = json.loads(
+        NodeRoleProvisioner.merge_daemon_json(json.dumps({"runtimes": {"nvidia": own}}))
+    )
+    assert merged["runtimes"]["nvidia"] == own and merged["max-download-attempts"] == 100
+
+    empty = json.dumps({"runtimes": {"nvidia": {"path": ""}}, "max-download-attempts": 100})
+    merged = json.loads(NodeRoleProvisioner.merge_daemon_json(empty))
+    assert merged["runtimes"]["nvidia"]["path"] == "nvidia-container-runtime"
