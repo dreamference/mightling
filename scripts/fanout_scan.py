@@ -327,7 +327,13 @@ CONFIRM_FRAMINGS: Final[tuple[str, ...]] = (
     "sentence say why, then end with `verdict: real high`, `verdict: real medium`, `verdict: real low`, or "
     "`verdict: no` if they would close it as not a bug.",
 )
-CONFIRM_TOKENS: Final[int] = 80
+CONFIRM_TOKENS: Final[int] = 120
+
+# Appended to every round-2 question: without it the model now and then answers in round 1's format.
+CONFIRM_FORMAT: Final[str] = (
+    "This is the second pass: do not answer `no` or `yes L<line>`; write the one sentence, then the "
+    "`verdict:` line."
+)
 
 BASELINE_QUESTION: Final[str] = (
     "List every problem in this file: bugs, unhandled errors, leaks, races and breaks of the project "
@@ -542,7 +548,8 @@ def probe_question(kind: ProblemClass, region: Region, whole: bool) -> str:
 
 def confirm_question(framing: str, finding: Finding) -> str:
     """The round-2 question for one candidate in one framing."""
-    return framing.format(line=finding.line, text=finding.text, kind=finding.kind)
+    question = framing.format(line=finding.line, text=finding.text, kind=finding.kind)
+    return f"{question}\n{CONFIRM_FORMAT}"
 
 
 def parse_answer(answer: str, kind: str, region: Region) -> Finding | None:

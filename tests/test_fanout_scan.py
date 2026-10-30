@@ -102,6 +102,7 @@ def test_a_confirm_question_quotes_the_candidate():
     for framing in fs.CONFIRM_FRAMINGS:
         question = fs.confirm_question(framing, finding)
         assert "42" in question and "file never closed" in question
+        assert question.endswith(fs.CONFIRM_FORMAT) and "verdict:" in question
 
 
 # Region splitting
