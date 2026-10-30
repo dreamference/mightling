@@ -978,6 +978,16 @@ mod tests {
     }
 
     #[test]
+    fn an_error_that_only_names_a_reason_is_not_the_cap() {
+        let (nudged, flag) = memory();
+        let events = vec![Err(ModelResponseError::Stream("upstream failed, reason: overloaded".into()))];
+        let out = run(events, nudged, true);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(&out[0], Err(ModelResponseError::Stream(m)) if m.starts_with("upstream failed")));
+        assert!(!flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn with_the_detector_off_only_the_cap_is_handled() {
         let (nudged, _) = memory();
         let out = run(looping_reasoning(12), nudged, false);
