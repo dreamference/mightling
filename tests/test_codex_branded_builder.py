@@ -1780,3 +1780,14 @@ def test_a_staging_link_left_by_a_crashed_link_of_this_process_is_replaced(tmp_p
     CodexBrandedBuilder._link("/install/ling", str(link))
     assert link.readlink() == Path("/install/ling")
     assert not os.path.lexists(f"{link}.{os.getpid()}.new")
+
+
+def test_only_a_runnable_console_script_is_linked(tmp_path, monkeypatch):
+    # A link to a script this virtualenv does not have would be a dangling ling-admin.
+    monkeypatch.setattr(builder_module.sys, "executable", str(tmp_path / "python"))
+    assert CodexBrandedBuilder.console_script_path("ling-admin") is None
+    script = tmp_path / "ling-admin"
+    script.write_text("#!/bin/sh\n")
+    assert CodexBrandedBuilder.console_script_path("ling-admin") is None
+    script.chmod(0o755)
+    assert CodexBrandedBuilder.console_script_path("ling-admin") == str(script)
