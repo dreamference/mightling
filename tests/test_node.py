@@ -2109,6 +2109,36 @@ def test_only_paths_the_node_allows_are_bound_and_only_read_only(job_node, tmp_p
             NodeJob.validate(job_request(binds=[path]))
 
 
+def test_a_bind_is_allowed_only_inside_a_root_once_links_are_resolved(tmp_path, monkeypatch):
+    from dreamference.node import NodeJob
+
+    root = tmp_path / "datasets"
+    (root / "imagenet").mkdir(parents=True)
+    (tmp_path / "datasets-private").mkdir()
+    (tmp_path / "secret").mkdir()
+    (root / "escape").symlink_to(tmp_path / "secret")
+    config = tmp_path / "home-config.toml"
+    monkeypatch.setattr(
+        "os.path.expanduser",
+        lambda path: (
+            str(config) if path.endswith("config.toml") else path.replace("~", os.environ["HOME"])
+        ),
+    )
+    config.write_text(f'[node]\nbindable = "{root}"\n')  # one root, not in a list
+    assert NodeJob.allowed_binds([str(root), str(root / "imagenet")]) == [
+        str(root),
+        str(root / "imagenet"),
+    ]
+    for path in (tmp_path / "datasets-private", root / "escape"):
+        with pytest.raises(ValueError, match="does not allow binding"):
+            NodeJob.allowed_binds([str(path)])
+    # A blank root is no root, not the folder the node happens to run in.
+    config.write_text('[node]\nbindable = ["", " "]\n')
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="allows nothing"):
+        NodeJob.allowed_binds([str(root)])
+
+
 def test_a_job_binds_at_most_sixteen_paths(job_node, tmp_path, monkeypatch):
     from dreamference.node import NodeJob
 
