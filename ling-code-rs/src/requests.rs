@@ -114,4 +114,18 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn a_planted_symlink_is_neither_read_nor_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "index\n").unwrap();
+        let state = dir.path().join("state");
+        std::fs::create_dir(&state).unwrap();
+        std::os::unix::fs::symlink(&outside, path(&state)).unwrap();
+        assert!(append(&state, Request::IndexExact).is_err());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "index\n");
+        assert_eq!(drain(&state), None);
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "index\n");
+    }
 }
