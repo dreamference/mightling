@@ -921,6 +921,17 @@ mod tests {
     }
 
     #[test]
+    fn a_trust_entry_for_another_config_file_is_kept() {
+        let path = Path::new("/h/config.toml");
+        let hash = hook_hash("/opt/ling ledger");
+        let existing = format!("[hooks.state.\"/other/config.toml:session_start:0:0\"]\ntrusted_hash = \"{hash}\"\n");
+        let updated = with_ledger_hook(&existing, path, "/opt/ling ledger", true).unwrap_or_default();
+        let parsed: toml::Table = updated.parse().unwrap_or_default();
+        assert_eq!(parsed["hooks"]["state"]["/other/config.toml:session_start:0:0"]["trusted_hash"].as_str(), Some(hash.as_str()));
+        assert!(parsed["hooks"]["state"]["/h/config.toml:session_start:0:0"]["trusted_hash"].as_str().is_some());
+    }
+
+    #[test]
     #[cfg(not(windows))]
     fn a_path_the_shell_would_split_is_quoted() {
         assert_eq!(hook_command(Path::new("/opt/ling/bin/ling")), "/opt/ling/bin/ling ledger");
