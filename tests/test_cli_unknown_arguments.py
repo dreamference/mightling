@@ -146,3 +146,51 @@ def test_every_command_refuses_an_unknown_argument(
     # A group that needs a subcommand names the missing subcommand instead.
     assert stray in output.out + output.err or needs_subcommand, [*argv, stray]
     assert not ran, ran
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["chat", "--yes", "--delete-data", "remove"],
+        ["chat", "remove", "--yes", "--delete-data"],
+        ["chat", "remove", "--delete-data", "--yes"],
+    ],
+)
+def test_chat_remove_takes_its_flags_before_or_after_the_subcommand(monkeypatch, argv):
+    # After `remove` the catch-all takes them; they still reach the removal rather than being dropped.
+    removed = []
+    monkeypatch.setattr(LegacyNameMigration, "run", classmethod(lambda cls: None))
+    monkeypatch.setattr(
+        RetiredWebChat, "remove", classmethod(lambda cls, **flags: removed.append(flags) or 0)
+    )
+    monkeypatch.setattr(os, "environ", dict(os.environ))  # run_cli sets NO_PROXY
+    with pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(argv)
+    assert exit_info.value.code == 0
+    assert removed == [{"yes": True, "delete_data": True}]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["node", "run", "--time", "2h", "--memory", "8G", "n1", "--", "true"],
+        ["node", "run", "n1", "--time", "2h", "--memory", "8G", "--", "true"],
+    ],
+)
+def test_node_run_takes_its_options_before_or_after_the_nodes_name(monkeypatch, argv):
+    sent = []
+    monkeypatch.setattr(LegacyNameMigration, "run", classmethod(lambda cls: None))
+    monkeypatch.setattr(
+        NodeJobSender,
+        "run",
+        classmethod(
+            lambda cls, name, command, **options: sent.append((name, command, options)) or 0
+        ),
+    )
+    monkeypatch.setattr(os, "environ", dict(os.environ))  # run_cli sets NO_PROXY
+    with pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(argv)
+    assert exit_info.value.code == 0
+    [(name, command, options)] = sent
+    assert (name, command) == ("n1", ["true"])
+    assert (options["time_limit"], options["memory"]) == ("2h", "8G")
