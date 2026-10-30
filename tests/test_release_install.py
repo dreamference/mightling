@@ -467,6 +467,27 @@ def test_reinstalling_replaces_the_binaries_in_place(tmp_path, release_server):
     assert not [path.name for path in bin_dir.iterdir() if path.name.startswith(".")]
 
 
+def puffin_install(home, files):
+    """An installation from before the rename: its folder, with `files` (path: text) in it."""
+    old = Path(home) / ".local/share/dreamference/puffin"
+    for name, text in files.items():
+        (old / name).parent.mkdir(parents=True, exist_ok=True)
+        (old / name).write_text(text)
+    return old
+
+
+def test_a_puffin_installation_becomes_the_mightling_one_with_its_tools_renamed(tmp_path, release_server):
+    old = puffin_install(tmp_path, {"bin/puffin-code": "the code index", "index/state": "kept"})
+    result = run_install(tmp_path, release_server(binaries()), "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    new = tmp_path / ".local/share/dreamference/mightling"
+    assert not old.exists()
+    assert (new / "index/state").read_text() == "kept"
+    assert (new / "bin/ling-code").read_text() == "the code index"
+    assert not (new / "bin/puffin-code").exists()
+    assert "Puffin is now Mightling" in result.stdout
+
+
 def test_an_unknown_role_is_refused_before_anything_is_downloaded(tmp_path, release_server):
     server = release_server(binaries())
     result = run_install(tmp_path, server, "--role", "server")
