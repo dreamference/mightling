@@ -941,6 +941,12 @@ mod tests {
 
     #[test]
     #[cfg(not(windows))]
+    fn an_argument_follows_the_subcommand() {
+        assert_eq!(hook_command_for(Path::new("/opt/ling"), &LEDGER_HOOK, "k1"), "/opt/ling ledger k1");
+    }
+
+    #[test]
+    #[cfg(not(windows))]
     fn a_path_the_shell_would_split_is_quoted() {
         assert_eq!(hook_command(Path::new("/opt/ling/bin/ling")), "/opt/ling/bin/ling ledger");
         assert_eq!(hook_command(Path::new("/home/a b/ling")), "'/home/a b/ling' ledger");
