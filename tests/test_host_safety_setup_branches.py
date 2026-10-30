@@ -47,3 +47,48 @@ def test_without_sudo_root_cannot_be_had(monkeypatch):
 def test_the_other_modes_put_sudo_in_front():
     assert HostSafetySetup.root_argv(["swapon", "-a"], "sudo -n") == ["sudo", "-n", "swapon", "-a"]
     assert HostSafetySetup.root_argv(["swapon", "-a"], "sudo") == ["sudo", "swapon", "-a"]
+
+
+# -- helper_works ----------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def real_helper_probe(monkeypatch, tmp_path):
+    monkeypatch.setattr(HostSafetySetup, "helper_works", REAL_HELPER_WORKS)
+    path = tmp_path / "mightling-node-root"
+    monkeypatch.setattr(host_safety_setup, "HELPER_PATH", str(path))
+    return path
+
+
+def test_no_helper_installed_is_no_helper_and_runs_no_sudo(monkeypatch, real_helper_probe):
+    monkeypatch.setattr(host_safety_setup.subprocess, "run",
+                        lambda *a, **k: pytest.fail("sudo ran for a helper that is not there"))
+
+    assert HostSafetySetup.helper_works() is False
+
+
+def test_the_helper_works_only_when_sudo_runs_its_probe_without_asking(monkeypatch, real_helper_probe):
+    real_helper_probe.write_text("#!/bin/sh\n")
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, run.code)
+
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
+    run.code = 0
+    assert HostSafetySetup.helper_works() is True
+    assert seen == [["sudo", "-n", str(real_helper_probe), "probe"]]
+    run.code = 1
+    assert HostSafetySetup.helper_works() is False
+
+
+def test_a_sudo_that_cannot_run_is_no_helper(monkeypatch, real_helper_probe):
+    real_helper_probe.write_text("#!/bin/sh\n")
+
+    def run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 10)
+
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
+
+    assert HostSafetySetup.helper_works() is False
