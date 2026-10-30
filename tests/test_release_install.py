@@ -182,6 +182,8 @@ if [ "${FAKE_SUDO:-nopasswd}" != nopasswd ] && [ ! -f "$HOME/.sudo-stamp" ]; the
 fi
 [ $# -eq 0 ] && exit 0
 echo "$*" >> "$log"
+# A command run without -n could stop to ask for the password again.
+[ "$nonint" = 1 ] || echo "$*" >> "$HOME/sudo-could-ask.log"
 if [ "$1" = env ]; then
     shift
     while :; do case "$1" in *=*) export "$1"; shift;; *) break;; esac; done
@@ -816,6 +818,8 @@ def test_at_a_terminal_the_password_and_the_updates_are_asked_once_at_the_start(
     assert root.index("loginctl") < root.index("full-upgrade")
     assert "reboot" not in logged(tmp_path, "admin.log") and "sudo reboot" in out
     assert "✅ system packages upgraded (3)" in out and "✅ firmware staged" in out
+    # Every command after the password ran with sudo -n, which never asks.
+    assert logged(tmp_path, "sudo-could-ask.log") == ""
     # No ling-admin ever had the terminal, so none of them could have asked anything.
     assert "terminal" not in logged(tmp_path, "admin.log")
 
