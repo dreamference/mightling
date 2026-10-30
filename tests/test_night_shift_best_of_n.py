@@ -585,6 +585,17 @@ def test_an_attempt_of_a_task_being_dropped_stops_before_it_runs(bon, monkeypatc
     assert not bon["calls"].exists() or bon["calls"].read_text() == ""
 
 
+def test_the_scope_of_a_best_of_run_is_its_working_attempts(bon):
+    from types import SimpleNamespace
+
+    record = queue(bon["night"], bon["repo"], test=TEST)
+    run = NightShiftBestOfN.task_run(bon["night"], record, NightShiftSettings({"best_of": 3}), bon["ling"],
+                                     time.time() + 60, model_host="http://x")
+    assert run.current_unit is None
+    run.current = SimpleNamespace(current_unit="mightling-night-20261001-0100-abc-a2-1")
+    assert run.current_unit == "mightling-night-20261001-0100-abc-a2-1"
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
