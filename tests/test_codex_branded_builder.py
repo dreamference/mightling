@@ -1685,3 +1685,28 @@ def test_force_rebuilds_ling_even_when_it_is_current(tmp_path, monkeypatch):
     # Without force a current build is not redone, but its links are still refreshed.
     assert CodexBrandedBuilder._build_codex() is True
     assert built == [1, "link"]
+
+
+def test_force_reaches_every_build_and_any_failure_fails_the_whole(monkeypatch):
+    seen, failing = [], set()
+    for name in ("_build_codex", "build_web_tools", "build_code_index", "build_docs_index"):
+        monkeypatch.setattr(
+            CodexBrandedBuilder,
+            name,
+            classmethod(
+                lambda cls, force=False, name=name: seen.append((name, force)) or name not in failing
+            ),
+        )
+    assert CodexBrandedBuilder.build(force=True) is True
+    assert sorted(seen) == [
+        ("_build_codex", True),
+        ("build_code_index", True),
+        ("build_docs_index", True),
+        ("build_web_tools", True),
+    ]
+    for name in ("_build_codex", "build_web_tools", "build_code_index", "build_docs_index"):
+        failing = {name}
+        seen.clear()
+        assert CodexBrandedBuilder.build() is False
+        # A failing step does not keep the others from running.
+        assert len(seen) == 4
