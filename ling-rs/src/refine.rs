@@ -846,6 +846,8 @@ mod tests {
         assert!(enabled(Some("on"), &table("mightling_refine = false")));
         assert!(enabled(Some(" 1 "), &table("")));
         assert!(!enabled(Some(""), &table("")));
+        assert!(enabled(Some(" "), &table("mightling_refine = true")), "a blank variable is unset");
+        assert!(enabled(Some("ON"), &table("")));
         assert!(!DEFAULT, "refine mode stays off until the 100-task pair decides");
     }
 
