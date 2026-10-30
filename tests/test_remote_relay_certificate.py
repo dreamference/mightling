@@ -69,6 +69,32 @@ def test_the_relay_name_must_differ_from_the_control_planes(name, ok):
     assert RemoteRelayCertificate.valid_name(name, BOX) is ok
 
 
+def test_a_relay_name_may_be_as_long_as_a_dns_name_and_no_longer():
+    longest = ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 61])
+    assert len(longest) == 253 and RemoteRelayCertificate.valid_name(longest, BOX)
+    assert not RemoteRelayCertificate.valid_name(longest + "d", BOX)
+
+
+@pytest.mark.parametrize(
+    ("name", "record", "issued"),
+    [
+        (" Relay.Example.ORG. ", {}, RELAY),
+        (None, {"relay_name": "Turn.Example.org"}, "turn.example.org"),
+        ("relay2.example.org", {"relay_name": "turn.example.org"}, "relay2.example.org"),
+        (None, {}, RELAY),
+    ],
+)
+def test_the_relay_name_comes_from_the_command_then_the_record_then_the_default(
+    monkeypatch, name, record, issued
+):
+    _set_up(**record)
+    seen = []
+    monkeypatch.setattr(
+        RemoteAccess, "_relay_issue", classmethod(lambda cls, r, n, s: seen.append(n) or 0)
+    )
+    assert RemoteAccess.certificate_relay(name=name) == 0 and seen == [issued]
+
+
 # -- DNS --------------------------------------------------------------------------------------------
 
 
@@ -227,8 +253,20 @@ def test_setup_keeps_the_relays_public_certificate_on_the_box():
     assert RemoteRelayCertificate.box_files(BOX, node) == node
     _set_up(relay_name=RELAY)
     assert RemoteRelayCertificate.box_files(BOX, node) == node, "no certificate files yet"
+    crt = _relay_files()[0]
+    crt.unlink()
+    assert RemoteRelayCertificate.box_files(BOX, node) == node, "a key alone is not enough"
     files = _relay_files()
     assert RemoteRelayCertificate.box_files(BOX, node) == files
+
+
+def test_with_no_relay_name_the_box_never_gets_the_control_planes_own_certificate():
+    node = (pathlib.Path("/n/relay.crt"), pathlib.Path("/n/relay.key"))
+    _set_up(public_certificate=True)
+    for path in RemotePublicCertificate.files(BOX):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("box")
+    assert RemoteRelayCertificate.box_files(BOX, node) == node
 
 
 # -- the switch -------------------------------------------------------------------------------------
