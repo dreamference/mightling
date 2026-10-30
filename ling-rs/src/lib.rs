@@ -2410,6 +2410,8 @@ mod tests {
         assert!(read(&home.join("model_catalog.json")).contains("# Web access"));
         let config = std::fs::read_to_string(home.join("config.toml")).unwrap_or_default();
         assert!(config.contains("model_catalog.json") && !config.contains("high-swe"));
+        // The sandbox mounts the skills directory as writable, so it has to exist.
+        assert!(home.join("skills").is_dir());
         let _ = std::fs::remove_dir_all(&home);
     }
 
