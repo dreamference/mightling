@@ -1516,3 +1516,12 @@ def test_git_apply_drops_an_inherited_repository_and_stops_at_the_export(tmp_pat
     assert seen["cwd"] == str(export)
     assert "GIT_DIR" not in seen["env"] and "GIT_WORK_TREE" not in seen["env"]
     assert seen["env"]["GIT_CEILING_DIRECTORIES"] == str((tmp_path / "work").resolve())
+
+
+@pytest.mark.parametrize("version", ["1.4", "1", '1.4.1"\nbuild = "evil.rs', "1.4.1 "])
+def test_only_a_full_cargo_version_is_stamped(tmp_path, version):
+    # The version is written into the manifest as it is, so anything after it would be TOML too.
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text('[workspace.package]\nversion = "0.158.0"\n')
+    assert CodexBrandedBuilder.stamp_version(str(manifest), version) is False
+    assert manifest.read_text() == '[workspace.package]\nversion = "0.158.0"\n'
