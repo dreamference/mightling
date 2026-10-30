@@ -569,6 +569,13 @@ def test_a_node_is_kept_once_at_ipv4_and_a_link_local_address_carries_its_interf
     assert node["address"] == "2001:db8::20"
 
 
+def test_only_a_resolved_line_on_a_real_interface_is_read():
+    line = '{};{};IPv4;gx10-1a2b;_mightling-node._tcp;local;gx10-1a2b.local;10.0.0.5;8000;"node=abc"'
+    for kind, interface in (("+", "wlP9s9"), ("=", "lo"), ("=", "docker0"), ("=", "veth1a2b")):
+        assert NodeBrowser.parse(line.format(kind, interface)) == [], (kind, interface)
+    assert [node["interface"] for node in NodeBrowser.parse(line.format("=", "wlP9s9"))] == ["wlP9s9"]
+
+
 def test_a_browse_runs_avahi_browse_for_the_service_asked_and_returns_nothing_without_it(monkeypatch):
     from dreamference.node import node_browser
 
