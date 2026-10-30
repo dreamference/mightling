@@ -576,6 +576,12 @@ def test_only_a_resolved_line_on_a_real_interface_is_read():
     assert [node["interface"] for node in NodeBrowser.parse(line.format("=", "wlP9s9"))] == ["wlP9s9"]
 
 
+def test_an_empty_txt_record_adds_no_key():
+    line = '=;wlP9s9;IPv4;gx10-1a2b;_mightling-node._tcp;local;gx10-1a2b.local;10.0.0.5;8000;"" "=x" "state=ready"'
+    (node,) = NodeBrowser.parse(line)
+    assert "" not in node and node["state"] == "ready"
+
+
 def test_a_browse_runs_avahi_browse_for_the_service_asked_and_returns_nothing_without_it(monkeypatch):
     from dreamference.node import node_browser
 
