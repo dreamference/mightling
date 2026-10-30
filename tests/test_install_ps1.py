@@ -321,7 +321,11 @@ def test_install_ps1_uses_only_what_windows_powershell_5_1_has():
         assert "-Parallel" not in line, line
         # `<condition> ? <a> : <b>`; `| ? { … }` (Where-Object's alias) is 5.1 as well.
         assert not re.search(r"[^|\s]\s+\?\s+\S.*\s:\s", line), line
-    calls = [line for line in lines if re.search(r"Invoke-(WebRequest|RestMethod)\b", line, re.IGNORECASE)]
+    calls = [
+        line
+        for line in lines
+        if re.search(r"Invoke-(WebRequest|RestMethod)\b", line, re.IGNORECASE)
+    ]
     assert calls
     for call in calls:
         assert "-UseBasicParsing" in call, call
@@ -336,6 +340,8 @@ def test_every_windows_release_step_carries_the_same_sandbox_helpers():
     update_rs = (ROOT / "ling-rs" / "src" / "update.rs").read_text()
     helpers = re.search(r"pub const WINDOWS_SANDBOX_HELPERS: [^=]+= \[(.*)\];", update_rs).group(1)
     updated = re.findall(r'"([^"]+)"', helpers)
-    fetched = re.findall(r'"([^"]+)"', re.search(r"^\$Optional = @\((.*)\)$", script(), re.M).group(1))
+    fetched = re.findall(
+        r'"([^"]+)"', re.search(r"^\$Optional = @\((.*)\)$", script(), re.M).group(1)
+    )
     assert set(WINDOWS_SANDBOX_HELPERS) <= set(fetched)
     assert tuple(packaged) == tuple(updated) == tuple(WINDOWS_SANDBOX_HELPERS)
