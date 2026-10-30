@@ -86,3 +86,22 @@ def test_stored_embeddings_read_back_empty_from_an_index_older_than_their_table(
 def test_reading_embeddings_from_a_missing_index_creates_no_database(tmp_path: Path) -> None:
     assert SQLiteContextStorage(tmp_path / "context.db").load_embeddings() == {}
     assert not (tmp_path / "context.db").exists()
+
+
+def test_symbols_sizes_and_the_idf_table_survive_a_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+    (tmp_path / "auth.py").write_text(
+        "class Login:\n    def check(self, password):\n        pass\n"
+    )
+    (tmp_path / "notes.txt").write_text("login notes\n")
+    built = ContextEngine(workspace_root=str(tmp_path))
+    built.index_workspace(force_reindex=True)
+
+    restarted = ContextEngine(workspace_root=str(tmp_path))
+    assert restarted.load_index()
+    assert restarted.idf_table == built.idf_table
+    assert {r: (f.size_bytes, f.symbols) for r, f in restarted.indexed_files.items()} == {
+        r: (f.size_bytes, f.symbols) for r, f in built.indexed_files.items()
+    }
