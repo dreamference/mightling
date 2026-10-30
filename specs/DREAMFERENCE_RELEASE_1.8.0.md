@@ -62,7 +62,49 @@ chunks. A conversation used in the last 30 seconds is not evicted for a new one.
 **A smaller image.** ling-serve's Docker image is under 1 GB, against SGLang's 34 GB; a node pulls it
 at the first `ling-admin server start` after the upgrade.
 
-**Also:** {{TBD the merges since v1.7.2 that are not about the engine}}
+**Everything from 1.7.3 and 1.7.4.** Both came out after 1.7.2 and 1.8.0 contains them. 1.7.3 fixed
+`install.sh` reading the release API's answer, and it pinned ling-engine `72c2a6a`; 1.8.0's engine
+pin (`02704d4`) replaces that one. The security fixes from 1.7.4, by area:
+
+- **`ling web` and paired devices.** A device paired with the `watch` scope can only read and follow
+  threads. A revoked device stays revoked, two pairings at once cannot race past the one-time code,
+  and an Ask turn cannot choose its own sandbox.
+- **The bridge and sync.** `ling web`'s bridge refuses parameters that are not an object. A sync host
+  answers approvals only for requests that are waiting. The Signal and Telegram bridges and sync read
+  the air gap at every message.
+- **The desktop app.** Open never runs a file the agent wrote. The air-gap gate fails closed, and
+  preview tabs follow the air gap. The office preview opens no stray sockets, and the sync hub is
+  pinned to the one you chose.
+- **The air gap.** Every profile without a sandbox is refused at the air gap. A node job cannot loosen
+  its node's air gap. The setting's reader fails closed on a malformed file (found by fuzzing).
+- **Installers and updates.** `install.ps1` checks the release signature as `install.sh` does. The
+  installers and `ling update` require the latest release to be signed, and the search services'
+  base image is pinned by digest.
+- **The Hugging Face token** is no longer on the model server's `docker` command line or any other
+  command's arguments. Config never saves a value taken from the environment, and a config file keeps
+  its mode when it is written.
+- **A repository's own config.** A repository's `dreamference.toml` names only a local model server
+  and cannot choose the adapter or the prompt. A project's `.codex/config.toml` cannot reopen the
+  vendor channels. Skill downloads and worktree trust are closed to a hostile repository.
+- **Nodes.** The `authorized_keys` line, pairing, provisioning, power-cycle, fetch, the model copy's
+  paths and sizes, and the LAN copy's host key are all checked more strictly.
+- **Night Shift and Signal setup.** Night Shift reports carry no terminal escape sequences. Signal
+  setup unpacks in a private scratch folder and takes the pairing code on standard input.
+- **The chat sidecar** refuses the tailnet address range and saves Gmail tokens safely. A model server
+  the memory watchdog killed is not restarted by the restart policy.
+- **The egress audit** counts every address of a batched send, even one another line interrupted.
+- **Remote access and the forge.** The mirror stops when air-gapped, and the CAA record is swapped
+  without a gap.
+- **`ling-code` and `ling-docs`.** Nine fixes each from a correctness review. `ling-docs` refuses a
+  symlinked folder that points at a secret location.
+- **Releases.** The Mac preview bundles only this repository's client artifacts, and CI actions are
+  pinned.
+
+Also from 1.7.4: `ling-search` and `ling-fetch` honour `MIGHTLING_NODE` as `ling` does. The desktop
+app lets you pick a node when several answer. Every `ling-admin` command refuses unknown arguments,
+and Night Shift copes with paths that have spaces, clock changes and a hung index.
+
+**Also:** {{TBD the merges since 1.7.4 that are not about the engine}}
 
 ## Known issues
 
