@@ -1580,6 +1580,38 @@ def test_each_running_task_keeps_its_memory_allowance_and_no_more(fake_host, mon
     assert "GiB is free" in NightShiftRunner.start_blocker("http://x", "p", active, settings)
 
 
+def test_a_free_lane_is_one_with_fewer_tasks_of_its_own_than_it_holds(fake_host, monkeypatch):
+    # This machine holds one task and the replica one: two tasks start, one on each, and no third.
+    import threading
+    from dreamference.night_shift.night_shift_best_of_n import NightShiftBestOfN
+    hosts = []
+
+    class Run:
+        in_model = False
+        current_unit = None
+
+        def __init__(self):
+            self.stop_event = threading.Event()
+
+        def run(self):
+            self.stop_event.wait(10)
+
+    def task_run(cls, night_dir, task, settings, mightling_bin, deadline, **kwargs):
+        hosts.append(kwargs["model_host"])
+        return Run()
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
+    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(lambda seconds: clock.update(now=clock["now"] + seconds)))
+    monkeypatch.setattr(NightShiftRunner, "start_blocker", classmethod(lambda cls, *args, **kwargs: None))
+    monkeypatch.setattr(NightShiftBestOfN, "task_run", classmethod(task_run))
+    local = {"name": "this machine", "node": None, "host": "http://x", "parallel": 1, "budget": None}
+    replica = dict(REPLICA, budget=None)
+    NightShiftRunner.schedule(Path("/nonexistent"), [{"id": f"t{i}", "repo": "r"} for i in range(3)],
+                              NightShiftSettings({}), "ling", "http://x", datetime.fromtimestamp(1012.0).astimezone(),
+                              1, [], lanes=[local, replica])
+    assert hosts == ["http://x", REPLICA["host"]]
+
+
 @pytest.fixture
 def two_nodes(setup, fake_host, monkeypatch):
     """This machine as both sender and node: the pairing reaches `serve-job` in this process, and
