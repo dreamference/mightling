@@ -1115,6 +1115,14 @@ mod tests {
     }
 
     #[test]
+    fn a_blank_host_or_pin_is_no_setting() {
+        let browser = Fixed::new(vec![spark1()]);
+        let inputs = Inputs { configured: Some(" ".into()), pinned: Some(" \n".into()), is_node: true, ..Inputs::default() };
+        assert_eq!(resolve(&inputs, &browser), Resolution::Host(crate::DEFAULT_VLLM_HOST.to_string()));
+        assert!(browser.asked.borrow().is_empty());
+    }
+
+    #[test]
     fn a_node_uses_loopback_and_never_browses() {
         let browser = Fixed::new(vec![spark2()]);
         let inputs = Inputs { is_node: true, remembered: Some(spark2().node), ..Inputs::default() };
