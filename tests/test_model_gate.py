@@ -168,6 +168,20 @@ def test_a_network_or_peer_the_gate_cannot_read_admits_nobody(tmp_path):
         assert not ModelGateService.allows(state, peer, "POST", "/v1/responses"), peer
 
 
+def test_read_only_means_a_get_or_head_of_a_listed_path_and_nothing_beside_it():
+    closed = {"state": "closed", "networks": ["172.30.0.0/16"]}
+    for method in ("GET", "HEAD"):
+        for path in ("/health", "/v1/models", "/v1/models/stand-in"):
+            assert ModelGateService.allows(closed, "127.0.0.1", method, path), (method, path)
+    for method, path in (
+        ("GET", "/v1/modelsx"),
+        ("GET", "/v1/models_admin"),
+        ("PUT", "/health"),
+        ("OPTIONS", "/v1/models"),
+    ):
+        assert not ModelGateService.allows(closed, "127.0.0.1", method, path), (method, path)
+
+
 def test_a_request_head_is_rewritten_to_one_request_per_connection():
     head = (
         b"POST /v1/responses HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\nKeep-Alive: 5\r\n"
