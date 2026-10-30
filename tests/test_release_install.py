@@ -1379,3 +1379,39 @@ def test_a_new_key_that_endorses_itself_is_refused(tmp_path, release_server):
         assert result.returncode == 1, (endorser, namespace)
         assert "no trusted key has signed" in result.stderr
         assert nothing_installed(tmp_path)
+
+
+def test_without_ssh_keygen_a_signed_release_stops_and_names_the_package(tmp_path, release_server):
+    # No opt-out (§3): a machine without OpenSSH's client is told what to install, never let past
+    # the check. The PATH is every tool of /usr/bin but ssh-keygen.
+    tools = tmp_path / "tools-without-ssh-keygen"
+    tools.mkdir()
+    for tool in Path("/usr/bin").iterdir():
+        if tool.name != "ssh-keygen":
+            (tools / tool.name).symlink_to(tool)
+    result = run_install(tmp_path, release_server(binaries()), "--role", "client",
+                         env_extra={"PATH": f"{tmp_path / 'fakebin'}:{tools}"})
+    assert result.returncode == 1
+    assert "ssh-keygen (OpenSSH 8.1 or newer) is needed" in result.stderr
+    assert "openssh-client" in result.stderr
+    assert nothing_installed(tmp_path)
+
+
+def test_a_signature_without_the_file_it_signs_is_refused(tmp_path, release_server):
+    assets = binaries()
+    del assets["SHA256SUMS"]
+    result = run_install(tmp_path, release_server(assets), "--role", "client")
+    assert result.returncode == 1
+    assert "has SHA256SUMS.sig but no SHA256SUMS" in result.stderr
+    assert nothing_installed(tmp_path)
+
+
+def test_a_new_key_whose_endorsement_is_missing_is_refused(tmp_path, release_server):
+    # The new key alone, without the current key's signature over it, earns no trust.
+    assets = binaries(signed=False)
+    assets["release-key-transition.pub"] = KEYS["next"].with_suffix(".pub").read_bytes()
+    sign(assets, key="next")
+    result = run_install(tmp_path, release_server(assets), "--role", "client")
+    assert result.returncode == 1
+    assert "its endorsement could not be downloaded" in result.stderr
+    assert nothing_installed(tmp_path)
