@@ -568,6 +568,51 @@ mod tests {
     }
 
     #[test]
+    fn a_code_of_the_wrong_shape_is_refused_even_when_one_like_it_is_pending() {
+        let state = scratch("shape");
+        let (logins, pairing) = (state.join("logins"), state.join("pairing"));
+        for code in ["", "ab/cd"] {
+            issue_code(&logins, code, LOGIN_LIFETIME).unwrap();
+            assert!(!take_login_code(&state, code), "{code:?}");
+        }
+        for code in ["1234567", "123456789", "1234567a"] {
+            issue_code(&pairing, code, PAIRING_LIFETIME).unwrap();
+            assert!(!take_pairing_code(&state, code), "{code:?}");
+        }
+    }
+
+    #[test]
+    fn a_pairing_code_is_no_login_code() {
+        let state = scratch("kinds-of-code");
+        let code = issue_pairing_code(&state).unwrap();
+        assert!(!take_login_code(&state, &code));
+        assert!(take_pairing_code(&state, &code), "the refused login left the pairing code pending");
+    }
+
+    #[test]
+    fn a_code_lasts_its_own_lifetime_and_no_longer() {
+        let state = scratch("lifetimes");
+        issue_login_code(&state).unwrap();
+        issue_pairing_code(&state).unwrap();
+        for (dir, lifetime) in [("logins", LOGIN_LIFETIME), ("pairing", PAIRING_LIFETIME)] {
+            let entry = std::fs::read_dir(state.join(dir)).unwrap().next().unwrap().unwrap();
+            let text = std::fs::read_to_string(entry.path()).unwrap();
+            let expires = serde_json::from_str::<Value>(&text).unwrap()["expires"].as_u64().unwrap();
+            let left = expires.saturating_sub(now_secs());
+            assert!(left <= lifetime.as_secs() && left + 30 >= lifetime.as_secs(), "{dir}: {left}s left");
+        }
+    }
+
+    #[test]
+    fn an_empty_owner_token_file_is_replaced() {
+        let state = scratch("empty-token");
+        write_private(&state.join("token"), "\n").unwrap();
+        let token = owner_token(&state).unwrap();
+        assert_eq!(token.len(), 64);
+        assert_eq!(std::fs::read_to_string(state.join("token")).unwrap().trim(), token);
+    }
+
+    #[test]
     fn a_code_sent_by_many_requests_at_once_works_for_one() {
         // Whoever read a code over the owner's shoulder must not pair beside them unnoticed.
         let state = scratch("race");
