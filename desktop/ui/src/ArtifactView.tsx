@@ -84,13 +84,17 @@ function Rendered(props: FileViewProps & { kind: ArtifactKind; onOpenFile: (path
 /** An office file converted to a PDF by the desktop app (DESKTOP §16 B31), or why it cannot be. */
 function OfficeArtifact(props: { path: string; root: string | null }) {
   const [state, setState] = useState<{ status: "loading" } | { status: "pdf"; data: Uint8Array<ArrayBuffer>; stamp: number } | { status: "none"; message: string }>({ status: "loading" });
+  const converts = useRef(0);
   const convert = useCallback(() => {
     if (!bridge.office.available()) return setState({ status: "none", message: "Office files are previewed in the desktop app, which converts them with LibreOffice; open this one in an office suite." });
+    // Only the newest conversion is shown: a Convert again during a slow one drops the older answer.
+    const mine = ++converts.current;
     setState({ status: "loading" });
     bridge.office.preview(props.path).then((answer) => {
+      if (mine !== converts.current) return;
       if ("pdf" in answer) setState({ status: "pdf", data: Uint8Array.from(atob(answer.pdf), (char) => char.charCodeAt(0)), stamp: Date.now() });
       else setState({ status: "none", message: answer.unavailable });
-    }).catch((error) => setState({ status: "none", message: error instanceof Error ? error.message : String(error) }));
+    }).catch((error) => mine === converts.current && setState({ status: "none", message: error instanceof Error ? error.message : String(error) }));
   }, [props.path]);
   useEffect(convert, [convert]);
   const shown = props.root && props.path.startsWith(`${props.root.replace(/\/+$/, "")}/`) ? props.path.slice(props.root.replace(/\/+$/, "").length + 1) : props.path;
@@ -165,6 +169,8 @@ function PdfArtifact(props: { data: Uint8Array<ArrayBuffer>; stamp: number }) {
   useEffect(() => {
     let cancelled = false;
     const holder = pages.current;
+    // A reload that reads starts clean: the last bytes' failure is not this one's.
+    setError(null);
     void (async () => {
       try {
         // pdf.js and its worker are loaded only when a PDF is opened; both are in the bundle.
