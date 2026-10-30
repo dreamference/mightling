@@ -343,6 +343,24 @@ def test_asked_why_it_was_slow_only_the_injected_cause_passes(tmp_path, answer, 
     assert result.passed is passes, result.failures
 
 
+@pytest.mark.parametrize(
+    ("answer", "kind"),
+    [
+        ("The answer is that the cache is warm and the request succeeds. " * 60, "loop"),
+        ("", "stall"),
+    ],
+)
+def test_a_cut_turn_is_recorded_as_a_loop_when_the_metrics_agree_else_a_stall(
+    tmp_path, answer, kind
+):
+    write_rollout(tmp_path, [{"user": "q", "answer": answer}])
+    scenario = json.loads((SUITE / "scenarios" / "s8-simple-fact.json").read_text())
+    records = [{"turn": 0, "rc": -9, "seconds": 180.4, "cut": "silence"}]
+    result = checks.score(scenario, rollout.read_home(tmp_path), records, [])
+    assert not result.passed and f"turn 0 cut (silence after 180.4 s): a {kind}" in result.failures
+    assert result.columns["cut"] == ["silence"] and result.columns["cut_as"] == [kind]
+
+
 def test_a_scenario_fails_at_two_of_three():
     assert checks.decide([True, True, False]) is True
     assert checks.decide([True, False, False]) is False
