@@ -2092,6 +2092,23 @@ def test_a_resumed_run_keeps_its_arm(bench):
     assert store.state("acme__widget-2")["index"]["layers"] == ["universal"]
 
 
+def test_a_run_resumed_from_before_named_prompts_runs_the_default(bench, monkeypatch):
+    # A manifest written before the `prompt` field ran the default prompt; its resume keeps it, whatever
+    # the host has configured since.
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_PROMPT", raising=False)
+    run(bench, instances=["acme__widget-1"])
+    store = SweBenchRunStore("r1")
+    manifest = store.manifest()
+    del manifest["prompt"], manifest["prompt_sha256"]
+    manifest["instances"].append("acme__widget-2")
+    manifest["images"]["acme__widget-2"] = {"image": f"{REPOSITORY}:acme-widget-2", "digest": "d"}
+    store.manifest_path.write_text(json.dumps(manifest))
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_PROMPT", "offline")
+    assert run(bench) == 0
+    runs = [call for call in bench["docker"].calls if call[0] == "run"]
+    assert len(runs) == 2 and "DREAMFERENCE_MIGHTLING_PROMPT=default" in runs[-1]
+
+
 def test_against_sets_the_two_arms_side_by_side(bench):
     ids = ["acme__widget-1", "acme__widget-2", "beta__gadget-7"]
     bench["docker"].modes = {"acme__widget-2": "empty"}
