@@ -569,6 +569,32 @@ def test_a_node_is_kept_once_at_ipv4_and_a_link_local_address_carries_its_interf
     assert node["address"] == "2001:db8::20"
 
 
+def test_a_browse_runs_avahi_browse_for_the_service_asked_and_returns_nothing_without_it(monkeypatch):
+    from dreamference.node import node_browser
+
+    monkeypatch.setattr(NodeBrowser, "browse", REAL_BROWSE)
+    monkeypatch.setattr(NodeBrowser, "browse_service", REAL_BROWSE_SERVICE)
+    ran = []
+    output = '=;wlP9s9;IPv4;spark-1a2b;_ssh._tcp;local;spark-1a2b.local;10.0.0.5;22;""'
+
+    def run(argv, **kwargs):
+        ran.append(argv)
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    monkeypatch.setattr(node_browser.subprocess, "run", run)
+    monkeypatch.setattr(node_browser.shutil, "which", lambda name: None)
+    assert NodeBrowser.browse() == [] and NodeBrowser.browse_service("_ssh._tcp") == [] and ran == []
+    monkeypatch.setattr(node_browser.shutil, "which", lambda name: f"/usr/bin/{name}")
+    assert [entry["name"] for entry in NodeBrowser.browse_service("_ssh._tcp")] == ["spark-1a2b"]
+    assert ran == [["avahi-browse", "-rtp", "_ssh._tcp"]]
+
+    def hang(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 6)
+
+    monkeypatch.setattr(node_browser.subprocess, "run", hang)
+    assert NodeBrowser.browse() == [] and NodeBrowser.browse_service("_ssh._tcp") == []
+
+
 def test_rsync_brackets_an_ipv6_host(tmp_path, monkeypatch):
     from dreamference.node.fleet_session import FleetSession
 
