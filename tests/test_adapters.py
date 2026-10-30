@@ -527,6 +527,45 @@ def test_a_tensor_without_a_lora_suffix_or_an_oversized_header_is_refused(tmp_pa
         AdapterVerifier.check_tensors(weights, {"q_proj"})
 
 
+def test_a_weights_file_of_another_dtype_or_no_tensors_is_refused_and_its_metadata_is_not_a_tensor(
+    tmp_path,
+):
+    weights = tmp_path / "adapter_model.safetensors"
+    tensor = f"{LAYER}.3.self_attn.q_proj.lora_A.weight"
+    weights.write_bytes(safetensors([tensor], dtype="F16"))
+    with pytest.raises(ValueError, match="not bfloat16"):
+        AdapterVerifier.check_tensors(weights, {"q_proj"})
+    header = json.dumps({"__metadata__": {"format": "pt"}}).encode()
+    weights.write_bytes(struct.pack("<Q", len(header)) + header)
+    with pytest.raises(ValueError, match="holds no tensors"):
+        AdapterVerifier.check_tensors(weights, {"q_proj"})
+    record = {
+        "__metadata__": {"format": "pt"},
+        tensor: {"dtype": "BF16", "shape": [2, 2], "data_offsets": [0, 8]},
+    }
+    header = json.dumps(record).encode()
+    weights.write_bytes(struct.pack("<Q", len(header)) + header + b"\0" * 8)
+    AdapterVerifier.check_tensors(weights, {"q_proj"})
+
+
+def test_the_base_must_match_in_repository_and_revision_and_be_downloaded(tmp_path, keys):
+    manifest = AdapterManifest.parse(make_adapter(tmp_path, keys))
+    base = served(base_snapshot())
+    assert AdapterVerifier.base_problem(manifest, base) is None
+    for change, reason in (
+        ({"repo": "someone/Qwen3.8-27B-NVFP4"}, "made for"),
+        ({"revision": "f" * 40}, "made for"),
+        ({"snapshot": str(tmp_path / "absent")}, "not downloaded here"),
+    ):
+        assert reason in AdapterVerifier.base_problem(manifest, {**base, **change})
+
+
+def test_a_model_without_a_pinned_revision_is_no_base(monkeypatch):
+    assert AdapterVerifier.base_for(DEFAULT_MODEL_ALIAS)["repo"] == BASE_REPO
+    monkeypatch.setattr(ModelMatrixRegistry, "get_launch_overrides", lambda key, *rest: {})
+    assert AdapterVerifier.base_for(DEFAULT_MODEL_ALIAS) is None
+
+
 def test_an_adapter_config_that_disagrees_with_its_manifest_is_refused(tmp_path, keys):
     manifest = AdapterManifest.parse(make_adapter(tmp_path, keys))
     AdapterVerifier.check_config(manifest, tmp_path)
