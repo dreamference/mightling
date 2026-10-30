@@ -57,7 +57,14 @@ export function isRemote(reference: string): boolean {
 export function localReference(documentPath: string, reference: string): string | null {
   const bare = reference.trim().split(/[?#]/)[0];
   if (!bare || isRemote(bare)) return null;
-  let path = /^file:/i.test(bare) ? decodeURIComponent(bare.replace(/^file:\/\//i, "")) : decodeURIComponent(bare);
+  const raw = /^file:/i.test(bare) ? bare.replace(/^file:\/\//i, "") : bare;
+  // A stray `%` (`100%.png`) is the name as written, not an escape.
+  let path = raw;
+  try {
+    path = decodeURIComponent(raw);
+  } catch {
+    // kept as written
+  }
   if (!path.startsWith("/")) path = `${parentOf(documentPath)}/${path}`;
   const parts: string[] = [];
   for (const part of path.split("/")) {
