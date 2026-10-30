@@ -982,7 +982,10 @@ export function App() {
   /** A new Work thread may read the window's terminal tabs and previews' console (Settings › Project and terminal; on by default). */
   const windowToolFields = (): Record<string, unknown> => (prefsRef.current.agentReadsWindow ? { windowTools: windowToolNames(bridge.host() === "electron") } : {});
 
+  // A second send while the first one's thread is still starting starts no second thread.
+  const startingThread = useRef(false);
   const startThread = async (): Promise<Thread | null> => {
+    if (startingThread.current) return null;
     const cwd = (startingProject ? primaryFolder(startingProject) : null) ?? newCwd.trim();
     if (startingProject && !primaryFolder(startingProject)) {
       notice(`The project ${startingProject.name} has no folder: add one in Edit project, or ask in Ask.`);
@@ -993,6 +996,7 @@ export function App() {
       return null;
     }
     dispatch({ type: "dropNotice", message: NAME_THE_FOLDER });
+    startingThread.current = true;
     try {
       if (newChoice.mode === "worktree" && HOST === "electron" && bridge.git.available()) return await startInWorktree(cwd);
       const chatRepoFields = HOST === "web" && isChatRepoCwd(cwd) ? { prompt: CHAT_WORK_PROMPT } : {};
@@ -1003,6 +1007,8 @@ export function App() {
     } catch (error) {
       notice(error);
       return null;
+    } finally {
+      startingThread.current = false;
     }
   };
 
@@ -1867,6 +1873,7 @@ export function App() {
   // its turn stopped and the server let go of it; it had no folder of its own to delete.
   const [side, setSide] = useState<{ id: string; parent: Thread; title: string; recap: string[]; asked: boolean; keeping: boolean } | null>(null);
   const sideRef = useRef(side);
+  const sideStarting = useRef(false);
   sideRef.current = side;
   const closeSide = async () => {
     const open = sideRef.current;
@@ -1885,6 +1892,8 @@ export function App() {
     if (!selected) return;
     if (sideRef.current) return document.querySelector<HTMLTextAreaElement>(".side-chat textarea")?.focus();
     if (selected.thread.ephemeral) return notice("An incognito question has no side chat.");
+    if (sideStarting.current) return;
+    sideStarting.current = true;
     const parent = selected.thread;
     try {
       const started = await client.request("thread/start", sideChatParams(parent, servedModel) as unknown as ParamsOf<"thread/start">);
@@ -1893,6 +1902,8 @@ export function App() {
       setSide({ id: started.thread.id, parent, title: parent.name || parent.preview || "thread", recap: threadContext(selected), asked: false, keeping: false });
     } catch (error) {
       notice(error);
+    } finally {
+      sideStarting.current = false;
     }
   };
   const sendSide = async (text: string) => {
