@@ -198,6 +198,61 @@ def test_a_stray_line_in_app_ini_does_not_cost_the_secrets(tmp_path):
     assert ForgeAppIni.read_secrets(tmp_path) == secrets
 
 
+@pytest.mark.parametrize("word", ["0", "false", "no", "off", " OFF ", "No"])
+def test_every_off_word_in_any_case_turns_the_forge_off(monkeypatch, word):
+    monkeypatch.setenv("DREAMFERENCE_FORGE", word)
+    assert not ForgeSettings.enabled()
+
+
+@pytest.mark.parametrize(
+    "config, enabled",
+    [
+        ("[forge]\nenabled = 0\n", True),
+        ("[forge]\nimage = 1\n", True),
+        ("[ forge ]\nenabled = false\na line TOML cannot parse\n", False),
+        ("[forge]\nenabled = False\n", False),
+        ("[web]\nenabled = false\n[forge]\na line TOML cannot parse\n", True),
+    ],
+)
+def test_only_a_written_false_turns_the_forge_off(monkeypatch, config, enabled):
+    monkeypatch.delenv("DREAMFERENCE_FORGE", raising=False)
+    ForgeSettings.config_path().parent.mkdir(parents=True, exist_ok=True)
+    ForgeSettings.config_path().write_text(config)
+    assert ForgeSettings.enabled() is enabled
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        "[forge]\nenabled = true\n",
+        '[forge]\nimage = "x"\n\n[night]\nwindow = "22-06"\n',
+        '[night]\nwindow = "22-06"\n\n[forge]\nimage = "x"\n',
+    ],
+)
+def test_the_switch_is_written_once_into_the_forge_table_the_config_has(monkeypatch, config):
+    import tomllib
+
+    monkeypatch.delenv("DREAMFERENCE_FORGE", raising=False)
+    path = ForgeSettings.config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(config)
+    path.chmod(0o600)
+    ForgeSettings.set_enabled(False)
+    text = path.read_text()
+    assert tomllib.loads(text)["forge"]["enabled"] is False, text
+    assert text.count("[forge]") == 1 and text.count("enabled") == 1, text
+    assert oct(path.stat().st_mode & 0o777) == "0o600", "the config keeps its mode"
+
+
+def test_an_empty_secret_reads_as_none_and_an_odd_state_as_none_set_up():
+    ForgeSettings.write_secret("admin-token", "")
+    assert ForgeSettings.read_secret("admin-token") is None
+    ForgeSettings.write_secret("state.json", '["record"]')
+    assert ForgeSettings.state() == {} and ForgeSettings.role() is None
+    ForgeSettings.update_state(role="writer")
+    assert ForgeSettings.role() is None
+
+
 def test_a_forge_systemd_would_not_stop_is_not_reported_off(monkeypatch, capsys):
     # The container would still be published on the LAN.
     monkeypatch.setattr(
