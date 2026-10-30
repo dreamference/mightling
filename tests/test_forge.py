@@ -318,6 +318,142 @@ def test_passwords_are_generated_by_forgejo_never_on_a_command_line(monkeypatch,
     assert password not in out and "forge password --show" in out, "not a terminal: never printed"
 
 
+TOKEN = "0123456789abcdef0123456789abcdef01234567"
+PASSWORD = "Abc123Abc123Abc123Abc123"
+
+
+def forgejo_replies(monkeypatch, password=PASSWORD, token=TOKEN):
+    """Answer `forgejo admin user` like Forgejo: a None password or token fails that command."""
+    calls = []
+
+    def forgejo(cls, arguments, timeout=300):
+        calls.append(arguments)
+        if arguments[2] == "create":
+            out = f"generated random password is '{password}'\n" if password else ""
+            return subprocess.CompletedProcess(arguments, 0 if password else 1, out, "")
+        return subprocess.CompletedProcess(arguments, 0 if token else 1, f"{token or ''}\n", "")
+
+    monkeypatch.setattr(ForgeContainer, "forgejo", classmethod(forgejo))
+    return calls
+
+
+def scopes(call):
+    return call[call.index("--scopes") + 1]
+
+
+@pytest.mark.parametrize(
+    "code, stdout, expected",
+    [
+        (0, f"generated random password is '{PASSWORD}'\n", PASSWORD),
+        (1, f"generated random password is '{PASSWORD}'\nbut the account was not saved\n", None),
+        (0, "the account was created\n", None),
+    ],
+)
+def test_an_account_counts_as_made_only_when_forgejo_succeeds_and_names_its_password(
+    monkeypatch, code, stdout, expected
+):
+    monkeypatch.setattr(
+        ForgeContainer,
+        "forgejo",
+        classmethod(lambda cls, a, timeout=300: subprocess.CompletedProcess(a, code, stdout, "")),
+    )
+    assert ForgeAccounts.create_user("owner", admin=False) == expected
+
+
+@pytest.mark.parametrize(
+    "code, stdout, expected",
+    [
+        (0, f"{TOKEN}\n", TOKEN),
+        (0, f"a warning first\n{TOKEN}\n", TOKEN),
+        (1, f"{TOKEN}\n", None),
+        (0, "Error: a token of that name exists\n", None),
+        (0, "0123abcd\n", None),
+    ],
+)
+def test_a_token_is_the_last_line_of_forty_hex_digits_of_a_command_that_succeeded(
+    monkeypatch, code, stdout, expected
+):
+    monkeypatch.setattr(
+        ForgeContainer,
+        "forgejo",
+        classmethod(lambda cls, a, timeout=300: subprocess.CompletedProcess(a, code, stdout, "")),
+    )
+    assert ForgeAccounts.generate_token("forge-admin", "ling-admin", "all") == expected
+
+
+def test_the_admin_keeps_its_password_and_a_token_for_everything_and_no_one_must_change_one(
+    monkeypatch,
+):
+    calls = forgejo_replies(monkeypatch)
+    assert ForgeAccounts.ensure() == (True, PASSWORD)
+    assert ForgeSettings.read_secret("admin-password") == PASSWORD
+    assert [scopes(c) for c in calls if c[2] == "generate-access-token"] == ["all"]
+    # The owner signs in with the password `forge password --show` prints.
+    assert all("--must-change-password=false" in c for c in calls if c[2] == "create")
+
+
+def test_an_admin_whose_password_is_kept_is_not_made_again(monkeypatch):
+    ForgeSettings.write_secret("admin-password", "kept")
+    calls = forgejo_replies(monkeypatch)
+    assert ForgeAccounts.ensure() == (True, PASSWORD)
+    assert [c[4] for c in calls if c[2] == "create"] == ["owner"]
+    assert ForgeSettings.read_secret("admin-password") == "kept"
+
+
+@pytest.mark.parametrize("password, token", [(None, TOKEN), (PASSWORD, None)])
+def test_an_admin_forgejo_would_not_make_stops_the_setup_before_the_owner(
+    monkeypatch, capsys, password, token
+):
+    calls = forgejo_replies(monkeypatch, password, token)
+    assert ForgeAccounts.ensure() == (False, None)
+    assert ForgeAccounts.admin_token() is None
+    assert ForgeSettings.read_secret("admin-password") == password
+    assert not [c for c in calls if "owner" in c]
+    assert "❌" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "status, body, expected",
+    [(200, {"is_admin": True}, True), (200, {"is_admin": False}, False), (500, {}, None)],
+)
+def test_the_owner_is_reported_an_admin_only_when_the_forge_says_so(
+    monkeypatch, status, body, expected
+):
+    monkeypatch.setattr(ForgeContainer, "api", classmethod(lambda cls, *a, **k: (status, body)))
+    assert ForgeAccounts.owner_is_admin() is expected
+
+
+def test_the_mirror_account_is_plain_reads_only_and_its_token_is_made_once(monkeypatch):
+    calls = forgejo_replies(monkeypatch)
+    account = {"status": 404}
+    asked = []
+    monkeypatch.setattr(
+        ForgeContainer,
+        "api",
+        classmethod(
+            lambda cls, method, path, *a, **k: asked.append(path) or (account["status"], {})
+        ),
+    )
+    assert ForgeAccounts.mirror_token() == TOKEN
+    created = [c for c in calls if c[2] == "create"]
+    assert [c[4] for c in created] == ["mirror"] and "--admin" not in created[0]
+    assert [scopes(c) for c in calls if c[2] == "generate-access-token"] == ["read:repository"]
+    assert ForgeSettings.read_secret("mirror-token") == TOKEN
+    calls.clear()
+    asked.clear()
+    assert ForgeAccounts.mirror_token() == TOKEN and not calls and not asked, "kept"
+    # An account that exists gets a token, not a second account.
+    ForgeSettings.secret_path("mirror-token").unlink()
+    account["status"] = 200
+    assert ForgeAccounts.mirror_token() == TOKEN
+    assert [c[2] for c in calls] == ["generate-access-token"]
+    # A token Forgejo would not make leaves nothing behind.
+    ForgeSettings.secret_path("mirror-token").unlink()
+    forgejo_replies(monkeypatch, token=None)
+    assert ForgeAccounts.mirror_token() is None
+    assert not ForgeSettings.secret_path("mirror-token").exists()
+
+
 # -- the anonymity check ---------------------------------------------------------------------------
 
 
