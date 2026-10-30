@@ -74,9 +74,18 @@ fn text_not_toml_finds_an_indented_key() {
 
 #[test]
 fn a_blank_tier_is_unset_not_invalid() {
-    let resolved = resolve_from(Some("  "), Some("on"), &[]);
+    // A blank environment variable is not a tier; a blank session value is not a level (AIRGAPPED
+    // §6.5), so it counts as `on` and is named.
+    let path = std::path::PathBuf::from("config.toml");
+    let configs = [(path.clone(), "mightling_airgapped = \"on\"\n".to_string())];
+    let resolved = resolve_from(None, Some("  "), &configs);
     assert_eq!(
         (resolved.level, resolved.source, resolved.invalid),
-        (Level::On, Source::Environment, Vec::<String>::new())
+        (Level::On, Source::ConfigFile(path), Vec::<String>::new())
+    );
+    let resolved = resolve_from(Some("  "), Some("off"), &[]);
+    assert_eq!(
+        (resolved.level, resolved.source, resolved.invalid.len()),
+        (Level::On, Source::Session, 1)
     );
 }
