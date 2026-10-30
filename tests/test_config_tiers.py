@@ -344,3 +344,11 @@ def test_every_key_save_config_writes_is_one_it_removes_again(tmp_path):
         file.write("other_reader = 1\n")
     DreamferenceConfig(config_file=str(tmp_path / "none.toml")).save_config(path)
     assert _saved(path) == {"other_reader": 1}
+
+
+def test_an_empty_yaml_file_is_saved_over(tmp_path):
+    yaml = pytest.importorskip("yaml")
+    path = tmp_path / "dreamference.yaml"
+    path.write_text("")
+    DreamferenceConfig(config_file=str(path), model="llama-3.3-70b").save_config()
+    assert yaml.safe_load(path.read_text()) == {"model": "llama-3.3-70b"}
