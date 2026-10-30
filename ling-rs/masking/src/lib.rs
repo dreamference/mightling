@@ -793,4 +793,22 @@ mod tests {
         assert_eq!(masked(&items), vec![4]);
         assert_eq!(items[items.len() - 1].item, other);
     }
+
+    #[test]
+    fn the_next_move_waits_for_the_step_even_above_the_high_mark() {
+        let scratch = Scratch::new("step-high");
+        // The low mark just under the high one: the size a move leaves, plus the step, is above
+        // the high mark, so the step decides.
+        let policy = Policy::with_shares(44_000, 85, 80, MIN_STEP_TOKENS);
+        let mut items = history(60, 60);
+        apply_with(&policy, &scratch.0, &mut items, policy.high + 1, |e| &mut e.item);
+        let first = masked(&items);
+        assert!(!first.is_empty());
+        let key = segment_key(&items.iter().map(|e| e.item.clone()).collect::<Vec<_>>()).unwrap_or_default();
+        let after = State::load(&scratch.0, &key).after_last_move.unwrap_or_default();
+        assert!(after + MIN_STEP_TOKENS > policy.high, "{after}");
+        let mut again = history(60, 60);
+        apply_with(&policy, &scratch.0, &mut again, after + MIN_STEP_TOKENS, |e| &mut e.item);
+        assert_eq!(masked(&again), first);
+    }
 }
