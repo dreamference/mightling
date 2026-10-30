@@ -439,6 +439,14 @@ def test_a_task_dropped_before_it_starts_counts_no_attempt(bon, monkeypatch):
     assert not bon["calls"].exists()
 
 
+def test_a_skipped_judge_names_no_tie_at_the_top():
+    stage = "judge skipped: no model server"
+    record = {"chosen": 1, "stage": stage, "attempts": []}
+    assert NightShiftBestOfN.reason(record, {"chosen": ["a1", "a2"]}) == (
+        f"{stage}, so the tie went to the attempt whose tests passed, then the earliest"
+    )
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
