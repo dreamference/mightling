@@ -834,6 +834,22 @@ mod tests {
     }
 
     #[test]
+    fn every_secret_extension_in_any_case_is_skipped() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("plain.txt"), b"x");
+        for ext in ["pem", "KEY", "p12", "PFX", "kdbx", "keystore", "JKS"] {
+            write(&root.join(format!("backup.{ext}.txt")), b"x");
+        }
+        write(&root.join("Credentials.md"), b"x");
+        let found = walk(&Collection::new("docs", root), &home, true);
+        let rels: Vec<&str> = found.candidates.iter().map(|c| c.rel.as_str()).collect();
+        assert_eq!(rels, ["plain.txt"]);
+        assert_eq!(found.skipped["named like a secret"], 8);
+    }
+
+    #[test]
     fn collection_globs_max_size_and_image_flag_filter_candidates() {
         let home = tempfile::tempdir().unwrap();
         let home = home.path().canonicalize().unwrap();
