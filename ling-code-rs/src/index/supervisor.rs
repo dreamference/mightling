@@ -628,6 +628,39 @@ mod tests {
     }
 
     #[test]
+    fn a_kill_well_under_the_cap_is_not_blamed_on_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = FakeHost::new(dir.path(), 100);
+        let mut plan = repo_and_plan(dir.path(), Kind::Static, 1);
+        plan.runs[0].indexer = "scip-python".into();
+        plan.runs[0].root = "pkg".into();
+        let peak_file = plan.runs[0].spec.scratch.join("peak");
+        host.stand_in = vec![
+            "sh".into(),
+            "-c".into(),
+            format!(
+                "echo {} > '{}'; exit 137",
+                100u64 << 20,
+                peak_file.display()
+            ),
+        ];
+        let out = execute(
+            &plan,
+            &host,
+            &FixedProbe(ModelState::Absent),
+            Duration::from_millis(1),
+        );
+        assert_eq!(out[0].1, Outcome::Failed("killed".into()));
+        let repo = Repo {
+            root: plan.repo_root.clone(),
+            main_root: plan.main_root.clone(),
+            is_git: false,
+        };
+        let entry = &crate::manifest::Manifest::load(&repo.scip_dir()).runs["scip-python:pkg"];
+        assert!(!entry.peak_cap_bounded, "{entry:?}");
+    }
+
+    #[test]
     fn a_peak_within_ten_percent_of_the_cap_is_marked_cap_bounded() {
         // A universal run gets the 4 GiB small ceiling here; 90% of it is 3686 MiB (§6.4).
         for (peak_mb, bounded) in [(3700u64, true), (3600, false)] {
