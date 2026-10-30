@@ -1471,4 +1471,20 @@ mod tests {
         let lines = apply_between(&repo, &head, &head, "b").unwrap_or_else(|lines| panic!("{lines:?}"));
         assert!(lines[0].starts_with("Nothing to apply"), "{lines:?}");
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn discard_from_inside_the_session_goes_on_while_its_record_names_another_process() {
+        let fixture = Fixture::new("discard-inside");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (mut session, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("auth.py"), "changed\n").unwrap_or_default();
+        // pid 1 always runs: from any other folder the session counts as running.
+        session.pid = 1;
+        assert_eq!(discard(&session, false).1, 1);
+        let (lines, code) = discard(&session, true);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(lines[0].starts_with("Discarded:"), "{lines:?}");
+        assert_ne!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default(), "changed\n");
+    }
 }
