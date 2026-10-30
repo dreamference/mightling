@@ -17,6 +17,15 @@ describe("the window's preferences", () => {
     expect(prefs.read().followUp).toBe("steer");
   });
 
+  it("start with the desktop parity features as PARITY_CLAUDE §4 names them", () => {
+    const read = new Prefs(scratch()).read();
+    // Off until the user turns them on: the global shortcut, the tray, remembered questions, suggestions.
+    expect([read.quickEntry, read.keepInTray, read.recallQuestions, read.suggestPrompts]).toEqual([false, false, false, false]);
+    expect(read.quickEntryShortcut).toBe("Ctrl+Alt+Space");
+    // On: a made file opens in its tab, and a long paste becomes a file.
+    expect([read.openArtifacts, read.pasteAsFile]).toEqual([true, true]);
+  });
+
   it("write some keys and keep the others, in a file only the user reads", () => {
     const folder = scratch();
     const prefs = new Prefs(folder);
