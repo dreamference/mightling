@@ -1042,6 +1042,21 @@ mod tests {
     }
 
     #[test]
+    fn what_follows_a_held_tool_call_is_held_behind_it() {
+        let (nudged, _) = memory();
+        let call = item(json!({"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"ls\"}", "call_id": "c1"}));
+        let events = vec![
+            Ok(ResponseEvent::OutputItemDone(call)),
+            Ok(message_added()),
+            Ok(ResponseEvent::OutputItemDone(item(json!({"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Done."}]})))),
+            Ok(completed()),
+        ];
+        let out = run(events, nudged, true);
+        let order: Vec<_> = done_items(&out).into_iter().map(|(kind, _)| kind).collect();
+        assert_eq!(order, vec!["function_call".to_string(), "assistant".to_string()]);
+    }
+
+    #[test]
     fn with_the_detector_off_only_the_cap_is_handled() {
         let (nudged, _) = memory();
         let out = run(looping_reasoning(12), nudged, false);
