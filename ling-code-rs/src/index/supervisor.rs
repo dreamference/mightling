@@ -115,6 +115,9 @@ fn execute_one(
     let started_at = now_rfc3339();
 
     std::fs::create_dir_all(&run.spec.scratch)?;
+    for (path, _) in &run.spec.writable_outside_scratch {
+        std::fs::create_dir_all(path)?;
+    }
     let peak_file = run.spec.scratch.join("peak");
     let _ = std::fs::remove_file(&peak_file);
     let log = run.spec.scratch.join("run.log");
@@ -482,6 +485,23 @@ mod tests {
         assert_eq!(&argv[..4], ["choom", "-n", "1000", "--"]);
         assert!(argv.contains(&"bwrap".to_string()) && argv.contains(&"--unshare-net".to_string()));
         assert!(host.slice_max.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn a_writable_path_outside_the_scratch_exists_before_the_sandbox_binds_it() {
+        // bwrap fails on a bind whose source is missing: a fresh home has no graph cache yet.
+        let dir = tempfile::tempdir().unwrap();
+        let host = FakeHost::new(dir.path(), 100);
+        let mut plan = repo_and_plan(dir.path(), Kind::Universal, 0);
+        let cache = dir.path().join("home/.cache/codebase-memory-mcp");
+        plan.runs[0].spec.writable_outside_scratch = vec![(cache.clone(), "graph cache".into())];
+        execute(
+            &plan,
+            &host,
+            &BusyThenIdle(Cell::new(0)),
+            Duration::from_millis(1),
+        );
+        assert!(cache.is_dir());
     }
 
     #[test]
