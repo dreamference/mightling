@@ -1,4 +1,5 @@
 """Where `ensure_docker_image`, `probe_image` and `is_docker_available` fall back when docker does not oblige."""
+
 import subprocess
 from pathlib import Path
 
@@ -28,8 +29,9 @@ def docker(monkeypatch):
 
 
 def _dockerfile(monkeypatch, present):
-    monkeypatch.setattr(Path, "is_file",
-                        lambda self: present if self.name == "Dockerfile" else REAL_IS_FILE(self))
+    monkeypatch.setattr(
+        Path, "is_file", lambda self: present if self.name == "Dockerfile" else REAL_IS_FILE(self)
+    )
 
 
 # -- ensure_docker_image -------------------------------------------------------------------------------
@@ -75,6 +77,7 @@ def probe(monkeypatch):
         def run(argv, **kwargs):
             runs.append(argv)
             return subprocess.CompletedProcess(argv, code, stdout=stdout, stderr="")
+
         monkeypatch.setattr(vllm_server_manager.subprocess, "run", run)
 
     return mgr, runs, answer
@@ -90,7 +93,7 @@ def test_a_probe_container_that_fails_is_not_read_and_its_unknown_is_kept(probe)
 
 
 def test_lines_the_probe_did_not_write_are_passed_over(probe):
-    mgr, runs, answer = probe
+    mgr, _runs, answer = probe
     answer(0, "WARNING: the requested image's platform\nvllm=0.11.0rc1+cu129\ntensorizer=True\n")
 
     assert mgr.probe_image("img:1") == {"vllm_version": (0, 11), "has_tensorizer": True}
@@ -101,7 +104,10 @@ def test_lines_the_probe_did_not_write_are_passed_over(probe):
 
 def test_without_a_docker_binary_docker_is_unavailable_and_nothing_runs(monkeypatch):
     monkeypatch.setattr(vllm_server_manager.shutil, "which", lambda name: None)
-    monkeypatch.setattr(vllm_server_manager.subprocess, "run",
-                        lambda *a, **k: pytest.fail("docker ps ran without docker"))
+    monkeypatch.setattr(
+        vllm_server_manager.subprocess,
+        "run",
+        lambda *a, **k: pytest.fail("docker ps ran without docker"),
+    )
 
     assert VLLMServerManager().is_docker_available() is False

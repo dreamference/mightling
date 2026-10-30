@@ -1,4 +1,5 @@
 """The decisions of `HostSafetySetup` that its stubbed host (tests/test_release_install.py) never reaches."""
+
 import io
 import subprocess
 
@@ -18,10 +19,12 @@ def _which(*present):
 
 def _files(monkeypatch, contents):
     """`open` in the module reads `contents[path]`, or fails as a missing file does."""
+
     def fake_open(path, *args, **kwargs):
         if path not in contents:
             raise FileNotFoundError(path)
         return io.StringIO(contents[path])
+
     monkeypatch.setattr(host_safety_setup, "open", fake_open, raising=False)
 
 
@@ -61,13 +64,18 @@ def real_helper_probe(monkeypatch, tmp_path):
 
 
 def test_no_helper_installed_is_no_helper_and_runs_no_sudo(monkeypatch, real_helper_probe):
-    monkeypatch.setattr(host_safety_setup.subprocess, "run",
-                        lambda *a, **k: pytest.fail("sudo ran for a helper that is not there"))
+    monkeypatch.setattr(
+        host_safety_setup.subprocess,
+        "run",
+        lambda *a, **k: pytest.fail("sudo ran for a helper that is not there"),
+    )
 
     assert HostSafetySetup.helper_works() is False
 
 
-def test_the_helper_works_only_when_sudo_runs_its_probe_without_asking(monkeypatch, real_helper_probe):
+def test_the_helper_works_only_when_sudo_runs_its_probe_without_asking(
+    monkeypatch, real_helper_probe
+):
     real_helper_probe.write_text("#!/bin/sh\n")
     seen = []
 
@@ -100,8 +108,11 @@ def test_a_sudo_that_cannot_run_is_no_helper(monkeypatch, real_helper_probe):
 def test_a_file_whose_header_says_swap_is_the_swap_file(monkeypatch):
     _files(monkeypatch, {host_safety_setup.FSTAB: "UUID=1 / ext4 defaults 0 1\n"})
     monkeypatch.setattr(host_safety_setup.shutil, "which", _which("blkid"))
-    monkeypatch.setattr(host_safety_setup.subprocess, "run",
-                        lambda argv, **k: subprocess.CompletedProcess(argv, 0, stdout="swap\n"))
+    monkeypatch.setattr(
+        host_safety_setup.subprocess,
+        "run",
+        lambda argv, **k: subprocess.CompletedProcess(argv, 0, stdout="swap\n"),
+    )
 
     assert HostSafetySetup.is_swap_file("/swapfile") is True
 
@@ -109,8 +120,11 @@ def test_a_file_whose_header_says_swap_is_the_swap_file(monkeypatch):
 def test_a_file_whose_header_says_something_else_is_not_overwritten(monkeypatch):
     _files(monkeypatch, {})
     monkeypatch.setattr(host_safety_setup.shutil, "which", _which("blkid"))
-    monkeypatch.setattr(host_safety_setup.subprocess, "run",
-                        lambda argv, **k: subprocess.CompletedProcess(argv, 0, stdout="ext4\n"))
+    monkeypatch.setattr(
+        host_safety_setup.subprocess,
+        "run",
+        lambda argv, **k: subprocess.CompletedProcess(argv, 0, stdout="ext4\n"),
+    )
 
     assert HostSafetySetup.is_swap_file("/swapfile") is False
 
@@ -138,22 +152,30 @@ def test_a_commented_out_fstab_line_does_not_make_a_swap_file(monkeypatch):
 
 
 def test_the_sandbox_is_not_judged_without_bubblewrap_or_user_systemd(monkeypatch):
-    monkeypatch.setattr(host_safety_setup.subprocess, "run",
-                        lambda *a, **k: pytest.fail("nothing can be tried"))
+    monkeypatch.setattr(
+        host_safety_setup.subprocess, "run", lambda *a, **k: pytest.fail("nothing can be tried")
+    )
     for present in [("systemd-run",), ("bwrap",)]:
         monkeypatch.setattr(host_safety_setup.shutil, "which", _which(*present))
         assert HostSafetySetup.sandbox_works() is None
 
 
 def test_a_swaps_line_that_is_short_or_not_numbers_is_skipped(monkeypatch):
-    _files(monkeypatch, {"/proc/swaps": (
-        "Filename Type Size Used Priority\n"
-        "/swapfile file\n"
-        "/dev/sda2 partition big 0 -2\n"
-        "/swapfile file 16777216 1048576 -3\n")})
+    _files(
+        monkeypatch,
+        {
+            "/proc/swaps": (
+                "Filename Type Size Used Priority\n"
+                "/swapfile file\n"
+                "/dev/sda2 partition big 0 -2\n"
+                "/swapfile file 16777216 1048576 -3\n"
+            )
+        },
+    )
 
     assert HostSafetySetup.swap_areas() == [
-        {"name": "/swapfile", "type": "file", "size_gb": 16.0, "used_gb": 1.0}]
+        {"name": "/swapfile", "type": "file", "size_gb": 16.0, "used_gb": 1.0}
+    ]
 
 
 def test_available_memory_is_read_from_its_own_line(monkeypatch):
@@ -180,12 +202,21 @@ def test_without_a_group_database_docker_access_is_assumed(monkeypatch):
 
 
 def test_a_sandbox_still_broken_after_setup_keeps_the_night_shift_turned_off(monkeypatch):
-    sandbox_step = {"name": "let bubblewrap create its sandbox", "why": "it cannot", "commands": [["true"]]}
+    sandbox_step = {
+        "name": "let bubblewrap create its sandbox",
+        "why": "it cannot",
+        "commands": [["true"]],
+    }
     monkeypatch.setattr(HostSafetySetup, "steps", classmethod(lambda cls: [sandbox_step]))
-    monkeypatch.setattr(HostSafetySetup, "root_mode", classmethod(lambda cls, yes=False, helper=False: None))
+    monkeypatch.setattr(
+        HostSafetySetup, "root_mode", classmethod(lambda cls, yes=False, helper=False: None)
+    )
     monkeypatch.setattr(HostSafetySetup, "_ignore_hangup", classmethod(lambda cls: None))
     monkeypatch.setattr(SandboxPrerequisite, "turned_off", classmethod(lambda cls: True))
-    monkeypatch.setattr(SandboxPrerequisite, "_forget",
-                        classmethod(lambda cls: pytest.fail("the turned-off answer was forgotten")))
+    monkeypatch.setattr(
+        SandboxPrerequisite,
+        "_forget",
+        classmethod(lambda cls: pytest.fail("the turned-off answer was forgotten")),
+    )
 
     assert HostSafetySetup.setup(yes=True) is False
