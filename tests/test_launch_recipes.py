@@ -228,3 +228,8 @@ def test_an_exact_repository_or_display_name_wins_over_a_loose_match(monkeypatch
     assert ModelMatrixRegistry.get_spec("Example/Repo-A") is exact
     assert ModelMatrixRegistry.get_spec("Repo B") is exact
     assert ModelMatrixRegistry.get_spec("example_repo_a") is loose_repo
+
+
+def test_an_engine_is_named_in_any_case():
+    recipe = ModelMatrixRegistry.get_launch_overrides("qwen3.8-27b-nvfp4-dflash2", "LING")
+    assert ModelMatrixRegistry.engine_of(recipe) == "ling"
