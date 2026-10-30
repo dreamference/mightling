@@ -2159,3 +2159,63 @@ fn a_database_over_the_size_cap_defers_indexing() {
     );
     assert_eq!(host.started.lock().unwrap().len(), started);
 }
+
+/// A host without a user systemd: it cannot cap a run's memory.
+struct NoSystemd(LocalHost);
+
+impl Host for NoSystemd {
+    fn mem_available(&self) -> u64 {
+        self.0.mem_available()
+    }
+    fn mem_total(&self) -> u64 {
+        self.0.mem_total()
+    }
+    fn earlyoom_percent(&self) -> Option<f64> {
+        self.0.earlyoom_percent()
+    }
+    fn live_scopes(&self) -> Vec<LiveScope> {
+        self.0.live_scopes()
+    }
+    fn set_slice_limits(&self, max: u64) -> anyhow::Result<()> {
+        self.0.set_slice_limits(max)
+    }
+    fn can_create_scopes(&self) -> bool {
+        false
+    }
+    fn start_scope(
+        &self,
+        unit: &str,
+        cap: u64,
+        argv: &[String],
+        log: &Path,
+    ) -> anyhow::Result<Child> {
+        self.0.start_scope(unit, cap, argv, log)
+    }
+    fn freeze(&self, unit: &str) -> anyhow::Result<()> {
+        self.0.freeze(unit)
+    }
+    fn thaw(&self, unit: &str) -> anyhow::Result<()> {
+        self.0.thaw(unit)
+    }
+    fn stop(&self, unit: &str) -> anyhow::Result<()> {
+        self.0.stop(unit)
+    }
+    fn lock_dir(&self) -> PathBuf {
+        self.0.lock_dir()
+    }
+}
+
+#[test]
+fn indexing_waits_where_no_user_systemd_can_cap_its_memory() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home, docs, host) = one_note();
+    let host = NoSystemd(host);
+    let mut env = env(&host.0, &home, exe());
+    env.host = &host;
+    let outcome = index::run(&env, &docs, None, false).unwrap();
+    assert!(
+        matches!(&outcome[0].1, Outcome::Deferred(why) if why.contains("no user systemd")),
+        "{outcome:?}"
+    );
+    assert!(host.0.started.lock().unwrap().is_empty());
+}
