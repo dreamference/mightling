@@ -3639,6 +3639,19 @@ def test_a_pause_that_ends_before_it_begins_or_is_withdrawn_before_it_begins_is_
     assert gate_record()["pauses"] == []
 
 
+def test_a_hold_keeps_the_sessions_and_pauses_of_the_runs_earlier_starts(hold):
+    earlier = {
+        "sessions": [{"start": 1_000, "end": 2_000, "gate": "in force", "ended": True}],
+        "pauses": [{"start": 1_100, "end": 1_200}],
+    }
+    (SweBenchRunStore("r1").directory / "gate.json").write_text(json.dumps(earlier))
+    with hold:
+        pass
+    record = gate_record()
+    assert record["sessions"][0] == earlier["sessions"][0] and len(record["sessions"]) == 2
+    assert record["pauses"] == earlier["pauses"]
+
+
 def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
     from dreamference.vllm_server.model_gate import ModelGate
 
