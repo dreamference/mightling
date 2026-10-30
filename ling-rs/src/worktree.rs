@@ -1376,4 +1376,20 @@ mod tests {
         assert!(repo.join("theirs.py").is_file(), "{lines:?}");
         assert_eq!(git_text(&repo, &["status", "--porcelain"]).as_deref(), Some(" M auth.py"));
     }
+
+    #[test]
+    fn apply_between_lands_at_the_top_from_a_subfolder_and_refuses_an_unknown_commit() {
+        let fixture = Fixture::new("between");
+        let repo = fixture.repo();
+        let base = git_text(&repo, &["rev-parse", "HEAD"]).unwrap_or_default();
+        git(&repo, &["checkout", "-q", "-b", "side"], None);
+        std::fs::write(repo.join("auth.py"), "def login():\n    return True\n").unwrap_or_default();
+        git(&repo, &["commit", "-qam", "side"], None);
+        let side = git_text(&repo, &["rev-parse", "HEAD"]).unwrap_or_default();
+        git(&repo, &["checkout", "-q", "main"], None);
+        let lines = apply_between(&repo.join("sub"), &base, &side, "side").unwrap_or_else(|lines| panic!("{lines:?}"));
+        assert!(lines[0].starts_with(&format!("Applied side to {} as", repo.display())), "{lines:?}");
+        assert!(std::fs::read_to_string(repo.join("auth.py")).unwrap_or_default().contains("True"));
+        assert_eq!(apply_between(&repo, "no-such-commit", &side, "side"), Err(vec!["Could not read the changes on side.".to_string()]));
+    }
 }
