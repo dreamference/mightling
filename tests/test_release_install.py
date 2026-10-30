@@ -792,6 +792,15 @@ def test_no_terminal_and_a_sudo_that_wants_a_password_stops_before_anything(tmp_
     assert server.requests == [] and not (tmp_path / ".local/share/dreamference").exists()
 
 
+def test_a_wrong_password_at_the_terminal_stops_before_anything(tmp_path, release_server):
+    server = release_server(node_release())
+    result = run_install(tmp_path, server, gpu="NVIDIA GB10", env_extra={"FAKE_SUDO": "password"},
+                         terminal_input="wrong\n")
+    assert result.returncode == 1
+    assert "sudo did not accept the password; nothing was changed." in result.stderr
+    assert server.requests == [] and logged(tmp_path, "sudo.log") == ""
+
+
 def test_at_a_terminal_the_password_and_the_updates_are_asked_once_at_the_start(tmp_path, release_server):
     env = {**fresh_gb10(tmp_path), "FAKE_SUDO": "password"}
     result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10", env_extra=env,
