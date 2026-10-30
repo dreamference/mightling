@@ -515,6 +515,10 @@ mod tests {
         let too_long = codex.join(format!("projects/{}/knowledge", "a".repeat(129)));
         assert!(is_project_knowledge(&longest, &codex));
         assert!(!is_project_knowledge(&too_long, &codex));
+        // An agent home named through a link holds the same knowledge folders.
+        let link = home.join("agent-link");
+        std::os::unix::fs::symlink(&codex, &link).unwrap();
+        assert!(is_project_knowledge(&knowledge, &link));
         // A walk of the knowledge folder skips every secret folder but the one it is in.
         let skipped = secret_dirs_in(&knowledge, &home, &codex);
         assert!(!skipped.contains(&home.join(".mightling")));
