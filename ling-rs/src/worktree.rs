@@ -1501,4 +1501,20 @@ mod tests {
         assert!(lines[0].starts_with("Not discarded"), "{lines:?}");
         assert_eq!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default(), "changed\n");
     }
+
+    #[test]
+    fn discard_by_its_own_id_from_inside_the_session_keeps_its_folder() {
+        let fixture = Fixture::new("discard-own-id");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (mut session, cwd, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("auth.py"), "changed\n").unwrap_or_default();
+        session.pid = std::process::id();
+        session.write().unwrap_or_default();
+        // Named by its id, the session this process runs in is still reset in place, as with a bare discard.
+        let (lines, code) = command(&home, &cwd, &format!("discard {}", session.id), true);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(lines[0].starts_with("Discarded:"), "{lines:?}");
+        assert!(session.checkout.is_dir());
+        assert_ne!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default(), "changed\n");
+    }
 }
