@@ -28,3 +28,26 @@ def test_enable_without_lingering_warns_that_the_timer_needs_a_login(monkeypatch
     out = capsys.readouterr().out
     assert "Lingering is off" in out and "sudo loginctl enable-linger" in out
     assert (NightShiftScheduler.unit_dir() / f"{UNIT}.timer").is_file()
+
+
+def test_lingering_is_on_only_when_loginctl_says_yes(monkeypatch):
+    answers = iter(["yes\n", "no\n", ""])
+    seen = []
+
+    def loginctl(args, **kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, next(answers), "")
+
+    monkeypatch.setattr(subprocess, "run", loginctl)
+    assert [NightShiftScheduler.lingering() for _ in range(3)] == [True, False, False]
+    assert all(args[:2] == ["loginctl", "show-user"] for args in seen)
+
+
+def test_lingering_is_off_when_loginctl_cannot_answer(monkeypatch):
+    for error in (FileNotFoundError("loginctl"), subprocess.TimeoutExpired("loginctl", 10)):
+
+        def loginctl(args, error=error, **kwargs):
+            raise error
+
+        monkeypatch.setattr(subprocess, "run", loginctl)
+        assert NightShiftScheduler.lingering() is False
