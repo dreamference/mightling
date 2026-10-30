@@ -35,7 +35,8 @@
       "CPU",
       "quantiz",
       "my model",
-      "network congestion"
+      "network congestion",
+      "thinking"
     ],
     "max_tool_calls": 2
   },
