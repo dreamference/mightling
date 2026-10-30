@@ -779,6 +779,16 @@ mod tests {
         assert_eq!(command_line_value(&given, "d"), None);
     }
 
+    #[test]
+    fn a_window_wider_than_the_models_does_not_widen_it() {
+        // Codex narrows the catalog's window with a `-c`, never widens it.
+        let wide = args(&["ling", "-c", "model_context_window=1000000"]);
+        assert_eq!(drop_limit(&wide, "", 262_144), 235_929);
+        let limited = [wide, args(&["-c", "model_auto_compact_token_limit=94144"])].concat();
+        let out = with_turn_end(limited, "", 262_144, true, true);
+        assert_eq!(command_line_value(&out, TURN_END_KEY).as_deref(), Some("20"));
+    }
+
     /// The hook below is the one a live session accepted on 2026-10-02: defined in a `config.toml`
     /// exactly like this, the hook ran after a compaction with no `--dangerously-bypass-hook-trust`.
     /// The path keeps that day's binary name (before the product was renamed) but not its home
