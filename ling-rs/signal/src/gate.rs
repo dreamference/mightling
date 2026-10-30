@@ -288,6 +288,19 @@ mod tests {
         assert_eq!(gate.check(&direct("owner", "hi", NOW + 1), &Mode::Linked { own_device: 3 }, Some("fp1"), NOW), Verdict::Ignored);
     }
 
+    #[test]
+    fn a_dedicated_bridge_counts_a_group_message_and_not_a_receipt() {
+        let mut gate = owned();
+        let mut group = direct("stranger", "hi all", NOW);
+        group.body = Body::Group;
+        assert_eq!(gate.check(&group, &Mode::Dedicated, Some("fpX"), NOW), Verdict::Ignored);
+        assert_eq!(gate.ignored, 1);
+        let mut receipt = direct("stranger", "", NOW + 1);
+        receipt.body = Body::Other;
+        assert_eq!(gate.check(&receipt, &Mode::Dedicated, Some("fpX"), NOW), Verdict::Ignored);
+        assert_eq!(gate.ignored, 1);
+    }
+
     fn linked() -> (Gate, Mode) {
         (Gate::new(Some(Owner { aci: "me".to_string(), fingerprint: String::new() })), Mode::Linked { own_device: 3 })
     }
