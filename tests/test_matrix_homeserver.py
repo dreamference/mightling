@@ -714,3 +714,29 @@ def test_the_loopback_proxy_points_at_the_address_docker_gives_the_container(mac
     assert MatrixHomeserver.start() == 0
     service = pathlib.Path(MatrixHomeserver.unit_dir(), mh.PROXY_SERVICE_UNIT).read_text()
     assert f"ExecStart={mh.SOCKET_PROXYD} 172.20.0.7:{mh.MATRIX_PORT}" in service
+
+
+def test_the_proxy_socket_is_enabled_after_the_old_proxy_stops_and_a_failed_step_fails_start(
+    machine, capsys
+):
+    # A proxy the socket started earlier keeps its old target until it stops; the socket is
+    # enabled, not only started, so the homeserver answers again after a reboot.
+    assert MatrixHomeserver.start() == 0
+    assert machine.argv("systemctl", "--user") == [
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "stop", mh.PROXY_SERVICE_UNIT],
+        ["systemctl", "--user", "enable", "--now", mh.PROXY_SOCKET_UNIT],
+    ]
+    real = machine.run
+
+    def run(argv, timeout=120, env=None):
+        if argv[:3] == ["systemctl", "--user", "enable"]:
+            return subprocess.CompletedProcess(argv, 1, "", "Failed to enable unit")
+        return real(argv, timeout, env)
+
+    machine.run = run
+    machine.runs.clear()
+    capsys.readouterr()
+    assert MatrixHomeserver.start() == 1
+    assert "loopback proxy" in capsys.readouterr().out
+    assert not machine.argv("tailscale", "serve")
