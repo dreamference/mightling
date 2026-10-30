@@ -10,8 +10,10 @@ from types import SimpleNamespace
 import pytest
 
 from dreamference.node import node_prepare
-from dreamference.node.node_prepare import NodePrepare
+from dreamference.node.node_prepare import TELEMETRY_UNIT, NodePrepare
 from dreamference.node.node_service_file import NodeServiceFile
+from dreamference.vllm_server import sandbox_prerequisite
+from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite
 
 
 @pytest.fixture
@@ -143,3 +145,107 @@ def test_a_service_file_missing_or_someone_elses_is_made_the_users(monkeypatch, 
             str(NodeServiceFile.service_path),
         ]
     ]
+
+
+# -- the sandbox profile and telemetry
+
+
+@pytest.fixture
+def profile(monkeypatch, tmp_path):
+    path = tmp_path / "puffin-bwrap"
+    monkeypatch.setattr(sandbox_prerequisite, "PROFILE_PATH", str(path))
+    return path
+
+
+def test_a_loaded_profile_needs_nothing_and_no_fix_means_no_step(monkeypatch, profile):
+    def never(cls):
+        pytest.fail("asked for a fix")
+
+    profile.write_text("profile")
+    monkeypatch.setattr(NodePrepare, "_profile_loaded", classmethod(lambda cls: True))
+    monkeypatch.setattr(SandboxPrerequisite, "fix_commands", classmethod(never))
+    assert NodePrepare._sandbox_step() is None
+
+    monkeypatch.setattr(NodePrepare, "_profile_loaded", classmethod(lambda cls: False))
+    monkeypatch.setattr(SandboxPrerequisite, "fix_commands", classmethod(lambda cls: None))
+    assert NodePrepare._sandbox_step() is None
+
+    monkeypatch.setattr(SandboxPrerequisite, "fix_commands", classmethod(lambda cls: [["fix"]]))
+    assert NodePrepare._sandbox_step()["commands"] == [["fix"]]
+
+
+class Profiles:
+    def __init__(self, text):
+        self.text = text
+
+    def __call__(self, *_):
+        return self
+
+    def read_text(self):
+        if isinstance(self.text, Exception):
+            raise self.text
+        return self.text
+
+
+@pytest.mark.parametrize(
+    ("text", "loaded"),
+    [
+        ("other (enforce)\npuffin-bwrap (unconfined)\n", True),
+        ("puffin-bwrap-old (enforce)\n", False),
+        (PermissionError("profiles"), False),
+    ],
+)
+def test_the_profile_is_loaded_only_when_the_kernel_lists_it_by_name(monkeypatch, text, loaded):
+    monkeypatch.setattr(node_prepare, "Path", Profiles(text))
+    assert NodePrepare._profile_loaded() is loaded
+
+
+@pytest.mark.parametrize(
+    ("enabled", "active", "needed"),
+    [
+        ("disabled", "inactive", False),
+        ("", "", False),
+        ("static", "inactive", True),
+        ("disabled", "active", True),
+    ],
+)
+def test_telemetry_is_turned_off_when_enabled_or_running(monkeypatch, enabled, active, needed):
+    answers = {"is-enabled": enabled, "is-active": active}
+    monkeypatch.setattr(
+        NodePrepare, "_systemctl", classmethod(lambda cls, verb, unit: answers[verb])
+    )
+    step = NodePrepare._telemetry_step()
+    assert (step is not None) is needed
+    if needed:
+        assert step["commands"] == [["systemctl", "disable", "--now", TELEMETRY_UNIT]]
+
+
+# -- the one place commands run
+
+
+def test_systemctl_that_cannot_run_reads_as_no_answer(monkeypatch):
+    def broken(*_, **__):
+        raise FileNotFoundError("systemctl")
+
+    monkeypatch.setattr(node_prepare.subprocess, "run", broken)
+    assert NodePrepare._systemctl("is-active", TELEMETRY_UNIT) == ""
+    monkeypatch.setattr(
+        node_prepare.subprocess, "run", lambda *_, **__: SimpleNamespace(stdout="active\n")
+    )
+    assert NodePrepare._systemctl("is-active", TELEMETRY_UNIT) == "active"
+
+
+def test_a_command_that_cannot_run_or_fails_is_a_failure(monkeypatch, capsys):
+    def broken(*_, **__):
+        raise FileNotFoundError("loginctl")
+
+    monkeypatch.setattr(node_prepare.subprocess, "run", broken)
+    assert NodePrepare._execute(["loginctl", "enable-linger", "owner"]) is False
+    assert "loginctl" in capsys.readouterr().out
+
+    codes = iter([1, 0])
+    monkeypatch.setattr(
+        node_prepare.subprocess, "run", lambda *_, **__: SimpleNamespace(returncode=next(codes))
+    )
+    assert NodePrepare._execute(["loginctl", "enable-linger", "owner"]) is False
+    assert NodePrepare._execute(["loginctl", "enable-linger", "owner"]) is True
