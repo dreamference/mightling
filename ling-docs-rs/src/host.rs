@@ -525,6 +525,20 @@ mod tests {
     }
 
     #[test]
+    fn an_uncapped_scope_promises_no_more_than_the_machine_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = FakeHost::new(dir.path(), 100);
+        // A scope with no cap of its own already uses 115 of the 121 GiB: it can grow by 6 more.
+        host.scopes.lock().unwrap().push(LiveScope {
+            unit: "uncapped".into(),
+            cap: u64::MAX,
+            current: 115 * GIB,
+        });
+        let admitted = admit(&host, GIB, GIB).unwrap();
+        assert!(admitted.is_ok(), "{:?}", admitted.err());
+    }
+
+    #[test]
     fn a_budget_below_the_floor_defers() {
         let dir = tempfile::tempdir().unwrap();
         // 121 GiB total, 5% earlyoom line: reserve is 6.05 + 4 = ~10.05 GiB; 11 GiB leaves ~0.95.
