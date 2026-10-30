@@ -43,3 +43,18 @@ def test_the_embedding_model_is_added_once_and_only_when_this_machine_has_it(
     if here:
         (hub / EMBEDDING).mkdir()
     assert FleetModelPlan.plan("the-model")["folders"] == folders
+
+
+def test_only_folders_this_machine_has_are_copied_and_counted(hub, monkeypatch):
+    (hub / "models--org--here").mkdir()
+    (hub / "models--org--file").write_text("not a folder")
+    sized = []
+    monkeypatch.setattr(
+        NodeModelSync, "size", classmethod(lambda cls, paths: sized.append(paths) or 7)
+    )
+    wanted = ["models--org--here", "models--org--file", "models--org--elsewhere"]
+
+    assert FleetModelPlan.hub() == hub
+    assert FleetModelPlan.local_folders(wanted) == [hub / "models--org--here"]
+    assert FleetModelPlan.bytes_needed(wanted) == 7
+    assert sized == [[hub / "models--org--here"]]
