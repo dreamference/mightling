@@ -623,6 +623,16 @@ mod state_file_tests {
         let err = open_state_file(&state, "session.lock", true).unwrap_err();
         assert!(err.to_string().contains("not writing through it"), "{err}");
     }
+
+    /// procfs reports a size of 0 for the files it fills as they are read.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_longer_than_its_reported_size_is_still_capped() {
+        let status = Path::new("/proc/self/status");
+        assert_eq!(std::fs::metadata(status).unwrap().len(), 0);
+        assert_eq!(read_capped(status, 16, true), None);
+        assert!(read_capped(status, 1 << 20, true).is_some());
+    }
 }
 
 #[cfg(test)]
