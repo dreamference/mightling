@@ -712,4 +712,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(downloaded.map(|d| d.bytes), Ok(pdf.len() as u64));
     }
+
+    #[test]
+    fn a_page_is_read_no_further_than_one_byte_past_the_cap() {
+        // The stand-in sends one byte past the cap, then nothing while it keeps the connection
+        // open: a fetch that read on would wait there for the read timeout.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let _ = std::io::Read::read(&mut stream, &mut request);
+            let head = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".as_slice();
+            let body = vec![b'a'; MAX_DOWNLOAD_BYTES as usize + 1];
+            let _ = std::io::Write::write_all(&mut stream, &[head, &body].concat());
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        });
+        let started = std::time::Instant::now();
+        let page = fetch(&url, 100).unwrap();
+        assert!(page.truncated);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    }
 }
