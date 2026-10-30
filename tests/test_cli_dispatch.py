@@ -22,11 +22,18 @@ from dreamference.vllm_server import SandboxPrerequisite
 def before_the_command(monkeypatch):
     """What ran before the command: `migration`, `offer` and `(gate, command, subcommand)`."""
     seen = []
-    monkeypatch.setattr(LegacyNameMigration, "run", classmethod(lambda cls: seen.append("migration")))
-    monkeypatch.setattr(RetiredWebChat, "offer", classmethod(lambda cls, command: seen.append("offer")))
     monkeypatch.setattr(
-        SandboxPrerequisite, "gate",
-        classmethod(lambda cls, command, subcommand: seen.append(("gate", command, subcommand)) or True),
+        LegacyNameMigration, "run", classmethod(lambda cls: seen.append("migration"))
+    )
+    monkeypatch.setattr(
+        RetiredWebChat, "offer", classmethod(lambda cls, command: seen.append("offer"))
+    )
+    monkeypatch.setattr(
+        SandboxPrerequisite,
+        "gate",
+        classmethod(
+            lambda cls, command, subcommand: seen.append(("gate", command, subcommand)) or True
+        ),
     )
     return seen
 
@@ -43,12 +50,16 @@ def test_mcp_neither_migrates_nor_offers_before_it_serves(before_the_command, mo
     assert before_the_command == [("gate", "mcp", None)]
 
 
-@pytest.mark.parametrize("argv, served", [
-    (["node", "job-exec", "job-1"], (NodeJob, "execute")),
-    (["node", "serve-job", "--key", "k"], (NodeServe, "serve")),
-])
-def test_the_node_commands_an_ssh_session_runs_neither_migrate_nor_offer(before_the_command, monkeypatch,
-                                                                         argv, served):
+@pytest.mark.parametrize(
+    "argv, served",
+    [
+        (["node", "job-exec", "job-1"], (NodeJob, "execute")),
+        (["node", "serve-job", "--key", "k"], (NodeServe, "serve")),
+    ],
+)
+def test_the_node_commands_an_ssh_session_runs_neither_migrate_nor_offer(
+    before_the_command, monkeypatch, argv, served
+):
     monkeypatch.setattr(*served, classmethod(lambda cls, *a, **k: 0))
     assert _exit_code(argv) == 0
     assert before_the_command == [("gate", "node", argv[1])]
@@ -62,7 +73,9 @@ def test_a_command_a_person_types_migrates_and_offers(before_the_command, monkey
 
 def test_images_status_is_not_the_image_search_mcp_server(before_the_command, monkeypatch, capsys):
     monkeypatch.setattr(ImageSearchMcp, "serve", classmethod(lambda cls: pytest.fail("served MCP")))
-    monkeypatch.setattr(ImageSearchSidecar, "status_lines", classmethod(lambda cls: ["image search: stopped"]))
+    monkeypatch.setattr(
+        ImageSearchSidecar, "status_lines", classmethod(lambda cls: ["image search: stopped"])
+    )
     assert _exit_code(["images", "status"]) == 0
     assert "image search: stopped" in capsys.readouterr().out
 
