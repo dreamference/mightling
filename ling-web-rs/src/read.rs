@@ -490,4 +490,19 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.error, crate::AIRGAPPED_ON_MESSAGE);
     }
+
+    #[test]
+    fn a_page_its_fetch_trimmed_is_marked_trimmed_though_it_fits() {
+        let read = read(
+            found(vec![result("Long", "https://long.example/", "")]),
+            1,
+            &|url: &str, _| {
+                let mut long = page(url, "Long", "the start");
+                long.truncated = true;
+                Ok(long)
+            },
+        );
+        assert!(read.sources[0].truncated);
+        assert!(render_text(&read).contains("[page trimmed to fit; ling-fetch the URL for more]"));
+    }
 }
