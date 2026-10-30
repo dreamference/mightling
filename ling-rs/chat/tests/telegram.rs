@@ -193,6 +193,23 @@ async fn pairing_takes_a_code_once_and_ten_wrong_codes_withdraw_the_rest() {
     assert_eq!(TelegramConfig::load(&dir).unwrap().users, vec![111, 333]);
 }
 
+/// A paired account that sends a code is told so: the code is not spent on it, and the account is
+/// not listed twice.
+#[tokio::test]
+async fn a_paired_account_does_not_spend_a_code() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let dir = scratch("repair");
+    let (hub, _inbound) = mpsc::unbounded_channel();
+    let mut poller = Poller::new(api, dir.clone(), hub);
+    let code = store::issue_pairing_code(&dir).unwrap();
+    poller.handle(&private_message(111, &format!("/pair {code}"))).await;
+    assert_eq!(TelegramConfig::load(&dir).unwrap().users, vec![111]);
+    assert_eq!(stand.bodies("sendMessage").last().unwrap()["text"], "This Telegram account is already paired.");
+    // The code is still there for the account it was meant for.
+    poller.handle(&private_message(333, &format!("/pair {code}"))).await;
+    assert_eq!(TelegramConfig::load(&dir).unwrap().users, vec![111, 333]);
+}
+
 #[tokio::test]
 async fn buttons_and_the_stop_button_come_from_paired_users_only() {
     let (stand, api) = stand_in(default_answer()).await;
