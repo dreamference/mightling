@@ -268,6 +268,9 @@ class EgressAudit:
             # The preview tab under audit (DESKTOP_PARITY §5): the audit's page, which reaches for the internet.
             if cls.preview_url:
                 env["MIGHTLING_APP_AUDIT_PREVIEW"] = cls.preview_url
+                # At `/airgapped on` the preview session holds a dead proxy for everything but loopback,
+                # which is what keeps the page's peer connection (STUN, TURN over TCP) off the network.
+                env["DREAMFERENCE_MIGHTLING_AIRGAPPED"] = "on"
             command = strace[:-1] + [str(app_bin)]
         else:
             command = strace + ["exec", "--skip-git-repo-check", "-o", reply_path, prompt]

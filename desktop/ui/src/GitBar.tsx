@@ -112,7 +112,7 @@ export function GitBar(props: GitBarProps) {
     const sent = pending;
     setPending(null);
     try {
-      const result = await executeGitAction(api, thread, sent, { openTab: props.openTab });
+      const result = await executeGitAction(api, thread, sent, { openTab: props.openTab ?? ((url) => void bridge.openWebLink(url, thread)) });
       if (thread !== threadRef.current) return;
       setOutcome(result);
       if (result.mergeInProgress !== undefined) setMergeInProgress(result.mergeInProgress);
@@ -225,7 +225,13 @@ export function GitBar(props: GitBarProps) {
         <span className="git-bar-outcome" role="status">
           {outcome.text}
           {outcome.prUrl && safePrUrl(outcome.prUrl) ? (
-            <> (<a href={outcome.prUrl} target="_blank" rel="noopener noreferrer">{outcome.prUrl}</a>)</>
+            <> (<a href={outcome.prUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => {
+              // The app has no window to open: the main process opens it in the system's browser.
+              if (bridge.host() === "electron") {
+                event.preventDefault();
+                void bridge.openWebLink(outcome.prUrl!, thread);
+              }
+            }}>{outcome.prUrl}</a>)</>
           ) : null}
         </span>
       ) : null}

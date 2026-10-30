@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 
+import { openWebLink } from "./bridge";
 import { elicitationAnswer, elicitationContent, elicitationFields, type ElicitationField } from "./elicitation";
 
 export function ElicitationCard(props: { params: Record<string, unknown>; airgappedOn: boolean; onAnswer: (result: unknown) => void }) {
@@ -62,7 +63,7 @@ export function ElicitationCard(props: { params: Record<string, unknown>; airgap
           <pre className="elicitation-url">{String(params.url ?? "")}</pre>
           {props.airgappedOn ? <p className="warn">Airgapped is on: open this link on another device, or turn airgapped off first.</p> : (
             <p><button className="link-button" onClick={() => {
-              window.open(String(params.url ?? ""), "_blank", "noopener");
+              void openWebLink(String(params.url ?? ""), null);
               setOpened(true);
             }}>Open in the browser</button>{opened ? " · then come back and Accept when you are done there." : null}</p>
           )}
