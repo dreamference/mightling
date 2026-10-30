@@ -26,6 +26,11 @@ from dreamference.node import (
 
 NODE_ID = "7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001"
 
+# The real methods conftest stubs for every test, taken before any fixture runs.
+REAL_BROWSE = NodeBrowser.browse
+REAL_BROWSE_SERVICE = NodeBrowser.browse_service
+REAL_AVAHI_INSTALLED = NodeAdvertiser.avahi_installed
+
 
 # -- the service file ------------------------------------------------------------------------------
 
@@ -148,6 +153,20 @@ def test_a_service_file_that_cannot_be_written_is_a_failure(monkeypatch):
     monkeypatch.setattr(Path, "write_text", refuse)
     assert NodeServiceFile.write("x") is False
     assert NodeServiceFile.update(state="ready") is False
+
+
+def test_an_update_that_changes_nothing_needs_no_write(monkeypatch):
+    path = NodeServiceFile.service_path
+    path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.3.0", "ready"))
+    original = Path.write_text
+
+    def refuse(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError(13, "Permission denied", str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", refuse)
+    assert NodeServiceFile.update(state="ready") is True
 
 
 def test_a_node_that_was_never_enabled_is_never_advertised_by_a_side_effect():
