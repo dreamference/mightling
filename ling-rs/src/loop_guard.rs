@@ -1095,6 +1095,23 @@ mod tests {
     }
 
     #[test]
+    fn each_process_has_its_surface_and_an_unknown_app_server_thread_is_work() {
+        let state = |process| State {
+            process,
+            codex_home: None,
+            table: None,
+            threads: Mutex::new(HashMap::new()),
+            nudged: Mutex::new(HashSet::new()),
+        };
+        assert_eq!(thread_surface(&state(Process::Tui), "t"), Surface::Tui);
+        assert_eq!(thread_surface(&state(Process::Exec), "t"), Surface::Exec);
+        let app = state(Process::AppServer);
+        app.threads.lock().expect("lock").insert("p".to_string(), Surface::Phone);
+        assert_eq!(thread_surface(&app, "p"), Surface::Phone);
+        assert_eq!(thread_surface(&app, "other"), Surface::Work);
+    }
+
+    #[test]
     fn with_the_detector_off_only_the_cap_is_handled() {
         let (nudged, _) = memory();
         let out = run(looping_reasoning(12), nudged, false);
