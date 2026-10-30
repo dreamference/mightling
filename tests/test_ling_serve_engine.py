@@ -713,3 +713,9 @@ def test_a_ling_serve_plan_missing_a_figure_is_no_plan(monkeypatch):
         )
         is None
     )
+
+
+def test_the_last_plan_ling_serve_prints_is_the_one_taken(monkeypatch):
+    early = '{"sessions":1,"batch":1,"max_context":4096,"planned_bytes":1}'
+    final = '{"sessions":3,"batch":3,"max_context":262144,"planned_bytes":82400000000}'
+    assert _plan_from(monkeypatch, 0, f"{early}\nnoise\n{final}\n")["sessions"] == 3
