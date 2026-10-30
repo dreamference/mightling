@@ -895,6 +895,7 @@ def test_every_connection_uses_the_pairing_key_and_the_pinned_host_key(monkeypat
         and "HostKeyAlias=mightling-node-2222-bbbb" in options
     )
     assert f"UserKnownHostsFile={NodePairing.known_hosts()}" in options
+    assert "ConnectTimeout=10" in options  # a node that is gone fails in seconds
     assert "accept-new" in " ".join(NodePairing.ssh_options(record, accept_new=True))
     for name in ("spark-2", "SPARK-2", "192.168.50.106", "2222-bbbb", "2222"):
         assert NodePairing.find(name)["node"] == "2222-bbbb", name
