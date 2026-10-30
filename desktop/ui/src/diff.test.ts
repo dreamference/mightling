@@ -94,6 +94,11 @@ describe("a turn's diff under a folder of the repository", () => {
     // A new file keeps /dev/null.
     expect(underDirectory("--- /dev/null\n+++ b/new.txt\n", "app")).toBe("--- /dev/null\n+++ b/app/new.txt\n");
   });
+
+  it("leaves a changed line that reads like a file header as it is", () => {
+    const diff = "diff --git a/notes.md b/notes.md\n--- a/notes.md\n+++ b/notes.md\n@@ -1 +1 @@\n--- a/old\n+++ b/new\n";
+    expect(underDirectory(diff, "docs")).toBe("diff --git a/docs/notes.md b/docs/notes.md\n--- a/docs/notes.md\n+++ b/docs/notes.md\n@@ -1 +1 @@\n--- a/old\n+++ b/new\n");
+  });
 });
 
 describe("Revert's question", () => {

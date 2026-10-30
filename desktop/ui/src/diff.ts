@@ -253,10 +253,16 @@ export function commentsMessage(comments: ReviewComment[]): string {
 export function underDirectory(diff: string, directory: string): string {
   const dir = directory.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   if (!dir) return diff;
+  // The ---/+++ lines name files only before a file's first hunk: in a hunk they are changed lines.
+  let header = true;
   return diff.split("\n").map((line) => {
-    const header = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
-    if (header) return `diff --git a/${dir}/${header[1]} b/${dir}/${header[2]}`;
-    const side = /^(---|\+\+\+) ([ab])\/(.+)$/.exec(line);
+    const names = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+    if (names) {
+      header = true;
+      return `diff --git a/${dir}/${names[1]} b/${dir}/${names[2]}`;
+    }
+    if (line.startsWith("@@")) header = false;
+    const side = header ? /^(---|\+\+\+) ([ab])\/(.+)$/.exec(line) : null;
     if (side) return `${side[1]} ${side[2]}/${dir}/${side[3]}`;
     return line;
   }).join("\n");
