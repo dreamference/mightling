@@ -203,6 +203,78 @@ def test_an_unknown_machine_is_refused_without_a_download(pinned):
     assert fetched == []
 
 
+def test_a_pinned_archive_without_its_library_installs_nothing_of_it(pinned, monkeypatch):
+    tmp_path, files, _ = pinned
+    # A directory where the library should be: tarfile hands back no file for it.
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        info = tarfile.TarInfo("lib/libpdfium.so")
+        info.type = tarfile.DIRTYPE
+        archive.addfile(info)
+    empty = buffer.getvalue()
+    files["https://x/pdfium.tgz"] = empty
+    libraries = docs_index_setup.LIBRARIES["aarch64"]
+    monkeypatch.setitem(
+        docs_index_setup.LIBRARIES,
+        "aarch64",
+        [("https://x/pdfium.tgz", hashlib.sha256(empty).hexdigest(), *libraries[0][2:]), libraries[1]],
+    )
+    assert DocsIndexSetup.install("aarch64") is False
+    target = tmp_path / "lib" / "ling-docs" / "libpdfium.so"
+    assert not target.exists()
+    assert not pathlib.Path(DocsIndexSetup.stamp_path(str(target))).exists(), "no pin without the file"
+
+
+class _Response(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_the_download_itself_refuses_content_that_does_not_match_its_pin(monkeypatch):
+    # The fixture stubs fetch; this is the real one, with only the network replaced.
+    monkeypatch.setattr(
+        docs_index_setup.urllib.request, "urlopen", lambda url, timeout: _Response(b"tampered")
+    )
+    good = hashlib.sha256(b"tampered").hexdigest()
+    assert DocsIndexSetup.fetch("https://x/f", good) == b"tampered"
+    with pytest.raises(ValueError, match="expected"):
+        DocsIndexSetup.fetch("https://x/f", hashlib.sha256(b"pinned").hexdigest())
+
+
+def test_a_tesseract_package_is_refused_without_dpkg_deb_or_its_file(monkeypatch):
+    class Done:
+        def __init__(self, returncode, stdout=b"", stderr=b""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    monkeypatch.setattr(docs_index_setup.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        docs_index_setup.subprocess, "run", lambda *a, **k: pytest.fail("no dpkg-deb to run")
+    )
+    with pytest.raises(ValueError, match="dpkg-deb"):
+        DocsIndexSetup.deb_member(b"!<arch>", "./usr/lib/liblept.so.5")
+
+    monkeypatch.setattr(docs_index_setup.shutil, "which", lambda name: "/usr/bin/dpkg-deb")
+    monkeypatch.setattr(
+        docs_index_setup.subprocess, "run", lambda *a, **k: Done(2, stderr=b"not a debian archive")
+    )
+    with pytest.raises(ValueError, match="not a debian archive"):
+        DocsIndexSetup.deb_member(b"junk", "./usr/lib/liblept.so.5")
+
+    plain = io.BytesIO()
+    with tarfile.open(fileobj=plain, mode="w:") as archive:
+        info = tarfile.TarInfo("./usr/lib/liblept.so.5")
+        info.type = tarfile.DIRTYPE
+        archive.addfile(info)
+    monkeypatch.setattr(
+        docs_index_setup.subprocess, "run", lambda *a, **k: Done(0, stdout=plain.getvalue())
+    )
+    with pytest.raises(ValueError, match="is not in the package"):
+        DocsIndexSetup.deb_member(b"!<arch>", "./usr/lib/liblept.so.5")
+
+
 def test_the_real_pins_cover_both_linux_machines_and_the_measured_model():
     assert set(docs_index_setup.LIBRARIES) == {"aarch64", "x86_64"}
     for entries in docs_index_setup.LIBRARIES.values():
