@@ -554,6 +554,21 @@ def test_disable_on_a_node_never_advertised_asks_for_nothing(machine, monkeypatc
     assert "not advertised" in capsys.readouterr().out
 
 
+def test_disable_that_can_neither_remove_nor_empty_the_file_says_so(machine, monkeypatch, capsys):
+    path = NodeServiceFile.service_path
+    path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.3.0", "ready"))
+    original = Path.write_text
+
+    def refuse(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError(13, "Permission denied", str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", refuse)
+    assert NodeAdvertiser.disable() is False
+    assert "still advertises this node" in capsys.readouterr().out
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
