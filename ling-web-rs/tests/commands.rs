@@ -655,6 +655,24 @@ fn a_share_link_that_leads_elsewhere_is_read_as_a_page() {
 }
 
 #[test]
+fn a_location_on_a_response_that_is_not_a_redirect_is_not_followed() {
+    let server = Server::start(|_| {
+        response(
+            "200 OK",
+            "text/html; charset=utf-8",
+            b"<p>Body</p>",
+            "Location: https://www.google.com/search?q=elsewhere\r\n",
+        )
+    });
+    let Ok(share_links::Walked::Response(response)) = walk(&server, "/s") else {
+        panic!("the walk did not end at the page");
+    };
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.into_string().unwrap(), "<p>Body</p>");
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
 fn a_share_link_walk_gives_up_after_ten_redirects() {
     let server = Server::start(|_| response("302 Found", "text/html", b"", "Location: /again\r\n"));
     let error = walk(&server, "/again").err().unwrap();
