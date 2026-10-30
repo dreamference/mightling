@@ -586,4 +586,16 @@ mod tests {
         assert!(!tested.is_empty());
         assert!(Ledger::default().is_empty());
     }
+
+    #[test]
+    fn a_file_patched_twice_is_listed_once() {
+        let dir = scratch("twice");
+        let patch = |id: &str| {
+            json!({"type": "response_item", "payload": {"type": "custom_tool_call", "name": "apply_patch",
+                "call_id": id, "input": "*** Begin Patch\n*** Update File: src/a.py\n@@\n-x\n+y\n*** End Patch"}})
+            .to_string()
+        };
+        let ledger = Ledger::from_rollout(&[patch("1"), patch("2")].join("\n"), &dir, None);
+        assert_eq!(ledger.changed, vec!["src/a.py"]);
+    }
 }
