@@ -3660,6 +3660,14 @@ def test_a_hold_on_a_run_without_a_manifest_writes_nothing_to_disk(hold):
     assert not SweBenchRunStore("refused").directory.exists()
 
 
+def test_every_tick_gives_the_run_record_a_fresh_heartbeat(hold):
+    hold.started = time.time() - 1_000
+    before = time.time()
+    hold.tick()
+    assert FakeGate.written[-1]["heartbeat"] >= before
+    assert FakeGate.written[-1]["networks"] == ["172.30.0.0/16"]
+
+
 def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
     from dreamference.vllm_server.model_gate import ModelGate
 
