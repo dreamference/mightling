@@ -473,6 +473,8 @@ mod tests {
         )
         .unwrap_or_default();
         std::fs::create_dir_all(dir.join("scripts")).unwrap_or_default();
+        // Windows cannot name a file with an escape in it.
+        #[cfg(unix)]
         std::fs::write(dir.join("scripts/run\u{1b}[3A.sh"), "#!/bin/sh\n").unwrap_or_default();
         let staged_skill = install::validate(&dir).unwrap_or_else(|error| panic!("{error}"));
         let machine = fixture.machine();
@@ -480,6 +482,7 @@ mod tests {
         let text = staged(&staged_skill, &install::Origin::default(), &plan, &machine).join("\n");
         assert!(!text.contains(['\u{1b}', '\u{9b}', '\u{202e}', '\r']), "{text:?}");
         assert!(text.contains("Description: Fine.\\u{d}\\u{1b}[2K\\u{1b}[1A\\u{9b}1A\\u{202e}dlrow"), "{text}");
+        #[cfg(unix)]
         assert!(text.contains("scripts/run\\u{1b}[3A.sh"), "{text}");
         assert_eq!(printable(vec!["a\tb\nc".to_string()]), vec!["a\tb\nc".to_string()]);
     }
