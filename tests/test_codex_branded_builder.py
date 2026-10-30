@@ -1525,3 +1525,16 @@ def test_only_a_full_cargo_version_is_stamped(tmp_path, version):
     manifest.write_text('[workspace.package]\nversion = "0.158.0"\n')
     assert CodexBrandedBuilder.stamp_version(str(manifest), version) is False
     assert manifest.read_text() == '[workspace.package]\nversion = "0.158.0"\n'
+
+
+def test_the_version_is_stamped_only_inside_workspace_package(tmp_path):
+    manifest = tmp_path / "Cargo.toml"
+    text = '[workspace.package]\nedition = "2024"\n\n[package]\nname = "x"\nversion = "0.0.1"\n'
+    manifest.write_text(text)
+    assert CodexBrandedBuilder.stamp_version(str(manifest), "1.4.1") is False
+    assert manifest.read_text() == text
+
+    # Keys that end in "version" stay as they are.
+    manifest.write_text('[workspace.package]\nrust-version = "1.85"\nversion = "0.158.0"\n')
+    assert CodexBrandedBuilder.stamp_version(str(manifest), "1.4.1") is True
+    assert manifest.read_text() == '[workspace.package]\nrust-version = "1.85"\nversion = "1.4.1"\n'
