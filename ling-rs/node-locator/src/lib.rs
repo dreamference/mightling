@@ -958,6 +958,27 @@ mod tests {
             assert_eq!(Node::parse(&text), None, "{text}");
         }
     }
+    #[test]
+    fn a_unicode_escape_is_four_hex_digits_and_the_last_high_half_still_pairs() {
+        // `from_str_radix` alone would take a sign: `\u+041` is not an escape.
+        assert_eq!(Node::parse("{\"address\": \"a\\u+041\"}"), None);
+        let parsed = Node::parse("{\"address\": \"a\", \"name\": \"\\udbff\\udfff\"}").unwrap();
+        assert_eq!(parsed.name, "\u{10ffff}");
+    }
+
+    #[test]
+    fn every_control_character_is_written_escaped() {
+        let written = Node {
+            name: "a\u{1f}b\u{1}c".to_string(),
+            ..node()
+        }
+        .render();
+        assert!(written.contains("\"a\\u001fb\\u0001c\""), "{written}");
+        assert!(
+            !written.chars().any(|c| (c as u32) < 0x20 && c != '\n'),
+            "{written}"
+        );
+    }
 
     #[test]
     fn backspace_and_form_feed_escapes_are_the_characters_not_the_letters() {
