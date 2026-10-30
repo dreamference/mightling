@@ -37,7 +37,7 @@ export function redact(text: string, options: ExportOptions, places: { cwd: stri
   let out = text;
   if (options.redactPaths) {
     for (const [place, alias] of [[places.cwd, "."], [places.home, "~"]] as const) {
-      if (place && place.length > 1) out = out.replace(new RegExp(`${escapeRegExp(place.replace(/[\\/]+$/, ""))}(?=[\\\\/]|\\b|$)`, "g"), alias);
+      if (place && place.length > 1) out = out.replace(new RegExp(`${escapeRegExp(place.replace(/[\\/]+$/, ""))}(?![\\w-]|\\.[\\w-])`, "g"), alias);
     }
     out = out.replace(/(^|[\s("'`=:])((?:\/[\w.@+-]+){2,}|[A-Za-z]:\\(?:[\w.@+ -]+\\)+[\w.@+ -]*)/g, (_, lead: string, path: string) => `${lead}…/${path.split(/[\\/]/).filter(Boolean).pop()}`);
   }
@@ -91,7 +91,7 @@ export function threadHtml(source: ExportSource, options: ExportOptions): string
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
-<title>${escapeHtml(source.title)}</title>
+<title>${escapeHtml(redact(source.title, options, { cwd: source.cwd, home: source.home }))}</title>
 <style>
 body { font: 15px/1.6 system-ui, sans-serif; max-width: 760px; margin: 32px auto; padding: 0 16px; color: #1f2328; background: #fff; }
 pre { background: #f6f8fa; padding: 12px; border-radius: 8px; overflow: auto; font-size: 13px; }

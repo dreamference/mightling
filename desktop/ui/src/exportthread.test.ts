@@ -50,3 +50,12 @@ describe("a thread's export", () => {
     expect(redact("C:\\Users\\user\\proj\\a.txt", DEFAULT_EXPORT, { cwd: "/x", home: null })).toBe("…/a.txt");
   });
 });
+
+describe("a redacted export's edges", () => {
+  it("redacts the HTML page's title as the body, and leaves a sibling folder that shares the name's start", () => {
+    const titled = { ...source, title: "Fix /home/user/src/fetcher/retry.py" };
+    expect(threadHtml(titled, DEFAULT_EXPORT)).not.toContain("/home/user/src");
+    expect(redact("/home/user/src/fetcher-old/x and /home/user/src/fetcher/run.py", DEFAULT_EXPORT, { cwd: "/home/user/src/fetcher", home: null }))
+      .toBe("…/x and ./run.py");
+  });
+});
