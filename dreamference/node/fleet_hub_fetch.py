@@ -446,12 +446,12 @@ class FleetHubFetch:
                 return False
             hostkey = donor.run("cat /etc/ssh/ssh_host_ed25519_key.pub")
             fields = (hostkey.stdout or "").split()
-            if hostkey.returncode != 0 or len(fields) < KEY_FIELDS:
-                return False
-            if not HOST_KEY.fullmatch(" ".join(fields[:KEY_FIELDS])):
-                LOG.warning(
-                    "%s gave a host key that is not an ed25519 key; no LAN copy.", donor_name
-                )
+            if (
+                hostkey.returncode != 0
+                or len(fields) < KEY_FIELDS
+                or not HOST_KEY.fullmatch(" ".join(fields[:KEY_FIELDS]))
+            ):
+                LOG.warning("%s gave no ed25519 host key; no LAN copy.", donor_name)
                 return False
             # `expiry-time` (the donor's own clock) ends the key even when the removal below never
             # reaches the donor: the link is failing, which is why this copy runs at all.
