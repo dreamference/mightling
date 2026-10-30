@@ -332,6 +332,7 @@ def test_a_corrupt_or_incomplete_node_record_is_skipped(tmp_path):
     folder.mkdir(parents=True)
     (folder / "broken.json").write_text("{not json")
     (folder / "partial.json").write_text(json.dumps({"node": "x"}))
+    (folder / "escaped.json").write_text(json.dumps({"node": "../../x", "address": "192.0.2.9"}))
     (folder / f"{NODE}.json").write_text(
         json.dumps({"node": NODE, "address": "192.0.2.7", "name": "spark-1"})
     )
