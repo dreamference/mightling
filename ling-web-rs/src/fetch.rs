@@ -420,6 +420,18 @@ mod tests {
     }
 
     #[test]
+    fn text_before_a_colon_that_cannot_be_a_scheme_is_no_scheme() {
+        // As `urlparse`: a scheme is a letter, then letters, digits, `+`, `-` or `.`.
+        for url in ["example.com/a:b", "1http://example.com"] {
+            assert_eq!(
+                require_http_url(url).unwrap_err(),
+                "Only http and https URLs are supported, got no scheme",
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
     fn a_url_without_an_authority_has_no_host() {
         for url in ["http:example.com", "https://?q=1", "http://#top"] {
             assert_eq!(
