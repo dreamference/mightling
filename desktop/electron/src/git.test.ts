@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { findEditors, execProgram, openCommand, runsWhenOpened, systemDataDirs, terminalCommand } from "./editors";
+import { findEditors, execProgram, openCommand, openOrReveal, systemDataDirs, terminalCommand, whyNotOpened } from "./editors";
 import * as git from "./git";
 import { programOnPath } from "./platform";
 import { nodeScript } from "./test-ling";
@@ -367,7 +367,7 @@ describe("editors", () => {
     expect(systemDataDirs().length).toBeGreaterThan(0);
   });
 
-  it("never hand the system a file it would run instead of open (editor/open and docs/open with no editor chosen)", async () => {
+  it("hand the system only a document type, and show anything else in its folder (editor/open and docs/open with no editor chosen)", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-runs-"));
     const file = (name: string, mode = 0o644) => {
       const at = path.join(dir, name);
@@ -375,31 +375,72 @@ describe("editors", () => {
       fs.chmodSync(at, mode);
       return at;
     };
-    const notes = file("notes.md");
+    const kinds = ["notes.md", "README.TXT", "data.csv", "out.json", "report.pdf", "photo.png", "shot.JPEG", "memo.docx", "sheet.xlsx", "deck.pptx", "letter.odt"];
+    const refused = [
+      // What a system runs, mounts or installs, whatever the deny-lists knew: Windows, then a Mac, then Linux.
+      "setup.bat", "SETUP.EXE", "go.lnk", "x.url", "a.hta", "s.js", "fix.py", "deploy.sh", "app.jar", "help.chm", "disk.iso", "disk.img", "disk.vhd", "disk.vhdx", "job.ws", "page.mht",
+      "macro.docm", "macro.xlsm", "macro.pptm", "notes.one", "addin.xlam", "old.doc", "letter.rtf", "tool.xyz", "noextension",
+      "disk.dmg", "profile.mobileconfig", "flow.shortcut", "go.command", "x.pkg", "y.fileloc",
+      "app.desktop", "tool.AppImage",
+      // Script in a browser: `ling web` never serves HTML inline either.
+      "page.html", "page.htm", "logo.svg",
+    ];
+    for (const name of [...kinds, ...refused]) file(name);
     const script = file("build.sh", 0o755);
-    const entry = file("app.desktop");
+    const runnable = file("notes2.md", 0o755);
     fs.symlinkSync(script, path.join(dir, "readme.txt"));
+    fs.symlinkSync(path.join(dir, "report.pdf"), path.join(dir, "report.bat"));
     const app = path.join(dir, "Tool.app");
     fs.mkdirSync(app);
-    // Windows: what ShellExecute starts, whatever the case, trailing dots and spaces, a stream, PATHEXT's own.
-    for (const name of ["setup.bat", "SETUP.EXE", "run.cmd.", "run.ps1 ", "go.lnk", "x.url", "a.hta", "s.js", "a.txt:evil.bat", "C:\\w\\tool.msi", "fix.py", "gui.pyw", "deploy.sh", "app.jar"]) {
-      expect(await runsWhenOpened(path.join(dir, name), "win32", "")).toMatch(/would run, not open/);
+    const plain = path.join(dir, "project");
+    fs.mkdirSync(plain);
+    for (const platform of ["win32", "darwin", "linux"] as const) {
+      for (const name of kinds) expect(await whyNotOpened(path.join(dir, name), "document", platform, ".COM;.EXE")).toBeNull();
+      for (const name of refused) expect(await whyNotOpened(path.join(dir, name), "document", platform, ".COM;.EXE")).toMatch(new RegExp(`^${name.replace(/\./g, "\\.")} is not a document type .*shown in its folder instead`));
+      // A link is judged by both names; a folder, a bundle and a missing file never reach the system's app.
+      expect(await whyNotOpened(path.join(dir, "report.bat"), "document", platform, "")).toMatch(/^report.bat is not a document type/);
+      expect(await whyNotOpened(app, "document", platform, "")).toMatch(/^Tool.app is not a document type/);
+      expect(await whyNotOpened(plain, "document", platform, "")).toMatch(/^project is not a document type/);
+      expect(await whyNotOpened(path.join(dir, "missing.md"), "document", platform, "")).toBe("missing.md is not there");
     }
-    expect(await runsWhenOpened(path.join(dir, "tool.xyz"), "win32", ".COM;.EXE;.XYZ")).toMatch(/would run/);
-    for (const name of ["report.pdf", "notes.md", "photo.png", "data.csv"]) expect(await runsWhenOpened(path.join(dir, name), "win32", ".COM;.EXE")).toBeNull();
-    // macOS: an application (a folder), a Terminal script, an installer, an executable; Linux: a launcher or an executable, also behind a link.
-    expect(await runsWhenOpened(app, "darwin")).toMatch(/Tool.app would run/);
-    for (const name of ["go.command", "x.pkg", "y.fileloc", "fix.py", "app.jar"]) expect(await runsWhenOpened(path.join(dir, name), "darwin")).toMatch(/would run/);
-    expect(await runsWhenOpened(script, "darwin")).toMatch(/would run/);
-    expect(await runsWhenOpened(entry, "linux")).toMatch(/app.desktop would run/);
-    expect(await runsWhenOpened(script, "linux")).toMatch(/would run/);
-    expect(await runsWhenOpened(path.join(dir, "app.jar"), "linux")).toMatch(/would run/);
-    expect(await runsWhenOpened(path.join(dir, "readme.txt"), "linux")).toMatch(/readme.txt would run/);
-    // Documents and folders open.
-    expect(await runsWhenOpened(notes, "linux")).toBeNull();
-    expect(await runsWhenOpened(notes, "darwin")).toBeNull();
-    expect(await runsWhenOpened(dir, "linux")).toBeNull();
-    expect(await runsWhenOpened(path.join(dir, "missing.md"), "linux")).toBeNull();
+    // Windows: trailing dots and spaces, a stream, PATHEXT naming an allowed type.
+    if (process.platform !== "win32") {
+      // Names only Windows reads differently, so made here: `run.bat.` is `run.bat`, `a.txt:b` a stream.
+      for (const name of ["run.bat.", "run.ps1 ", "a.txt:evil.bat"]) {
+        file(name);
+        expect(await whyNotOpened(path.join(dir, name), "document", "win32", "")).toMatch(/is not a document type/);
+      }
+      file("notes.md. ");
+      expect(await whyNotOpened(path.join(dir, "notes.md. "), "document", "win32", "")).toBeNull();
+    }
+    expect(await whyNotOpened(path.join(dir, "out.json"), "document", "win32", ".COM;.EXE;.JSON")).toMatch(/not a document type/);
+    expect(await whyNotOpened(runnable, "document", "win32", "")).toBeNull();
+    // A Mac and Linux: an executable, also behind a link with a document's name.
+    for (const platform of ["darwin", "linux"] as const) {
+      expect(await whyNotOpened(runnable, "document", platform, "")).toMatch(/^notes2.md is not a document type/);
+      expect(await whyNotOpened(path.join(dir, "readme.txt"), "document", platform, "")).toMatch(/^readme.txt is not a document type/);
+    }
+    // Folders open in the file manager, except a bundle a Mac would launch.
+    for (const platform of ["win32", "darwin", "linux"] as const) expect(await whyNotOpened(plain, "folder", platform, "")).toBeNull();
+    expect(await whyNotOpened(app, "folder", "darwin", "")).toMatch(/^Tool.app is a bundle a Mac would launch/);
+    expect(await whyNotOpened(app, "folder", "linux", "")).toBeNull();
+    expect(await whyNotOpened(path.join(dir, "notes.md"), "folder", "linux", "")).toBe("notes.md is not a folder");
+
+    // openOrReveal: the system's app for a document, the file manager for the rest, nothing for a missing file.
+    const calls: string[] = [];
+    const system = {
+      openPath: async (at: string) => (calls.push(`open ${path.basename(at)}`), ""),
+      showItemInFolder: (at: string) => void calls.push(`show ${path.basename(at)}`),
+    };
+    await openOrReveal(path.join(dir, "report.pdf"), system, "document", "win32", ".EXE");
+    await expect(openOrReveal(path.join(dir, "help.chm"), system, "document", "win32", ".EXE")).rejects.toThrow(/^help.chm is not a document type .*shown in its folder instead/);
+    await expect(openOrReveal(path.join(dir, "disk.dmg"), system, "document", "darwin", "")).rejects.toThrow(/shown in its folder instead/);
+    await expect(openOrReveal(path.join(dir, "readme.txt"), system, "document", "linux", "")).rejects.toThrow(/shown in its folder instead/);
+    await expect(openOrReveal(path.join(dir, "missing.md"), system, "document", "linux", "")).rejects.toThrow("missing.md is not there");
+    await openOrReveal(plain, system, "folder", "darwin", "");
+    await expect(openOrReveal(app, system, "folder", "darwin", "")).rejects.toThrow(/bundle/);
+    expect(calls).toEqual(["open report.pdf", "show help.chm", "show disk.dmg", "show readme.txt", "open project", "show Tool.app"]);
+    await expect(openOrReveal(path.join(dir, "notes.md"), { ...system, openPath: async () => "no app for this type" }, "document", "linux", "")).rejects.toThrow("no app for this type");
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
