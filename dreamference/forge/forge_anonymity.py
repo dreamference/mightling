@@ -15,7 +15,6 @@ a push bringing a root commit the repository does not have (a branch of an old, 
 history).
 """
 
-import ipaddress
 import os
 import re
 import subprocess
@@ -462,17 +461,3 @@ class ForgeAnonymity:
             elif not header and line.startswith("+") and current and not skipping:
                 out.append(f"{current}: {line[1:]}")
         return "\n".join(out) + ("\n" if out else "")
-
-    @classmethod
-    def is_example_lan(cls, address: str) -> bool:
-        """Tell whether an address lies in one of the example subnets.
-
-        Args:
-            address: An IPv4 address.
-
-        Returns:
-            bool: Whether it lies in one of the example subnets (a helper for the tests' parity
-            check with tests/test_anonymity.py).
-        """
-        ip = ipaddress.IPv4Address(address)
-        return any(ip in ipaddress.IPv4Network(subnet) for subnet in EXAMPLE_LAN_SUBNETS)
