@@ -270,6 +270,21 @@ mod tests {
     }
 
     #[test]
+    fn the_seen_list_forgets_the_oldest_and_keeps_the_newest() {
+        let mut gate = owned();
+        let last = NOW + SEEN_LIMIT as u64 + 9;
+        for t in NOW..=last {
+            gate.check(&direct("owner", "x", t), &Mode::Dedicated, Some("fp1"), t);
+        }
+        assert_eq!((gate.seen()[0], *gate.seen().last().unwrap()), (NOW + 10, last));
+        assert_eq!(gate.check(&direct("owner", "x", last), &Mode::Dedicated, Some("fp1"), last), Verdict::Ignored, "the newest is still a duplicate");
+        // A longer list from an older state file keeps its newest timestamps too.
+        let mut restored = owned();
+        restored.restore_seen(&(NOW..=last).collect::<Vec<u64>>());
+        assert_eq!(restored.seen(), gate.seen());
+    }
+
+    #[test]
     fn the_pairing_code_binds_the_first_sender_within_its_window() {
         let mut gate = Gate::new(None);
         gate.binding = Some(Binding { code: "123456".to_string(), expires_ms: NOW + BINDING_MS });
