@@ -583,6 +583,14 @@ def test_status_of_a_node_without_its_web_ui_or_its_file(machine, monkeypatch):
     assert "Web UI (ling web, port 3100): this machine only" in text
 
 
+def test_a_web_start_that_fails_or_has_no_ling_is_not_counted(machine, monkeypatch, tmp_path, capsys):
+    (tmp_path / "ling").write_text("#!/bin/sh\necho 'port 3100 in use' >&2\nexit 1\n")
+    assert NodeAdvertiser.serve_web(True) is False
+    assert "`ling web start --lan` failed: port 3100 in use" in capsys.readouterr().out
+    monkeypatch.setattr(NodeAdvertiser, "ling_executable", classmethod(lambda cls: None))
+    assert NodeAdvertiser.serve_web(True) is False
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
