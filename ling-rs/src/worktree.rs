@@ -1256,4 +1256,13 @@ mod tests {
         assert!(elsewhere.checkout.is_dir());
         assert_eq!(prune(&home, &other), 1);
     }
+
+    #[test]
+    fn the_status_line_is_left_to_every_spelling_of_a_config_flag() {
+        let fixture = Fixture::new("status-flags");
+        let home = fixture.home();
+        for user in [args(&["--config", "tui.status_line=[]"]), args(&["--config=tui.status_line=[]"]), args(&["-ctui.status_line=[]"])] {
+            assert_eq!(with_status_line(vec!["ling".into()], &user, &home, true).len(), 1, "{user:?}");
+        }
+    }
 }
