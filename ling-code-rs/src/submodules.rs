@@ -959,6 +959,18 @@ mod tests {
     }
 
     #[test]
+    fn a_leading_dot_slash_does_not_stop_the_climb() {
+        let owner = |rel: &str| {
+            parse_remote(&resolve_relative_url(
+                "https://example.com/acme/super.git",
+                rel,
+            ))
+            .map(|r| r.owner)
+        };
+        assert_eq!(owner("./../../other/lib.git").as_deref(), Some("other"));
+    }
+
+    #[test]
     fn our_domains_leave_out_public_mail_and_web_flow() {
         let authors = Authors::from_addresses(
             [
