@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import urllib.error
+from pathlib import Path
 
 import pytest
 import requests
@@ -89,7 +90,7 @@ def test_the_served_models_are_the_entries_with_an_id_and_none_on_a_failure(monk
 def test_a_warm_up_the_server_refuses_or_cannot_aim_is_no_warm_up(monkeypatch):
     posted = []
     mgr = VLLMServerManager()
-    monkeypatch.setattr(mgr, "get_models", lambda: [])
+    monkeypatch.setattr(mgr, "get_models", list)
     monkeypatch.setattr(requests, "post", lambda *a, **k: posted.append(a) or _Response(200))
     assert mgr.warm_up(timeout=0.1) is None
     assert posted == [], "with no model listed there is nothing to warm"
@@ -112,7 +113,9 @@ def test_a_warm_up_the_server_refuses_or_cannot_aim_is_no_warm_up(monkeypatch):
 def test_reserved_memory_is_asked_of_the_container_only_while_one_runs(monkeypatch):
     mgr = VLLMServerManager()
     asked = []
-    monkeypatch.setattr(mgr.diagnostics, "get_diagnostics_line", lambda: asked.append(1) or "CPU 3%")
+    monkeypatch.setattr(
+        mgr.diagnostics, "get_diagnostics_line", lambda: asked.append(1) or "CPU 3%"
+    )
     mgr.process = None
     assert mgr.get_container_reserved_memory() is None
     assert asked == []
@@ -175,7 +178,7 @@ def test_eviction_counts_only_the_files_the_kernel_took_the_advice_for(tmp_path,
 
     def opened(path, flags, *rest):
         fd = real_open(path, flags, *rest)
-        names[fd] = os.path.basename(path)
+        names[fd] = Path(path).name
         return fd
 
     def fadvise(fd, offset, length, advice):
@@ -193,7 +196,7 @@ def test_eviction_skips_a_file_it_cannot_open_and_the_rest_still_count(tmp_path,
     real_open = os.open
 
     def opened(path, flags, *rest):
-        if os.path.basename(path) == "locked.bin":
+        if Path(path).name == "locked.bin":
             raise PermissionError("locked")
         return real_open(path, flags, *rest)
 
@@ -207,3 +210,16 @@ def test_eviction_of_a_model_the_downloader_cannot_place_evicts_nothing(monkeypa
 
     monkeypatch.setattr(ModelDownloader, "get_model_snapshot_dir", unknown)
     assert VLLMServerManager._evict_model_page_cache("no-such-model") == 0.0
+
+
+def test_the_weight_estimate_skips_a_file_it_cannot_read_and_sums_the_rest(tmp_path, monkeypatch):
+    _snapshot(tmp_path, monkeypatch, {"a.safetensors": 2 << 20, "locked.bin": 7 << 20})
+    real_is_file = Path.is_file
+
+    def is_file(path, *args, **kwargs):
+        if path.name == "locked.bin":
+            raise PermissionError("locked")
+        return real_is_file(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    assert VLLMServerManager._estimate_model_weights_gb("m") == pytest.approx((2 << 20) / (1 << 30))
