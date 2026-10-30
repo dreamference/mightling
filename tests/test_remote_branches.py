@@ -6,6 +6,7 @@ a rollback that puts the box back. Nothing here reaches a real box, Docker, syst
 network: every class's seam is replaced, as in the other remote tests.
 """
 
+import hashlib
 import subprocess
 
 import pytest
@@ -19,6 +20,7 @@ from dreamference.remote import (
     RemoteRelayCertificate,
     RemoteSettings,
     RemoteTunnel,
+    remote_box,
 )
 
 NODE_ID = "7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001"
@@ -598,3 +600,123 @@ def test_a_relay_certificate_that_cannot_be_renewed_is_not_pushed(monkeypatch):
     )
     monkeypatch.setattr(RemoteRelayCertificate, "push", _never("push"))
     assert RemoteRelayCertificate.renew(record) is False
+
+
+# -- the box ----------------------------------------------------------------------------------------
+
+
+def _box_commands(monkeypatch, fail=(), out=None, err="boom"):
+    """Replaces `RemoteBox._run`: a command starting with one of `fail`'s prefixes exits 1."""
+    calls = []
+
+    def fake(cls, argv, input_bytes=None, timeout=600):
+        calls.append(argv)
+        failing = any(argv[: len(prefix)] == list(prefix) for prefix in fail)
+        if argv[:2] == ["docker", "create"]:
+            return subprocess.CompletedProcess(argv, 1 if failing else 0, "c0ffee\n", err)
+        stdout = (out or {}).get(argv[0], "")
+        return subprocess.CompletedProcess(
+            argv, 1 if failing else 0, stdout, err if failing else ""
+        )
+
+    monkeypatch.setattr(RemoteBox, "_run", classmethod(fake))
+    return calls
+
+
+def test_a_box_that_ssh_cannot_reach_gives_its_error_not_facts(monkeypatch):
+    _box_commands(monkeypatch, fail=[["ssh"]], err="Permission denied")
+    assert RemoteBox.probe(BOX) == {"error": "Permission denied"}
+
+
+def test_a_box_that_ssh_cannot_reach_and_says_nothing_gives_the_exit_status(monkeypatch):
+    _box_commands(monkeypatch, fail=[["ssh"]], err="")
+    assert RemoteBox.probe(BOX) == {"error": "ssh exited 1"}
+
+
+@pytest.mark.parametrize(
+    ("failing", "ran_after"),
+    [
+        (["docker", "pull"], False),
+        (["docker", "create"], False),
+        (["docker", "cp"], True),
+    ],
+)
+def test_a_relay_binary_that_docker_cannot_give_is_none_and_the_scratch_container_goes(
+    monkeypatch, failing, ran_after
+):
+    calls = _box_commands(monkeypatch, fail=[failing])
+    assert RemoteBox.relay_binary("amd64") is None
+    assert (
+        ["docker", "rm", "c0ffee"] in calls
+        if ran_after
+        else ["docker", "cp"] not in [argv[:2] for argv in calls]
+    )
+
+
+def _deploy_ready(monkeypatch):
+    binary = b"\x7fELF relay"
+    digest = hashlib.sha256(binary).hexdigest()
+    monkeypatch.setitem(remote_box.RELAY_BINARY_SHA256, "amd64", digest)
+    monkeypatch.setattr(RemoteBox, "relay_binary", classmethod(lambda cls, arch: binary))
+    return RemoteSettings.write_private("certs/relay.crt", "CERT")
+
+
+@pytest.mark.parametrize("failing", ["copy", "install"])
+def test_a_deploy_whose_upload_or_install_fails_is_false_with_the_reason(
+    monkeypatch, caplog, failing
+):
+    cert = _deploy_ready(monkeypatch)
+    seen = []
+
+    def run(cls, argv, input_bytes=None, timeout=600):
+        seen.append(argv)
+        installing = bool(input_bytes) and input_bytes.startswith(b"set -eu")
+        broken = installing if failing == "install" else not installing
+        return subprocess.CompletedProcess(argv, 1 if broken else 0, "", "disk full")
+
+    monkeypatch.setattr(RemoteBox, "_run", classmethod(run))
+    with caplog.at_level("ERROR"):
+        assert RemoteBox.deploy(BOX, "amd64", "apt", "s", cert, cert, "ssh-ed25519 AAAA t") is False
+    assert "disk full" in caplog.text
+    assert len(seen) == (2 if failing == "install" else 1), "an upload that fails runs no script"
+
+
+def test_a_deploy_whose_script_never_says_ready_is_a_failed_deploy(monkeypatch, caplog):
+    cert = _deploy_ready(monkeypatch)
+    _box_commands(monkeypatch)
+    with caplog.at_level("ERROR"):
+        assert RemoteBox.deploy(BOX, "amd64", "apt", "s", cert, cert, "ssh-ed25519 AAAA t") is False
+    assert "Installing on" in caplog.text
+
+
+@pytest.mark.parametrize("failing", ["copy", "update"])
+def test_a_relay_update_that_fails_is_false_with_the_reason(monkeypatch, caplog, failing):
+    seen = []
+
+    def run(cls, argv, input_bytes=None, timeout=600):
+        seen.append(argv)
+        updating = bool(input_bytes) and input_bytes.startswith(b"set -eu")
+        broken = updating if failing == "update" else not updating
+        return subprocess.CompletedProcess(argv, 1 if broken else 0, "", "unit failed")
+
+    monkeypatch.setattr(RemoteBox, "_run", classmethod(run))
+    with caplog.at_level("ERROR"):
+        assert RemoteBox.update_relay(BOX, "crt", "key") is False
+    assert "unit failed" in caplog.text
+    assert len(seen) == (2 if failing == "update" else 1)
+
+
+def test_a_relay_update_without_the_ready_mark_is_false(monkeypatch):
+    _box_commands(monkeypatch)
+    assert RemoteBox.update_relay(BOX, "crt", "key") is False
+
+
+def test_a_box_that_reports_itself_clean_is_removed(monkeypatch):
+    _box_commands(monkeypatch, out={"ssh": remote_box.REMOVED_MARK + "\n"})
+    assert RemoteBox.remove(BOX) is True
+
+
+@pytest.mark.parametrize("answer", ["active\n", "active\nactive\nactive\n", ""])
+def test_unit_states_of_a_box_that_answers_the_wrong_number_of_lines_is_none(monkeypatch, answer):
+    _box_commands(monkeypatch, out={"ssh": answer})
+    assert RemoteBox.unit_states(BOX) is None
