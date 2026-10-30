@@ -313,3 +313,9 @@ def test_a_batch_token_budget_below_one_is_left_to_vllm(vllm_recipes):
     assert "--max-num-batched-tokens" not in build(
         model="test-vllm-nvfp4", max_num_batched_tokens=0
     )
+
+
+def test_only_an_entry_marked_for_vision_supports_it(vllm_recipes):
+    assert ModelMatrixRegistry.supports_vision("test-vllm-dflash")
+    assert not ModelMatrixRegistry.supports_vision("test-vllm-nvfp4")
+    assert not ModelMatrixRegistry.supports_vision("not-a-registered-model")
