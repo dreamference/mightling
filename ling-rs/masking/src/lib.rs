@@ -852,4 +852,14 @@ mod tests {
         assert_eq!(gone.len(), 29 - KEEP_RECENT);
         assert_eq!(gone.last(), Some(&(2 + 2 * (28 - KEEP_RECENT))));
     }
+
+    #[test]
+    fn a_move_stops_as_soon_as_the_saving_reaches_what_is_needed() {
+        let scratch = Scratch::new("exact");
+        let values: Vec<Value> = history(20, 60).into_iter().map(|e| e.item).collect();
+        let gain = saving_tokens(&values[2], &scratch.0);
+        let policy = Policy { high: 0, low: 1_000, min_step: 0, keep_recent: 0, min_chars: MIN_MASKABLE_CHARS };
+        assert_eq!(plan_move(&policy, &values, &State::default(), policy.low + gain, &scratch.0), Some(vec![2]));
+        assert_eq!(plan_move(&policy, &values, &State::default(), policy.low + gain + 1, &scratch.0), Some(vec![2, 4]));
+    }
 }
