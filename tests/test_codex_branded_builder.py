@@ -1657,3 +1657,17 @@ def test_a_codex_build_stops_before_cargo_when_a_step_fails(tmp_path, monkeypatc
     assert CodexBrandedBuilder._build_locked() is False
     assert calls == [] and linked == []
     assert not (tmp_path / "install" / "build-key").exists()
+
+
+def test_a_codex_install_replaces_ling_rather_than_writing_into_it(tmp_path, monkeypatch):
+    # A running session executes the old file; writing over it in place fails with ETXTBSY or
+    # hands that session a half-written binary.
+    _codex_build(tmp_path, monkeypatch)
+    bin_dir = tmp_path / "install" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "ling").write_text("the running ling")
+    os.link(bin_dir / "ling", tmp_path / "running")
+    assert CodexBrandedBuilder._build_locked() is True
+    assert (bin_dir / "ling").read_text() == "built codex"
+    assert (tmp_path / "running").read_text() == "the running ling"
+    assert not [p.name for p in bin_dir.iterdir() if p.name.endswith(".new")]
