@@ -289,3 +289,24 @@ def test_the_compaction_ledger_also_takes_on_from_the_environment(tmp_path, monk
     path.write_text("mightling_compaction_ledger = false\n")
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER", "On")
     assert DreamferenceConfig(config_file=str(path)).mightling_compaction_ledger is True
+
+
+def test_an_air_gap_level_set_after_loading_is_saved(tmp_path, monkeypatch):
+    path = tmp_path / "dreamference.toml"
+    path.write_text('model = "llama-3.3-70b"\n')
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "off")
+    config = DreamferenceConfig(config_file=str(path))
+    # The environment gave `off`; a level chosen since is the user's choice, not the environment's.
+    config.mightling_airgapped = "on"
+    config.save_config()
+    assert _saved(path)["mightling_airgapped"] == "on"
+
+
+def test_an_air_gap_level_from_the_environment_is_not_written(tmp_path, monkeypatch):
+    path = tmp_path / "dreamference.toml"
+    path.write_text('model = "llama-3.3-70b"\n')
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
+    config = DreamferenceConfig(config_file=str(path))
+    assert config.mightling_airgapped == "on"
+    config.save_config()
+    assert _saved(path) == {"model": "llama-3.3-70b"}
