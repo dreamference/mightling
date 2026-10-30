@@ -121,6 +121,12 @@ def test_a_service_file_without_a_node_record_is_not_rewritten():
     assert path.read_text() == text
 
 
+def test_a_service_file_of_another_service_is_not_a_node():
+    text = NodeServiceFile.render(8000, NODE_ID, "1.3.0", forge=("record", 3300))
+    assert NodeServiceFile.parse(text)["port"] == "8000"
+    assert NodeServiceFile.parse(text.replace("_mightling-node._tcp", "_http._tcp")) is None
+
+
 def test_a_node_that_was_never_enabled_is_never_advertised_by_a_side_effect():
     assert not NodeServiceFile.service_path.exists()
     assert NodeServiceFile.update(state="ready") is None
