@@ -16,7 +16,11 @@ import requests
 import torch
 from test_diffusion_server import _serve, _StubRunner
 
+from dreamference.vllm_server import diffusion_openai_service as dos
 from dreamference.vllm_server.diffusion_openai_service import (
+    DIFFUSION_SAMPLER_DEFAULTS,
+    DiffusionModelRunner,
+    _restore_layer_attention_types,
     block_diffusion_sample,
 )
 
@@ -170,3 +174,67 @@ def test_a_temperature_above_zero_samples_from_the_models_distribution():
         temperature=0.7,
     )
     assert tokens == [5, 6, 7]
+
+
+def test_layers_keep_their_own_attention_type_and_default_to_full_attention():
+    own = types.SimpleNamespace(attention_type="sliding_attention")
+    bare = types.SimpleNamespace()
+    model = types.SimpleNamespace(
+        model=types.SimpleNamespace(layers=[own, bare]),
+        config=types.SimpleNamespace(layer_types=["full_attention", "sliding_attention"]),
+    )
+    _restore_layer_attention_types(model)
+    assert own.attention_type == "sliding_attention" and bare.attention_type == "sliding_attention"
+
+    bare = types.SimpleNamespace()
+    model = types.SimpleNamespace(
+        model=types.SimpleNamespace(layers=[bare]), config=types.SimpleNamespace()
+    )
+    _restore_layer_attention_types(model)
+    assert bare.attention_type == "full_attention"
+
+    _restore_layer_attention_types(types.SimpleNamespace(config=types.SimpleNamespace()))
+
+
+class _Tokenizer:
+    mask_token_id, eos_token_id = 99, 9
+
+    def __init__(self):
+        self.decoded = []
+
+    def __call__(self, prompt, return_tensors):
+        assert return_tensors == "pt"
+        return {"input_ids": types.SimpleNamespace(to=lambda device: ("ids", prompt, device))}
+
+    def decode(self, ids, skip_special_tokens):
+        self.decoded.append((ids, skip_special_tokens))
+        return "decoded"
+
+    def apply_chat_template(self, messages, tokenize, add_generation_prompt):
+        assert tokenize is False and add_generation_prompt is True
+        return f"<chat>{messages[-1]['content']}"
+
+
+def test_the_runner_hands_the_tokenizers_own_ids_to_the_sampler(monkeypatch):
+    sampled = []
+
+    def sample(model, input_ids, **kwargs):
+        sampled.append((model, input_ids, kwargs))
+        return [5, 6]
+
+    monkeypatch.setattr(dos, "block_diffusion_sample", sample)
+    runner = DiffusionModelRunner("org/diffusion")
+    assert runner.ready is False and runner.error is None and runner.device == "cpu"
+    runner.tokenizer, runner.model = _Tokenizer(), "model"
+    assert runner.chat([{"role": "user", "content": "hi"}], 16, 0.3) == "decoded"
+    ((model, input_ids, kwargs),) = sampled
+    assert model == "model" and input_ids == ("ids", "<chat>hi", "cpu")
+    assert kwargs == {
+        "mask_id": 99,
+        "eos_id": 9,
+        "max_new_tokens": 16,
+        "block_size": DIFFUSION_SAMPLER_DEFAULTS["block_size"],
+        "steps": DIFFUSION_SAMPLER_DEFAULTS["steps"],
+        "temperature": 0.3,
+    }
+    assert runner.tokenizer.decoded == [([5, 6], True)]
