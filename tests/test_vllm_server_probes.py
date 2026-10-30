@@ -223,3 +223,48 @@ def test_the_weight_estimate_skips_a_file_it_cannot_read_and_sums_the_rest(tmp_p
 
     monkeypatch.setattr(Path, "is_file", is_file)
     assert VLLMServerManager._estimate_model_weights_gb("m") == pytest.approx((2 << 20) / (1 << 30))
+
+
+def _plan(monkeypatch, outcome):
+    from dreamference.hardware import get_model_launch_overrides
+    from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS, ENGINE_LING
+    from dreamference.vllm_server import vllm_server_manager as vsm
+
+    def run(cmd, **kwargs):
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return subprocess.CompletedProcess(cmd, 0, stdout=outcome, stderr="")
+
+    monkeypatch.setattr(vsm.subprocess, "run", run)
+    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    return VLLMServerManager.ling_serve_plan("ling-serve:test", DEFAULT_MODEL_ALIAS, recipe)
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        OSError("no docker"),
+        subprocess.TimeoutExpired(["docker"], 120),
+        "",
+        "planning...\nnot json either\n",
+        '{"sessions": 2, "batch": 2, "max_context": 4096}\n',
+        '{"sessions": "2", "batch": 2, "max_context": 4096, "planned_bytes": 1}\n',
+        "[1, 2, 3]\n",
+    ],
+)
+def test_no_plan_is_read_from_a_run_that_failed_or_printed_no_whole_plan(monkeypatch, outcome):
+    assert _plan(monkeypatch, outcome) is None
+
+
+def test_the_last_whole_plan_line_is_read_past_trailing_noise(monkeypatch):
+    out = (
+        '{"sessions": 1, "batch": 1, "max_context": 1024, "planned_bytes": 10}\n'
+        '{"sessions": 4, "batch": 2, "max_context": 8192, "planned_bytes": 99}\n'
+        "plan written\n"
+    )
+    assert _plan(monkeypatch, out) == {
+        "sessions": 4,
+        "batch": 2,
+        "max_context": 8192,
+        "planned_bytes": 99,
+    }
