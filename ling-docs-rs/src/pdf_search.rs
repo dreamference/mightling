@@ -178,7 +178,8 @@ pub fn air_gapped(parent: u32) -> bool {
     ) || sealed_by(parent)
 }
 
-/// The environment's level if it names one, else whether any configuration file says `on`.
+/// The environment's level if it names one, else whether any configuration file says `on` (or
+/// `true`, as ling-airgapped reads a boolean).
 pub fn configured_on(environment: Option<String>, configs: &[String]) -> bool {
     if let Some(level) = environment
         .map(|v| v.trim().to_ascii_lowercase())
@@ -189,9 +190,10 @@ pub fn configured_on(environment: Option<String>, configs: &[String]) -> bool {
     configs.iter().any(|text| {
         text.parse::<toml::Table>()
             .ok()
-            .and_then(|t| {
-                t.get("mightling_airgapped")
-                    .and_then(|v| v.as_str().map(|s| s.trim().eq_ignore_ascii_case("on")))
+            .and_then(|t| match t.get("mightling_airgapped")? {
+                toml::Value::String(s) => Some(s.trim().eq_ignore_ascii_case("on")),
+                toml::Value::Boolean(b) => Some(*b),
+                _ => None,
             })
             .unwrap_or(false)
     })
@@ -872,6 +874,17 @@ mod tests {
             configured_on(Some("bogus".into()), &[on]),
             "an invalid value is passed over"
         );
+        // Read as ling-airgapped reads a file: past a byte order mark, `true` as `on`.
+        let bom = "\u{feff}mightling_airgapped = \"on\"\r\n".to_string();
+        assert!(configured_on(None, &[bom]), "a byte order mark");
+        assert!(configured_on(
+            None,
+            &["mightling_airgapped = true\n".into()]
+        ));
+        assert!(!configured_on(
+            None,
+            &["mightling_airgapped = false\n".into()]
+        ));
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("0b5c-thread"), "4242\n").unwrap();
         assert!(sealed_in(dir.path(), 4242));
