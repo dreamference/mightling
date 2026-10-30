@@ -783,6 +783,9 @@ mod tests {
         assert_eq!((file.prompt.name.as_str(), file.source.clone()), ("high-swe", Source::ConfigFile(path.to_path_buf())));
         let nothing = resolve_from(Some(" "), Some((path, "vllm_host = \"x\"\n")), &installed);
         assert_eq!((nothing.prompt.name.as_str(), nothing.source), ("default", Source::Default));
+        assert!(nothing.skipped.is_empty(), "a blank value is unset, not a name");
+        let spaced = resolve_from(Some(" high-swe "), None, &installed);
+        assert_eq!((spaced.prompt.name.as_str(), spaced.source), ("high-swe", Source::Environment));
         // A typo is named with its tier, and the next tier is used.
         let typo = resolve_from(Some("high-sw"), Some((path, toml)), &installed);
         assert_eq!(typo.prompt.name, "high-swe");
