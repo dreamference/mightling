@@ -5,9 +5,10 @@ now", never "fix it" with sudo; the restriction is known only from the kernel's 
 only a person at a terminal on both ends is asked anything.
 """
 
+import pytest
 from test_sandbox_prerequisite import machine  # noqa: F401 - fixture
 
-from dreamference.vllm_server import SandboxPrerequisite
+from dreamference.vllm_server import SandboxPrerequisite, sandbox_prerequisite
 
 
 def test_a_profile_that_cannot_be_read_is_skipped_and_the_rest_still_count(machine):  # noqa: F811
@@ -26,3 +27,16 @@ def test_a_closed_input_is_not_now_and_nothing_runs_as_root(machine, monkeypatch
     assert SandboxPrerequisite.gate("server", "start") is True
     assert machine["root"] == []
     assert not SandboxPrerequisite.decision_path().exists()
+
+
+@pytest.mark.parametrize(("value", "restricted"), [("1\n", True), ("0\n", False)])
+def test_the_restriction_is_read_from_the_kernels_setting(tmp_path, monkeypatch, value, restricted):
+    sysctl = tmp_path / "apparmor_restrict_unprivileged_userns"
+    sysctl.write_text(value)
+    monkeypatch.setattr(sandbox_prerequisite, "USERNS_SYSCTL", str(sysctl))
+    assert SandboxPrerequisite._userns_restricted() is restricted
+
+
+def test_a_kernel_without_the_setting_leaves_the_restriction_unknown(tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox_prerequisite, "USERNS_SYSCTL", str(tmp_path / "missing"))
+    assert SandboxPrerequisite._userns_restricted() is None
