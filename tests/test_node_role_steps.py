@@ -15,6 +15,8 @@ from dreamference.node.fleet_probe import FleetProbe
 from dreamference.node.node_provisioner import NodeProvisioner
 from dreamference.node.node_role_provisioner import (
     DERIVE_FLAG,
+    ENGINE,
+    SMOKE_PASSED,
     NodeRoleProvisioner,
 )
 
@@ -224,3 +226,34 @@ def test_a_key_only_drop_in_that_will_not_install_leaves_passwords_on():
     assert steps.key_only_ssh(HOST, session) is False
     assert run.results[HOST]["reason"] == "sshd -t: bad option"
     assert session.key_logins == [], "the key was proven once and the change stopped there"
+
+
+# The role's own setup
+
+
+def test_build_tools_that_cannot_be_installed_fail_before_cuda_is_read():
+    steps, run = role(ENGINE)
+    session = Session({"command -v cmake": (1, "", ""), "apt-get": (100, "", "E: lock held")})
+    assert steps.role_setup(HOST, session) is False
+    assert run.results[HOST]["reason"] == "E: lock held" and "cuda" not in run.results[HOST]
+    assert sent(session, "nvcc") == []
+
+
+def test_night_folders_that_cannot_be_made_stop_before_swe_bench():
+    steps, run = role()
+    session = Session({"test -d": (1, "", ""), "mkdir -p": (1, "", "Read-only file system")})
+    assert steps.role_setup(HOST, session) is False
+    assert run.results[HOST]["reason"] == "Read-only file system"
+    assert sent(session, "ling-admin swe-bench") == [] and sent(session, SMOKE_PASSED) == []
+
+
+def test_a_failed_swe_bench_setup_fails_the_role_and_skips_the_smoke():
+    steps, run = role()
+    session = Session(
+        {SMOKE_PASSED: (1, "", ""), "ling-admin swe-bench setup": (1, "pull failed\n", "")}
+    )
+    assert steps.role_setup(HOST, session) is False
+    result = run.results[HOST]
+    assert result["failed"] == "swe-bench setup" and result["reason"] == "pull failed"
+    assert result["swe-bench setup"] is False and "swe-bench smoke" not in result
+    assert sent(session, "ling-admin swe-bench smoke") == []
