@@ -606,6 +606,21 @@ def test_searxng_is_neither_restarted_nor_advertised_when_its_container_is_missi
     assert started == []
 
 
+def test_avahi_is_found_on_the_path_or_in_sbin(monkeypatch, tmp_path):
+    from dreamference.node import node_advertiser
+
+    monkeypatch.setattr(NodeAdvertiser, "avahi_installed", REAL_AVAHI_INSTALLED)
+    daemon = tmp_path / "avahi-daemon"
+    monkeypatch.setattr(node_advertiser, "AVAHI_DAEMON", str(daemon))
+    monkeypatch.setattr(node_advertiser.shutil, "which", lambda name: None)
+    assert NodeAdvertiser.avahi_installed() is False
+    daemon.write_text("")
+    assert NodeAdvertiser.avahi_installed() is True
+    daemon.unlink()
+    monkeypatch.setattr(node_advertiser.shutil, "which", lambda name: "/usr/bin/avahi-daemon")
+    assert NodeAdvertiser.avahi_installed() is True
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
