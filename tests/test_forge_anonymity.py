@@ -265,3 +265,21 @@ def test_the_mirror_pushes_clean_commits_without_forcing(work, monkeypatch):
     )
     assert result == {"ok": True}
     assert "push" in pushed[0] and "--force" not in pushed[0] and "-f" not in pushed[0]
+
+
+def test_what_github_already_has_is_not_checked_again(work, monkeypatch):
+    sent = commit(work, "a.txt", f"reach {LAN}.7.105\n")
+    subprocess.run(
+        ["git", "-C", str(work), "update-ref", "refs/github/heads/main", sent], check=True
+    )
+    tip = commit(work, "b.txt", "fine\n")
+    pushed = []
+    monkeypatch.setattr(
+        ForgeGithubMirror,
+        "push_each",
+        classmethod(lambda cls, w, command, refspecs, env: pushed.append(refspecs) or {"ok": True}),
+    )
+    result = ForgeGithubMirror.send_to_github(
+        work, [f"{tip}:refs/heads/main"], "https://github.com/o/r.git", mirror_settings(), {}
+    )
+    assert result == {"ok": True} and pushed == [[f"{tip}:refs/heads/main"]]

@@ -1032,8 +1032,14 @@ def test_the_mirror_plan_sends_what_is_ahead_brings_back_what_is_behind_and_neve
         "refs/github/heads/fork": ahead,  # diverged → reported
         "refs/github/tags/v1": base,  # GitHub's tag → forge
         "refs/forge/heads/behind": base,
-        "refs/github/heads/behind": ahead,
-    }  # GitHub ahead → forge
+        "refs/github/heads/behind": ahead,  # GitHub ahead → forge
+        "refs/forge/heads/same": base,
+        "refs/github/heads/same": base,  # the same on both → nothing
+        "refs/forge/tags/v2": ahead,
+        "refs/github/tags/v2": base,  # a tag moved on the forge → reported, never moved
+        "refs/forge/tags/v3": base,
+        "refs/github/tags/v3": ahead,  # a tag moved on GitHub → reported, never moved
+    }
     for ref, sha in refs.items():
         git("-C", str(work), "update-ref", ref, sha)
     plan = ForgeGithubMirror.plan(work)
@@ -1046,7 +1052,7 @@ def test_the_mirror_plan_sends_what_is_ahead_brings_back_what_is_behind_and_neve
         "refs/github/heads/release:refs/heads/release",
         "refs/github/tags/v1:refs/tags/v1",
     ]
-    assert plan["diverged"] == ["refs/heads/fork"]
+    assert plan["diverged"] == ["refs/heads/fork", "refs/tags/v2", "refs/tags/v3"]
     assert not any(spec.startswith("+") for spec in plan["to_github"] + plan["to_forge"])
 
 
@@ -1190,6 +1196,142 @@ def test_a_failed_fetch_is_printed(monkeypatch, capsys):
     assert "o/r: fetch from GitHub failed: x" in capsys.readouterr().out
 
 
+def _mirror_one_with(monkeypatch, plan, fetched=None, sent=None, brought=None):
+    monkeypatch.setattr(ForgeGithubMirror, "fetch", classmethod(lambda cls, *a: fetched))
+    monkeypatch.setattr(ForgeGithubMirror, "plan", classmethod(lambda cls, work: plan))
+    monkeypatch.setattr(
+        ForgeGithubMirror,
+        "send_to_github",
+        classmethod(lambda cls, *a: sent or pytest.fail("sent to GitHub")),
+    )
+    monkeypatch.setattr(
+        ForgeGithubMirror,
+        "bring_back",
+        classmethod(lambda cls, *a: brought or pytest.fail("brought back")),
+    )
+    return ForgeGithubMirror.mirror_one("o/r", "https://github.com/o/r", "t")
+
+
+def test_a_failed_fetch_ends_the_repository_before_any_plan(monkeypatch):
+    error = "fetch from GitHub failed: x"
+    assert _mirror_one_with(monkeypatch, None, fetched=error) == {"ok": False, "error": error}
+
+
+def test_an_anonymity_stop_before_github_is_the_repositorys_whole_answer(monkeypatch):
+    stop = {"ok": False, "stop": True, "error": "the anonymity re-check found 1 identifiers"}
+    plan = {"to_github": ["refs/forge/heads/a:refs/heads/a"], "to_forge": ["x:y"], "diverged": []}
+    assert _mirror_one_with(monkeypatch, plan, sent=stop) == stop
+
+
+def test_what_the_forges_anonymity_check_refuses_is_held_and_any_other_refusal_fails(monkeypatch):
+    plan = {
+        "to_github": [],
+        "to_forge": ["refs/github/heads/a:refs/heads/a", "refs/github/heads/b:refs/heads/b"],
+        "diverged": ["refs/heads/d"],
+    }
+    brought = {
+        "pushed": 0,
+        "failures": {
+            "refs/heads/a": "Refused by the forge's anonymity check: replace it",
+            "refs/heads/b": "fatal: the forge did not answer",
+        },
+        "backoff": "",
+    }
+    result = _mirror_one_with(monkeypatch, plan, brought=brought)
+    assert result["ok"] is False
+    assert result["failures"] == {"refs/heads/b": "fatal: the forge did not answer"}
+    assert set(result["held"]) == {"refs/heads/a", "refs/heads/d"}
+
+
+def test_a_rate_limit_in_capitals_still_backs_off(monkeypatch, tmp_path):
+    def throttled(cls, work, arguments, environment=None, timeout=0):
+        return subprocess.CompletedProcess(arguments, 1, "", "remote: API RATE LIMIT EXCEEDED")
+
+    monkeypatch.setattr(ForgeRepositories, "git", classmethod(throttled))
+    outcome = ForgeGithubMirror.push_each(tmp_path, ["push"], ["a:b", "c:d"], None)
+    assert outcome["backoff"] and not outcome["failures"]
+
+
+@pytest.mark.parametrize(
+    "codes, error",
+    [
+        ([128], "fetch from the forge failed: boom"),
+        ([0, 128], "fetch from GitHub failed: boom"),
+        ([0, 0], None),
+    ],
+)
+def test_the_fetches_prune_and_the_first_failure_ends_them(monkeypatch, tmp_path, codes, error):
+    calls = []
+
+    def fetch(cls, work, arguments, environment=None, timeout=0):
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, codes[len(calls) - 1], "", "boom\n")
+
+    monkeypatch.setattr(ForgeRepositories, "git", classmethod(fetch))
+    assert ForgeGithubMirror.fetch(tmp_path, "o/r", "https://github.com/o/r", {}, {}) == error
+    assert len(calls) == len(codes)
+    assert all("--prune" in arguments and "--no-tags" in arguments for arguments in calls)
+
+
+@pytest.mark.parametrize("role, enabled", [("mirror", True), ("record", False), (None, True)])
+def test_only_an_enabled_forge_of_record_runs_the_github_mirror(monkeypatch, role, enabled):
+    if role:
+        ForgeSettings.update_state(role=role)
+    ForgeGithubMirror.save_settings(enabled, "dgxcoder")
+    monkeypatch.setattr(
+        ForgeGithubMirror, "run_locked", classmethod(lambda cls: pytest.fail("mirrored"))
+    )
+    assert ForgeGithubMirror.run() == 0
+
+
+def _run_over(monkeypatch, repositories, result=None):
+    ForgeSettings.update_state(role="record")
+    ForgeGithubMirror.save_settings(True, "dgxcoder")
+    monkeypatch.setattr(ForgeAccounts, "admin_token", classmethod(lambda cls: "t"))
+    monkeypatch.setattr(
+        ForgeRepositories,
+        "all",
+        classmethod(lambda cls, token=None: [{"full_name": "o/r", "name": "r", "private": False}]),
+    )
+    monkeypatch.setattr(
+        ForgeRepositories, "config", classmethod(lambda cls: {"repositories": repositories})
+    )
+    issues, mirrored = [], []
+    monkeypatch.setattr(
+        ForgeGithubMirror, "open_issue", classmethod(lambda cls, *a: issues.append(a))
+    )
+    monkeypatch.setattr(
+        ForgeGithubMirror,
+        "mirror_one",
+        classmethod(lambda cls, name, *a: mirrored.append(name) or result),
+    )
+    return ForgeGithubMirror.run(), mirrored, issues
+
+
+def test_a_repository_the_forge_lacks_or_a_destination_off_github_is_skipped(monkeypatch):
+    code, mirrored, _ = _run_over(
+        monkeypatch,
+        {
+            "o/gone": {"github": "https://github.com/o/gone"},
+            "o/r": {"github": "https://gitlab.com/o/r"},
+        },
+    )
+    assert code == 0 and mirrored == []
+    repositories = ForgeGithubMirror.status()["repositories"]
+    assert "not on the forge: skipped" in repositories["o/gone"]["error"]
+    assert repositories["o/r"]["error"] == "not a GitHub repository URL: skipped"
+
+
+def test_a_stopped_repository_stops_the_run_and_opens_an_issue(monkeypatch):
+    stop = {"ok": False, "stop": True, "error": "the anonymity re-check found 1 identifiers"}
+    code, mirrored, issues = _run_over(
+        monkeypatch, {"o/r": {"github": "https://github.com/o/r"}}, stop
+    )
+    assert code == 2 and mirrored == ["o/r"]
+    assert issues == [("o/r", stop["error"])]
+    assert ForgeGithubMirror.status()["stopped"] == f"o/r: {stop['error']}"
+
+
 def test_airgapped_on_stops_the_mirror(monkeypatch):
     ForgeSettings.update_state(role="record")
     ForgeGithubMirror.save_settings(True, "dgxcoder")
@@ -1207,7 +1349,11 @@ def test_a_boolean_or_a_byte_order_mark_still_reads_as_airgapped():
     # The Rust resolver reads both files as `on`; the mirror read them as `off`.
     config = Path("~/.mightling/config.toml").expanduser()
     config.parent.mkdir(parents=True, exist_ok=True)
-    for text in ("mightling_airgapped = true\n", '\ufeffmightling_airgapped = "on"\n'):
+    for text in (
+        "mightling_airgapped = true\n",
+        '\ufeffmightling_airgapped = "on"\n',
+        'mightling_airgapped = " ON "\n',
+    ):
         config.write_text(text, encoding="utf-8")
         assert ForgeGithubMirror.airgapped(), text
     config.write_text("mightling_airgapped = false\n")
