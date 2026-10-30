@@ -574,4 +574,23 @@ mod tests {
             search("a", None)
         );
     }
+
+    #[test]
+    fn the_page_leaves_out_an_entity_id_that_is_the_query() {
+        let found = page(
+            "u",
+            "f".into(),
+            302,
+            &Target::Search {
+                query: "/g/11only".into(),
+                kgmid: Some("/g/11only".into()),
+            },
+        );
+        assert!(!found.text.contains("Knowledge Graph id"), "{}", found.text);
+        assert!(
+            found.text.contains("search for \"/g/11only\". "),
+            "{}",
+            found.text
+        );
+    }
 }
