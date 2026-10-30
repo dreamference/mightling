@@ -144,6 +144,7 @@ class SweBenchReport:
             "excluded": len(manifest.get("excluded", {})),
             "finished": len(finished & set(instances)),
             "graded": len(graded),
+            "ungraded": len((finished & set(instances)) - set(graded)),
             "resolved": len(resolved),
             "resolved_ids": resolved,
             "statuses": statuses,
@@ -1052,7 +1053,7 @@ class SweBenchReport:
         lines += cls.hooks_lines(summary["hooks"])
         lines += cls.compaction_lines(summary["compactions"])
         not_run = validated - summary["finished"]
-        not_graded = summary["finished"] - summary["graded"]
+        not_graded = summary["ungraded"]
         if not_run or not_graded:
             lines.append(
                 f"INCOMPLETE          {not_run} not run yet, {not_graded} run but not graded yet: "
