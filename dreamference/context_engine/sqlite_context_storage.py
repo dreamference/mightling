@@ -138,6 +138,7 @@ class SQLiteContextStorage:
         if not self.db_path.exists():
             return {}
         conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA mmap_size = 2147483648;")
         try:
             rows = conn.execute("SELECT rel_path, vector FROM embeddings;").fetchall()
         except sqlite3.OperationalError:

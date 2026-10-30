@@ -197,3 +197,38 @@ def test_snake_case_and_camel_case_identifiers_are_split_into_their_words(tmp_pa
     engine.index_workspace(force_reindex=True)
     assert engine.sqlite_storage.search_fts(TFIDFCalculator.tokenize("get_user_name"), top_k=5)
     assert engine.search_code("user name")[0]["rel_path"] == "users.py"
+
+
+def test_every_connection_to_the_context_database_maps_it_into_memory(tmp_path, monkeypatch):
+    # Schema setup and full-text search set the pragma; reading the vectors back did not.
+    import sqlite3
+
+    import numpy as np
+
+    from dreamference.context_engine import sqlite_context_storage
+    from dreamference.context_engine.sqlite_context_storage import SQLiteContextStorage
+
+    opened = []
+
+    class Recording(sqlite3.Connection):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.statements = []
+            opened.append(self)
+
+        def execute(self, sql, *args):
+            self.statements.append(sql)
+            return super().execute(sql, *args)
+
+    storage = SQLiteContextStorage(tmp_path / "context.db")
+    storage.store_embeddings({"a.py": np.ones(4, dtype=np.float32)})
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(sqlite_context_storage.sqlite3, "connect",
+                        lambda *args, **kwargs: real_connect(*args, factory=Recording, **kwargs))
+    storage.init_db().close()
+    storage.search_fts(["alpha"], top_k=5)
+    storage.store_embeddings({"a.py": np.ones(4, dtype=np.float32)})
+    assert set(storage.load_embeddings()) == {"a.py"}
+    assert len(opened) == 4
+    for conn in opened:
+        assert conn.statements[0] == "PRAGMA mmap_size = 2147483648;"
