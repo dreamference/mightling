@@ -201,6 +201,15 @@ if [ "$ROLE" = "node" ] && ! is_gb10; then
     say "   for one; installing the node anyway because --role node was given."
 fi
 
+# A read-only or foreign HOME is named before anything is downloaded: the nearest folder that
+# exists above each place the files go must be writable. Nothing is created here.
+for dir in "$INSTALL_DIR" "$LINK_DIR"; do
+    probe="$dir"
+    while [ ! -e "$probe" ] && [ "$probe" != "/" ]; do probe="$(dirname "$probe")"; done
+    [ -d "$probe" ] && [ -w "$probe" ] \
+        || fail "cannot write to $probe, where $dir would be made (is $HOME read-only, or not yours?). Nothing was downloaded or installed; fix that, or set MIGHTLING_INSTALL_DIR, and run this again."
+done
+
 WORK="$(mktemp -d)"
 KEEPALIVE=""
 MOUNTED=""
