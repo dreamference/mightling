@@ -1031,6 +1031,15 @@ def test_a_silent_metrics_endpoint_never_counts_as_idle(fake_host):
     assert "/metrics does not answer" in NightShiftRunner.wait_for_idle("http://x", "ling", 0, far_end())
 
 
+def test_a_night_picks_up_queued_and_interrupted_tasks_and_no_finished_one(tmp_path):
+    statuses = ["queued", "interrupted", "cancel-requested", "sent", "done", "no-change", "stalled",
+                "failed", "cancelled", "timed-out", "running"]
+    (tmp_path / "tasks").mkdir()
+    for index, status in enumerate(statuses):
+        (tmp_path / "tasks" / f"t{index:02}.json").write_text(json.dumps({"id": f"t{index:02}", "status": status}))
+    assert [task["status"] for task in NightShiftRunner.pending_tasks(tmp_path)] == ["queued", "interrupted"]
+
+
 def test_round_robin_alternates_repositories():
     tasks = [{"id": i, "repo": repo} for i, repo in enumerate("AAAB")]
     assert [task["id"] for task in NightShiftRunner.round_robin(tasks)] == [0, 3, 1, 2]
