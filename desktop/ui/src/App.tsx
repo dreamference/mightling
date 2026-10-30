@@ -1901,6 +1901,8 @@ export function App() {
     try {
       await sendMessage(client, { threadId: open.id, activeTurnId: stateRef.current.threads[open.id]?.activeTurnId ?? null, input: turnInput(words, []), followUp: prefs.followUp });
     } catch (error) {
+      // Not sent: the next try is the first message again, with the title and recap.
+      setSide((now) => (now && now.id === open.id ? { ...now, asked: open.asked } : now));
       notice(error);
     }
   };
