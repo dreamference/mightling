@@ -444,9 +444,10 @@ def test_a_rate_limited_api_is_named_not_reported_as_a_missing_tag(tmp_path, rel
     assert "no tag" not in result.stderr
 
 
-def test_a_named_version_is_fetched_by_its_tag(tmp_path, release_server):
+@pytest.mark.parametrize("version", [("--version", "1.4.0"), ("--version=1.4.0",)])
+def test_a_named_version_is_fetched_by_its_tag(tmp_path, release_server, version):
     server = release_server(binaries(), tag="v1.4.0")
-    result = run_install(tmp_path, server, "--role", "client", "--version", "1.4.0")
+    result = run_install(tmp_path, server, "--role", "client", *version)
     assert result.returncode == 0, result.stdout + result.stderr
     assert server.requests[0][0].endswith("/releases/tags/v1.4.0")
 
