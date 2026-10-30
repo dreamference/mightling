@@ -8,7 +8,7 @@
 // request (`gh pr create`, after a confirmation) with a description the local model can write from the
 // branch's changes and Settings › Git's instruction; both refused at `/airgapped on` by main.ts.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
@@ -99,16 +99,24 @@ export function PullRequestsTab(props: {
   }, [root, inbox, thread]);
   useEffect(load, [load]);
 
+  /** Counts the pull requests opened (and left for a new one): only the latest one's answers are shown. */
+  const opened = useRef(0);
   const open = (pr: bridge.PullRequest) => {
     if (!root) return;
+    const ask = ++opened.current;
+    function latest<T>(set: (value: T) => void) {
+      return (value: T) => {
+        if (opened.current === ask) set(value);
+      };
+    }
     setCreating(null);
     setChosen(pr);
     setDiff(null);
     setBody("");
     setActivity(null);
-    bridge.prs.view(root, pr.number, thread).then(setChosen).catch(notice);
-    bridge.prs.activity(root, pr.number, thread).then(setActivity).catch((failure) => setActivity(`(the comments could not be read: ${failure instanceof Error ? failure.message : String(failure)})`));
-    bridge.prs.diff(root, pr.number, thread).then(setDiff).catch((failure) => setDiff(`(the changes could not be read: ${failure instanceof Error ? failure.message : String(failure)})`));
+    bridge.prs.view(root, pr.number, thread).then(latest(setChosen)).catch(notice);
+    bridge.prs.activity(root, pr.number, thread).then(latest(setActivity)).catch((failure) => latest(setActivity)(`(the comments could not be read: ${failure instanceof Error ? failure.message : String(failure)})`));
+    bridge.prs.diff(root, pr.number, thread).then(latest(setDiff)).catch((failure) => latest(setDiff)(`(the changes could not be read: ${failure instanceof Error ? failure.message : String(failure)})`));
   };
 
   const submit = async (verdict: "comment" | "approve" | "request-changes") => {
@@ -129,6 +137,7 @@ export function PullRequestsTab(props: {
 
   const startCreating = () => {
     if (!root) return;
+    opened.current++;
     setChosen(null);
     setCreating({ title: "", body: "", base: "", draft: false });
     // The title starts as the branch's last commit's subject.
