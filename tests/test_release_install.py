@@ -381,13 +381,9 @@ def test_the_signal_bridge_is_installed_beside_ling_without_a_link(tmp_path, rel
 ], ids=["public", "fork", "env-token"])
 def test_a_gh_login_is_used_only_for_a_fork(tmp_path, release_server, repo, env_token, sent):
     # A gh login carries far more access than reading a release (specs/DREAMFERENCE_SETUP.md §3.2).
-    fake_bin = tmp_path / "fakebin"
-    fake_bin.mkdir()
-    (fake_bin / "gh").write_text(f'#!/bin/sh\necho "$*" >> "{tmp_path}/gh.log"\necho from-gh\n')
-    (fake_bin / "gh").chmod(0o755)
     server = release_server(binaries())
     result = run_install(tmp_path, server, "--role", "client", token=env_token,
-                         env_extra={"MIGHTLING_RELEASE_REPO": repo})
+                         env_extra={"MIGHTLING_RELEASE_REPO": repo, "FAKE_GH_TOKEN": "from-gh"})
     assert result.returncode == 0, result.stdout + result.stderr
     assert {auth for _, auth in server.requests} == {sent}
     assert (tmp_path / "gh.log").exists() == (sent == "Bearer from-gh")
