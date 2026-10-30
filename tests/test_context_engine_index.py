@@ -5,9 +5,11 @@ Indexing runs beside a resident model server, so its memory is a safety property
 not compared with the constants they would change together with.
 """
 
+import sqlite3
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from dreamference.context_engine import ContextEngine, context_engine, embedding_calculator
@@ -34,6 +36,13 @@ IGNORED_DIRECTORIES = (
 @pytest.fixture
 def keyword_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+
+
+class OnesModel:
+    """An embedding model that gives every text the same unit vector."""
+
+    def encode(self, texts: list[str], **kwargs: object) -> np.ndarray:
+        return np.full((len(texts), 2), 2**-0.5, dtype=np.float32)
 
 
 def names(paths: list[Path]) -> list[str]:
@@ -148,3 +157,48 @@ def test_the_parse_pool_is_sized_to_the_work_and_capped_at_eight(
     monkeypatch.setattr(engine, "collect_files", lambda: paths)
     engine.index_workspace(force_reindex=True)
     assert sizes == [workers]
+
+
+@pytest.mark.usefixtures("keyword_only")
+def test_a_cached_index_is_loaded_unless_a_rebuild_is_forced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.py").write_text("def alpha():\n    pass\n")
+    ContextEngine(workspace_root=str(tmp_path)).index_workspace(force_reindex=True)
+    (tmp_path / "b.py").write_text("def beta():\n    pass\n")
+
+    cached = ContextEngine(workspace_root=str(tmp_path))
+
+    def no_walk() -> list[Path]:
+        raise AssertionError("a cached index is not rebuilt")
+
+    monkeypatch.setattr(cached, "collect_files", no_walk)
+    assert cached.index_workspace()["total_indexed_files"] == 1
+
+    forced = ContextEngine(workspace_root=str(tmp_path))
+    assert forced.index_workspace(force_reindex=True)["total_indexed_files"] == 2
+
+
+def test_a_forced_rebuild_forgets_a_deleted_file_in_memory_and_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_model", OnesModel())
+    (tmp_path / "a.py").write_text("def alpha():\n    pass\n")
+    (tmp_path / "gone.py").write_text("def vanished():\n    pass\n")
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_workspace(force_reindex=True)
+    (tmp_path / "gone.py").unlink()
+    engine.index_workspace(force_reindex=True)
+
+    assert set(engine.indexed_files) == {"a.py"}
+    assert {symbol.file_path for symbol in engine.symbols} == {"a.py"}
+    conn = sqlite3.connect(engine.sqlite_file)
+    try:
+        assert conn.execute("SELECT rel_path FROM files").fetchall() == [("a.py",)]
+        assert conn.execute("SELECT DISTINCT file_path FROM symbols").fetchall() == [("a.py",)]
+    finally:
+        conn.close()
+    storage = engine.sqlite_storage
+    assert storage.search_fts(["vanished"], 5) == {}
+    assert set(storage.search_fts(["alpha"], 5)) == {"a.py"}
+    assert set(storage.load_embeddings()) == {"a.py"}
