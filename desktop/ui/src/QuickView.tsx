@@ -55,7 +55,8 @@ export function QuickView() {
     const question = text.trim();
     if (!question) return;
     setText("");
-    send({ type: "quick/ask", prompt: question }).catch(() => {});
+    // Not sent: the question comes back to the box (unless something new was typed meanwhile).
+    send({ type: "quick/ask", prompt: question }).catch(() => setText((now) => now || question));
   };
 
   return (
