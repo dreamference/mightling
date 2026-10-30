@@ -323,3 +323,24 @@ def test_only_an_entry_marked_for_vision_supports_it(vllm_recipes):
 
 def test_a_removed_model_is_recognised_with_padding_and_capitals():
     assert ModelMatrixRegistry.removed_in(" Qwen3.5-122B-A10B-Hybrid-DFlash\n") == "1.5.1"
+
+
+def test_only_a_checkpoint_whose_every_precision_declares_itself_skips_the_guess(monkeypatch):
+    import dataclasses
+
+    from dreamference.hardware.model_spec import ModelSpec
+
+    base = ModelSpec(
+        name="Test precisions",
+        params_b=1.0,
+        supported_precisions=["BF16"],
+        min_memory_gb=1.0,
+        max_memory_gb=2.0,
+        compatible_gb10=True,
+        notes="Test only.",
+        hf_repo_id="example/precisions",
+    )
+    for precisions, declares in ((["nvfp4"], True), (["NVFP4", "BF16"], False)):
+        spec = dataclasses.replace(base, supported_precisions=precisions)
+        monkeypatch.setitem(ModelMatrixRegistry.MATRIX, "test-precisions", spec)
+        assert ModelMatrixRegistry.declares_own_quantization("test-precisions") is declares
