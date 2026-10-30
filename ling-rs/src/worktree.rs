@@ -1161,4 +1161,24 @@ mod tests {
         assert!(lines[0].starts_with("Could not save the setting:") && lines[0].contains("is not valid TOML"), "{lines:?}");
         assert_eq!(std::fs::read_to_string(&path).unwrap_or_default(), "model = [\n");
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_record_without_a_pid_is_finished_and_a_process_of_another_user_is_running() {
+        let fixture = Fixture::new("pid");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (mut session, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        // pid 1 always runs; a user who may not signal it hears EPERM, which still means running.
+        session.pid = 1;
+        session.write().unwrap_or_default();
+        assert!(session.in_use_elsewhere());
+        assert_eq!(prune(&home, &repo), 0);
+        assert!(session.checkout.is_dir());
+        // A record without a pid is of a finished session: a clean one is pruned.
+        session.pid = 0;
+        session.write().unwrap_or_default();
+        assert!(!session.in_use_elsewhere());
+        assert_eq!(prune(&home, &repo), 0);
+        assert!(!session.home.exists());
+    }
 }
