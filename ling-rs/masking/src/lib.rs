@@ -914,4 +914,16 @@ mod tests {
             assert_eq!(segment_key(&values).as_deref(), Some("first"), "{kind}");
         }
     }
+
+    #[test]
+    fn pruning_the_dropped_folder_takes_only_its_segment_files() {
+        let scratch = Scratch::new("prune-dropped");
+        let dropped = dropping::dropped_dir(&scratch.0);
+        std::fs::create_dir_all(&dropped).unwrap_or_default();
+        std::fs::write(dropped.join("call_first.json"), "{}").unwrap_or_default();
+        std::fs::write(dropped.join("log.jsonl"), "{}\n").unwrap_or_default();
+        prune(&scratch.0, SystemTime::now() + Duration::from_secs((KEEP_DAYS + 1) * 86_400));
+        assert!(!dropped.join("call_first.json").exists());
+        assert!(dropped.join("log.jsonl").exists(), "the log is not a segment");
+    }
 }
