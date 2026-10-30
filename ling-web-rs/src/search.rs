@@ -967,4 +967,12 @@ mod tests {
     fn a_host_is_compared_in_lower_case() {
         assert_eq!(comparable_url("https://WWW.A.Example/X"), "a.example/X");
     }
+
+    #[test]
+    fn the_fragment_is_not_part_of_the_address() {
+        assert_eq!(
+            comparable_url("https://a.example/x?id=2#top"),
+            "a.example/x?id=2"
+        );
+    }
 }
