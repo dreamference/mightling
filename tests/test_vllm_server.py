@@ -1092,6 +1092,15 @@ def test_host_safety_blocks_on_genuinely_small_swap(monkeypatch):
         VLLMServerManager.check_host_safety()
     assert exc.value.code == 1
 
+def test_host_safety_allows_only_a_one_percent_shortfall(monkeypatch):
+    # The mkswap tolerance covers a header, not a swapfile a few gigabytes short.
+    vsm = _pass_all_host_checks(monkeypatch)
+    monkeypatch.setattr(
+        VLLMServerManager, "_swap_total_gb", staticmethod(lambda: vsm.MIN_SWAP_GB * 0.98)
+    )
+    with pytest.raises(SystemExit):
+        VLLMServerManager.check_host_safety()
+
 def test_host_safety_blocks_without_oom_handler(monkeypatch):
     _pass_all_host_checks(monkeypatch)
     monkeypatch.setattr(
