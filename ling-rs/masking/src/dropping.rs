@@ -576,4 +576,14 @@ mod tests {
         assert_eq!(items, before);
         let _ = std::fs::remove_file(&scratch.0);
     }
+
+    #[test]
+    fn outputs_shorter_than_the_minimum_stay_and_one_of_exactly_the_minimum_goes() {
+        let items: Vec<Value> = history(12, 5).into_iter().map(|e| e.item).collect();
+        assert!(output_text(&items[3]).chars().count() < crate::MIN_MASKABLE_CHARS);
+        assert!(plan_drop(&policy(), &items, &DropState::default(), 44_000).newly.is_empty());
+        let edge = vec![call("c", "ls"), json!({"type": "function_call_output", "call_id": "c", "output": "y".repeat(MIN_CHARS)})];
+        let policy = DropPolicy { keep_recent: 0, ..policy() };
+        assert_eq!(plan_drop(&policy, &edge, &DropState::default(), 44_000).newly.len(), 1);
+    }
 }
