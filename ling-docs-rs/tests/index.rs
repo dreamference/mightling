@@ -1042,7 +1042,8 @@ fn a_file_that_hangs_or_kills_the_extractor_fails_alone() {
 }
 
 /// A stand-in `ling-fetch --download <file> --max-bytes N <url>`: copies `<dir>/<last segment of
-/// the URL>` into the file, or fails as the real one does.
+/// the URL>` into the file, or fails as the real one does. Each run adds its URL to
+/// `<dir>/fetched.log`.
 fn fake_fetch(dir: &Path) -> PathBuf {
     let script = dir.join("fake-ling-fetch");
     std::fs::write(
@@ -1052,6 +1053,8 @@ fn fake_fetch(dir: &Path) -> PathBuf {
 import json, os, shutil, sys
 args = sys.argv[1:]
 dest, url = args[args.index("--download") + 1], args[-1]
+with open({log:?}, "a") as log:
+    log.write(url + "\n")
 name = url.rstrip("/").rsplit("/", 1)[-1]
 src = os.path.join({dir:?}, name)
 if not os.path.exists(src):
@@ -1060,7 +1063,8 @@ if not os.path.exists(src):
 shutil.copy(src, dest)
 print(json.dumps({{"final_url": url, "status": 200, "content_type": "application/pdf", "bytes": os.path.getsize(dest)}}))
 "#,
-            dir = dir.join("web")
+            dir = dir.join("web"),
+            log = dir.join("fetched.log")
         ),
     )
     .unwrap();
@@ -1300,6 +1304,18 @@ fn pdf_search_finds_the_page_reads_it_back_and_keeps_to_the_session() {
             && remote.contains("ninety days"),
         "{remote}"
     );
+    // A URL is downloaded once a session: asked again, it is searched where it was put.
+    let twice = text(&ask(call(
+        "pdf_search",
+        serde_json::json!({ "source": "https://example.org/files/remote.pdf", "query": "contract" }),
+    )));
+    assert!(twice.contains("ninety days"), "{twice}");
+    let fetched = std::fs::read_to_string(home.join("fetched.log")).unwrap();
+    assert_eq!(
+        fetched.lines().collect::<Vec<_>>(),
+        ["https://example.org/files/remote.pdf"],
+        "{fetched}"
+    );
     assert!(refuse(ask(call(
         "pdf_search",
         serde_json::json!({ "source": "https://example.org/files/missing.pdf", "query": "x" })
@@ -1384,6 +1400,122 @@ fn a_pdf_over_the_page_cap_is_indexed_from_the_start_and_says_so() {
     assert!(!late.contains("marker5 appears"), "{late}");
     drop(ask);
     let _ = server.wait();
+}
+
+#[test]
+fn pdf_search_returns_six_passages_unless_asked_and_never_more_than_twelve() {
+    let Some(_) = lib_dir() else { return };
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    // Pages of about 400 words, so each page is a passage of its own.
+    let pages: Vec<Vec<String>> = (1..=14)
+        .map(|i| {
+            (0..32)
+                .map(|l| {
+                    format!("Section {i} line {l} of measured field observations from the survey")
+                })
+                .collect()
+        })
+        .collect();
+    let refs: Vec<Vec<&str>> = pages
+        .iter()
+        .map(|p| p.iter().map(String::as_str).collect())
+        .collect();
+    let slices: Vec<&[&str]> = refs.iter().map(|p| p.as_slice()).collect();
+    std::fs::write(home.join("survey.pdf"), pdf_pages(&slices, None)).unwrap();
+    let (mut server, mut ask) = pdf_server(&home, &home, &[]);
+    // Passages shown, and those the output limit left out.
+    let mut passages = move |arguments: serde_json::Value| -> usize {
+        let answer = text(&ask(call("pdf_search", arguments)));
+        let shown = answer.matches("<untrusted").count();
+        let left_out: usize = answer
+            .split_once(" more passages left out")
+            .and_then(|(before, _)| before.rsplit('(').next()?.parse().ok())
+            .unwrap_or(0);
+        shown + left_out
+    };
+    assert_eq!(
+        passages(serde_json::json!({ "source": "survey.pdf", "query": "field observations" })),
+        6
+    );
+    assert_eq!(
+        passages(
+            serde_json::json!({ "source": "survey.pdf", "query": "field observations", "k": 50 })
+        ),
+        12
+    );
+    assert_eq!(
+        passages(
+            serde_json::json!({ "source": "survey.pdf", "query": "field observations", "k": 2 })
+        ),
+        2
+    );
+    drop(passages);
+    let _ = server.wait();
+}
+
+/// `ling-docs status` counts the PDFs `pdf_search` keeps, apart from the collections.
+#[test]
+fn status_names_the_pdf_search_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let (user, agent) = (root.join("user"), root.join("agent"));
+    std::fs::create_dir_all(&user).unwrap();
+    let cache = agent.join("docs/pdf");
+    std::fs::create_dir_all(&cache).unwrap();
+    let before = docs_command(&["status"], &user, &agent, &root, None);
+    assert!(
+        !String::from_utf8_lossy(&before.stdout).contains("pdf_search cache"),
+        "{before:?}"
+    );
+    std::fs::write(cache.join("pdf-0123456789ab.db"), vec![0u8; 2048]).unwrap();
+    std::fs::write(cache.join("pdf-ba9876543210.db"), vec![0u8; 2048]).unwrap();
+    std::fs::write(cache.join("notes.db"), vec![0u8; 2048]).unwrap();
+    let after = docs_command(&["status"], &user, &agent, &root, None);
+    let out = String::from_utf8_lossy(&after.stdout);
+    assert!(out.contains("pdf_search cache: 2 PDFs, 4 KB\n"), "{out}");
+}
+
+/// The prompt's `# PDFs` block: offered with the tools when PDFium is installed, with no
+/// collection; never without the tools, without PDFium, or with `mightling_docs` off.
+#[test]
+fn the_pdf_block_follows_the_tools_pdfium_and_the_docs_setting() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let (user, agent) = (root.join("user"), root.join("agent"));
+    std::fs::create_dir_all(&user).unwrap();
+    let (lib, no_lib) = (root.join("lib"), root.join("no-lib"));
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::create_dir_all(&no_lib).unwrap();
+    std::fs::write(lib.join("libpdfium.so"), b"").unwrap();
+    let block = |args: &[&str], lib: &Path, docs: Option<&str>| -> String {
+        let mut command = Command::new(exe());
+        command
+            .args(args)
+            .current_dir(&root)
+            .env("HOME", &user)
+            .env("CODEX_HOME", &agent)
+            .env("DREAMFERENCE_CONFIG_PATH", root.join("no-config.toml"))
+            .env("XDG_RUNTIME_DIR", root.join("no-run"))
+            .env("MIGHTLING_DOCS_TEST_EMBEDDER", "hash")
+            .env("MIGHTLING_DOCS_LIB_DIR", lib)
+            .env_remove("DREAMFERENCE_MIGHTLING_DOCS");
+        if let Some(value) = docs {
+            command.env("DREAMFERENCE_MIGHTLING_DOCS", value);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let offered = block(&["prompt-block", "--tools"], &lib, None);
+    assert!(
+        offered.starts_with("# PDFs\n") && offered.contains("pdf_search"),
+        "{offered}"
+    );
+    assert!(!offered.contains("# Your documents"), "{offered}");
+    assert_eq!(block(&["prompt-block"], &lib, None), "");
+    assert_eq!(block(&["prompt-block", "--tools"], &no_lib, None), "");
+    assert_eq!(block(&["prompt-block", "--tools"], &lib, Some("false")), "");
 }
 
 #[test]
