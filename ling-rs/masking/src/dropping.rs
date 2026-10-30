@@ -611,4 +611,13 @@ mod tests {
         assert!(plan_drop(&policy(), &items, &DropState::default(), target + saving).accepted);
         assert!(!plan_drop(&policy(), &items, &DropState::default(), target + saving + 1).accepted);
     }
+
+    #[test]
+    fn the_placeholder_names_the_nearest_call_with_the_outputs_id() {
+        let output = exec_output("c", 20, 0);
+        let repeated = vec![call("c", "first"), call("c", "second"), output.clone()];
+        assert_eq!(placeholder_for(&repeated, 2), "[output of second dropped at compaction (exit 0); re-run if needed]");
+        let after_output = vec![call("c", "ls"), output.clone(), output];
+        assert_eq!(placeholder_for(&after_output, 2), "[output of ls dropped at compaction (exit 0); re-run if needed]");
+    }
 }
