@@ -1799,3 +1799,12 @@ def test_the_runner_does_not_resolve_a_branded_file_it_cannot_run(tmp_path):
     binary.write_text("#!/bin/sh\n")
     with patch.object(builder_module, "INSTALL_DIR", str(tmp_path)):
         assert CodexInstaller.get_codex_executable() is None
+
+
+@pytest.mark.parametrize("ling_current, web_current", [(True, False), (False, True)])
+def test_ling_is_installed_only_with_both_ling_and_the_web_tools_current(
+    monkeypatch, ling_current, web_current
+):
+    monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: ling_current))
+    monkeypatch.setattr(CodexBrandedBuilder, "web_tools_are_current", classmethod(lambda cls: web_current))
+    assert CodexInstaller.is_installed() is False
