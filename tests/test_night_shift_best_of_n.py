@@ -414,6 +414,20 @@ def test_a_branch_that_cannot_take_the_tasks_name_keeps_the_attempts(bon, monkey
     assert branches(bon["repo"]) == ["night/20261001-0100-abc-a1"]
 
 
+def test_a_commit_that_fails_fails_the_task_and_keeps_no_attempt(bon, monkeypatch):
+    real_git = NightShiftBestOfN._git
+
+    def git_(self, cwd, *args):
+        return (1, "hook said no") if args[:1] == ("commit",) else real_git(self, cwd, *args)
+
+    monkeypatch.setattr(NightShiftBestOfN, "_git", git_)
+    status, record, _ = run_best_of(bon, monkeypatch, ["good", "good"], n=2)
+    assert status == "failed"
+    assert record["history"][-1]["note"] == "git commit failed: hook said no"
+    assert branches(bon["repo"]) == []
+    assert not any((bon["night"] / "worktrees").iterdir())
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
