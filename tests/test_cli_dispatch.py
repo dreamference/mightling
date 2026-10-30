@@ -8,6 +8,7 @@ subcommand as typed.
 
 import pytest
 
+from dreamference.chat.image_search_mcp import ImageSearchMcp
 from dreamference.chat.image_search_sidecar import ImageSearchSidecar
 from dreamference.chat.retired_web_chat import RetiredWebChat
 from dreamference.cli import dreamference_cli_controller as controller
@@ -57,4 +58,17 @@ def test_a_command_a_person_types_migrates_and_offers(before_the_command, monkey
     monkeypatch.setattr(ImageSearchSidecar, "status_lines", classmethod(lambda cls: ["stopped"]))
     assert _exit_code(["images", "status"]) == 0
     assert before_the_command == ["migration", ("gate", "images", "status"), "offer"]
+
+
+def test_images_status_is_not_the_image_search_mcp_server(before_the_command, monkeypatch, capsys):
+    monkeypatch.setattr(ImageSearchMcp, "serve", classmethod(lambda cls: pytest.fail("served MCP")))
+    monkeypatch.setattr(ImageSearchSidecar, "status_lines", classmethod(lambda cls: ["image search: stopped"]))
+    assert _exit_code(["images", "status"]) == 0
+    assert "image search: stopped" in capsys.readouterr().out
+
+
+def test_images_mcp_serves_before_anything_can_print(before_the_command, monkeypatch):
+    monkeypatch.setattr(ImageSearchMcp, "serve", classmethod(lambda cls: 3))
+    assert _exit_code(["images", "mcp"]) == 3
+    assert before_the_command == []
 
