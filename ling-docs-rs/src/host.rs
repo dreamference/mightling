@@ -508,6 +508,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_stand_in_host_caps_its_child_s_address_space() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = RlimitHost {
+            lock_dir: dir.path().to_path_buf(),
+        };
+        let log = dir.path().join("log");
+        let argv: Vec<String> = ["/bin/sh", "-c", "ulimit -S -v; ulimit -H -v"]
+            .iter()
+            .map(|a| a.to_string())
+            .collect();
+        let mut child = host.start_scope("u", 512 * MIB, &argv, &log).unwrap();
+        assert!(child.wait().unwrap().success());
+        // `ulimit -v` counts KiB: both the soft and the hard limit are the cap.
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "524288\n524288\n");
+    }
+
+    #[test]
     fn a_budget_below_the_floor_defers() {
         let dir = tempfile::tempdir().unwrap();
         // 121 GiB total, 5% earlyoom line: reserve is 6.05 + 4 = ~10.05 GiB; 11 GiB leaves ~0.95.
