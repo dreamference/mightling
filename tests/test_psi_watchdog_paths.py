@@ -287,6 +287,25 @@ def test_pids_that_are_all_gone_are_not_a_kill(tmp_path, monkeypatch, no_docker_
     assert no_docker_cli == [["docker", "kill", "test-container"]]
 
 
+def test_a_pid_gone_mid_kill_does_not_spare_the_rest(tmp_path, monkeypatch, no_docker_cli):
+    procs = tmp_path / "cgroup.procs"
+    procs.write_text("4242\n4243\n")
+    signalled = []
+
+    def kill(pid, sig):
+        if pid == 4242:
+            raise ProcessLookupError(3, "No such process")
+        signalled.append(pid)
+
+    monkeypatch.setattr(psi_watchdog.os, "kill", kill)
+    monkeypatch.setattr(MemoryPressureWatchdog, "_docker_api", lambda self, action, body=b"": True)
+    wd = MemoryPressureWatchdog("test-container")
+    wd._cgroup_procs = str(procs)
+    wd._direct_kill_ok = True
+    assert wd._kill() is True
+    assert signalled == [4243]
+
+
 def test_a_docker_cli_that_cannot_run_is_not_a_kill(monkeypatch):
     def run(cmd, **kwargs):
         raise FileNotFoundError("docker")
