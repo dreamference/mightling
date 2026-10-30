@@ -484,6 +484,18 @@ def test_a_closed_gate_reads_a_large_body_before_it_refuses(live):
     assert refused.value.code == 503
 
 
+def test_a_closed_gate_refuses_a_client_waiting_for_100_continue_at_once(live):
+    write(live["state"], RUN_FILE, run_record())
+    started = time.monotonic()
+    answer = exchange(
+        live["port"],
+        b"POST /v1/responses HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\n"
+        b"Content-Length: 1000\r\n\r\n",
+        timeout=5,
+    )
+    assert answer.startswith(b"HTTP/1.1 503 ") and time.monotonic() - started < 5
+
+
 def test_a_chunked_request_body_reaches_the_engine_whole(live):
     StandIn.second_chunk.set()
     with socket.create_connection(("127.0.0.1", live["port"]), timeout=10) as client:
