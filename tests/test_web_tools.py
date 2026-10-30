@@ -6,7 +6,13 @@ import pytest
 import requests
 
 from dreamference.mcp_server import web_tools
-from dreamference.mcp_server.web_tools import MAX_DOWNLOAD_BYTES, WebTools
+from dreamference.mcp_server.web_tools import (
+    MAX_CHARS_CEILING,
+    MAX_DOWNLOAD_BYTES,
+    REQUEST_TIMEOUT_S,
+    USER_AGENT,
+    WebTools,
+)
 
 
 class Page:
@@ -49,7 +55,14 @@ def test_fetch_at_air_gap_on_makes_no_request(monkeypatch, online):
 
 
 @pytest.mark.parametrize(
-    "url", ["file:///etc/passwd", "gopher://example.org/", "example.org", "http://"]
+    "url",
+    [
+        "file:///etc/passwd",
+        "file://localhost/etc/passwd",
+        "gopher://example.org/",
+        "example.org",
+        "http://",
+    ],
 )
 def test_fetch_refuses_anything_but_an_http_url_with_a_host_before_any_request(online, url):
     assert "error" in WebTools.fetch(url)
@@ -96,7 +109,9 @@ def test_fetch_hands_back_text_that_is_not_markup_as_it_is(online):
     assert WebTools.fetch("https://example.org")["text"] == "<not> markup"
 
 
-@pytest.mark.parametrize("content_type", ["text/html", "text/plain"])
+@pytest.mark.parametrize(
+    "content_type", ["text/html", "text/plain", "text/plain; charset=x-no-such-charset"]
+)
 def test_fetch_reads_a_page_that_names_an_unknown_charset_as_utf8(online, content_type):
     # The charset comes from the page's server: an unknown one used to raise LookupError out of a
     # tool whose errors are returned, not raised.
@@ -297,3 +312,160 @@ def test_search_ends_at_the_deadline_when_searxng_answers_a_byte_at_a_time(monke
     outcome = WebTools.search("python")
     assert "took longer than 2 s" in outcome["error"]
     assert time.monotonic() - started < 10
+
+
+def test_fetch_asks_for_a_streamed_page_as_a_browser_would_with_a_timeout_on_each_read(online):
+    online.return_value = Page(b"ok", content_type="text/plain")
+    WebTools.fetch("https://example.org/a")
+    online.assert_called_once_with(
+        "https://example.org/a",
+        headers={"User-Agent": USER_AGENT, "Accept-Language": "en"},
+        timeout=REQUEST_TIMEOUT_S,
+        stream=True,
+    )
+
+
+def test_fetch_returns_an_error_status_as_an_error(online):
+    page = Page(b"<p>not found</p>")
+    page.raise_for_status = MagicMock(side_effect=requests.HTTPError("404 Client Error"))
+    online.return_value = page
+    assert WebTools.fetch("https://example.org/gone")["error"] == "request failed: 404 Client Error"
+
+
+@pytest.mark.parametrize(
+    "max_chars, length", [(-5, 1), (0, 1), (10, 10), (MAX_CHARS_CEILING * 10, MAX_CHARS_CEILING)]
+)
+def test_fetch_returns_at_least_one_and_at_most_the_ceiling_of_characters(
+    online, max_chars, length
+):
+    online.return_value = Page(b"a" * (MAX_CHARS_CEILING * 2), content_type="text/plain")
+    outcome = WebTools.fetch("https://example.org", max_chars=max_chars)
+    assert len(outcome["text"]) == length and outcome["truncated"] is True
+
+
+def test_fetch_text_exactly_as_long_as_asked_for_is_not_truncated(online):
+    online.return_value = Page(b"a" * 10, content_type="text/plain")
+    outcome = WebTools.fetch("https://example.org", max_chars=10)
+    assert outcome["text"] == "a" * 10 and outcome["truncated"] is False
+
+
+@pytest.mark.parametrize("content_type", ["application/xhtml+xml", "TEXT/HTML; charset=utf-8"])
+def test_fetch_reads_any_html_type_as_markup(online, content_type):
+    online.return_value = Page(b"<p>hi</p>", content_type=content_type)
+    assert WebTools.fetch("https://example.org")["text"] == "hi"
+
+
+def test_fetch_drops_a_utf8_sequence_the_download_ceiling_cut_in_two(online):
+    online.return_value = Page("café".encode()[:-1], content_type="text/plain", encoding=None)
+    assert WebTools.fetch("https://example.org")["text"] == "caf"
+
+
+def test_search_sends_searxng_the_query_as_a_json_request(monkeypatch, online):
+    monkeypatch.setattr(web_tools, "SEARXNG_URL", "http://searx.test:9/")
+    online.return_value.json.return_value = {"results": []}
+    WebTools.search("lisbon")
+    WebTools.search("lisbon", categories="social", language="pt", time_range="week")
+    WebTools.search("lisbon", time_range="decade")
+    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+    query = {"q": "lisbon", "format": "json", "categories": "general", "language": "auto"}
+    assert [(c.args, c.kwargs) for c in online.call_args_list] == [
+        (("http://searx.test:9/search",), {"params": query, "headers": headers, "timeout": 25.0}),
+        (
+            ("http://searx.test:9/search",),
+            {
+                "params": {
+                    **query,
+                    "categories": "social media",
+                    "language": "pt",
+                    "time_range": "week",
+                },
+                "headers": headers,
+                "timeout": REQUEST_TIMEOUT_S,
+            },
+        ),
+        (("http://searx.test:9/search",), {"params": query, "headers": headers, "timeout": 25.0}),
+    ]
+
+
+def test_search_returns_an_error_status_from_searxng_as_an_error(online):
+    online.return_value.raise_for_status.side_effect = requests.HTTPError("502 Server Error")
+    assert "is unreachable: 502 Server Error" in WebTools.search("python")["error"]
+
+
+@pytest.mark.parametrize("max_results", [-1, 0])
+def test_search_keeps_at_least_one_result(online, max_results):
+    online.return_value.json.return_value = {
+        "results": [{"title": str(n), "url": f"u{n}"} for n in range(3)]
+    }
+    assert WebTools.search("python", max_results=max_results)["result_count"] == 1
+
+
+def test_search_takes_the_snippet_from_the_content_searxng_returns(online):
+    online.return_value.json.return_value = {
+        "results": [{"title": "t", "url": "u", "content": "the snippet", "engine": "wiki"}]
+    }
+    assert WebTools.search("python")["results"] == [
+        {"title": "t", "url": "u", "snippet": "the snippet", "engine": "wiki"}
+    ]
+
+
+def test_search_returns_at_most_three_answers_even_when_every_engine_failed(online):
+    # A direct answer is an answer: only no results and no answers at all is a failed search.
+    online.return_value.json.return_value = {
+        "results": [],
+        "answers": ["1", "2", "3", "4"],
+        "unresponsive_engines": [["bing", "timeout"]],
+    }
+    outcome = WebTools.search("2 + 2")
+    assert "error" not in outcome
+    assert outcome["answers"] == ["1", "2", "3"] and outcome["result_count"] == 0
+
+
+def test_searxng_is_looked_for_on_loopback_unless_configured(tmp_path):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    env = {k: v for k, v in os.environ.items() if k != "DREAMFERENCE_SEARXNG_URL"}
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    script = "from dreamference.mcp_server import web_tools; print(web_tools.SEARXNG_URL)"
+    printed = subprocess.run(
+        [sys.executable, "-c", script], env=env, cwd=tmp_path, capture_output=True, text=True
+    )
+    assert printed.stdout.strip() == "http://127.0.0.1:8888", printed.stderr[-2000:]
+
+
+def test_a_login_in_the_url_is_not_sent_on_to_another_host_a_page_redirects_to(loopback):
+    import http.server
+    import threading
+
+    seen: list = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append((self.path, self.headers.get("Authorization")))
+            if self.path == "/start":
+                self.send_response(302)
+                self.send_header("Location", f"http://localhost:{port}/final")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        assert WebTools.fetch(f"http://me:pw@127.0.0.1:{port}/start")["text"] == "ok"
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert seen == [("/start", "Basic bWU6cHc="), ("/final", None)]
