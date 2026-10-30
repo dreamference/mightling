@@ -842,6 +842,17 @@ fn a_page_of_exactly_the_size_cap_is_whole() {
 }
 
 #[test]
+fn the_bytes_past_the_size_cap_are_not_read_as_the_page() {
+    // A NUL just past the cap would make the page binary if it were kept.
+    let mut body = vec![b'a'; 5 * 1024 * 1024];
+    body.push(0);
+    let server = Server::start(move |_| response("200 OK", "text/plain", &body, ""));
+    let output = fetch(&[&server.base, "--max-chars", "10"], &[]);
+    assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
+    assert!(stdout(&output).ends_with("aaaaaaaaaa\n\n[truncated at 10 chars]\n"));
+}
+
+#[test]
 fn a_binary_body_is_refused_rather_than_printed_as_text() {
     let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01".to_vec();
     let server = Server::start(move |_| response("200 OK", "image/png", &png, ""));
