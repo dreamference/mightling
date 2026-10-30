@@ -334,4 +334,18 @@ mod tests {
         let _ = std::fs::remove_file(link);
         let _ = std::fs::remove_dir_all(target);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_entry_stored_for_another_key_is_not_returned() {
+        let cache = Cache::at(scratch("collision")).unwrap();
+        let now = SystemTime::now();
+        let stored = key("http://127.0.0.1:8888", "lisbon tram", "general", "en");
+        let asked = key("http://127.0.0.1:8888", "porto tram", "general", "en");
+        cache.put(&stored, &json!({"results": []}), now);
+        // Two keys whose hashes collide share a file; the key kept inside tells them apart.
+        std::fs::copy(cache.entry(&stored), cache.entry(&asked)).unwrap();
+        assert_eq!(cache.get(&asked, now), None);
+        let _ = std::fs::remove_dir_all(cache.dir());
+    }
 }
