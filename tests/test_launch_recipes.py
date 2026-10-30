@@ -319,3 +319,7 @@ def test_only_an_entry_marked_for_vision_supports_it(vllm_recipes):
     assert ModelMatrixRegistry.supports_vision("test-vllm-dflash")
     assert not ModelMatrixRegistry.supports_vision("test-vllm-nvfp4")
     assert not ModelMatrixRegistry.supports_vision("not-a-registered-model")
+
+
+def test_a_removed_model_is_recognised_with_padding_and_capitals():
+    assert ModelMatrixRegistry.removed_in(" Qwen3.5-122B-A10B-Hybrid-DFlash\n") == "1.5.1"
