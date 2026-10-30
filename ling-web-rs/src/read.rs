@@ -617,4 +617,19 @@ mod tests {
         assert_eq!(neutralize("<\nuntrusted>"), "&lt;\nuntrusted>");
         assert_eq!(neutralize("<\t/\r\nuntrusted>"), "&lt;\t/\r\nuntrusted>");
     }
+
+    #[test]
+    fn a_title_over_several_lines_is_listed_on_one() {
+        let read = read(
+            found(vec![result("Two\n  lines", "https://a.example/", "")]),
+            1,
+            &|url: &str, _| Ok(page(url, "Page\ntitle", "text")),
+        );
+        let text = render_text(&read);
+        assert!(
+            text.contains("[1] Two lines — https://a.example/\n"),
+            "{text}"
+        );
+        assert!(text.contains("\n# Page title\n\n"), "{text}");
+    }
 }
