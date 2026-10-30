@@ -566,4 +566,12 @@ mod tests {
             place("Park", None)
         );
     }
+
+    #[test]
+    fn a_fragment_is_not_part_of_the_query() {
+        assert_eq!(
+            classify("https://www.google.com/search?q=a#frag"),
+            search("a", None)
+        );
+    }
 }
