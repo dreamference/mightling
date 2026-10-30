@@ -111,6 +111,16 @@ def test_an_update_that_does_not_name_the_state_or_main_keeps_them():
     assert (records["state"], records["port"], records.get("main")) == ("ready", "8020", "1")
 
 
+def test_a_service_file_without_a_node_record_is_not_rewritten():
+    path = NodeServiceFile.service_path
+    text = NodeServiceFile.render(8000, NODE_ID, "1.3.0").replace(
+        f"    <txt-record>node={NODE_ID}</txt-record>\n", ""
+    )
+    path.write_text(text)
+    assert NodeServiceFile.update(state="ready") is None
+    assert path.read_text() == text
+
+
 def test_a_node_that_was_never_enabled_is_never_advertised_by_a_side_effect():
     assert not NodeServiceFile.service_path.exists()
     assert NodeServiceFile.update(state="ready") is None
