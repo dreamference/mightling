@@ -51,3 +51,20 @@ def test_an_unreadable_avahi_conf_allows_and_denies_nothing(monkeypatch, tmp_pat
     conf.write_text("[server]\nallow-interfaces=eth0, wlan0\ndeny-interfaces=docker0\n")
     monkeypatch.setattr(forge_bind, "AVAHI_CONF", conf)
     assert ForgeBind.avahi_rules() == (["eth0", "wlan0"], ["docker0"])
+
+
+def test_only_each_ipv4_address_is_kept_once(monkeypatch):
+    interfaces = [
+        {
+            "ifname": "eth0",
+            "addr_info": [
+                {"family": "inet6", "local": "lan-v6"},
+                {"family": "inet"},
+                {"local": "lan-a"},
+                {"family": "inet", "local": "lan-a"},
+                {"family": "inet", "local": "lan-b"},
+            ],
+        },
+        {"ifname": "eth1", "addr_info": None},
+    ]
+    assert ForgeBind.lan_addresses(interfaces, avahi_text="") == ["lan-a", "lan-b"]
