@@ -1047,6 +1047,15 @@ def test_watchdog_trip_deadline_fits_inside_the_freeze_window(monkeypatch):
     # The hold is only checked once a sample, so the last interval counts against the window too.
     assert 10.0 + psi_watchdog.PSI_TRIP_DURATION_S + psi_watchdog.PSI_SAMPLE_INTERVAL_S <= 20.0
 
+def test_watchdog_thread_does_not_keep_the_process_alive(monkeypatch):
+    # A watchdog nobody stopped must not hang the launcher's exit.
+    wd, _ = _watchdog_with_readings(monkeypatch, [])
+    assert wd.start() is True
+    try:
+        assert wd._thread.daemon is True
+    finally:
+        wd.stop()
+
 def test_watchdog_declines_to_start_without_psi(monkeypatch):
     from dreamference.vllm_server import psi_watchdog
 
