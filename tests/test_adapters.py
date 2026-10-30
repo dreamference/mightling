@@ -594,7 +594,7 @@ def test_a_drafter_adapter_file_that_differs_from_its_digest_is_refused(tmp_path
     make_adapter(
         tmp_path, keys, drafter_adapter={"files": {"drafter/adapter_model.safetensors": signed}}
     )
-    with pytest.raises(ValueError, match="drafter/adapter_model.safetensors does not match"):
+    with pytest.raises(ValueError, match=r"drafter/adapter_model\.safetensors does not match"):
         AdapterVerifier.check_files(tmp_path, signed=True)
 
 
@@ -622,9 +622,7 @@ def test_verify_catches_a_file_changed_after_the_install(keys, remote, catalogue
     assert "does not match" in AdapterInstaller.verify(entry, served(base_snapshot()))
 
 
-def test_verify_catches_a_signature_pin_name_or_base_that_changed_after_the_install(
-    keys, remote
-):
+def test_verify_catches_a_signature_pin_name_or_base_that_changed_after_the_install(keys, remote):
     source, _ = remote
     make_adapter(source, keys)
     base = served(base_snapshot())
