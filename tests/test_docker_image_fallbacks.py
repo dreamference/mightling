@@ -94,3 +94,14 @@ def test_lines_the_probe_did_not_write_are_passed_over(probe):
     answer(0, "WARNING: the requested image's platform\nvllm=0.11.0rc1+cu129\ntensorizer=True\n")
 
     assert mgr.probe_image("img:1") == {"vllm_version": (0, 11), "has_tensorizer": True}
+
+
+# -- is_docker_available -------------------------------------------------------------------------------
+
+
+def test_without_a_docker_binary_docker_is_unavailable_and_nothing_runs(monkeypatch):
+    monkeypatch.setattr(vllm_server_manager.shutil, "which", lambda name: None)
+    monkeypatch.setattr(vllm_server_manager.subprocess, "run",
+                        lambda *a, **k: pytest.fail("docker ps ran without docker"))
+
+    assert VLLMServerManager().is_docker_available() is False
