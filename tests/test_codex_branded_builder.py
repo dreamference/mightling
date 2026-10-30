@@ -1358,3 +1358,15 @@ def test_the_build_key_changes_with_the_lockfile_and_the_profile_overrides(tmp_p
     assert second != first
     monkeypatch.setitem(builder_module.RELEASE_PROFILE_OVERRIDES, "CARGO_PROFILE_RELEASE_LTO", "fat")
     assert CodexBrandedBuilder.build_key() != second
+
+
+def test_the_build_key_changes_when_a_launcher_file_is_renamed(tmp_path, monkeypatch):
+    # A module's path is part of the crate as much as its text is.
+    crate = tmp_path / "ling-rs"
+    (crate / "src").mkdir(parents=True)
+    (crate / "src" / "a.rs").write_text("// same")
+    monkeypatch.setattr(builder_module, "MIGHTLING_CRATE_DIR", str(crate))
+    monkeypatch.setattr(CodexBrandedBuilder, "source_commit", classmethod(lambda cls: "a" * 40))
+    first = CodexBrandedBuilder.build_key()
+    (crate / "src" / "a.rs").rename(crate / "src" / "b.rs")
+    assert CodexBrandedBuilder.build_key() != first
