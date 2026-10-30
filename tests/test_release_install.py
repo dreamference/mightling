@@ -419,6 +419,14 @@ def test_a_binary_its_sums_file_does_not_list_installs_nothing(tmp_path, release
     assert nothing_installed(tmp_path)
 
 
+def test_a_release_without_a_required_binary_installs_nothing(tmp_path, release_server):
+    server = release_server(binaries(names=("ling", "ling-search", "ling-fetch")))
+    result = run_install(tmp_path, server, "--role", "client")
+    assert result.returncode == 1
+    assert f"release v9.9.9 is missing codex-code-mode-host-{TARGET}.gz." in result.stderr
+    assert nothing_installed(tmp_path)
+
+
 def test_a_machine_the_release_has_no_binaries_for_is_told_which_exist(tmp_path, release_server):
     result = run_install(tmp_path, release_server(binaries()), "--role", "client", uname_m="x86_64")
     assert result.returncode == 1
