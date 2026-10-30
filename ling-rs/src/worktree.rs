@@ -1392,4 +1392,19 @@ mod tests {
         assert!(std::fs::read_to_string(repo.join("auth.py")).unwrap_or_default().contains("True"));
         assert_eq!(apply_between(&repo, "no-such-commit", &side, "side"), Err(vec!["Could not read the changes on side.".to_string()]));
     }
+
+    #[test]
+    fn a_refused_apply_keeps_the_users_file_and_advises_merging_the_branch() {
+        let fixture = Fixture::new("refused");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (session, cwd, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("new.py"), "theirs\n").unwrap_or_default();
+        std::fs::write(repo.join("new.py"), "mine\n").unwrap_or_default();
+        let (lines, code) = command(&home, &cwd, "apply", true);
+        assert_eq!(code, 1);
+        assert!(lines[0].starts_with(&format!("Not applied: the changes on {} conflict with", session.branch)), "{lines:?}");
+        assert!(lines.iter().any(|line| line.contains("new.py")), "{lines:?}");
+        assert!(lines.last().is_some_and(|line| line.ends_with(&format!("git merge {}", session.branch))), "{lines:?}");
+        assert_eq!(std::fs::read_to_string(repo.join("new.py")).unwrap_or_default(), "mine\n");
+    }
 }
