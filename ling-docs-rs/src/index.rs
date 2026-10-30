@@ -1810,6 +1810,89 @@ mod tests {
         );
     }
 
+    fn sandboxed<'a>(host: &'a crate::host::fake::FakeHost, dir: &Path) -> Env<'a> {
+        Env {
+            host,
+            settings: Settings::default(),
+            user_home: dir.join("home"),
+            exe: PathBuf::from("/usr/bin/true"),
+            lib_dir: dir.join("lib"),
+            model_dir: dir.join("model"),
+            ocr_dir: dir.join("ocr"),
+            sandbox: true,
+            worker_args: Vec::new(),
+            poll: Duration::from_millis(1),
+        }
+    }
+
+    /// The paths bound read-write, and those bound read-only, in a scope's bwrap arguments.
+    fn binds(argv: &[String]) -> (Vec<String>, Vec<String>) {
+        let end = argv.iter().position(|a| a == "--chdir").unwrap();
+        let of = |flag: &str| -> Vec<String> {
+            let mut paths: Vec<String> = argv[..end]
+                .windows(2)
+                .filter(|w| w[0] == flag)
+                .map(|w| w[1].clone())
+                .collect();
+            paths.sort();
+            paths
+        };
+        (of("--bind"), of("--ro-bind"))
+    }
+
+    #[test]
+    fn the_embedder_writes_only_its_scratch_and_the_database_folder_within_its_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        const MIB: u64 = 1 << 20;
+        let mut host = crate::host::fake::FakeHost::new(dir.path(), 0);
+        // Room for the embedder's floor but not its ceiling: its scope gets what is left.
+        host.available = host::reserve(&host) + Kind::Embed.ceiling() - 64 * MIB;
+        let env = sandboxed(&host, dir.path());
+        let docs = dir.path().join("home/.mightling/docs");
+        let scratch = dir.path().join("s");
+        std::fs::create_dir_all(&scratch).unwrap();
+        // A recorded peak of 1800 MiB needs the full ceiling, which is not there.
+        let deferred = start_embed(
+            &env,
+            "documents",
+            &docs.join("documents.db"),
+            &scratch,
+            &scratch.join("events"),
+            1800,
+        )
+        .unwrap();
+        assert!(matches!(deferred, Err(Outcome::Deferred(_))));
+        let mut started = match start_embed(
+            &env,
+            "documents",
+            &docs.join("documents.db"),
+            &scratch,
+            &scratch.join("events"),
+            0,
+        )
+        .unwrap()
+        {
+            Ok(started) => started,
+            Err(outcome) => panic!("not started: {outcome:?}"),
+        };
+        started.child.wait().unwrap();
+        let (_, cap, argv) = host.started.lock().unwrap()[0].clone();
+        assert_eq!(cap, Kind::Embed.ceiling() - 64 * MIB, "the cap admitted");
+        assert!(argv.contains(&"--unshare-net".to_string()), "{argv:?}");
+        let home = env.user_home.to_string_lossy().into_owned();
+        assert!(
+            argv.windows(2).any(|w| w[0] == "--tmpfs" && w[1] == home),
+            "the home folder is hidden: {argv:?}"
+        );
+        let (rw, _) = binds(&argv);
+        let mut expected = vec![
+            docs.to_string_lossy().into_owned(),
+            scratch.to_string_lossy().into_owned(),
+        ];
+        expected.sort();
+        assert_eq!(rw, expected);
+    }
+
     #[test]
     fn a_night_shift_lock_is_seen_without_taking_it() {
         let dir = tempfile::tempdir().unwrap();
