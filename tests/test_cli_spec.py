@@ -63,6 +63,37 @@ def test_a_global_agent_picks_the_runner_for_run(clean_env, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "argv, session",
+    [
+        (["run", "hello"], ("CodexRunner", False, {})),
+        (["--agent", "codex", "run", "hello"], ("CodexRunner", False, {})),
+        (["--agent", "cline", "run", "hello"], ("ClineRunner", False, {})),
+        (["--agent", "continue", "run", "hello"], ("ContinueRunner", False, {})),
+        (["--agent", "openhands", "run", "hello"], ("OpenHandsRunner", False, {})),
+        (["run", "hello", "--agent", "openhands"], ("OpenHandsRunner", False, {})),
+        (["--agent", "cline", "run", "hello", "--debug"], ("ClineRunner", True, {})),
+        (["run", "hello", "--compat", "claude"], ("CodexRunner", False, {"compat": "claude"})),
+        (["run", "hello", "--compat", "off", "--debug"], ("CodexRunner", True, {"compat": "off"})),
+    ],
+)
+def test_each_agent_runs_its_own_runner_and_run_exits_with_the_sessions_code(clean_env, monkeypatch, argv, session):
+    from dreamference.runner import ClineRunner, CodexRunner, ContinueRunner, OpenHandsRunner
+
+    sessions = []
+    for each in (CodexRunner, ClineRunner, ContinueRunner, OpenHandsRunner):
+        monkeypatch.setattr(
+            each,
+            "run_session",
+            lambda self, prompt, debug=False, **k: sessions.append((type(self).__name__, prompt, debug, k)) or 7,
+        )
+    with pytest.raises(SystemExit) as exit_info:
+        DreamferenceCLIController.run_cli(argv)
+    assert exit_info.value.code == 7
+    runner, debug, extra = session
+    assert sessions == [(runner, "hello", debug, extra)]
+
+
+@pytest.mark.parametrize(
     "path, flag, default",
     [
         (["server", "stop"], "--port", 8000),
