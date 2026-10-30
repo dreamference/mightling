@@ -413,4 +413,13 @@ mod tests {
         assert!(holders(&accounts, App::Drive).is_empty());
         assert!(holders(&accounts, App::Calendar).is_empty());
     }
+
+    #[test]
+    fn an_app_nobody_connected_links_to_its_connect_page() {
+        let rows = rows(&Service::Up(Vec::new()), false);
+        for (row, app) in rows.as_array().into_iter().flatten().zip(App::ALL) {
+            assert_eq!(row["installUrl"], app.install_url());
+            assert_eq!(row["isAccessible"], false);
+        }
+    }
 }
