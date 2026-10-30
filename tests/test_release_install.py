@@ -745,6 +745,16 @@ def test_a_release_without_a_mac_app_installs_the_terminal_agent(tmp_path, relea
     assert (tmp_path / ".local/bin/ling").is_symlink()
 
 
+def test_the_dmg_is_told_from_its_blockmap(tmp_path, release_server):
+    # electron-builder writes a .dmg.blockmap beside each dmg, for updates; here it is listed first.
+    assets = binaries(signed=False, target="aarch64-apple-darwin")
+    assets["Mightling-9.9.9-arm64-preview.dmg.blockmap"] = b"the blockmap"
+    assets["Mightling-9.9.9-arm64-preview.dmg"] = b"the arm64 app"
+    result = run_install(tmp_path, release_server(sign(assets)), uname_s="Darwin", uname_m="arm64")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "Applications/Mightling.app/Contents/Info.plist").read_text() == "the arm64 app"
+
+
 def test_a_dmg_that_does_not_mount_leaves_the_terminal_agent_installed(tmp_path, release_server):
     result = run_install(tmp_path, release_server(mac_release()), uname_s="Darwin", uname_m="arm64",
                          env_extra={"FAKE_HDIUTIL_FAIL": "1"})
