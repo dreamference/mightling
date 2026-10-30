@@ -1393,7 +1393,8 @@ mod tests {
         let side = git_text(&repo, &["rev-parse", "HEAD"]).unwrap_or_default();
         git(&repo, &["checkout", "-q", "main"], None);
         let lines = apply_between(&repo.join("sub"), &base, &side, "side").unwrap_or_else(|lines| panic!("{lines:?}"));
-        assert!(lines[0].starts_with(&format!("Applied side to {} as", repo.display())), "{lines:?}");
+        // git names the folder with forward slashes on Windows too.
+        assert!(lines[0].replace('\\', "/").starts_with(&format!("Applied side to {} as", repo.display()).replace('\\', "/")), "{lines:?}");
         assert!(std::fs::read_to_string(repo.join("auth.py")).unwrap_or_default().contains("True"));
         assert_eq!(apply_between(&repo, "no-such-commit", &side, "side"), Err(vec!["Could not read the changes on side.".to_string()]));
     }
@@ -1424,7 +1425,8 @@ mod tests {
         let (lines, code) = command(&home, &cwd, "apply", true);
         assert_eq!(code, 0, "{lines:?}");
         assert_eq!(std::fs::read(repo.join("blob.bin")).unwrap_or_default(), bytes);
-        assert_eq!(std::fs::read_to_string(repo.join("spaces.txt")).unwrap_or_default(), "trailing  \n\tmixed \t\n");
+        // A Windows git checks files out with CRLF (core.autocrlf); the whitespace itself must survive.
+        assert_eq!(std::fs::read_to_string(repo.join("spaces.txt")).unwrap_or_default().replace("\r\n", "\n"), "trailing  \n\tmixed \t\n");
     }
 
     #[test]
