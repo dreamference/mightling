@@ -509,6 +509,7 @@ mightling_code_layers = "exact"
         assert!(missing.read_file(None).is_empty(), "no file is no error");
     }
 
+    #[cfg(unix)]
     #[test]
     fn is_trusted_in_requires_matching_canonical_path_and_trusted_level() {
         let dir = tempfile::tempdir().unwrap();
@@ -539,6 +540,7 @@ mightling_code_layers = "exact"
         assert!(!is_trusted_in(&codex, &dir.path().join("other")));
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_trust_entry_listed_through_a_link_trusts_the_directory_it_names() {
         let dir = tempfile::tempdir().unwrap();
