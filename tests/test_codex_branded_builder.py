@@ -1277,3 +1277,19 @@ def test_the_prebuilt_v8_is_verified_through_the_manifest_the_submodule_pins(tmp
     }
     assert Path(env["RUSTY_V8_ARCHIVE"]).read_bytes() == b"v8 archive"
     assert Path(env["RUSTY_V8_SRC_BINDING_PATH"]).read_bytes() == b"// v8 bindings"
+
+
+@pytest.mark.parametrize(
+    "returncode, listed",
+    [(128, True), (0, False)],
+    ids=["git-show-failed", "target-not-pinned"],
+)
+def test_no_v8_is_fetched_without_a_pinned_checksum_for_this_target(
+    tmp_path, monkeypatch, returncode, listed
+):
+    manifest = f"{'1' * 64}  {V8_CHECKSUMS}\n" if listed else f"{'1' * 64}  other.sha256\n"
+    export, _, downloaded = _v8_release(
+        tmp_path, monkeypatch, manifest_returncode=returncode, manifest=manifest
+    )
+    assert CodexBrandedBuilder.fetch_rusty_v8(export) is None
+    assert downloaded == []
