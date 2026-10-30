@@ -1046,4 +1046,20 @@ mod tests {
             found.results[0].engines
         );
     }
+
+    #[test]
+    fn only_the_first_infobox_is_a_result() {
+        let mut payload = searxng(json!([]), json!([]), json!([]));
+        payload["infoboxes"] = json!([
+            {"infobox": "Lisbon", "id": "https://en.wikipedia.org/wiki/Lisbon", "engine": "wikipedia"},
+            {"infobox": "Lisboa", "id": "https://www.wikidata.org/wiki/Q597", "engine": "wikidata"}
+        ]);
+        let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
+        let urls: Vec<&str> = found
+            .results
+            .iter()
+            .map(|result| result.url.as_str())
+            .collect();
+        assert_eq!(urls, ["https://en.wikipedia.org/wiki/Lisbon"]);
+    }
 }
