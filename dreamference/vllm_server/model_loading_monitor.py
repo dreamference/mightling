@@ -166,23 +166,6 @@ class ModelLoadingMonitor:
             "server_ready": self.server_ready,
         }
 
-    def wait_for_ready(self, timeout: float = 300.0) -> bool:
-        """
-        Blocks until server is ready or timeout is reached.
-
-        Args:
-            timeout (float): Maximum seconds to wait.
-
-        Returns:
-            bool: True if server became ready, False if timeout.
-        """
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            if self.server_ready:
-                return True
-            time.sleep(0.5)
-        return False
-
     def print_progress(self) -> None:
         """Prints current loading progress to stdout."""
         status = self.get_status()
