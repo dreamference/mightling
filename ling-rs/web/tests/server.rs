@@ -1498,6 +1498,11 @@ async fn git_through_the_front_is_not_passed_on_whatever_host_the_front_forwards
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     let front = Request::builder().method("GET").uri(git).header(header::HOST, "node.example.ts.net").body(Body::empty()).unwrap();
     assert_eq!(call(&server, front).await.0, StatusCode::UNAUTHORIZED);
+    // Any one forwarding header alone marks the front.
+    for name in ["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip"] {
+        let forwarded = request("GET", git).header(name, "192.0.2.9").body(Body::empty()).unwrap();
+        assert_eq!(call(&server, forwarded).await.0, StatusCode::UNAUTHORIZED, "{name}");
+    }
     // On the LAN and loopback it is passed on to the forge (none here) without a sign-in.
     let (status, _, body) = call(&server, request("GET", git).body(Body::empty()).unwrap()).await;
     assert_eq!((status, body.as_str()), (StatusCode::OK, "fake forge"));
@@ -1738,4 +1743,41 @@ async fn a_mini_app_first_launch_pairs_only_on_the_front_and_only_after_the_bot_
         .body(Body::empty())
         .unwrap();
     assert_eq!(call(&server, after_revoke).await.0, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_request_from_another_site_is_refused_whatever_its_method_or_the_case_of_its_upgrade() {
+    let scratch = scratch("origin-kinds");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let options = request("OPTIONS", "/api/apps").header(header::ORIGIN, "http://evil.example").body(Body::empty()).unwrap();
+    assert_eq!(call(&server, options).await.0, StatusCode::FORBIDDEN, "an OPTIONS request is not a read");
+    let upgrade = request("GET", "/ws")
+        .header(header::ORIGIN, "http://evil.example")
+        .header(header::UPGRADE, "WebSocket")
+        .header(header::CONNECTION, "Upgrade")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(call(&server, upgrade).await.0, StatusCode::FORBIDDEN, "the upgrade is named in any case");
+}
+
+#[tokio::test]
+async fn index_html_without_a_credential_is_the_locked_page_like_the_root() {
+    let scratch = scratch("locked-index");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    for path in ["/", "/index.html"] {
+        let (status, headers, _) = call(&server, request("GET", path).body(Body::empty()).unwrap()).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+        assert!(headers[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/html"), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn a_sync_agents_secret_opens_nothing_outside_the_hub() {
+    let scratch = scratch("sync-secret");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let (_, secret) = auth::add_device_of(&server.config.state_dir, "laptop-sync", auth::DeviceKind::Sync).unwrap();
+    for path in ["/healthz", "/api/apps", "/devices"] {
+        let get = request("GET", path).header(header::AUTHORIZATION, format!("Bearer {secret}")).body(Body::empty()).unwrap();
+        assert_eq!(call(&server, get).await.0, StatusCode::UNAUTHORIZED, "{path}");
+    }
 }
