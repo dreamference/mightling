@@ -937,4 +937,14 @@ mod tests {
         assert_eq!(prune(&scratch.0, written + kept), 0);
         assert_eq!(prune(&scratch.0, written + kept + Duration::from_secs(1)), 1);
     }
+
+    #[test]
+    fn custom_tool_outputs_are_masked_too() {
+        let values = vec![
+            json!({"type": "custom_tool_call", "name": "exec", "input": "ls", "call_id": "c1"}),
+            json!({"type": "custom_tool_call_output", "call_id": "c1", "output": "x"}),
+        ];
+        let state = State { masked: ["c1".to_string()].into(), after_last_move: None };
+        assert_eq!(masked_indices(&values, &state), HashMap::from([(1, "c1".to_string())]));
+    }
 }
