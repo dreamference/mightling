@@ -368,6 +368,11 @@ pub fn header_str(headers: &HeaderMap, name: header::HeaderName) -> Option<&str>
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
+/// The only requests other than a read that a `watch` device may send (see [`guard`]): the Mini
+/// App's launch check, which verifies Telegram's signature and writes nothing, and without which a
+/// watch device's Mini App never opens (bridge.js; CHAT_REPOS §12.1 G2).
+pub const WATCH_MAY_SEND: &[&str] = &["/api/telegram/check"];
+
 /// The application, every route behind [`guard`].
 pub fn router(server: Arc<Server>) -> Router {
     Router::new()
@@ -422,13 +427,22 @@ async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) 
     if !server.addresses.host_ok(header_str(headers, header::HOST)) {
         return secured(text(StatusCode::MISDIRECTED_REQUEST, "This server does not answer to that name.\n"));
     }
+    let changes = !matches!(*request.method(), Method::GET | Method::HEAD);
+    // A `watch` device changes nothing (SYNC §5.1, O4): every request but a read is refused here,
+    // on every route and on a path that does not exist, so a new route is covered without a check
+    // of its own. Only what is in `WATCH_MAY_SEND` passes; `/ws` filters its messages (relay.rs).
+    if changes
+        && !WATCH_MAY_SEND.contains(&request.uri().path())
+        && let Some(refused) = refuse_watch(&server, headers)
+    {
+        return secured(refused);
+    }
     // Git over HTTP to the forge carries the forge's own credentials, as on the forge's own port,
     // and is passed on only to a client on the LAN or this machine, never through a front (forge.rs).
     if crate::forge::is_git(request.uri().path()) && !server.through_proxy(headers) {
         return secured(next.run(request).await);
     }
     let upgrade = header_str(headers, header::UPGRADE).is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
-    let changes = !matches!(*request.method(), Method::GET | Method::HEAD);
     if (upgrade || changes) && !server.addresses.origin_ok(header_str(headers, header::ORIGIN)) {
         return secured(text(StatusCode::FORBIDDEN, "Requests from other sites are refused.\n"));
     }
@@ -678,6 +692,9 @@ async fn telegram_launch_pair_post(
             "Telegram launch pairing is only served on the configured HTTPS front.\n",
         );
     }
+    if let Some(refused) = refuse_paired(&server, &headers) {
+        return refused;
+    }
     let host = header_str(&headers, header::HOST).unwrap_or_default().trim().to_ascii_lowercase();
     let expected_origin = format!("https://{host}");
     if header_str(&headers, header::ORIGIN).is_none_or(|origin| !origin.trim().eq_ignore_ascii_case(&expected_origin)) {
@@ -713,6 +730,19 @@ async fn telegram_launch_pair_post(
     }
 }
 
+/// Launch pairing is for a first launch with no credential (CHAT_REPOS §12.1 G2): a request that
+/// already carries one (the owner's session, any paired device, a `watch` one included) is refused,
+/// so a paired device never asks the bot for a second, `control` credential. bridge.js asks only
+/// after the launch check answered 401.
+fn refuse_paired(server: &Server, headers: &HeaderMap) -> Option<Response> {
+    server.authenticated("/api/telegram/launch-pair", headers).then(|| {
+        json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "ok": false, "reason": "This device is already paired; launch pairing is for a first launch." }),
+        )
+    })
+}
+
 /// Polled by the launching webview (`GET /api/telegram/launch-pair?pending=<id>`) with the same
 /// `initData` in `X-Telegram-Init-Data`: hands out the `telegram-app` device cookie once after
 /// the bot approves, and never before.
@@ -726,6 +756,9 @@ async fn telegram_launch_pair_get(
             StatusCode::MISDIRECTED_REQUEST,
             "Telegram launch pairing is only served on the configured HTTPS front.\n",
         );
+    }
+    if let Some(refused) = refuse_paired(&server, &headers) {
+        return refused;
     }
     let id = query.get("pending").map(String::as_str).unwrap_or_default();
     let init_data = headers
