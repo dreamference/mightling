@@ -478,6 +478,85 @@ def test_the_session_command_resumes_and_attaches_images_after_the_prompt(tmp_pa
     assert "workspace-write" in first
 
 
+ENV_LING = r"""#!/usr/bin/env python3
+import json, os, sys
+keys = ["CODEX_HOME", "DREAMFERENCE_MIGHTLING_PROMPT", "DREAMFERENCE_VLLM_HOST",
+        "DREAMFERENCE_SEARXNG_URL", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+        "NO_PROXY", "no_proxy", "LING_SEARCH_CACHE_DIR"]
+with open(os.environ["ENV_DUMP"], "a") as out:
+    out.write(json.dumps({"argv": sys.argv[1:], **{k: os.environ.get(k) for k in keys}}) + "\n")
+"""
+
+
+def _session(tmp_path: Path, scenario: dict, ling: str, *extra: str) -> tuple[int, list[dict]]:
+    from askevals import session
+
+    path = tmp_path / "scenario.json"
+    path.write_text(json.dumps(scenario))
+    out = tmp_path / "out"
+    status = session.main(
+        [
+            str(path),
+            str(out),
+            "--home",
+            str(tmp_path / "home"),
+            "--workspace",
+            str(tmp_path / "ws"),
+            "--ling",
+            ling,
+            *extra,
+        ]
+    )
+    turns = (out / "turns.jsonl").read_text().splitlines()
+    return status, [json.loads(line) for line in turns]
+
+
+def test_a_session_reaches_only_the_stand_ins_with_the_ask_prompt(tmp_path, monkeypatch):
+    """The model at the jail's loopback 8000, the proxy in both cases, no search cache."""
+    ling = tmp_path / "env-ling"
+    ling.write_text(ENV_LING)
+    ling.chmod(ling.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("ENV_DUMP", str(tmp_path / "env.jsonl"))
+    status, turns = _session(tmp_path, {"turns": [{"text": "a"}, {"text": "b"}]}, str(ling))
+    assert status == 0 and [t["turn"] for t in turns] == [0, 1]
+    first, later = (json.loads(x) for x in (tmp_path / "env.jsonl").read_text().splitlines())
+    assert first["CODEX_HOME"] == str(tmp_path / "home")
+    assert first["DREAMFERENCE_MIGHTLING_PROMPT"] == "ask"
+    assert first["DREAMFERENCE_VLLM_HOST"] == "http://127.0.0.1:8000"
+    proxy = first["HTTP_PROXY"]
+    assert proxy.startswith("http://127.0.0.1:")
+    assert first["http_proxy"] == first["HTTPS_PROXY"] == first["https_proxy"] == proxy
+    assert first["DREAMFERENCE_SEARXNG_URL"].startswith("http://127.0.0.1:")
+    assert first["no_proxy"] == first["NO_PROXY"] == "localhost,127.0.0.1,::1"
+    assert first["LING_SEARCH_CACHE_DIR"] == "off"
+    assert "resume" not in first["argv"] and later["argv"][-3:] == ["resume", "--last", "b"]
+
+
+def test_a_thread_that_needs_faketime_is_skipped_without_it(tmp_path, monkeypatch):
+    from askevals import session
+
+    monkeypatch.setattr(session.shutil, "which", lambda name: None)
+    scenario = {"turns": [{"text": "old", "faketime": "-2d"}, {"text": "now"}]}
+    status, turns = _session(tmp_path, scenario, "/nonexistent/ling")
+    assert status == 3 and turns == [{"turn": 0, "skipped": "faketime is not installed"}]
+    result = checks.score(scenario, [], turns, [])
+    assert not result.passed and result.columns == {"skipped": True}
+    assert result.failures == ["skipped: faketime is not installed"]
+
+
+def test_the_harness_cuts_a_silent_turn_and_one_past_its_limit(tmp_path):
+    from askevals.session import run_turn
+
+    silent = run_turn(["sleep", "30"], dict(os.environ), tmp_path / "a.jsonl", 60, 0.3)
+    chatty = ["bash", "-c", "while true; do echo x; sleep 0.1; done"]
+    limit = run_turn(chatty, dict(os.environ), tmp_path / "b.jsonl", 0.6, 60)
+    done = run_turn(["echo", "ok"], dict(os.environ), tmp_path / "c.jsonl", 60, 60)
+    assert silent["cut"] == "silence" and silent["seconds"] < 5
+    assert limit["cut"] == "limit" and (tmp_path / "b.jsonl").read_text().startswith("x")
+    assert done == {"rc": 0, "seconds": done["seconds"], "cut": None}
+    assert (tmp_path / "c.jsonl").read_text() == "ok\n"
+
+
 def test_the_jail_has_no_network_but_its_loopback(tmp_path):
     """The command the runner uses keeps the session in its own network namespace."""
     args = RUNNER.argparse.Namespace(no_jail=False, ling="ling")
