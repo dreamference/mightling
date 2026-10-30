@@ -3554,6 +3554,60 @@ def test_the_report_names_the_instances_that_ran_during_a_pause(bench):
     assert lines[1].endswith(": acme__widget-1")
 
 
+class FakeGate:
+    """The gate as the hold sees it: what its probe answers and what pause is on file."""
+
+    answer = None
+    pause = None
+    written = []
+
+    @classmethod
+    def write_run(cls, record):
+        cls.written.append(dict(record))
+
+    @classmethod
+    def probe(cls, host, timeout=2.0):
+        return cls.answer
+
+    @classmethod
+    def pause_record(cls):
+        return cls.pause
+
+    @classmethod
+    def clear_run(cls, run_id):
+        pass
+
+
+@pytest.fixture
+def hold(bench, monkeypatch):
+    """A hold on run r1, which has its manifest, in front of a gate the test answers for."""
+    from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
+
+    monkeypatch.setattr(SweBenchGateHold, "gate", FakeGate)
+    monkeypatch.setattr(FakeGate, "answer", None)
+    monkeypatch.setattr(FakeGate, "pause", None)
+    monkeypatch.setattr(FakeGate, "written", [])
+    SweBenchRunStore("r1").write_manifest({"run": "r1"})
+    return SweBenchGateHold(SweBenchRunStore("r1"), "http://localhost:8000", "172.30.0.0/16")
+
+
+def gate_record(store_name="r1"):
+    return json.loads((SweBenchRunStore(store_name).directory / "gate.json").read_text())
+
+
+def test_the_gate_is_the_runs_only_when_it_holds_the_runs_own_record(hold):
+    for answer, expected in (
+        (None, (False, False, False)),
+        ({"gate": "mightling", "state": "closed", "id": "another run"}, (False, False, False)),
+        ({"gate": "mightling", "state": "paused", "id": "another run"}, (False, False, False)),
+        ({"gate": "mightling", "state": "paused", "id": hold.id}, (True, False, True)),
+        ({"gate": "mightling", "state": "closed", "id": hold.id}, (True, True, False)),
+    ):
+        FakeGate.answer = answer
+        hold.tick()
+        assert (hold.enforced, hold.priority(), hold.paused()) == expected, answer
+
+
 def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
     from dreamference.vllm_server.model_gate import ModelGate
 
