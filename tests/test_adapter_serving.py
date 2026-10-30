@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import ClassVar
 
 import pytest
+from test_model_gate import stop_gate
 
 from dreamference.hardware.adapter_installer import AdapterInstaller
 from dreamference.hardware.adapter_store import AdapterStore
@@ -518,10 +519,10 @@ def gate(tmp_path):
         ("127.0.0.1", 0), ("127.0.0.1", engine.server_address[1]), str(state)
     )
     port = loop.run_until_complete(service.start())
-    threading.Thread(target=loop.run_forever, daemon=True).start()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
     yield {"port": port, "folders": folders, "tmp": tmp_path}
-    loop.call_soon_threadsafe(service.server.close)
-    loop.call_soon_threadsafe(loop.stop)
+    stop_gate(loop, thread, service)
     engine.shutdown()
 
 

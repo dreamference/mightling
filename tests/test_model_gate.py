@@ -280,11 +280,33 @@ def live(tmp_path):
         ("127.0.0.1", 0), ("127.0.0.1", upstream.server_address[1]), str(state_dir)
     )
     port = loop.run_until_complete(service.start())
-    threading.Thread(target=loop.run_forever, daemon=True).start()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
     yield {"port": port, "state": state_dir, "upstream": upstream}
+    stop_gate(loop, thread, service)
+    upstream.shutdown()
+    upstream.server_close()
+
+
+def stop_gate(loop, thread, service):
+    """Stop the gate and close its loop once the connections it still holds are finished.
+
+    Stopping the loop alone left a handler suspended on it: the garbage collector finished it
+    during some later test, on a closed loop, and pytest reported that test's unraisable
+    `RuntimeError: Event loop is closed` (one run in three of this file).
+    """
     loop.call_soon_threadsafe(service.server.close)
     loop.call_soon_threadsafe(loop.stop)
-    upstream.shutdown()
+    thread.join(10)
+
+    async def finish():
+        pending = asyncio.all_tasks() - {asyncio.current_task()}
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    loop.run_until_complete(finish())
+    loop.close()
 
 
 def post(
@@ -553,7 +575,8 @@ def test_the_client_is_told_to_close_whatever_the_engine_says(tmp_path):
         ("127.0.0.1", 0), ("127.0.0.1", upstream.getsockname()[1]), str(tmp_path)
     )
     port = loop.run_until_complete(service.start())
-    threading.Thread(target=loop.run_forever, daemon=True).start()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=10) as client:
             client.sendall(b"POST /v1/responses HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n{}")
@@ -561,8 +584,7 @@ def test_the_client_is_told_to_close_whatever_the_engine_says(tmp_path):
             while not answer.endswith(b"ok"):
                 answer += client.recv(65536)
     finally:
-        loop.call_soon_threadsafe(service.server.close)
-        loop.call_soon_threadsafe(loop.stop)
+        stop_gate(loop, thread, service)
         upstream.close()
     interim, final = answer.split(b"\r\n\r\n", 1)[0], answer.split(b"\r\n\r\n", 1)[1]
     assert interim == b"HTTP/1.1 100 Continue"
