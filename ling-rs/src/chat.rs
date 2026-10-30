@@ -169,4 +169,33 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn repos_cli_refuses_any_other_shape_before_it_reads_or_writes_anything() {
+        let args = |words: &[&str]| words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
+        for words in [
+            &["repos"][..],
+            &["repos", "full-access"],
+            &["repos", "full-access", "yes"],
+            &["repos", "full-access", "ON"],
+            &["repos", "full-access", "on", "now"],
+            &["repos", "full_access", "on"],
+            &["repos", "list", "off"],
+        ] {
+            assert_eq!(run_repos_cli(&args(words)), 2, "{words:?}");
+        }
+    }
+
+    #[test]
+    fn write_full_access_leaves_a_file_that_is_not_toml_as_it_was() {
+        let dir = std::env::temp_dir().join(format!("ling-chat-repos-bad-toml-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("config.toml");
+        std::fs::write(&config, "[chat_repos\nfull_access = true\n").unwrap();
+        assert!(write_full_access(&config, false).unwrap_err().contains("not valid TOML"));
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), "[chat_repos\nfull_access = true\n");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no staged file is left behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

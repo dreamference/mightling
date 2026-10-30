@@ -971,4 +971,45 @@ mod tests {
         assert!(lines.iter().any(|l| l.trim_start().starts_with("1  ask") && l.contains("ended")));
         assert_eq!(status_lines(None, &no_env, "").last().map(String::as_str), Some("Nothing stopped yet."));
     }
+
+    #[test]
+    fn a_setting_that_does_not_read_leaves_the_tier_below_in_place() {
+        assert_eq!(sampling_arm(" NonThinking\n").as_deref(), Some(NONTHINKING));
+        assert_eq!(sampling_arm("thinking"), None);
+        assert_eq!(sampling_arm(""), None);
+
+        // A budget written as a string is not a number: the surface's default stays.
+        let table: toml::Table = "phone_max_output_tokens = \"6000\"\nsampling = \"nonthinking\"\n".parse().expect("toml");
+        assert_eq!(settings_for(Surface::Phone, Some(&table), &no_env).budget, Some(4_096));
+        // A variable that is not a number keeps the file's value; 0 lifts the cap.
+        let table: toml::Table = "phone_max_output_tokens = 6000\n".parse().expect("toml");
+        let env = |name: &str| (name == BUDGET_ENV).then(|| "lots".to_string());
+        assert_eq!(settings_for(Surface::Phone, Some(&table), &env).budget, Some(6_000));
+        let env = |name: &str| (name == BUDGET_ENV).then(|| " 0 ".to_string());
+        assert_eq!(settings_for(Surface::Phone, Some(&table), &env).budget, None);
+        // Any other sampling arm in the variable turns the file's arm off.
+        let table: toml::Table = "sampling = \"nonthinking\"\n".parse().expect("toml");
+        let env = |name: &str| (name == SAMPLING_ENV).then(|| "off".to_string());
+        assert_eq!(settings_for(Surface::Work, Some(&table), &env).sampling, None);
+    }
+
+    #[test]
+    fn a_cut_item_keeps_its_kind_and_loses_its_status() {
+        let message = json!({"type": "message", "role": "assistant", "id": "m1", "status": "in_progress",
+            "content": [{"type": "output_text", "text": "loop loop loop"}]});
+        let Some(ResponseItem::Message { content, .. }) = finished_item(message, "loop") else {
+            panic!("a message stays a message");
+        };
+        assert_eq!(serde_json::to_value(&content).unwrap_or(Value::Null), json!([{"type": "output_text", "text": "loop"}]));
+
+        let reasoning = json!({"type": "reasoning", "id": "r1", "status": "in_progress", "summary": [{"type": "summary_text", "text": "s"}]});
+        let Some(ResponseItem::Reasoning { summary, content, .. }) = finished_item(reasoning, "think") else {
+            panic!("reasoning stays reasoning");
+        };
+        assert!(summary.is_empty());
+        assert_eq!(serde_json::to_value(&content).unwrap_or(Value::Null), json!([{"type": "reasoning_text", "text": "think"}]));
+
+        assert!(finished_item(json!({"type": "function_call", "name": "f", "arguments": "{}", "call_id": "c"}), "x").is_none());
+        assert!(finished_item(json!("not an object"), "x").is_none());
+    }
 }

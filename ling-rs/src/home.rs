@@ -257,4 +257,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&from);
         let _ = std::fs::remove_dir_all(&to);
     }
+
+    #[test]
+    fn a_database_moves_with_its_journal_and_the_logs_stay_behind() {
+        let from = scratch("db-from");
+        let to = scratch("db-to");
+        for name in ["state_5.sqlite", "state_5.sqlite-wal", "state_5.sqlite-shm", "logs_2.sqlite", "logs_2.sqlite-wal"] {
+            std::fs::write(from.join(name), name).unwrap_or_default();
+        }
+
+        assert_eq!(migrate(&from, &to).ok(), Some(3));
+        for name in ["state_5.sqlite", "state_5.sqlite-wal", "state_5.sqlite-shm"] {
+            assert_eq!(std::fs::read_to_string(to.join(name)).unwrap_or_default(), name);
+        }
+        assert!(!to.join("logs_2.sqlite").exists() && !to.join("logs_2.sqlite-wal").exists());
+
+        let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&to);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_the_history_is_copied_as_a_link_never_as_what_it_points_at() {
+        let from = scratch("link-from");
+        let to = scratch("link-to");
+        std::fs::write(from.join("auth.json"), "{\"tokens\":\"secret\"}").unwrap_or_default();
+        std::fs::create_dir_all(from.join("sessions")).unwrap_or_default();
+        std::os::unix::fs::symlink(from.join("auth.json"), from.join("sessions/login.jsonl")).unwrap_or_default();
+
+        assert_eq!(migrate(&from, &to).ok(), Some(1));
+        let copied = to.join("sessions/login.jsonl");
+        assert!(std::fs::symlink_metadata(&copied).is_ok_and(|metadata| metadata.file_type().is_symlink()));
+        assert_eq!(std::fs::read_link(&copied).ok(), Some(from.join("auth.json")));
+        assert!(!to.join("auth.json").exists());
+
+        let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&to);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_new_home_and_its_parents_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = scratch("private");
+        let home = root.join("a/.mightling");
+        create_private_dir(&home).unwrap_or_default();
+        for dir in [root.join("a"), home.clone()] {
+            let mode = std::fs::metadata(&dir).map(|metadata| metadata.permissions().mode() & 0o777).unwrap_or_default();
+            assert_eq!(mode, 0o700, "{}", dir.display());
+        }
+        // An existing folder is used as it is.
+        assert!(create_private_dir(&home).is_ok());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
