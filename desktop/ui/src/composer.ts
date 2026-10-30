@@ -333,7 +333,8 @@ export const LONG_PASTE = { chars: 2_000, lines: 40 };
 
 /** Whether pasted text is long enough to go in as an attachment rather than into the text. */
 export function isLongPaste(text: string): boolean {
-  return text.length >= LONG_PASTE.chars || text.split("\n").length >= LONG_PASTE.lines;
+  // Lines counted as `pasteLabel` counts them: a final newline is not one more line.
+  return text.length >= LONG_PASTE.chars || text.replace(/\n+$/, "").split("\n").length >= LONG_PASTE.lines;
 }
 
 /** A pasted text's chip: its lines, or its characters when it is one long line. */

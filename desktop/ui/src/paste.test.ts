@@ -8,6 +8,10 @@ describe("a long paste", () => {
     expect(isLongPaste("short")).toBe(false);
     expect(isLongPaste("x".repeat(LONG_PASTE.chars))).toBe(true);
     expect(isLongPaste(Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n"))).toBe(true);
+    // Lines are counted as the chip counts them: a final newline is not a line.
+    const thirtyNine = `${Array.from({ length: 39 }, (_, i) => `line ${i}`).join("\n")}\n`;
+    expect(pasteLabel(thirtyNine)).toBe("Pasted text · 39 lines");
+    expect(isLongPaste(thirtyNine)).toBe(false);
     expect(isLongPaste(Array.from({ length: 39 }, (_, i) => `line ${i}`).join("\n"))).toBe(false);
   });
 
