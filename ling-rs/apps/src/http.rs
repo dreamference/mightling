@@ -152,4 +152,9 @@ mod tests {
         let truncated = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nab";
         assert_eq!(parse_response(truncated), Err("truncated chunk".to_string()));
     }
+
+    #[test]
+    fn a_slash_is_encoded_and_a_tilde_kept() {
+        assert_eq!(encode("a/b~c"), "a%2Fb~c");
+    }
 }
