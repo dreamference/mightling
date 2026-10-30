@@ -1848,3 +1848,59 @@ async fn wrong_codes_sent_to_the_hub_count_toward_the_ten() {
 fn hub_on(server: &Arc<Server>) {
     ling_web_server::sync_store::set_enabled(&server.config.codex_home, true).unwrap();
 }
+
+fn with_header(name: header::HeaderName, value: &str) -> axum::http::HeaderMap {
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(name, axum::http::HeaderValue::from_str(value).unwrap());
+    headers
+}
+
+#[tokio::test]
+async fn a_device_cookie_beside_the_owners_session_is_the_owner() {
+    let scratch = scratch("owner-and-device");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let owner = sign_in(&server).await;
+    let (_, token) = auth::add_device(&server.config.state_dir, "phone").unwrap();
+    auth::set_scope(&server.config.state_dir, "phone", auth::Scope::Watch).unwrap();
+    let device = format!("{}={token}", auth::DEVICE_COOKIE);
+    let alone = with_header(header::COOKIE, &device);
+    assert_eq!(server.paired_device_name(&alone).as_deref(), Some("phone"));
+    assert!(server.watch_device(&alone));
+    let both = with_header(header::COOKIE, &format!("{owner}; {device}"));
+    assert_eq!(server.paired_device_name(&both), None);
+    assert!(!server.watch_device(&both));
+}
+
+#[tokio::test]
+async fn only_bridge_one_signs_in_a_bridge_session() {
+    let scratch = scratch("bridge-flag");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    for (flag, bridge) in [("1", true), ("0", false), ("", false), ("yes", false)] {
+        let code = auth::issue_login_code(&server.config.state_dir).unwrap();
+        let login = request("GET", &format!("/login?code={code}&bridge={flag}")).body(Body::empty()).unwrap();
+        let (status, headers, _) = call(&server, login).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let cookie = headers[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
+        let cookie = with_header(header::COOKIE, &cookie);
+        assert!(server.owner_session(&cookie), "bridge={flag}");
+        assert_eq!(server.bridge_session(&cookie), bridge, "bridge={flag}");
+    }
+}
+
+#[tokio::test]
+async fn the_configured_mini_app_host_alone_is_the_front_and_an_empty_host_never_is() {
+    let scratch = scratch("front-host");
+    let mut config = config(&scratch.dir, 3100, Vec::new());
+    config.public_names = vec!["other.example.ts.net".to_string(), " ".to_string()];
+    let user_config = config.user_config.clone().unwrap();
+    std::fs::create_dir_all(user_config.parent().unwrap()).unwrap();
+    let server = Server::new(config).unwrap();
+    // Without a mini app, a public name is the front, and a blank one names no host.
+    assert!(server.front_host_ok(&with_header(header::HOST, "other.example.ts.net")));
+    assert!(!server.front_host_ok(&with_header(header::HOST, "")));
+    assert!(!server.front_host_ok(&with_header(header::HOST, "  ")));
+    std::fs::write(&user_config, "[chat]\ntelegram_mini_app_url = \"https://tg.example.ts.net/app\"\n").unwrap();
+    assert!(server.front_host_ok(&with_header(header::HOST, "TG.example.ts.net")));
+    assert!(!server.front_host_ok(&with_header(header::HOST, "other.example.ts.net")), "another public name is not the mini app's");
+    assert!(!server.front_host_ok(&with_header(header::HOST, HOST)));
+}
