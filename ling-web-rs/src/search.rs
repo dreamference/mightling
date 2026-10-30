@@ -1092,4 +1092,12 @@ mod tests {
         assert!(SearchOptions::new(None, None, Some("en-;x")).is_err());
         assert!(SearchOptions::new(None, None, Some("en-1")).is_err());
     }
+
+    #[test]
+    fn a_language_code_is_two_or_three_letters() {
+        assert!(SearchOptions::new(None, None, Some("e")).is_err());
+        assert!(SearchOptions::new(None, None, Some("engl")).is_err());
+        assert!(SearchOptions::new(None, None, Some("e-ch")).is_err());
+        assert!(SearchOptions::new(None, None, Some("deu")).is_ok());
+    }
 }
