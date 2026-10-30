@@ -10607,4 +10607,63 @@ mod tests {
         let finished_notice = &drained["notices"].as_array().unwrap()[3];
         assert_eq!(finished_notice["files"], 2);
     }
+
+    #[tokio::test]
+    async fn the_listing_is_cached_for_a_minute_then_fetched_again() {
+        let s = scratch("listing-cache");
+        let (forge_url, forge, _forge_task) = start_fake_forge_with_state(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "trunk",
+                "private": true,
+                "archived": false,
+                "mirror": true,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": true }
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+        let list = || {
+            Request::builder()
+                .method("GET")
+                .uri("/api/repos")
+                .header(header::HOST, HOST)
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap()
+        };
+        let searches = || {
+            forge.requests.lock().unwrap().iter().filter(|(_, path, _)| path.starts_with("/api/v1/repos/search")).count()
+        };
+
+        // §4.3: the first listing asks the forge; the fields the page shows come from its answer.
+        let (status, body) = call(&server, list()).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let listed: Value = serde_json::from_str(&body).unwrap();
+        let entry = &listed.as_array().unwrap()[0];
+        assert_eq!(entry["repo"], "org/widget");
+        assert_eq!(entry["default_branch"], "trunk");
+        assert_eq!(entry["pushed_at"], "2026-10-20T12:00:00Z");
+        assert_eq!((entry["private"].clone(), entry["archived"].clone(), entry["mirror"].clone()), (json!(true), json!(false), json!(true)));
+        let first = searches();
+        assert!(first >= 1);
+
+        // Within the minute the same listing is served from the cache.
+        let (status, again) = call(&server, list()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(again, body);
+        assert_eq!(searches(), first);
+
+        // Past the minute the forge is asked again.
+        {
+            let mut cached = server.chat_repos.listing.lock().await;
+            let entry = cached.as_mut().unwrap();
+            entry.at = Instant::now().checked_sub(LISTING_TTL + Duration::from_secs(1)).unwrap();
+        }
+        let (status, _) = call(&server, list()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(searches(), 2 * first);
+    }
 }
