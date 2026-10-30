@@ -239,6 +239,25 @@ def test_settings_default_to_loopback_and_live_outside_the_working_directory(tmp
     assert NodeSettings.advertised() is False
 
 
+def test_only_a_true_advertise_shares_and_the_web_ui_follows_it_unless_turned_off():
+    # `ling web start --lan` reads this very file (ling-rs/web/src/cli.rs) before it binds beyond
+    # loopback, so its name and its two keys are a contract, not a detail of this module.
+    path = NodeSettings.path()
+    assert path == Path.home() / ".config" / "dreamference" / "node-advertise.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for data, expected in (
+        ({"advertise": True}, {"advertise": True, "web": True}),
+        ({"advertise": True, "web": None}, {"advertise": True, "web": True}),
+        ({"advertise": True, "web": False}, {"advertise": True, "web": False}),
+        ({"advertise": "yes", "web": True}, {"advertise": False, "web": False}),
+        ({"advertise": 1}, {"advertise": False, "web": False}),
+        ([True], {"advertise": False, "web": False}),
+        ("advertise", {"advertise": False, "web": False}),
+    ):
+        path.write_text(json.dumps(data))
+        assert NodeSettings.load() == expected, data
+
+
 # -- the two binds ---------------------------------------------------------------------------------
 
 
