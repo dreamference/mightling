@@ -166,3 +166,11 @@ def test_meminfo_without_available_memory_counts_as_none(monkeypatch):
     _files(monkeypatch, {"/proc/meminfo": "MemTotal: 134217728 kB\n"})
 
     assert HostSafetySetup._mem_available_gb() == 0.0
+
+
+def test_without_a_group_database_docker_access_is_assumed(monkeypatch):
+    monkeypatch.setattr(host_safety_setup.os.path, "exists", lambda path: True)
+    monkeypatch.setattr(host_safety_setup.os, "access", lambda path, mode: False)
+    monkeypatch.setattr(host_safety_setup, "grp", None)
+
+    assert HostSafetySetup._may_use_docker() is True
