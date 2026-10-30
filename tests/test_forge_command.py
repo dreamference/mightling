@@ -171,3 +171,55 @@ def test_the_password_is_printed_on_the_nodes_own_terminal_or_its_absence_said(m
     ForgeSettings.write_secret("owner-password", "q" * 24)
     assert ForgeCommand.dispatch(argparse.Namespace(forge_command="password")) == 0
     assert capsys.readouterr().out == "q" * 24 + "\n"
+
+
+# The status
+
+
+def test_the_status_lists_repositories_only_while_running_and_a_backup_held_off_the_record(
+    monkeypatch,
+):
+    from dreamference.forge.forge_container import ForgeContainer
+
+    running = [True]
+    monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: running[0]))
+    monkeypatch.setattr(ForgeCommand, "header_lines", classmethod(lambda cls, *a: ["header"]))
+    monkeypatch.setattr(ForgeCommand, "repository_lines", classmethod(lambda cls: ["repos"]))
+    monkeypatch.setattr(ForgeCommand, "record_lines", classmethod(lambda cls: ["record"]))
+    monkeypatch.setattr(ForgeCommand, "storage_lines", classmethod(lambda cls: ["storage"]))
+    monkeypatch.setattr(ForgeBackup, "latest", classmethod(lambda cls: Path("forge-1.tar")))
+
+    ForgeSettings.update_state(role="mirror")
+    assert ForgeCommand.status_lines() == [
+        "header",
+        "repos",
+        "Newest backup held here: forge-1.tar",
+        "storage",
+    ]
+
+    running[0] = False
+    ForgeSettings.update_state(role="record")
+    ForgeSettings.write_secret("owner-password", "q" * 24)
+    lines = ForgeCommand.status_lines()
+    assert lines[:3] == ["header", "record", "storage"]
+    assert "forge password --show" in lines[3] and "q" * 24 not in lines[3]
+
+
+def test_a_mirror_names_its_record_by_name_node_or_unknown_and_a_frozen_forge_says_so(
+    monkeypatch, tmp_path
+):
+    flag = tmp_path / "frozen"
+    monkeypatch.setattr(ForgeService, "host_name", classmethod(lambda cls: "node-a"))
+    monkeypatch.setattr(ForgeService, "find_record", classmethod(lambda cls: {"node": "n-1"}))
+    monkeypatch.setattr(ForgeMove, "frozen_flag", classmethod(lambda cls: flag))
+
+    def header(state):
+        return ForgeCommand.header_lines(state, "mirror", True)[1:]
+
+    assert header({"record_node": "n-1"}) == ["Forge of record: n-1"]
+    assert header({}) == ["Forge of record: unknown"]
+    flag.write_text("")
+    assert header({"record_name": "rec"}) == [
+        "Forge of record: rec",
+        "⚠️  Frozen: pushes are refused while the role moves.",
+    ]
