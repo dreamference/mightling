@@ -120,3 +120,13 @@ def test_a_missing_file_or_disk_reads_as_zero_gigabytes(tmp_path):
     assert HostSafetySetup._file_gb(str(sized)) == 2.0
     assert HostSafetySetup._file_gb(str(tmp_path / "missing")) == 0.0
     assert HostSafetySetup._disk_free_gb(str(tmp_path / "missing")) == 0.0
+
+
+def test_a_root_command_that_cannot_start_fails_and_says_why(monkeypatch, capsys):
+    def run(command, **kwargs):
+        raise FileNotFoundError("sudo: not found")
+
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
+    assert HostSafetySetup._run_as_root(["swapon", "/swap.img"]) is False
+    out = capsys.readouterr().out
+    assert "🔑 sudo swapon /swap.img" in out and "❌ sudo: not found" in out
