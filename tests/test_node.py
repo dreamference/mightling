@@ -1717,6 +1717,18 @@ def test_a_node_that_cannot_sandbox_refuses_the_job_and_never_runs_it_without(
     assert NodeJob.admission_blocker(record) == reason
 
 
+def test_a_probe_that_cannot_start_is_a_reason_not_to_run_a_job(job_node, monkeypatch):
+    from dreamference.node import NodeJob
+
+    def refuse(argv, **_):
+        raise OSError("no such file: bwrap")
+
+    monkeypatch.setattr(NodeJob, "sandbox_blocker", REAL_SANDBOX_BLOCKER)
+    monkeypatch.setattr(subprocess, "run", refuse)
+    reason = NodeJob.sandbox_blocker()
+    assert "cannot sandbox a job" in reason and "no such file: bwrap" in reason
+
+
 def test_a_job_stopped_by_its_limits_is_settled_and_a_cancel_is_kept(job_node, monkeypatch):
     from dreamference.node import NodeJob
 
