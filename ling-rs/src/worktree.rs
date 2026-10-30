@@ -1462,4 +1462,13 @@ mod tests {
         assert_eq!(list(&home, &repo), vec!["No worktree sessions for this repository.".to_string()]);
         assert_eq!(list(&home, &other).len(), 3);
     }
+
+    #[test]
+    fn nothing_to_apply_is_not_a_failure() {
+        let fixture = Fixture::new("nothing");
+        let repo = fixture.repo();
+        let head = git_text(&repo, &["rev-parse", "HEAD"]).unwrap_or_default();
+        let lines = apply_between(&repo, &head, &head, "b").unwrap_or_else(|lines| panic!("{lines:?}"));
+        assert!(lines[0].starts_with("Nothing to apply"), "{lines:?}");
+    }
 }
