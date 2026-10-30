@@ -868,6 +868,20 @@ mod tests {
     }
 
     #[test]
+    fn a_file_of_exactly_the_size_cap_is_kept() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("cap.md"), &vec![b'x'; 1 << 20]);
+        write(&root.join("over.md"), &vec![b'x'; (1 << 20) + 1]);
+        let mut c = Collection::new("docs", root);
+        c.max_file_mb = 1;
+        let found = walk(&c, &home, true);
+        let rels: Vec<&str> = found.candidates.iter().map(|c| c.rel.as_str()).collect();
+        assert_eq!(rels, ["cap.md"]);
+    }
+
+    #[test]
     fn collection_globs_max_size_and_image_flag_filter_candidates() {
         let home = tempfile::tempdir().unwrap();
         let home = home.path().canonicalize().unwrap();
