@@ -157,4 +157,24 @@ mod tests {
     fn a_slash_is_encoded_and_a_tilde_kept() {
         assert_eq!(encode("a/b~c"), "a%2Fb~c");
     }
+
+    #[test]
+    fn a_request_asks_to_close_and_a_runaway_answer_is_cut() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr").to_string();
+        let head = "HTTP/1.0 200 OK\r\n\r\n";
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buffer = [0u8; 1024];
+            let read = stream.read(&mut buffer).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(&vec![b'x'; MAX_RESPONSE_BYTES + 1024]);
+            request
+        });
+        let answer = get(&addr, "/status", None, Duration::from_secs(5));
+        let request = server.join().unwrap_or_default();
+        assert!(request.contains(&format!("Host: {addr}\r\nConnection: close\r\n")), "{request}");
+        assert_eq!(answer.map(|(status, body)| (status, body.len())), Ok((200, MAX_RESPONSE_BYTES - head.len())));
+    }
 }
