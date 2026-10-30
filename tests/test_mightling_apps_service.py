@@ -856,3 +856,17 @@ def test_a_google_service_start_forgets_the_last_failure(monkeypatch, staging):
     _docker(monkeypatch, "")
     assert GoogleService.start() is True
     assert GoogleService.problem == ""
+
+
+def test_the_credentials_folder_is_made_private_or_reported(monkeypatch, tmp_path, capsys):
+    import dreamference.chat.gmail_credentials as credentials
+
+    folder = tmp_path / "gmail"
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(folder))
+    assert credentials.GmailCredentials.ensure_directory() is True
+    assert folder.stat().st_mode & 0o777 == 0o700
+    blocked = tmp_path / "a-file"
+    blocked.write_text("")
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(blocked / "gmail"))
+    assert credentials.GmailCredentials.ensure_directory() is False
+    assert "Could not create" in capsys.readouterr().out
