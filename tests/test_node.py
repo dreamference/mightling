@@ -1760,6 +1760,27 @@ def test_a_job_whose_unit_does_not_start_is_refused_and_recorded_as_failed(job_n
     assert NodeJob.read("20261002-1200-abc")["status"] == "failed"
 
 
+def test_an_airgapped_job_runs_without_network_and_a_job_runs_only_once(job_node, monkeypatch):
+    from dreamference.node import NodeJob
+
+    networks = []
+    monkeypatch.setattr(
+        NodeJob,
+        "sandbox_command",
+        classmethod(
+            lambda cls, tree, command, network, job_id, writable=(), readable=(), environment=None: (
+                networks.append(network) or list(command)
+            )
+        ),
+    )
+    record = NodeJob.submit(
+        job_request(commit=job_node["commit"], command=["true"], airgapped="on"), "/x"
+    )
+    assert NodeJob.execute(record["id"]) == 0 and networks == [False]
+    assert NodeJob.execute(record["id"]) == 1  # finished, no longer queued
+    assert networks == [False] and NodeJob.read(record["id"])["status"] == "done"
+
+
 def test_a_job_stopped_by_its_limits_is_settled_and_a_cancel_is_kept(job_node, monkeypatch):
     from dreamference.node import NodeJob
 
