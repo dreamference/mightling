@@ -1945,6 +1945,56 @@ mod tests {
     }
 
     #[test]
+    fn a_restarted_extraction_asks_for_the_peak_its_first_attempt_reached() {
+        let dir = tempfile::tempdir().unwrap();
+        const MIB: u64 = 1 << 20;
+        let scratch = dir.path().join("s");
+        std::fs::create_dir_all(&scratch).unwrap();
+        let events = scratch.join("events");
+        std::fs::write(&events, "").unwrap();
+        // The first attempt reaches 600 MiB and dies reading file 1; the second would start fresh.
+        let peak = scratch.join("peak-x1");
+        let script = format!(
+            "[ -e {p} ] && exit 0; echo {} > {p}; echo '{{\"event\":\"start\",\"id\":1}}' >> {e}; exit 1",
+            600 * MIB,
+            p = peak.display(),
+            e = events.display(),
+        );
+        let mut host = crate::host::fake::FakeHost::new(dir.path(), 0);
+        host.stand_in = vec!["/bin/sh".into(), "-c".into(), script];
+        // The first scope takes the whole ceiling and stays on the books: 700 MiB are left, above
+        // the floor but below the 720 MiB the second attempt needs.
+        host.available = host::reserve(&host) + Kind::Extract.ceiling() + 700 * MIB;
+        let env = sandboxed(&host, dir.path());
+        let phase = Phase {
+            worker: vec!["extract-worker".into()],
+            extra: Vec::new(),
+            kind: Kind::Extract,
+            letter: "x",
+            what: "the extractor",
+            timeout: Duration::from_secs(5),
+            read_only: Vec::new(),
+            failed: |id, error| Event::Failed { id, error },
+        };
+        let outcome = run_phase(
+            &env,
+            &phase,
+            "documents",
+            &[],
+            &scratch,
+            &[(1, "{}".into()), (2, "{}".into())],
+            &events,
+            0,
+        )
+        .unwrap();
+        assert!(
+            matches!(&outcome, Err(Outcome::Deferred(why)) if why.starts_with("memory")),
+            "{outcome:?}"
+        );
+        assert_eq!(host.started.lock().unwrap().len(), 1);
+    }
+
+    #[test]
     fn a_night_shift_lock_is_seen_without_taking_it() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!night_shift_active(dir.path()));
