@@ -1376,6 +1376,219 @@ mod tests {
     }
 
     #[test]
+    fn ids_and_file_names_are_checked_at_their_edges() {
+        assert!(!valid_id(&format!("{ID}0")) && !valid_id(&ID[1..]));
+        for dash in [8, 13, 18, 23] {
+            let mut bytes = ID.as_bytes().to_vec();
+            bytes[dash] = b'a';
+            assert!(!valid_id(std::str::from_utf8(&bytes).unwrap()), "no hyphen at {dash}");
+        }
+        assert!(!valid_id("01a0f1ae-2da4-7942-99ae-c3151dc137cg"));
+        assert!(!valid_file_name("rollout-x.json") && !valid_file_name("rollout-a b.jsonl") && !valid_file_name("rollout-a/b.jsonl"));
+        let name = |len: usize| format!("rollout-{}.jsonl", "a".repeat(len - "rollout-.jsonl".len()));
+        assert!(valid_file_name(&name(200)) && !valid_file_name(&name(201)));
+    }
+
+    #[test]
+    fn the_first_upload_names_a_valid_file_and_thread_and_an_empty_one_publishes_nothing() {
+        let home = scratch("first-upload");
+        let store = Store::open(&home).unwrap();
+        let laptop = agent("lap1");
+        let named = |file: Option<&str>, thread: Option<&str>| Upload { file: file.map(str::to_string), thread: thread.map(str::to_string), ..Upload::first(FILE) };
+        assert!(matches!(store.append(ID, &laptop, &named(Some("../x"), None), b"{}\n"), Err(Refusal::BadRequest(_))));
+        assert!(matches!(store.append(ID, &laptop, &named(Some(FILE), Some("../x")), b"{}\n"), Err(Refusal::BadRequest(_))));
+        assert!(store.record(ID).is_none());
+        // Nothing to take: the hub holds nothing for it afterwards.
+        store.append(ID, &laptop, &Upload::first(FILE), b"").unwrap();
+        assert!(store.record(ID).is_none() && store.threads().is_empty() && store.manifest(0).rollouts.is_empty());
+        let record = store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        // An empty upload at the hub's length changes nothing, not even the cursor.
+        store.append(ID, &laptop, &Upload::at(record.length, &record.hash), b"").unwrap();
+        assert_eq!(store.cursor(), record.seq);
+        assert_eq!(store.record(ID).unwrap().seq, record.seq);
+    }
+
+    #[test]
+    fn an_upload_may_be_eight_mib_and_not_a_byte_more() {
+        let home = scratch("cap");
+        let store = Store::open(&home).unwrap();
+        let laptop = agent("lap1");
+        assert!(matches!(store.append(ID, &laptop, &Upload::first(FILE), &vec![b'x'; UPLOAD_CAP + 1]), Err(Refusal::BadRequest(_))));
+        let record = store.append(ID, &laptop, &Upload::first(FILE), &vec![b'x'; UPLOAD_CAP]).unwrap();
+        assert_eq!(record.length, UPLOAD_CAP as u64);
+    }
+
+    /// Whether a rollout's tombstone shuts a device out is decided by who made it and how.
+    #[test]
+    fn a_rollouts_tombstone_shuts_out_every_device_but_the_owner_of_a_withdrawal() {
+        let home = scratch("tomb-gate");
+        let store = Store::open(&home).unwrap();
+        let (laptop, desktop) = (agent("lap1"), agent("desk"));
+        let elsewhere = "01a0f1ae-2da4-7942-99ae-c3151dc13700";
+        let into = Upload { thread: Some(elsewhere.to_string()), ..Upload::first(FILE) };
+        store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        store.delete(ID, &laptop).unwrap();
+        // Deleted: gone for the device that deleted it too, and for the rest.
+        assert_eq!(store.append(ID, &laptop, &into, b"{}\n").unwrap_err(), Refusal::Gone);
+        assert_eq!(store.append(ID, &desktop, &into, b"{}\n").unwrap_err(), Refusal::Gone);
+        let other = "01a0f1ae-2da4-7942-99ae-c3151dc13701";
+        let fresh = "01a0f1ae-2da4-7942-99ae-c3151dc13702";
+        let into = Upload { thread: Some(other.to_string()), ..Upload::first(FILE) };
+        store.append(other, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        store.withdraw(other, &laptop).unwrap();
+        // Withdrawn: gone for every device but the one that withdrew it.
+        assert_eq!(store.append(other, &desktop, &Upload { thread: Some(fresh.to_string()), ..Upload::first(FILE) }, b"{}\n").unwrap_err(), Refusal::Gone);
+        assert!(store.record(other).is_none());
+        assert!(store.append(other, &laptop, &into, b"{}\n").is_ok());
+    }
+
+    /// A new rollout joins a thread that was deleted or withdrawn only as its withdrawing owner.
+    #[test]
+    fn a_new_rollout_cannot_join_a_deleted_thread_or_one_another_device_withdrew() {
+        let home = scratch("tomb-thread");
+        let store = Store::open(&home).unwrap();
+        let (laptop, desktop) = (agent("lap1"), agent("desk"));
+        let later = "01a0f1ae-2da4-7942-99ae-c3151dc13700";
+        let join = |thread: &str| Upload { thread: Some(thread.to_string()), ..Upload::first(FILE) };
+        store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        store.delete(ID, &laptop).unwrap();
+        assert_eq!(store.append(later, &laptop, &join(ID), b"{}\n").unwrap_err(), Refusal::Gone);
+        assert_eq!(store.append(later, &desktop, &join(ID), b"{}\n").unwrap_err(), Refusal::Gone);
+        let kept = "01a0f1ae-2da4-7942-99ae-c3151dc13701";
+        store.append(kept, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        store.withdraw(kept, &laptop).unwrap();
+        assert_eq!(store.append(later, &desktop, &join(kept), b"{}\n").unwrap_err(), Refusal::Gone);
+        assert!(store.append(later, &laptop, &join(kept), b"{}\n").is_ok());
+    }
+
+    #[test]
+    fn a_device_told_a_thread_is_owned_is_told_where_to_publish_it() {
+        let home = scratch("owned");
+        let store = Store::open(&home).unwrap();
+        let (laptop, desktop) = (agent("lap1"), agent("desk"));
+        store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        let other = "01a0f1ae-2da4-7942-99ae-c3151dc13700";
+        let into = Upload { thread: Some(ID.to_string()), ..Upload::first(FILE) };
+        assert_eq!(store.append(other, &desktop, &into, b"z\n").unwrap_err(), Refusal::Owned { fork: fork_id(other, "desk"), thread: fork_id(ID, "desk") });
+        assert_eq!(store.append(ID, &desktop, &Upload::first(FILE), b"z\n").unwrap_err(), Refusal::Owned { fork: fork_id(ID, "desk"), thread: fork_id(ID, "desk") });
+        assert!(store.record(other).is_none());
+    }
+
+    #[test]
+    fn deleting_twice_is_the_same_answer_and_an_unknown_thread_is_not_found() {
+        let home = scratch("delete-twice");
+        let store = Store::open(&home).unwrap();
+        let laptop = agent("lap1");
+        store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        let first = store.delete(ID, &laptop).unwrap();
+        assert_eq!(store.delete(ID, &laptop).unwrap(), first);
+        assert_eq!(store.cursor(), first[0].seq);
+        let unknown = "01a0f1ae-2da4-7942-99ae-c3151dc13700";
+        assert_eq!(store.delete(unknown, &laptop).unwrap_err(), Refusal::NotFound);
+        assert_eq!(store.delete("../x", &laptop).unwrap_err(), Refusal::NotFound);
+    }
+
+    #[test]
+    fn a_manifest_after_a_cursor_holds_only_what_came_after_it() {
+        let home = scratch("manifest-edges");
+        let store = Store::open(&home).unwrap();
+        let laptop = agent("lap1");
+        let record = store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        assert!(store.manifest(record.seq).rollouts.is_empty());
+        assert_eq!(store.manifest(record.seq - 1).rollouts.len(), 1);
+        let gone = store.delete(ID, &laptop).unwrap();
+        assert!(store.manifest(gone[0].seq).tombstones.is_empty());
+        assert_eq!(store.manifest(gone[0].seq - 1).tombstones.len(), 1);
+    }
+
+    #[test]
+    fn a_read_stops_at_the_end_and_at_the_limit() {
+        let home = scratch("read-edges");
+        let store = Store::open(&home).unwrap();
+        store.append(ID, &agent("lap1"), &Upload::first(FILE), b"abcdef\n").unwrap();
+        assert_eq!(store.read(ID, 7, 100).unwrap().0, Vec::<u8>::new());
+        assert!(matches!(store.read(ID, 8, 100), Err(Refusal::BadRequest(_))));
+        assert_eq!(store.read(ID, 2, 3).unwrap().0, b"cde".to_vec());
+        assert_eq!(store.read("01a0f1ae-2da4-7942-99ae-c3151dc13700", 0, 1).unwrap_err(), Refusal::NotFound);
+    }
+
+    #[test]
+    fn a_browsers_own_reading_of_the_clock_is_not_taken_on_trust() {
+        let home = scratch("browser-clock");
+        let store = Store::open(&home).unwrap();
+        store.append(ID, &agent("lap1"), &Upload::first(FILE), b"{}\n").unwrap();
+        let phone = Caller { device: "ph1".to_string(), name: "phone".to_string(), agent: false, scope: auth::Scope::Control };
+        let claimed = Hlc { ms: now_ms() + 86_400_000, counter: 0, device: "ph1".to_string() };
+        store.set_meta(ID, &phone, None, Some(("Phone".to_string(), Some(claimed)))).unwrap();
+        let read = Hlc::parse(&store.record(ID).unwrap().name_hlc).unwrap();
+        assert!(read.ms < now_ms() + 3_600_000, "the hub's own clock, not the browser's");
+    }
+
+    #[test]
+    fn a_device_cannot_pass_off_another_devices_reading_of_the_clock() {
+        let home = scratch("agent-clock");
+        let store = Store::open(&home).unwrap();
+        let laptop = agent("lap1");
+        store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        let claimed = Hlc { ms: now_ms() + 86_400_000, counter: 0, device: "desk".to_string() };
+        store.set_meta(ID, &laptop, None, Some(("Mine".to_string(), Some(claimed)))).unwrap();
+        let read = Hlc::parse(&store.record(ID).unwrap().name_hlc).unwrap();
+        assert!(read.ms < now_ms() + 3_600_000 && read.device == "lap1");
+    }
+
+    #[test]
+    fn a_change_that_loses_to_the_clock_changes_nothing_and_moves_no_cursor() {
+        let home = scratch("stale-meta");
+        let store = Store::open(&home).unwrap();
+        let laptop = agent("lap1");
+        store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        let newer = Hlc { ms: now_ms(), counter: 0, device: "lap1".to_string() };
+        let older = Hlc { ms: now_ms() - 60_000, counter: 0, device: "lap1".to_string() };
+        store.set_meta(ID, &laptop, Some((true, Some(newer.clone()))), Some(("Kept".to_string(), Some(newer)))).unwrap();
+        let cursor = store.cursor();
+        let kept = store.set_meta(ID, &laptop, Some((false, Some(older.clone()))), Some(("Lost".to_string(), Some(older)))).unwrap();
+        assert_eq!((kept.archived, kept.name.as_deref()), (true, Some("Kept")));
+        assert_eq!(store.cursor(), cursor);
+        assert!(matches!(store.set_meta("01a0f1ae-2da4-7942-99ae-c3151dc13700", &laptop, Some((true, None)), None), Err(Refusal::NotFound)));
+    }
+
+    #[test]
+    fn a_name_is_cut_to_two_hundred_characters_and_this_machine_always_controls() {
+        let home = scratch("name-cap");
+        let store = Store::open(&home).unwrap();
+        let laptop = agent("lap1");
+        store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        let record = store.set_meta(ID, &laptop, None, Some(("n".repeat(300), None))).unwrap();
+        assert_eq!(record.name.unwrap().chars().count(), 200);
+        assert!(Caller::owner_session().can_control());
+        assert!(!Caller { scope: auth::Scope::Watch, ..Caller::owner_session() }.can_control());
+    }
+
+    #[test]
+    fn threads_are_listed_newest_first() {
+        let home = scratch("order");
+        let store = Store::open(&home).unwrap();
+        let laptop = agent("lap1");
+        let second = "01a0f1ae-2da4-7942-99ae-c3151dc13700";
+        store.append(ID, &laptop, &Upload::first(FILE), b"{}\n").unwrap();
+        store.append(second, &laptop, &Upload::first(&FILE.replace("01a0f1ae-2da4-7942-99ae-c3151dc137cc", second)), b"{}\n").unwrap();
+        for (rollout, updated) in [(ID, 100), (second, 200)] {
+            store.lock().rollouts.get_mut(rollout).unwrap().updated = updated;
+        }
+        let order: Vec<u64> = store.threads().iter().map(|view| view.updated).collect();
+        assert_eq!(order, [200, 100]);
+    }
+
+    #[tokio::test]
+    async fn a_wait_for_a_change_lasts_until_one_comes_or_the_time_is_up() {
+        let home = scratch("wait");
+        let store = Store::open(&home).unwrap();
+        let started = std::time::Instant::now();
+        store.wait_past(store.cursor(), std::time::Duration::from_millis(300)).await;
+        assert!(started.elapsed() >= std::time::Duration::from_millis(250), "nothing came past the cursor, so it waited");
+    }
+
+    #[test]
     fn the_hub_is_off_until_enabled_and_off_keeps_the_store() {
         let home = scratch("enabled");
         assert!(!enabled(&home));
