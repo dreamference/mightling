@@ -764,8 +764,8 @@ def test_paging_and_fair_pairing_are_off_in_the_recipe_and_switchable_per_launch
         )
 
     off = args()
-    # Flat and unfair, said explicitly; the sessions the pool would hold are not asked of flat slots.
-    assert "--no-kv-pages" in off and "--kv-pages" not in off and "--sessions" not in off
+    # Flat and unfair, said explicitly; the sessions are the recipe's, flat or paged.
+    assert "--no-kv-pages" in off and "--kv-pages" not in off and "--sessions" in off
     assert flag(off, "--fair-pairing") == "0"
     # The recipe turns either on; the environment of a night arm turns it back, or on, per launch.
     on = args(kv_pages=True, fair_pairing=True)

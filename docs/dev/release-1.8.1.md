@@ -20,14 +20,14 @@ The 1.8.1 cut is a short list because everything before it is already on `prep/1
   `model_matrix_registry.py` (machines by role only), and add `LING_ENGINE_PAGING_SWITCH_SINCE` and
   `LING_ENGINE_FAIR_PAIRING_SINCE` (the engine commits that introduced `--no-kv-pages` and `--fair-pairing`) with a
   test beside `test_a_ling_engine_recipe_lists_kv_pages_exactly_when_its_commit_has_the_page_pool`.
-  `test_ling_serve_plan_runs_plan_only...` asks the plan of the recipe as it launches: with `paging` off the plan has
+  `test_ling_serve_plan_runs_plan_only...` asks the plan of the recipe as it launches: with `kv_pages` off the plan has
   no pool, so check what it asserts.
 - An arm sets `DREAMFERENCE_LING_PAGING` and `DREAMFERENCE_LING_FAIR_PAIRING` (`0` or `1`) in the environment of
   `ling-admin server start`; `server status` shows `KV cache` and `Fair pairing`, and `docker inspect` the flags.
 
 ## After the verdict (the verdict names the two defaults)
 
-1. In `model_matrix_registry.py`, `QWEN38_LING_RECIPE`: `"paging"` to `True` only if the paging default is on,
+1. In `model_matrix_registry.py`, `QWEN38_LING_RECIPE`: `"kv_pages"` to `True` only if the paging default is on,
    `"fair_pairing"` to `True` only if the fair-pairing default is on. `"vision"` is `True` (image input).
    Update `test_paging_and_fair_pairing_are_off_in_the_recipe_and_switchable_per_launch` to the new defaults.
 2. The pin: if the night ran on the candidate image and it passed, the candidate commit and digest become the pin
@@ -44,3 +44,15 @@ The 1.8.1 cut is a short list because everything before it is already on `prep/1
    succeeded on that commit (`docs/dev/release-on-green.md`); to go sooner, dispatch the Release dry run on main by
    hand. The tag and the publish are `release.yml`'s, never done by hand.
 7. Ragon 1.9.0 is cut the day after, if 1.8.1 needs no hotfix in its first day.
+
+## State of the candidate (2026-10-30)
+
+- The image is the 1.8.0 one, reused: ling-engine 4853a93 (fair pairing and the head-major page pool merged, both
+  off by default, image input in), `ling-serve@sha256:311325fe9f57768ad3ed920cba1580ef359a73c4c9246b308bcde2f506f27338`.
+  The SINCE constants and the feature list are in; the recipe's `kv_pages` and `fair_pairing` are off, `vision` on.
+- Open items (from the vision checks; they belong to the paging-on variant `prep/1.8.1-paging-on`):
+  - the paged image checks still owed before paging ships: prefix, resume and batch;
+  - with paging on, the harness's pool gauge (`max_total_num_tokens`) reads below sessions x context, so the harness
+    admits three conversations, not four (tests/server test_sessions, test_regression);
+  - the flat launch with vision on plans 1.7 GB more (99.3 GB available needed against 97.6 GB without); a
+    desktop-capped host with 85-97 GB available refuses it, flat or not.

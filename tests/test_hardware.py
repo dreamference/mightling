@@ -557,6 +557,32 @@ def test_a_ling_engine_recipe_lists_kv_pages_exactly_when_its_commit_has_the_pag
     assert ("kv-pages" in (recipe.get("engine_features") or [])) == descends, commit
 
 
+def test_a_ling_engine_recipe_lists_the_switch_features_exactly_when_its_commit_has_them():
+    from pathlib import Path
+
+    import pytest
+
+    import dreamference.hardware.model_matrix_registry as registry
+
+    engine = Path(__file__).resolve().parent.parent / "ling-engine"
+    recipe = registry.ModelMatrixRegistry.get_launch_overrides(registry.DEFAULT_MODEL_ALIAS, "ling")
+    commit = recipe.get("engine_commit", "")
+    for feature, since in (
+        ("paging-switch", registry.LING_ENGINE_PAGING_SWITCH_SINCE),
+        ("fair-pairing", registry.LING_ENGINE_FAIR_PAIRING_SINCE),
+    ):
+        known = [
+            subprocess.run(["git", "-C", str(engine), "cat-file", "-e", c + "^{commit}"], capture_output=True)
+            for c in (since, commit)
+        ]
+        if not commit or any(r.returncode != 0 for r in known):
+            pytest.skip("the ling-engine submodule lacks the commits (fetch it)")
+        descends = subprocess.run(
+            ["git", "-C", str(engine), "merge-base", "--is-ancestor", since, commit], capture_output=True
+        ).returncode == 0
+        assert (feature in (recipe.get("engine_features") or [])) == descends, feature
+
+
 def test_a_model_refused_for_memory_is_told_the_budget_it_was_compared_against(monkeypatch):
     # The check allows 95% of the total; the message used to call the total "available", so a
     # model needing less than that total was refused as if it needed more.

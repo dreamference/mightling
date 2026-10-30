@@ -434,7 +434,7 @@ QWEN38_LING_ENGINE_COMMIT: Final[str] = "4853a93a4996339ec1867c68704c761d83d75dd
 # a list rather than git: "sparse-head" (the drafter's sparse head, read from a file beside the
 # drafter) from ling-engine ec9dce8 on. A checkout-only test keeps the list true to the commit's
 # ancestry. Empty at 1.7.2's 8d112d0; "kv-pages" (f180b44) and "sparse-head" (ec9dce8) are both ancestors of 4853a93.
-QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ("kv-pages", "sparse-head")
+QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ("kv-pages", "sparse-head", "paging-switch", "fair-pairing")
 
 # The last commit of ling-engine's P4b (BATCHING §5.3: `--kv-pages` with the KV page pool, admission by
 # pages, reclaim of idle sessions, the last resort), which is what lets four sessions at 262,144 tokens
@@ -445,6 +445,13 @@ QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ("kv-pages", "sparse-head"
 # plan these flags were measured against). P4d's merge keeps the flat slots the default and takes
 # `--kv-pages` (and `--no-kv-pages`), so this commit stays the boundary for the flags.
 LING_ENGINE_KV_PAGES_SINCE: Final[str] = "f180b44a40369d7dd03f9ae97e7fa8be4ece1380"
+
+# The first ling-engine commits with `--no-kv-pages` (P4d, the pool becoming the engine's default) and with
+# `--fair-pairing` (the scheduler's pairing switch). A recipe lists "paging-switch" / "fair-pairing" in
+# `engine_features` exactly when its `engine_commit` descends from the one; an engine before either exits 2
+# on the flag, so the launch passes it only then.
+LING_ENGINE_PAGING_SWITCH_SINCE: Final[str] = "c818a28de1f2e8a444ba6a6654d9a984e1c99903"
+LING_ENGINE_FAIR_PAIRING_SINCE: Final[str] = "51b7372fbd69b43e83d980ea5e1047bcb86e57bd"
 
 # The sessions and the batch the recipe asks of an engine with the "kv-pages" feature: four
 # conversations at once (the owner's bar of 2026-10-28; BATCHING §5.3 P4d), flat at 1.8.0 and paged
