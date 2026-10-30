@@ -468,6 +468,16 @@ mod tests {
     }
 
     #[test]
+    fn plain_text_that_holds_markup_is_kept_as_it_is() {
+        let source = b"<title>T</title> if a < b: print('<p>')";
+        let text = page("u", "f".into(), 200, "text/plain".into(), source, 100);
+        assert_eq!(
+            (text.title.as_str(), text.text.as_bytes()),
+            ("", &source[..])
+        );
+    }
+
+    #[test]
     fn text_is_cut_at_a_character_count_and_marked() {
         let long = page(
             "u",
