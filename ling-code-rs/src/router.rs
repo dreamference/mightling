@@ -1902,7 +1902,7 @@ impl Context {
                         ", peak {} MiB{}",
                         entry.peak_rss_mb,
                         if entry.peak_cap_bounded {
-                            " (cap-bounded)"
+                            " (cap-bounded: the next need is not capped)"
                         } else {
                             ""
                         }
