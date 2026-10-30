@@ -1062,3 +1062,108 @@ def test_the_third_party_confirmation_needs_a_terminal(monkeypatch, capsys):
 
     monkeypatch.setattr("sys.stdin", Terminal("rust\n"))
     assert AdapterCommand._confirm(manifest) is True
+
+
+# -- the command's refusals and exit codes ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "repo", "third_party"),
+    [
+        ("rust", "org/repo@abc", False),
+        (None, None, False),
+        ("rust", None, True),
+    ],
+    ids=["name-and-repo", "neither", "third-party-from-the-catalogue"],
+)
+def test_an_install_it_cannot_read_is_a_usage_error_with_nothing_fetched(
+    monkeypatch, name, repo, third_party
+):
+    import argparse
+
+    monkeypatch.setattr(
+        AdapterInstaller, "install", classmethod(lambda cls, *a, **k: pytest.fail("nothing fetched"))
+    )
+    args = argparse.Namespace(name=name, repo=repo, third_party=third_party)
+    assert AdapterCommand._install(args, None, object()) == 2
+
+
+def test_removing_an_adapter_that_is_not_installed_fails_and_withdraws_nothing(monkeypatch, capsys):
+    import argparse
+
+    from dreamference.vllm_server.adapter_serving import AdapterServing
+
+    monkeypatch.setattr(AdapterInstaller, "remove", classmethod(lambda cls, name: False))
+    monkeypatch.setattr(
+        AdapterServing, "withdraw", classmethod(lambda cls, name: pytest.fail("nothing to withdraw"))
+    )
+    assert AdapterCommand._remove(argparse.Namespace(name="rust"), None) == 1
+    assert "No adapter named rust" in capsys.readouterr().out
+
+
+def test_verify_fails_when_any_adapter_fails_and_for_a_name_not_installed(monkeypatch):
+    import argparse
+
+    entries = {"go": {"name": "go"}, "rust": {"name": "rust"}}
+    monkeypatch.setattr(AdapterStore, "entries", classmethod(lambda cls: dict(entries)))
+    checked = []
+
+    def verify(cls, entry, base):
+        checked.append(entry["name"])
+        return "signature does not match" if entry["name"] == "rust" else None
+
+    monkeypatch.setattr(AdapterInstaller, "verify", classmethod(verify))
+    assert AdapterCommand._verify(argparse.Namespace(name=None), None) == 1
+    assert checked == ["go", "rust"], "one failure does not stop the others' check"
+    assert AdapterCommand._verify(argparse.Namespace(name="go"), None) == 0
+    checked.clear()
+    assert AdapterCommand._verify(argparse.Namespace(name="java"), None) == 1
+    assert checked == []
+    entries.clear()
+    assert AdapterCommand._verify(argparse.Namespace(name=None), None) == 0
+
+
+def test_a_terminal_that_closes_at_the_confirmation_installs_nothing(monkeypatch):
+    from dreamference.hardware.adapter_manifest import AdapterManifest
+
+    manifest = AdapterManifest(
+        name="rust",
+        display_name="Rust",
+        version="1",
+        description="d",
+        base_repo=BASE_REPO,
+        base_revision="r",
+        base_digest="d",
+        rank=8,
+        target_modules=("q_proj",),
+    )
+
+    class ClosedTerminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr("sys.stdin", ClosedTerminal(""))
+    assert AdapterCommand._confirm(manifest) is False
+
+
+def test_list_marks_an_adapter_for_another_base_as_a_mismatch(monkeypatch, capsys):
+    import argparse
+
+    from dreamference.hardware.adapter_store import TRUST_THIRD_PARTY
+
+    entries = {
+        "go": {"name": "go", "base_repo": BASE_REPO, "base_revision": "r1"},
+        "rust": {"name": "rust", "base_repo": BASE_REPO, "base_revision": "r0", "trust": TRUST_THIRD_PARTY},
+    }
+    monkeypatch.setattr(AdapterStore, "entries", classmethod(lambda cls: entries))
+    monkeypatch.setattr(AdapterCatalog, "available", classmethod(lambda cls: pytest.fail("not asked")))
+    base = {"repo": BASE_REPO, "revision": "r1", "key": "k", "source": "node"}
+    listed = AdapterCommand._list(argparse.Namespace(available=False, json=True), base)
+    assert listed == 0
+    rows = {row["name"]: row["base_matches"] for row in json.loads(capsys.readouterr().out)["installed"]}
+    assert rows == {"go": True, "rust": False}
+    # Without a served base nothing matches, and the text says so for each row.
+    assert AdapterCommand._list(argparse.Namespace(available=False, json=False), None) == 0
+    out = capsys.readouterr().out
+    assert "no model of the matrix" in out
+    assert out.count("base mismatch") == 2 and "third-party" in out
