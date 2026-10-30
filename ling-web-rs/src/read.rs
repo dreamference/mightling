@@ -505,4 +505,10 @@ mod tests {
         assert!(read.sources[0].truncated);
         assert!(render_text(&read).contains("[page trimmed to fit; ling-fetch the URL for more]"));
     }
+
+    #[test]
+    fn a_search_with_nothing_to_read_says_so() {
+        let read = read(found(vec![]), 3, &|_: &str, _| panic!("nothing to fetch"));
+        assert_eq!(render_text(&read), "No results to read.\n");
+    }
 }
