@@ -31,7 +31,10 @@ from dreamference.vllm_server.ling_serve_launch_builder import (
     LING_SERVE_PROGRAM,
     LingServeLaunchBuilder,
 )
-from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
+from dreamference.vllm_server.vllm_server_manager import (
+    LING_SERVE_HOST_RESERVE_GB,
+    VLLMServerManager,
+)
 
 SERVED_ID = "RadixArk/Qwen3.8-27B-NVFP4"
 DOCKERFILE = Path(__file__).resolve().parent.parent / "docker" / "ling-serve" / "Dockerfile"
@@ -505,23 +508,23 @@ def test_ling_serve_plan_is_none_when_the_line_lacks_a_key_the_check_reads(monke
     assert _plan_only_stdout(monkeypatch, line) is None
 
 
-# ling-serve keeps 16 GB of the host's MemAvailable for the host (ling-engine BATCHING §5.6, the
-# default --host-reserve-mb), so the plan it reports is about MemAvailable - 16 GB. The pre-load check
-# adds the load peak and the side services to it: a plan that takes all the engine may take therefore
-# starts only when those two together stay under the engine's 16 GB.
-ENGINE_HOST_RESERVE_GB = 16.0
+# ling-serve keeps 16,384 MiB of the host's MemAvailable for the host (ling-engine BATCHING §5.6, the
+# default --host-reserve-mb), so the plan it reports is about MemAvailable - that reserve. The pre-load
+# check adds the reserve, the load peak and the side services to the plan: a plan that leaves 16 GB of
+# headroom beyond the reserve starts only when the peak and the side services together stay under it.
+ENGINE_HEADROOM_GB = 16.0
 
 
 @pytest.mark.parametrize(
     ("transient_gb", "side_gb", "starts"),
     [(8.0, 2.0, True), (12.0, 3.9, True), (14.0, 4.0, False), (16.5, 0.0, False)],
 )
-def test_the_pre_load_check_on_a_full_plan_turns_on_the_engines_16_gb_reserve(
+def test_the_pre_load_check_counts_the_engines_host_reserve(
     monkeypatch, capsys, transient_gb, side_gb, starts
 ):
     mgr = VLLMServerManager()
     available_gb = 110.0  # _stub_start's telemetry
-    planned_gb = available_gb - ENGINE_HOST_RESERVE_GB
+    planned_gb = available_gb - LING_SERVE_HOST_RESERVE_GB - ENGINE_HEADROOM_GB
     calls: dict = {
         "plan": {
             "sessions": 4,
@@ -537,7 +540,7 @@ def test_the_pre_load_check_on_a_full_plan_turns_on_the_engines_16_gb_reserve(
         "side_service_allowance",
         lambda: [("the forge, mightling-forge", side_gb)] if side_gb else [],
     )
-    assert (transient_gb + side_gb < ENGINE_HOST_RESERVE_GB) == starts
+    assert (transient_gb + side_gb < ENGINE_HEADROOM_GB) == starts
     if starts:
         with pytest.raises(TypeError):  # past the check; the launch itself is stubbed out
             mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
@@ -549,7 +552,10 @@ def test_the_pre_load_check_on_a_full_plan_turns_on_the_engines_16_gb_reserve(
         out = capsys.readouterr().out
         assert "Not enough memory to start ling-serve." in out
         assert f"Plan:        {planned_gb:.2f} GB" in out
-        assert f"Required:    {planned_gb + transient_gb + side_gb:.2f} GB" in out
+        assert (
+            f"Required:    {planned_gb + LING_SERVE_HOST_RESERVE_GB + transient_gb + side_gb:.2f} GB"
+            in out
+        )
         assert ("the forge, mightling-forge" in out) == bool(side_gb)
 
 
@@ -916,3 +922,101 @@ def test_the_last_plan_ling_serve_prints_is_the_one_taken(monkeypatch):
 def test_a_plan_from_a_ling_serve_that_failed_is_not_taken(monkeypatch):
     plan = '{"sessions":3,"batch":3,"max_context":262144,"planned_bytes":82400000000}'
     assert _plan_from(monkeypatch, 1, f"{plan}\n") is None
+
+
+def _cut_setup(monkeypatch, available_gb, recipe_sessions=None, base_gb=0.0):
+    """_stub_start with `available_gb` free and a plan of base_gb plus an even share a session (81.2 GB for 4)."""
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    mgr = VLLMServerManager()
+    calls: dict = {}
+    _stub_start(monkeypatch, mgr, calls)
+    monkeypatch.setattr(mgr, "load_transient_gb", lambda model, weights_gb: (4.0, "test"))
+    monkeypatch.setattr(mgr, "side_service_allowance", list)
+    monkeypatch.setattr(
+        "dreamference.hardware.hardware_manager.HardwareManager.detect_gb10_hardware",
+        classmethod(
+            lambda cls: HardwareTelemetry(
+                is_gb10=True,
+                gpu_name="NVIDIA GB10",
+                driver_version="0",
+                arch="aarch64",
+                total_unified_memory_gb=121.0,
+                available_memory_gb=available_gb,
+                used_memory_gb=0.0,
+                vram_gb=0.0,
+            )
+        ),
+    )
+    asked: list = []
+
+    def plan(image, model, recipe):
+        asked.append(recipe["sessions"])
+        return {
+            "sessions": recipe["sessions"],
+            "batch": recipe["batch"],
+            "max_context": 196608,
+            "planned_bytes": int(base_gb * 1e9 + recipe["sessions"] * (81.2 - base_gb) / 4 * 1e9),
+        }
+
+    monkeypatch.setattr(mgr, "ling_serve_plan", plan)
+    if recipe_sessions is not None:
+        real = ModelMatrixRegistry.get_launch_overrides
+        monkeypatch.setattr(
+            ModelMatrixRegistry,
+            "get_launch_overrides",
+            classmethod(lambda cls, m, e=None: {**real(m, e), "sessions": recipe_sessions}),
+        )
+    calls["asked"] = asked
+    return mgr, calls
+
+
+def test_four_sessions_that_fit_start_unchanged_and_without_a_warning(monkeypatch, capsys):
+    mgr, calls = _cut_setup(monkeypatch, 110.0)  # 81.2 + 17.2 + 4 = 102.4
+    with pytest.raises(TypeError):
+        mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
+    assert calls["asked"] == [4]
+    assert "Only" not in capsys.readouterr().out
+
+
+def test_short_memory_cuts_the_sessions_and_says_so(monkeypatch, capsys):
+    mgr, calls = _cut_setup(monkeypatch, 85.0)  # 3 sessions: 60.9 + 17.2 + 4 = 82.1
+    seen: dict = {}
+    real = VLLMServerManager.build_launch_command
+    monkeypatch.setattr(
+        mgr,
+        "build_launch_command",
+        lambda **kw: seen.update(kw) or (_ for _ in ()).throw(TypeError("stop")),
+    )
+    with pytest.raises(TypeError):
+        mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
+    assert calls["asked"] == [4, 3]
+    assert seen["ling_sessions"] == 3
+    assert (
+        "⚠️  Only 3 of 4 sessions fit in the memory available (85.0 GB)" in capsys.readouterr().out
+    )
+    from dreamference.hardware.model_matrix_registry import ENGINE_LING as LING
+
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+    cmd = real(mgr, model=DEFAULT_MODEL_ALIAS, engine=LING, ling_sessions=3)
+    assert cmd[cmd.index("--sessions") + 1] == "3" and cmd[cmd.index("--batch") + 1] == "3"
+    assert "--host-reserve-mb" not in cmd
+    full = real(mgr, model=DEFAULT_MODEL_ALIAS, engine=LING)
+    assert full[full.index("--sessions") + 1] == "4" and "--host-reserve-mb" not in full
+
+
+def test_one_session_that_does_not_fit_still_aborts(monkeypatch, capsys):
+    # A plan that is mostly weights: one session is still 61.6 GB, plus 17.2 + 4 for the reserve and the peak.
+    mgr, calls = _cut_setup(monkeypatch, 60.0, base_gb=55.0)
+    with pytest.raises(SystemExit):
+        mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
+    assert calls["asked"] == [4, 3, 2, 1]
+    assert "Not enough memory to start ling-serve." in capsys.readouterr().out
+
+
+def test_sessions_set_by_the_recipe_are_refused_not_cut(monkeypatch, capsys):
+    mgr, calls = _cut_setup(monkeypatch, 70.0, recipe_sessions=3)  # 3 sessions need 82.1 GB
+    with pytest.raises(SystemExit):
+        mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
+    assert calls["asked"] == [3]
+    assert "Only" not in capsys.readouterr().out
