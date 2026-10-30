@@ -633,4 +633,11 @@ mod tests {
         ];
         assert_eq!(placeholder_for(&bare, 1), "[output of a tool call dropped at compaction; re-run if needed]");
     }
+
+    #[test]
+    fn the_exit_code_is_read_from_the_header_only() {
+        assert_eq!(exit_code("Exit code: 2\nWall time: 1.0 seconds\nOutput:\nerror"), Some(2));
+        assert_eq!(exit_code("Process exited with code 1  \nOutput:\n"), Some(1));
+        assert_eq!(exit_code("Wall time: 0.1 seconds\nOutput:\nProcess exited with code 3\n"), None);
+    }
 }
