@@ -12,6 +12,7 @@ import pytest
 from dreamference.forge.forge_accounts import ForgeAccounts
 from dreamference.forge.forge_backup import ForgeBackup
 from dreamference.forge.forge_command import USAGE_EXIT, ForgeCommand
+from dreamference.forge.forge_github_mirror import ForgeGithubMirror
 from dreamference.forge.forge_mirrors import ForgeMirrors
 from dreamference.forge.forge_move import ForgeMove
 from dreamference.forge.forge_repositories import ForgeRepositories
@@ -100,3 +101,39 @@ def test_a_key_file_that_cannot_be_read_adds_nothing(monkeypatch, capsys, tmp_pa
     args = argparse.Namespace(forge_command="key", key_command="add", file=str(tmp_path / "x.pub"))
     assert ForgeCommand.dispatch(args) == 1
     assert "x.pub" in capsys.readouterr().out
+
+
+@pytest.fixture
+def github(monkeypatch):
+    saved = []
+    monkeypatch.setattr(
+        ForgeGithubMirror, "settings", classmethod(lambda cls: {"account": "acct-old"})
+    )
+    monkeypatch.setattr(
+        ForgeGithubMirror,
+        "save_settings",
+        classmethod(lambda cls, enabled, account: saved.append((enabled, account))),
+    )
+    monkeypatch.setattr(ForgeGithubMirror, "destinations", classmethod(lambda cls: []))
+    return saved
+
+
+def mirror_args(run=False, off=False, account=None):
+    return argparse.Namespace(forge_command="github-mirror", run=run, off=off, account=account)
+
+
+def test_the_github_mirror_runs_now_or_turns_off_keeping_the_account(github, monkeypatch, capsys):
+    monkeypatch.setattr(ForgeGithubMirror, "run", classmethod(lambda cls: 4))
+    assert ForgeCommand.dispatch(mirror_args(run=True)) == 4
+    assert github == []
+
+    assert ForgeCommand.dispatch(mirror_args(off=True)) == 0
+    assert github == [(False, "acct-old")]
+    assert "nothing on GitHub was changed" in capsys.readouterr().out
+
+
+def test_the_github_mirror_turns_on_for_the_account_given_or_the_one_saved(github, capsys):
+    assert ForgeCommand.dispatch(mirror_args(account="acct-new")) == 0
+    assert ForgeCommand.dispatch(mirror_args()) == 0
+    assert github == [(True, "acct-new"), (True, "acct-old")]
+    assert "Destinations: none yet" in capsys.readouterr().out
