@@ -400,7 +400,7 @@ Every run with graded results that finished between 2026-10-20 and 2026-10-29, c
 | Code | Category | Rule |
 |---|---|---|
 | I | Harness or infrastructure | The run or its eval failed for a reason outside the agent and the model: status `error`, an image pull, a test that fails on the network for the reference patch too |
-| Pe | Engine output: SGLang phase bug, no patch | A run with the phase bug; status `empty` or `stalled`, or no patch; the last message announces a step |
+| Pe | Engine output: SGLang phase bug, no patch | A run with the phase bug; status `empty` or `stalled`, or no patch (the last message is usually an announced step) |
 | Pp | Engine output: SGLang phase bug, partial patch | A run with the phase bug; status `done` with a patch that fails the hidden tests; the last message announces a step it never took. Two causes at once: on n12, 9 of the 16 also fail on the engine arm |
 | X | Engine output: raw tool call | A message holds the raw `</parameter></function></tool_call>` text of a tool call the engine did not parse |
 | L | Agent loop | No patch, or the agent stopped before testing, on a server without the phase bug |
@@ -615,7 +615,7 @@ The raw tool-call text (X) is ling-serve's only engine-output failure: 3 tasks o
 | List | Holds an I task |
 |---|---|
 | `fresh-51m.txt` (the 1.8.0 bar night) | None |
-| `night18-list` to `night22a-list` | None |
+| The night 18, 19, 21 and 22a lists | None |
 | `fresh-150k-1of3`, `fresh-61j`, `sample-100` | `requests-2317` |
 | `fresh-150k-2of3`, `fresh-50d`, `night8-list` | `requests-1766` |
 
@@ -635,7 +635,7 @@ No task fails for an infrastructure reason on every night: the two TLS tasks are
 | `sympy-19040` | W | X | – | T | W |
 | `sympy-21596` | Pe | T | – | W | W |
 
-| Run | Wall time on the 12 | Wall time on all 50 |
+| Run | Summed task wall time on the 12 | Summed task wall time on all 50 |
 |---|---|---|
 | n12 engine | 4.3 h | 10.5 h |
 | n17 SGLang | 3.8 h | 11.3 h |
