@@ -939,3 +939,44 @@ def test_a_file_system_without_hard_links_still_gets_a_whole_key(tmp_path, monke
     assert len(key) == 32 and (tmp_path / KEY_NAME).read_bytes() == key
     assert (tmp_path / KEY_NAME).stat().st_mode & 0o777 == 0o600
     assert [path.name for path in tmp_path.iterdir()] == [KEY_NAME]
+
+
+def test_status_is_asked_without_the_secret_even_when_none_is_set_up(tmp_path):
+    # /status exposes no mail, so a node not set up yet can still say whether it runs.
+    seen = []
+
+    class Answer(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def answered(request, timeout=None):
+        seen.append(request)
+        return Answer(b'{"connected": false}')
+
+    with (
+        patch.object(client_module, "SERVICE_SECRET_PATH", str(tmp_path / "missing")),
+        patch("urllib.request.urlopen", answered),
+    ):
+        assert GmailClient.status() == {"connected": False}
+    assert seen[0].full_url.endswith("/status")
+    assert seen[0].header_items() == []
+
+
+def test_replies_that_are_not_json_read_as_errors(tmp_path):
+    secret = tmp_path / "service-secret"
+    secret.write_text("s")
+
+    def error_page(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, 500, "x", {}, io.BytesIO(b"<html>"))
+
+    def garbage(request, timeout=None):
+        return io.BytesIO(b"<html>")
+
+    with patch.object(client_module, "SERVICE_SECRET_PATH", str(secret)):
+        with patch("urllib.request.urlopen", error_page):
+            assert GmailClient.search("x") == {"error": "Gmail service answered HTTP 500."}
+        with patch("urllib.request.urlopen", garbage):
+            assert "not JSON" in GmailClient.search("x")["error"]
