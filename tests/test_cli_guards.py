@@ -15,14 +15,19 @@ def _no_migration(monkeypatch):
     "argv",
     [["index"], ["index", "--force"], ["server", "start"], ["codex", "build"]],
 )
-def test_a_night_run_holding_the_runner_stops_loads_builds_and_index_runs(monkeypatch, capsys, argv):
+def test_a_night_run_holding_the_runner_stops_loads_builds_and_index_runs(
+    monkeypatch, capsys, argv
+):
     from dreamference import context_engine
     from dreamference.night_shift import NightShiftQueue
     from dreamference.node import NodeIdentity
     from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
 
     monkeypatch.setattr(NightShiftQueue, "runner_holder", classmethod(lambda cls: "pid 99"))
-    refuse = lambda *a, **k: pytest.fail(f"`ling-admin {' '.join(argv)}` started work beside a night run")
+
+    def refuse(*args, **kwargs):
+        pytest.fail(f"`ling-admin {' '.join(argv)}` started work beside a night run")
+
     monkeypatch.setattr(context_engine, "ContextEngine", refuse)
     monkeypatch.setattr(NodeIdentity, "ensure", classmethod(refuse))
     monkeypatch.setattr(CodexBrandedBuilder, "build", classmethod(refuse))

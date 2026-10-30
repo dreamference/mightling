@@ -79,7 +79,8 @@ def test_a_tool_that_cannot_be_had_installs_nothing(download, tmp_path, monkeypa
             raise download
         return download
 
-    tool = PinnedTool(hashlib.sha256(data).hexdigest(), "scip", "0.10.0", "https://github.com/x/scip.tar.gz", "scip")
+    url = "https://github.com/x/scip.tar.gz"
+    tool = PinnedTool(hashlib.sha256(data).hexdigest(), "scip", "0.10.0", url, "scip")
     monkeypatch.setattr(CodeIndexSetup, "_download", classmethod(fetch))
     assert CodeIndexSetup.install_tool(tool) is False
     bin_dir = tmp_path / "install" / "bin"
@@ -91,7 +92,8 @@ def test_an_unreadable_dotnet_package_installs_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(code_setup, "INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(code_setup, "INDEXERS_DIR", str(tmp_path / "indexers"))
     package = b"not a zip"
-    tool = PinnedTool(hashlib.sha256(package).hexdigest(), "scip-dotnet", "0.2.14", "https://api.nuget.org/x.nupkg", "tools/")
+    url = "https://api.nuget.org/x.nupkg"
+    tool = PinnedTool(hashlib.sha256(package).hexdigest(), "scip-dotnet", "0.2.14", url, "tools/")
     monkeypatch.setattr(CodeIndexSetup, "_download", classmethod(lambda cls, url: package))
     monkeypatch.setattr(CodeIndexSetup, "dotnet_major", classmethod(lambda cls, dotnet: 9))
     assert CodeIndexSetup.install_tool(tool) is False

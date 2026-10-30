@@ -217,12 +217,17 @@ def test_a_pinned_archive_without_its_library_installs_nothing_of_it(pinned, mon
     monkeypatch.setitem(
         docs_index_setup.LIBRARIES,
         "aarch64",
-        [("https://x/pdfium.tgz", hashlib.sha256(empty).hexdigest(), *libraries[0][2:]), libraries[1]],
+        [
+            ("https://x/pdfium.tgz", hashlib.sha256(empty).hexdigest(), *libraries[0][2:]),
+            libraries[1],
+        ],
     )
     assert DocsIndexSetup.install("aarch64") is False
     target = tmp_path / "lib" / "ling-docs" / "libpdfium.so"
     assert not target.exists()
-    assert not pathlib.Path(DocsIndexSetup.stamp_path(str(target))).exists(), "no pin without the file"
+    assert not pathlib.Path(DocsIndexSetup.stamp_path(str(target))).exists(), (
+        "no pin without the file"
+    )
 
 
 class _Response(io.BytesIO):
