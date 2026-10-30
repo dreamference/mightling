@@ -1075,6 +1075,15 @@ mod tests {
     }
 
     #[test]
+    fn a_held_tool_call_goes_on_when_the_stream_ends_without_a_terminal_event() {
+        let (nudged, _) = memory();
+        let call = item(json!({"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"ls\"}", "call_id": "c1"}));
+        let out = run(vec![Ok(ResponseEvent::OutputItemDone(call))], nudged, true);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(&out[0], Ok(ResponseEvent::OutputItemDone(ResponseItem::FunctionCall { .. }))));
+    }
+
+    #[test]
     fn with_the_detector_off_only_the_cap_is_handled() {
         let (nudged, _) = memory();
         let out = run(looping_reasoning(12), nudged, false);
