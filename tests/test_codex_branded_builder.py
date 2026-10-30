@@ -1489,3 +1489,10 @@ def test_a_patch_that_checks_clean_but_fails_to_apply_stops_the_export(
     monkeypatch.setattr(CodexBrandedBuilder, "git_apply", classmethod(git_apply))
     with pytest.raises(subprocess.CalledProcessError):
         CodexBrandedBuilder.prepare_source(str(tmp_path / "export"))
+
+
+def test_an_export_whose_version_cannot_be_stamped_is_not_built(stand_in_codex, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "stamp_version", classmethod(lambda cls, manifest, version: False)
+    )
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "export")) is False
