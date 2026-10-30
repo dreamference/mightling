@@ -1,26 +1,46 @@
-"""Night Shift's runner under faults: the agent killed, the worktree gone, the disk full, a
-corrupt queue file, noisy agent output.
+"""A night run under faults: nothing is lost, merged or pushed, and the report says what happened.
 
-Whatever goes wrong, no queue entry is lost, nothing is merged or pushed, and the report says
-what happened to each task. The stand-in `ling` and the repository come from test_night_shift.py.
+The faults: a killed agent, a removed worktree, a full disk, a corrupt queue file, noisy agent
+output, a clock jump and a second run. The stand-in `ling` and the repository come from
+test_night_shift.py.
 """
 
-import json
-import os
-import signal
-import subprocess
 import time
 
 import pytest
-from test_night_shift import FakeHost, calls, fake_host, git, queue  # noqa: F401 - fixtures
-from test_night_shift import setup  # noqa: F401 - the fixture
+from test_night_shift import fake_host as night_host  # noqa: F401 - the fixture
+from test_night_shift import git, queue
+from test_night_shift import setup as night_repo  # noqa: F401 - the fixture
 
-from dreamference.night_shift import NightShiftQueue, NightShiftReport, NightShiftRunner, NightShiftSettings
+from dreamference.night_shift import (
+    NightShiftQueue,
+    NightShiftReport,
+    NightShiftRunner,
+    NightShiftSettings,
+)
+
+
+@pytest.fixture
+def setup(request):
+    """The repository, queue directory and stand-in `ling` of test_night_shift.py."""
+    return request.getfixturevalue("night_repo")
+
+
+@pytest.fixture
+def fake_host(request):
+    """The scripted host of test_night_shift.py."""
+    return request.getfixturevalue("night_host")
 
 
 def _run(setup, minutes=5):
-    return NightShiftRunner.run(minutes=minutes, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
-                                vllm_host="http://x", settings=NightShiftSettings({}))
+    return NightShiftRunner.run(
+        minutes=minutes,
+        idle_minutes=0,
+        night_dir=setup["night"],
+        mightling_bin=setup["ling"],
+        vllm_host="http://x",
+        settings=NightShiftSettings({}),
+    )
 
 
 def _reports(setup):
@@ -31,14 +51,23 @@ def _nothing_published(setup, task_id):
     """No remote, no merge of the task's branch into the base branch, no push."""
     main = git(setup["repo"], "branch", "--show-current").stdout.strip()
     assert not (setup["repo"] / "hello.txt").exists()
-    assert not git(setup["repo"], "branch", "--merged", main, "--list", f"night/{task_id}").stdout.replace("*", "").strip() \
-        or git(setup["repo"], "rev-parse", f"night/{task_id}").stdout == git(setup["repo"], "rev-parse", main).stdout
+    assert (
+        not git(setup["repo"], "branch", "--merged", main, "--list", f"night/{task_id}")
+        .stdout.replace("*", "")
+        .strip()
+        or git(setup["repo"], "rev-parse", f"night/{task_id}").stdout
+        == git(setup["repo"], "rev-parse", main).stdout
+    )
     assert git(setup["repo"], "remote").stdout.strip() == ""
     assert git(setup["repo"], "log", "--format=%s", main).stdout.split() == ["init"]
 
 
-def test_an_agent_killed_mid_task_fails_the_task_and_the_report_says_so(setup, fake_host, monkeypatch):
-    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "error")  # exits at once, as a killed agent's wait status does
+def test_an_agent_killed_mid_task_fails_the_task_and_the_report_says_so(
+    setup, fake_host, monkeypatch
+):
+    monkeypatch.setenv(
+        "FAKE_MIGHTLING_MODE", "error"
+    )  # exits at once, as a killed agent's wait status does
     record = queue(setup["night"], setup["repo"])
     assert _run(setup) == 0
     stored = NightShiftQueue.read(setup["night"], record["id"])
@@ -71,7 +100,9 @@ def test_a_corrupt_queue_line_does_not_hide_the_other_tasks(setup, fake_host, mo
     assert bad.read_text().startswith('{"id"')  # not deleted, not rewritten
 
 
-def test_a_task_that_prints_binary_and_huge_lines_still_finishes(setup, fake_host, monkeypatch, tmp_path):
+def test_a_task_that_prints_binary_and_huge_lines_still_finishes(
+    setup, fake_host, monkeypatch, tmp_path
+):
     noisy = tmp_path / "ling-noisy"
     noisy.write_text(
         "#!/bin/sh\n"
@@ -79,7 +110,7 @@ def test_a_task_that_prints_binary_and_huge_lines_still_finishes(setup, fake_hos
         "import sys, os\n"
         "sys.stdout.buffer.write(os.urandom(100000) + bytes([255, 254, 0]) + b'x' * 10_000_000 + b'\\n')\n"
         "PY\n"
-        f"exec {setup['ling']} \"$@\"\n"
+        f'exec {setup["ling"]} "$@"\n'
     )
     noisy.chmod(0o755)
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
@@ -90,7 +121,9 @@ def test_a_task_that_prints_binary_and_huge_lines_still_finishes(setup, fake_hos
     assert _reports(setup)
 
 
-def test_a_full_disk_on_the_report_leaves_every_task_recorded(setup, fake_host, monkeypatch, capsys):
+def test_a_full_disk_on_the_report_leaves_every_task_recorded(
+    setup, fake_host, monkeypatch, capsys
+):
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     record = queue(setup["night"], setup["repo"])
 
@@ -101,12 +134,14 @@ def test_a_full_disk_on_the_report_leaves_every_task_recorded(setup, fake_host, 
     assert _run(setup) == 1  # a clear refusal, not a traceback
     stored = NightShiftQueue.read(setup["night"], record["id"])
     assert stored is not None and stored["status"] == "done"
-    assert "No space left on device" in capsys.readouterr().out
+    assert "not written" in capsys.readouterr().out
 
 
 def test_the_worktree_removed_under_a_running_task_fails_it(setup, fake_host, monkeypatch):
     import shutil
+
     from dreamference.night_shift import NightShiftTaskRun
+
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     record = queue(setup["night"], setup["repo"])
     original = NightShiftTaskRun._cancelled

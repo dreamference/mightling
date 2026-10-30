@@ -140,8 +140,8 @@ class NightShiftRunner:
         for task in final:
             counts[task.get("status", "?")] = counts.get(task.get("status", "?"), 0) + 1
         summary = ", ".join(f"{count} {status}" for status, count in counts.items())
-        print(f"✅ Night Shift finished: {summary}. Report: {path}")
-        return 0
+        print(f"✅ Night Shift finished: {summary}. Report: {path or f'not written, see {night_dir / 'tasks'}'}")
+        return 0 if path else 1
 
     @classmethod
     def _reread(cls, night_dir: Path, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -537,6 +537,11 @@ class NightShiftRunner:
 
     @classmethod
     def _write_report(cls, night_dir: Path, started: datetime, tasks: List[Dict[str, Any]],
-                      notes: List[str]) -> Path:
+                      notes: List[str]) -> Path | None:
+        """Writes the morning report; None when the disk refuses it (the tasks stay in the queue)."""
         text = NightShiftReport.render(started, tasks, notes, compactions=cls.compactions)
-        return NightShiftReport.write(night_dir, started, text)
+        try:
+            return NightShiftReport.write(night_dir, started, text)
+        except OSError as error:
+            notes.append(f"The report could not be written: {error}")
+            return None
