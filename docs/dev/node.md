@@ -6,7 +6,7 @@ Mightling is a client and a node, and `ling` finds the node.
 
 ## Node or client
 
-- A **node** is a machine with `~/.config/dreamference/node-id` (written by `server start`, `codex build`, `desktop build` and `node enable`): its `ling` uses loopback and never browses.
+- A **node** is a machine with `~/.config/dreamference/node-id` (written by `server start`, `codex build`, every `desktop` command, `node enable` and `node id`): its `ling` uses loopback and never browses.
 - Anything else is a **client**: the launcher (`ling-rs/src/node.rs`) resolves the model server through tiers:
   1. `DREAMFERENCE_VLLM_HOST`/`vllm_host`;
   2. `MIGHTLING_NODE`;
@@ -34,7 +34,7 @@ On the node, `ling-admin node enable` installs an Avahi service file (root once;
 
 ## Pairing and jobs, over SSH
 
-**Managing and using a second node goes over SSH, never an open port** (`node/node_pairing.py`, `node_serve.py`, `node_remote.py`, `node_job.py`, `node_job_sender.py`). `node add` has the other node authorise a key for one forced command, `ling-admin node serve-job`, which refuses anything but its operations (info, status, start, stop, `set-model <matrix key>`, unpair, the two git services for `jobs/<name>.git`, and the job requests) and carries each out with that node's own `ling-admin`.
+**Managing and using a second node goes over SSH, never an open port** (`node/node_pairing.py`, `node_serve.py`, `node_remote.py`, `node_job.py`, `node_job_sender.py`). `node add` has the other node authorise a key for one forced command, `ling-admin node serve-job`, which refuses anything but its operations (info, status, start, stop, `set-model <matrix key>`, unpair, `model-receive` and `adapter-receive` for `sync-model`, the two git services for `jobs/<name>.git`, the job requests, and the Night Shift, forge and smart-plug ones, `night-*`, `forge-*` and `power-*`) and carries each out with that node's own `ling-admin`.
 
 **A paired node's address is never trusted from its record.** Every connection (`NodePairing.ssh_command`, the lanes, the job repositories' URLs, `sync-model`) goes through `NodePairing.resolve`: a browse looks for the node's id and the address in that answer is used; the record remembers it for display only. A browse that does not show the node (nothing answering, or other nodes answering and this one not) is repeated for up to a minute (`resolve_wait_s`), then the node is reported off the network and its old address, which may be another machine's by now, is never tried (spec §6.1, tier 4; the user's rule of 2026-10-10: never use an address, always resolve). An answer is reused by the same process for thirty seconds, so a lane probe and the ssh it then runs browse once; the suite sets the budget to zero (conftest `_no_browse_wait`). The night of 2026-10-09 lost its second lane because the lanes used the recorded address directly after node-b's DHCP lease had moved; `--address` on `sync-model` is the one deliberate exception (`address_fixed`).
 
