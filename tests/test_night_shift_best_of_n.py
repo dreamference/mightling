@@ -542,6 +542,19 @@ def test_the_judge_clips_the_issue_it_is_given():
     assert "x" * (MAX_ISSUE_CHARS + 1) not in content
 
 
+def test_an_attempt_starts_from_the_base_whatever_an_earlier_run_left(bon, monkeypatch):
+    left = bon["night"] / "worktrees" / "20261001-0100-abc-a1"
+    left.parent.mkdir(parents=True, exist_ok=True)
+    git(bon["repo"], "worktree", "add", "-q", "-b", "night/20261001-0100-abc-a1", str(left))
+    (left / "stray.txt").write_text("from a broken run\n")
+    git(left, "add", "stray.txt")
+    git(left, "commit", "-qm", "stray")
+    status, record, _ = run_best_of(bon, monkeypatch, ["good", "bad", "bad"])
+    assert status == "done" and record["result"]["best_of"]["chosen"] == 1
+    assert git(bon["repo"], "show", "night/20261001-0100-abc:hello.txt").stdout == "hi\n"
+    assert git(bon["repo"], "show", "night/20261001-0100-abc:stray.txt").returncode != 0
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
