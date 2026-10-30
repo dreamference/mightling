@@ -421,18 +421,19 @@ ENGINE_LING: Final[str] = "ling"
 #
 # The commit the image's ling-serve was built from (the full hash, never abbreviated), recorded in
 # the image's labels (`org.opencontainers.image.revision`, `ai.dreamference.ling-engine.commit`).
-# 1.8.0: 02704d4, ling-engine main at the merge of its P4d branch (paged KV sizing in `--plan-only` and
-# the auto-size; the page pool stays off unless `--kv-pages` is given). The image's binary was built from
-# that commit under neutral paths (scripts/build_ling_serve_image.sh), flat greedy output identical to pre-P4d main's
-# (agentlong, four warm and one and two cold streams) and the same `--plan-only` plan.
-# Before it, 1.7.2 pinned 8d112d0 (bdda3a2 plus the tokenizer's BPE cache under a shared mutex). The fair
-# pairing flag (`--fair-pairing`, off) is not in this commit; it moves with 1.8.1.
-QWEN38_LING_ENGINE_COMMIT: Final[str] = "02704d4a004067f377242d5e74bab37b16b5bdaf"
+# 1.8.0: 4853a93, ling-engine main after fair pairing (51b7372, `--fair-pairing 1|0`, default 0) and the
+# head-major page pool (4853a93, used only when the page pool is on) were merged onto P4d (02704d4: paged
+# KV sizing in `--plan-only` and the auto-size; the page pool stays off unless `--kv-pages` is given). The
+# recipe passes neither `--fair-pairing` nor `--kv-pages`, so both stay off; the image's binary was built
+# from that commit under neutral paths (scripts/build_ling_serve_image.sh), and its greedy output on the
+# four flat sessions is identical to 02704d4's image (sha256:f241d647…), which 1.8.0 pinned first.
+# Before them, 1.7.2 pinned 8d112d0 (bdda3a2 plus the tokenizer's BPE cache under a shared mutex).
+QWEN38_LING_ENGINE_COMMIT: Final[str] = "4853a93a4996339ec1867c68704c761d83d75dd2"
 
 # What the engine at that commit has that an asset or a launch may depend on, so the runtime asks
 # a list rather than git: "sparse-head" (the drafter's sparse head, read from a file beside the
 # drafter) from ling-engine ec9dce8 on. A checkout-only test keeps the list true to the commit's
-# ancestry. Empty at 1.7.2's 8d112d0; "kv-pages" (f180b44) and "sparse-head" (ec9dce8) are both ancestors of 02704d4.
+# ancestry. Empty at 1.7.2's 8d112d0; "kv-pages" (f180b44) and "sparse-head" (ec9dce8) are both ancestors of 4853a93.
 QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ("kv-pages", "sparse-head")
 
 # The last commit of ling-engine's P4b (BATCHING §5.3: `--kv-pages` with the KV page pool, admission by
@@ -470,11 +471,12 @@ QWEN38_DEFAULT_ENGINE: Final[str] = ENGINE_LING
 
 # ling-serve's image (docker/ling-serve/Dockerfile, built by scripts/build_ling_serve_image.sh on an
 # aarch64 machine from QWEN38_LING_ENGINE_COMMIT), pinned by the digest GHCR gave the push
-# (ghcr.io/dreamference/ling-serve:8d112d0d2539, pushed again 2026-10-27; linux/arm64, 681 MB).
-# It replaces two images whose binaries carried the build machine's paths, deleted from the
-# registry: the first 8d112d0 build (sha256:9428996a…) and bdda3a2's (sha256:87807c50…).
+# (ghcr.io/dreamference/ling-serve:4853a93a4996, pushed 2026-10-30; linux/arm64, 688 MB). 1.7.2's was
+# sha256:7bff4e37… (8d112d0d2539) and 1.8.0's first sha256:f241d647… (02704d4a0040). 1.7.2's replaced
+# two images whose binaries carried the build machine's paths, deleted from the registry: the first
+# 8d112d0 build (sha256:9428996a…) and bdda3a2's (sha256:87807c50…).
 QWEN38_LING_IMAGE: Final[str] = (
-    "ghcr.io/dreamference/ling-serve@sha256:f241d6475ac155497e44494943d699d81a596a74c521045658445cf1223a2b4d"
+    "ghcr.io/dreamference/ling-serve@sha256:311325fe9f57768ad3ed920cba1580ef359a73c4c9246b308bcde2f506f27338"
 )
 
 # The DFlash2 drafters ling-serve can run, pinned. Speculation is exact, so the drafter moves

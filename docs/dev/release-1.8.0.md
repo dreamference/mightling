@@ -12,7 +12,7 @@ ling-engine `specs/DREAMFERENCE_LING_ENGINE_BATCHING.md` §5.3).
   `LingServeLaunchBuilder.server_args` passes `--sessions 4 --batch 4 --kv-pages` **only when the recipe's
   `engine_features` lists `"kv-pages"`**. At the 1.7.2 pin (8d112d0, no features) nothing changes: the engine's
   own sessions, no flag it may not parse. **Owner decision 2026-10-29: 1.8.0 ships with paging OFF.** The pin
-  (02704d4, P4d merged, features `kv-pages` and `sparse-head`) is flat by default, and the recipe's `kv_pages`
+  (4853a93: P4d and fair pairing merged, both off by default; features `kv-pages` and `sparse-head`) is flat by default, and the recipe's `kv_pages`
   (`QWEN38_LING_KV_PAGES`) is `False`: the launch passes no `--sessions`, `--batch` or `--kv-pages` (still
   `--vision off`) except what the flat layout needs: `--max-context 196608 --sessions 4 --batch 4`, four flat
   slots of 196,608 tokens each (the engine's auto-size gave only 3 x 262,144 on the node-b figures). Paged
@@ -65,7 +65,7 @@ Eight sessions only after the engine's eight-session reproduction and the owner'
    model_matrix_registry.py (the commit's story, the binary's sha256, the registry's earlier digests),
    `LING_ENGINE_KV_PAGES_SINCE` if P4c/P4d should be what gates the flags (change it to their last commit and
    re-run `tests/test_hardware.py` with the submodule fetched), `tests/test_ling_serve_engine.py`
-   (`startswith("02704d4")`, `engine_features == ["kv-pages", "sparse-head"]`, `kv_pages is False`), and the measured paragraph of
+   (`startswith("4853a93")`, `engine_features == ["kv-pages", "sparse-head"]`, `kv_pages is False`), and the measured paragraph of
    models-and-engines.md.
 4. **Live checks on the node** (nothing mocked): `ling-admin server start --engine ling`, then
    the NVFP4 canary and the tool call that `server start` runs, `server status` (the engine commit, `Sessions 4

@@ -11,8 +11,7 @@ started with `--vision off`) and the engine pin (`scripts/pin_ling_serve_image.p
 `prep/1.8.0`; the cut still needs the version set as for 1.7.2.
 
 **Still to fill in before the cut:** the measured figures below (the bar night, on the pinned image);
-the share-scope and HTTP 503 statements, confirmed against the pinned engine; the fair-pairing
-paragraph, kept only if the pinned image contains it; the upgrade note's sizes; the known issues the
+the share-scope and HTTP 503 statements, confirmed against the pinned engine; the upgrade note's sizes; the known issues the
 bar night finds. Decided (2026-10-29): image input and LoRA adapters stay on SGLang until 1.8.1
 (`--engine sglang` for both); ling-serve reads no images and serves no adapters in 1.8.0.
 
@@ -59,12 +58,17 @@ answer after a shared beginning arrives in {{TBD}} s, against {{TBD}} s when it 
 short follow-up runs ahead of a long first read, and while others decode the long read goes in small
 chunks. A conversation used in the last 30 seconds is not evicted for a new one.
 
+**Fair pairing, included and off.** ling-serve can give every decoding conversation the same share of
+passes (`--fair-pairing 1`). It ships switched off in 1.8.0, and Mightling does not turn it on, so the
+scheduling is the bar night's; it is meant to be on by default from 1.8.1, once its own test night
+passes.
+
 **A smaller image.** ling-serve's Docker image is under 1 GB, against SGLang's 34 GB; a node pulls it
 at the first `ling-admin server start` after the upgrade.
 
 **Everything from 1.7.3 and 1.7.4.** Both came out after 1.7.2 and 1.8.0 contains them. 1.7.3 fixed
 `install.sh` reading the release API's answer, and it pinned ling-engine `72c2a6a`; 1.8.0's engine
-pin (`02704d4`) replaces that one. The security fixes from 1.7.4, by area:
+pin (`4853a93`) replaces that one. The security fixes from 1.7.4, by area:
 
 - **`ling web` and paired devices.** A device paired with the `watch` scope can only read and follow
   threads. A revoked device stays revoked, two pairings at once cannot race past the one-time code,

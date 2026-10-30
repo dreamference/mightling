@@ -69,9 +69,9 @@ def test_the_image_is_pinned_by_digest_and_the_engine_commit_is_a_full_hash():
     # must be the full hash an ancestry check takes.
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
     assert recipe["engine_commit"] == QWEN38_LING_ENGINE_COMMIT
-    # 1.8.0's engine: ling-engine main at the merge of P4d (02704d4), paging off by default; it has
-    # the page pool and the sparse head.
-    assert QWEN38_LING_ENGINE_COMMIT.startswith("02704d4")
+    # 1.8.0's engine: ling-engine main with P4d and fair pairing merged (4853a93), paging and fair
+    # pairing off by default; it has the page pool and the sparse head.
+    assert QWEN38_LING_ENGINE_COMMIT.startswith("4853a93")
     assert recipe["engine_features"] == ["kv-pages", "sparse-head"]
     # The owner's decision of 2026-10-29: the recipe does not turn paging on at 1.8.0.
     assert recipe["kv_pages"] is False
