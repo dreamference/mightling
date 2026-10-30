@@ -1212,6 +1212,23 @@ mod tests {
         assert_eq!(found[0].radio, None);
         assert_eq!(wifi_hint_from(&found), None);
     }
+    #[test]
+    fn the_powersave_setting_is_one_whole_word_in_any_case_and_blank_is_unknown() {
+        let with = |setting: &str| WifiInterface {
+            device: "wlP9s9".to_string(),
+            connection: "home".to_string(),
+            setting: setting.to_string(),
+            radio: None,
+        };
+        for setting in ["DISABLE", "Disable", "2 (DISABLE)"] {
+            assert!(with(setting).setting_off(), "{setting}");
+        }
+        for setting in ["disabled", "20", "22 (unknown)"] {
+            assert!(!with(setting).setting_off(), "{setting}");
+        }
+        let found = wifi_interfaces_with(&machine(Some(WIFI_ONLY), "home", "", Some("off")));
+        assert_eq!(found[0].setting, "unknown");
+    }
 
     #[test]
     fn each_half_of_the_fix_is_named_only_when_it_is_needed() {
