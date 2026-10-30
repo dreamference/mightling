@@ -932,6 +932,14 @@ mod tests {
     }
 
     #[test]
+    fn codexs_default_context_limit_is_left_out_of_the_hash() {
+        let with_default = SessionHook { context_limit: Some(DEFAULT_CONTEXT_LIMIT), ..LEDGER_HOOK };
+        assert_eq!(hook_hash_for("/opt/ling ledger", &with_default), hook_hash("/opt/ling ledger"));
+        let never = SessionHook { context_limit: Some(0), ..LEDGER_HOOK };
+        assert_ne!(hook_hash_for("/opt/ling ledger", &never), hook_hash("/opt/ling ledger"));
+    }
+
+    #[test]
     #[cfg(not(windows))]
     fn a_path_the_shell_would_split_is_quoted() {
         assert_eq!(hook_command(Path::new("/opt/ling/bin/ling")), "/opt/ling/bin/ling ledger");
