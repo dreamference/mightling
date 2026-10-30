@@ -22,12 +22,7 @@ from typing import Any, Final
 SEVERITIES: Final = ("bridge", "model", "info", "known")
 
 # Check name -> why it fails today. Every messenger's check of that name is covered.
-KNOWN_FAILING: Final[dict[str, str]] = {
-    "long answer streams": (
-        "known failing, model server: SGLang's /v1/responses holds back every output_text delta "
-        "until the end when the request carries tools, so the bridge has nothing to stream"
-    ),
-}
+KNOWN_FAILING: Final[dict[str, str]] = {}
 STATUSES: Final = ("pass", "fail", "skip", "observed")
 
 

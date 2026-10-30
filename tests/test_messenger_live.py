@@ -551,7 +551,8 @@ def test_the_nightly_units_run_the_checkout_at_six_utc():
     assert "OnCalendar=*:0/15" in units["mightling-messenger-live-after-merge.timer"]
 
 
-def test_a_known_failure_is_reported_but_never_alerts(tmp_path):
+def test_a_known_failure_is_reported_but_never_alerts(tmp_path, monkeypatch):
+    monkeypatch.setitem(report.KNOWN_FAILING, "long answer streams", "known failing, model server")
     run = report.Run(started=0)
     known = run.add(
         report.Result("telegram", "long answer streams", "bridge", "fail", 9.0, 2.0, "grew 0 times")
