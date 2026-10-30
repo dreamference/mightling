@@ -463,9 +463,9 @@ def exchange(port, request, timeout=10):
 
 def test_a_closed_gate_answers_a_head_with_a_head_and_a_post_to_its_probe_with_a_refusal(live):
     write(live["state"], RUN_FILE, run_record())
-    head, body = exchange(
-        live["port"], b"HEAD /v1/responses HTTP/1.1\r\nHost: x\r\n\r\n"
-    ).split(b"\r\n\r\n", 1)
+    head, body = exchange(live["port"], b"HEAD /v1/responses HTTP/1.1\r\nHost: x\r\n\r\n").split(
+        b"\r\n\r\n", 1
+    )
     assert head.startswith(b"HTTP/1.1 503 ") and b"\r\nRetry-After: 0" in head
     assert body == b"", "a HEAD answer carries no body"
     # Only a GET or HEAD reads the probe; anything else is an ordinary request and is refused.

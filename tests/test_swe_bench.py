@@ -3559,7 +3559,7 @@ class FakeGate:
 
     answer = None
     pause = None
-    written = []
+    written = None  # the fixture gives each test its own list
 
     @classmethod
     def write_run(cls, record):
