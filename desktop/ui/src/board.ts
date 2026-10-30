@@ -14,6 +14,11 @@ export function sqliteHome(config: Record<string, unknown> | null): string | nul
   return typeof config?.sqlite_home === "string" ? config.sqlite_home : null;
 }
 
+/** A post's time as the view shows it: `at` is in seconds (desktop/electron/src/board.ts), as activity.ts's. */
+export function postTime(at: number): string {
+  return new Date(at * 1000).toLocaleString();
+}
+
 export interface Discussion {
   root: BoardPost;
   replies: BoardPost[];
