@@ -1447,3 +1447,10 @@ def test_the_submodule_is_checked_out_only_with_a_commit_and_codex_rs(
     )
     assert CodexBrandedBuilder.source_commit() is None
     assert CodexBrandedBuilder.build_key() is None
+
+
+def test_without_the_submodule_nothing_is_exported(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(CodexBrandedBuilder, "source_commit", classmethod(lambda cls: None))
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "export")) is False
+    assert "git submodule update --init codex" in capsys.readouterr().out
+    assert not (tmp_path / "export").exists()
