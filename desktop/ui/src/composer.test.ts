@@ -48,6 +48,9 @@ describe("the composer's menus", () => {
       text("use $pdf and $old and $nothing"),
       { type: "skill", name: "pdf", path: "/skills/pdf/SKILL.md" },
     ]);
+    // At the end of a sentence the stop is the sentence's, not the name's.
+    expect(composeInput("ship it with $deploy.", skills)).toContainEqual({ type: "skill", name: "deploy", path: "/skills/deploy/SKILL.md" });
+    expect(composeInput("$deploy, then $deploy.", skills).filter((input) => input.type === "skill")).toHaveLength(1);
   });
 
   it("/ opens the commands only at the start of a message, and only the ones this view can run", () => {
