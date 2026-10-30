@@ -1009,4 +1009,13 @@ mod tests {
         let resolved = Resolved { prompt: Prompt::high_swe(), source: Source::Environment, skipped: Vec::new() };
         assert!(startup_lines(&resolved, false).is_empty());
     }
+
+    #[test]
+    fn the_list_carries_the_skipped_names_and_the_notes() {
+        let installed = Installed { notes: vec!["x.md is ignored: default is built in".to_string()], ..Installed::built_in() };
+        let resolved = resolve_from(Some("nope"), None, &installed);
+        let lines = list_lines(&resolved, &installed);
+        assert!(lines.iter().any(|line| line.starts_with("Note: prompt \"nope\" from") && line.ends_with("; skipped.")), "{lines:?}");
+        assert!(lines.contains(&"Note: x.md is ignored: default is built in.".to_string()), "{lines:?}");
+    }
 }
