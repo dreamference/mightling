@@ -1538,3 +1538,30 @@ def test_the_version_is_stamped_only_inside_workspace_package(tmp_path):
     manifest.write_text('[workspace.package]\nrust-version = "1.85"\nversion = "0.158.0"\n')
     assert CodexBrandedBuilder.stamp_version(str(manifest), "1.4.1") is True
     assert manifest.read_text() == '[workspace.package]\nrust-version = "1.85"\nversion = "1.4.1"\n'
+
+
+def _tar(*members):
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for name, target in members:
+            info = tarfile.TarInfo(name)
+            if target is None:
+                info.size = 4
+                archive.addfile(info, io.BytesIO(b"text"))
+            else:
+                info.type, info.linkname = tarfile.SYMTYPE, target
+                archive.addfile(info)
+    buffer.seek(0)
+    return buffer
+
+
+@pytest.mark.parametrize("windows", [False, True])
+def test_the_export_keeps_its_symbolic_links_except_on_windows(tmp_path, monkeypatch, windows):
+    monkeypatch.setattr(builder_module, "IS_WINDOWS", windows)
+    stream = _tar(("codex-rs/LICENSE.txt", None), ("codex-rs/LICENSE", "LICENSE.txt"))
+    assert CodexBrandedBuilder.extract_archive(stream, str(tmp_path)) is True
+    assert (tmp_path / "codex-rs" / "LICENSE.txt").read_text() == "text"
+    assert (tmp_path / "codex-rs" / "LICENSE").is_symlink() is not windows
