@@ -632,4 +632,10 @@ mod tests {
         let wrapped = wrap("gmail", &json!({"id": "x", "body": "B", "subject": "S", "cc": null}));
         assert_eq!(wrapped, "<untrusted source=\"gmail\" id=\"x\">\ncc: \nid: x\nsubject: S\nbody:\nB\n</untrusted>");
     }
+
+    #[test]
+    fn an_id_cannot_break_out_of_its_attribute() {
+        let wrapped = wrap("gmail", &json!({"id": "a\"b\nc\rd"}));
+        assert_eq!(wrapped.lines().next(), Some("<untrusted source=\"gmail\" id=\"a'b'c'd\">"));
+    }
 }
