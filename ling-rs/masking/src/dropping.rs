@@ -564,4 +564,16 @@ mod tests {
         assert_eq!(policy.target(), 0);
         assert_eq!(DropPolicy { room_percent: 100, ..policy }.target(), 0);
     }
+
+    #[test]
+    fn a_drop_whose_state_cannot_be_saved_changes_nothing() {
+        let scratch = Scratch::new("unsaved");
+        // A file where the folder belongs: neither the state nor the log can be written.
+        std::fs::write(&scratch.0, "in the way").unwrap_or_default();
+        let mut items = history(60, 20);
+        let before = items.clone();
+        assert!(!drop_with(&policy(), &scratch.0, &mut items, 44_000, |e| &mut e.item));
+        assert_eq!(items, before);
+        let _ = std::fs::remove_file(&scratch.0);
+    }
 }
