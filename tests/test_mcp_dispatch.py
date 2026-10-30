@@ -30,6 +30,16 @@ def ide(monkeypatch) -> IDEState:
     return state
 
 
+@pytest.fixture
+def no_engine(monkeypatch) -> None:
+    """Makes building the context engine fail the test: it walks the workspace for minutes."""
+    monkeypatch.setattr(
+        MCPServer,
+        "context_engine",
+        property(lambda self: (_ for _ in ()).throw(AssertionError("engine built"))),
+    )
+
+
 def test_an_unknown_method_is_a_method_not_found_error_with_the_request_id():
     reply = MCPServer().handle_request({"jsonrpc": "2.0", "id": 41, "method": "resources/list"})
     assert reply["id"] == 41
@@ -112,7 +122,7 @@ def test_web_fetch_hands_the_tool_its_url_and_length_or_the_default(monkeypatch)
     ]
 
 
-def test_code_search_asks_the_index_for_five_rows_unless_told(monkeypatch):
+def test_code_search_asks_the_index_for_five_rows_unless_told(monkeypatch, no_engine):
     search = MagicMock(return_value=[])
     monkeypatch.setattr(CodeIndexSearch, "search", search)
     call("workspace_search_code", {"query": "loader"})
@@ -123,14 +133,9 @@ def test_code_search_asks_the_index_for_five_rows_unless_told(monkeypatch):
     ]
 
 
-def test_an_index_that_finds_nothing_is_the_answer_and_no_engine_is_built(monkeypatch):
+def test_an_index_that_finds_nothing_is_the_answer_and_no_engine_is_built(monkeypatch, no_engine):
     # An empty list is the router's answer; only None (it cannot answer here) falls back.
     monkeypatch.setattr(CodeIndexSearch, "search", MagicMock(return_value=[]))
-    monkeypatch.setattr(
-        MCPServer,
-        "context_engine",
-        property(lambda self: (_ for _ in ()).throw(AssertionError("engine built"))),
-    )
     assert call("workspace_search_code", {"query": "nothing matches"}) == []
 
 
