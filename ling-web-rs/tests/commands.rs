@@ -1161,3 +1161,25 @@ fn a_share_link_is_resolved_without_requesting_google() {
         stdout(&output)
     );
 }
+
+#[test]
+fn a_page_that_redirects_to_a_google_search_is_read_there() {
+    let proxy = Server::start(|line| {
+        if line.starts_with("GET http://example.invalid/") {
+            response(
+                "302 Found",
+                "text/html",
+                b"",
+                "Location: http://www.google.com/search?q=lisbon+tram\r\n",
+            )
+        } else {
+            response("200 OK", "text/plain", b"the search page itself", "")
+        }
+    });
+    let output = fetch(
+        &["http://example.invalid/page"],
+        &[("http_proxy", &proxy.base)],
+    );
+    assert_eq!(stdout(&output), "the search page itself\n");
+    assert_eq!(proxy.requests().len(), 2);
+}
