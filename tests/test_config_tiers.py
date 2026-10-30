@@ -398,3 +398,28 @@ def test_an_empty_yaml_file_is_saved_over(tmp_path):
     path.write_text("")
     DreamferenceConfig(config_file=str(path), model="llama-3.3-70b").save_config()
     assert yaml.safe_load(path.read_text()) == {"model": "llama-3.3-70b"}
+
+
+def test_resetting_the_host_to_the_default_over_a_repository_file_warns(
+    tmp_path, monkeypatch, capsys
+):
+    # The user's own file names a host and a repository file is in use. Setting the host back to the
+    # default makes save_config() write nothing, and the next load takes the user's host again, so the
+    # change is lost; it says so, as a changed host does.
+    monkeypatch.chdir(tmp_path)
+    user_level = tmp_path / "home" / "config.toml"
+    user_level.parent.mkdir()
+    user_level.write_text('vllm_host = "http://gpu-box.lan:8000"\n')
+    monkeypatch.setattr(config_path_resolver, "GLOBAL_DREAMFERENCE_CONFIG_PATH", user_level)
+    repository = tmp_path / "dreamference.toml"
+    repository.write_text('model = "m"\n')
+    config = DreamferenceConfig()
+    assert config.vllm_host == "http://gpu-box.lan:8000"
+    capsys.readouterr()
+    config.save_config()
+    assert capsys.readouterr().err == ""
+    config.vllm_host = "http://localhost:8000"
+    config.save_config()
+    assert "vllm_host not saved in" in capsys.readouterr().err
+    assert "vllm_host" not in _saved(repository)
+    assert DreamferenceConfig().vllm_host == "http://gpu-box.lan:8000"
