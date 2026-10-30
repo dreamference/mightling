@@ -971,6 +971,12 @@ mod tests {
     }
 
     #[test]
+    fn an_address_is_compared_without_case_or_padding() {
+        let authors = Authors::from_addresses(["dev@acme.example".to_string()]);
+        assert!(authors.wrote(" Dev@ACME.example\n"));
+    }
+
+    #[test]
     fn our_domains_leave_out_public_mail_and_web_flow() {
         let authors = Authors::from_addresses(
             [
