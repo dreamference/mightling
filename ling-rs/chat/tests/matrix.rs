@@ -150,6 +150,30 @@ async fn invites_are_accepted_from_allowed_users_only_and_encrypted_rooms_refuse
     assert!(notices[0].1["body"].as_str().unwrap().contains("encrypted"));
 }
 
+/// Who invited the bot is read from the bot's own invite only: an allowed user's name on another
+/// member event, on the bot's earlier leave, or on a state event of another type, never lets a
+/// stranger's invite in.
+#[tokio::test]
+async fn only_the_bots_own_invite_names_the_inviter() {
+    let (stand, root) = stand_in().await;
+    let (dir, config) = setup("inviter", &root);
+    let (hub, _inbound) = mpsc::unbounded_channel();
+    let (syncer, _) = ling_chat::matrix::pair_for_tests(MatrixApi::new(&root, "bot-token"), dir, BOT, hub);
+    let from_eve = json!({ "type": "m.room.member", "state_key": BOT, "sender": "@eve:elsewhere", "content": { "membership": "invite" } });
+    let rooms = [
+        ("!other-member:x", json!({ "type": "m.room.member", "state_key": "@friend:x", "sender": OWNER, "content": { "membership": "invite" } })),
+        ("!old-leave:x", json!({ "type": "m.room.member", "state_key": BOT, "sender": OWNER, "content": { "membership": "leave" } })),
+        ("!other-type:x", json!({ "type": "org.example.note", "state_key": BOT, "sender": OWNER, "content": { "membership": "invite" } })),
+    ];
+    for (room, decoy) in rooms {
+        let body = json!({ "next_batch": "s2", "rooms": { "invite": { room: { "invite_state": { "events": [decoy, from_eve.clone()] } } } } });
+        syncer.handle(&config, &body, false).await;
+    }
+    assert!(stand.calls("POST", "/join/").is_empty());
+    let leaves: Vec<String> = stand.calls("POST", "/leave").into_iter().map(|(p, _)| p).collect();
+    assert_eq!(leaves, vec!["/_matrix/client/v3/rooms/!other-member:x/leave", "/_matrix/client/v3/rooms/!old-leave:x/leave", "/_matrix/client/v3/rooms/!other-type:x/leave"]);
+}
+
 #[tokio::test]
 async fn messages_from_allowed_users_reach_the_hub_after_the_first_sync() {
     let (stand, root) = stand_in().await;
