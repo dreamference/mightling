@@ -860,6 +860,16 @@ def test_firmware_updates_alone_are_listed_too(tmp_path, release_server):
     assert "available, not installed: 2 firmware update(s); install: sudo fwupdmgr refresh" in out
 
 
+def test_a_cuda_package_is_named_among_nvidias_updates(tmp_path, release_server):
+    env = fresh_gb10(tmp_path)
+    (tmp_path / "upgrades").write_text(
+        "Inst cuda-compat-13-0 [13.0.1-1] (13.0.2-1 cuda-ubuntu2404-sbsa [arm64])\n"
+        "Inst libc6 [2.39-0ubuntu8.4] (2.39-0ubuntu8.5 Ubuntu:24.04/noble-updates [arm64])\n")
+    result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10", env_extra=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "NVIDIA (DGX, CUDA, driver): cuda-compat-13-0\n" in result.stdout
+
+
 def test_a_failed_step_is_named_in_the_summary_and_the_exit_code(tmp_path, release_server):
     (tmp_path / "groups-db").write_text("tester docker\n")
     result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10",
