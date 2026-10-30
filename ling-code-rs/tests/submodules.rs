@@ -1478,3 +1478,19 @@ fn the_size_guard_is_not_read_from_the_main_worktree_of_a_linked_one() {
     let ours = all.iter().find(|s| s.path == "ours").unwrap();
     assert_eq!((ours.indexed, ours.reason.clone()), (true, Reason::Yours));
 }
+
+#[test]
+fn the_size_guard_is_not_read_through_a_link_into_the_repository() {
+    let f = with_submodules();
+    f.write("dreamference.toml", "code_index_submodule_max_files = 1\n");
+    let link = f.dir.path().join("linked.toml");
+    std::os::unix::fs::symlink(f.repo.root.join("dreamference.toml"), &link).unwrap();
+    let settings = Settings {
+        config_path: Some(link),
+        submodule_max_files: 1,
+        ..Settings::default()
+    };
+    let all = submodules::evaluate(&f.repo, &settings);
+    let ours = all.iter().find(|s| s.path == "ours").unwrap();
+    assert_eq!((ours.indexed, ours.reason.clone()), (true, Reason::Yours));
+}
