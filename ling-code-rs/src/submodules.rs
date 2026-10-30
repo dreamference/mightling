@@ -927,6 +927,18 @@ mod tests {
     }
 
     #[test]
+    fn a_remote_without_a_host_names_no_organisation() {
+        for url in [
+            "file://server/acme/repo.git",
+            "https:///acme/repo.git",
+            ":acme/repo.git",
+            "git@:acme/repo.git",
+        ] {
+            assert!(parse_remote(url).is_none(), "{url}");
+        }
+    }
+
+    #[test]
     fn our_domains_leave_out_public_mail_and_web_flow() {
         let authors = Authors::from_addresses(
             [
