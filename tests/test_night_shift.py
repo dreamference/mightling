@@ -243,6 +243,12 @@ def test_a_task_from_another_machine_never_gets_the_owners_test(setup, monkeypat
     assert seen == ["the-owners-test", None]
 
 
+def test_tests_the_window_cut_off_leave_the_task_interrupted_not_committed(setup, monkeypatch):
+    status, record, run = run_task(setup, monkeypatch, "change", deadline_s=3, test="sleep 30")
+    assert status == "interrupted" and run.worktree.is_dir()
+    assert "night:" not in git(setup["repo"], "log", "--format=%s", "night/20261001-0100-abc").stdout
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
