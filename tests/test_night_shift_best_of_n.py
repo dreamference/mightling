@@ -528,6 +528,13 @@ def test_one_swiss_round_is_one_round():
     assert swiss and len(in_swiss) == len(set(in_swiss))
 
 
+def test_every_attempt_tied_at_the_top_is_named():
+    import random
+    candidates = [ChooserCandidate(f"a{i}", "p", [f"a{i}"], p2p_failed=0) for i in range(1, 4)]
+    choice = NightShiftChooser.choose(candidates, lambda a, b: (5.0, 5.0), random.Random("t"))
+    assert choice["chosen"] == ["a1", "a2", "a3"]
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
