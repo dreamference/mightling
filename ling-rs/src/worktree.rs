@@ -1205,4 +1205,10 @@ mod tests {
         assert!(prepared.cwd.is_some(), "{:?}", prepared.lines);
         assert_eq!(prepared.lines.last(), kept_line(1).as_ref(), "{:?}", prepared.lines);
     }
+
+    #[test]
+    fn with_cd_leaves_config_flags_alone() {
+        let rewrite = |list: &[&str]| with_cd(args(list).into_iter(), |arg| Some(arg.clone()), |arg| arg, "/w");
+        assert_eq!(rewrite(&["-c", "model=x", "-cmodel=y", "hi"]), args(&["-c", "model=x", "-cmodel=y", "hi"]));
+    }
 }
