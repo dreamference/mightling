@@ -577,4 +577,13 @@ mod tests {
             assert!(text.len() <= MAX_CHARS + "\n…".len() && text.ends_with("\n…"), "{}", text.len());
         }
     }
+
+    #[test]
+    fn a_failure_or_a_test_result_alone_is_something_to_say() {
+        let failed = Ledger { failed: vec![(1, "false".to_string())], ..Ledger::default() };
+        assert!(!failed.is_empty());
+        let tested = Ledger { last_test: Some(("1 passed in 0.1s".to_string(), "pytest".to_string())), ..Ledger::default() };
+        assert!(!tested.is_empty());
+        assert!(Ledger::default().is_empty());
+    }
 }
