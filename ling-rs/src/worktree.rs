@@ -1181,4 +1181,14 @@ mod tests {
         assert_eq!(prune(&home, &repo), 0);
         assert!(!session.home.exists());
     }
+
+    #[test]
+    fn a_session_is_found_from_a_path_that_is_not_canonical() {
+        let fixture = Fixture::new("roundabout");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (session, cwd, _) = create(&home, &repo.join("sub")).unwrap_or_else(|err| panic!("{err}"));
+        let inside = cwd.strip_prefix(&fixture.root).unwrap_or_else(|err| panic!("{err}"));
+        let roundabout = repo.join("..").join(inside);
+        assert_eq!(session_at(&home, &roundabout).map(|found| found.id), Some(session.id));
+    }
 }
