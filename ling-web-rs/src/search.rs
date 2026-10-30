@@ -954,4 +954,12 @@ mod tests {
         let error = search("http://127.0.0.1:9", "   ", 5, Level::Off).unwrap_err();
         assert_eq!(error.error, "empty query");
     }
+
+    #[test]
+    fn bings_tracking_parameter_is_not_part_of_the_address() {
+        assert_eq!(
+            comparable_url("https://a.example/x?msockid=1&id=2"),
+            "a.example/x?id=2"
+        );
+    }
 }
