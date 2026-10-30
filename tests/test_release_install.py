@@ -1604,7 +1604,8 @@ def test_an_unsigned_release_from_the_cut_over_on_is_refused(tmp_path, release_s
 def test_an_unsigned_latest_release_is_refused_whatever_its_tag(tmp_path, release_server):
     # The tag is only a name: whoever can mark a release latest without the signing key could tag
     # it v1.4.9 and have it installed on its checksums alone (found 2026-10-29).
-    for tag in ("v1.4.1", "v1.5.0", "nightly"):
+    # this-<digest> names a node's own build, which only a --from bundle may be.
+    for tag in ("v1.4.1", "v1.5.0", "nightly", "this-0123abc"):
         result = run_install(tmp_path, release_server(binaries(signed=False), tag=tag), "--role", "client")
         assert result.returncode == 1, tag
         assert f"the latest release ({tag}) is not signed" in result.stderr
