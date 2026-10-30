@@ -363,6 +363,13 @@ def test_removing_a_node_that_is_not_paired_is_refused(capsys):
     assert "No paired node named spark-9" in capsys.readouterr().out
 
 
+def test_only_a_name_inside_the_overlay_domain_is_an_overlay_name():
+    from dreamference.remote.remote_settings import OVERLAY_DOMAIN
+
+    assert NodePairing.is_overlay_name(f"spark-1.{OVERLAY_DOMAIN}")
+    assert not NodePairing.is_overlay_name(f"spark-1{OVERLAY_DOMAIN}")  # it only ends like one
+
+
 # -- the forced command ------------------------------------------------------------------------------
 
 
