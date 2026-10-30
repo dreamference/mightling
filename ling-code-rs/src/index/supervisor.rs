@@ -485,6 +485,23 @@ mod tests {
     }
 
     #[test]
+    fn a_writable_path_outside_the_scratch_exists_before_the_sandbox_binds_it() {
+        // bwrap fails on a bind whose source is missing: a fresh home has no graph cache yet.
+        let dir = tempfile::tempdir().unwrap();
+        let host = FakeHost::new(dir.path(), 100);
+        let mut plan = repo_and_plan(dir.path(), Kind::Universal, 0);
+        let cache = dir.path().join("home/.cache/codebase-memory-mcp");
+        plan.runs[0].spec.writable_outside_scratch = vec![(cache.clone(), "graph cache".into())];
+        execute(
+            &plan,
+            &host,
+            &BusyThenIdle(Cell::new(0)),
+            Duration::from_millis(1),
+        );
+        assert!(cache.is_dir());
+    }
+
+    #[test]
     fn a_budget_below_the_need_defers_and_records_it() {
         let dir = tempfile::tempdir().unwrap();
         let host = FakeHost::new(dir.path(), 12); // ~2 GiB above the reserve
