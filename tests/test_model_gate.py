@@ -476,6 +476,14 @@ def test_a_closed_gate_answers_a_head_with_a_head_and_a_post_to_its_probe_with_a
     assert StandIn.seen == []
 
 
+def test_a_closed_gate_reads_a_large_body_before_it_refuses(live):
+    """Closing on an unread body resets the connection; the client must see the 503."""
+    write(live["state"], RUN_FILE, run_record())
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        post(live["port"], path="/v1/responses", body=b"x" * (32 << 20))
+    assert refused.value.code == 503
+
+
 def test_a_chunked_request_body_reaches_the_engine_whole(live):
     StandIn.second_chunk.set()
     with socket.create_connection(("127.0.0.1", live["port"]), timeout=10) as client:
