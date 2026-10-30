@@ -475,7 +475,7 @@ mod tests {
         assert!(text.starts_with("model = \"m\"\n"), "{text}");
         assert!(text.contains("unavailable: for macos only\n[[skills.config]]\npath = "), "{text}");
         // A Windows path is written as a TOML literal string: single quotes, backslashes as they are.
-        let flat = text.replace('\\', "/").replace('\'', "\"");
+        let flat = text.replace('\\', "/").replace("//", "/").replace('\'', "\"");
         assert!(flat.contains(".agents/skills/mac-only/SKILL.md\"\nenabled = false\n"), "{text}");
 
         // A second start changes nothing on disk.
