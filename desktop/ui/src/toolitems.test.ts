@@ -49,6 +49,9 @@ describe("tool calls in full", () => {
     expect(jsonText({})).toBeNull();
     expect(jsonText("plain")).toBe("plain");
     expect(took(850)).toBe("850 ms");
+    // Rounded first: 999.6 ms is a second, not "1000 ms".
+    expect(took(999.6)).toBe("1.0 s");
+    expect(took(59_999)).toBe("1 min");
     expect(took(null)).toBeNull();
     expect(mcpContent([{ type: "resource", resource: { uri: "file:///a" } }])).toBe("[resource file:///a]");
     const long = toolView(item({ type: "functionCallOutput", id: "f", name: "x", namespace: null, output: "y".repeat(PART_CAP + 10) }));

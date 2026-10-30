@@ -43,8 +43,10 @@ export function jsonText(value: unknown): string | null {
 /** How long something took, in words: 850 ms, 2.4 s, 3 min. */
 export function took(ms: number | null | undefined): string | null {
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return null;
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+  // Each unit is chosen on the rounded value, so 999.6 ms is "1.0 s" and not "1000 ms".
+  if (Math.round(ms) < 1000) return `${Math.round(ms)} ms`;
+  if (Math.round(ms / 100) < 100) return `${(ms / 1000).toFixed(1)} s`;
+  if (Math.round(ms / 1000) < 60) return `${Math.round(ms / 1000)} s`;
   return `${Math.round(ms / 60_000)} min`;
 }
 
