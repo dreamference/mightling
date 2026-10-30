@@ -331,6 +331,17 @@ def test_a_command_never_waits_for_a_git_password_and_knows_it_is_the_night_run(
     assert "GIT_TERMINAL_PROMPT=0" in lines and f"{NIGHT_RUN_ENV}=1" in lines
 
 
+def test_a_commands_output_replaces_the_last_unless_appended(setup):
+    record = queue(setup["night"], setup["repo"])
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() + 60)
+    out = setup["night"] / "out.log"
+    run._run_capped(["echo", "one"], setup["repo"], out, 30)
+    run._run_capped(["echo", "two"], setup["repo"], out, 30, append=False)
+    assert out.read_text() == "two\n"
+    run._run_capped(["echo", "three"], setup["repo"], out, 30)
+    assert out.read_text() == "two\nthree\n"
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
