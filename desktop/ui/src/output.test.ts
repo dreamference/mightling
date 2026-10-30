@@ -71,6 +71,10 @@ describe("findMatches (G8)", () => {
     ]);
   });
 
+  it("gives ranges in the text's own offsets when lower case changes a length", () => {
+    expect(findMatches("İİ error", "ERROR")).toEqual([{ start: 3, end: 8 }]);
+  });
+
   it("steps between matches with wrap-around and formats the match count", () => {
     expect(stepMatchIndex(0, 0, 1)).toBe(0);
     expect(stepMatchIndex(0, 17, -1)).toBe(16);

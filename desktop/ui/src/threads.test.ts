@@ -38,6 +38,12 @@ describe("threads in the sidebar", () => {
     expect(occurrences("Retry, retry, RETRY", "retry")).toEqual([0, 7, 14]);
     expect(occurrences("abc", "")).toEqual([]);
   });
+
+  it("finds at the text's own offsets when lower case changes a length", () => {
+    // "İ".toLowerCase() is two code units: offsets in the lowered text drift past it.
+    expect(occurrences("İstanbul x", "x")).toEqual([9]);
+    expect(occurrences("a.b a+b", "a+b")).toEqual([4]);
+  });
 });
 
 describe("the rename box", () => {
