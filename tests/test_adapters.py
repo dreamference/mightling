@@ -494,6 +494,7 @@ def test_a_third_party_adapter_installs_only_with_its_name_typed(keys, remote):
             "not a LoRA tensor",
         ),
         ({"rank": 32}, "ceiling"),
+        ({"rank": 17}, "ceiling"),
     ],
 )
 def test_an_adapter_the_recipe_cannot_serve_is_refused(keys, remote, changes, reason):
@@ -501,6 +502,18 @@ def test_an_adapter_the_recipe_cannot_serve_is_refused(keys, remote, changes, re
     make_adapter(source, keys, **changes)
     with pytest.raises(ValueError, match=reason):
         AdapterInstaller.install(None, f"{ADAPTER_REPO}@{COMMIT}", served(base_snapshot()))
+
+
+def test_a_tensor_without_a_lora_suffix_or_an_oversized_header_is_refused(tmp_path):
+    weights = tmp_path / "adapter_model.safetensors"
+    weights.write_bytes(safetensors([f"{LAYER}.3.self_attn.q_proj.lora_A.weight"]))
+    AdapterVerifier.check_tensors(weights, {"q_proj"})
+    weights.write_bytes(safetensors([f"{LAYER}.3.self_attn.q_proj.weight"]))
+    with pytest.raises(ValueError, match="not a LoRA tensor"):
+        AdapterVerifier.check_tensors(weights, {"q_proj"})
+    weights.write_bytes(struct.pack("<Q", adapter_verifier.HEADER_LIMIT + 1) + b"{}")
+    with pytest.raises(ValueError, match="implausibly large"):
+        AdapterVerifier.check_tensors(weights, {"q_proj"})
 
 
 def test_an_adapter_config_that_disagrees_with_its_manifest_is_refused(tmp_path, keys):
