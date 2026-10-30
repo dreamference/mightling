@@ -1061,6 +1061,22 @@ def test_a_node_reinstalls_a_wheel_of_the_same_version(tmp_path, release_server)
     assert any("--force-reinstall" in args and "--no-deps" in args for args in wheel), pip
 
 
+def test_a_bundle_with_a_wheelhouse_installs_the_node_without_a_package_index(tmp_path, release_server):
+    # `node provision` brings the Python dependencies in the bundle: pip asks no index at all.
+    bundle = tmp_path / "bundle"
+    (bundle / "wheelhouse").mkdir(parents=True)
+    for name, body in node_release().items():
+        (bundle / name).write_bytes(body)
+    server = release_server({})
+    result = run_install(tmp_path, server, "--from", str(bundle), "--role", "node", "--no-advertise",
+                         "--no-host-setup", "--no-model")
+    assert result.returncode == 0, result.stdout + result.stderr
+    pip = [line.split() for line in logged(tmp_path, "pip.log").splitlines() if line.startswith("-m pip install")]
+    wheelhouse = str(bundle.resolve() / "wheelhouse")
+    assert len(pip) == 2 and all("--no-index" in args and wheelhouse in args for args in pip), pip
+    assert server.requests == []
+
+
 def test_an_option_without_its_value_is_named(tmp_path, release_server):
     # `shift 2` past the end used to end the script under `set -e` with no word.
     for option in ("--role", "--version", "--from"):
