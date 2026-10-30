@@ -1834,3 +1834,13 @@ def test_a_missing_ling_is_built_and_its_build_decides(monkeypatch):
 def test_without_a_patch_directory_there_is_no_patch_series(tmp_path):
     with patch.object(builder_module, "CODEX_PATCH_DIR", str(tmp_path / "no-patches")):
         assert CodexBrandedBuilder.patches() == []
+
+
+def test_the_export_names_its_extraction_filter_so_python_cannot_change_it(tmp_path):
+    # Without one, Python 3.12 warns and Python 3.14 switches to the stricter "data" filter.
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        archive = _tar(("codex-rs/main.rs", None), ("codex-rs/LICENSE", "main.rs"))
+        assert CodexBrandedBuilder.extract_archive(archive, str(tmp_path)) is True
