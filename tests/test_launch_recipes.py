@@ -243,3 +243,10 @@ def test_a_caller_value_wins_over_the_recipe_even_when_it_is_empty(vllm_recipes)
     build = VLLMServerManager().build_launch_command
     assert _flag(build(model="test-vllm-nvfp4"), "--reasoning-parser") == "qwen3"
     assert "--reasoning-parser" not in build(model="test-vllm-nvfp4", reasoning_parser="")
+
+
+def test_an_auto_attention_backend_leaves_the_choice_to_the_recipe(vllm_recipes):
+    cmd = VLLMServerManager().build_launch_command(
+        model="test-vllm-nvfp4", attention_backend="auto"
+    )
+    assert _flag(cmd, "--attention-backend") == "flashinfer"
