@@ -104,9 +104,15 @@ class ReleaseAssetDownloader:
             if not blob.is_file() and not cls._fetch(pin, blob):
                 return False
             link = snapshot / name
-            if link.is_symlink() or link.exists():
-                link.unlink()
-            link.symlink_to(Path("..") / ".." / "blobs" / pin["sha256"])
+            # Made under a name of this run's own and renamed over the old link: a download at
+            # the same time cannot make it in between, and a reader never finds it missing.
+            staged = link.with_name(f".{link.name}.{os.getpid()}.{id(source)}.link")
+            staged.unlink(missing_ok=True)
+            staged.symlink_to(Path("..") / ".." / "blobs" / pin["sha256"])
+            try:
+                staged.replace(link)
+            finally:
+                staged.unlink(missing_ok=True)
         cls._say(
             f"✅ {repo} at {source['revision']} ({len(source['files'])} file(s), SHA-256 checked)"
         )
