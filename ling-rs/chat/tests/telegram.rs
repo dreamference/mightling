@@ -193,6 +193,39 @@ async fn pairing_takes_a_code_once_and_ten_wrong_codes_withdraw_the_rest() {
     assert_eq!(TelegramConfig::load(&dir).unwrap().users, vec![111, 333]);
 }
 
+/// `times` wrong codes from an account that is not paired.
+async fn wrong_codes(poller: &mut Poller, times: u32) {
+    for n in 0..times {
+        poller.handle(&private_message(777, &format!("/pair wrong{n}"))).await;
+    }
+}
+
+/// The tenth wrong code in a row withdraws every pending code, not the eleventh, and a code that
+/// binds starts the count again.
+#[tokio::test]
+async fn the_tenth_wrong_code_in_a_row_withdraws_the_codes_and_a_good_one_starts_the_count_again() {
+    let (_stand, api) = stand_in(default_answer()).await;
+    let dir = scratch("count");
+    let (hub, _inbound) = mpsc::unbounded_channel();
+    let mut poller = Poller::new(api, dir.clone(), hub);
+    let users = || TelegramConfig::load(&dir).unwrap().users;
+    // Nine wrong codes, then a good one: it binds.
+    let first = store::issue_pairing_code(&dir).unwrap();
+    wrong_codes(&mut poller, 9).await;
+    poller.handle(&private_message(444, &format!("/pair {first}"))).await;
+    assert_eq!(users(), vec![111, 444]);
+    // The count started again: one more wrong code withdraws nothing.
+    let second = store::issue_pairing_code(&dir).unwrap();
+    wrong_codes(&mut poller, 1).await;
+    poller.handle(&private_message(555, &format!("/pair {second}"))).await;
+    assert_eq!(users(), vec![111, 444, 555]);
+    // Ten wrong codes in a row: the pending code is gone.
+    let third = store::issue_pairing_code(&dir).unwrap();
+    wrong_codes(&mut poller, 10).await;
+    poller.handle(&private_message(666, &format!("/pair {third}"))).await;
+    assert_eq!(users(), vec![111, 444, 555]);
+}
+
 /// A paired account that sends a code is told so: the code is not spent on it, and the account is
 /// not listed twice.
 #[tokio::test]
