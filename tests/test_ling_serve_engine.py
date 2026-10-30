@@ -692,3 +692,24 @@ def test_server_status_names_the_engine_commit_drafter_and_step_graphs():
 def test_the_ling_engine_is_named_in_any_case():
     assert LingServeLaunchBuilder.is_ling({"engine": "Ling"})
     assert not LingServeLaunchBuilder.is_ling({"engine": "sglang"})
+
+
+def _plan_from(monkeypatch, returncode, stdout):
+    import subprocess
+
+    monkeypatch.setattr(
+        "dreamference.vllm_server.vllm_server_manager.subprocess.run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=""),
+    )
+    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    return VLLMServerManager.ling_serve_plan(QWEN38_LING_IMAGE, DEFAULT_MODEL_ALIAS, recipe)
+
+
+def test_a_ling_serve_plan_missing_a_figure_is_no_plan(monkeypatch):
+    assert _plan_from(monkeypatch, 0, '{"sessions":3}\n') is None
+    assert (
+        _plan_from(
+            monkeypatch, 0, '{"sessions":3,"batch":3,"max_context":"262144","planned_bytes":1}\n'
+        )
+        is None
+    )
