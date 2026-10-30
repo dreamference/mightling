@@ -398,3 +398,45 @@ def test_an_empty_yaml_file_is_saved_over(tmp_path):
     path.write_text("")
     DreamferenceConfig(config_file=str(path), model="llama-3.3-70b").save_config()
     assert yaml.safe_load(path.read_text()) == {"model": "llama-3.3-70b"}
+
+
+def _gmail_files(tmp_path, monkeypatch, user: str | None, repository: str):
+    monkeypatch.chdir(tmp_path)
+    user_level = tmp_path / "home" / "config.toml"
+    monkeypatch.setattr(config_path_resolver, "GLOBAL_DREAMFERENCE_CONFIG_PATH", user_level)
+    user_level.parent.mkdir()
+    if user is not None:
+        user_level.write_text(user)
+    (tmp_path / "dreamference.toml").write_text(repository)
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_GMAIL", raising=False)
+    return DreamferenceConfig()
+
+
+def test_a_repository_cannot_turn_gmail_back_on(tmp_path, monkeypatch):
+    config = _gmail_files(
+        tmp_path, monkeypatch, "mightling_gmail = false\n", "mightling_gmail = true\n"
+    )
+    assert config.mightling_gmail is False
+
+
+def test_a_repository_can_turn_gmail_off(tmp_path, monkeypatch):
+    config = _gmail_files(
+        tmp_path, monkeypatch, "mightling_gmail = true\n", "mightling_gmail = false\n"
+    )
+    assert config.mightling_gmail is False
+
+
+def test_a_repository_that_is_silent_leaves_gmail_to_the_user_file(tmp_path, monkeypatch):
+    assert (
+        _gmail_files(
+            tmp_path, monkeypatch, "mightling_gmail = false\n", 'model = "m"\n'
+        ).mightling_gmail
+        is False
+    )
+
+
+def test_a_repository_true_with_no_user_choice_is_the_default(tmp_path, monkeypatch):
+    assert (
+        _gmail_files(tmp_path, monkeypatch, None, "mightling_gmail = true\n").mightling_gmail
+        is True
+    )
