@@ -521,6 +521,18 @@ mod tests {
     }
 
     #[test]
+    fn the_users_home_reached_through_a_link_indexes_but_a_folder_beside_it_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("user");
+        std::fs::create_dir_all(user.join(".mightling")).unwrap();
+        std::fs::create_dir_all(user.join("other")).unwrap();
+        std::os::unix::fs::symlink(user.join(".mightling"), dir.path().join("link")).unwrap();
+        assert!(indexes_unasked_for(&dir.path().join("link"), &user, None));
+        assert!(!indexes_unasked_for(&user.join("other"), &user, None));
+        assert!(!indexes_unasked_for(&user, &user, None));
+    }
+
+    #[test]
     fn defaults_are_the_specs() {
         let s = Settings::default();
         assert_eq!(
