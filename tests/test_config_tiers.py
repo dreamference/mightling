@@ -6,7 +6,7 @@ import pytest
 
 from dreamference.config import DreamferenceConfig, config_path_resolver
 from dreamference.config.config_path_resolver import ConfigPathResolver
-from dreamference.config.dreamference_config import DEFAULT_SPECULATIVE_TOKENS
+from dreamference.config.dreamference_config import CONFIG_KEYS, DEFAULT_SPECULATIVE_TOKENS
 
 TIER_VARIABLES = (
     "HF_TOKEN",
@@ -310,3 +310,37 @@ def test_an_air_gap_level_from_the_environment_is_not_written(tmp_path, monkeypa
     assert config.mightling_airgapped == "on"
     config.save_config()
     assert _saved(path) == {"model": "llama-3.3-70b"}
+
+
+def test_every_key_save_config_writes_is_one_it_removes_again(tmp_path):
+    path = tmp_path / "dreamference.toml"
+    DreamferenceConfig(
+        config_file=str(path),
+        vllm_host="http://gpu-box.lan:8000",
+        agent_runner="claude",
+        model="llama-3.3-70b",
+        diffusion_model="diffusion-model",
+        draft_model="draft-model",
+        num_speculative_tokens=DEFAULT_SPECULATIVE_TOKENS + 1,
+        hf_token="hf_named",
+        enable_prefix_caching=False,
+        enable_chunked_prefill=False,
+        num_scheduler_steps=3,
+        attention_backend="flashinfer",
+        kv_cache_dtype="fp8",
+        guided_decoding_backend="outlines",
+        use_tensorizer=True,
+        server_engine="sglang",
+        mightling_gmail=False,
+        mightling_compaction_ledger=False,
+        mightling_airgapped="on",
+        mightling_prompt="terse",
+        mightling_refine=True,
+        mightling_refine_version="v2",
+    ).save_config()
+    assert set(_saved(path)) == CONFIG_KEYS
+    # A default configuration saved over it leaves only the keys another reader owns.
+    with path.open("a") as file:
+        file.write("other_reader = 1\n")
+    DreamferenceConfig(config_file=str(tmp_path / "none.toml")).save_config(path)
+    assert _saved(path) == {"other_reader": 1}
