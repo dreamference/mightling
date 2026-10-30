@@ -634,6 +634,60 @@ fn a_share_link_walk_gives_up_after_ten_redirects() {
 }
 
 #[test]
+fn a_fetch_gives_up_on_a_redirect_loop() {
+    let server = Server::start(|_| response("302 Found", "text/html", b"", "Location: /again\r\n"));
+    let output = fetch(&[&format!("{}/again", server.base)], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stdout(&output).starts_with("❌ request failed: more than 10 redirects"),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(server.requests().len(), 11);
+}
+
+#[test]
+fn a_redirect_cannot_turn_a_fetch_or_a_download_into_a_file_read() {
+    let dir = std::env::temp_dir().join(format!("ling-fetch-file-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let secret = dir.join("secret.pdf");
+    std::fs::write(&secret, b"%PDF-1.4\nnot-for-the-web").unwrap();
+    let location = format!("Location: file://{}\r\n", secret.display());
+    let server = Server::start(move |_| response("302 Found", "text/html", b"", &location));
+    let output = fetch(&[&format!("{}/doc", server.base)], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout(&output).contains("refused"), "{}", stdout(&output));
+    assert!(!stdout(&output).contains("not-for-the-web"));
+    let dest = dir.join("copy.pdf");
+    let download = fetch(
+        &[
+            "--download",
+            dest.to_str().unwrap(),
+            &format!("{}/doc", server.base),
+        ],
+        &[],
+    );
+    assert_eq!(download.status.code(), Some(1));
+    assert!(
+        stdout(&download).contains("refused"),
+        "{}",
+        stdout(&download)
+    );
+    assert!(!dest.exists());
+    let hostless =
+        Server::start(|_| response("302 Found", "text/html", b"", "Location: http:///x\r\n"));
+    let output = fetch(&[&hostless.base], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stdout(&output).contains("URL has no host"),
+        "{}",
+        stdout(&output)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn fetch_reports_http_errors() {
     let server = Server::start(|_| response("404 Not Found", "text/html", b"gone", ""));
     let output = fetch(&[&format!("{}/missing", server.base)], &[]);
@@ -650,6 +704,8 @@ fn download_saves_a_pdf_and_refuses_anything_else() {
     let server = Server::start(|line| {
         if line.contains("/paper") {
             response("200 OK", "application/octet-stream", b"%PDF-1.4\nbody", "")
+        } else if line.contains("/moved") {
+            response("302 Found", "text/html", b"", "Location: /paper\r\n")
         } else {
             response("200 OK", "text/html", b"<html>login</html>", "")
         }
@@ -671,6 +727,16 @@ fn download_saves_a_pdf_and_refuses_anything_else() {
     assert_eq!(saved["bytes"], 13);
     assert_eq!(saved["final_url"], format!("{}/paper", server.base));
     assert_eq!(std::fs::read(&dest).unwrap(), b"%PDF-1.4\nbody");
+    let moved = fetch(
+        &[
+            "--download",
+            dir.join("moved.pdf").to_str().unwrap(),
+            &format!("{}/moved", server.base),
+        ],
+        &[],
+    );
+    assert!(moved.status.success(), "{}", stdout(&moved));
+    assert!(stdout(&moved).contains("/paper"), "{}", stdout(&moved));
     let refused = fetch(
         &[
             "--download",
