@@ -347,3 +347,49 @@ def test_clean_of_every_run_with_no_container_removes_none_and_with_images_remov
     assert not any((SweBenchRunStore(n).directory / "scratch").exists() for n in ("r1", "r2"))
     assert removed == ["i1", "i2"]
     assert "Removed 1 of 2 instance image(s)" in capsys.readouterr().out
+
+
+def test_run_with_a_refine_version_but_without_refine_exits_2_and_starts_nothing(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        SweBenchRunner, "run", classmethod(lambda cls, **kwargs: pytest.fail("must not run"))
+    )
+    version = next(iter(REFINE_VERSIONS))
+    assert SweBenchCommand.dispatch(parse("run", "--refine-version", version)) == 2
+    assert "give both" in capsys.readouterr().out
+
+
+def test_no_subcommand_prints_the_usage_and_exits_2(capsys):
+    assert SweBenchCommand.dispatch(argparse.Namespace(swe_bench_command=None)) == 2
+    assert USAGE in capsys.readouterr().out
+
+
+def test_report_against_another_run_compares_them_and_without_prints_the_report(
+    monkeypatch, capsys
+):
+    SweBenchRunStore("a").write_manifest({"name": "a"})
+    monkeypatch.setattr(
+        SweBenchReport,
+        "against",
+        classmethod(lambda cls, store, other, variant: f"{store.name} vs {other.name}\n"),
+    )
+    monkeypatch.setattr(
+        SweBenchReport, "write", classmethod(lambda cls, store, variant: f"report {store.name}\n")
+    )
+    assert SweBenchCommand.dispatch(parse("report", "a", "--against", "b")) == 0
+    assert SweBenchCommand.dispatch(parse("report", "a")) == 0
+    assert capsys.readouterr().out == "a vs b\nreport a\n"
+
+
+def test_smoke_and_status_are_dispatched_with_their_arguments(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        SweBenchCommand, "smoke", classmethod(lambda cls, *args: seen.append(("smoke", args)) or 5)
+    )
+    monkeypatch.setattr(
+        SweBenchCommand, "status", classmethod(lambda cls: seen.append(("status", ())) or 6)
+    )
+    assert SweBenchCommand.dispatch(parse("smoke", "--ignore-open-sessions")) == 5
+    assert SweBenchCommand.dispatch(parse("status")) == 6
+    assert seen[0][0] == "smoke" and seen[0][1][1] is True and seen[1] == ("status", ())
