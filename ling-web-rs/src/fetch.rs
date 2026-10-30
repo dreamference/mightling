@@ -507,6 +507,124 @@ mod tests {
     }
 
     #[test]
+    fn a_byte_order_mark_overrides_the_header_and_the_meta() {
+        let utf16 = [0xff, 0xfe, b'h', 0, 0xe9, 0];
+        assert_eq!(decode(&utf16, "text/html; charset=ISO-8859-1", true), "hé");
+        let utf8 = [
+            b"\xef\xbb\xbf<meta charset=\"latin1\">".as_slice(),
+            "café".as_bytes(),
+        ]
+        .concat();
+        assert!(decode(&utf8, "text/plain; charset=latin1", true).ends_with("café"));
+    }
+
+    #[test]
+    fn an_unknown_or_late_charset_falls_back_to_utf8() {
+        assert_eq!(
+            decode(
+                "café".as_bytes(),
+                "text/html; charset=no-such-charset",
+                true
+            ),
+            "café"
+        );
+        let late = [
+            " ".repeat(1024).as_bytes(),
+            b"<meta charset=\"windows-1252\">caf",
+            &[0xe9],
+        ]
+        .concat();
+        assert!(decode(&late, "text/html", true).ends_with("caf\u{fffd}"));
+        let not_html = [b"<meta charset=\"windows-1252\">caf".as_slice(), &[0xe9]].concat();
+        assert!(decode(&not_html, "text/plain", false).ends_with("caf\u{fffd}"));
+    }
+
+    #[test]
+    fn a_pdf_header_after_the_first_kib_is_not_a_pdf() {
+        let dir = std::env::temp_dir().join(format!("ling-fetch-late-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let late = [vec![b' '; 1024].as_slice(), b"%PDF-1.7\n"].concat();
+        let error = save_pdf(late.as_slice(), &dir.join("a.pdf"), 1 << 20, "").unwrap_err();
+        assert!(error.contains("no type"), "{error}");
+        assert!(!dir.join("a.pdf").exists());
+        let at_the_end_of_the_kib = [vec![b' '; 1019].as_slice(), b"%PDF-"].concat();
+        assert_eq!(
+            save_pdf(
+                at_the_end_of_the_kib.as_slice(),
+                &dir.join("b.pdf"),
+                1 << 20,
+                ""
+            ),
+            Ok(1024)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_download_of_exactly_the_cap_is_kept() {
+        let dir = std::env::temp_dir().join(format!("ling-fetch-cap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pdf = [b"%PDF-1.7\n".as_slice(), &vec![b'x'; 3000]].concat();
+        let cap = pdf.len() as u64;
+        assert_eq!(
+            save_pdf(pdf.as_slice(), &dir.join("a.pdf"), cap, ""),
+            Ok(cap)
+        );
+        assert!(save_pdf(pdf.as_slice(), &dir.join("b.pdf"), cap - 1, "").is_err());
+        assert!(!dir.join("b.pdf").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_download_never_writes_through_a_symlink() {
+        let dir = std::env::temp_dir().join(format!("ling-fetch-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("victim"), b"keep").unwrap();
+        std::os::unix::fs::symlink(dir.join("victim"), dir.join("a.pdf")).unwrap();
+        std::os::unix::fs::symlink(dir.join("absent"), dir.join("b.pdf")).unwrap();
+        let pdf = b"%PDF-1.7\nbody".as_slice();
+        assert!(save_pdf(pdf, &dir.join("a.pdf"), 1 << 20, "").is_err());
+        assert!(save_pdf(pdf, &dir.join("b.pdf"), 1 << 20, "").is_err());
+        assert_eq!(std::fs::read(dir.join("victim")).unwrap(), b"keep");
+        assert!(
+            !dir.join("absent").exists(),
+            "a dangling link is not followed"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_body_that_breaks_off_leaves_nothing_behind() {
+        struct BreaksOff(Vec<u8>);
+        impl Read for BreaksOff {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0.is_empty() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionReset,
+                        "reset",
+                    ));
+                }
+                let n = buf.len().min(self.0.len());
+                buf[..n].copy_from_slice(&self.0[..n]);
+                self.0.drain(..n);
+                Ok(n)
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("ling-fetch-reset-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let body = BreaksOff([b"%PDF-1.7\n".as_slice(), &vec![b'x'; 4096]].concat());
+        let error = save_pdf(body, &dir.join("a.pdf"), 1 << 20, "").unwrap_err();
+        assert!(error.contains("request failed"), "{error}");
+        assert!(!dir.join("a.pdf").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn rendering_matches_the_python_command() {
         let page = FetchedPage {
             url: "u".into(),
