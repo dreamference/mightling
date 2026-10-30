@@ -1048,3 +1048,15 @@ fn read_sends_nothing_at_on() {
 fn pages_without_read_is_a_usage_error() {
     assert_eq!(search(&["--pages", "2", "q"], &[]).status.code(), Some(2));
 }
+
+#[test]
+fn json_that_is_not_an_object_is_not_a_searxng_answer() {
+    let array = Server::start(|_| response("200 OK", "application/json", b"[]", ""));
+    let output = search(&["q"], &[("DREAMFERENCE_SEARXNG_URL", &array.base)]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stdout(&output).contains("did not return JSON"),
+        "{}",
+        stdout(&output)
+    );
+}
