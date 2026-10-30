@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from dreamference.forge.forge_accounts import ForgeAccounts
 from dreamference.forge.forge_backup import ForgeBackup
 from dreamference.forge.forge_command import USAGE_EXIT, ForgeCommand
 from dreamference.forge.forge_mirrors import ForgeMirrors
@@ -82,3 +83,20 @@ def test_a_move_to_a_node_or_back_is_handed_on(monkeypatch):
     ForgeCommand.dispatch(argparse.Namespace(forge_command="move", node="n-2", back=False))
     ForgeCommand.dispatch(argparse.Namespace(forge_command="move", node=None, back=True))
     assert moves == [("n-2", False), (None, True)]
+
+
+# Keys, the GitHub mirror and the password
+
+
+def test_a_key_subcommand_other_than_add_prints_the_usage(monkeypatch, capsys):
+    monkeypatch.setattr(ForgeAccounts, "add_key", classmethod(never))
+    args = argparse.Namespace(forge_command="key", key_command=None)
+    assert ForgeCommand.dispatch(args) == USAGE_EXIT
+    assert "ling-admin forge" in capsys.readouterr().out
+
+
+def test_a_key_file_that_cannot_be_read_adds_nothing(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(ForgeAccounts, "add_key", classmethod(never))
+    args = argparse.Namespace(forge_command="key", key_command="add", file=str(tmp_path / "x.pub"))
+    assert ForgeCommand.dispatch(args) == 1
+    assert "x.pub" in capsys.readouterr().out
