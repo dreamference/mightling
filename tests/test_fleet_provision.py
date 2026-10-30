@@ -129,6 +129,7 @@ def test_opening_the_master_hands_ssh_the_askpass_script_not_the_password(tmp_pa
 def test_askpass_answers_its_own_host_over_the_socket(tmp_path, monkeypatch, capsys):
     run_dir = Path(FleetSession.new_run_dir())
     askpass = FleetAskpass(run_dir, {"spark-1": SECRET})
+    before = set(threading.enumerate())
     askpass.start("/usr/bin/false")
     try:
         assert stat.S_IMODE(os.stat(askpass.socket_path).st_mode) == 0o600
@@ -143,6 +144,9 @@ def test_askpass_answers_its_own_host_over_the_socket(tmp_path, monkeypatch, cap
     finally:
         askpass.stop()
         os.rmdir(run_dir)
+    # Its answering thread ends with it (one left waiting in accept() made every later fork in
+    # the process warn that it was multi-threaded).
+    assert set(threading.enumerate()) <= before
 
 
 def test_askpass_without_a_run_prints_nothing(monkeypatch, capsys):

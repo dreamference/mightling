@@ -12,6 +12,7 @@ it to ssh. Only the socket's path and the host name are in the environment; the 
 the socket once per connection and is checked against the peer's uid.
 """
 
+import contextlib
 import os
 import shlex
 import socket
@@ -80,6 +81,13 @@ class FleetAskpass:
     def stop(self) -> None:
         """Stops answering and removes the socket and the script."""
         if self._server is not None:
+            # close() alone does not wake a thread waiting in accept() on Linux: it would wait
+            # for the rest of the process. shutdown() does, and the thread then ends.
+            with contextlib.suppress(OSError):
+                self._server.shutdown(socket.SHUT_RDWR)
+            if self._thread is not None:
+                self._thread.join(5)
+                self._thread = None
             self._server.close()
             self._server = None
         for path in (self.socket_path, self.script_path):
