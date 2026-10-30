@@ -292,7 +292,55 @@ def test_a_valid_manifest_parses():
             "digest",
         ),
         ({"name": "Rust Adapter"}, "name"),
+        ({"name": "rust+evil"}, "name"),
+        ({"name": "rust:latest"}, "name"),
+        ({"version": "1.0.0-rc1"}, "version"),
+        ({"display_name": "  "}, "display_name"),
         ({"lora": {"rank": 0, "target_modules": ["q_proj"]}}, "rank"),
+        ({"lora": {"rank": True, "target_modules": ["q_proj"]}}, "rank"),
+        ({"lora": {"rank": 16, "target_modules": []}}, "target_modules"),
+        (
+            {"base": {"repo": BASE_REPO, "revision": "main", "digest": "sha256:" + "b" * 64}},
+            "revision",
+        ),
+        ({"base": {"repo": BASE_REPO, "revision": "a" * 40, "digest": "md5:x"}}, "digest"),
+        ({"files": {}}, "files list"),
+        ({"files": {"adapter_model.safetensors": "sha256:" + "c" * 64}}, "adapter_config.json"),
+        ({"files": {"adapter_config.json": "sha256:" + "d" * 64}}, "adapter_model.safetensors"),
+        (
+            {
+                "files": {
+                    "adapter_model.safetensors": "sha256:" + "c" * 64,
+                    "adapter_config.json": "sha256:" + "d" * 64,
+                    "manifest.json": "sha256:" + "e" * 64,
+                }
+            },
+            "cannot be one of",
+        ),
+        (
+            {
+                "files": {
+                    "adapter_model.safetensors": "sha256:" + "c" * 64,
+                    "adapter_config.json": "sha256:" + "d" * 64,
+                    "a/../escape.json": "sha256:" + "e" * 64,
+                }
+            },
+            "leaves",
+        ),
+        (
+            {
+                "files": {
+                    "adapter_model.safetensors": "sha256:" + "c" * 65,
+                    "adapter_config.json": "sha256:" + "d" * 64,
+                }
+            },
+            "digest",
+        ),
+        ({"drafter_adapter": "draft"}, "drafter_adapter is not an object"),
+        (
+            {"drafter_adapter": {"files": {"adapter_config.json": "sha256:" + "e" * 64}}},
+            "listed twice",
+        ),
     ],
 )
 def test_a_manifest_this_release_does_not_accept_is_refused(change, reason):
