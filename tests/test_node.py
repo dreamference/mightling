@@ -646,6 +646,23 @@ def test_root_without_a_terminal_reads_no_input_and_a_missing_sudo_is_a_failure(
     assert NodeAdvertiser.run_privileged(["true"], "test") is False
 
 
+def test_the_advert_takes_its_records_from_the_machine(monkeypatch):
+    from types import SimpleNamespace
+
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+    from dreamference.remote.remote_settings import RemoteSettings
+
+    monkeypatch.setattr(RemoteSettings, "read", classmethod(lambda cls: {"overlay_name": "gx10-1a2b"}))
+    assert NodeAdvertiser.remote_name() == "gx10-1a2b"
+    monkeypatch.setattr(RemoteSettings, "read", classmethod(lambda cls: None))
+    assert NodeAdvertiser.remote_name() is None
+    monkeypatch.setattr("dreamference.config.DreamferenceConfig", lambda: SimpleNamespace(vllm_host="http://127.0.0.1"))
+    assert NodeAdvertiser.model_port() == 8000
+    chat = next(key for key in ModelMatrixRegistry.MATRIX if not ModelMatrixRegistry.is_diffusion(key))
+    assert NodeAdvertiser.is_main_model(chat) is True
+    assert NodeAdvertiser.is_main_model("no-such-model") is False
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
