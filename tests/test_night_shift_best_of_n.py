@@ -401,6 +401,19 @@ def test_the_server_judge_never_waits_past_the_window_and_always_gets_a_minute(b
     assert 90 <= timeouts[0] <= 100 and timeouts[1] == MIN_JUDGE_TIMEOUT_S
 
 
+def test_a_branch_that_cannot_take_the_tasks_name_keeps_the_attempts(bon, monkeypatch):
+    real_git = NightShiftBestOfN._git
+
+    def git_(self, cwd, *args):
+        return (1, "locked") if args[:2] == ("branch", "-M") else real_git(self, cwd, *args)
+
+    monkeypatch.setattr(NightShiftBestOfN, "_git", git_)
+    status, record, _ = run_best_of(bon, monkeypatch, ["good", "none"], n=2)
+    assert status == "done"
+    assert record["result"]["branch"] == "night/20261001-0100-abc-a1"
+    assert branches(bon["repo"]) == ["night/20261001-0100-abc-a1"]
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
