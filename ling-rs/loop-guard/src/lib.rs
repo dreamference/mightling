@@ -537,4 +537,10 @@ mod tests {
         // Eight of the run's characters are kept, not eight bytes.
         assert_eq!(&run[..found.cut], format!("Да{}", "я".repeat(8)));
     }
+
+    #[test]
+    fn crlf_text_splits_as_lf_text_does() {
+        assert_eq!(pieces("Done.\r\nNext"), vec!["Done", ".\r\n"]);
+        assert_eq!(pieces("Done.\nNext"), vec!["Done", ".\n"]);
+    }
 }
