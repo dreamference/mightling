@@ -1144,4 +1144,21 @@ mod tests {
         assert!(output.status.success(), "{stdout}{}", String::from_utf8_lossy(&output.stderr));
         assert!(stdout.contains("1 passed"), "{stdout}");
     }
+
+    #[test]
+    fn the_setting_replaces_a_desktop_key_that_is_not_a_table_and_leaves_bad_toml_alone() {
+        let fixture = Fixture::new("bad-config");
+        let home = fixture.home();
+        let path = home.join("config.toml");
+        std::fs::write(&path, "model = \"m\"\ndesktop = 1\n").unwrap_or_default();
+        write_mode(&home, Mode::Worktree).unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(configured(&home), Some(Mode::Worktree));
+        assert!(std::fs::read_to_string(&path).unwrap_or_default().contains("model = \"m\""));
+        // A file that is not TOML is not overwritten, and the command says so.
+        std::fs::write(&path, "model = [\n").unwrap_or_default();
+        let (lines, code) = command(&home, &fixture.repo(), "on", false);
+        assert_eq!(code, 1);
+        assert!(lines[0].starts_with("Could not save the setting:") && lines[0].contains("is not valid TOML"), "{lines:?}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap_or_default(), "model = [\n");
+    }
 }
