@@ -68,6 +68,37 @@ def test_a_missing_visibility_counts_as_private():
     assert not ForgeRepositories.never_mirrored({"name": "x", "private": False})
 
 
+def test_the_named_archives_are_never_mirrored_even_when_shared():
+    for name in ("archive-pre-rewrite", "memos"):
+        assert ForgeRepositories.never_mirrored({"name": name, "private": False}), name
+
+
+def test_a_repository_starts_off_an_unknown_scope_reads_as_full_and_none_removes_a_setting():
+    assert ForgeRepositories.settings("o/r") == {"scope": "off", "exempt": [], "github": None}
+    ForgeRepositories.set_settings("o/r", scope="bogus", github="https://github.com/o/r")
+    assert ForgeRepositories.settings("o/r")["scope"] == "full"
+    ForgeRepositories.set_settings("o/r", github=None)
+    assert ForgeRepositories.config()["repositories"]["o/r"] == {"scope": "bogus"}
+
+
+def test_the_listing_reads_every_page_private_ones_included_and_fails_on_an_error(monkeypatch):
+    paths = []
+
+    def api(cls, method, path, token, body=None, timeout=30):
+        paths.append(path)
+        count = 50 if "&page=1&" in path else 3
+        return 200, {"data": [{"full_name": f"o/{len(paths)}-{i}"} for i in range(count)]}
+
+    monkeypatch.setattr(ForgeContainer, "api", classmethod(api))
+    assert len(ForgeRepositories.all("t")) == 53
+    assert len(paths) == 2 and all("private=true" in path for path in paths)
+    monkeypatch.setattr(
+        ForgeContainer, "api", classmethod(lambda cls, *a, **k: (500, {"data": []}))
+    )
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        ForgeRepositories.all("t")
+
+
 def test_the_mirror_stops_when_it_cannot_read_visibility(monkeypatch):
     configure_mirror()
 
@@ -106,7 +137,18 @@ def test_the_tick_removes_any_push_mirror_and_names_a_private_one(monkeypatch):
     monkeypatch.setattr(ForgeContainer, "api", classmethod(api))
     lines = ForgeRepositories.remove_push_mirrors()
     assert deleted == ["/repos/dreamference/archive-pre-rewrite/push_mirrors/remote_mirror_x"]
-    assert "PRIVATE" in lines[0]
+    assert "Removed" in lines[0] and "PRIVATE" in lines[0]
+
+
+def test_a_push_mirror_list_the_forge_would_not_give_removes_nothing(monkeypatch):
+    monkeypatch.setattr(ForgeRepositories, "all", classmethod(lambda cls, token=None: [SHARED]))
+
+    def api(cls, method, path, token, body=None, timeout=30):
+        assert method == "GET", path
+        return 500, [{"remote_name": "remote_mirror_x"}]
+
+    monkeypatch.setattr(ForgeContainer, "api", classmethod(api))
+    assert ForgeRepositories.remove_push_mirrors() == []
 
 
 def test_a_push_mirror_forgejo_would_not_remove_is_not_reported_removed(monkeypatch):
