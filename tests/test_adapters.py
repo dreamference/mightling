@@ -552,6 +552,36 @@ def test_without_ssh_keygen_the_check_names_the_package_to_install(monkeypatch):
     assert "openssh-client" in problem
 
 
+def test_an_empty_signature_is_refused_before_ssh_keygen_runs(monkeypatch):
+    def run(*args, **kwargs):
+        raise AssertionError("ssh-keygen ran on an empty signature")
+
+    monkeypatch.setattr(adapter_signature.shutil, "which", lambda name: "/usr/bin/ssh-keygen")
+    monkeypatch.setattr(adapter_signature.subprocess, "run", run)
+    assert AdapterSignature.problem(b"{}", b" \n") == "manifest.json.sig is empty"
+
+
+@pytest.mark.parametrize(
+    "error", [OSError("exec format error"), subprocess.TimeoutExpired("ssh-keygen", 30)]
+)
+def test_an_ssh_keygen_that_fails_to_run_or_times_out_refuses_the_signature(monkeypatch, error):
+    def run(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(adapter_signature.shutil, "which", lambda name: "/usr/bin/ssh-keygen")
+    monkeypatch.setattr(adapter_signature.subprocess, "run", run)
+    problem = AdapterSignature.problem(b"{}", b"signature")
+    assert problem is not None
+    assert "could not check" in problem
+
+
+def test_each_key_is_allowed_to_sign_in_the_adapter_namespace_only():
+    lines = AdapterSignature.allowed_signers().splitlines()
+    assert lines
+    for line in lines:
+        assert line.startswith('mightling-adapter namespaces="mightling-adapter" ssh-')
+
+
 # -- the command -------------------------------------------------------------------------------------
 
 
