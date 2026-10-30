@@ -972,4 +972,12 @@ mod tests {
         assert_eq!((resolved.prompt.name.as_str(), resolved.source), ("high-swe", Source::Environment));
         assert!(resolved.skipped.is_empty());
     }
+
+    #[test]
+    fn a_blank_name_in_the_environment_is_no_choice() {
+        let config = Path::new("/h/config.toml");
+        let resolved = resolve_from(Some("  "), Some((config, "mightling_prompt = \"high-swe\"\n")), &Installed::built_in());
+        assert_eq!(resolved.prompt.name, "high-swe");
+        assert!(resolved.skipped.is_empty(), "{:?}", resolved.skipped);
+    }
 }
