@@ -532,4 +532,20 @@ mod tests {
         let result = call(App::Drive, &stub, "drive_search", &json!({"query": "nothing"}));
         assert_eq!(text(&result), "No results.");
     }
+
+    fn replies(input: &str) -> Vec<Value> {
+        let mut output = Vec::new();
+        run(App::Gmail, &Stub::new(200, json!({})), input.as_bytes(), &mut output).unwrap_or_default();
+        String::from_utf8_lossy(&output).lines().filter_map(|line| serde_json::from_str(line).ok()).collect()
+    }
+
+    #[test]
+    fn blank_lines_get_no_reply_and_a_line_that_is_not_json_a_parse_error() {
+        let ping = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"}).to_string();
+        assert_eq!(replies(&format!("\n   \n{ping}\n\n")).len(), 1);
+        let bad = replies("{not json\n");
+        assert_eq!(bad.len(), 1);
+        assert_eq!(bad[0]["error"]["code"], -32700);
+        assert!(bad[0]["id"].is_null());
+    }
 }
