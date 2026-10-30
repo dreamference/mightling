@@ -1421,4 +1421,23 @@ mod tests {
         assert_eq!(std::fs::read(repo.join("blob.bin")).unwrap_or_default(), bytes);
         assert_eq!(std::fs::read_to_string(repo.join("spaces.txt")).unwrap_or_default(), "trailing  \n\tmixed \t\n");
     }
+
+    #[test]
+    fn commits_in_the_worktree_are_applied_and_discarded_too() {
+        let fixture = Fixture::new("agent-commits");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (session, cwd, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("auth.py"), "def login():\n    return True\n").unwrap_or_default();
+        git(&session.checkout, &["commit", "-qam", "the agent's commit"], None);
+        std::fs::write(session.checkout.join("later.py"), "y = 2\n").unwrap_or_default();
+        let (lines, code) = command(&home, &cwd, "apply", true);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(std::fs::read_to_string(repo.join("auth.py")).unwrap_or_default().contains("True"));
+        assert!(repo.join("later.py").is_file());
+        let (lines, code) = command(&home, &cwd, "discard", true);
+        assert_eq!(code, 0, "{lines:?}");
+        assert_eq!(git_text(&session.checkout, &["rev-parse", "HEAD"]), Some(session.base.clone()));
+        assert!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default().contains("False"));
+        assert!(!session.checkout.join("later.py").exists());
+    }
 }
