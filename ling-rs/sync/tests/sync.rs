@@ -389,6 +389,11 @@ async fn names_and_archive_state_follow_the_owner() {
     let view = &store.threads()[0];
     assert_eq!((view.title(), view.current.archived), ("Login fix".to_string(), true));
     assert!(calls(&scratch.dir.join("laptop-bin")).is_empty(), "its own change is not applied back");
+    // A name gone from Codex's index (its entries rewritten) does not unname the thread.
+    write(&laptop.join("session_index.jsonl"), "");
+    let report = agent.cycle(&hub_client).await;
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert_eq!(store.threads()[0].title(), "Login fix");
 }
 
 #[tokio::test]
@@ -524,4 +529,204 @@ async fn an_archive_codex_did_not_carry_out_is_not_published_back_over_the_hubs(
         agent.cycle(&hub_client).await;
     }
     assert!(hub.server.sync_store().unwrap().threads()[0].current.archived, "the phone's choice stands");
+}
+
+/// A hub nobody answers at: whatever the agent tries to send there shows in its report.
+fn away(codex_home: &Path) -> HubClient {
+    HubClient::new("http://127.0.0.1:1", &DeviceFile::load(codex_home).unwrap().secret).unwrap()
+}
+
+fn tried_to_send(report: &ling_sync::agent::Report, id: &str) -> bool {
+    report.errors.iter().any(|err| err.starts_with("rollout-") && err.contains(id))
+}
+
+#[tokio::test]
+async fn a_thread_the_hub_answered_as_deleted_is_never_sent_again() {
+    let scratch = scratch("gone");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, ling) = device(&scratch.dir, &hub, "laptop");
+    let path = rollout_path(&laptop, THREAD);
+    write(&path, &format!("{}{}", meta_line(THREAD, "cli", "/w"), said("UserMessage", "one")));
+    agent(&laptop, &ling, Settings::default()).cycle(&client(&hub, &laptop)).await;
+    // Deleted from the phone while the laptop had lost its state: its upload is answered as gone.
+    std::fs::remove_file(laptop.join("sync/agent.json")).unwrap();
+    let browser = phone(&hub, auth::Scope::Control);
+    assert_eq!(post(&hub, &format!("/api/sync/threads/{THREAD}/delete"), &browser).await, 200);
+    let mut fresh = agent(&laptop, &ling, Settings::default());
+    let report = fresh.cycle(&client(&hub, &laptop)).await;
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    // From then on the agent does not even try.
+    append(&path, &said("AgentMessage", "two"));
+    let report = fresh.cycle(&away(&laptop)).await;
+    assert!(!tried_to_send(&report, THREAD), "{:?}", report.errors);
+}
+
+#[tokio::test]
+async fn a_rollout_whose_folder_is_not_known_yet_stays_on_the_device() {
+    let scratch = scratch("no-meta");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, ling) = device(&scratch.dir, &hub, "laptop");
+    let path = rollout_path(&laptop, THREAD);
+    // No `session_meta` first: its folder, and so whether it is excluded, is not known.
+    write(&path, &said("UserMessage", "secret plans"));
+    let mut agent = agent(&laptop, &ling, Settings::default());
+    let hub_client = client(&hub, &laptop);
+    agent.cycle(&hub_client).await;
+    let store = hub.server.sync_store().unwrap();
+    assert!(store.record(THREAD).is_none());
+    write(&path, &format!("{}{}", meta_line(THREAD, "cli", "/w"), said("UserMessage", "secret plans")));
+    agent.cycle(&hub_client).await;
+    assert!(store.record(THREAD).is_some(), "read again once Codex wrote its meta");
+}
+
+#[tokio::test]
+async fn a_rollout_with_no_whole_line_yet_is_no_thread_on_the_hub() {
+    let scratch = scratch("no-line");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, ling) = device(&scratch.dir, &hub, "laptop");
+    write(&rollout_path(&laptop, THREAD), meta_line(THREAD, "cli", "/w").trim_end());
+    let report = agent(&laptop, &ling, Settings::default()).cycle(&client(&hub, &laptop)).await;
+    assert!(report.published.is_empty(), "{:?}", report.published);
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+}
+
+#[tokio::test]
+async fn an_excluded_thread_asks_nothing_of_the_hub_and_its_later_name_stays_here() {
+    let scratch = scratch("excluded-name");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, ling) = device(&scratch.dir, &hub, "laptop");
+    write(&rollout_path(&laptop, THREAD), &format!("{}{}", meta_line(THREAD, "cli", "/home/u/app"), said("UserMessage", "hello")));
+    write(&rollout_path(&laptop, SECRET_PROJECT), &format!("{}{}", meta_line(SECRET_PROJECT, "cli", "/home/u/secret/x"), said("UserMessage", "secret")));
+    let settings = Settings { exclude: vec![PathBuf::from("/home/u/secret")], ..Settings::default() };
+    let mut agent = agent(&laptop, &ling, settings);
+    let hub_client = client(&hub, &laptop);
+    let report = agent.cycle(&hub_client).await;
+    assert!(report.errors.is_empty(), "never published, so nothing to withdraw: {:?}", report.errors);
+    // Excluded after it was published: withdrawn, and a name given later does not follow it.
+    agent.settings.exclude.push(PathBuf::from("/home/u/app"));
+    agent.cycle(&hub_client).await;
+    let store = hub.server.sync_store().unwrap();
+    assert!(store.threads().is_empty());
+    write(&laptop.join("session_index.jsonl"), &format!("{{\"id\":\"{THREAD}\",\"thread_name\":\"Secret name\",\"updated_at\":\"t\"}}\n"));
+    let report = agent.cycle(&hub_client).await;
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert!(store.threads().is_empty());
+}
+
+#[tokio::test]
+async fn a_rollout_rewritten_shorter_is_refused_and_the_hub_keeps_its_copy() {
+    let scratch = scratch("shorter");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, ling) = device(&scratch.dir, &hub, "laptop");
+    let path = rollout_path(&laptop, THREAD);
+    let longer = format!("{}{}{}", meta_line(THREAD, "cli", "/w"), said("UserMessage", "one"), said("AgentMessage", "two"));
+    write(&path, &longer);
+    let mut agent = agent(&laptop, &ling, Settings::default());
+    let hub_client = client(&hub, &laptop);
+    agent.cycle(&hub_client).await;
+    write(&path, &format!("{}{}", meta_line(THREAD, "cli", "/w"), said("UserMessage", "one")));
+    let report = agent.cycle(&hub_client).await;
+    assert!(report.errors.iter().any(|err| err.contains("rewritten")), "{:?}", report.errors);
+    assert_eq!(hub.server.sync_store().unwrap().record(THREAD).unwrap().length as usize, longer.len());
+}
+
+#[tokio::test]
+async fn a_hub_copy_that_is_not_this_devices_file_is_not_continued() {
+    let scratch = scratch("differs");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, ling) = device(&scratch.dir, &hub, "laptop");
+    let path = rollout_path(&laptop, THREAD);
+    let first = format!("{}{}", meta_line(THREAD, "cli", "/w"), said("UserMessage", "first version"));
+    write(&path, &first);
+    agent(&laptop, &ling, Settings::default()).cycle(&client(&hub, &laptop)).await;
+    // The state is lost and the file is another one under the same name.
+    std::fs::remove_file(laptop.join("sync/agent.json")).unwrap();
+    write(&path, &format!("{}{}", meta_line(THREAD, "cli", "/w"), said("UserMessage", "other version, and longer than the first")));
+    let mut fresh = agent(&laptop, &ling, Settings::default());
+    let report = fresh.cycle(&client(&hub, &laptop)).await;
+    assert!(report.errors.iter().any(|err| err.contains("differs")), "{:?}", report.errors);
+    fresh.cycle(&client(&hub, &laptop)).await;
+    assert_eq!(hub.server.sync_store().unwrap().record(THREAD).unwrap().length as usize, first.len());
+}
+
+#[tokio::test]
+async fn the_newest_rollout_of_a_thread_says_whether_it_is_archived() {
+    let scratch = scratch("newest");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, ling) = device(&scratch.dir, &hub, "laptop");
+    let other = "01a0f1ae-2da4-7942-99ae-c3151dc10002";
+    let opening = format!("{}{}", meta_line(THREAD, "cli", "/w"), said("UserMessage", "one"));
+    write(&laptop.join("archived_sessions").join(format!("rollout-2026-10-22T09-00-00-{THREAD}.jsonl")), &opening);
+    write(&rollout_path(&laptop, &format!("{THREAD}_{other}")), &format!("{opening}{}", said("UserMessage", "after the revert")));
+    agent(&laptop, &ling, Settings::default()).cycle(&client(&hub, &laptop)).await;
+    let threads = hub.server.sync_store().unwrap().threads();
+    assert_eq!(threads.len(), 1);
+    assert!(!threads[0].current.archived);
+}
+
+#[tokio::test]
+async fn a_rollout_missing_for_a_scan_now_and_then_is_no_deletion() {
+    let scratch = scratch("flicker");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, ling) = device(&scratch.dir, &hub, "laptop");
+    let path = rollout_path(&laptop, THREAD);
+    write(&path, &format!("{}{}", meta_line(THREAD, "cli", "/w"), said("UserMessage", "one")));
+    let mut agent = agent(&laptop, &ling, Settings::default());
+    let hub_client = client(&hub, &laptop);
+    agent.cycle(&hub_client).await;
+    let aside = scratch.dir.join("aside.jsonl");
+    for _ in 0..2 {
+        std::fs::rename(&path, &aside).unwrap();
+        agent.cycle(&hub_client).await;
+        std::fs::rename(&aside, &path).unwrap();
+        agent.cycle(&hub_client).await;
+    }
+    assert!(hub.server.sync_store().unwrap().record(THREAD).is_some());
+}
+
+#[tokio::test]
+async fn a_thread_deleted_here_that_the_hub_does_not_know_is_let_go() {
+    let scratch = scratch("unknown");
+    let first = hub(&scratch.dir.join("first"), true).await;
+    let (laptop, ling) = device(&scratch.dir, &first, "laptop");
+    let path = rollout_path(&laptop, THREAD);
+    write(&path, &format!("{}{}", meta_line(THREAD, "cli", "/w"), said("UserMessage", "one")));
+    let mut agent = agent(&laptop, &ling, Settings::default());
+    assert_eq!(agent.cycle(&client(&first, &laptop)).await.published.len(), 1);
+    std::fs::remove_file(&path).unwrap();
+    // The hub was set up anew in between: it never had the thread, and answers so.
+    let second = hub(&scratch.dir.join("second"), true).await;
+    let (_, secret) = auth::add_device_of(&second.server.config.state_dir, "laptop", auth::DeviceKind::Sync).unwrap();
+    let second_client = HubClient::new(&second.base, &secret).unwrap();
+    for _ in 0..3 {
+        let report = agent.cycle(&second_client).await;
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert!(report.deleted_on_hub.is_empty(), "{:?}", report.deleted_on_hub);
+    }
+    assert!(calls(&scratch.dir.join("laptop-bin")).is_empty(), "nothing is left to delete here");
+}
+
+#[tokio::test]
+async fn a_deletion_codex_could_not_carry_out_is_reported_and_still_holds() {
+    let scratch = scratch("delete-fails");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, _) = device(&scratch.dir, &hub, "laptop");
+    let ling = scratch.dir.join("failing-ling");
+    std::fs::write(&ling, "#!/bin/sh\nexit 1\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&ling, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = rollout_path(&laptop, THREAD);
+    write(&path, &format!("{}{}", meta_line(THREAD, "cli", "/w"), said("UserMessage", "one")));
+    let mut agent = agent(&laptop, &ling, Settings::default());
+    let hub_client = client(&hub, &laptop);
+    agent.cycle(&hub_client).await;
+    let browser = phone(&hub, auth::Scope::Control);
+    assert_eq!(post(&hub, &format!("/api/sync/threads/{THREAD}/delete"), &browser).await, 200);
+    let report = agent.cycle(&hub_client).await;
+    assert!(report.applied.is_empty(), "{:?}", report.applied);
+    assert!(report.errors.iter().any(|err| err.contains("could not delete")), "{:?}", report.errors);
+    // The rollout is still here, and still never sent again.
+    append(&path, &said("AgentMessage", "two"));
+    let report = agent.cycle(&away(&laptop)).await;
+    assert!(!tried_to_send(&report, THREAD), "{:?}", report.errors);
 }
