@@ -1655,6 +1655,16 @@ mod tests {
     }
 
     #[test]
+    fn the_catalog_entry_has_the_served_window_no_reasoning_and_code_mode() {
+        let model = ServedModel { id: "m".into(), max_model_len: 40_000, owned_by: String::new() };
+        let entry = &model_catalog(&model, "prompt")["models"][0];
+        assert_eq!(entry["max_context_window"], json!(40_000));
+        assert_eq!(entry["auto_compact_token_limit"], json!(40_000));
+        assert_eq!(entry["default_reasoning_level"], json!("none"));
+        assert_eq!(entry["tool_mode"], json!("code_mode"));
+    }
+
+    #[test]
     fn app_server_is_given_the_model_as_configuration() {
         let args: Vec<OsString> = ["ling", "--oss", "app-server"].iter().map(OsString::from).collect();
         let out: Vec<String> = with_configured_model(args, "qwen3.8-27b")
