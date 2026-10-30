@@ -42,3 +42,10 @@ def execve(program: str, *argv: str) -> str:
 ])
 def test_every_git_command_that_reaches_a_network_is_recorded(line, command):
     assert StraceParser.parse(line).networked_git == [command]
+
+
+@pytest.mark.parametrize("option", ["--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"])
+def test_an_option_value_before_the_subcommand_does_not_hide_a_fetch(option):
+    # Each of these takes the next word as its value; read as the subcommand, it would hide the fetch.
+    trace = StraceParser.parse(execve("/usr/bin/git", "git", option, "value", "fetch", "origin"))
+    assert trace.networked_git == [f"git {option} value fetch origin"]
