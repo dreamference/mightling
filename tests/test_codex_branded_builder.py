@@ -840,6 +840,7 @@ def test_the_target_names_the_v8_assets_and_release_assets_per_platform(
     # platform.machine() on Windows; ARM64 on an RTX Spark laptop (WINDOWS_ARM section 16.1).
     ("ARM64", "aarch64-pc-windows-msvc"),
     ("AMD64", "x86_64-pc-windows-msvc"),
+    ("x64", "x86_64-pc-windows-msvc"),
 ])
 def test_a_windows_machine_builds_for_the_msvc_target_and_fetches_v8s_lib(machine, target):
     assert CodexBrandedBuilder.target_for(machine, windows=True) == target
