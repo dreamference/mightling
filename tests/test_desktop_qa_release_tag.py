@@ -1,5 +1,7 @@
-"""The desktop QA reads the latest release tag from the /releases/latest redirect; with no
-published release that redirect points at /releases and the install.sh leg must skip.
+"""The desktop QA skips the install.sh leg when no release is published.
+
+It reads the latest release tag from the /releases/latest redirect; with no published release that
+redirect points at /releases.
 """
 
 import re
