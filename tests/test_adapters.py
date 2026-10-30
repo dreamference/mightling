@@ -611,6 +611,53 @@ def test_a_digest_cached_while_the_base_was_still_downloading_is_not_kept_once_i
     assert AdapterBaseDigest.of(BASE_REPO, BASE_REVISION, snapshot) == complete != partial
 
 
+def test_the_base_digest_covers_the_tokenizer_and_chat_templates_by_their_paths(tmp_path):
+    snapshot = tmp_path / "snapshot"
+    (snapshot / "chat_templates").mkdir(parents=True)
+    for name in (
+        "config.json",
+        "tokenizer.json",
+        "chat_template.json",
+        "template.jinja",
+        "chat_templates/tool_use.jinja",
+        "README.md",
+    ):
+        (snapshot / name).write_text(name)
+    listing = AdapterBaseDigest.listing(snapshot, hashed=False)
+    assert listing == [
+        "-  chat_template.json",
+        "-  chat_templates/tool_use.jinja",
+        "-  config.json",
+        "-  template.jinja",
+        "-  tokenizer.json",
+    ]
+    # The listing names each file, so a renamed file changes the digest.
+    before = AdapterBaseDigest.compute(snapshot)
+    (snapshot / "template.jinja").rename(snapshot / "other.jinja")
+    assert AdapterBaseDigest.compute(snapshot) != before
+
+
+def test_a_link_to_a_blob_not_named_by_its_sha256_is_hashed_from_its_content(tmp_path):
+    blob = tmp_path / ("a" * 64 + ".incomplete")
+    blob.write_bytes(b"partial")
+    link = tmp_path / "model.safetensors"
+    link.symlink_to(blob)
+    assert AdapterBaseDigest.file_hash(link) == hashlib.sha256(b"partial").hexdigest()
+
+
+def test_a_cached_base_digest_is_kept_per_revision(tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    for snapshot, text in ((first, "one"), (second, "two")):
+        snapshot.mkdir()
+        (snapshot / "config.json").write_text(text)
+    digest = AdapterBaseDigest.of(BASE_REPO, "a" * 40, first)
+    assert digest == AdapterBaseDigest.compute(first)
+    assert AdapterBaseDigest.of(BASE_REPO, "b" * 40, second) == AdapterBaseDigest.compute(second)
+    # A revision's files do not change, so its digest is read from the cache, not computed again.
+    (first / "config.json").write_text("changed")
+    assert AdapterBaseDigest.of(BASE_REPO, "a" * 40, first) == digest
+
+
 def test_an_adapter_id_names_its_base_entry():
     assert ModelMatrixRegistry.key_for_served_id(f"{BASE_REPO}+rust") == DEFAULT_MODEL_ALIAS
 
