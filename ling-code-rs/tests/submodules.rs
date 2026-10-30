@@ -1516,3 +1516,27 @@ fn the_trust_gate_reads_the_decision_of_the_targets_own_submodule() {
         "{why}"
     );
 }
+
+#[test]
+fn a_submodules_own_trust_is_looked_up_in_the_main_worktree() {
+    let f = with_submodules();
+    let wt = linked_worktree(&f, "vendored");
+    let repo = Repo {
+        root: wt,
+        main_root: f.repo.root.clone(),
+        is_git: true,
+    };
+    let codex_home = trust(&f, &[&f.repo.root.join("vendored")]);
+    let target = plan::Target {
+        kind: Kind::Executing,
+        indexer: "rust-analyzer",
+        root: "vendored/crate".to_string(),
+        on_demand: false,
+        file: String::new(),
+        submodule: "vendored".to_string(),
+    };
+    assert_eq!(
+        plan::untrusted_reason_in(&codex_home, &repo, false, &[], &target),
+        None
+    );
+}
