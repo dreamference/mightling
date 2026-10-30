@@ -465,6 +465,11 @@ def test_stopping_the_run_stops_the_attempt_that_is_working(bon, monkeypatch):
     assert outcome.get("status") == "interrupted"
 
 
+def test_a_run_has_at_least_one_attempt(tmp_path):
+    task = {"id": "t", "repo": str(tmp_path), "base": "b", "task": "x"}
+    assert NightShiftBestOfN(tmp_path, task, NightShiftSettings({}), "ling", time.time() + 60, best_of=0).best_of == 1
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
