@@ -534,5 +534,7 @@ mod tests {
         let run = format!("Да{}", "я".repeat(500));
         let found = scan(&run, &defaults()).expect("a loop");
         assert!(run.is_char_boundary(found.cut));
+        // Eight of the run's characters are kept, not eight bytes.
+        assert_eq!(&run[..found.cut], format!("Да{}", "я".repeat(8)));
     }
 }
