@@ -470,6 +470,22 @@ def test_a_run_has_at_least_one_attempt(tmp_path):
     assert NightShiftBestOfN(tmp_path, task, NightShiftSettings({}), "ling", time.time() + 60, best_of=0).best_of == 1
 
 
+def test_the_judges_seed_is_the_tasks_own(bon, monkeypatch):
+    seeds = []
+
+    def judge(server, issue, seed=None, log=None):
+        seeds.append(seed)
+        return lambda a, b: (5.0, 5.0)
+
+    monkeypatch.setattr(NightShiftBestOfN, "JUDGE", staticmethod(judge))
+    passed = [{"attempt": i, "status": "candidate", "result": {"test_result": "passed"}} for i in (1, 2)]
+    for task_id in ("20261001-0100-abc", "20261001-0100-abd", "20261001-0100-abc"):
+        record = queue(bon["night"], bon["repo"], test=TEST, task_id=task_id)
+        NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
+                          best_of=2, model_host="http://x")._choose(passed)
+    assert seeds[0] == seeds[2] != seeds[1]
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
