@@ -420,6 +420,17 @@ mod tests {
     }
 
     #[test]
+    fn a_url_without_an_authority_has_no_host() {
+        for url in ["http:example.com", "https://?q=1", "http://#top"] {
+            assert_eq!(
+                require_http_url(url).unwrap_err(),
+                "URL has no host",
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
     fn html_is_reduced_to_text_and_other_types_are_kept_as_they_are() {
         let html = page(
             "u",
