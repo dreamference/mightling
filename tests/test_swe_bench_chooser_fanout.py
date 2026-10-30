@@ -243,3 +243,106 @@ def test_fan_out_picks_the_good_patch_and_records_the_cache_hit(fanout):
     assert fanout.top(record["scores"]) == ["good"]
     assert all(c["chat_template_kwargs"] == {"enable_thinking": False} for c in server.calls)
     assert all(c["max_tokens"] == 1 and c["logprobs"] for c in server.calls[1:])
+
+
+class FakeResponse:
+    """What `urlopen` returns: a context manager whose body is one JSON answer."""
+
+    def __init__(self, answer):
+        self.body = json.dumps(answer).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self.body
+
+
+@pytest.fixture
+def hosted(fanout, tmp_path, monkeypatch):
+    """An OpenRouter judge with a throwaway key, its requests answered here; returns (server, sent bodies)."""
+    key = tmp_path / "key"
+    key.write_text("test-key\n")
+    sent = []
+    answers = []
+
+    def urlopen(request, timeout):
+        sent.append({"body": json.loads(request.data), "auth": request.get_header("Authorization")})
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return FakeResponse(answer)
+
+    monkeypatch.setattr(fanout.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(fanout.time, "sleep", lambda seconds: None)
+    server = fanout.OpenRouterServer("vendor/model", "host/fp8", key, budget=0.01)
+    return server, sent, answers
+
+
+def usage(cost, prompt=100, cached=80):
+    return {
+        "cost": cost,
+        "prompt_tokens": prompt,
+        "prompt_tokens_details": {"cached_tokens": cached},
+    }
+
+
+def test_the_hosted_judge_pins_one_provider_and_drops_the_chat_template(fanout, hosted):
+    server, sent, answers = hosted
+    answers.append(
+        {"choices": [logprob_choice([("Yes", 0.9), ("No", 0.1)])], "usage": usage(0.004)}
+    )
+    choice = server.chat({**fanout.PROBE_PARAMS, "messages": [{"role": "user", "content": "?"}]})
+    body = sent[0]["body"]
+    assert body["model"] == "vendor/model"
+    assert body["provider"] == {"order": ["host/fp8"], "allow_fallbacks": False}
+    assert body["reasoning"] == {"enabled": False}
+    assert "chat_template_kwargs" not in body and body["max_tokens"] == 1
+    assert sent[0]["auth"] == "Bearer test-key"
+    assert fanout.answer_of(
+        fanout.Probe(key="k", kind="attribute", text="?"), choice
+    ) == pytest.approx(0.9)
+    assert server.counters() == (80.0, 100.0) and server.cost == pytest.approx(0.004)
+
+
+def test_the_hosted_judge_stops_at_its_budget_and_retries_a_stall(fanout, hosted):
+    server, sent, answers = hosted
+    answers.extend(
+        [
+            OSError("timed out"),
+            {"choices": [{"message": {"content": "Yes"}}], "usage": usage(0.011)},
+        ]
+    )
+    server.chat({"messages": []})
+    assert len(sent) == 2
+    with pytest.raises(fanout.BudgetSpent):
+        server.chat({"messages": []})
+
+
+def test_a_reasoning_judge_is_read_from_the_answer_after_its_thinking(fanout, hosted):
+    server, sent, answers = hosted
+    server.effort, server.thinking_tokens = "minimal", 512
+    top = [{"token": "Yes", "logprob": math.log(0.8)}, {"token": "No", "logprob": math.log(0.2)}]
+    content = [
+        {"token": "</think>", "logprob": 0.0, "top_logprobs": []},
+        {"token": "**", "logprob": -0.2, "top_logprobs": []},
+        {**top[0], "top_logprobs": top},
+    ]
+    answers.append(
+        {
+            "choices": [
+                {"message": {"content": "**Yes.** It does."}, "logprobs": {"content": content}}
+            ],
+            "usage": usage(0.0),
+        }
+    )
+    choice = server.chat({**fanout.PROBE_PARAMS, "messages": []})
+    assert sent[0]["body"]["reasoning"] == {"effort": "minimal", "exclude": True}
+    assert sent[0]["body"]["max_tokens"] == 513
+    assert choice["message"]["content"].startswith("Yes.")
+    assert fanout.answer_of(
+        fanout.Probe(key="k", kind="attribute", text="?"), choice
+    ) == pytest.approx(0.8)

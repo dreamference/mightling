@@ -45,6 +45,12 @@ Usage (the model server by node name, never an address)::
     .venv/bin/python scripts/swe_bench_best_of.py --runs n13-default-1,n13-default-2,n13-default-3 \\
         --chooser ~/chooser-fanout/n13-o0/summary.json
 
+A hosted judge through OpenRouter instead of the local server (`--openrouter MODEL --provider TAG`):
+pinned to one provider (`allow_fallbacks` false, so the provider's prompt cache serves the prefix),
+reasoning off, the key read from `--key-file` inside the process and never printed, the spend
+summed from each answer's `usage.cost` and stopped at `--budget` dollars; the cache hit comes from
+`usage.prompt_tokens_details.cached_tokens`.
+
 Tests: ``tests/test_swe_bench_chooser_fanout.py`` (a fake client; no server).
 """
 
@@ -57,6 +63,7 @@ import math
 import random
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -536,6 +543,97 @@ class Server:
         return found if found[1] > 0 else None
 
 
+OPENROUTER: Final[str] = "https://openrouter.ai/api/v1"
+RETRIED: Final[Tuple[int, ...]] = (429, 500, 502, 503, 504)
+
+
+class BudgetSpent(RuntimeError):
+    """The hosted judge's spend reached `--budget`: the run stops; `tasks.jsonl` keeps what was done."""
+
+
+def answer_start(choice: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    The choice with its logprobs and content starting at the answer's first word: past a closing
+    ``</think>`` and any markdown (``**Yes.**``), so a reasoning model's probe reads like a one-token one.
+    """
+    content = list(((choice.get("logprobs") or {}).get("content") or []))
+    ends = [i for i, item in enumerate(content) if str(item.get("token") or "").strip() == "</think>"]
+    if ends:
+        content = content[ends[-1] + 1:]
+    while content and not str(content[0].get("token") or "").strip(" \n*#_`>-"):
+        content = content[1:]
+    message = dict(choice.get("message") or {})
+    message["content"] = str(message.get("content") or "").split("</think>")[-1].lstrip(" \n*#_`>-")
+    return {**choice, "message": message, "logprobs": {"content": content} if content else None}
+
+
+class OpenRouterServer:
+    """A hosted model through OpenRouter, pinned to one provider: the same probes, the spend counted."""
+
+    def __init__(self, model: str, provider: str, key_file: Path, budget: float, timeout: float = 300.0,
+                 effort: Optional[str] = None, thinking_tokens: int = 512) -> None:
+        """
+        Args:
+            model: OpenRouter's model id (``z-ai/glm-5.3``).
+            provider: The one provider (endpoint tag) every request goes to.
+            key_file: The API key's file; read here, kept in memory, never printed.
+            budget: Dollars after which every request raises `BudgetSpent`.
+            timeout: Seconds to wait for one answer.
+            effort: Reasoning effort (``minimal``) for a model whose provider refuses to switch
+                reasoning off (GLM 5.3); None switches it off.
+            thinking_tokens: Tokens added to every request's ``max_tokens`` when reasoning is on.
+        """
+        self.model, self.provider, self.budget, self.timeout = model, provider, budget, timeout
+        self.effort, self.thinking_tokens = effort, thinking_tokens
+        self._key = key_file.expanduser().read_text().strip()
+        self.cost = self.cached = self.prompt = 0.0
+        self.requests = 0
+        self.lock = threading.Lock()
+
+    def body(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """The request's body: the local parameters, OpenRouter's in place of the chat template's."""
+        body = {k: v for k, v in payload.items() if k != "chat_template_kwargs"}
+        reasoning: Dict[str, Any] = {"enabled": False}
+        if self.effort:
+            reasoning = {"effort": self.effort, "exclude": True}
+            body["max_tokens"] = int(body.get("max_tokens") or 0) + self.thinking_tokens
+        return {"model": self.model, **body, "provider": {"order": [self.provider], "allow_fallbacks": False},
+                "reasoning": reasoning, "usage": {"include": True}}
+
+    def chat(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """One chat completion's first choice; retried on rate limits and gateway errors."""
+        if self.cost >= self.budget:
+            raise BudgetSpent(f"spent {self.cost:.4f} of {self.budget} USD")
+        request = urllib.request.Request(OPENROUTER + "/chat/completions", data=json.dumps(self.body(payload)).encode(),
+                                         headers={"Content-Type": "application/json",
+                                                  "Authorization": f"Bearer {self._key}"})
+        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    answer = json.loads(response.read())
+                break
+            except urllib.error.HTTPError as error:
+                if error.code not in RETRIED or attempt == 3:
+                    raise
+                time.sleep(2 ** attempt)
+            except OSError:  # a timeout or a dropped connection: a provider stalls now and then
+                if attempt == 3:
+                    raise
+                time.sleep(2 ** attempt)
+        usage = answer.get("usage") or {}
+        with self.lock:
+            self.requests += 1
+            self.cost += float(usage.get("cost") or 0.0)
+            self.prompt += float(usage.get("prompt_tokens") or 0)
+            self.cached += float((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
+        return answer_start((answer.get("choices") or [{}])[0])
+
+    def counters(self) -> Optional[Tuple[float, float]]:
+        """(cached prompt tokens, prompt tokens) so far, as the provider reported them."""
+        with self.lock:
+            return (self.cached, self.prompt) if self.prompt else None
+
+
 PROBE_PARAMS: Final[Dict[str, Any]] = {
     "max_tokens": 1, "temperature": 0.0, "logprobs": True, "top_logprobs": TOP_LOGPROBS,
     "chat_template_kwargs": {"enable_thinking": False},
@@ -612,10 +710,17 @@ def run(args: argparse.Namespace, server_factory: Callable[[str, float], Any] = 
     print(f"{len(tasks)} task(s) from {', '.join(r['name'] for r in runs)}; {len(judged)} go to the fan-out judge")
     if args.dry_run:
         return {}
-    if not args.server:
+    if args.openrouter and not args.provider:
+        raise SystemExit("❌ --provider is required with --openrouter (one provider, no fallbacks)")
+    if not args.server and not args.openrouter:
         raise SystemExit("❌ --server is required (the model server's URL, by node name)")
     rows = load_rows(args.dataset, [t.instance_id for t in judged])
-    server = server_factory(args.server, args.timeout)
+    if args.openrouter:
+        server: Any = OpenRouterServer(args.openrouter, args.provider, args.key_file, args.budget, args.timeout,
+                                       args.effort, args.thinking_tokens)
+        args.server = f"openrouter {args.openrouter} via {args.provider}"
+    else:
+        server = server_factory(args.server, args.timeout)
     args.out.mkdir(parents=True, exist_ok=True)
     log = args.out / "tasks.jsonl"
     done: Dict[str, Dict[str, Any]] = {}
@@ -638,7 +743,10 @@ def run(args: argparse.Namespace, server_factory: Callable[[str, float], Any] = 
                 order = rotate(pool, args.order)
                 context = Context(issue=row["problem_statement"], order=order,
                                   source=source_context([c.patch for c in order], read))
+                spent = getattr(server, "cost", None)
                 record = fan_out(server, context, random.Random(f"{args.order}:{task.instance_id}"), args.workers)
+                if spent is not None:
+                    record["cost"] = round(server.cost - spent, 6)
                 record["numbers"] = context.numbers
                 record["prefix_chars"] = len(shared_prefix(context))
                 return record
@@ -663,7 +771,8 @@ def run(args: argparse.Namespace, server_factory: Callable[[str, float], Any] = 
                    "seconds": round(sum(f["seconds"] for f in fanned), 1),
                    "seconds_per_task": round(sum(f["seconds"] for f in fanned) / len(fanned), 2) if fanned else None,
                    "cache_hit_mean": round(sum(hits) / len(hits), 4) if hits else None,
-                   "cache_hit_min": min(hits) if hits else None},
+                   "cache_hit_min": min(hits) if hits else None,
+                   "cost_usd": round(sum(f.get("cost") or 0.0 for f in fanned), 4) if args.openrouter else None},
         "parts": part_credits(tasks, choices),
     })
     (args.out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -711,6 +820,13 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--order", type=int, default=0, help="rotates the candidates in the prefix and shuffles the questions")
     p.add_argument("--workers", type=int, default=16, help="concurrent probes")
     p.add_argument("--timeout", type=float, default=300.0, help="seconds to wait for one answer")
+    p.add_argument("--openrouter", help="judge with this OpenRouter model instead of --server")
+    p.add_argument("--provider", help="the one OpenRouter provider (endpoint tag) to use, no fallbacks")
+    p.add_argument("--key-file", type=Path, default=Path("~/.config/dreamference/openrouter-key"),
+                   help="OpenRouter's API key (read in the process, never printed)")
+    p.add_argument("--effort", help="reasoning effort for a hosted model that cannot switch it off (minimal)")
+    p.add_argument("--thinking-tokens", type=int, default=512, help="max_tokens added when --effort is set")
+    p.add_argument("--budget", type=float, default=1.0, help="dollars after which the hosted judge stops")
     p.add_argument("--all", action="store_true", help="judge every task, not only those where the runs disagree")
     p.add_argument("--limit", type=int, help="judge only the first N tasks")
     p.add_argument("--dry-run", action="store_true", help="list the tasks; contact no server")
