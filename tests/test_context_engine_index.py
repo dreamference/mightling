@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from dreamference.context_engine import ContextEngine, embedding_calculator
+from dreamference.context_engine import ContextEngine, context_engine, embedding_calculator
 
 ONE_MIB = 1024 * 1024
 SNIFF_BYTES = 8192
@@ -111,3 +111,40 @@ def test_in_a_git_workspace_build_output_git_does_not_ignore_is_still_skipped(
     assert names(engine.collect_files()) == ["app.py"]
     # The parser checks again, so a caller that lists files itself cannot index build output.
     assert engine._process_single_file(tmp_path / "target" / "build.rs") is None
+
+
+@pytest.mark.usefixtures("keyword_only")
+@pytest.mark.parametrize(
+    ("file_count", "cpu_count", "workers"),
+    [(3, 64, 1), (64, 64, 3), (1000, 64, 8), (1000, 2, 2), (1000, None, 4)],
+)
+def test_the_parse_pool_is_sized_to_the_work_and_capped_at_eight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    file_count: int,
+    cpu_count: int | None,
+    workers: int,
+) -> None:
+    # Each worker is a fork of a parent that has imported torch.
+    sizes = []
+
+    class RecordingPool:
+        def __init__(self, max_workers: int) -> None:
+            sizes.append(max_workers)
+
+        def __enter__(self) -> "RecordingPool":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def map(self, function: object, items: list[Path], chunksize: int = 1) -> list[None]:
+            return [None for _ in items]
+
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    monkeypatch.setattr(context_engine, "ProcessPoolExecutor", RecordingPool)
+    monkeypatch.setattr(context_engine.os, "cpu_count", lambda: cpu_count)
+    paths = [tmp_path / f"f{i}.py" for i in range(file_count)]
+    monkeypatch.setattr(engine, "collect_files", lambda: paths)
+    engine.index_workspace(force_reindex=True)
+    assert sizes == [workers]
