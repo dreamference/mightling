@@ -1348,3 +1348,62 @@ fn a_committer_of_the_superproject_counts_as_ours() {
         (true, Reason::Yours, 2)
     );
 }
+
+#[test]
+fn merges_by_others_do_not_outvote_your_commits() {
+    let f = fixture();
+    let root = f.repo.root.clone();
+    git(
+        &root,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://example.com/acme/super.git",
+        ],
+    );
+    let lib = library(
+        f.dir.path(),
+        "lib",
+        "t@localhost",
+        &[("a.py", "x = 1\n")],
+        2,
+    );
+    // Three merge commits by upstream on top of your two.
+    let first = git(&lib, &["rev-parse", "HEAD~1"]);
+    for n in 0..3 {
+        let out = Command::new("git")
+            .args([
+                "-c",
+                "user.name=u",
+                "-c",
+                "user.email=dev@upstream.example",
+                "-c",
+                "commit.gpgsign=false",
+                "commit-tree",
+                "HEAD^{tree}",
+                "-p",
+                "HEAD",
+                "-p",
+                first.trim(),
+                "-m",
+                &format!("merge {n}"),
+            ])
+            .current_dir(&lib)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let merge = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        git_as(
+            &lib,
+            "dev@upstream.example",
+            &["reset", "-q", "--hard", &merge],
+        );
+    }
+    add_submodule(&root, &lib, "lib", Some("https://example.com/acme/lib.git"));
+    let all = decisions(&f.repo);
+    assert_eq!(
+        (all[0].indexed, all[0].reason.clone(), all[0].commits),
+        (true, Reason::Yours, 2)
+    );
+}
