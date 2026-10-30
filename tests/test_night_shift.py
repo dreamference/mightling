@@ -313,6 +313,13 @@ def test_stopping_the_run_stops_the_command_that_is_running(setup, monkeypatch):
     assert run.stopped == ["mightling-night-20261001-0100-abc-1"]
 
 
+def test_a_command_stops_at_the_earlier_of_its_timeout_and_the_deadline(setup, monkeypatch):
+    run = capped(setup, monkeypatch, time.time() - 1)
+    assert run._run_capped(["true"], setup["repo"], setup["night"] / "out.log", 600) == "timeout"
+    run.deadline = time.time() + 600
+    assert run._run_capped(["true"], setup["repo"], setup["night"] / "out.log", 0) == "timeout"
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
