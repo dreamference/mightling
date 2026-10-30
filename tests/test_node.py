@@ -703,6 +703,14 @@ def test_a_probe_that_fails_says_no(monkeypatch, tmp_path):
     assert NodeAdvertiser.ling_executable() == str(ling)
 
 
+def test_enable_warns_off_a_gb10_and_says_nothing_of_a_web_ui_it_does_not_share(machine, monkeypatch, capsys):
+    monkeypatch.setattr(NodeAdvertiser, "is_gb10", classmethod(lambda cls: False))
+    NodeServiceFile.service_path.write_text("")
+    assert NodeAdvertiser.enable(no_web=True) is True
+    out = capsys.readouterr().out
+    assert "does not look like a GB10" in out and "ling web pair" not in out
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
