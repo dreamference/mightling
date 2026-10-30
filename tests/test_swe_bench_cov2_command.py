@@ -292,3 +292,58 @@ def test_build_images_reads_the_subset_file_skipping_comments_and_validates_only
 def test_build_images_where_everything_built_exits_0(builder):
     assert SweBenchCommand.dispatch(parse("build-images", "--instances", "a__a-1,c__c-3")) == 0
     assert "validate" not in names(builder)
+
+
+@pytest.fixture
+def docker_calls(monkeypatch):
+    calls = []
+    listed = {"stdout": "c1\nc2\n"}
+
+    def run(args, timeout=None):
+        calls.append(args)
+        stdout = listed["stdout"] if args[0] == "ps" else ""
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    monkeypatch.setattr(SweBenchDocker, "run", classmethod(lambda cls, *a, **k: run(*a, **k)))
+    return calls, listed
+
+
+def test_clean_of_one_run_removes_only_its_containers_and_scratch(docker_calls, monkeypatch):
+    calls, _ = docker_calls
+    for name in ("r1", "r2"):
+        store = SweBenchRunStore(name)
+        store.write_manifest({"name": name})
+        (store.directory / "scratch" / "x").mkdir(parents=True)
+    monkeypatch.setattr(
+        SweBenchImages, "remove", classmethod(lambda cls, images: pytest.fail("no --images"))
+    )
+    assert SweBenchCommand.dispatch(parse("clean", "r1")) == 0
+    assert calls == [
+        ["ps", "-aq", "--filter", "label=ling.swe-bench.run=r1"],
+        ["rm", "-f", "c1", "c2"],
+    ]
+    assert not (SweBenchRunStore("r1").directory / "scratch").exists()
+    assert (SweBenchRunStore("r2").directory / "scratch" / "x").is_dir()
+
+
+def test_clean_of_every_run_with_no_container_removes_none_and_with_images_removes_the_present_ones(
+    docker_calls, monkeypatch, capsys
+):
+    calls, listed = docker_calls
+    listed["stdout"] = ""
+    for name in ("r1", "r2"):
+        store = SweBenchRunStore(name)
+        store.write_manifest({"name": name})
+        (store.directory / "scratch").mkdir(parents=True)
+    monkeypatch.setattr(
+        SweBenchImages, "local_images", classmethod(lambda cls: [{"image": "i1"}, {"image": "i2"}])
+    )
+    removed = []
+    monkeypatch.setattr(
+        SweBenchImages, "remove", classmethod(lambda cls, images: removed.extend(images) or 1)
+    )
+    assert SweBenchCommand.dispatch(parse("clean", "--images")) == 0
+    assert calls == [["ps", "-aq", "--filter", "label=ling.swe-bench.run"]]
+    assert not any((SweBenchRunStore(n).directory / "scratch").exists() for n in ("r1", "r2"))
+    assert removed == ["i1", "i2"]
+    assert "Removed 1 of 2 instance image(s)" in capsys.readouterr().out
