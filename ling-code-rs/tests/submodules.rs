@@ -298,6 +298,22 @@ fn the_size_guard_stops_automatic_inclusion_only() {
 }
 
 #[test]
+fn the_size_guard_stops_only_a_submodule_above_it_and_only_one_the_tests_let_in() {
+    let f = with_submodules();
+    // Exactly at the guard (ours has two files) is not above it.
+    let all = submodules::evaluate_with(&f.repo, 2, &[]);
+    let ours = all.iter().find(|s| s.path == "ours").unwrap();
+    assert_eq!((ours.indexed, ours.reason.clone()), (true, Reason::Yours));
+    // A submodule the tests already leave out keeps the tests' reason, whatever its size.
+    let all = submodules::evaluate_with(&f.repo, 0, &[]);
+    let vendored = all.iter().find(|s| s.path == "vendored").unwrap();
+    assert_eq!(
+        (vendored.indexed, vendored.reason.clone()),
+        (false, Reason::ThirdParty)
+    );
+}
+
+#[test]
 fn the_size_guard_is_not_read_from_a_file_in_the_repository() {
     let f = with_submodules();
     f.write("dreamference.toml", "code_index_submodule_max_files = 1\n");
