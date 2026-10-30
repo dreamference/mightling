@@ -90,4 +90,28 @@ mod tests {
         append(dir.path(), Request::IndexExact).unwrap();
         assert_eq!(drain(dir.path()), Some(Request::IndexExact));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_without_a_reader_is_refused_without_blocking() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        std::fs::create_dir(&state).unwrap();
+        let fifo = path(&state);
+        let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let queued = state.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(append(&queued, Request::IndexExact).is_err());
+        });
+        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(refused) => assert!(refused),
+            Err(_) => {
+                // Release the blocked open before failing.
+                let _reader = std::fs::File::open(&fifo);
+                panic!("queueing into a FIFO without a reader blocked");
+            }
+        }
+    }
 }
