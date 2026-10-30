@@ -54,3 +54,32 @@ def test_build_images_refuses_an_instance_that_is_not_in_the_dataset(monkeypatch
     args = argparse.Namespace(instances="a__a-1,b__b-2,c__c-3", subset=None, languages=None)
     assert SweBenchCommand.build_selection("multilingual", args) is None
     assert "Not in multilingual: b__b-2, c__c-3" in capsys.readouterr().out
+
+
+def test_the_drop_test_hunks_flag_chooses_the_filtered_grading_series(monkeypatch):
+    seen = []
+    monkeypatch.setattr(SweBenchCommand, "evaluate", classmethod(lambda cls, *a: seen.append(("eval", *a)) or 0))
+    monkeypatch.setattr(SweBenchCommand, "report", classmethod(lambda cls, *a: seen.append(("report", *a)) or 0))
+    assert SweBenchCommand.dispatch(parse("eval", "r1", "--drop-test-hunks")) == 0
+    assert SweBenchCommand.dispatch(parse("eval", "r1")) == 0
+    assert SweBenchCommand.dispatch(parse("report", "r1", "--drop-test-hunks")) == 0
+    assert SweBenchCommand.dispatch(parse("report", "r1")) == 0
+    assert seen[0][:3] == ("eval", "r1", "drop-test-hunks")
+    assert seen[1][:3] == ("eval", "r1", None)
+    assert seen[2] == ("report", "r1", None, "drop-test-hunks")
+    assert seen[3] == ("report", "r1", None, None)
+
+
+def test_report_of_a_run_that_does_not_exist_is_refused(capsys):
+    assert SweBenchCommand.report("no-such-run", None) == 1
+    assert "No such run" in capsys.readouterr().out
+
+
+def test_shard_refuses_a_count_outside_the_allowed_range_and_an_unreadable_list(tmp_path, capsys):
+    source = tmp_path / "tasks.txt"
+    source.write_text("a__a-1\n")
+    assert SweBenchCommand.shard(source, 0) == 1
+    assert "--shards 0" in capsys.readouterr().out
+    assert SweBenchCommand.shard(tmp_path / "absent.txt", 2) == 1
+    assert "absent.txt" in capsys.readouterr().out
+    assert list(tmp_path.iterdir()) == [source]
