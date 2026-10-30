@@ -1781,6 +1781,8 @@ def test_job_requests_through_serve_job(job_node, monkeypatch, capsys):
     # A request nested past the recursion limit is refused like any other malformed one.
     deep = base64.urlsafe_b64encode(b"[" * 100_000).decode()
     assert NodeServe.serve(f"job-submit {deep}") == 2
+    # A field of the wrong type is a refusal too, not a crash of the forced command.
+    assert NodeServe.serve(f"job-submit {encode(job_request(repo=5))}") == 2
 
 
 def test_a_jobs_environment_is_built_once_per_lock_file_content_and_bound_read_only(
