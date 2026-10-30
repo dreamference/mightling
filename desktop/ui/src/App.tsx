@@ -826,8 +826,14 @@ export function App() {
   }, [info]);
 
   // The level can differ per thread (`/airgapped` in the TUI writes a session file).
+  // An answer for a thread no longer in front is dropped: it would show that thread's level for this one.
   useEffect(() => {
-    if (state.server === "ready") bridge.airgapped(state.selected).then(setAirgap).catch(notice);
+    if (state.server !== "ready") return;
+    let current = true;
+    bridge.airgapped(state.selected).then((level) => current && setAirgap(level)).catch(notice);
+    return () => {
+      current = false;
+    };
   }, [state.selected, state.server, notice]);
 
   const choices = permissionChoices(profiles, airgap?.level === "on");
@@ -2089,7 +2095,8 @@ export function App() {
       bridge.git.repos(newFolder).then(async (repos) => {
         if (!current) return;
         const inside = repoRoot(newFolder, repos);
-        setNewBranches(inside ? await bridge.worktrees.branches(inside) : null);
+        const branches = inside ? await bridge.worktrees.branches(inside) : null;
+        if (current) setNewBranches(branches);
         const found = await bridge.localEnvironments(newFolder).catch(() => ({ found: [], problems: [] }));
         if (current) setNewEnvs(found.found);
       }).catch(() => current && setNewBranches(null));
