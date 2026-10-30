@@ -233,3 +233,62 @@ def test_a_smoke_whose_agent_step_left_everything_is_recorded(smoke):
     SweBenchRunner.smoke_path().parent.mkdir(parents=True, exist_ok=True)
     assert SweBenchCommand.smoke() == 0
     assert SweBenchRunner.smoke_path().is_file()
+
+
+@pytest.fixture
+def builder(monkeypatch):
+    calls = []
+    rows = [{"instance_id": i} for i in ("a__a-1", "b__b-2", "c__c-3")]
+    seam(monkeypatch, SweBenchHarness, "install", True, calls)
+    seam(monkeypatch, SweBenchHarness, "download_dataset", {}, calls)
+    seam(monkeypatch, SweBenchHarness, "rows", rows, calls)
+    outcome = {"a__a-1": None, "b__b-2": "build failed", "c__c-3": None}
+    seam(
+        monkeypatch,
+        SweBenchImageBuilder,
+        "build",
+        lambda dataset, ids, settings, force=False: {i: outcome[i] for i in ids},
+        calls,
+    )
+    seam(
+        monkeypatch,
+        SweBenchEvaluator,
+        "validate",
+        lambda dataset, ids, settings, force=False: dict.fromkeys(ids, "no-op resolves"),
+        calls,
+    )
+    return calls
+
+
+def test_build_images_of_an_unknown_instance_exits_2_and_builds_nothing(builder):
+    assert SweBenchCommand.dispatch(parse("build-images", "--instances", "z__z-9")) == 2
+    assert "build" not in names(builder)
+
+
+def test_build_images_of_a_dataset_without_a_task_repository_exits_2_before_installing(
+    builder, capsys
+):
+    assert SweBenchCommand.dispatch(parse("build-images", "--dataset", "verified")) == 2
+    assert "has no task repository" in capsys.readouterr().out
+    assert builder == []
+
+
+def test_build_images_reads_the_subset_file_skipping_comments_and_validates_only_what_built(
+    builder, tmp_path, capsys
+):
+    subset = tmp_path / "subset.txt"
+    subset.write_text("# two of three\na__a-1\n\nb__b-2\n")
+    assert (
+        SweBenchCommand.dispatch(parse("build-images", "--subset", str(subset), "--validate")) == 1
+    )
+    [(_, build_args, _)] = [call for call in builder if call[0] == "build"]
+    assert build_args[1] == ["a__a-1", "b__b-2"]
+    [(_, validate_args, _)] = [call for call in builder if call[0] == "validate"]
+    assert validate_args[1] == ["a__a-1"]
+    out = capsys.readouterr().out
+    assert "1 of 2 built" in out and "a__a-1: no-op resolves" in out and "0 of 1 validated" in out
+
+
+def test_build_images_where_everything_built_exits_0(builder):
+    assert SweBenchCommand.dispatch(parse("build-images", "--instances", "a__a-1,c__c-3")) == 0
+    assert "validate" not in names(builder)
