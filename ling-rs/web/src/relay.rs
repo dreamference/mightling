@@ -874,4 +874,44 @@ mod tests {
         // Once removed, a second response with the same ID is no longer in the set.
         assert!(!take_internal_id(&shared, &json!({ "id": issued, "result": {} })));
     }
+
+    #[test]
+    fn a_server_request_carrying_an_issued_id_is_not_taken_for_its_answer() {
+        let shared = Shared::default();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        send_steer(&shared, &tx, "t1", "turn-1", "stop");
+        let UpstreamMessage::Text(text) = rx.try_recv().unwrap() else { panic!("expected text") };
+        let issued = serde_json::from_str::<Value>(text.as_str()).unwrap()["id"].as_i64().unwrap();
+        // The server numbers its own requests: one with the same id is a request, not the answer.
+        let request = json!({ "id": issued, "method": "item/commandExecution/requestApproval", "params": {} });
+        assert!(!take_internal_id(&shared, &request));
+        // The id stays issued until the answer comes.
+        assert!(take_internal_id(&shared, &json!({ "id": issued, "result": {} })));
+    }
+
+    #[test]
+    fn a_watch_device_only_reads_and_follows() {
+        let watch = |message: Value| watch_message(true, message);
+        // The handshake's notification passes; `initialized` sent as a request does not.
+        assert!(watch(json!({ "method": "initialized" })).is_ok());
+        assert!(watch(json!({ "id": 1, "method": "initialized" })).is_err());
+        // Every read is a request; the same method as a notification is refused.
+        for method in ["thread/read", "thread/list", "thread/turns/list", "config/read", "model/list"] {
+            assert!(watch(json!({ "id": 1, "method": method, "params": { "threadId": "t1" } })).is_ok(), "{method}");
+            assert!(watch(json!({ "method": method, "params": { "threadId": "t1" } })).is_err(), "{method} as a notification");
+        }
+        for method in ["turn/start", "turn/steer", "turn/interrupt", "thread/start", "thread/shellCommand", "thread/queue/add"] {
+            assert!(watch(json!({ "id": 1, "method": method, "params": { "threadId": "t1" } })).is_err(), "{method}");
+        }
+        // An answer to the server's request (an approval) is refused.
+        assert!(watch(json!({ "id": 0, "result": { "decision": "accept" } })).is_err());
+        // `thread/resume` keeps only the thread it follows, and needs one.
+        let resumed = watch(json!({ "id": 2, "method": "thread/resume", "params": { "threadId": "t1", "cwd": "/", "sandbox": "danger-full-access" } }));
+        assert_eq!(resumed, Ok(json!({ "id": 2, "method": "thread/resume", "params": { "threadId": "t1" } })));
+        assert!(watch(json!({ "id": 2, "method": "thread/resume", "params": { "cwd": "/" } })).is_err());
+        assert!(watch(json!({ "method": "thread/resume", "params": { "threadId": "t1" } })).is_err());
+        // A device with control passes everything on unchanged.
+        let turn = json!({ "id": 3, "method": "turn/start", "params": { "threadId": "t1" } });
+        assert_eq!(watch_message(false, turn.clone()), Ok(turn));
+    }
 }
