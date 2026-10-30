@@ -225,4 +225,17 @@ mod tests {
         let incoming = json!({"envelope": {"sourceUuid": "friend", "timestamp": 9, "dataMessage": {"message": "hey"}}});
         assert!(matches!(parse(&incoming, me).unwrap().body, Body::Direct { .. }));
     }
+
+    #[test]
+    fn a_half_of_the_account_that_is_not_known_matches_no_destination() {
+        // The account id is not known yet and the message to a friend names them by number only:
+        // the two missing ids are not a match.
+        let by_number = json!({"envelope": {"sourceUuid": "me", "timestamp": 6,
+            "syncMessage": {"sentMessage": {"destinationNumber": "+15551111", "message": "private", "timestamp": 6}}}});
+        assert_eq!(parse(&by_number, OwnAccount { uuid: None, number: Some("+15550000") }).unwrap().body, Body::Other);
+        // The number is not known and the message names the friend by id only.
+        let by_uuid = json!({"envelope": {"sourceUuid": "me", "timestamp": 7,
+            "syncMessage": {"sentMessage": {"destinationUuid": "friend", "message": "private", "timestamp": 7}}}});
+        assert_eq!(parse(&by_uuid, OwnAccount { uuid: Some("me"), number: None }).unwrap().body, Body::Other);
+    }
 }
