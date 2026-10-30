@@ -648,6 +648,15 @@ def test_a_cancel_requested_while_running_wins_over_the_runners_next_status(setu
     assert NightShiftQueue.transition(setup["night"], record["id"], "done") == "cancelled"
 
 
+def test_a_transition_to_the_same_status_is_written_only_with_a_note(setup):
+    record = queue(setup["night"], setup["repo"])
+    NightShiftQueue.transition(setup["night"], record["id"], "queued")
+    assert NightShiftQueue.read(setup["night"], record["id"])["history"] == record["history"]
+    NightShiftQueue.transition(setup["night"], record["id"], "queued", note="node spark-2 gone")
+    history = NightShiftQueue.read(setup["night"], record["id"])["history"]
+    assert [(entry["status"], entry.get("note")) for entry in history[1:]] == [("queued", "node spark-2 gone")]
+
+
 def test_a_vanished_base_commit_fails_the_task(setup, monkeypatch):
     record = queue(setup["night"], setup["repo"])
     record["base"] = "0" * 40
