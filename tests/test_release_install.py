@@ -847,6 +847,17 @@ def test_the_update_question_defaults_to_no(tmp_path, release_server):
     assert "available, not installed" in result.stdout
 
 
+def test_firmware_updates_alone_are_listed_too(tmp_path, release_server):
+    # A machine whose packages are all current can still have firmware waiting.
+    env = fresh_gb10(tmp_path)
+    (tmp_path / "upgrades").unlink()
+    result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10", env_extra=env)
+    out = result.stdout
+    assert result.returncode == 0, out + result.stderr
+    assert "System updates available: 0 package(s), 2 firmware update(s)." in out
+    assert "available, not installed: 2 firmware update(s); install: sudo fwupdmgr refresh" in out
+
+
 def test_a_failed_step_is_named_in_the_summary_and_the_exit_code(tmp_path, release_server):
     (tmp_path / "groups-db").write_text("tester docker\n")
     result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10",
