@@ -302,6 +302,33 @@ pub fn disk_use(path: &Path) -> u64 {
 mod tests {
     use super::*;
 
+    /// `.git/info/exclude` is git's own file: a symlink there is left as it is, and so is its target.
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_git_exclude_file_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        crate::paths::git(&root, &["init", "-q"]).unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "keep\n").unwrap();
+        let exclude = root.join(".git/info/exclude");
+        let _ = std::fs::remove_file(&exclude);
+        std::fs::create_dir_all(exclude.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, &exclude).unwrap();
+        let repo = Repo {
+            root: root.clone(),
+            main_root: root,
+            is_git: true,
+        };
+        exclude_from_git(&repo, ".cbmignore").unwrap();
+        assert!(std::fs::symlink_metadata(&exclude)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep\n");
+    }
+
     #[test]
     fn a_second_supervisor_finds_the_lock_held() {
         let dir = tempfile::tempdir().unwrap();
