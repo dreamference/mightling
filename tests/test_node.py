@@ -544,6 +544,16 @@ def test_enable_yes_installs_the_file_as_this_user_and_removes_the_staged_copy(m
     assert not Path(command[-2]).exists()
 
 
+def test_disable_on_a_node_never_advertised_asks_for_nothing(machine, monkeypatch, capsys):
+    asked = []
+    monkeypatch.setattr(
+        NodeAdvertiser, "run_privileged", classmethod(lambda cls, command, purpose, yes=False: asked.append(command))
+    )
+    assert NodeAdvertiser.disable() is True
+    assert asked == [] and not NodeServiceFile.service_path.exists()
+    assert "not advertised" in capsys.readouterr().out
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
