@@ -1345,3 +1345,16 @@ def test_a_checksum_file_that_omits_a_v8_file_stops_the_fetch(tmp_path, monkeypa
     )
     assert CodexBrandedBuilder.fetch_rusty_v8(export) is None
     assert downloaded == [V8_CHECKSUMS]
+
+
+def test_the_build_key_changes_with_the_lockfile_and_the_profile_overrides(tmp_path, monkeypatch):
+    lockfile = tmp_path / "Cargo.lock"
+    lockfile.write_text("one")
+    monkeypatch.setattr(builder_module, "CODEX_LOCKFILE", str(lockfile))
+    monkeypatch.setattr(CodexBrandedBuilder, "source_commit", classmethod(lambda cls: "a" * 40))
+    first = CodexBrandedBuilder.build_key()
+    lockfile.write_text("two")
+    second = CodexBrandedBuilder.build_key()
+    assert second != first
+    monkeypatch.setitem(builder_module.RELEASE_PROFILE_OVERRIDES, "CARGO_PROFILE_RELEASE_LTO", "fat")
+    assert CodexBrandedBuilder.build_key() != second
