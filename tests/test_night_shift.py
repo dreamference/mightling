@@ -342,6 +342,28 @@ def test_a_commands_output_replaces_the_last_unless_appended(setup):
     assert out.read_text() == "two\nthree\n"
 
 
+def test_a_command_that_ignores_the_stop_is_killed(setup, monkeypatch):
+    import signal
+
+    import dreamference.night_shift.night_shift_task_run as task_run_module
+
+    monkeypatch.setattr(task_run_module, "KILL_GRACE_S", 1)
+    record = queue(setup["night"], setup["repo"])
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() - 1)
+    pid_file = setup["night"] / "pid"
+    command = ["sh", "-c", f"trap '' TERM; echo $$ > {pid_file}; while :; do sleep 1; done"]
+    assert run._run_capped(command, setup["repo"], setup["night"] / "out.log", None) == "timeout"
+    pid = int(pid_file.read_text())
+    try:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+    finally:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
