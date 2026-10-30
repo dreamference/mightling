@@ -290,7 +290,7 @@ def test_init_writes_the_config_at_the_resolved_path_and_reindexes(clean_env, mo
     assert downloads == ["qwen3.8-27b-nvfp4-dflash2"]
     assert indexed == [True]
     text = target.read_text(encoding="utf-8")
-    assert 'vllm_host = "http://localhost:8000"' in text and 'agent_runner = "codex"' in text
+    assert 'agent_runner = "codex"' in text  # the loopback host is the default and is not written
     assert str(target) in capsys.readouterr().out.replace("\n", "")
 
 
