@@ -485,3 +485,165 @@ def test_a_request_whose_params_are_a_list_does_not_stop_the_server():
     server.run(io.StringIO("".join(json.dumps(m) + "\n" for m in messages)), out)
     replies = [json.loads(line) for line in out.getvalue().splitlines()]
     assert [reply["id"] for reply in replies] == [1, 2]
+
+
+# -- the image search sidecar's decisions, one by one ------------------------------------------
+
+
+def _env(run):
+    return [run[i + 1] for i, arg in enumerate(run) if arg == "-e"]
+
+
+def test_an_existing_secret_is_read_and_no_new_one_made(monkeypatch, store):
+    store.mkdir()
+    (store / "secret").write_text("s3cret\n")
+
+    def no_new_secret(size):
+        pytest.fail("made a new secret although one was stored")
+
+    monkeypatch.setattr(image_search_sidecar.secrets_module, "token_urlsafe", no_new_secret)
+    assert ImageSearchSidecar.secret() == "s3cret"
+
+
+def test_a_new_secret_lives_in_a_private_folder_without_a_temporary_file(store):
+    assert ImageSearchSidecar.secret()
+    assert store.stat().st_mode & 0o777 == 0o700
+    assert sorted(path.name for path in store.iterdir()) == ["secret"]
+
+
+def test_the_served_model_is_the_first_one_the_server_names(monkeypatch):
+    def urlopen(url, timeout):
+        assert url == "http://localhost:8000/v1/models"
+        return io.BytesIO(json.dumps({"data": [{"id": "served/one"}, {"id": "other"}]}).encode())
+
+    monkeypatch.setattr(image_search_sidecar.urllib.request, "urlopen", urlopen)
+    assert ImageSearchSidecar.served_model("http://localhost:8000/", "fallback") == "served/one"
+
+
+def test_the_service_runs_as_the_invoking_user_and_siglip_on_loopback_only(monkeypatch, store):
+    fake = FakeDocker()
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured") is True
+    (run,) = fake.runs(IMAGE_SEARCH_CONTAINER_NAME)
+    assert run[run.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
+    (siglip,) = fake.runs(SIGLIP_CONTAINER_NAME)
+    assert siglip[siglip.index("-p") + 1] == "127.0.0.1:9100:9100"
+    # Nothing was there to replace.
+    assert ["docker", "rm", "-f", SIGLIP_CONTAINER_NAME] not in fake.commands
+
+
+def test_a_running_siglip_on_the_sidecar_network_is_left_alone(monkeypatch, store):
+    fake = FakeDocker({SIGLIP_CONTAINER_NAME: "running"}, {SIGLIP_CONTAINER_NAME: SIDECAR_NETWORK})
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured") is True
+    assert [c for c in fake.commands if SIGLIP_CONTAINER_NAME in c and c[:2] != ["docker", "inspect"]] == []
+    (run,) = fake.runs(IMAGE_SEARCH_CONTAINER_NAME)
+    assert f"MIGHTLING_SIGLIP_URL=http://{SIGLIP_CONTAINER_NAME}:9100" in _env(run)
+
+
+@pytest.mark.parametrize("starts", [True, False])
+def test_a_stopped_siglip_is_started_not_created_again(monkeypatch, store, starts):
+    failing = {} if starts else {("docker", "start"): "port is taken"}
+    fake = FakeDocker({SIGLIP_CONTAINER_NAME: "exited"}, {SIGLIP_CONTAINER_NAME: SIDECAR_NETWORK}, failing)
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured") is True
+    assert ["docker", "start", SIGLIP_CONTAINER_NAME] in fake.commands
+    assert fake.runs(SIGLIP_CONTAINER_NAME) == []
+    # Without it the service skips the pre-filter rather than calling a server that is not there.
+    url = f"http://{SIGLIP_CONTAINER_NAME}:9100" if starts else ""
+    assert f"MIGHTLING_SIGLIP_URL={url}" in _env(fake.runs(IMAGE_SEARCH_CONTAINER_NAME)[0])
+
+
+def _health(monkeypatch, answers):
+    calls, sleeps = [], []
+
+    def urlopen(url, timeout):
+        calls.append(url)
+        if not answers.pop(0):
+            raise OSError("connection refused")
+        return io.BytesIO(b"ok")
+
+    monkeypatch.setattr(image_search_sidecar.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(image_search_sidecar.time, "sleep", sleeps.append)
+    return calls, sleeps
+
+
+def test_the_health_check_asks_at_least_once(monkeypatch):
+    calls, _ = _health(monkeypatch, [True])
+    assert ImageSearchSidecar.healthy(wait_seconds=0) is True
+    assert calls == ["http://127.0.0.1:8768/health"]
+
+
+def test_the_health_check_waits_between_tries_but_not_after_the_last(monkeypatch):
+    calls, sleeps = _health(monkeypatch, [False, False])
+    assert ImageSearchSidecar.healthy(wait_seconds=2) is False
+    assert len(calls) == 2 and sleeps == [1]
+
+
+def test_a_start_forgets_the_last_failure(monkeypatch, store):
+    monkeypatch.setattr(ImageSearchSidecar, "problem", "Could not start the image search service: earlier")
+    monkeypatch.setattr(subprocess, "run", FakeDocker())
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured") is True
+    assert ImageSearchSidecar.problem == ""
+
+
+def test_a_start_without_a_secret_runs_nothing(monkeypatch, store):
+    fake = FakeDocker()
+    monkeypatch.setattr(subprocess, "run", fake)
+    monkeypatch.setattr(ImageSearchSidecar, "secret", classmethod(lambda cls: None))
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured") is False
+    assert fake.commands == [] and not (store / "service.py").exists()
+
+
+@pytest.mark.parametrize("failing, problem", [
+    ({("docker", "network", "create"): "denied"}, f"Could not create the Docker network {SIDECAR_NETWORK}."),
+    ({("docker", "run", "-d", "--name", IMAGE_SEARCH_CONTAINER_NAME): "pull access denied"},
+     "Could not start the image search service: pull access denied"),
+])
+def test_an_image_search_start_that_fails_says_why(monkeypatch, store, failing, problem):
+    fake = FakeDocker(failing=failing, network_exists=False)
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured", siglip=False) is False
+    assert ImageSearchSidecar.problem == problem
+
+
+@pytest.mark.parametrize("wait", [True, False])
+def test_only_a_start_that_waits_checks_the_health_route(monkeypatch, store, wait):
+    monkeypatch.setattr(subprocess, "run", FakeDocker())
+    monkeypatch.setattr(ImageSearchSidecar, "healthy", classmethod(lambda cls, wait_seconds=30: False))
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured", siglip=False, wait=wait) is not wait
+    assert (ImageSearchSidecar.problem == "The image search service did not answer its health check.") is wait
+
+
+def test_server_start_starts_no_image_search_off_a_node(monkeypatch, store):
+    from dreamference.node.node_identity import NodeIdentity
+
+    fake = FakeDocker()
+    monkeypatch.setattr(subprocess, "run", fake)
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: None))
+    assert ImageSearchSidecar.ensure_on_node("http://localhost:8000", "m") is None
+    assert fake.runs(IMAGE_SEARCH_CONTAINER_NAME) == []
+
+
+def test_stop_removes_both_containers_and_says_when_siglip_is_left(monkeypatch):
+    states = {IMAGE_SEARCH_CONTAINER_NAME: "running", SIGLIP_CONTAINER_NAME: "running"}
+    fake = FakeDocker(states)
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert ImageSearchSidecar.stop() is True
+    assert ["docker", "rm", "-f", SIGLIP_CONTAINER_NAME] in fake.commands
+    stuck = FakeDocker(states, failing={("docker", "rm", "-f", SIGLIP_CONTAINER_NAME): "device busy"})
+    monkeypatch.setattr(subprocess, "run", stuck)
+    assert ImageSearchSidecar.stop() is False
+
+
+def test_status_names_each_containers_network_and_counts_only_stored_images(monkeypatch, store):
+    fake = FakeDocker({IMAGE_SEARCH_CONTAINER_NAME: "running"}, {IMAGE_SEARCH_CONTAINER_NAME: SIDECAR_NETWORK})
+    monkeypatch.setattr(subprocess, "run", fake)
+    images = store / "data" / "images"
+    images.mkdir(parents=True)
+    (images / "0123456789abcdef.jpg").write_bytes(b"\xff\xd8\xff")
+    (images / "0123456789abcdef.jpg.tmp").write_bytes(b"\xff")
+    lines = ImageSearchSidecar.status_lines()
+    assert lines[0] == f"Image search ({IMAGE_SEARCH_CONTAINER_NAME}): running on {SIDECAR_NETWORK}"
+    assert lines[1] == f"SigLIP pre-filter ({SIGLIP_CONTAINER_NAME}): absent"
+    assert lines[2] == f"Store: {images} (1 images)"
