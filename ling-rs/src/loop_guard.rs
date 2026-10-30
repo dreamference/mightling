@@ -988,6 +988,20 @@ mod tests {
     }
 
     #[test]
+    fn a_held_tool_call_goes_on_before_another_error() {
+        let (nudged, _) = memory();
+        let call = item(json!({"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"ls\"}", "call_id": "c1"}));
+        let events = vec![
+            Ok(ResponseEvent::OutputItemDone(call)),
+            Err(ModelResponseError::Stream("stream closed before response.completed".into())),
+        ];
+        let out = run(events, nudged, true);
+        assert_eq!(out.len(), 2);
+        assert!(matches!(&out[0], Ok(ResponseEvent::OutputItemDone(ResponseItem::FunctionCall { .. }))));
+        assert!(matches!(&out[1], Err(ModelResponseError::Stream(_))));
+    }
+
+    #[test]
     fn with_the_detector_off_only_the_cap_is_handled() {
         let (nudged, _) = memory();
         let out = run(looping_reasoning(12), nudged, false);
