@@ -563,6 +563,17 @@ def test_an_attempt_is_a_session_of_its_own_even_for_a_task_with_one(bon):
     assert single.session == "an-earlier-session" and attempt.session is None
 
 
+def test_an_attempt_the_window_ended_is_interrupted_not_a_candidate(bon):
+    record = queue(bon["night"], bon["repo"], test=TEST)
+    run = NightShiftTaskRun(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
+                            attempt=1)
+    assert run._prepare_worktree() is None
+    (run.worktree / "hello.txt").write_text("hi\n")
+    assert run._interrupted() == "candidate"  # its own time ran out: what it changed is a candidate
+    run.stop_event.set()
+    assert run._interrupted() == "interrupted" and run.outcome["status"] == "interrupted"
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
