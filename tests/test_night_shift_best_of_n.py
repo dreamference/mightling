@@ -322,6 +322,14 @@ def test_the_first_attempt_keeps_the_schedulers_deadline_and_a_later_one_gets_it
     assert run._attempt_deadline(2) == run.window_end
 
 
+def test_no_attempt_starts_once_the_window_has_closed(bon, monkeypatch):
+    status, record, _ = run_best_of(bon, monkeypatch, ["good", "good", "good"], window_s=-1)
+    assert status == "interrupted"
+    assert not bon["calls"].exists()
+    best = record["result"]["best_of"]
+    assert best["ran"] == 0 and best["why"] == "the window closed before attempt 1 could start"
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
