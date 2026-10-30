@@ -804,6 +804,45 @@ mod tests {
             .overlay_name_is_its_own()
         );
     }
+    #[test]
+    fn the_overlay_name_needs_the_whole_id_then_a_domain_and_reads_in_any_case() {
+        let id = "7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001";
+        for remote in [
+            // A longer id that starts with this one is another node's.
+            format!("mightling-{id}0.netbird.selfhosted"),
+            // The prefix and the id with no domain after the dot.
+            format!("mightling-{id}."),
+            // Characters no host name has.
+            format!("mightling-{id}.netbird_selfhosted"),
+            format!("mightling-{id}.netbird.selfhosted:22"),
+        ] {
+            assert!(
+                !Node {
+                    remote: remote.clone(),
+                    ..node()
+                }
+                .overlay_name_is_its_own(),
+                "{remote}"
+            );
+        }
+        // A node with no id does not own the name made of the prefix alone.
+        assert!(
+            !Node {
+                node: String::new(),
+                remote: "mightling-.netbird.selfhosted".to_string(),
+                ..node()
+            }
+            .overlay_name_is_its_own()
+        );
+        // Host names are read without regard to case.
+        assert!(
+            Node {
+                remote: format!("MIGHTLING-{}.NetBird.SelfHosted", id.to_uppercase()),
+                ..node()
+            }
+            .overlay_name_is_its_own()
+        );
+    }
 
     #[test]
     fn a_silent_lan_address_falls_back_to_the_overlay_name_only_while_the_overlay_is_up() {
