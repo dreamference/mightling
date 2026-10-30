@@ -242,6 +242,19 @@ def test_the_user_s_host_is_saved_without_a_warning(tmp_path, monkeypatch, capsy
     assert capsys.readouterr().err == ""
 
 
+def test_the_user_level_file_through_a_link_is_still_the_user_s(tmp_path, monkeypatch, capsys):
+    # A dotfiles folder: ~/.config/dreamference/config.toml is a link to the file kept there.
+    monkeypatch.chdir(tmp_path)
+    dotfiles = tmp_path / "dotfiles" / "config.toml"
+    dotfiles.parent.mkdir()
+    dotfiles.write_text('vllm_host = "http://gpu-box.lan:8000"\n')
+    user_level = tmp_path / "home" / "config.toml"
+    monkeypatch.setattr(config_path_resolver, "GLOBAL_DREAMFERENCE_CONFIG_PATH", user_level)
+    user_level.parent.mkdir()
+    user_level.symlink_to(dotfiles)
+    assert DreamferenceConfig().vllm_host == "http://gpu-box.lan:8000"
+    assert capsys.readouterr().err == ""
+
 
 def test_init_writes_no_network_key_into_the_file_it_creates(tmp_path):
     # `ling-admin init` writes ./dreamference.toml, a repository's file, which may not name an
