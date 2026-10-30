@@ -451,6 +451,31 @@ def test_the_runs_own_requests_and_a_pause_pass_a_closed_gate(live):
         assert response.status == 200 and b"[DONE]" in response.read()
 
 
+def exchange(port, request, timeout=10):
+    """Sends one raw request and reads the answer until the gate closes the connection."""
+    with socket.create_connection(("127.0.0.1", port), timeout=timeout) as client:
+        client.sendall(request)
+        answer = b""
+        while chunk := client.recv(65536):
+            answer += chunk
+    return answer
+
+
+def test_a_closed_gate_answers_a_head_with_a_head_and_a_post_to_its_probe_with_a_refusal(live):
+    write(live["state"], RUN_FILE, run_record())
+    head, body = exchange(
+        live["port"], b"HEAD /v1/responses HTTP/1.1\r\nHost: x\r\n\r\n"
+    ).split(b"\r\n\r\n", 1)
+    assert head.startswith(b"HTTP/1.1 503 ") and b"\r\nRetry-After: 0" in head
+    assert body == b"", "a HEAD answer carries no body"
+    # Only a GET or HEAD reads the probe; anything else is an ordinary request and is refused.
+    answer = exchange(
+        live["port"], b"POST /mightling-gate HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
+    )
+    assert answer.startswith(b"HTTP/1.1 503 ")
+    assert StandIn.seen == []
+
+
 def test_a_chunked_request_body_reaches_the_engine_whole(live):
     StandIn.second_chunk.set()
     with socket.create_connection(("127.0.0.1", live["port"]), timeout=10) as client:
