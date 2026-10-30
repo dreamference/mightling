@@ -374,6 +374,18 @@ def test_with_no_candidate_the_task_ends_as_its_most_telling_attempt(bon, status
     assert result.get("last_message") == (f"attempt {len(statuses)} said so" if ends in ("stalled", "failed") else None)
 
 
+def test_without_a_model_server_the_judge_is_skipped_not_asked(bon, monkeypatch):
+    asked = []
+    monkeypatch.setattr(NightShiftBestOfN, "JUDGE", None)
+    monkeypatch.setattr(NightShiftChooser, "server_judge", staticmethod(lambda *a, **k: asked.append(a)))
+    record = queue(bon["night"], bon["repo"], test=TEST)
+    run = NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60, best_of=2)
+    passed = [{"attempt": i, "status": "candidate", "result": {"test_result": "passed"}} for i in (1, 2)]
+    chosen, choice = run._choose(passed)
+    assert choice["stage"] == "judge skipped: no model server" and chosen["attempt"] == 1
+    assert asked == []
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
