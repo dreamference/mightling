@@ -468,6 +468,14 @@ mod tests {
     }
 
     #[test]
+    fn utf16_text_is_not_binary_though_it_holds_nul_bytes() {
+        assert!(is_binary(b"a\0b", "text/plain"));
+        assert!(!is_binary(b"\xff\xfea\0", "text/plain"));
+        assert!(!is_binary(b"\xfe\xff\0a", "text/plain"));
+        assert!(!is_binary(b"a\0b\0", "text/plain; charset=UTF-16LE"));
+    }
+
+    #[test]
     fn plain_text_that_holds_markup_is_kept_as_it_is() {
         let source = b"<title>T</title> if a < b: print('<p>')";
         let text = page("u", "f".into(), 200, "text/plain".into(), source, 100);
