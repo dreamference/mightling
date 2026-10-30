@@ -103,3 +103,10 @@ def test_a_udp_lite_connect_with_nothing_sent_is_a_route_lookup(label, address, 
 def test_a_literal_cut_after_a_backslash_keeps_the_backslash():
     # strace cuts long strings: the last character read may be the start of an escape.
     assert StraceParser.unescape("ab\\") == b"ab\\"
+
+
+@pytest.mark.parametrize("fd", ["6<TCP:[700]>", "6<UDPv6:[700]>"])
+def test_a_resolver_bus_name_sent_over_an_ip_socket_is_not_a_bus_lookup(fd):
+    # Only a unix socket carries D-Bus messages: the name inside a TCP or UDP payload is just text.
+    trace = StraceParser.parse(f'5 write({fd}, "org.freedesktop.resolve1", 24) = 24\n')
+    assert trace.local_resolvers == {}
