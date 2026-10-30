@@ -336,7 +336,16 @@ mod tests {
         assert!(first.is_some());
         assert!(claim_supervisor(dir.path()).unwrap().is_none());
         drop(first);
-        assert!(claim_supervisor(dir.path()).unwrap().is_some());
+        // A process another test thread is starting holds a copy of the lock's descriptor
+        // until it execs, so the lock can outlive the drop by that moment (1 run in 7 at
+        // --test-threads=64). It must still come free.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut again = claim_supervisor(dir.path()).unwrap();
+        while again.is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            again = claim_supervisor(dir.path()).unwrap();
+        }
+        assert!(again.is_some());
     }
 
     /// `ling-code index` must not report a background run that would stand down at once.
