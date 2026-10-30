@@ -311,6 +311,17 @@ def test_an_attempt_that_would_not_fit_the_window_is_not_started(tmp_path):
     assert run.wont_fit(3, took(10 * 3600)) is None
 
 
+def test_the_first_attempt_keeps_the_schedulers_deadline_and_a_later_one_gets_its_own(tmp_path):
+    task = {"id": "t", "repo": str(tmp_path), "base": "b", "task": "x"}
+    deadline, window_end = time.time() + 60, time.time() + 3600
+    run = NightShiftBestOfN(tmp_path, task, NightShiftSettings({"task_timeout": "10m"}), "ling",
+                            deadline, best_of=3, window_end=window_end)
+    assert run._attempt_deadline(1) == deadline
+    assert time.time() + 590 <= run._attempt_deadline(2) <= time.time() + 600
+    run.window_end = time.time() + 120
+    assert run._attempt_deadline(2) == run.window_end
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
