@@ -627,6 +627,14 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_sglang_pool_is_no_pool() {
+        // Below one token the server has not sized its pool: unknown, not a pool of 0.
+        assert_eq!(parse_kv_pool("sglang:max_total_num_tokens{model_name=\"m\"} 0.0\n"), None);
+        assert_eq!(parse_kv_pool("sglang:max_total_num_tokens{model_name=\"m\"} 0.5\n"), None);
+        assert_eq!(parse_kv_pool("sglang:max_total_num_tokens{model_name=\"m\"} 1.0\n"), Some(1));
+    }
+
+    #[test]
     fn the_limit_is_a_share_of_the_pool_and_never_above_the_window() {
         // The default model: a 262,144-token window over a 156,907-token pool.
         assert_eq!(limit_for(262_144, Some(156_907)), Some(94_144));
