@@ -1588,6 +1588,18 @@ mod tests {
         assert!(started.elapsed() >= std::time::Duration::from_millis(250), "nothing came past the cursor, so it waited");
     }
 
+    #[tokio::test]
+    async fn a_change_made_while_nobody_waited_ends_a_later_wait_at_once() {
+        let home = scratch("missed");
+        let store = Store::open(&home).unwrap();
+        let before = store.cursor();
+        store.append(ID, &agent("lap1"), &Upload::first(FILE), b"{}\n").unwrap();
+        assert!(store.cursor() > before);
+        let started = std::time::Instant::now();
+        store.wait_past(before, std::time::Duration::from_secs(3)).await;
+        assert!(started.elapsed() < std::time::Duration::from_secs(1), "the change was already past the cursor");
+    }
+
     #[test]
     fn the_hub_is_off_until_enabled_and_off_keeps_the_store() {
         let home = scratch("enabled");
