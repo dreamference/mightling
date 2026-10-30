@@ -1286,4 +1286,30 @@ mod tests {
         assert_eq!(code, 2);
         assert_eq!(lines, vec!["Unknown: frobnicate".to_string(), CLI_USAGE.to_string()]);
     }
+
+    #[test]
+    fn apply_by_id_goes_to_the_checkout_of_the_repository_it_is_asked_from() {
+        let fixture = Fixture::new("apply-into");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (session, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        let apply = format!("apply {}", session.id);
+        // From another checkout of the same repository: there, not the source.
+        let linked = fixture.root.join("linked");
+        git(&repo, &["worktree", "add", "-q", "-b", "mine", &linked.to_string_lossy()], None);
+        std::fs::write(session.checkout.join("one.py"), "1\n").unwrap_or_default();
+        let (lines, code) = command(&home, &linked.join("sub"), &apply, false);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(linked.join("one.py").is_file() && !repo.join("one.py").exists(), "{lines:?}");
+        // From the session's own checkout: the source.
+        std::fs::write(session.checkout.join("two.py"), "2\n").unwrap_or_default();
+        let (lines, code) = command(&home, &session.checkout, &apply, false);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(repo.join("two.py").is_file(), "{lines:?}");
+        // From another repository: the source.
+        let other = other_repository(&fixture, "other");
+        std::fs::write(session.checkout.join("three.py"), "3\n").unwrap_or_default();
+        let (lines, code) = command(&home, &other, &apply, false);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(repo.join("three.py").is_file() && !other.join("three.py").exists(), "{lines:?}");
+    }
 }
