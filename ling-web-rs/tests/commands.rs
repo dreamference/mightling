@@ -1079,3 +1079,24 @@ fn a_search_that_found_nothing_is_not_kept_in_the_cache() {
     assert_eq!(server.requests().len(), 2);
     let _ = std::fs::remove_dir_all(cache);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_search_that_found_only_answers_is_kept_in_the_cache() {
+    let server = Server::start(|_| {
+        let body = r#"{"results": [], "answers": ["42"], "unresponsive_engines": []}"#;
+        response("200 OK", "application/json", body.as_bytes(), "")
+    });
+    let cache = fresh_cache_dir();
+    let cache = cache.to_str().unwrap();
+    let env = [
+        ("DREAMFERENCE_SEARXNG_URL", server.base.as_str()),
+        (ling_web::cache::CACHE_DIR_ENV, cache),
+    ];
+    let first = search(&["q"], &env);
+    let second = search(&["q"], &env);
+    assert!(first.status.success(), "{}", stdout(&first));
+    assert_eq!(stdout(&first), stdout(&second));
+    assert_eq!(server.requests().len(), 1);
+    let _ = std::fs::remove_dir_all(cache);
+}
