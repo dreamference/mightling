@@ -403,4 +403,17 @@ mod tests {
         assert_eq!(cache.reserve(now), MAX_WAIT);
         let _ = std::fs::remove_dir_all(cache.dir());
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn pruning_leaves_files_that_are_not_entries() {
+        let cache = Cache::at(scratch("prune")).unwrap();
+        let other = cache.dir().join("notes.txt");
+        std::fs::write(&other, b"kept").unwrap();
+        let later = SystemTime::now() + TTL * 3;
+        cache.put("query", &json!({"results": []}), later);
+        assert!(other.exists());
+        assert!(cache.dir().join(".owner").exists());
+        let _ = std::fs::remove_dir_all(cache.dir());
+    }
 }
