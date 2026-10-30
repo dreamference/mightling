@@ -767,4 +767,16 @@ mod tests {
         assert!(dir.join("notes.txt").exists(), "only segment files are pruned");
         assert_eq!(prune(&scratch.0.join("missing"), later), 0);
     }
+
+    #[test]
+    fn an_output_whose_copy_cannot_be_written_stays_whole() {
+        let scratch = Scratch::new("nocopy");
+        // A file where the copies' folder belongs: no copy can be written, so nothing is masked.
+        std::fs::create_dir_all(&scratch.0).unwrap_or_default();
+        std::fs::write(scratch.0.join("outputs"), "in the way").unwrap_or_default();
+        let mut items = history(40, 60);
+        let before = items.clone();
+        run(&scratch.0, &mut items, policy().high + 1);
+        assert_eq!(items, before);
+    }
 }
