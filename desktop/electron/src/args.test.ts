@@ -66,3 +66,21 @@ describe("Quick Entry's links (DESKTOP_PARITY_CLAUDE §2.9)", () => {
   });
 });
 
+describe("what ling app takes from its arguments, and how much", () => {
+  it("reads a link only as an argument of its own, never inside another", () => {
+    expect(workTarget(["--app-user-model-id=ling://threads/t1"])).toBeNull();
+    expect(workTarget(["--opened-by", "https://example.com/?next=mightling://work?cwd=/etc"])).toBeNull();
+  });
+
+  it("caps what a link carries: a remote at 500 characters, a plugin's name at 200", () => {
+    expect(linkTarget(`ling://new?originUrl=${"a".repeat(600)}`).origin).toBe("a".repeat(500));
+    expect(linkTarget(`ling://plugins/${"p".repeat(300)}`).plugin).toBe("p".repeat(200));
+  });
+
+  it("runs the audit's session only for a finite time, with its preview on plain http alone", () => {
+    expect(auditSeconds({ MIGHTLING_APP_AUDIT: "Infinity" })).toBeNull();
+    expect(auditSeconds({ MIGHTLING_APP_AUDIT: "-5" })).toBeNull();
+    expect(auditPreview({ MIGHTLING_APP_AUDIT_PREVIEW: "https://localhost/page" })).toBeNull();
+    expect(auditPreview({ MIGHTLING_APP_AUDIT_PREVIEW: "http://localhost/page" })).toBe("http://localhost/page");
+  });
+});
