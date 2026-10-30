@@ -24,9 +24,11 @@ from dreamference.chat.speech_sidecar import STT_CONTAINER_NAME, SpeechSidecar
 class FakeDocker:
     """Records docker commands; `inspect` answers each container's state and network."""
 
-    def __init__(self, states=None, networks=None):
+    def __init__(self, states=None, networks=None, failing=None, network_exists=True):
         self.states = dict(states or {})
         self.networks = dict(networks or {})
+        self.failing = dict(failing or {})  # argv prefix -> stderr of a command that fails
+        self.network_exists = network_exists
         self.commands = []
         self.environments = []
 
@@ -34,12 +36,15 @@ class FakeDocker:
         argv = list(argv)
         self.commands.append(argv)
         self.environments.append(kwargs.get("env"))
+        failed = [stderr for prefix, stderr in self.failing.items() if argv[: len(prefix)] == list(prefix)]
+        if failed:
+            return subprocess.CompletedProcess(argv, 1, "", failed[0])
         if argv[:2] == ["docker", "inspect"]:
             name, fmt = argv[2], argv[4]
             value = self.states.get(name, "") if "State" in fmt else self.networks.get(name, "")
             return subprocess.CompletedProcess(argv, 0 if name in self.states else 1, value + "\n", "")
         if argv[:3] == ["docker", "network", "inspect"]:
-            return subprocess.CompletedProcess(argv, 0, f"{SIDECAR_NETWORK}\n", "")
+            return subprocess.CompletedProcess(argv, 0 if self.network_exists else 1, f"{SIDECAR_NETWORK}\n", "")
         if argv[:3] == ["docker", "rm", "-f"]:
             self.states.pop(argv[3], None)
             self.networks.pop(argv[3], None)
@@ -170,6 +175,65 @@ def test_speech_to_text_runs_on_the_sidecar_network(monkeypatch, states, network
         assert "dreamference-stt-cache:/home/ubuntu/.cache/huggingface" in ran[0]
     assert (["docker", "start", STT_CONTAINER_NAME] in fake.commands) is starts
     assert any(c[:3] == ["docker", "exec", STT_CONTAINER_NAME] for c in fake.commands)
+    # Only a container on another network is removed first.
+    replaced = networks.get(STT_CONTAINER_NAME, SIDECAR_NETWORK) != SIDECAR_NETWORK
+    assert (["docker", "rm", "-f", STT_CONTAINER_NAME] in fake.commands) is replaced
+
+
+def test_speech_to_text_creates_the_sidecar_network_before_its_container(monkeypatch):
+    fake = FakeDocker(network_exists=False)
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert SpeechSidecar.start() is True
+    create = ["docker", "network", "create", SIDECAR_NETWORK]
+    assert fake.commands.index(create) < fake.commands.index(fake.runs(STT_CONTAINER_NAME)[0])
+
+
+@pytest.mark.parametrize("states, failing, problem", [
+    ({}, {("docker", "network", "create"): "denied"}, f"Could not create the Docker network {SIDECAR_NETWORK}."),
+    ({}, {("docker", "run"): "pull access denied"}, "Could not start the speech-to-text server: pull access denied"),
+    ({STT_CONTAINER_NAME: "exited"}, {("docker", "start"): "port is taken"},
+     f"Could not start {STT_CONTAINER_NAME}: port is taken"),
+])
+def test_a_speech_to_text_start_that_fails_says_why(monkeypatch, states, failing, problem):
+    fake = FakeDocker(states, dict.fromkeys(states, SIDECAR_NETWORK), failing, network_exists=False)
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert SpeechSidecar.start() is False
+    assert SpeechSidecar.problem == problem
+    assert not any(c[:2] == ["docker", "exec"] for c in fake.commands)
+
+
+def test_a_speech_to_text_start_forgets_the_last_failure(monkeypatch):
+    monkeypatch.setattr(SpeechSidecar, "problem", "Could not start the speech-to-text server: earlier")
+    monkeypatch.setattr(subprocess, "run", FakeDocker())
+    assert SpeechSidecar.start() is True
+    assert SpeechSidecar.problem == ""
+
+
+def test_server_start_starts_speech_to_text_only_on_a_node_without_one(monkeypatch):
+    from dreamference.node.node_identity import NodeIdentity
+
+    fake = FakeDocker()
+    monkeypatch.setattr(subprocess, "run", fake)
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: None))
+    assert SpeechSidecar.ensure_on_node() is None
+    assert not fake.runs(STT_CONTAINER_NAME)
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: "node-1"))
+    assert SpeechSidecar.ensure_on_node() is True
+    # The model downloads in the container's background: the model server must not wait for it.
+    assert fake.commands[-1][:4] == ["docker", "exec", "-d", STT_CONTAINER_NAME]
+    assert SpeechSidecar.ensure_on_node() is None
+    assert len(fake.runs(STT_CONTAINER_NAME)) == 1
+
+
+def test_speech_to_text_stop_removes_the_container_and_says_when_one_is_left(monkeypatch):
+    fake = FakeDocker({STT_CONTAINER_NAME: "running"}, {STT_CONTAINER_NAME: SIDECAR_NETWORK})
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert "running on " + SIDECAR_NETWORK in SpeechSidecar.status_lines()[0]
+    assert SpeechSidecar.stop() is True
+    assert ["docker", "rm", "-f", STT_CONTAINER_NAME] in fake.commands
+    stuck = FakeDocker({STT_CONTAINER_NAME: "running"}, failing={("docker", "rm"): "device busy"})
+    monkeypatch.setattr(subprocess, "run", stuck)
+    assert SpeechSidecar.stop() is False
 
 
 # -- the image_search tool ---------------------------------------------------------------------
