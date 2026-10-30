@@ -20,7 +20,11 @@ def test_copy_into_a_test_file_is_dropped():
 
 
 def test_quoted_test_path_is_unquoted_before_the_check():
-    patch = 'diff --git "a/tests/t\\"x.py" "b/tests/t\\"x.py"\n--- "a/tests/t\\"x.py"\n+++ "b/tests/t\\"x.py"\n@@ -1 +1 @@\n-a\n+b\n'
+    patch = (
+        'diff --git "a/tests/t\\"x.py" "b/tests/t\\"x.py"\n'
+        '--- "a/tests/t\\"x.py"\n+++ "b/tests/t\\"x.py"\n'
+        "@@ -1 +1 @@\n-a\n+b\n"
+    )
     kept, dropped = SweBenchPatchFilter.drop_test_hunks(patch)
     assert kept == ""
     assert dropped == ['tests/t"x.py']

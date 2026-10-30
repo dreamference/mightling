@@ -50,7 +50,9 @@ def test_build_images_stops_when_the_harness_cannot_be_installed(monkeypatch):
 
 
 def test_build_images_refuses_an_instance_that_is_not_in_the_dataset(monkeypatch, capsys):
-    monkeypatch.setattr(SweBenchHarness, "rows", classmethod(lambda cls, dataset: [{"instance_id": "a__a-1"}]))
+    monkeypatch.setattr(
+        SweBenchHarness, "rows", classmethod(lambda cls, dataset: [{"instance_id": "a__a-1"}])
+    )
     args = argparse.Namespace(instances="a__a-1,b__b-2,c__c-3", subset=None, languages=None)
     assert SweBenchCommand.build_selection("multilingual", args) is None
     assert "Not in multilingual: b__b-2, c__c-3" in capsys.readouterr().out
@@ -58,8 +60,12 @@ def test_build_images_refuses_an_instance_that_is_not_in_the_dataset(monkeypatch
 
 def test_the_drop_test_hunks_flag_chooses_the_filtered_grading_series(monkeypatch):
     seen = []
-    monkeypatch.setattr(SweBenchCommand, "evaluate", classmethod(lambda cls, *a: seen.append(("eval", *a)) or 0))
-    monkeypatch.setattr(SweBenchCommand, "report", classmethod(lambda cls, *a: seen.append(("report", *a)) or 0))
+    monkeypatch.setattr(
+        SweBenchCommand, "evaluate", classmethod(lambda cls, *a: seen.append(("eval", *a)) or 0)
+    )
+    monkeypatch.setattr(
+        SweBenchCommand, "report", classmethod(lambda cls, *a: seen.append(("report", *a)) or 0)
+    )
     assert SweBenchCommand.dispatch(parse("eval", "r1", "--drop-test-hunks")) == 0
     assert SweBenchCommand.dispatch(parse("eval", "r1")) == 0
     assert SweBenchCommand.dispatch(parse("report", "r1", "--drop-test-hunks")) == 0

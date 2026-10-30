@@ -1,18 +1,29 @@
 """Grading refusals: an instance is left ungraded, never graded against a missing image."""
 
-from tests.test_swe_bench import bench, run  # noqa: F401
+import pytest
 
 from dreamference.swe_bench import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
+from tests.test_swe_bench import bench as swe_bench_machine  # noqa: F401
+from tests.test_swe_bench import run
 
 
-def test_a_full_disk_leaves_the_instance_ungraded_and_never_calls_the_harness(bench, monkeypatch, capsys):
+@pytest.fixture
+def bench(request):
+    return request.getfixturevalue("swe_bench_machine")
+
+
+def test_a_full_disk_leaves_the_instance_ungraded_and_never_calls_the_harness(
+    bench, monkeypatch, capsys
+):
     run(bench, instances=["acme__widget-1"])
     store = SweBenchRunStore("r1")
     calls = len(bench["harness"].calls)
     monkeypatch.setattr(SweBenchDocker, "image_digest", classmethod(lambda cls, image: None))
-    monkeypatch.setattr(SweBenchEvaluator, "disk_problem", classmethod(lambda cls, settings: "disk is full"))
+    monkeypatch.setattr(
+        SweBenchEvaluator, "disk_problem", classmethod(lambda cls, settings: "disk is full")
+    )
     assert SweBenchEvaluator.grade(store, bench["settings"]) == {}
     assert len(bench["harness"].calls) == calls
     assert "acme__widget-1 is not graded yet: disk is full" in capsys.readouterr().out

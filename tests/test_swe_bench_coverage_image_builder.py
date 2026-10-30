@@ -22,7 +22,9 @@ def fake_git(monkeypatch, fail_on=(), calls=None):
         calls.append(list(command))
         verb = command[1] if command[1] != "-C" else command[3]
         if verb == "clone":
-            (SweBenchImageBuilder.task_repo_dir(DATASET) / ".git").mkdir(parents=True, exist_ok=True)
+            (SweBenchImageBuilder.task_repo_dir(DATASET) / ".git").mkdir(
+                parents=True, exist_ok=True
+            )
         return done(1, "git said no") if verb in fail_on else done()
 
     monkeypatch.setattr(SweBenchImageBuilder, "execute", staticmethod(execute))
@@ -50,14 +52,18 @@ def test_a_commit_that_cannot_be_checked_out_gives_no_task_repository(monkeypatc
 
 def test_a_missing_pinned_commit_is_fetched_before_the_checkout(monkeypatch):
     calls = fake_git(monkeypatch, fail_on=("cat-file",))
-    assert SweBenchImageBuilder.ensure_task_repo(DATASET) == SweBenchImageBuilder.task_repo_dir(DATASET)
+    assert SweBenchImageBuilder.ensure_task_repo(DATASET) == SweBenchImageBuilder.task_repo_dir(
+        DATASET
+    )
     verbs = [c[3] if c[1] == "-C" else c[1] for c in calls]
     assert verbs == ["clone", "cat-file", "fetch", "checkout"]
 
 
 def test_a_builder_that_cannot_be_created_is_reported(monkeypatch, capsys):
     def docker(args, timeout=None, input_text=None):
-        return done(1, "buildkit missing") if args[1] == "inspect" or args[1] == "create" else done()
+        return (
+            done(1, "buildkit missing") if args[1] == "inspect" or args[1] == "create" else done()
+        )
 
     monkeypatch.setattr(SweBenchDocker, "run", classmethod(lambda cls, *a, **k: docker(*a, **k)))
     settings = swe_bench_settings.SweBenchSettings()
@@ -67,23 +73,33 @@ def test_a_builder_that_cannot_be_created_is_reported(monkeypatch, capsys):
 
 def test_without_a_task_repository_or_builder_every_instance_is_reported_unbuilt(monkeypatch):
     monkeypatch.setattr(SweBenchHarness, "rows", classmethod(lambda cls, dataset: []))
-    monkeypatch.setattr(SweBenchImageBuilder, "ensure_task_repo", classmethod(lambda cls, dataset: None))
+    monkeypatch.setattr(
+        SweBenchImageBuilder, "ensure_task_repo", classmethod(lambda cls, dataset: None)
+    )
     settings = swe_bench_settings.SweBenchSettings()
     outcome = SweBenchImageBuilder.build(DATASET, ["a__a-1", "b__b-2"], settings)
     assert set(outcome) == {"a__a-1", "b__b-2"}
     assert all("missing" in problem for problem in outcome.values())
 
 
-def test_an_instance_without_a_dockerfile_in_the_pinned_repository_is_not_built(monkeypatch, tmp_path):
+def test_an_instance_without_a_dockerfile_in_the_pinned_repository_is_not_built(
+    monkeypatch, tmp_path
+):
     repo = tmp_path / "tasks-repo"
     repo.mkdir()
     monkeypatch.setattr(SweBenchHarness, "rows", classmethod(lambda cls, dataset: []))
-    monkeypatch.setattr(SweBenchImageBuilder, "ensure_task_repo", classmethod(lambda cls, dataset: repo))
-    monkeypatch.setattr(SweBenchImageBuilder, "ensure_builder", classmethod(lambda cls, settings: True))
+    monkeypatch.setattr(
+        SweBenchImageBuilder, "ensure_task_repo", classmethod(lambda cls, dataset: repo)
+    )
+    monkeypatch.setattr(
+        SweBenchImageBuilder, "ensure_builder", classmethod(lambda cls, settings: True)
+    )
     monkeypatch.setattr(module, "BUILD_HEADROOM_BYTES", 0)
     docker_calls = []
     monkeypatch.setattr(
-        SweBenchDocker, "run", classmethod(lambda cls, args, **k: docker_calls.append(args) or done())
+        SweBenchDocker,
+        "run",
+        classmethod(lambda cls, args, **k: docker_calls.append(args) or done()),
     )
     outcome = SweBenchImageBuilder.build(DATASET, ["a__a-1"], swe_bench_settings.SweBenchSettings())
     assert "no Dockerfile in the task repository" in outcome["a__a-1"]

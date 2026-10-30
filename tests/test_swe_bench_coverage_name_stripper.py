@@ -32,10 +32,7 @@ def test_init_module_reveals_the_package_but_not_its_own_stem():
 
 
 def test_top_level_module_and_non_python_file_reveal_only_what_they_are():
-    patch = (
-        "diff --git a/setup.py b/setup.py\n"
-        "diff --git a/docs/changes.rst b/docs/changes.rst\n"
-    )
+    patch = "diff --git a/setup.py b/setup.py\ndiff --git a/docs/changes.rst b/docs/changes.rst\n"
     found = {name: kind for name, kind, _ in SweBenchNameStripper.names(patch)}
     assert found["setup.py"] == "file"
     assert found["setup"] == "module"

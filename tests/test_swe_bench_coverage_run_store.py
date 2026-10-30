@@ -34,8 +34,14 @@ def test_predictions_skip_torn_lines_and_records_without_an_instance():
     assert store.predictions() == []  # no file yet
     good = {"instance_id": "a__a-1", "model_name_or_path": "m", "model_patch": ""}
     store.predictions_path.write_text(
-        json.dumps(good) + "\n" + '{"instance_id": "b__b-2", "mod\n' + "[1]\n"
-        + json.dumps({"model_patch": "x"}) + "\n" + json.dumps({"instance_id": ""}) + "\n"
+        json.dumps(good)
+        + "\n"
+        + '{"instance_id": "b__b-2", "mod\n'
+        + "[1]\n"
+        + json.dumps({"model_patch": "x"})
+        + "\n"
+        + json.dumps({"instance_id": ""})
+        + "\n"
     )
     assert store.predictions() == [good]
 

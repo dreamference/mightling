@@ -2,12 +2,17 @@
 
 import pytest
 
-from tests.test_swe_bench import bench, run  # noqa: F401
-
 from dreamference.swe_bench import SweBenchRunStore
 from dreamference.swe_bench import swe_bench_instance_run as module
+from tests.test_swe_bench import bench as swe_bench_machine  # noqa: F401
+from tests.test_swe_bench import run
 
 INSTANCE = "acme__widget-1"
+
+
+@pytest.fixture
+def bench(request):
+    return request.getfixturevalue("swe_bench_machine")
 
 
 def failed_preparation(bench, monkeypatch, which):
@@ -19,7 +24,10 @@ def failed_preparation(bench, monkeypatch, which):
 
 @pytest.mark.parametrize(
     "script, words",
-    [("SCRUB_SCRIPT", "scrubbing /testbed failed (5)"), ("PREPARE_SCRIPT", "preparing /testbed failed (5)")],
+    [
+        ("SCRUB_SCRIPT", "scrubbing /testbed failed (5)"),
+        ("PREPARE_SCRIPT", "preparing /testbed failed (5)"),
+    ],
 )
 def test_a_testbed_that_cannot_be_scrubbed_or_prepared_ends_in_error_with_no_patch(
     bench, monkeypatch, script, words
@@ -30,7 +38,9 @@ def test_a_testbed_that_cannot_be_scrubbed_or_prepared_ends_in_error_with_no_pat
     assert [p["model_patch"] for p in predictions] == [""]
 
 
-def test_a_runner_bug_ends_the_instance_in_error_and_still_removes_its_container(bench, monkeypatch):
+def test_a_runner_bug_ends_the_instance_in_error_and_still_removes_its_container(
+    bench, monkeypatch
+):
     def broken(self, state):
         raise RuntimeError("bug in the runner")
 
@@ -58,7 +68,9 @@ def test_an_interrupted_instance_writes_no_prediction_so_it_runs_again(bench, mo
 
 
 def test_a_container_that_does_not_start_ends_in_error_before_any_script_runs(bench, monkeypatch):
-    monkeypatch.setattr(module.SweBenchInstanceRun, "_start_container", lambda self: "docker run failed: no space")
+    monkeypatch.setattr(
+        module.SweBenchInstanceRun, "_start_container", lambda self: "docker run failed: no space"
+    )
     run(bench, instances=[INSTANCE])
     store = SweBenchRunStore("r1")
     state = store.state(INSTANCE)

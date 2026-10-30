@@ -3,12 +3,19 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
-from tests.test_swe_bench import bench, run  # noqa: F401
+import pytest
 
 from dreamference.swe_bench import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_runner import SweBenchRunner
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
+from tests.test_swe_bench import bench as swe_bench_machine  # noqa: F401
+from tests.test_swe_bench import run
+
+
+@pytest.fixture
+def bench(request):
+    return request.getfixturevalue("swe_bench_machine")
 
 
 def test_a_run_without_a_usable_runtime_starts_no_instance(bench, monkeypatch):
@@ -25,13 +32,18 @@ def test_a_run_naming_an_instance_the_dataset_lacks_is_refused_before_any_contai
     assert not any(call[0] == "run" for call in bench["docker"].calls)
 
 
-def test_an_image_that_cannot_be_pulled_is_recorded_as_an_error_with_an_empty_prediction(monkeypatch, capsys):
+def test_an_image_that_cannot_be_pulled_is_recorded_as_an_error_with_an_empty_prediction(
+    monkeypatch, capsys
+):
     store = SweBenchRunStore("2026-10-05-a")
     store.write_manifest({"name": store.name})
     monkeypatch.setattr(SweBenchDocker, "ensure_image", classmethod(lambda cls, image: None))
     started = []
     instance = SimpleNamespace(
-        image="registry/none:latest", store=store, instance_id="a__a-1", model_name="m",
+        image="registry/none:latest",
+        store=store,
+        instance_id="a__a-1",
+        model_name="m",
         run=lambda: started.append(1),
     )
     SweBenchRunner._run_one(instance)
