@@ -510,6 +510,11 @@ mod tests {
                 refused.display()
             );
         }
+        // A project id is at most 128 characters.
+        let longest = codex.join(format!("projects/{}/knowledge", "a".repeat(128)));
+        let too_long = codex.join(format!("projects/{}/knowledge", "a".repeat(129)));
+        assert!(is_project_knowledge(&longest, &codex));
+        assert!(!is_project_knowledge(&too_long, &codex));
         // A walk of the knowledge folder skips every secret folder but the one it is in.
         let skipped = secret_dirs_in(&knowledge, &home, &codex);
         assert!(!skipped.contains(&home.join(".mightling")));
