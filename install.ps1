@@ -169,12 +169,17 @@ function Read-Sums([string]$Path) {
 $Work = Join-Path ([IO.Path]::GetTempPath()) ("mightling-install-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $Work | Out-Null
 $DownloadHeaders = @{ "Accept" = "application/octet-stream"; "User-Agent" = "mightling-install" }
-if ($Token) { $DownloadHeaders["Authorization"] = "Bearer $Token" }
 
+# The token goes only to the API root, never to a download URL the release names: a release that was
+# tampered with, or an old repository name taken over, would otherwise collect it (as in install.sh).
 function Get-Asset([string]$Name) {
     $Path = Join-Path $Work $Name
     Say "  downloading $Name"
-    Invoke-WebRequest -Uri $Assets[$Name] -Headers $DownloadHeaders -OutFile $Path -UseBasicParsing
+    $Sent = $DownloadHeaders.Clone()
+    if ($Token -and $Assets[$Name].StartsWith("$Api/", [StringComparison]::Ordinal)) {
+        $Sent["Authorization"] = "Bearer $Token"
+    }
+    Invoke-WebRequest -Uri $Assets[$Name] -Headers $Sent -OutFile $Path -UseBasicParsing
     return $Path
 }
 

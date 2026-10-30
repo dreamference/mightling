@@ -228,6 +228,25 @@ def test_install_ps1_requires_signatures_from_the_same_release_as_install_sh():
     assert f'$SignedSince = "{since.group(1)}"' in script()
 
 
+def test_the_token_goes_only_to_asset_urls_under_the_api_root():
+    # As in install.sh (security review 2026-10, finding 1): the release JSON names each asset's
+    # URL, and a token that followed it to another host would reach whoever controls that host.
+    text = script()
+    download = re.search(r"^function Get-Asset\(.*?^}$", text, re.MULTILINE | re.DOTALL).group(0)
+    assert (
+        'if ($Token -and $Assets[$Name].StartsWith("$Api/", [StringComparison]::Ordinal)) {'
+        in download
+    )
+    assert "-Headers $Sent " in download
+    # The release itself is read from the API root; nothing else ever carries the token.
+    setters = [line.strip() for line in text.splitlines() if '["Authorization"]' in line]
+    assert setters == [
+        'if ($Token) { $Headers["Authorization"] = "Bearer $Token" }',
+        '$Sent["Authorization"] = "Bearer $Token"',
+    ]
+    assert "$ReleaseUrl = " in text and '"$Api/repos/' in text
+
+
 def test_install_ps1_checks_sha256sums_against_the_release_key():
     block = signature_block()
     assert "-Y verify" in script()
