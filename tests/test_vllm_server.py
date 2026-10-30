@@ -1146,6 +1146,7 @@ def test_host_safety_reports_every_failure_at_once(monkeypatch, capsys):
     (["/usr/bin/earlyoom", "-m", "5,2", "-s", "100", "-r", "60"], None),
     (["/usr/bin/earlyoom", "-m5,2", "-s100"], None),             # attached-value form
     (["/usr/bin/earlyoom", "-m", "5", "-s", "100,100"], None),   # SIGTERM point governs
+    (["/usr/bin/earlyoom", "-m", "6", "-s", "100"], None),       # the ceiling itself is allowed
 ])
 def test_earlyoom_faults_cover_both_thresholds(argv, fault):
     result = VLLMServerManager._earlyoom_fault(argv)
