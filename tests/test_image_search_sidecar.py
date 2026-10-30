@@ -647,3 +647,146 @@ def test_status_names_each_containers_network_and_counts_only_stored_images(monk
     assert lines[0] == f"Image search ({IMAGE_SEARCH_CONTAINER_NAME}): running on {SIDECAR_NETWORK}"
     assert lines[1] == f"SigLIP pre-filter ({SIGLIP_CONTAINER_NAME}): absent"
     assert lines[2] == f"Store: {images} (1 images)"
+
+
+# -- the image_search tool's decisions, one by one ----------------------------------------------
+
+
+@pytest.mark.parametrize("stored, secret", [("s3cret\n", "s3cret"), (" \n", None)])
+def test_the_tools_secret_is_read_without_its_line_end(store, stored, secret):
+    store.mkdir()
+    (store / "secret").write_text(stored)
+    assert ImageSearchMcp.secret() == secret
+
+
+def test_a_search_goes_to_loopback_with_the_secret(monkeypatch, store):
+    store.mkdir()
+    (store / "secret").write_text("s3cret\n")
+    sent = []
+
+    def urlopen(request, timeout):
+        sent.append(request)
+        response = io.BytesIO(b'{"response": "none"}')
+        response.status = 200
+        return response
+
+    monkeypatch.setattr(image_search_mcp.urllib.request, "urlopen", urlopen)
+    assert ImageSearchMcp.live_search({"queries": ["x"], "count": 1}) == (200, {"response": "none"})
+    (request,) = sent
+    assert request.full_url == "http://127.0.0.1:8768/search" and request.get_method() == "POST"
+    assert request.get_header(image_search_mcp.AUTH_HEADER.capitalize()) == "s3cret"
+    assert json.loads(request.data) == {"queries": ["x"], "count": 1}
+
+
+def test_a_refused_search_keeps_its_status(monkeypatch, store):
+    import urllib.error
+
+    store.mkdir()
+    (store / "secret").write_text("s3cret")
+
+    def refused(request, timeout):
+        body = io.BytesIO(b'{"error": "bad token"}')
+        raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, body)
+
+    monkeypatch.setattr(image_search_mcp.urllib.request, "urlopen", refused)
+    assert ImageSearchMcp.live_search({"queries": ["x"], "count": 1}) == (401, {"error": "bad token"})
+
+
+def test_no_seal_folder_without_an_absolute_runtime_folder(monkeypatch, tmp_path):
+    # A relative XDG_RUNTIME_DIR names a folder in whatever directory the session runs in.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "run").mkdir()
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "run")
+    monkeypatch.setattr(image_search_mcp.os, "getuid", lambda: 4000000000)
+    assert ImageSearchMcp.seal_dir() is None
+    assert ImageSearchMcp.sealed_by(os.getppid()) is False
+
+
+def test_a_seal_folder_that_is_not_there_seals_nothing(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    assert ImageSearchMcp.seal_dir() == str(tmp_path / "ling-airgapped")
+    assert ImageSearchMcp.sealed_by(os.getppid()) is False
+
+
+def test_an_unreadable_seal_does_not_hide_the_sessions_own(monkeypatch, tmp_path):
+    seals = tmp_path / "ling-airgapped"
+    (seals / "a-folder").mkdir(parents=True)
+    (seals / "thread-1").write_text(f"{os.getppid()}\n")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    listdir = os.listdir
+    monkeypatch.setattr(image_search_mcp.os, "listdir", lambda path=".": sorted(listdir(path)))
+    assert ImageSearchMcp.sealed_by(os.getppid()) is True
+
+
+def _tool(answer=None):
+    sent = []
+
+    def search(body):
+        sent.append(body)
+        return 200, answer or {"response": "![t](/images/0123456789abcdef.jpg)"}
+
+    return ImageSearchMcp(search=search, air_gapped=lambda: False), sent
+
+
+def test_an_unknown_tool_searches_nothing():
+    server, sent = _tool()
+    result = server.call("gmail_search", {"queries": ["x"]})
+    assert result == {"content": [{"type": "text", "text": "Unknown tool gmail_search."}], "isError": True}
+    assert sent == []
+
+
+@pytest.mark.parametrize("arguments, body", [
+    ({"queries": "puffins"}, {"queries": ["puffins"], "count": 4}),
+    ({"queries": [str(n) for n in range(7)]}, {"queries": ["0", "1", "2", "3", "4"], "count": 4}),
+    ({"queries": ["x"], "count": 0}, {"queries": ["x"], "count": 1}),
+    ({"queries": ["x"], "count": -3}, {"queries": ["x"], "count": 1}),
+    ({"queries": ["x"], "count": True}, {"queries": ["x"], "count": 4}),
+])
+def test_a_calls_arguments_are_made_into_a_search_the_service_takes(arguments, body):
+    server, sent = _tool()
+    assert server.call(TOOL_NAME, arguments)["isError"] is False
+    assert sent == [body]
+
+
+def test_the_note_on_titles_comes_only_with_images():
+    server, _ = _tool({"response": "No image matched."})
+    assert server.call(TOOL_NAME, {"queries": ["x"]})["content"][0]["text"] == "No image matched."
+
+
+def test_arguments_that_are_not_an_object_count_as_none():
+    server, sent = _tool()
+    reply = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                           "params": {"name": TOOL_NAME, "arguments": ["x"]}})
+    assert reply["result"]["isError"] and "at least one search text" in reply["result"]["content"][0]["text"]
+    assert sent == []
+
+
+def test_blank_lines_and_messages_that_are_not_objects_get_no_reply():
+    server, _ = _tool()
+    source = io.StringIO("\n42\n" + json.dumps({"jsonrpc": "2.0", "id": 7, "method": "ping"}) + "\n")
+    out = io.StringIO()
+    server.run(source, out)
+    assert [json.loads(line) for line in out.getvalue().splitlines()] == [{"jsonrpc": "2.0", "id": 7, "result": {}}]
+
+
+def _probe(monkeypatch, outcome):
+    def run(argv, **kwargs):
+        if isinstance(outcome, Exception):
+            raise outcome
+        return subprocess.CompletedProcess(argv, 0, outcome, "")
+
+    monkeypatch.setattr(image_search_mcp.subprocess, "run", run)
+    return ImageSearchMcp.probe("/opt/ling-admin", {})
+
+
+def test_a_probe_that_times_out_says_it_did_not_run(monkeypatch):
+    problem = _probe(monkeypatch, subprocess.TimeoutExpired(["ling-admin"], 30))
+    assert problem.startswith("`/opt/ling-admin images mcp` did not run")
+
+
+@pytest.mark.parametrize("stdout", [
+    "not json\n",
+    json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"tools": 5}}) + "\n",
+])
+def test_a_probe_answered_without_a_tool_list_says_so(monkeypatch, stdout):
+    assert "does not serve the image_search tool (exit 0)" in _probe(monkeypatch, stdout)
