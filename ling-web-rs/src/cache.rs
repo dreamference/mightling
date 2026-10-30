@@ -311,4 +311,15 @@ mod tests {
         assert!(Cache::open_from(Some("off"), None, None, None).is_none());
         assert!(Cache::open_from(Some(" "), None, None, None).is_none());
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_its_group_can_write_is_not_used() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("group");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o770)).unwrap();
+        assert!(Cache::at(dir.clone()).is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
