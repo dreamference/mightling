@@ -306,6 +306,13 @@ def test_the_scope_a_command_runs_in_is_known_while_it_runs_and_forgotten_after(
     assert run.seen_units == ["mightling-night-20261001-0100-abc-1"] and run.current_unit is None
 
 
+def test_stopping_the_run_stops_the_command_that_is_running(setup, monkeypatch):
+    run = capped(setup, monkeypatch, time.time() + 60)
+    run.stop_event.set()
+    assert run._run_capped(["true"], setup["repo"], setup["night"] / "out.log", None) == "timeout"
+    assert run.stopped == ["mightling-night-20261001-0100-abc-1"]
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
