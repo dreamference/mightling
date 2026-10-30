@@ -16,7 +16,9 @@ from dreamference.node.node_provisioner import NodeProvisioner
 from dreamference.node.node_role_provisioner import (
     DERIVE_FLAG,
     ENGINE,
+    MIN_FREE_GIB,
     SMOKE_PASSED,
+    VERIFIED,
     NodeRoleProvisioner,
 )
 
@@ -257,3 +259,55 @@ def test_a_failed_swe_bench_setup_fails_the_role_and_skips_the_smoke():
     assert result["failed"] == "swe-bench setup" and result["reason"] == "pull failed"
     assert result["swe-bench setup"] is False and "swe-bench smoke" not in result
     assert sent(session, "ling-admin swe-bench smoke") == []
+
+
+# Finishing and the readiness report
+
+
+def test_a_model_server_that_failed_to_start_skips_the_role_setup_but_still_reports(monkeypatch):
+    steps, run = role()
+    run.results[HOST]["paired_record"] = True
+    seen = []
+    run._start_and_verify = lambda host: run.results[host].update(failed="verify")
+    monkeypatch.setattr(steps, "role_setup", lambda host, session: seen.append("setup"))
+    monkeypatch.setattr(steps, "report", lambda host, session: seen.append("report"))
+    steps.finish(HOST, Session())
+    assert seen == ["report"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "results", "failed"),
+    [
+        ("night", {"verify": VERIFIED}, "role night"),
+        (ENGINE, {"verify": VERIFIED}, "role engine"),
+        ("night", {"swe-bench setup": True, "swe-bench smoke": True}, "model server canary"),
+    ],
+)
+def test_a_failed_readiness_check_fails_the_run_naming_it_and_the_command_to_rerun(
+    kind, results, failed
+):
+    steps, run = role(kind)
+    run.results[HOST].update(results)
+    session = Session({"df -Pk": (0, str(MIN_FREE_GIB), "")})
+    steps.report(HOST, session)
+    result = run.results[HOST]
+    assert result["complete"] is False and result["failed"] == "readiness"
+    assert result["reason"] == failed
+    assert result["left"] == f"ling-admin node provision {HOST} --role {kind}"
+
+
+def test_a_disk_under_the_minimum_or_unreadable_fails_readiness():
+    steps, run = role(ENGINE)
+    run.results[HOST].update(verify=VERIFIED, cuda="13.0")
+    steps.report(HOST, Session({"df -Pk": (0, str(MIN_FREE_GIB - 1), "")}))
+    assert run.results[HOST]["reason"] == "disk free"
+
+    steps, run = role(ENGINE)
+    run.results[HOST].update(verify=VERIFIED, cuda="13.0")
+    steps.report(HOST, Session({"df -Pk": (0, "", "")}))
+    assert run.results[HOST]["reason"] == "disk free"
+
+    steps, run = role(ENGINE)
+    run.results[HOST].update(verify=VERIFIED, cuda="13.0")
+    steps.report(HOST, Session({"df -Pk": (0, str(MIN_FREE_GIB), "")}))
+    assert run.results[HOST]["complete"] is True and "failed" not in run.results[HOST]
