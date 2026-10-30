@@ -2219,3 +2219,30 @@ fn indexing_waits_where_no_user_systemd_can_cap_its_memory() {
     );
     assert!(host.0.started.lock().unwrap().is_empty());
 }
+
+#[test]
+fn a_citation_whose_file_became_a_folder_is_not_opened() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home, docs, host) = one_note();
+    let env = env(&host, &home, exe());
+    assert_eq!(
+        index::run(&env, &docs, None, false).unwrap()[0].1,
+        Outcome::Ok
+    );
+    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents"))
+        .unwrap()
+        .unwrap();
+    let id: i64 = conn
+        .query_row("SELECT id FROM documents WHERE path = 'note.md'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    drop(conn);
+    let collections: Vec<_> = docs.enabled().cloned().collect();
+    let link = ling_docs::locate::link(&format!("documents:{id}"), None).unwrap();
+    assert!(ling_docs::locate::locate(&collections, &link).is_ok());
+    std::fs::remove_file(home.join("Documents/note.md")).unwrap();
+    std::fs::create_dir(home.join("Documents/note.md")).unwrap();
+    let err = ling_docs::locate::locate(&collections, &link).unwrap_err();
+    assert!(err.to_string().contains("is not a file"), "{err}");
+}
