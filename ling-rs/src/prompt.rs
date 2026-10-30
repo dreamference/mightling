@@ -980,4 +980,12 @@ mod tests {
         assert_eq!(resolved.prompt.name, "high-swe");
         assert!(resolved.skipped.is_empty(), "{:?}", resolved.skipped);
     }
+
+    #[test]
+    fn a_prompt_without_the_code_block_keeps_codexs_search_sentence() {
+        let code = "\n\n# Code navigation\n\nbehind the `code_*` tools\n";
+        let mut prompt = Prompt::offline();
+        prompt.blocks.code = false;
+        assert_eq!(compose(&prompt, &parts("", code)), compose(&prompt, &parts("", "")));
+    }
 }
