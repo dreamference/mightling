@@ -621,3 +621,22 @@ def test_a_bot_token_the_homeserver_did_not_answer_for_is_kept(machine):
     machine.request = unreachable_whoami
     assert MatrixHomeserver.start() == 0
     assert machine.registered == [mh.BOT_LOCALPART]
+
+
+# --- what the mutation run found unpinned (2026-10-30) ---------------------------------------
+
+
+def test_push_off_puts_the_container_back_on_the_internal_network(machine, capsys):
+    # Push off is the way back to no route out: the setting is saved off, and the new container
+    # joins the internal network at its fixed address again.
+    assert MatrixHomeserver.start() == 0
+    assert MatrixHomeserver.set_push(True) == 0
+    machine.runs.clear()
+    assert MatrixHomeserver.set_push(False) == 0
+    assert MatrixHomeserver._load("matrix-admin.json")["push"] is False
+    run = machine.argv("docker", "run")[0]
+    assert run[run.index("--network") + 1] == mh.MATRIX_NETWORK
+    assert run[run.index("--ip") + 1] == mh.MATRIX_ADDRESS
+    capsys.readouterr()
+    assert MatrixHomeserver.status() == 0
+    assert "internal, no route out" in capsys.readouterr().out
