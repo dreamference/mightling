@@ -1,5 +1,5 @@
 # Format and lint gate for the standalone Rust crates (those with their own lockfile, built outside
-# the Codex workspace): `cargo fmt --check` and `cargo clippy --locked -- -D warnings`. Never runs
+# the Codex workspace): `cargo fmt --check` and `cargo clippy --locked --all-targets -- -D warnings`. Never runs
 # cargo inside codex/ (AGENTS.md). The three main crates pin 1.95.0 in their rust-toolchain.toml;
 # the same version is installed here so the eval crate (no toolchain file) is linted by it too.
 name: Rust lint
@@ -46,4 +46,4 @@ jobs:
         run: cargo fmt --check
       - name: Clippy
         working-directory: ${{ matrix.crate }}
-        run: cargo clippy --locked -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
