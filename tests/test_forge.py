@@ -963,6 +963,139 @@ def test_the_phone_account_gets_a_token_for_ling_web_write_access_and_a_protecte
     assert token.read_text() == "p" * 40 + "\n"
 
 
+PHONE_REPO = "dreamference/mightling"
+PROTECTIONS = f"/repos/{PHONE_REPO}/branch_protections"
+COLLABORATOR = f"/repos/{PHONE_REPO}/collaborators/mightling-phone"
+
+
+def phone_forge(monkeypatch, answers):
+    """Answer the forge API from `answers` ((method, path) → (status, body)); record the calls."""
+    calls = []
+
+    def api(cls, method, path, token, body=None, timeout=30):
+        calls.append((method, path, body))
+        return answers.get((method, path), (204, None) if method == "PUT" else (201, {}))
+
+    monkeypatch.setattr(ForgeContainer, "api", classmethod(api))
+    return calls
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        '[chat_repos]\nallow_main = "dreamference/mightling"\n',
+        'chat_repos = "dreamference/mightling"\n',
+    ],
+)
+def test_an_allow_main_that_is_not_a_list_in_a_table_allows_nothing(config):
+    ForgeSettings.config_path().parent.mkdir(parents=True, exist_ok=True)
+    ForgeSettings.config_path().write_text(config)
+    assert ForgePhone.allow_main() == set()
+
+
+@pytest.mark.parametrize(
+    "status, password, token", [(500, "pw", "p" * 40), (404, None, "p" * 40), (404, "pw", None)]
+)
+def test_the_phone_account_is_not_ready_when_the_forge_does_not_make_it(
+    monkeypatch, tmp_path, status, password, token
+):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    made = []
+    monkeypatch.setattr(
+        ForgeAccounts,
+        "create_user",
+        classmethod(lambda cls, name, admin: made.append("account") or password),
+    )
+    monkeypatch.setattr(
+        ForgeAccounts,
+        "generate_token",
+        classmethod(lambda cls, user, name, scopes: made.append("token") or token),
+    )
+    phone_forge(monkeypatch, {("GET", "/users/mightling-phone"): (status, None)})
+    assert ForgePhone.ensure_account("a" * 40) is False
+    assert not ForgePhone.token_path().exists()
+    if status != 404:
+        assert made == [], "a forge that did not answer is not given a second account"
+
+
+def test_the_phone_account_is_not_checked_without_the_admin_token(monkeypatch):
+    calls = phone_forge(monkeypatch, {})
+    assert ForgePhone.ensure() == [
+        "⚠️  The phone account was not checked: no `forge-admin` token yet."
+    ]
+    assert calls == []
+
+
+def test_a_repository_the_phone_cannot_be_given_or_protect_is_reported(monkeypatch):
+    phone_forge(
+        monkeypatch,
+        {
+            ("PUT", COLLABORATOR): (403, None),
+            ("GET", PROTECTIONS): (200, []),
+            ("POST", PROTECTIONS): (422, {}),
+        },
+    )
+    repository = {"full_name": PHONE_REPO, "default_branch": "main"}
+    problems = ForgePhone.ensure_repository(repository, "a" * 40, set())
+    assert len(problems) == 2
+    assert "not given write access (HTTP 403)" in problems[0]
+    assert "`main` not protected (HTTP 422)" in problems[1]
+    calls = phone_forge(monkeypatch, {("GET", PROTECTIONS): (500, None)})
+    assert ForgePhone.ensure_repository(repository, "a" * 40, set()) == [
+        f"⚠️  {PHONE_REPO}: branch protection not readable (HTTP 500)."
+    ]
+    assert not [call for call in calls if call[0] in ("POST", "PATCH")]
+
+
+def test_a_mirror_or_a_nameless_repository_gets_no_protection(monkeypatch):
+    calls = phone_forge(monkeypatch, {})
+    mirror = {"full_name": PHONE_REPO, "default_branch": "main", "mirror": True}
+    assert ForgePhone.ensure_repository(mirror, "a" * 40, set()) == []
+    assert [call[0] for call in calls] == ["PUT"]
+    calls.clear()
+    assert ForgePhone.ensure_repository({"full_name": ""}, "a" * 40, set()) == []
+    assert calls == []
+
+
+def test_the_default_branch_is_the_one_protected(monkeypatch):
+    calls = phone_forge(monkeypatch, {("GET", PROTECTIONS): (200, [])})
+    repository = {"full_name": PHONE_REPO, "default_branch": "trunk"}
+    assert ForgePhone.ensure_repository(repository, "a" * 40, set()) == []
+    assert [body["rule_name"] for method, _path, body in calls if method == "POST"] == ["trunk"]
+
+
+PUSHERS = ["owner", "forge-admin"]
+
+
+@pytest.mark.parametrize(
+    "rule, change",
+    [
+        ({"rule_name": "dev", "enable_push": True, "enable_push_whitelist": True}, "POST"),
+        (
+            {
+                "enable_push": True,
+                "enable_push_whitelist": True,
+                "push_whitelist_usernames": ["owner"],
+            },
+            "PATCH",
+        ),
+        ({"enable_push": True, "enable_push_whitelist": False}, "PATCH"),
+        ({"enable_push": True, "enable_push_whitelist": True}, None),
+    ],
+)
+def test_a_main_rule_that_lets_others_push_is_corrected_and_one_in_place_is_kept(
+    monkeypatch, rule, change
+):
+    rule = {"rule_name": "main", "push_whitelist_usernames": PUSHERS[::-1]} | rule
+    calls = phone_forge(monkeypatch, {("GET", PROTECTIONS): (200, [rule])})
+    repository = {"full_name": PHONE_REPO, "default_branch": "main"}
+    assert ForgePhone.ensure_repository(repository, "a" * 40, set()) == []
+    changes = [(method, path) for method, path, _body in calls if method in ("POST", "PATCH")]
+    assert changes == (
+        [] if change is None else [(change, PROTECTIONS + ("/main" if change == "PATCH" else ""))]
+    )
+
+
 # -- mirror nodes ------------------------------------------------------------------------------------
 
 
