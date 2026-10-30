@@ -944,7 +944,7 @@ mod tests {
         let mut subtree_with_a_minimum = tlv(0x82, b"example.org");
         subtree_with_a_minimum.extend(tlv(0x80, &[0]));
         for (label, ca) in [
-            ("the to-be-signed part is not a SEQUENCE", certificate(0x31, &[good.clone()])),
+            ("the to-be-signed part is not a SEQUENCE", certificate(0x31, std::slice::from_ref(&good))),
             ("two extension lists", certificate(0x30, &[good.clone(), good.clone()])),
             (
                 "name constraints marked FALSE in the flag",
