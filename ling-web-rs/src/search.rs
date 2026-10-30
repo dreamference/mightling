@@ -1004,4 +1004,21 @@ mod tests {
         let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
         assert_eq!(found.results[0].engines, ["bing", "yep"]);
     }
+
+    #[test]
+    fn the_snippet_and_date_of_the_first_copy_of_a_page_are_kept() {
+        let payload = searxng(
+            json!([
+                {"title": "A", "url": "https://a.example/x", "content": "first", "engine": "bing",
+                 "publishedDate": "2026-10-01T08:00:00"},
+                {"title": "A", "url": "http://a.example/x", "content": "second", "engine": "yep",
+                 "publishedDate": "2026-10-20T08:00:00"}
+            ]),
+            json!([]),
+            json!([]),
+        );
+        let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
+        assert_eq!(found.results[0].snippet, "first");
+        assert_eq!(found.results[0].published.as_deref(), Some("2026-10-01"));
+    }
 }
