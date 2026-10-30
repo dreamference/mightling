@@ -259,6 +259,18 @@ mod tests {
     }
 
     #[test]
+    fn the_lower_case_variable_wins_over_the_upper_case_one() {
+        let both = [
+            ("https_proxy", "http://p:3128"),
+            ("HTTPS_PROXY", "socks5h://p:1080"),
+        ];
+        assert!(matches!(
+            proxy_for("https://a.com/x", env(&both)),
+            Ok(Some(_))
+        ));
+    }
+
+    #[test]
     fn a_web_command_refuses_at_on_and_in_a_sandbox_without_network() {
         assert_eq!(refusal(Level::On, false), Some(AIRGAPPED_ON_MESSAGE));
         assert_eq!(refusal(Level::On, true), Some(AIRGAPPED_ON_MESSAGE));
