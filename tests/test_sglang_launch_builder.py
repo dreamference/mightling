@@ -62,3 +62,18 @@ def test_a_recipe_without_a_drafter_gets_no_speculative_flags():
     # Self-speculation (a method and a depth, no draft model) is vLLM's; SGLang is given none of it.
     args = _args({"speculative_config": {"method": "mtp", "num_speculative_tokens": 3}})
     assert not any(a.startswith("--speculative") for a in args)
+
+
+def test_the_parsers_are_passed_only_when_named():
+    args = SGLangLaunchBuilder.server_args(
+        "example/target",
+        {},
+        port=8001,
+        max_model_len=None,
+        gpu_memory_utilization=0.5,
+        tool_call_parser="qwen3_coder",
+        reasoning_parser="qwen3",
+    )
+    assert _flag(args, "--tool-call-parser") == "qwen3_coder"
+    assert _flag(args, "--reasoning-parser") == "qwen3"
+    assert not {"--tool-call-parser", "--reasoning-parser"} & set(_args({}))
