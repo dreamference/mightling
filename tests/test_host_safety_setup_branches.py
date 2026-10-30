@@ -92,3 +92,43 @@ def test_a_sudo_that_cannot_run_is_no_helper(monkeypatch, real_helper_probe):
     monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
 
     assert HostSafetySetup.helper_works() is False
+
+
+# -- is_swap_file: whether `mkswap` may overwrite the file ---------------------------------------------
+
+
+def test_a_file_whose_header_says_swap_is_the_swap_file(monkeypatch):
+    _files(monkeypatch, {host_safety_setup.FSTAB: "UUID=1 / ext4 defaults 0 1\n"})
+    monkeypatch.setattr(host_safety_setup.shutil, "which", _which("blkid"))
+    monkeypatch.setattr(host_safety_setup.subprocess, "run",
+                        lambda argv, **k: subprocess.CompletedProcess(argv, 0, stdout="swap\n"))
+
+    assert HostSafetySetup.is_swap_file("/swapfile") is True
+
+
+def test_a_file_whose_header_says_something_else_is_not_overwritten(monkeypatch):
+    _files(monkeypatch, {})
+    monkeypatch.setattr(host_safety_setup.shutil, "which", _which("blkid"))
+    monkeypatch.setattr(host_safety_setup.subprocess, "run",
+                        lambda argv, **k: subprocess.CompletedProcess(argv, 0, stdout="ext4\n"))
+
+    assert HostSafetySetup.is_swap_file("/swapfile") is False
+
+
+def test_a_header_that_cannot_be_read_is_not_a_swap_file(monkeypatch):
+    _files(monkeypatch, {})
+    monkeypatch.setattr(host_safety_setup.shutil, "which", _which("blkid"))
+
+    def run(argv, **kwargs):
+        raise OSError("blkid")
+
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
+
+    assert HostSafetySetup.is_swap_file("/swapfile") is False
+
+
+def test_a_commented_out_fstab_line_does_not_make_a_swap_file(monkeypatch):
+    _files(monkeypatch, {host_safety_setup.FSTAB: "# /swapfile none swap sw 0 0\n"})
+    monkeypatch.setattr(host_safety_setup.shutil, "which", _which())
+
+    assert HostSafetySetup.is_swap_file("/swapfile") is False
