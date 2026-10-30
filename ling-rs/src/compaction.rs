@@ -909,6 +909,18 @@ mod tests {
     }
 
     #[test]
+    fn an_update_brings_every_field_of_ours_in_line() {
+        let path = Path::new("/h/config.toml");
+        let existing = "[[hooks.SessionStart]]\nmatcher = \"compact\"\n\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\ncommand = \"/opt/ling ledger\"\ntimeout = 5\nstatusMessage = \"old\"\nadditionalContextLimit = 0\n";
+        let updated = with_ledger_hook(existing, path, "/opt/ling ledger", true).unwrap_or_default();
+        let parsed: toml::Table = updated.parse().unwrap_or_default();
+        let handler = parsed["hooks"]["SessionStart"][0]["hooks"][0].as_table().cloned().unwrap_or_default();
+        assert_eq!(handler.get("timeout").and_then(toml::Value::as_integer), Some(10), "{updated}");
+        assert!(!handler.contains_key("statusMessage"), "{updated}");
+        assert!(!handler.contains_key("additionalContextLimit"), "{updated}");
+    }
+
+    #[test]
     #[cfg(not(windows))]
     fn a_path_the_shell_would_split_is_quoted() {
         assert_eq!(hook_command(Path::new("/opt/ling/bin/ling")), "/opt/ling/bin/ling ledger");
