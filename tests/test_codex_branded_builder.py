@@ -1771,3 +1771,12 @@ def test_linking_again_moves_an_existing_link_to_the_new_target(tmp_path):
     link.symlink_to("/old/install/ling")
     CodexBrandedBuilder._link("/new/install/ling", str(link))
     assert link.readlink() == Path("/new/install/ling")
+
+
+def test_a_staging_link_left_by_a_crashed_link_of_this_process_is_replaced(tmp_path):
+    link = tmp_path / "bin" / "ling"
+    link.parent.mkdir()
+    Path(f"{link}.{os.getpid()}.new").symlink_to("/left/behind")
+    CodexBrandedBuilder._link("/install/ling", str(link))
+    assert link.readlink() == Path("/install/ling")
+    assert not os.path.lexists(f"{link}.{os.getpid()}.new")
