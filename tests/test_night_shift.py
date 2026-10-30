@@ -1413,6 +1413,8 @@ def test_enable_writes_absolute_paths_and_the_window(tmp_path, monkeypatch):
     service = (NightShiftScheduler.unit_dir() / "mightling-night.service").read_text()
     assert timer.startswith("# Night Shift window: 01:30-06:15\n")
     assert "OnCalendar=*-*-* 01:30:00" in timer
+    # A night missed while the machine was off is not made up for in the morning.
+    assert "Persistent=false" in timer
     exec_start = next(line for line in service.splitlines() if line.startswith("ExecStart="))
     assert exec_start.split("=", 1)[1].startswith("/") and exec_start.endswith("night run --until 06:15")
     assert "/.local/bin" in service and "/.cargo/bin" in service
@@ -1449,6 +1451,7 @@ def test_the_service_quotes_a_path_with_a_space(monkeypatch):
     assert ":/opt/my tools/100%%/:" not in environment and ":/opt/my tools/100%%:" in environment
 
 
+
 def test_settings_parse_durations_and_windows():
     settings = NightShiftSettings({"task_timeout": "2h", "test_timeout": 15, "window": "23:00-05:00"})
     assert settings.task_timeout_s == 7200 and settings.test_timeout_s == 900
@@ -1469,6 +1472,7 @@ def test_a_duration_without_a_unit_is_minutes_and_one_with_trailing_words_is_ref
 def test_parallelism_is_at_least_one_and_a_compaction_limit_never_negative():
     settings = NightShiftSettings({"max_parallel": 0, "compact_at": -5})
     assert settings.max_parallel == 1 and settings.compact_at == 0
+
 
 
 def test_the_reports_review_command_quotes_a_repository_with_a_space():
