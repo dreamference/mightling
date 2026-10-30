@@ -115,6 +115,9 @@ fn execute_one(
     let started_at = now_rfc3339();
 
     std::fs::create_dir_all(&run.spec.scratch)?;
+    for (path, _) in &run.spec.writable_outside_scratch {
+        std::fs::create_dir_all(path)?;
+    }
     let peak_file = run.spec.scratch.join("peak");
     let _ = std::fs::remove_file(&peak_file);
     let log = run.spec.scratch.join("run.log");
