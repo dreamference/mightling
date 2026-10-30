@@ -548,4 +548,43 @@ mod tests {
             "{text}"
         );
     }
+
+    /// A SearXNG on loopback that answers one request with `body`.
+    fn searxng_answering(body: &'static str) -> String {
+        use std::io::{BufRead, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                line.clear();
+            }
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        });
+        base
+    }
+
+    #[test]
+    fn at_most_five_pages_are_read_whatever_is_asked() {
+        let base = searxng_answering(
+            r#"{"answers": [], "unresponsive_engines": [], "results": [
+                {"title": "1", "url": "https://one.example/"}, {"title": "2", "url": "https://two.example/"},
+                {"title": "3", "url": "https://three.example/"}, {"title": "4", "url": "https://four.example/"},
+                {"title": "5", "url": "https://five.example/"}, {"title": "6", "url": "https://six.example/"},
+                {"title": "7", "url": "https://seven.example/"}]}"#,
+        );
+        let read = search_and_read_from(&base, "q", 9, Level::Off, None, |url: &str, _| {
+            Ok(page(url, "", "text"))
+        })
+        .unwrap();
+        assert_eq!(read.sources.len(), MAX_PAGES);
+    }
 }
