@@ -1117,4 +1117,31 @@ mod tests {
         assert_eq!(configured(&home), Some(Mode::Local));
         assert_eq!(mode_now(&home).1, format!("{KEY} in {}", home.join("config.toml").display()));
     }
+
+    /// The variable and `CODEX_HOME` come from the process environment, which the tests share, so
+    /// the checks that set them run in a child process of their own.
+    #[test]
+    fn the_variable_wins_over_the_setting_for_one_session() {
+        const CHILD: &str = "LING_WORKTREE_TEST_CHILD";
+        if let Some(home) = std::env::var_os(CHILD) {
+            let home = PathBuf::from(home);
+            assert_eq!(mode_now(&home), (Mode::Worktree, ENV_VAR.to_string()));
+            assert_eq!(enter("  /worktree help").as_deref(), Some(USAGE));
+            return;
+        }
+        let fixture = Fixture::new("variable");
+        let home = fixture.home();
+        write_mode(&home, Mode::Local).unwrap_or_default();
+        let exe = std::env::current_exe().unwrap_or_else(|err| panic!("{err}"));
+        let output = std::process::Command::new(exe)
+            .args(["--exact", "worktree::tests::the_variable_wins_over_the_setting_for_one_session", "--nocapture"])
+            .env(CHILD, &home)
+            .env("CODEX_HOME", &home)
+            .env(ENV_VAR, " On ")
+            .output()
+            .unwrap_or_else(|err| panic!("{err}"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{stdout}{}", String::from_utf8_lossy(&output.stderr));
+        assert!(stdout.contains("1 passed"), "{stdout}");
+    }
 }
