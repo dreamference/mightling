@@ -5,10 +5,12 @@ lives in the test's HOME.
 """
 
 import argparse
+import io
 from pathlib import Path
 
 import pytest
 
+from dreamference.forge import forge_command
 from dreamference.forge.forge_accounts import ForgeAccounts
 from dreamference.forge.forge_backup import ForgeBackup
 from dreamference.forge.forge_command import USAGE_EXIT, ForgeCommand
@@ -17,6 +19,7 @@ from dreamference.forge.forge_mirrors import ForgeMirrors
 from dreamference.forge.forge_move import ForgeMove
 from dreamference.forge.forge_repositories import ForgeRepositories
 from dreamference.forge.forge_service import ForgeService
+from dreamference.forge.forge_settings import ForgeSettings
 
 
 def never(*_, **__):
@@ -137,3 +140,34 @@ def test_the_github_mirror_turns_on_for_the_account_given_or_the_one_saved(githu
     assert ForgeCommand.dispatch(mirror_args()) == 0
     assert github == [(True, "acct-new"), (True, "acct-old")]
     assert "Destinations: none yet" in capsys.readouterr().out
+
+
+class Terminal(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def on_terminal(monkeypatch):
+    """Put standard input and the captured standard output on a terminal, as on the node itself."""
+    monkeypatch.setattr(forge_command.sys, "stdin", Terminal())
+    monkeypatch.setattr(forge_command.sys.stdout, "isatty", lambda: True)
+    monkeypatch.delenv("SSH_ORIGINAL_COMMAND", raising=False)
+
+
+def test_the_password_is_not_printed_to_a_terminal_reached_over_ssh(monkeypatch, capsys):
+    on_terminal(monkeypatch)
+    ForgeSettings.write_secret("owner-password", "q" * 24)
+    monkeypatch.setenv("SSH_ORIGINAL_COMMAND", "forge password --show")
+    assert ForgeCommand.dispatch(argparse.Namespace(forge_command="password")) == 1
+    out = capsys.readouterr().out
+    assert "q" * 24 not in out and "own terminal only" in out
+
+
+def test_the_password_is_printed_on_the_nodes_own_terminal_or_its_absence_said(monkeypatch, capsys):
+    on_terminal(monkeypatch)
+    assert ForgeCommand.dispatch(argparse.Namespace(forge_command="password")) == 1
+    assert "never set up here" in capsys.readouterr().out
+
+    ForgeSettings.write_secret("owner-password", "q" * 24)
+    assert ForgeCommand.dispatch(argparse.Namespace(forge_command="password")) == 0
+    assert capsys.readouterr().out == "q" * 24 + "\n"
