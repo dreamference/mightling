@@ -553,6 +553,8 @@ def test_a_gb10_without_a_driver_is_still_found_by_its_pci_id(tmp_path, release_
 
 @pytest.mark.parametrize("uname_s, uname_m, target", [
     ("Linux", "x86_64", "x86_64-unknown-linux-gnu"),
+    # Some systems name it amd64.
+    ("Linux", "amd64", "x86_64-unknown-linux-gnu"),
     # macOS's uname says arm64 where the asset says aarch64.
     ("Darwin", "arm64", "aarch64-apple-darwin"),
     ("Darwin", "x86_64", "x86_64-apple-darwin"),
