@@ -447,6 +447,24 @@ def test_a_skipped_judge_names_no_tie_at_the_top():
     )
 
 
+def test_stopping_the_run_stops_the_attempt_that_is_working(bon, monkeypatch):
+    import threading
+    monkeypatch.setenv("FAKE_BON_PLAN", json.dumps(["hang", "good"]))
+    record = queue(bon["night"], bon["repo"], test=TEST)
+    run = NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
+                            best_of=2, model_host="http://x")
+    outcome = {}
+    worker = threading.Thread(target=lambda: outcome.update(status=run.run()), daemon=True)
+    worker.start()
+    for _ in range(200):
+        if bon["calls"].exists():
+            break
+        time.sleep(0.05)
+    run.stop_event.set()
+    worker.join(20)
+    assert outcome.get("status") == "interrupted"
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
