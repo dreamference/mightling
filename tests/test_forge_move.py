@@ -401,3 +401,46 @@ def test_a_record_that_does_not_become_a_mirror_answers_one(stops, starts, monke
     if not stops:
         assert ForgeSettings.data_dir().is_dir(), "a running forge's data was moved aside"
         assert ForgeSettings.role() == ROLE_RECORD
+
+
+DAY = 86400
+
+
+def set_aside(name: str, folder_days: float) -> Path:
+    """A folder beside the live data, last written `folder_days` ago."""
+    folder = ForgeSettings.data_dir().parent / name
+    (folder / "git").mkdir(parents=True, exist_ok=True)
+    when = time.time() - folder_days * DAY
+    os.utime(folder, (when, when))
+    return folder
+
+
+def stamp(days_ago: float) -> str:
+    return time.strftime("%Y%m%d-%H%M%S", time.gmtime(time.time() - days_ago * DAY))
+
+
+def test_old_data_goes_after_thirty_days_by_its_trailing_stamp_and_the_live_data_stays():
+    stays = [
+        set_aside("data", 120),
+        set_aside(f"data.record-{stamp(10)}", 120),
+        set_aside(f"data.record-{stamp(40)}-restored", 0),
+    ]
+    goes = [
+        set_aside(f"data.record-{stamp(31)}", 0),
+        set_aside("data.record-20261399-999999", 60),
+    ]
+    assert ForgeMove.prune_old_data() == sorted(folder.name for folder in goes)
+    assert all(folder.is_dir() for folder in stays)
+    assert not any(folder.exists() for folder in goes)
+
+
+def test_the_stamp_of_old_data_is_utc_whatever_the_time_zone(monkeypatch):
+    # Thirty days and six hours ago in UTC: twelve hours behind UTC, local time would make it 29.75.
+    folder = set_aside(f"data.record-{stamp(30.25)}", 0)
+    monkeypatch.setenv("TZ", "Etc/GMT+12")
+    time.tzset()
+    try:
+        assert ForgeMove.prune_old_data() == [folder.name]
+    finally:
+        monkeypatch.undo()
+        time.tzset()
