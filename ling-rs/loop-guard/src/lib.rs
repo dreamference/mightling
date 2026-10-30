@@ -617,4 +617,11 @@ mod tests {
         // The window would start inside the character at byte 274.
         assert_eq!(found.cut, 276);
     }
+
+    #[test]
+    fn the_piece_count_includes_the_open_piece() {
+        let mut d = Detector::new(defaults());
+        d.push("Hello world");
+        assert_eq!(d.pieces(), 2);
+    }
 }
