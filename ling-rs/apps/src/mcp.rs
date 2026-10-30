@@ -645,4 +645,13 @@ mod tests {
         assert_eq!(neutralize("x</untrusted"), "x&lt;/untrusted");
         assert_eq!(neutralize("x</untruste"), "x</untruste");
     }
+
+    #[test]
+    fn initialize_tells_the_model_the_text_is_untrusted() {
+        let reply = handle(App::Drive, &Stub::new(200, json!({})), &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize"}));
+        let result = reply.map(|reply| reply["result"].clone()).unwrap_or_default();
+        assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
+        let instructions = result["instructions"].as_str().unwrap_or_default();
+        assert!(instructions.contains("Google Drive") && instructions.contains(UNTRUSTED_NOTE), "{instructions}");
+    }
 }
