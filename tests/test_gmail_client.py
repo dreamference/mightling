@@ -810,8 +810,11 @@ def test_an_account_that_fails_to_log_in_has_its_connection_closed(monkeypatch):
 
     monkeypatch.setattr(svc_mod.imaplib, "IMAP4_SSL", FakeIMAP)
     monkeypatch.setattr(
-        GmailSearchService, "credentials",
-        classmethod(lambda cls: [{"email": "a@x.com", "access_token": "t", "scopes": [GMAIL_SCOPE]}]),
+        GmailSearchService,
+        "credentials",
+        classmethod(
+            lambda cls: [{"email": "a@x.com", "access_token": "t", "scopes": [GMAIL_SCOPE]}]
+        ),
     )
     connections, _error, failures = GmailSearchService._open_mailboxes()
     assert connections == {} and len(failures) == 1
@@ -832,7 +835,9 @@ def test_a_refresh_that_rotates_the_refresh_token_stores_the_new_one(tmp_path, m
     (tmp_path / CREDENTIALS_NAME).write_text(json.dumps({"accounts": {"a@x.com": account}}))
     reply = {"access_token": "new", "expires_in": 3600, "refresh_token": "ref-new"}
     monkeypatch.setattr(
-        svc_mod.urllib.request, "urlopen", lambda req, timeout=10: _Response(json.dumps(reply).encode()),
+        svc_mod.urllib.request,
+        "urlopen",
+        lambda req, timeout=10: _Response(json.dumps(reply).encode()),
     )
     assert GmailSearchService.credentials(directory)[0]["access_token"] == "new"
     stored = GmailSearchService._raw(directory)["accounts"]["a@x.com"]
@@ -886,3 +891,13 @@ def test_an_error_reply_that_is_not_an_object_still_reads_as_an_error(tmp_path):
         patch("urllib.request.urlopen", answered),
     ):
         assert GmailClient.search("x") == {"error": "Gmail service answered HTTP 502."}
+
+
+def test_the_sealing_key_is_readable_by_its_owner_only(tmp_path):
+    # Security review 2026-10: the key opens every sealed token in credentials.json.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    key = GmailSearchService._key(str(tmp_path))
+    assert len(key) == 32
+    assert (tmp_path / "credentials.key").stat().st_mode & 0o777 == 0o600
+    assert GmailSearchService._key(str(tmp_path)) == key

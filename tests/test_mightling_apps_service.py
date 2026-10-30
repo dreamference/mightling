@@ -562,3 +562,16 @@ def test_a_shared_secret_another_start_created_first_is_the_one_kept(monkeypatch
     monkeypatch.setattr(secrets, "token_urlsafe", racing)
     assert GoogleService.secret() == "theirs"
     assert (folder / "service-secret").read_text() == "theirs"
+
+
+def test_the_shared_secret_is_kept_where_only_its_owner_can_read_it(monkeypatch, tmp_path):
+    # Security review 2026-10: the secret is all that stands between a local program and the mail.
+    import dreamference.chat.gmail_credentials as credentials
+
+    folder = tmp_path / "credentials"
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(folder))
+    value = GoogleService.secret()
+    assert value
+    assert folder.stat().st_mode & 0o777 == 0o700
+    assert (folder / "service-secret").stat().st_mode & 0o777 == 0o600
+    assert GoogleService.secret() == value
