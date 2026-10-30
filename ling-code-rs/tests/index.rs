@@ -9,7 +9,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use ling_code::index::{plan, sandbox};
 use ling_code::paths::Repo;
@@ -117,6 +117,7 @@ fn nothing_inside_the_repository_grants_trust() {
         "{skipped:?}"
     );
     // Codex's own per-project trust is what counts.
+    let _config = CODEX_CONFIG.lock().unwrap();
     std::fs::create_dir_all(&codex_home).unwrap();
     std::fs::write(
         codex_home.join("config.toml"),
@@ -127,6 +128,45 @@ fn nothing_inside_the_repository_grants_trust() {
     )
     .unwrap();
     assert!(ling_code::config::is_trusted_in(&codex_home, &root));
+}
+
+/// Held by the tests that write `$CODEX_HOME/config.toml`, which this binary's tests share.
+static CODEX_CONFIG: Mutex<()> = Mutex::new(());
+
+#[test]
+fn a_linked_worktree_is_planned_on_the_main_worktrees_trust() {
+    let env = env();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/lib.rs"), "pub fn f() {}\n").unwrap();
+    git_repo(&root);
+    let wt = dir.path().join("wt");
+    common::git(&root, &["worktree", "add", "-q", wt.to_str().unwrap()]);
+    let repo = Repo::discover(&wt).unwrap();
+    assert_eq!(repo.main_root, root.canonicalize().unwrap());
+    // Only the main worktree is trusted; the linked one is the same repository.
+    let _config = CODEX_CONFIG.lock().unwrap();
+    let codex_home = env.home.join(".mightling");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    std::fs::write(
+        codex_home.join("config.toml"),
+        format!(
+            "[projects.\"{}\"]\ntrust_level = \"trusted\"\n",
+            repo.main_root.display()
+        ),
+    )
+    .unwrap();
+    let (_, skipped) = plan::build(&repo, &ling_code::config::Settings::default(), true);
+    assert!(
+        !skipped.iter().any(|s| s.contains("not trusted")),
+        "{skipped:?}"
+    );
 }
 
 #[test]
