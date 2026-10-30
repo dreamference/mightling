@@ -103,6 +103,14 @@ def test_an_update_changes_one_record_and_keeps_the_rest():
     assert NodeServiceFile.read()["state"] == "ready" and NodeServiceFile.read()["port"] == "8010"
 
 
+def test_an_update_that_does_not_name_the_state_or_main_keeps_them():
+    path = NodeServiceFile.service_path
+    path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.3.0", "ready", main=True))
+    assert NodeServiceFile.update(port=8020) is True
+    records = NodeServiceFile.read()
+    assert (records["state"], records["port"], records.get("main")) == ("ready", "8020", "1")
+
+
 def test_a_node_that_was_never_enabled_is_never_advertised_by_a_side_effect():
     assert not NodeServiceFile.service_path.exists()
     assert NodeServiceFile.update(state="ready") is None
