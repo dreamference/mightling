@@ -962,4 +962,9 @@ mod tests {
             "a.example/x?id=2"
         );
     }
+
+    #[test]
+    fn a_host_is_compared_in_lower_case() {
+        assert_eq!(comparable_url("https://WWW.A.Example/X"), "a.example/X");
+    }
 }
