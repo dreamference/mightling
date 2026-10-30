@@ -572,4 +572,18 @@ mod tests {
         assert_eq!(asked[1], "/calendar/events?limit=50");
         assert_eq!(asked[2], "/calendar/events?limit=50&q=x");
     }
+
+    #[test]
+    fn arguments_are_trimmed_and_a_blank_one_counts_as_missing() {
+        let stub = Stub::new(200, json!({"messages": []}));
+        call(App::Gmail, &stub, "gmail_search", &json!({"query": "  standup  "}));
+        assert_eq!(stub.asked.borrow()[0], "/search?query=standup&limit=10");
+        let blanks = [(App::Gmail, "gmail_search", "query"), (App::Drive, "drive_read", "id"), (App::Calendar, "calendar_search", "query")];
+        for (app, name, key) in blanks {
+            let result = call(app, &stub, name, &json!({key: "   "}));
+            assert_eq!(result["isError"], true, "{name}");
+            assert!(text(&result).contains(&format!("{key} is required")), "{name}");
+        }
+        assert_eq!(stub.asked.borrow().len(), 1, "no request for a blank argument");
+    }
 }
