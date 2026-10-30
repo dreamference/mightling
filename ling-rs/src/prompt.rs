@@ -988,4 +988,13 @@ mod tests {
         prompt.blocks.code = false;
         assert_eq!(compose(&prompt, &parts("", code)), compose(&prompt, &parts("", "")));
     }
+
+    #[test]
+    fn every_prompt_gets_the_documents_and_the_masking_note() {
+        let parts = Parts { docs: "\n\n# Your documents\n".to_string(), masking: "\n\nMasked outputs.\n".to_string(), ..parts("", "") };
+        for prompt in Installed::built_in().prompts {
+            let text = compose(&prompt, &parts);
+            assert!(text.contains("# Your documents") && text.contains("Masked outputs."), "{}", prompt.name);
+        }
+    }
 }
