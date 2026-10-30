@@ -64,7 +64,7 @@ def test_the_model_table_matches_the_matrix():
         assert matrix[alias].hf_repo_id == weights, alias
         assert (matrix[alias].launch_overrides or {}).get("engine") == engine, alias
     main = matrix["qwen3.8-27b-nvfp4-dflash2"]
-    assert main.launch_overrides["max_model_len"] == 196608
+    assert main.launch_overrides["max_model_len"] == 262144
     assert main.engine_recipes["sglang"]["max_model_len"] == 262144
     assert main.supports_vision and "sglang" in main.engine_recipes
     assert not matrix["qwen3.8-27b-minima-nvfp4-dflash2"].supports_vision
