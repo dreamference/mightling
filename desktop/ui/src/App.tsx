@@ -123,7 +123,7 @@ import { ProjectPage } from "./ProjectPage";
 import { contextItem, contextStamp, isContextText, isRemoved, knowledgeCollection, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
 import { ElicitationCard } from "./ElicitationCard";
 import { elicitationAnswer, shownElicitation } from "./elicitation";
-import { ACROSS_REPOS_KEY, carry, cleanupPool, cleanupVictims, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
+import { ACROSS_REPOS_KEY, carry, cleanupPool, cleanupVictims, defaultCheckout, projectFolder, protectedOwners, repoRoot, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
 import { clicked, deleteQuestion, forgetThreads, NO_CHOICE, present, type Choice } from "./selection";
 import { SelectionBar } from "./SelectionBar";
 import { commitMessage, dropQueued, forkAt, forkThread, listQueue, movedQueue, reorderQueued, sendMessage, steerQueued, takeBack, updateQueued, type Listen } from "./turns";
@@ -2087,7 +2087,7 @@ export function App() {
     const timer = setTimeout(() => {
       bridge.git.repos(newFolder).then(async (repos) => {
         if (!current) return;
-        const inside = repos[0] && (newFolder === repos[0] || newFolder.startsWith(`${repos[0]}/`)) ? repos[0] : null;
+        const inside = repoRoot(newFolder, repos);
         setNewBranches(inside ? await bridge.worktrees.branches(inside) : null);
         const found = await bridge.localEnvironments(newFolder).catch(() => ({ found: [], problems: [] }));
         if (current) setNewEnvs(found.found);
@@ -2175,7 +2175,7 @@ export function App() {
     }
     let current = true;
     bridge.git.repos(workFolder).then(async (repos) => {
-      const root = repos[0] && (workFolder === repos[0] || workFolder.startsWith(`${repos[0]}/`)) ? repos[0] : null;
+      const root = repoRoot(workFolder, repos);
       const branch = root ? (await bridge.git.status(root)).branch : null;
       if (current) setHeaderGit({ folder: workFolder, root, branch });
     }).catch(() => current && setHeaderGit({ folder: workFolder, root: null, branch: null }));

@@ -15,6 +15,12 @@ export function carry(path: string, from: string, to: string): string {
   return insideFolder(path, base) ? `${to.replace(/[\\/]+$/, "")}${path.slice(base.length)}` : path;
 }
 
+/** The repository `folder` is in, from the roots `git.repos` answers for it, or null when it is in none. */
+export function repoRoot(folder: string, roots: string[]): string | null {
+  const [root] = roots;
+  return root && (folder === root || insideFolder(folder, root)) ? root : null;
+}
+
 /** The folder a thread's next turn runs in: its worktree folder, or the same folder in the local checkout after a hand-off. */
 export function turnCwd(link: WorktreeLink | undefined): string | null {
   if (!link) return null;

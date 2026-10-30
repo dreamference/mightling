@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { WorktreeLink } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
 import { initialState, projects, reduce } from "./store";
-import { ACROSS_REPOS_KEY, carry, cleanupPool, cleanupVictims, DEFAULT_KEEP, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings } from "./worktrees";
+import { ACROSS_REPOS_KEY, carry, cleanupPool, cleanupVictims, DEFAULT_KEEP, defaultCheckout, projectFolder, protectedOwners, repoRoot, turnCwd, worktreeSettings } from "./worktrees";
 
 const link: WorktreeLink = {
   checkout: "/home/u/.mightling/worktrees/ab12/app", cwd: "/home/u/.mightling/worktrees/ab12/app/src",
@@ -23,6 +23,14 @@ describe("worktree threads", () => {
     // Windows folders: a hand-off moves a turn in a subfolder to the same subfolder of the local checkout.
     expect(carry("C:\\wt\\ab12\\app\\src", "C:\\wt\\ab12\\app", "C:\\src\\app")).toBe("C:\\src\\app\\src");
     expect(carry("C:\\wt\\ab12\\app2\\src", "C:\\wt\\ab12\\app", "C:\\src\\app")).toBe("C:\\wt\\ab12\\app2\\src");
+  });
+
+  it("find the repository a folder is in from git's roots, on Windows too", () => {
+    expect(repoRoot("/w/app", ["/w/app"])).toBe("/w/app");
+    expect(repoRoot("/w/app/web", ["/w/app"])).toBe("/w/app");
+    expect(repoRoot("/w/app2", ["/w/app"])).toBeNull();
+    expect(repoRoot("C:\\w\\app\\web", ["C:\\w\\app"])).toBe("C:\\w\\app");
+    expect(repoRoot("/w/app", [])).toBeNull();
   });
 
   it("are listed under the project they were started for", () => {
