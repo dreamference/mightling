@@ -409,6 +409,16 @@ def test_a_download_that_fails_its_checksum_installs_nothing(tmp_path, release_s
     assert not (tmp_path / ".local/bin").exists()
 
 
+def test_a_binary_its_sums_file_does_not_list_installs_nothing(tmp_path, release_server):
+    assets = binaries(signed=False)
+    sums = f"ling-{TARGET}.sha256sums"
+    assets[sums] = b"".join(line + b"\n" for line in assets[sums].splitlines() if b"ling-search" not in line)
+    result = run_install(tmp_path, release_server(sign(assets)), "--role", "client")
+    assert result.returncode == 1
+    assert f"{sums} has no checksum for ling-search-{TARGET}.gz" in result.stderr
+    assert nothing_installed(tmp_path)
+
+
 def test_a_machine_the_release_has_no_binaries_for_is_told_which_exist(tmp_path, release_server):
     result = run_install(tmp_path, release_server(binaries()), "--role", "client", uname_m="x86_64")
     assert result.returncode == 1
