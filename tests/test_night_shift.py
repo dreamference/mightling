@@ -1044,6 +1044,12 @@ def test_window_end_is_the_next_such_time():
     assert NightShiftRunner.window_end(now, None, 30, "x") == now + timedelta(minutes=30)
 
 
+def test_a_run_started_at_the_windows_end_runs_to_the_next_one():
+    # The end already reached is not an end in the future: the next such time is a day away.
+    now = datetime(2026, 10, 1, 7, 0).astimezone()
+    assert NightShiftRunner.window_end(now, None, None, "01:00-07:00") == now + timedelta(days=1)
+
+
 @pytest.mark.parametrize("start", [datetime(2026, 10, 24, 22, 0), datetime(2026, 3, 28, 22, 0)])
 def test_window_end_is_the_wall_clock_time_on_a_night_the_clocks_change(start, monkeypatch):
     # The start's UTC offset is not the end's on these nights: 06:00 is 06:00 on the clock.
