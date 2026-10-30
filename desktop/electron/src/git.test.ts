@@ -367,7 +367,8 @@ describe("editors", () => {
     expect(systemDataDirs().length).toBeGreaterThan(0);
   });
 
-  it("hand the system only a document type, and show anything else in its folder (editor/open and docs/open with no editor chosen)", async () => {
+  // Windows folds README.TXT and readme.txt into one file, and a symlink needs a privilege there.
+  it.skipIf(process.platform === "win32")("hand the system only a document type, and show anything else in its folder (editor/open and docs/open with no editor chosen)", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-runs-"));
     const file = (name: string, mode = 0o644) => {
       const at = path.join(dir, name);
@@ -543,7 +544,9 @@ describe("git a repository ships", () => {
       fs.chmodSync(runner, 0o755);
       expect(programOnPath("git", process.platform, dir)).toBe(runner);
       const relative = path.relative(process.cwd(), dir);
-      for (const entries of ["", ".", relative, ["", relative].join(path.delimiter)]) expect(programOnPath("git", process.platform, entries)).toBeNull();
+      // Across drives (the checkout on D:, the temp folder on C:) there is no relative path, only an absolute one.
+      const relatives = path.isAbsolute(relative) ? [] : [relative, ["", relative].join(path.delimiter)];
+      for (const entries of ["", ".", ...relatives]) expect(programOnPath("git", process.platform, entries)).toBeNull();
       if (process.platform !== "win32") {
         fs.chmodSync(runner, 0o644);
         expect(programOnPath("git", process.platform, dir)).toBeNull();
