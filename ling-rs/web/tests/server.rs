@@ -1814,3 +1814,60 @@ async fn a_tab_answers_only_what_its_own_connection_asked_and_links_only_ask_fol
     let _ = stop.send(());
     serving.await.unwrap().unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_messenger_bridge_puts_no_input_into_a_telegram_or_discord_checkout_thread() {
+    let scratch = scratch("ws-bridge-repo");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let config = config(&scratch.dir, port, Vec::new());
+    let mut app_server = fake_app_server(&config.socket).await;
+    let server = Server::new(config).unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = tokio::spawn(server::serve(server.clone(), vec![listener], async move {
+        let _ = stopped.await;
+    }));
+
+    // One checkout opened from Telegram, one from Discord, each with its app thread.
+    let codex_home = server.config.codex_home.clone();
+    let records: Vec<_> = [("telegram", "thr-tg"), ("discord", "thr-dc")]
+        .into_iter()
+        .map(|(bridge, app_thread)| {
+            let dir = ling_web_server::chat_repos::root_dir(&codex_home).join(bridge);
+            std::fs::create_dir_all(&dir).unwrap();
+            ling_web_server::chat_repos::CheckoutRecord::from_json(&json!({
+                "thread": format!("{bridge}-1"), "repo": "org/widget", "bridge": bridge, "chat": "c1", "device": "",
+                "dir": dir.to_string_lossy(), "base": "main", "app_threads": [app_thread], "read_only": false,
+                "created": 1, "last_used": 1,
+            }))
+            .unwrap()
+        })
+        .collect();
+    ling_web_server::chat_repos::save_index(&codex_home, &records).unwrap();
+
+    // `ling chat`'s session (`bridge=1`).
+    let code = auth::issue_login_code(&server.config.state_dir).unwrap();
+    let login = Request::builder()
+        .uri(format!("/login?code={code}&bridge=1"))
+        .header(header::HOST, format!("127.0.0.1:{port}"));
+    let (status, headers, _) = call(&server, login.body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let cookie = headers.get(header::SET_COOKIE).unwrap().to_str().unwrap().split(';').next().unwrap().to_string();
+    let mut browser = connect(port, &cookie).await;
+    browser.call(json!({ "type": "work/start" })).await;
+
+    for thread in ["thr-tg", "thr-dc"] {
+        let turn = json!({ "id": 1, "method": "turn/start", "params": { "threadId": thread, "input": [] } });
+        let refused = browser.call(json!({ "type": "work/send", "message": turn })).await;
+        assert!(refused["error"].as_str().unwrap_or_default().contains("Repo work happens in the app"), "{thread}: {refused}");
+    }
+    // Another thread takes the bridge's turn; nothing refused reached the server before it.
+    let turn = json!({ "id": 2, "method": "turn/start", "params": { "threadId": "thr-other", "input": [] } });
+    let passed = browser.call(json!({ "type": "work/send", "message": turn })).await;
+    assert!(passed.get("error").is_none(), "{passed}");
+    let (frame, _) = next_frame(&mut app_server).await;
+    assert_eq!((frame["id"].clone(), frame["params"]["threadId"].clone()), (json!(2), json!("thr-other")));
+
+    let _ = stop.send(());
+    serving.await.unwrap().unwrap();
+}
