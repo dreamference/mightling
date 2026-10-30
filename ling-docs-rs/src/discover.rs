@@ -700,6 +700,26 @@ mod tests {
     }
 
     #[test]
+    fn a_followed_link_into_a_secret_folder_under_the_root_is_skipped() {
+        // `snap/firefox` holds a browser profile: a plainly named link deep into it is skipped as
+        // the folder itself is.
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("snap");
+        write(&root.join("in.md"), b"x");
+        write(&root.join("firefox/profile/saved.md"), b"x");
+        std::os::unix::fs::symlink(root.join("firefox/profile"), root.join("notes")).unwrap();
+        let mut collection = Collection::new("snap", root.clone());
+        collection.follow_symlinks = true;
+        let rels: Vec<_> = walk(&collection, &home, true)
+            .candidates
+            .iter()
+            .map(|c| c.rel.clone())
+            .collect();
+        assert_eq!(rels, ["in.md"]);
+    }
+
+    #[test]
     fn a_followed_link_is_kept_out_by_a_lingignore_naming_it_or_its_target() {
         let home = tempfile::tempdir().unwrap();
         let home = home.path().canonicalize().unwrap();
