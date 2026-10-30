@@ -1468,3 +1468,13 @@ def test_a_failed_export_is_not_built(stand_in_codex, tmp_path, monkeypatch, fai
     monkeypatch.setattr(CodexBrandedBuilder, "extract_archive", classmethod(extract))
     monkeypatch.setattr(CodexBrandedBuilder, "patches", classmethod(lambda cls: []))
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "export")) is False
+
+
+def test_the_launchers_own_build_output_is_not_exported(stand_in_codex, tmp_path):
+    (tmp_path / "ling-rs" / "target" / "release").mkdir(parents=True)
+    (tmp_path / "ling-rs" / "target" / "release" / "ling").write_text("a stale binary")
+    (tmp_path / "ling-rs" / "Cargo.toml").write_text("[package]\n")
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "export"))
+    launcher = tmp_path / "export" / builder_module.MIGHTLING_CRATE_DEST
+    assert (launcher / "Cargo.toml").is_file()
+    assert not (launcher / "target").exists()
