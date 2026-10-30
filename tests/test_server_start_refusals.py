@@ -199,3 +199,37 @@ def test_a_stop_disarms_the_watchdog_before_the_container_goes(monkeypatch):
 
     assert events == ["watchdog stopped", ["docker", "stop", "dreamference-vllm-18001"], ("gate", 18001)]
     assert mgr.watchdog is None
+
+
+# -- what the memory gate is told the weights weigh --------------------------------------------------
+
+
+def test_snapshot_links_are_weighed_at_the_size_of_their_blobs(monkeypatch, tmp_path):
+    blobs, snapshot = tmp_path / "blobs", tmp_path / "snapshot"
+    blobs.mkdir()
+    (snapshot / "sub").mkdir(parents=True)
+    (blobs / "a").write_bytes(b"x" * 3 * 1024)
+    (blobs / "b").write_bytes(b"x" * 1024)
+    os.symlink(blobs / "a", snapshot / "model-1.safetensors")
+    os.symlink(blobs / "b", snapshot / "sub" / "model-2.safetensors")
+    monkeypatch.setattr(ModelDownloader, "get_model_snapshot_dir", classmethod(lambda cls, key: snapshot))
+
+    assert VLLMServerManager._estimate_model_weights_gb("model") == 4 * 1024 / 1024 ** 3
+
+
+def test_an_empty_snapshot_falls_back_to_the_registrys_minimum(monkeypatch, tmp_path):
+    monkeypatch.setattr(ModelDownloader, "get_model_snapshot_dir", classmethod(lambda cls, key: tmp_path))
+    monkeypatch.setattr(ModelMatrixRegistry, "get_spec",
+                        classmethod(lambda cls, key: SimpleNamespace(min_memory_gb=42)))
+
+    assert VLLMServerManager._estimate_model_weights_gb("model") == 42.0
+
+
+def test_a_model_neither_fetched_nor_registered_weighs_nothing(monkeypatch):
+    def unknown(cls, key):
+        raise KeyError(key)
+
+    monkeypatch.setattr(ModelDownloader, "get_model_snapshot_dir", classmethod(unknown))
+    monkeypatch.setattr(ModelMatrixRegistry, "get_spec", classmethod(unknown))
+
+    assert VLLMServerManager._estimate_model_weights_gb("model") == 0.0
