@@ -585,3 +585,30 @@ def test_the_release_notes_stay_held_back_by_exactly_one_placeholder_line():
     text = (REPO / "specs" / "DREAMFERENCE_RELEASE_1.9.0.md").read_text(encoding="utf-8")
     between_rules = text.split("\n---\n")[1]
     assert between_rules.count("{{TBD") == 1
+
+
+def test_format_clean_reads_which_files_ruff_would_reformat(tmp_path):
+    # ruff 0.9 stopped printing `Would reformat: path`; reading only that, every file looked
+    # clean and the rename reformatted files that were not clean before it.
+    (tmp_path / "dreamference").mkdir()
+    (tmp_path / "dreamference" / "clean.py").write_text("x = 1\n")
+    (tmp_path / "dreamference" / "dirty.py").write_text("x=1\n")
+    paths = ["dreamference/clean.py", "dreamference/dirty.py", "notes.md"]
+    assert rr.format_clean(str(tmp_path), paths) == {"dreamference/clean.py"}
+
+
+def test_tidy_sorts_the_imports_only_where_the_rename_unsorted_them(tmp_path):
+    # A renamed name can sort before its neighbour; a block that was unsorted before the rename
+    # is left alone, as the ratchet counts it.
+    (tmp_path / "dreamference").mkdir()
+    unsorted = "import os\nimport json\n\nprint(os, json)\n"
+    (tmp_path / "dreamference" / "renamed.py").write_text(unsorted)
+    (tmp_path / "dreamference" / "before.py").write_text(unsorted)
+    clean = {"dreamference/renamed.py", "dreamference/before.py"}
+    rr.tidy(str(tmp_path), clean, {"dreamference/before.py": 1})
+    assert (
+        (tmp_path / "dreamference" / "renamed.py")
+        .read_text()
+        .startswith("import json\nimport os\n")
+    )
+    assert (tmp_path / "dreamference" / "before.py").read_text() == unsorted

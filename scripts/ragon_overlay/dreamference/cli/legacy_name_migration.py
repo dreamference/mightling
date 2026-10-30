@@ -290,7 +290,7 @@ class LegacyNameMigration:
         ):
             try:
                 line = step()
-            except OSError as error:
+            except (OSError, ValueError) as error:  # ValueError: a file that is not UTF-8
                 line = f"could not finish {step.__name__}: {error}"
             if line:
                 done.append(line)
@@ -699,6 +699,9 @@ class LegacyNameMigration:
     def rewrite_keys(cls, path: Path) -> bool:
         """Rewrites `puffin_`/`mightling_` keys to `ragon_` (whole lines) and the engine value `ling` to `ragon`.
 
+        An old key whose newer name is already set in the same table is dropped: the newest one
+        (`ragon_`, then `mightling_`, then `puffin_`) is what is read.
+
         Args:
             path: A `dreamference.toml`-style file; a missing one is not an error.
 
@@ -708,13 +711,30 @@ class LegacyNameMigration:
         if not path.is_file():
             return False
         text = path.read_text()
-        prefixes = "|".join(LEGACY_KEY_PREFIXES)
-        new = re.sub(
-            rf"^(\s*)(?:{prefixes})([A-Za-z0-9_]+)(\s*=)",
-            rf"\g<1>{KEY_PREFIX}\g<2>\g<3>",
-            text,
-            flags=re.M,
-        )
+        ranks = {prefix: rank for rank, prefix in enumerate((*LEGACY_KEY_PREFIXES, KEY_PREFIX))}
+        prefixes = "|".join(ranks)
+        key = re.compile(rf"^(\s*)({prefixes})([A-Za-z0-9_]+)(\s*=)")
+        lines = text.splitlines(keepends=True)
+        tables: list[str] = []
+        table = ""
+        for line in lines:
+            if re.match(r"\s*\[", line):
+                table = line.strip()
+            tables.append(table)
+        newest: dict[tuple[str, str], int] = {}
+        for line, table in zip(lines, tables, strict=True):
+            if match := key.match(line):
+                slot = (table, match.group(3))
+                newest[slot] = max(newest.get(slot, 0), ranks[match.group(2)])
+        out: list[str] = []
+        for line, table in zip(lines, tables, strict=True):
+            match = key.match(line)
+            if match and match.group(2) != KEY_PREFIX:
+                if ranks[match.group(2)] < newest[(table, match.group(3))]:
+                    continue
+                line = key.sub(rf"\g<1>{KEY_PREFIX}\g<3>\g<4>", line, count=1)
+            out.append(line)
+        new = "".join(out)
         new = re.sub(r'^(\s*server_engine\s*=\s*)"ling"', r'\g<1>"ragon"', new, flags=re.M)
         if new == text:
             return False
@@ -1053,7 +1073,14 @@ class LegacyNameMigration:
             out.append(new)
         if not changed:
             return None
-        path.write_text("".join(out))
+        # Whole or not at all, as NodeServe writes it: a cut-short write would lock out every key.
+        staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            staging.write_text("".join(out))
+            staging.chmod(0o600)
+            staging.replace(path)
+        finally:
+            staging.unlink(missing_ok=True)
         return f"pointed {changed} paired sender(s) at ragon-admin in {path}"
 
     @classmethod

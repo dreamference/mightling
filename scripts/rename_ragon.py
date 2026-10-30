@@ -95,6 +95,7 @@ PROTECT = [
     "not mightling-",  # the message that says a peer name is not the overlay one
     'NODE_PEER_PREFIX: Final[str] = "mightling-"',
     'OVERLAY_PREFIX: &str = "mightling-"',
+    '"MIGHTLING-{}.NetBird.SelfHosted"',  # the node locators' test that case does not matter
     # SWE-bench stored keys
     "puffin_version",
     "puffin_code_calls",
@@ -334,6 +335,17 @@ BUILD_OLD_ASSETS_NEW = "          # release.yml adds the older asset names to 1.
 
 # This machine may hold the profile 1.8 and earlier installed (a test's host must not see it).
 HOST_FIXTURE_LAST = '    monkeypatch.setattr(SandboxPrerequisite, "profiles_attaching", classmethod(lambda cls, binary: []))\n'
+# "ling" -> "ragon" puts this line one over the limit in a file ruff format does not own yet
+BUILD_PRINT_OLD = (
+    '        print(f"🔨 Building ragon (upstream {CODEX_RELEASE_TAG}, {len(cls.patches())} patches)'
+    '{cls._through(cached)}...")\n'
+)
+BUILD_PRINT_NEW = (
+    "        print(\n"
+    '            f"🔨 Building ragon (upstream {CODEX_RELEASE_TAG}, {len(cls.patches())} patches)'
+    '{cls._through(cached)}..."\n'
+    "        )\n"
+)
 HOST_FIXTURE_NEW = HOST_FIXTURE_LAST + (
     '    monkeypatch.setattr(SandboxPrerequisite, "legacy_removal", classmethod(lambda cls: []))\n'
 )
@@ -343,8 +355,58 @@ SCIP_FILTER_NEW = (
     "WHERE name NOT LIKE 'ragon\\\\_%' ESCAPE '\\\\' AND name NOT LIKE 'puffin\\\\_%' ESCAPE '\\\\'\n"
     "           AND name NOT LIKE 'sqlite\\\\_%' ESCAPE '\\\\'"
 )
-SCIP_HAS_OLD = "SELECT count(*) FROM sqlite_master WHERE name = 'ragon_names'"
-SCIP_HAS_NEW = "SELECT count(*) FROM sqlite_master WHERE name IN ('ragon_names', 'puffin_names')"
+# The open's check of ragon-code's own tables (main, 10-29): a store written before the rename has
+# them as `puffin_*`, compared with the same tables under that name.
+SCIP_CHECK_OLD = (
+    "        let puffin = puffin_schema(&conn)?;\n"
+    "        if puffin.is_empty() {\n"
+)
+SCIP_CHECK_NEW = (
+    "        // A store written before the rename (1.8 and earlier) has them as `puffin_*`.\n"
+    '        let mut prefix = "ragon";\n'
+    "        let mut own = own_schema(&conn, prefix)?;\n"
+    "        if own.is_empty() {\n"
+    '            prefix = "puffin";\n'
+    "            own = own_schema(&conn, prefix)?;\n"
+    "        }\n"
+    "        if own.is_empty() {\n"
+)
+SCIP_COMPARE_OLD = "        if puffin != expected_puffin_schema()? {\n"
+SCIP_COMPARE_NEW = "        if own != expected_own_schema(prefix)? {\n"
+SCIP_SCHEMA_OLD = """/// The `sqlite_master` rows of ragon-code's own objects, which [`schema_fingerprint`] leaves out.
+fn puffin_schema(conn: &Connection) -> Result<Vec<[String; 4]>> {
+    let mut stmt = conn.prepare(
+        "SELECT type, name, tbl_name, coalesce(sql, '') FROM sqlite_master
+         WHERE name LIKE 'puffin\\\\_%' ESCAPE '\\\\' OR tbl_name LIKE 'puffin\\\\_%' ESCAPE '\\\\'
+         ORDER BY type, name",
+    )?;
+"""
+SCIP_SCHEMA_NEW = """/// The `sqlite_master` rows of ragon-code's own objects, which [`schema_fingerprint`] leaves out:
+/// `ragon_*`, or `puffin_*` in a store written before the rename (1.8 and earlier).
+fn own_schema(conn: &Connection, prefix: &str) -> Result<Vec<[String; 4]>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT type, name, tbl_name, coalesce(sql, '') FROM sqlite_master
+         WHERE name LIKE '{prefix}\\\\_%' ESCAPE '\\\\' OR tbl_name LIKE '{prefix}\\\\_%' ESCAPE '\\\\'
+         ORDER BY type, name"
+    ))?;
+"""
+SCIP_EXPECTED_OLD = """/// [`puffin_schema`] of a store [`postprocess`] wrote.
+fn expected_puffin_schema() -> Result<Vec<[String; 4]>> {
+    let conn = Connection::open_in_memory()?;
+    conn.execute_batch(RAGON_TABLES)?;
+    conn.execute_batch(RAGON_INDEXES)?;
+    puffin_schema(&conn)
+}
+"""
+SCIP_EXPECTED_NEW = """/// [`own_schema`] of a store [`postprocess`] wrote, its tables named `{prefix}_*`.
+fn expected_own_schema(prefix: &str) -> Result<Vec<[String; 4]>> {
+    let conn = Connection::open_in_memory()?;
+    let named = |sql: &str| sql.replace("ragon_", &format!("{prefix}_"));
+    conn.execute_batch(&named(RAGON_TABLES))?;
+    conn.execute_batch(&named(RAGON_INDEXES))?;
+    own_schema(&conn, prefix)
+}
+"""
 SCIP_OPEN_ANCHOR = '        let docs = {\n            let mut stmt = conn.prepare("SELECT relative_path FROM documents")?;\n'
 SCIP_OPEN_NEW = (
     "        expose_legacy_tables(&conn)?;\n" + SCIP_OPEN_ANCHOR
@@ -393,6 +455,30 @@ mod tests {
         let name: String = conn.query_row("SELECT name FROM ragon_names", [], |r| r.get(0)).unwrap();
         assert_eq!(name, "main");
         super::expose_legacy_tables(&conn).unwrap(); // a second call finds the view and does nothing
+    }
+
+    #[test]
+    fn the_tables_a_1_8_store_was_written_with_pass_the_check_under_their_old_names() {
+        // The text 1.8's postprocess wrote, which sqlite_master keeps as it was.
+        let conn = super::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE puffin_names (symbol_id INTEGER NOT NULL, name TEXT NOT NULL);
+         CREATE TABLE puffin_relationships (symbol_id INTEGER NOT NULL, target TEXT NOT NULL,
+             is_reference INTEGER NOT NULL, is_implementation INTEGER NOT NULL, is_type_definition INTEGER NOT NULL);
+         CREATE TABLE puffin_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+         CREATE INDEX puffin_names_name ON puffin_names(name);
+         CREATE INDEX puffin_relationships_target ON puffin_relationships(target);",
+        )
+        .unwrap();
+        assert!(super::own_schema(&conn, "ragon").unwrap().is_empty());
+        let old = super::own_schema(&conn, "puffin").unwrap();
+        assert_eq!(old.len(), 6); // the five and puffin_meta's primary-key index
+        assert_eq!(old, super::expected_own_schema("puffin").unwrap());
+        // A view in place of a table is not what postprocess writes, under either name.
+        conn.execute_batch("DROP INDEX puffin_names_name; DROP TABLE puffin_names;
+             CREATE VIEW puffin_names AS SELECT 1 AS symbol_id, 'x' AS name;
+             CREATE INDEX puffin_names_name ON puffin_meta(k);").unwrap();
+        assert_ne!(super::own_schema(&conn, "puffin").unwrap(), super::expected_own_schema("puffin").unwrap());
     }
 
 """
@@ -616,9 +702,10 @@ COMPAT_EDITS = [
     ),
     (
         "dreamference/forge/forge_service.py",
-        "        for entry in NodeBrowser.browse_service(SERVICE_TYPE) + NodeBrowser.browse():\n",
-        "        legacy = NodeBrowser.browse_service(LEGACY_SERVICE_TYPE)\n"
-        "        for entry in NodeBrowser.browse_service(SERVICE_TYPE) + legacy + NodeBrowser.browse():\n",
+        "            for entry in NodeBrowser.browse_service(SERVICE_TYPE) + NodeBrowser.browse()\n",
+        "            for entry in NodeBrowser.browse_service(SERVICE_TYPE)\n"
+        "            + NodeBrowser.browse_service(LEGACY_SERVICE_TYPE)\n"
+        "            + NodeBrowser.browse()\n",
         1,
     ),
     (
@@ -661,7 +748,10 @@ COMPAT_EDITS = [
         1,
     ),
     ("ragon-code-rs/src/scip_store.rs", SCIP_FILTER_OLD, SCIP_FILTER_NEW, 1),
-    ("ragon-code-rs/src/scip_store.rs", SCIP_HAS_OLD, SCIP_HAS_NEW, 1),
+    ("ragon-code-rs/src/scip_store.rs", SCIP_CHECK_OLD, SCIP_CHECK_NEW, 1),
+    ("ragon-code-rs/src/scip_store.rs", SCIP_COMPARE_OLD, SCIP_COMPARE_NEW, 1),
+    ("ragon-code-rs/src/scip_store.rs", SCIP_SCHEMA_OLD, SCIP_SCHEMA_NEW, 1),
+    ("ragon-code-rs/src/scip_store.rs", SCIP_EXPECTED_OLD, SCIP_EXPECTED_NEW, 1),
     ("ragon-code-rs/src/scip_store.rs", SCIP_OPEN_ANCHOR, SCIP_OPEN_NEW, 1),
     ("ragon-code-rs/src/scip_store.rs", SCIP_HELPER_ANCHOR, SCIP_HELPER + SCIP_HELPER_ANCHOR, 1),
     ("ragon-code-rs/src/scip_store.rs", SCIP_TEST_ANCHOR, SCIP_TEST, 1),
@@ -805,6 +895,9 @@ COMPAT_EDITS = [
     ("tests/test_sandbox_prerequisite.py", BWRAP_TEST_ANCHOR, BWRAP_TEST, 1),
     (".github/workflows/release-build.yml", BUILD_OLD_ASSETS, BUILD_OLD_ASSETS_NEW, 1),
     ("tests/test_release_install.py", HOST_FIXTURE_LAST, HOST_FIXTURE_NEW, 1),
+    ("dreamference/runner/codex_branded_builder.py", BUILD_PRINT_OLD, BUILD_PRINT_NEW, 1),
+    # an escaped key the rename cannot see: the test's point is the escape, so it names the new key
+    ("tests/test_config.py", "'\"\\\\u006dightling_airgapped\" = \"on\"\\n',", "'\"\\\\u0072agon_airgapped\" = \"on\"\\n',", 1),
 ]
 
 
@@ -903,13 +996,40 @@ def format_clean(root, paths):
     if python is None or not files:
         return set()
     out = subprocess.run(
-        [python, "-m", "ruff", "format", "--check", *files], cwd=root, capture_output=True, text=True
+        [python, "-m", "ruff", "format", "--check", "--output-format", "concise", *files],
+        cwd=root,
+        capture_output=True,
+        text=True,
     ).stdout
-    dirty = {line.split("Would reformat: ", 1)[1].strip() for line in out.splitlines() if "Would reformat: " in line}
+    # `path:row:col: unformatted: …` since ruff 0.9; `Would reformat: path` before it
+    dirty = {line.split(": unformatted:", 1)[0].rsplit(":", 2)[0] for line in out.splitlines() if ": unformatted:" in line}
+    dirty |= {line.split("Would reformat: ", 1)[1].strip() for line in out.splitlines() if "Would reformat: " in line}
+    if files and len(dirty) == 0 and "already formatted" not in out:
+        sys.exit(f"ruff format --check said neither which files it would reformat nor that none: {out[-200:]!r}")
     return set(files) - dirty
 
 
-def tidy(root, clean):
+def import_counts(root, paths):
+    """How many unsorted import blocks (ruff I001) each Python file of `paths` has, by path."""
+    python = ruff_python(root)
+    files = python_sources(root, paths)
+    if python is None or not files:
+        return {}
+    out = subprocess.run(
+        [python, "-m", "ruff", "check", "--select", "I001", "--output-format", "concise", *files],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    ).stdout
+    counts = {}
+    for line in out.splitlines():
+        if ": unsorted-imports:" in line or " I001 " in line:
+            path = line.split(":", 1)[0]
+            counts[path] = counts.get(path, 0) + 1
+    return counts
+
+
+def tidy(root, clean, imports=None):
     """Formats the renamed files that were format-clean before: a longer name can push a line over.
 
     The ratchet tests treat a file whose formatting got worse as a regression; a file that was not
@@ -921,6 +1041,13 @@ def tidy(root, clean):
         print("ruff not found: run `ruff format` on the renamed files by hand")
         return 0
     subprocess.run([python, "-m", "ruff", "format", *files], cwd=root, capture_output=True)
+    # A renamed name can sort differently (`DEFAULT_RAGON_PROMPT` before `DEFAULT_MODEL`): the
+    # imports of a file are sorted again only where the rename added an unsorted block.
+    before = {new_path(path): count for path, count in (imports or {}).items()}
+    after = import_counts(root, sorted(set(before) | set(files))) if imports is not None else {}
+    worse = sorted(path for path, count in after.items() if count > before.get(path, 0))
+    if worse:
+        subprocess.run([python, "-m", "ruff", "check", "--select", "I001", "--fix", *worse], cwd=root, capture_output=True)
     move_noqa(root, python, files)
     return len(files)
 
@@ -1088,8 +1215,9 @@ def verify(root):
     steps = [
         ("leftover check", None),
         ("pytest", [python, "-m", "pytest", "tests/", "-q"]),
-        ("ruff format", [python, "-m", "ruff", "format", "--check", "dreamference", "tests"]),
-        ("ruff check", [python, "-m", "ruff", "check", "dreamference", "tests"]),
+        # the code standard is a ratchet (no count per file and rule rises), not a clean tree: main
+        # itself has files ruff would reformat
+        ("ruff and mypy ratchet", [python, "-m", "pytest", "tests/test_code_quality.py", "tests/test_typing.py", "-q"]),
     ]
     for crate in ("ragon-web-rs", "ragon-code-rs", "ragon-docs-rs"):
         steps.append(
@@ -1148,7 +1276,9 @@ def main(argv=None):
         print(f"{len(hits)} leftover(s)")
         return 1 if hits else 0
     files = args.paths if args.paths else tracked(root)
-    clean = format_clean(root, files) if args.repo == "main" and not args.paths and not args.dry else set()
+    whole = args.repo == "main" and not args.paths and not args.dry
+    clean = format_clean(root, files) if whole else set()
+    imports = import_counts(root, files) if whole else None
     changed, renames = run(root, files, args.dry, args.report)
     for path in changed:
         print(f"  {'would change' if args.dry else 'changed'} {path}")
@@ -1157,7 +1287,7 @@ def main(argv=None):
     overlays = [] if args.repo == "engine" else apply_overlay(root, args.dry)
     if args.repo == "main" and not args.paths and not args.dry:
         print(f"compat edits: {apply_compat(root, args.dry)}")
-        print(f"ruff-formatted files: {tidy(root, clean)}")
+        print(f"ruff-formatted files: {tidy(root, clean, imports)}")
     print(
         f"contents changed: {len(changed)} files; renamed: {len(renames)} paths; overlays: {len(overlays)}"
     )
