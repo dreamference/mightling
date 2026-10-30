@@ -1,6 +1,7 @@
 """How the context engine ranks files: full-text, TF-IDF and vector scores, and what survives a restart."""
 
 import sqlite3
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -105,3 +106,82 @@ def test_symbols_sizes_and_the_idf_table_survive_a_restart(
     assert {r: (f.size_bytes, f.symbols) for r, f in restarted.indexed_files.items()} == {
         r: (f.size_bytes, f.symbols) for r, f in built.indexed_files.items()
     }
+
+
+class RecordingModel:
+    """A stand-in for the sentence-transformers model that records how it is built and called."""
+
+    def __init__(self, name: str, **kwargs: object) -> None:
+        self.kwargs = kwargs
+        self.encoded: list[dict[str, object]] = []
+        self.max_seq_length = 8192
+
+    def encode(self, texts: list[str], **kwargs: object) -> np.ndarray:
+        self.encoded.append({"texts": texts, **kwargs})
+        return np.ones((len(texts), 2), dtype=np.float64)
+
+
+@pytest.fixture
+def recording_model(monkeypatch: pytest.MonkeyPatch) -> RecordingModel:
+    monkeypatch.setattr(embedding_calculator, "SentenceTransformer", RecordingModel)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_model", None)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", False)
+    model = embedding_calculator.EmbeddingCalculator._get_model()
+    assert isinstance(model, RecordingModel)
+    return model
+
+
+def test_the_model_reads_at_most_1024_tokens_of_a_file(recording_model: RecordingModel) -> None:
+    # Attention memory grows with the square of the sequence; this is the memory bound, by value.
+    assert recording_model.max_seq_length <= 1024
+
+
+def test_the_model_runs_its_pinned_remote_code(recording_model: RecordingModel) -> None:
+    # nomic-embed-text does not load without its modeling code; the code is pinned to a commit.
+    assert recording_model.kwargs.get("trust_remote_code") is True
+
+
+def test_texts_are_encoded_in_normalised_batches_of_at_most_eight_as_float32(
+    recording_model: RecordingModel,
+) -> None:
+    vectors = embedding_calculator.EmbeddingCalculator.embed_texts(["a", "b"])
+    assert vectors is not None
+    assert vectors.dtype == np.float32
+    (call,) = recording_model.encoded
+    assert isinstance(call["batch_size"], int)
+    assert call["batch_size"] <= 8
+    assert call["normalize_embeddings"] is True
+
+
+def test_no_files_means_no_call_to_the_model(recording_model: RecordingModel) -> None:
+    assert embedding_calculator.EmbeddingCalculator.compute_embeddings({}) == {}
+    assert recording_model.encoded == []
+
+
+def test_a_model_that_fails_to_load_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Each attempt can download the model or leave memory behind; one failure is final.
+    attempts = []
+
+    def failing_model(name: str, **kwargs: object) -> None:
+        attempts.append(name)
+        raise OSError("no network")
+
+    monkeypatch.setattr(embedding_calculator, "SentenceTransformer", failing_model)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_model", None)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", False)
+    assert embedding_calculator.EmbeddingCalculator._get_model() is None
+    assert embedding_calculator.EmbeddingCalculator._get_model() is None
+    assert len(attempts) == 1
+
+
+def test_without_sentence_transformers_installed_search_is_keyword_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        embedding_calculator, "SentenceTransformer", embedding_calculator._NOT_LOADED
+    )
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_model", None)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", False)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", None)
+    assert embedding_calculator.EmbeddingCalculator._get_model() is None
+    assert embedding_calculator.SentenceTransformer is None
