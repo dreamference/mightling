@@ -300,3 +300,8 @@ def test_vllm_is_given_the_api_key(vllm_recipes):
     build = VLLMServerManager().build_launch_command
     assert _flag(build(model="test-vllm-nvfp4", api_key="test-key"), "--api-key") == "test-key"
     assert "--api-key" not in build(model="test-vllm-nvfp4")
+
+
+def test_vllm_is_given_no_attention_backend_when_nothing_chooses_one(vllm_recipes):
+    cmd = VLLMServerManager().build_launch_command(model="test-vllm-dflash-draft")
+    assert "--attention-backend" not in cmd
