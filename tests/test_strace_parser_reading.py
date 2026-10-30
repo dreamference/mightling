@@ -1,0 +1,28 @@
+"""The strace parser on calls that each could hide a lookup or a connection from the verdict.
+
+Where a local resolver's socket may live, every git command that reaches a network, git's options
+that take a value, and lines strace prints without a pid or cut short.
+"""
+
+import pytest
+
+from dreamference.audit.strace_parser import StraceParser
+
+
+@pytest.mark.parametrize("path", [
+    "/var/run/avahi-daemon/socket",
+    "/var/run/systemd/resolve/io.systemd.Resolve",
+])
+def test_a_local_resolver_reached_through_var_run_is_a_lookup(path):
+    # `/var/run` links to `/run`: a program that names the old path asks the same resolver.
+    trace = StraceParser.parse(f'5 connect(7<UNIX-STREAM:[500]>, {{sa_family=AF_UNIX, sun_path="{path}"}}, 110) = 0\n')
+    assert trace.local_resolvers == {path: 1}
+
+
+def test_an_abstract_socket_named_like_a_resolver_is_not_one():
+    # avahi's socket is a file; an abstract socket of the same name belongs to someone else.
+    trace = StraceParser.parse(
+        '5 connect(7<UNIX-STREAM:[500]>, {sa_family=AF_UNIX, sun_path=@"/run/avahi-daemon/socket"}, 27) = 0\n'
+    )
+    assert trace.local_resolvers == {}
+    assert trace.unix_sockets == {"@/run/avahi-daemon/socket": 1}
