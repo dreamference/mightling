@@ -696,3 +696,13 @@ def test_an_empty_environment_variable_leaves_the_file_to_decide_as_on_the_rust_
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_gmail is True
     cfg_file.write_text("mightling_gmail = false\n", encoding="utf-8")
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_gmail is False
+
+
+def test_the_sealing_key_is_readable_by_its_owner_only(tmp_path):
+    # Security review 2026-10: the key opens every sealed token in credentials.json.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    key = GmailSearchService._key(str(tmp_path))
+    assert len(key) == 32
+    assert (tmp_path / "credentials.key").stat().st_mode & 0o777 == 0o600
+    assert GmailSearchService._key(str(tmp_path)) == key

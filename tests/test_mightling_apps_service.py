@@ -530,3 +530,16 @@ def test_the_shared_secret_is_created_once_and_kept_private(monkeypatch, tmp_pat
     path = folder / "service-secret"
     assert path.read_text() == first
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_the_shared_secret_is_kept_where_only_its_owner_can_read_it(monkeypatch, tmp_path):
+    # Security review 2026-10: the secret is all that stands between a local program and the mail.
+    import dreamference.chat.gmail_credentials as credentials
+
+    folder = tmp_path / "credentials"
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(folder))
+    value = GoogleService.secret()
+    assert value
+    assert folder.stat().st_mode & 0o777 == 0o700
+    assert (folder / "service-secret").stat().st_mode & 0o777 == 0o600
+    assert GoogleService.secret() == value
