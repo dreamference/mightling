@@ -687,3 +687,8 @@ def test_server_status_names_the_engine_commit_drafter_and_step_graphs():
     assert LingServeLaunchBuilder.facts("img", {}, [*args, STEP_GRAPHS_FLAG])["Step graphs"] == "On"
     # A flag left without its value, last on the line, reads as unset rather than failing.
     assert LingServeLaunchBuilder.facts("img", {}, ["--draft"])["Speculative"] == "Disabled"
+
+
+def test_the_ling_engine_is_named_in_any_case():
+    assert LingServeLaunchBuilder.is_ling({"engine": "Ling"})
+    assert not LingServeLaunchBuilder.is_ling({"engine": "sglang"})
