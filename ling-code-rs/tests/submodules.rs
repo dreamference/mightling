@@ -1083,3 +1083,95 @@ fn the_same_owner_on_another_host_is_another_organisation() {
     );
     assert!(!all[0].inherits_trust);
 }
+
+/// A nested submodule's relative URL is resolved against the remote of the submodule that
+/// declares it, as git does, not against the superproject's.
+#[test]
+fn a_nested_relative_url_is_resolved_against_its_parents_remote() {
+    let f = fixture();
+    let root = f.repo.root.clone();
+    git(
+        &root,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://example.com/acme/super.git",
+        ],
+    );
+    let inner = library(
+        f.dir.path(),
+        "inner",
+        "t@localhost",
+        &[("i.py", "i = 1\n")],
+        2,
+    );
+    let outer = library(
+        f.dir.path(),
+        "outer",
+        "dev@upstream.example",
+        &[("o.py", "o = 1\n")],
+        2,
+    );
+    git_as(
+        &outer,
+        "dev@upstream.example",
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &inner.to_string_lossy(),
+            "deps/inner",
+        ],
+    );
+    git_as(
+        &outer,
+        "dev@upstream.example",
+        &["commit", "-qm", "add inner"],
+    );
+    add_submodule(
+        &root,
+        &outer,
+        "outer",
+        Some("https://example.com/acme/outer.git"),
+    );
+    git(
+        &root,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "-q",
+            "--init",
+            "--recursive",
+        ],
+    );
+    // The outer checkout's own remote is another organisation's; `../inner.git` follows it.
+    let checkout = root.join("outer");
+    git(
+        &checkout,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://example.com/other-org/outer.git",
+        ],
+    );
+    git(
+        &checkout,
+        &["config", "submodule.deps/inner.url", "../inner.git"],
+    );
+    let all = submodules::evaluate_with(&f.repo, 5000, &[("outer".to_string(), Choice::Include)]);
+    let inner = all.iter().find(|s| s.path == "outer/deps/inner").unwrap();
+    assert_eq!(
+        (inner.indexed, inner.reason.clone(), inner.namespace),
+        (false, Reason::OtherOrganisation, Namespace::Different)
+    );
+    assert_eq!(
+        inner.their_namespace.as_deref(),
+        Some("example.com/other-org")
+    );
+}
