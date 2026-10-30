@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 from pathlib import Path
 
 import pytest
@@ -961,6 +962,44 @@ def test_the_phone_account_gets_a_token_for_ling_web_write_access_and_a_protecte
     assert ForgePhone.ensure() == []
     assert not [call for call in calls if call[0] in ("POST", "PATCH")]
     assert token.read_text() == "p" * 40 + "\n"
+
+
+def test_the_ten_minute_tick_keeps_the_phone_account_in_line_and_reports_a_failure(
+    monkeypatch, capsys
+):
+    """CHAT_REPOS §3.3: the forge of record's timer re-checks the phone account; a failure is said."""
+    monkeypatch.setattr(ForgeService, "housekeeping", classmethod(lambda cls: None))
+    monkeypatch.setattr(ForgeSettings, "role", classmethod(lambda cls: "record"))
+    monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: True))
+    monkeypatch.setattr(ForgeRepositories, "remove_push_mirrors", classmethod(lambda cls: []))
+    monkeypatch.setattr(ForgeRepositories, "install_hooks", classmethod(lambda cls, **k: None))
+    monkeypatch.setattr(ForgeGithubMirror, "run", classmethod(lambda cls: 0))
+    ForgeSettings.update_state(mirrors_synced_at=int(time.time()))
+    runs = []
+
+    def ensure(cls):
+        runs.append(1)
+        return ["⚠️  dreamference/mightling: `main` not protected (HTTP 500)."]
+
+    monkeypatch.setattr(ForgePhone, "ensure", classmethod(ensure))
+    assert ForgeService.tick() == 0
+    assert runs == [1]
+    assert "`main` not protected" in capsys.readouterr().out
+
+    def unreachable(cls):
+        raise RuntimeError("the forge did not list its repositories")
+
+    monkeypatch.setattr(ForgePhone, "ensure", classmethod(unreachable))
+    assert ForgeService.tick() == 0
+    assert "phone account was not checked: the forge did not list" in capsys.readouterr().out
+
+    # A mirror node has no phone account: its tick never touches it.
+    monkeypatch.setattr(ForgeSettings, "role", classmethod(lambda cls: "mirror"))
+    monkeypatch.setattr(ForgeService, "record_address", classmethod(lambda cls: None))
+    monkeypatch.setattr(
+        ForgePhone, "ensure", classmethod(lambda cls: pytest.fail("phone on mirror"))
+    )
+    assert ForgeService.tick() == 0
 
 
 # -- mirror nodes ------------------------------------------------------------------------------------
