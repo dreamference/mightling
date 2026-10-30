@@ -156,6 +156,18 @@ def test_only_the_runs_network_and_read_only_probes_pass_a_closed_gate():
         assert ModelGateService.allows(state, "127.0.0.1", "POST", "/v1/responses")
 
 
+def test_a_network_or_peer_the_gate_cannot_read_admits_nobody(tmp_path):
+    # 3232235777 is 192.168.1.1 as a number: only text names a network. A subnet written with
+    # its host bits set still names the subnet.
+    write(tmp_path, RUN_FILE, run_record(networks=["not a network", 3232235777, "10.200.0.1/16"]))
+    state = ModelGateService.state(str(tmp_path))
+    assert state["state"] == "closed"
+    assert state["networks"] == ["not a network", "3232235777", "10.200.0.1/16"]
+    assert ModelGateService.allows(state, "10.200.3.4", "POST", "/v1/responses")
+    for peer in ("192.168.1.1", "203.0.113.5", "", "unix", "10.200.3.4:8000"):
+        assert not ModelGateService.allows(state, peer, "POST", "/v1/responses"), peer
+
+
 def test_a_request_head_is_rewritten_to_one_request_per_connection():
     head = (
         b"POST /v1/responses HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\nKeep-Alive: 5\r\n"
