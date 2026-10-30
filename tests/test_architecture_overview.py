@@ -49,7 +49,7 @@ def test_setup_py_and_the_package_carry_the_same_version():
 def test_the_model_table_matches_the_matrix():
     # §2: alias, weights and engine of every entry, and the main model's context and vision.
     expected = {
-        "qwen3.8-27b-nvfp4-dflash2": ("RadixArk/Qwen3.8-27B-NVFP4", "sglang"),
+        "qwen3.8-27b-nvfp4-dflash2": ("RadixArk/Qwen3.8-27B-NVFP4", "ling"),
         "qwen3.8-27b-minima-nvfp4-dflash2": ("minima-ai/mnma_qwen3.8_27b_nvfp4", "sglang"),
         "qwen3.8-flash-next-nvfp4-mtp": ("local-inference-lab/Qwen3.8-Flash-Next-NVFP4", "vllm"),
         "qwen3.8-27b-dflash2-draft": ("dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch", None),
@@ -64,8 +64,9 @@ def test_the_model_table_matches_the_matrix():
         assert matrix[alias].hf_repo_id == weights, alias
         assert (matrix[alias].launch_overrides or {}).get("engine") == engine, alias
     main = matrix["qwen3.8-27b-nvfp4-dflash2"]
-    assert main.launch_overrides["max_model_len"] == 262144
-    assert main.supports_vision and "ling" in main.engine_recipes
+    assert main.launch_overrides["max_model_len"] == 196608
+    assert main.engine_recipes["sglang"]["max_model_len"] == 262144
+    assert main.supports_vision and "sglang" in main.engine_recipes
     assert not matrix["qwen3.8-27b-minima-nvfp4-dflash2"].supports_vision
     assert matrix["tiny-a2d-coder-0.5b-diffusion"].is_diffusion
 

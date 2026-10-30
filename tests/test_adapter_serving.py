@@ -150,7 +150,7 @@ def test_an_installed_adapter_turns_on_the_recipes_lora_flags_behind_the_gate(
         "/sgl-workspace/sglang/python/sglang/srt/entrypoints/openai/serving_responses.py:ro"
     )
     # The file with the adapters' patch, never the recipe's own alone.
-    recipe = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS)
+    recipe = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, SGLANG)
     with_lora, plain_patch = (
         SGLangRuntimePatcher.mount_args(SGLangRuntimePatcher.for_launch(recipe, lora=lora))[1]
         for lora in (True, False)
@@ -324,8 +324,8 @@ def test_prepare_mounts_the_recipes_patch_together_with_the_adapters(verified, m
         classmethod(lambda cls, image, patches: given.append(patches)),
     )
     install()
-    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True) is True
-    recipe = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS)
+    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True, engine=SGLANG) is True
+    recipe = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, SGLANG)
     assert given == [SGLangRuntimePatcher.for_launch(recipe, lora=True)]
     assert given != [SGLangRuntimePatcher.for_launch(recipe, lora=False)]
 
@@ -351,7 +351,7 @@ def test_prepare_writes_the_gates_list_or_removes_it(verified, monkeypatch):
     AdapterServing.withdraw("rust")
     assert json.loads((AdapterServing.gate_dir() / LIST_FILE).read_text())["adapters"] == {}
     # Behind no gate the list a former start wrote is removed, and the gate mounts nothing.
-    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=False) is True
+    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=False, engine=SGLANG) is True
     assert not (AdapterServing.gate_dir() / LIST_FILE).exists()
     assert AdapterServing.gate_mounts() == []
     monkeypatch.setattr(

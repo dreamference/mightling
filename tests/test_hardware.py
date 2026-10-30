@@ -464,10 +464,11 @@ def test_an_engine_asset_applies_only_to_its_engine_and_feature(monkeypatch):
     import dreamference.hardware.model_matrix_registry as registry
     from dreamference.node.node_model_sync import NodeModelSync
     key, head = registry.DEFAULT_MODEL_ALIAS, registry.QWEN38_SPARSE_HEAD_ASSET["repo"]
-    assert registry.ModelMatrixRegistry.get_engine_assets(key) == []
-    assert head not in NodeModelSync.repos(key)
-    # The asset list lives in SGLang's recipe; each case below swaps only the engine and its features.
-    recipe = dict(registry.ModelMatrixRegistry.get_launch_overrides(key, "sglang"))
+    # The shipped default since 1.8.0 is ling-engine at a commit that reads the head; SGLang fetches nothing.
+    assert [a["repo"] for a in registry.ModelMatrixRegistry.get_engine_assets(key)] == [head]
+    assert registry.ModelMatrixRegistry.get_engine_assets(key, "sglang") == []
+    assert head in NodeModelSync.repos(key)
+    recipe = dict(registry.ModelMatrixRegistry.get_launch_overrides(key, "ling"))
     cases = (("ling", [], False), ("ling", ["sparse-head"], True), ("sglang", ["sparse-head"], False))
     for engine, features, applies in cases:
         overrides = {**recipe, "engine": engine, "engine_features": features}
@@ -492,7 +493,12 @@ def test_model_download_fetches_the_recipe_drafter_at_its_pin(monkeypatch):
         classmethod(lambda cls, repo, **k: fetched.append((repo, k.get("revision"))) or True),
     )
     assert hardware.download_recipe_companions(registry.DEFAULT_MODEL_ALIAS)
-    assert fetched == [(registry.QWEN38_DRAFTER_REPO, registry.QWEN38_DRAFTER_REVISION or None)]
+    head = registry.QWEN38_SPARSE_HEAD_ASSET
+    # The sparse head comes too: ling-engine reads it, the shipped default since 1.8.0.
+    assert fetched == [
+        (registry.QWEN38_DRAFTER_REPO, registry.QWEN38_DRAFTER_REVISION or None),
+        (head["repo"], head["revision"]),
+    ]
 
 
 def test_a_ling_engine_recipe_lists_the_sparse_head_exactly_when_its_commit_reads_it():

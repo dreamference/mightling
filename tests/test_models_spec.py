@@ -43,7 +43,8 @@ def test_the_recipe_runs_the_spec_s_extra_args_in_order():
 
 
 def test_the_recipe_s_engine_context_memory_parsers_and_drafter_are_the_spec_s():
-    recipe = ModelMatrixRegistry.get_launch_overrides("qwen3.8-27b-nvfp4-dflash2")
+    # §1 is SGLang's recipe, the `--engine sglang` fallback since 1.8.0 made ling-serve the default.
+    recipe = ModelMatrixRegistry.get_launch_overrides("qwen3.8-27b-nvfp4-dflash2", "sglang")
     assert recipe["engine"] == "sglang"
     assert re.fullmatch(r"lmsysorg/sglang@sha256:[0-9a-f]{64}", QWEN38_SGLANG_IMAGE)
     assert recipe["docker_image"] == QWEN38_SGLANG_IMAGE

@@ -10,16 +10,26 @@ from dreamference.vllm_server import VLLMServerManager
 SECRET = "hf_review_secret_value"
 
 
-@pytest.mark.parametrize("model", ["qwen2.5-coder-32b", DEFAULT_MODEL_ALIAS])
-def test_the_launch_command_names_the_token_but_never_carries_it(monkeypatch, model):
+@pytest.mark.parametrize(
+    ("model", "engine"), [("qwen2.5-coder-32b", None), (DEFAULT_MODEL_ALIAS, "sglang")]
+)
+def test_the_launch_command_names_the_token_but_never_carries_it(monkeypatch, model, engine):
     # start_server prints the whole command; the token reaches the container through the
     # environment of the `docker run` it spawns, which start_server sets.
     mgr = VLLMServerManager()
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
-    cmd = mgr.build_launch_command(model=model, hf_token=SECRET)
+    cmd = mgr.build_launch_command(model=model, hf_token=SECRET, engine=engine)
     assert not any(SECRET in part for part in cmd)
     at = cmd.index("HF_TOKEN")
     assert cmd[at - 1] == "-e"
+
+
+def test_ling_serve_s_launch_command_never_carries_the_token(monkeypatch):
+    # ling-serve, the default since 1.8.0, reads the mounted cache and is given no token at all.
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+    cmd = mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS, hf_token=SECRET)
+    assert not any(SECRET in part for part in cmd)
 
 
 def test_a_failed_compile_cache_clear_is_tried_again_on_the_next_launch(monkeypatch, tmp_path):

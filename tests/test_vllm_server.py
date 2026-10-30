@@ -1361,7 +1361,7 @@ def test_an_sglang_model_leaves_the_vllm_compile_cache_alone(monkeypatch):
         classmethod(lambda cls, image, patches: None),
     )
     try:
-        mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=True)
+        mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=True, engine="sglang")
     except Exception:
         pass  # the launch itself is stubbed out; what happened before it is the point
     assert resets == []

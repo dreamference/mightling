@@ -907,7 +907,7 @@ def test_a_chat_template_that_cannot_be_prepared_stops_the_start(monkeypatch, ca
         classmethod(lambda cls, *a: None),
     )
     with pytest.raises(SystemExit) as stopped:
-        mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False)
+        mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False, engine="sglang")
     assert stopped.value.code == 1
     assert built == [] and ("docker", "run") not in events
     assert "❌ The recipe's chat template could not be prepared" in capsys.readouterr().out

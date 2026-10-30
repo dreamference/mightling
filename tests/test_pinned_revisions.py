@@ -17,6 +17,7 @@ from dreamference.hardware import ModelDownloader, ReleaseAssetDownloader
 from dreamference.hardware.model_matrix_registry import (
     DEFAULT_MODEL_ALIAS,
     QWEN38_SGLANG_RECIPE,
+    QWEN38_SPARSE_HEAD_ASSET,
     ModelMatrixRegistry,
 )
 
@@ -129,6 +130,8 @@ def test_model_download_fetches_the_model_and_its_drafter_at_their_pins(hub):
     assert hub.fetched == [
         (ModelMatrixRegistry.resolve_hf_repo(DEFAULT_MODEL_ALIAS), MODEL_PIN),
         (DRAFTER_REPO, DRAFTER_PIN),
+        # The sparse head ling-engine reads, the shipped default since 1.8.0.
+        (QWEN38_SPARSE_HEAD_ASSET["repo"], QWEN38_SPARSE_HEAD_ASSET["revision"]),
     ]
 
 

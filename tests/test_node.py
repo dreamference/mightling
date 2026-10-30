@@ -3113,12 +3113,17 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
     here, there = tmp_path / "here", tmp_path / "there"
     monkeypatch.setenv("HF_HUB_CACHE", str(here))
-    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+    from dreamference.hardware.model_matrix_registry import (
+        QWEN38_SPARSE_HEAD_ASSET,
+        ModelMatrixRegistry,
+    )
 
     repos = NodeModelSync.repos(SYNC_KEY)
-    assert len(repos) == 2  # the checkpoint and its drafter
+    assert len(repos) == 3  # the checkpoint, its drafter and the sparse head ling-engine reads
     pins = {repo: ModelMatrixRegistry.pinned_revision(repo) for repo in repos}
-    assert all(pins.values())
+    # The sparse head is a release asset no recipe pins by commit, so its whole folder is sent.
+    assert all(pins[repo] for repo in repos[:2]) and pins[repos[2]] is None
+    pins[repos[2]] = QWEN38_SPARSE_HEAD_ASSET["revision"]
     # Only another revision of the checkpoint here (the Hub's default branch): not the one served.
     model_cache(
         here,

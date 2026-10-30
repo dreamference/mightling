@@ -57,7 +57,7 @@ The model matrix (`hardware/model_matrix_registry.py`, `MATRIX`) is the source o
 
 | Alias | Weights | Role |
 | --- | --- | --- |
-| `qwen3.8-27b-nvfp4-dflash2` | `RadixArk/Qwen3.8-27B-NVFP4` | **The** main model (`DEFAULT_MODEL_ALIAS`, since 2026-09-29); served by SGLang by default with `ling-serve` (`engine: ling`) opt-in since 1.7.2, with the DFlash2 drafter, 262K context, vision |
+| `qwen3.8-27b-nvfp4-dflash2` | `RadixArk/Qwen3.8-27B-NVFP4` | **The** main model (`DEFAULT_MODEL_ALIAS`, since 2026-09-29); served by `ling-serve` (`engine: ling`) by default since 1.8.0, with SGLang the `--engine sglang` fallback (and the engine for images and adapters until 1.8.1), with the DFlash2 drafter, a 196,608-token context for each of four conversations on ling-serve (262K on SGLang), vision on SGLang |
 | `qwen3.8-27b-minima-nvfp4-dflash2` | `minima-ai/mnma_qwen3.8_27b_nvfp4` | Trial candidate (all-NVFP4, SGLang + DFlash2, text-only; `DREAMFERENCE_MODELS.md` §2.2), not a default |
 | `qwen3.8-flash-next-nvfp4-mtp` | `local-inference-lab/Qwen3.8-Flash-Next-NVFP4` | Trial candidate (125B + 51B n-gram + 4B MTP in NVFP4/MXFP8, vLLM; `DREAMFERENCE_MODELS.md` §2.3), not a default |
 | `qwen3.8-27b-dflash2-draft` | `dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch` | Its DFlash2 drafter (searched-scale NVFP4 since 1.7.2; `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` until then), not served on its own |
@@ -164,7 +164,7 @@ A stdio MCP server (`ling-admin mcp`) with `ide_*` tools over an in-process `IDE
 | `ling-code-rs/` | `ling-code`, the code index: a standalone crate installed beside `ling` |
 | `ling-docs-rs/` | `ling-docs`, the index of the user's own documents (text, Markdown, PDF): a standalone crate, released for Linux beside `ling` from 1.6.0; `ling-admin docs setup` fetches what it loads (PDFium, ONNX Runtime, the embedding model), pinned |
 | `desktop/electron/`, `desktop/ui/` | The Electron app `ling-app` and the Mightling UI it shares with `ling web` |
-| `ling-engine/` | Submodule: the Qwen3.8-27B model server (`ling-serve`, C++20 and CUDA), its own repository; served opt-in from its prebuilt image in 1.7.2 (`--engine ling`) |
+| `ling-engine/` | Submodule: the Qwen3.8-27B model server (`ling-serve`, C++20 and CUDA), its own repository; served from its prebuilt image, opt-in in 1.7.2 (`--engine ling`) and the default since 1.8.0 |
 | `dreamference/web_canvas.py` | `ling-admin web` status page |
 | `.github/workflows/` | `release.yml` (manually triggered: Python dist, `ling` and its companions for Linux, macOS and Windows, the desktop `.deb`; `SHA256SUMS` signed with Ed25519 in the `release` environment), `build-clients.yml`, `windows.yml`, `mac-preview.yml`, `docs.yml`, `cla.yml` |
 
