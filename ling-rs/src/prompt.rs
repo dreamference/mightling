@@ -919,4 +919,13 @@ mod tests {
         assert_eq!(Blocks::default().names(), "none");
         assert_eq!(Blocks::ALL.names(), "web, email, code");
     }
+
+    #[test]
+    fn a_name_that_only_starts_with_default_is_not_default() {
+        let mut prompt = Prompt::default_prompt();
+        prompt.name = "default-2".into();
+        assert!(!prompt.is_default());
+        let resolved = Resolved { prompt, source: Source::Environment, skipped: Vec::new() };
+        assert_eq!(startup_lines(&resolved, true), vec![format!("Prompt: default-2 ({ENV_VAR}).")]);
+    }
 }
