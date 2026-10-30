@@ -203,6 +203,46 @@ def _refuse_real_docker(monkeypatch, request):
         monkeypatch.setattr(subprocess, name, guarded(getattr(subprocess, name)))
 
 
+# dockerd's control socket, where a connect is a request to the real daemon: the PSI watchdog kills
+# and updates containers over it without the `docker` CLI, so `_refuse_real_docker` cannot see it.
+# Two watchdog tests sent `kill?signal=SIGKILL` and a restart-policy update for `test-container` to
+# the real dockerd (2026-10-30).
+def _real_docker_sockets() -> set:
+    paths = ["/var/run/docker.sock", "/run/docker.sock"]
+    if hasattr(os, "getuid"):
+        paths.append(f"/run/user/{os.getuid()}/docker.sock")  # rootless dockerd
+    docker_host = os.environ.get("DOCKER_HOST", "")
+    if docker_host.startswith("unix://"):
+        paths.append(docker_host[len("unix://"):])
+    return {os.path.realpath(path) for path in paths}
+
+
+REAL_DOCKER_SOCKETS = _real_docker_sockets()
+
+
+@pytest.fixture(autouse=True)
+def _refuse_real_dockerd_socket(monkeypatch):
+    # Refused with the error a stopped dockerd gives, so the code takes its own fallback, and failed
+    # after the test: the watchdog's thread swallows every exception, so raising alone would let
+    # the test pass.
+    import socket
+
+    reached = []
+    connect = socket.socket.connect
+
+    def guarded(self, address):
+        if self.family == getattr(socket, "AF_UNIX", None) and isinstance(address, (str, bytes)) \
+                and os.path.realpath(os.fsdecode(address)) in REAL_DOCKER_SOCKETS:
+            reached.append(os.fsdecode(address))
+            raise ConnectionRefusedError(111, "a test may not reach the real dockerd")
+        return connect(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded)
+    yield
+    if reached:
+        pytest.fail(f"the test connected to the real dockerd at {reached[0]}; stub the socket")
+
+
 # The throwaway Forgejo of tests/test_forge_private.py (FORGEJO §5.3): a test marked
 # `forge_container`, run only when MIGHTLING_FORGE_CONTAINER_TESTS=1, may run docker commands that
 # name its own container, network or image pin, never the node's forge (`mightling-forge`).
