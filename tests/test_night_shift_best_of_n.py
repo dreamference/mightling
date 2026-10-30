@@ -386,6 +386,21 @@ def test_without_a_model_server_the_judge_is_skipped_not_asked(bon, monkeypatch)
     assert asked == []
 
 
+def test_the_server_judge_never_waits_past_the_window_and_always_gets_a_minute(bon, monkeypatch):
+    from dreamference.night_shift.night_shift_best_of_n import MIN_JUDGE_TIMEOUT_S
+    timeouts = []
+    monkeypatch.setattr(NightShiftBestOfN, "JUDGE", None)
+    monkeypatch.setattr(NightShiftChooser, "server_judge",
+                        staticmethod(lambda server, issue, seed, timeout, log: timeouts.append(timeout)))
+    record = queue(bon["night"], bon["repo"], test=TEST)
+    run = NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
+                            best_of=2, model_host="http://x", window_end=time.time() + 100)
+    run._judge(0, [])
+    run.window_end = time.time() - 10
+    run._judge(0, [])
+    assert 90 <= timeouts[0] <= 100 and timeouts[1] == MIN_JUDGE_TIMEOUT_S
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
