@@ -138,3 +138,45 @@ def test_every_command_the_guide_names_parses(command):
     DreamferenceCLIController.build_parser().parse_args(
         command.split() + REQUIRED_ARGUMENTS.get(command, [])
     )
+
+
+def test_status_shows_the_target_the_machine_and_its_os(monkeypatch, capsys):
+    # The guide checks a GB10 by `status`'s System Target row, and a report says whose box it
+    # came from by its Machine and Operating System rows (specs/DREAMFERENCE_SETUP.md §2).
+    from rich.console import Console
+
+    from dreamference.cli import dreamference_cli_controller as controller
+    from dreamference.context_engine import ContextEngine
+    from dreamference.runner.cline_installer import ClineInstaller
+    from dreamference.runner.codex_installer import CodexInstaller
+    from dreamference.runner.continue_installer import ContinueInstaller
+    from dreamference.runner.openhands_installer import OpenHandsInstaller
+
+    hardware = {
+        "is_gb10": True,
+        "machine": "ASUSTeK COMPUTER INC. GX10",
+        "os_name": "DGX OS 7.2.3 (Ubuntu 24.04.3 LTS)",
+        "gpu_name": "NVIDIA GB10",
+        "driver_version": "580.95.05",
+        "total_unified_memory_gb": 128,
+        "used_memory_gb": 9,
+        "available_memory_gb": 119,
+        "arch": "aarch64",
+    }
+    monkeypatch.setattr(controller, "detect_gb10_hardware", lambda: hardware)
+    offline = {"healthy": False, "models": []}
+    monkeypatch.setattr(controller.VLLMServerManager, "get_server_status", lambda self: offline)
+    monkeypatch.setattr(ContextEngine, "load_index", lambda self: False)
+    for installer, probe in (
+        (ClineInstaller, "is_cline_extension_installed"),
+        (ContinueInstaller, "is_continue_extension_installed"),
+        (OpenHandsInstaller, "is_image_downloaded"),
+        (CodexInstaller, "is_installed"),
+    ):
+        monkeypatch.setattr(installer, probe, classmethod(lambda cls: False))
+    monkeypatch.setattr(controller, "rich_console", lambda: Console(width=200))
+    DreamferenceCLIController.handle_status()
+    rows = capsys.readouterr().out
+    assert "System Target" in rows and "Qualified" in rows
+    assert "Machine" in rows and "ASUSTeK COMPUTER INC. GX10" in rows
+    assert "Operating System" in rows and "DGX OS 7.2.3 (Ubuntu 24.04.3 LTS)" in rows
