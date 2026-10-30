@@ -1915,11 +1915,12 @@ mod tests {
         assert_eq!(configured_context_window_from(None, None), None);
     }
 
-    #[tokio::test]
-    async fn the_setting_wins_over_the_server_and_llama_cpp_is_asked_for_props() {
+    /// A stand-in model server on a free port, answering each path from `routes` (path, status,
+    /// body) and anything else with a 404. Returns its base URL.
+    fn stand_in(routes: &[(&str, &str, &str)]) -> String {
         use std::io::{BufRead, BufReader, Write};
-        // A stand-in llama.cpp server: `/v1/models` with only the training length, `/props` with
-        // the window it was started with.
+        let routes: Vec<(String, String, String)> =
+            routes.iter().map(|(path, status, body)| (path.to_string(), status.to_string(), body.to_string())).collect();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         std::thread::spawn(move || {
@@ -1932,24 +1933,56 @@ mod tests {
                 while reader.read_line(&mut header).is_ok_and(|n| n > 2) {
                     header.clear();
                 }
-                let body = if line.starts_with("GET /props ") {
-                    r#"{"default_generation_settings": {"n_ctx": 16384}}"#
-                } else {
-                    r#"{"object": "list", "data": [{"id": "q.gguf", "meta": {"n_ctx_train": 262144}}]}"#
-                };
+                let path = line.split_whitespace().nth(1).unwrap_or_default();
+                let (status, body) = routes
+                    .iter()
+                    .find(|(route, ..)| *route == path)
+                    .map_or(("404 Not Found", "{}"), |(_, status, body)| (status.as_str(), body.as_str()));
                 let _ = write!(
                     stream,
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
             }
         });
+        base
+    }
+
+    /// llama.cpp's `/v1/models`, with only the training length, and its `/props`, with the window it
+    /// was started with.
+    const LLAMA_CPP_MODELS: &str = r#"{"object": "list", "data": [{"id": "q.gguf", "meta": {"n_ctx_train": 262144}}]}"#;
+    const LLAMA_CPP_PROPS: &str = r#"{"default_generation_settings": {"n_ctx": 16384}}"#;
+
+    #[tokio::test]
+    async fn the_setting_wins_over_the_server_and_llama_cpp_is_asked_for_props() {
+        let base = stand_in(&[("/v1/models", "200 OK", LLAMA_CPP_MODELS), ("/props", "200 OK", LLAMA_CPP_PROPS)]);
         let client = reqwest::Client::new();
         let (served, adapters) = served_listing(&client, &base, None).await.unwrap();
         assert_eq!(served, ServedModel { id: "q.gguf".into(), max_model_len: 16_384, owned_by: String::new() });
         assert!(adapters.is_empty());
         let (served, _) = served_listing(&client, &base, Some(65_536)).await.unwrap();
         assert_eq!(served.max_model_len, 65_536);
+        // A trailing slash on the host is dropped.
+        let (served, _) = served_listing(&client, &format!("{base}/"), None).await.unwrap();
+        assert_eq!(served.max_model_len, 16_384);
+    }
+
+    #[tokio::test]
+    async fn an_error_status_is_no_answer_and_only_llama_cpp_is_asked_for_props() {
+        let client = reqwest::Client::new();
+        let window = |base: String| {
+            let client = client.clone();
+            async move { served_listing(&client, &base, None).await.map(|(served, _)| served.max_model_len) }
+        };
+        // An error status is no listing, whatever its body says.
+        assert_eq!(window(stand_in(&[("/v1/models", "503 Service Unavailable", LLAMA_CPP_MODELS)])).await, None);
+        // `/props` failing leaves llama.cpp's training length.
+        assert_eq!(window(stand_in(&[("/v1/models", "200 OK", LLAMA_CPP_MODELS)])).await, Some(262_144));
+        let props_error = stand_in(&[("/v1/models", "200 OK", LLAMA_CPP_MODELS), ("/props", "500 Internal Server Error", LLAMA_CPP_PROPS)]);
+        assert_eq!(window(props_error).await, Some(262_144));
+        // A server that is not llama.cpp (no `meta`) is not asked for `/props`.
+        let other = stand_in(&[("/v1/models", "200 OK", r#"{"data": [{"id": "m"}]}"#), ("/props", "200 OK", LLAMA_CPP_PROPS)]);
+        assert_eq!(window(other).await, Some(FALLBACK_CONTEXT_WINDOW));
     }
 
     const ADAPTER_BASE: &str = "RadixArk/Qwen3.8-27B-NVFP4";
