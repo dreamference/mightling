@@ -98,6 +98,15 @@ def test_the_spike_rule_trips_once_the_hold_reaches_its_duration(pressure_file, 
     assert wd.tripped is True
 
 
+def test_the_sustained_rule_reports_avg60_over_its_minute(pressure_file, monkeypatch):
+    pressure_file.write_text("full avg10=10.00 avg60=30.00 avg300=0.00 total=1\n")
+    monkeypatch.setattr(MemoryPressureWatchdog, "_kill", lambda self: True)
+    seen = []
+    wd = MemoryPressureWatchdog("test-container", on_trip=lambda *report: seen.append(report))
+    wd._sample(None)
+    assert seen == [(psi_watchdog.TRIP_REASON_SUSTAINED, 30.0, 60.0)]
+
+
 def test_the_cgroup_is_found_from_the_container_id_and_probed(tmp_path, monkeypatch):
     procs = tmp_path / "docker" / "abc123" / "cgroup.procs"
     procs.parent.mkdir(parents=True)
