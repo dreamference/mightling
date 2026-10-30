@@ -213,6 +213,15 @@ def test_a_worktree_that_cannot_be_added_fails_the_task_and_says_why(setup, monk
     assert record["result"]["last_message"].startswith("git worktree add failed: ")
 
 
+def test_a_worktree_git_cannot_read_has_no_changes(setup, tmp_path):
+    record = queue(setup["night"], setup["repo"])
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() + 60)
+    run.worktree = tmp_path / "not-a-repository"
+    run.worktree.mkdir()
+    assert run._git(run.worktree, "status", "--porcelain")[1].strip()  # git says why, and fails
+    assert run._has_changes() is False
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
