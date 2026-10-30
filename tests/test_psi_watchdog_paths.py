@@ -306,6 +306,21 @@ def test_a_pid_gone_mid_kill_does_not_spare_the_rest(tmp_path, monkeypatch, no_d
     assert signalled == [4243]
 
 
+@pytest.mark.parametrize("probed", [False, None])
+def test_no_pid_is_signalled_without_a_probe_that_allowed_it(tmp_path, monkeypatch, probed):
+    # The probe said no, or never got an answer: the socket kills the container, not kill(2).
+    procs = tmp_path / "cgroup.procs"
+    procs.write_text("4242\n")
+    signalled = []
+    monkeypatch.setattr(psi_watchdog.os, "kill", lambda pid, sig: signalled.append(pid))
+    monkeypatch.setattr(MemoryPressureWatchdog, "_docker_api", lambda self, action, body=b"": True)
+    wd = MemoryPressureWatchdog("test-container")
+    wd._cgroup_procs = str(procs)
+    wd._direct_kill_ok = probed
+    assert wd._kill() is True
+    assert signalled == []
+
+
 def test_a_docker_cli_that_cannot_run_is_not_a_kill(monkeypatch):
     def run(cmd, **kwargs):
         raise FileNotFoundError("docker")
