@@ -218,12 +218,12 @@ jobs:
       # pages; the build above has installed the toolchain they need.
       - name: Test the web commands
         working-directory: ling-web-rs
-        run: ~/.cargo/bin/cargo test --release --locked
+        run: cargo test --release --locked
       # Its scopes and sandbox are stand-ins in the tests; the PDF and model cases run only when
       # MIGHTLING_DOCS_LIB_DIR and MIGHTLING_DOCS_MODEL_DIR are set, which they are not here.
       - name: Test the local file index
         working-directory: ling-docs-rs
-        run: ~/.cargo/bin/cargo test --release --locked
+        run: cargo test --release --locked
       # The messenger bridges' crates (Signal, and Matrix and Telegram through `ling chat`), the sync
       # agent (`ling sync`, against a real hub on loopback) and the loop guard's detector
       # (ling-rs/loop-guard), in the
