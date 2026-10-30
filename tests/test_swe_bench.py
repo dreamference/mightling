@@ -3626,6 +3626,19 @@ def test_a_pause_is_recorded_only_for_the_part_inside_the_hold(hold):
     assert record["pauses"] == [{"start": hold.started, "end": record["sessions"][-1]["end"]}]
 
 
+def test_a_pause_that_ends_before_it_begins_or_is_withdrawn_before_it_begins_is_not_recorded(hold):
+    hold.started = time.time() - 100
+    FakeGate.pause = {"since": time.time() - 10, "until": time.time() - 20}
+    hold.tick()
+    assert gate_record()["pauses"] == []
+    FakeGate.pause = {"since": time.time() + 0.05, "until": time.time() + 100}
+    hold.tick()
+    FakeGate.pause = None
+    time.sleep(0.1)
+    hold.tick()
+    assert gate_record()["pauses"] == []
+
+
 def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
     from dreamference.vllm_server.model_gate import ModelGate
 
