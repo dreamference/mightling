@@ -39,3 +39,17 @@ def test_a_chunked_bodys_trailers_are_read_past_and_left_out():
     data = b"3\r\nabc\r\n0\r\nX-Trailer: 1\r\n\r\nGET /next"
 
     assert _read_body(data, ("chunked", 0)) == (b"abc", b"GET /next")
+
+
+# -- rewrite -------------------------------------------------------------------------------------------
+
+
+def test_a_body_that_is_not_a_json_object_goes_to_the_engine_as_it_came(adapters):
+    for body in (b"not json", b'["org/base+fix"]'):
+        assert asyncio.run(adapters.rewrite(body, LISTING)) == (None, body, None)
+
+
+def test_a_request_for_the_base_goes_through_unchanged(adapters):
+    body = json.dumps({"model": "org/base", "messages": []}).encode()
+
+    assert asyncio.run(adapters.rewrite(body, LISTING)) == (None, body, None)
