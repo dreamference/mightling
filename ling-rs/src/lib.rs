@@ -1895,6 +1895,7 @@ mod tests {
         let card = json!({"id": "q.gguf", "meta": {"n_vocab": 151936, "n_ctx_train": 262144}});
         assert_eq!(context_window_from_card(&card), None);
         assert_eq!(training_window(&card), Some(262_144));
+        assert_eq!(training_window(&json!({"id": "q.gguf", "meta": {"n_ctx_train": 0}})), None);
         assert_eq!(llama_cpp_window_from_props(&json!({"default_generation_settings": {"n_ctx": 32768}})), Some(32_768));
         assert_eq!(llama_cpp_window_from_props(&json!({"default_generation_settings": {}})), None);
         assert_eq!(llama_cpp_window_from_props(&json!({"default_generation_settings": {"n_ctx": 0}})), None);
