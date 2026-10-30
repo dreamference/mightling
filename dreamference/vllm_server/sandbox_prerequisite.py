@@ -75,7 +75,12 @@ class SandboxPrerequisite:
         works = HostSafetySetup.sandbox_works()
         if works is not False:
             if works and cls.turned_off():
+                # Fixed outside `host setup` (`node prepare`, a profile loaded by hand), which
+                # would otherwise leave the timer off with nothing saying so. On stderr: this
+                # runs before any command, and stdout may be what a script reads.
                 cls._forget()
+                print("💡 bubblewrap can sandbox again, and Night Shift was turned off for it; "
+                      "`ling-admin night enable` puts the timer back.", file=sys.stderr)
             return True
         needed = (command, subcommand) in NEEDS_SANDBOX
         if cls.turned_off():
