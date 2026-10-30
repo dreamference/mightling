@@ -729,3 +729,38 @@ def test_server_judge_asks_the_server_without_a_proxy_and_survives_a_refusal(mon
         assert log[1]["error"] and log[0]["ratings"] == (8.0, 2.0)
     finally:
         server.shutdown()
+
+
+def test_server_judge_asks_the_model_once_and_reads_a_reasoning_only_answer():
+    gets = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def reply(self, body):
+            data = json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            gets.append(self.path)
+            self.reply({"data": [{"id": "served-model"}]})
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.reply({"choices": [{"message": {"content": None,
+                                                 "reasoning_content": "RATING_A: 3\nRATING_B: 9"}}]})
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        compare = NightShiftChooser.server_judge(f"http://127.0.0.1:{server.server_port}", "Fix the bug")
+        a, b = ChooserCandidate("a1", "diff A", ["a1"]), ChooserCandidate("a2", "diff B", ["a2"])
+        assert compare(a, b) == (3.0, 9.0) and compare(b, a) == (3.0, 9.0)
+        assert gets == ["/v1/models"]
+    finally:
+        server.shutdown()
