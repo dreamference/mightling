@@ -611,4 +611,10 @@ mod tests {
     fn a_closing_tag_with_a_space_after_its_slash_is_neutralized() {
         assert_eq!(neutralize("a </ untrusted> b"), "a &lt;/ untrusted> b");
     }
+
+    #[test]
+    fn a_tag_spaced_with_tabs_or_line_breaks_is_neutralized() {
+        assert_eq!(neutralize("<\nuntrusted>"), "&lt;\nuntrusted>");
+        assert_eq!(neutralize("<\t/\r\nuntrusted>"), "&lt;\t/\r\nuntrusted>");
+    }
 }
