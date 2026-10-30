@@ -10,6 +10,7 @@ No PowerShell runs here: the script is read as text, as tests/test_windows_insta
 and windows.yml runs it under Windows PowerShell 5.1 as an administrator.
 """
 
+import ast
 import hashlib
 import re
 import subprocess
@@ -324,3 +325,17 @@ def test_install_ps1_uses_only_what_windows_powershell_5_1_has():
     assert calls
     for call in calls:
         assert "-UseBasicParsing" in call, call
+
+
+def test_every_windows_release_step_carries_the_same_sandbox_helpers():
+    """Section 16.2: what the builder builds, the release packages, install.ps1 and `ling update` fetch."""
+    from dreamference.runner.codex_branded_builder import WINDOWS_SANDBOX_HELPERS
+
+    package = (ROOT / ".github" / "scripts" / "package_mightling.py").read_text()
+    packaged = ast.literal_eval(re.search(r"^WINDOWS_ONLY = (\(.*\))$", package, re.M).group(1))
+    update_rs = (ROOT / "ling-rs" / "src" / "update.rs").read_text()
+    helpers = re.search(r"pub const WINDOWS_SANDBOX_HELPERS: [^=]+= \[(.*)\];", update_rs).group(1)
+    updated = re.findall(r'"([^"]+)"', helpers)
+    fetched = re.findall(r'"([^"]+)"', re.search(r"^\$Optional = @\((.*)\)$", script(), re.M).group(1))
+    assert set(WINDOWS_SANDBOX_HELPERS) <= set(fetched)
+    assert tuple(packaged) == tuple(updated) == tuple(WINDOWS_SANDBOX_HELPERS)
