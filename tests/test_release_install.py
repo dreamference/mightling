@@ -1292,6 +1292,17 @@ def test_a_wheel_that_does_not_match_the_release_sums_is_not_installed(tmp_path,
     assert not (tmp_path / ".local/share/dreamference/venv").exists()
 
 
+def test_a_wheel_from_a_release_with_no_sums_is_installed_with_that_said(tmp_path, release_server):
+    # A 1.4.x release has no release-wide SHA256SUMS: the missing check is said, never skipped silently.
+    assets = binaries(signed=False)
+    assets["dreamference-9.9.9-py3-none-any.whl"] = b"a wheel"
+    result = run_install(tmp_path, release_server(assets, tag="v1.4.1"), "--role", "node", "--version", "1.4.1",
+                         "--no-advertise", "--no-host-setup", "--no-model")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ("Release v1.4.1 has no SHA256SUMS, so dreamference-9.9.9-py3-none-any.whl is installed without "
+            "a checksum check.") in result.stdout
+
+
 # -- signed releases (specs/DREAMFERENCE_RELEASE_SIGNING.md) ----------------------------------------
 
 def nothing_installed(home):

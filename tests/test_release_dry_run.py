@@ -67,6 +67,23 @@ def test_the_release_keeps_only_its_own_jobs_and_calls_the_shared_build() -> Non
         assert passed[name] == f"${{{{ inputs.{name} }}}}", name
 
 
+def test_only_the_release_job_can_write_and_only_a_dispatch_starts_it() -> None:
+    # Security review 2026-10, finding 2: a moved tag must not run with a token that publishes.
+    release = workflow("release.yml")
+    assert set(trigger(release)) == {"workflow_dispatch"}
+    assert release["permissions"] == {"contents": "read"}
+    for name, job in release["jobs"].items():
+        writes = {key for key, value in job.get("permissions", {}).items() if value == "write"}
+        assert not writes or name == "release", name
+    assert release["jobs"]["release"]["permissions"]["contents"] == "write"
+    # An input reaches shell code only as a validated boolean; any other goes through env.
+    inputs = trigger(release)["workflow_dispatch"]["inputs"]
+    for job in release["jobs"].values():
+        for step in job.get("steps", []):
+            for name in re.findall(r"\$\{\{\s*inputs\.(\w+)\s*\}\}", step.get("run", "")):
+                assert inputs[name]["type"] == "boolean", (step.get("name"), name)
+
+
 def test_the_shared_build_holds_every_build_and_publishes_nothing() -> None:
     build = workflow("release-build.yml")
     assert set(trigger(build)) == {"workflow_call"}
