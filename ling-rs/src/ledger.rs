@@ -516,4 +516,14 @@ mod tests {
         let text = ledger.render();
         assert!(text.len() <= MAX_CHARS + 8 && text.contains("… and 160 more"), "{}", text.len());
     }
+
+    #[test]
+    fn the_last_five_failures_are_kept() {
+        let dir = scratch("five");
+        let rollout = (1..=7).flat_map(|n| [call(&n.to_string(), &format!("false {n}")), output(&n.to_string(), n, "")])
+            .collect::<Vec<_>>()
+            .join("\n");
+        let ledger = Ledger::from_rollout(&rollout, &dir, Some(""));
+        assert_eq!(ledger.failed.iter().map(|(code, _)| *code).collect::<Vec<_>>(), vec![3, 4, 5, 6, 7]);
+    }
 }
