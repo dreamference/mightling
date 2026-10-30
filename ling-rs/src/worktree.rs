@@ -494,7 +494,11 @@ pub fn command(codex_home: &Path, cwd: &Path, line: &str, in_session: bool) -> (
             None => (vec![format!("{} is edited in place: there is no worktree to discard.", cwd.display())], 1),
         },
         ["discard", id] => match find(codex_home, cwd, id) {
-            Ok(session) => discard(&session, false),
+            Ok(session) => {
+                // Named by its id, the session this process runs in is still reset in place.
+                let own = in_session && session_at(codex_home, cwd).is_some_and(|here| here.id == session.id);
+                discard(&session, own)
+            }
             Err(message) => (vec![message], 1),
         },
         ["help" | "-h" | "--help"] => (vec![usage.to_string()], 0),
