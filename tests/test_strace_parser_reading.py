@@ -69,3 +69,8 @@ def test_a_udp_lite_connect_with_nothing_sent_is_a_route_lookup(label, address, 
     trace = StraceParser.parse(f"6 connect(8<{label}:[800]>, {{sa_family={family}, {address}}}, 28) = 0\n")
     assert trace.route_lookups == {target: 1}
     assert trace.destinations == {}
+
+
+def test_a_literal_cut_after_a_backslash_keeps_the_backslash():
+    # strace cuts long strings: the last character read may be the start of an escape.
+    assert StraceParser.unescape("ab\\") == b"ab\\"
