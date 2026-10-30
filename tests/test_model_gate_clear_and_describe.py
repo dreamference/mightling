@@ -5,8 +5,10 @@ ends; and the status says what the gate in front of the server itself answers: c
 paused and until when, and no "no gate answers" line when one did.
 """
 
+import time
 from pathlib import Path
 
+import pytest
 from test_model_gate import run_record
 
 from dreamference.vllm_server import model_gate
@@ -30,3 +32,40 @@ def test_releasing_a_hold_whose_record_cannot_be_removed_does_not_fail(monkeypat
     monkeypatch.setattr(Path, "unlink", unlink)
     ModelGate.clear_run("ours")
     assert removed == [model_gate.GATE_DIR / model_gate.RUN_FILE]
+
+
+def _answered(monkeypatch, state):
+    monkeypatch.setattr(ModelGate, "probe", classmethod(lambda cls, host: state))
+    return ModelGate.describe("http://localhost:8000")
+
+
+def test_a_closed_gate_says_why_and_no_missing_gate_line_follows(monkeypatch):
+    lines = _answered(monkeypatch, {"state": "closed", "message": "night 1 holds the model"})
+    assert lines == ["Model gate: closed: night 1 holds the model"]
+
+
+def test_a_paused_gate_says_until_when_and_which_run_waits(monkeypatch):
+    until = time.time() + 3600
+    lines = _answered(monkeypatch, {"state": "paused", "paused_until": until, "run": "n1-default"})
+    (line,) = lines
+    assert line.startswith(
+        f"Model gate: paused until {time.strftime('%H:%M', time.localtime(until))}"
+    )
+    assert "run n1-default waits" in line
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ({"state": "open"}, ["Model gate: open (no benchmark run holds it)"]),
+        (
+            {"state": "open", "stale": "n0-old"},
+            [
+                "Model gate: open (no benchmark run holds it)",
+                "   Run n0-old left a record whose heartbeat stopped; it is ignored.",
+            ],
+        ),
+    ],
+)
+def test_an_open_gate_names_a_stale_record_it_ignores(monkeypatch, state, expected):
+    assert _answered(monkeypatch, state) == expected
