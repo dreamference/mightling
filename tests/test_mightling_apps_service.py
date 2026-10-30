@@ -870,3 +870,29 @@ def test_the_credentials_folder_is_made_private_or_reported(monkeypatch, tmp_pat
     monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(blocked / "gmail"))
     assert credentials.GmailCredentials.ensure_directory() is False
     assert "Could not create" in capsys.readouterr().out
+
+
+def test_a_container_without_todays_secret_that_cannot_be_removed_is_not_doubled(
+    monkeypatch, staging
+):
+    monkeypatch.setattr(GoogleService, "problem", "")
+    fake = _docker(monkeypatch, "running", "PUFFIN_GMAIL_SECRET=old", failing=("rm",))
+    assert GoogleService.start() is False
+    assert (
+        GoogleService.problem
+        == f"Could not replace {GOOGLE_CONTAINER_NAME}, made before the rename."
+    )
+    assert not [c for c in fake.commands if c[:2] == ["docker", "run"]]
+
+
+def test_a_service_that_cannot_be_staged_starts_nothing_and_says_why(monkeypatch, staging):
+    import dreamference.chat.gmail_credentials as credentials
+
+    blocker = staging / "not-a-folder"
+    blocker.write_text("")
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(blocker))
+    monkeypatch.setattr(GoogleService, "problem", "")
+    fake = _docker(monkeypatch, "")
+    assert GoogleService.start() is False
+    assert GoogleService.problem.startswith("Could not stage the Google service:")
+    assert fake.commands == []
