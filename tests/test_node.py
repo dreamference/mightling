@@ -621,6 +621,31 @@ def test_avahi_is_found_on_the_path_or_in_sbin(monkeypatch, tmp_path):
     assert NodeAdvertiser.avahi_installed() is True
 
 
+def test_root_without_a_terminal_reads_no_input_and_a_missing_sudo_is_a_failure(monkeypatch):
+    from conftest import REAL_RUN_PRIVILEGED
+
+    from dreamference.node import node_advertiser
+    from dreamference.vllm_server.host_safety_setup import HostSafetySetup
+
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", REAL_RUN_PRIVILEGED)
+    monkeypatch.setattr(HostSafetySetup, "root_mode", classmethod(lambda cls, yes=False, helper=False: "sudo -n"))
+    ran = []
+
+    def run(argv, **kwargs):
+        ran.append((argv, kwargs.get("stdin")))
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(node_advertiser.subprocess, "run", run)
+    assert NodeAdvertiser.run_privileged(["true"], "test") is True
+    assert ran == [(["sudo", "-n", "true"], subprocess.DEVNULL)]
+
+    def missing(argv, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "sudo")
+
+    monkeypatch.setattr(node_advertiser.subprocess, "run", missing)
+    assert NodeAdvertiser.run_privileged(["true"], "test") is False
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
