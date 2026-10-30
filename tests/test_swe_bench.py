@@ -5572,11 +5572,12 @@ def test_only_loopback_and_this_machines_names_are_local(monkeypatch):
     assert SweBenchRunner.remote_server("http://node-b.local:8300")
 
 
-# -- image chunks, shards and their merge (150-task nights, 2026-10-20) ---------------------------
-
-def graded_batches(harness, since=0):
-    return [sorted(call[i + 1] for i, word in enumerate(call) if word == "-i")
-            for call in harness.calls[since:] if "-p" in call and "to-grade.jsonl" in call[call.index("-p") + 1]]
+def test_this_machines_name_with_a_trailing_dot_is_local(monkeypatch):
+    import socket
+    monkeypatch.setattr(socket, "gethostname", lambda: "gx10-1a2b")
+    monkeypatch.setattr(socket, "getfqdn", lambda: "gx10-1a2b")
+    for host in ("http://gx10-1a2b.:8000", "http://localhost.:8000", "http://GX10-1A2B.local.:8000"):
+        assert not SweBenchRunner.remote_server(host), host
 
 
 def test_the_image_chunk_defaults_to_25_and_is_read_from_the_config():
