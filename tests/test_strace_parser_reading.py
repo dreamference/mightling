@@ -57,3 +57,15 @@ def test_a_line_without_a_pid_is_still_read():
         'connect(3<TCP:[700]>, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("192.0.2.7")}, 16) = 0\n'
     )
     assert trace.destinations == {"192.0.2.7:443": 1}
+
+
+@pytest.mark.parametrize("label, address, target", [
+    ("UDPLITE", 'sin_port=htons(443), sin_addr=inet_addr("192.0.2.7")', "192.0.2.7:443"),
+    ("UDPLITEv6", 'sin6_port=htons(443), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "2001:db8::7", &sin6_addr), '
+     "sin6_scope_id=0", "[2001:db8::7]:443"),
+])
+def test_a_udp_lite_connect_with_nothing_sent_is_a_route_lookup(label, address, target):
+    family = "AF_INET6" if label.endswith("v6") else "AF_INET"
+    trace = StraceParser.parse(f"6 connect(8<{label}:[800]>, {{sa_family={family}, {address}}}, 28) = 0\n")
+    assert trace.route_lookups == {target: 1}
+    assert trace.destinations == {}
