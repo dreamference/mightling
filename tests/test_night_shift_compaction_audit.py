@@ -17,6 +17,7 @@ from dreamference.night_shift import (
     NightShiftRunner,
     NightShiftSettings,
 )
+from dreamference.night_shift import night_shift_compaction_audit as audit_module
 
 PATCH = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-a\n+b\n*** End Patch\n"
 
@@ -132,6 +133,53 @@ def test_runs_cover_the_time_since_the_previous_run(tmp_path):
     assert NightShiftCompactionAudit.run(sessions, night, now=now + 20)[0].startswith("2 compaction(s)")
     # The next run starts where that one stopped.
     assert NightShiftCompactionAudit.run(sessions, night, now=now + 30) == []
+
+
+def test_the_end_time_is_kept_in_the_queue_directory(tmp_path):
+    NightShiftCompactionAudit.run(tmp_path / "sessions", tmp_path / "night", now=1000.0)
+    assert (tmp_path / "night" / "compaction-audit.json").is_file()
+
+
+def test_at_most_400_rollouts_of_at_most_64_mb_are_read_the_newest_kept(tmp_path, monkeypatch):
+    assert (audit_module.MAX_ROLLOUTS, audit_module.MAX_ROLLOUT_BYTES) == (400, 64 * 1024 * 1024)
+    sessions = tmp_path / "sessions"
+    paths = [write_rollout(sessions, two_compactions(), name=f"rollout-{n}") for n in range(4)]
+    for n, path in enumerate(paths):
+        os.utime(path, (100 + n, 100 + n))
+    monkeypatch.setattr(audit_module, "MAX_ROLLOUTS", 2)
+    assert NightShiftCompactionAudit.rollouts(sessions, 0, 1000) == paths[2:]
+    monkeypatch.setattr(audit_module, "MAX_ROLLOUTS", 400)
+    monkeypatch.setattr(audit_module, "MAX_ROLLOUT_BYTES", paths[0].stat().st_size - 1)
+    paths[1].write_text("{}\n")
+    os.utime(paths[1], (101, 101))
+    assert NightShiftCompactionAudit.rollouts(sessions, 0, 1000) == [paths[1]]
+
+
+def test_the_report_names_at_most_20_compactions_and_counts_the_rest(tmp_path):
+    (first, _) = NightShiftCompactionAudit.audit_rollout(write_rollout(tmp_path / "sessions", two_compactions()))
+    lines = NightShiftCompactionAudit.render([first] * 25, 0)
+    assert len(lines) == 1 + 20 + 1
+    assert lines[-1] == "… and 5 more compaction(s) that lost something."
+    assert len(NightShiftCompactionAudit.render([first] * 20, 0)) == 1 + 20
+
+
+def test_cargo_jest_and_sympy_summaries_are_test_results_named_by_every_count(tmp_path):
+    cargo = "test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured"
+    jest = "Tests:       1 failed, 3 passed, 4 total"
+    sympy = "tests finished: 3 passed, 1 failed, in 0.50 seconds"
+    outputs = {
+        "cargo test": (f"running 4 tests\n{cargo}\n", cargo),
+        "npx jest": (f"{jest}\nTime:        1.2 s", jest),
+        "bin/test": (f"{sympy}\nDO *NOT* COMMIT!", sympy),
+    }
+    for command, (output, line) in outputs.items():
+        records = [*call("1", f"cd /repo && {command}", f"Process exited with code 1\n{output}"),
+                   *compacted("Tests: 3 passed so far.")]
+        (finding,) = NightShiftCompactionAudit.audit_rollout(write_rollout(tmp_path / command, records))
+        assert finding["lost"]["last test result"] == [line], command
+    names = NightShiftCompactionAudit.names_test
+    assert names("3 passed and 1 failed", "test result: FAILED. 3 passed; 1 failed; 0 ignored")
+    assert not names("3 passed", "test result: FAILED. 3 passed; 1 failed; 0 ignored")
 
 
 def test_an_empty_queue_still_reports_the_audit_and_switching_it_off_writes_nothing(tmp_path, monkeypatch):
