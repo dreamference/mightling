@@ -71,6 +71,10 @@ The rest are recorded here for the first time: the model server's `1.8.0` step a
   - Exactness check `ling-run --spec-check --max-context 262144` passed: speculative tokens and recurrent GDN state after rejections match plain single-token decode bit-for-bit.
   - `ling exec` with a workspace-write sandbox wrote and ran a file and its test through the model gate.
 
+### Recorded ideas
+
+- **Concurrency chosen during execution (the owner, 2026-10-30).** In `1.8.0` the number of concurrent sessions is fixed when the server starts: 4 by default, cut to 3, 2 or 1 with a warning when memory is short at start (the owner's decision of the same day). The 2.0 idea is to choose concurrency dynamically while the server runs: admit another session when memory and throughput allow it, hold new sessions back or park idle ones when memory tightens, and let clients that run several tasks (Night Shift, SWE-bench, `ling` with subagents) follow the number the engine can serve at that moment instead of a fixed `max_parallel`. It came from the 2026-10-30 bar night, where one GB10 used as a desktop had memory for 3 sessions but not 4. A paged KV and state pool is the likely precondition. Not specified yet.
+
 ### Open questions
 
 - How the two gates combine. The 2026-10-26 gate also asks for images and adapters, which the 2026-10-27 `1.8.0` gate does not name. As recorded on 2026-10-28 (`docs/dev/release-1.8.0.md`), `1.8.0` includes vision (`input_image`, `/model_info`), while unmerged LoRA serving in `ling-serve` ([DREAMFERENCE_MIGHTLING_ADAPTERS.md](./DREAMFERENCE_MIGHTLING_ADAPTERS.md) §9) waits for 2.0 and `DreamferenceCLIController._engine_for_adapters` keeps a node with installed adapters on SGLang. Structured output and `--api-key` are the other SGLang features `ling-serve` lacks.
