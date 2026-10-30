@@ -594,6 +594,34 @@ def test_a_serialization_that_fails_midway_leaves_no_tensors_file(tmp_path, monk
     assert not list(ModelDownloader.get_tensorized_dir(model_key).iterdir())
 
 
+def test_a_tensorization_whose_every_attempt_fails_reports_failure(tmp_path, monkeypatch, capsys):
+    # It returned True, the docstring's "present or successfully created", with nothing created.
+    import types
+
+    from dreamference.hardware import ModelDownloader
+    from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
+
+    model_key = "qwen3.8-27b-nvfp4-dflash2"
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    monkeypatch.setattr(ModelDownloader, "TENSORIZER_CACHE_HOME", tmp_path / "tensorizer")
+    monkeypatch.setattr(VLLMServerManager, "check_host_safety", classmethod(lambda cls: None))
+    monkeypatch.setattr(ModelDownloader, "is_model_downloaded", classmethod(lambda cls, *a, **k: True))
+    monkeypatch.setattr(
+        ModelDownloader, "get_model_snapshot_dir", classmethod(lambda cls, *a, **k: snapshot)
+    )
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "subprocess.run", lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr="")
+    )
+    # None in sys.modules makes the import raise ImportError: no local tensorizer.
+    monkeypatch.setitem(sys.modules, "tensorizer", None)
+
+    assert ModelDownloader.tensorize_model(model_key, force=True) is False
+    assert ModelDownloader.is_model_tensorized(model_key) is False
+    assert "normal download will be used" in capsys.readouterr().out
+
+
 def test_a_cached_model_is_sized_by_its_blobs_not_also_by_its_snapshot_links(monkeypatch):
     from dreamference.hardware import ModelDownloader
     from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
