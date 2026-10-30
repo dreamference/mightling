@@ -372,3 +372,46 @@ def test_a_purge_whose_box_cannot_be_cleaned_is_not_reported_removed(monkeypatch
     out = capsys.readouterr().out
     assert "✅" not in out and "Not removed" not in out
     assert RemoteSettings.read() is None, "the node's own records are gone all the same"
+
+
+# -- the CAA records --------------------------------------------------------------------------------
+
+ACCOUNT = "https://acme-v02.api.letsencrypt.org/acme/acct/1"
+
+
+def _caa_cloudflare(monkeypatch, existing, delete_status=200):
+    calls = []
+
+    def fake(cls, method, path, body=None):
+        calls.append((method, path.rsplit("/", 1)[-1], body))
+        if path.startswith("/zones?"):
+            return 200, {"result": [{"id": "z1"}]}
+        if method == "GET":
+            return 200, {"result": existing}
+        if method == "DELETE":
+            return delete_status, {}
+        return 200, {}
+
+    monkeypatch.setattr(RemotePublicCertificate, "_cloudflare", classmethod(fake))
+    return calls
+
+
+def test_a_caa_record_already_present_is_not_added_again_and_an_allowed_one_is_kept(monkeypatch):
+    kept, issuewild = RemotePublicCertificate.caa_records([ACCOUNT])
+    existing = [
+        {"id": "keep", "data": kept},
+        {"id": "old", "data": {"flags": 0, "tag": "issue", "value": "evil-ca.example"}},
+    ]
+    calls = _caa_cloudflare(monkeypatch, existing)
+    assert RemotePublicCertificate.ensure_caa(BOX, [ACCOUNT]) is True
+    changes = [(method, last, body and body["data"]) for method, last, body in calls[2:]]
+    assert changes == [("POST", "dns_records", issuewild), ("DELETE", "old", None)]
+
+
+def test_a_caa_record_that_cannot_be_deleted_fails_after_the_new_ones_went_in(monkeypatch, caplog):
+    stale = {"id": "old", "data": {"flags": 0, "tag": "issue", "value": "evil-ca.example"}}
+    calls = _caa_cloudflare(monkeypatch, [stale], delete_status=403)
+    with caplog.at_level("ERROR"):
+        assert RemotePublicCertificate.ensure_caa(BOX, [ACCOUNT]) is False
+    assert [method for method, *_ in calls[2:]] == ["POST", "POST", "DELETE"]
+    assert "kept an old CAA record" in caplog.text
