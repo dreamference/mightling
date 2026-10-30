@@ -1080,4 +1080,10 @@ mod tests {
         let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
         assert_eq!(found.results[0].published, None);
     }
+
+    #[test]
+    fn a_language_is_at_most_six_characters() {
+        assert!(SearchOptions::new(None, None, Some("de-chxyz")).is_err());
+        assert!(SearchOptions::new(None, None, Some("de-chx")).is_ok());
+    }
 }
