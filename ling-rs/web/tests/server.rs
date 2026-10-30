@@ -661,6 +661,11 @@ async fn fake_app_server(socket: &Path) -> tokio::sync::mpsc::UnboundedReceiver<
                 let (reply, mut replies) = tokio::sync::mpsc::unbounded_channel::<Value>();
                 tokio::spawn(async move {
                     while let Some(value) = replies.recv().await {
+                        // `null`: the server goes away, closing this connection.
+                        if value.is_null() {
+                            let _ = sink.close().await;
+                            break;
+                        }
                         if sink.send(Message::Text(value.to_string().into())).await.is_err() {
                             break;
                         }
@@ -1738,4 +1743,74 @@ async fn a_mini_app_first_launch_pairs_only_on_the_front_and_only_after_the_bot_
         .body(Body::empty())
         .unwrap();
     assert_eq!(call(&server, after_revoke).await.0, StatusCode::UNAUTHORIZED);
+}
+
+/// A browser's WebSocket on `/ws`, signed in with `cookie`.
+async fn connect(port: u16, cookie: &str) -> Browser {
+    let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let mut upgrade = format!("ws://127.0.0.1:{port}/ws").into_client_request_with_origin(port);
+    upgrade.headers_mut().insert(header::COOKIE, cookie.parse().unwrap());
+    let (websocket, _) = tokio_tungstenite::client_async(upgrade, tcp).await.unwrap();
+    let (sink, stream) = websocket.split();
+    Browser { sink, stream, next: 0 }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tab_answers_only_what_its_own_connection_asked_and_links_only_ask_folders() {
+    let scratch = scratch("ws-held");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let config = config(&scratch.dir, port, Vec::new());
+    let mut app_server = fake_app_server(&config.socket).await;
+    let server = Server::new(config).unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = tokio::spawn(server::serve(server.clone(), vec![listener], async move {
+        let _ = stopped.await;
+    }));
+    let cookie = sign_in(&server).await;
+    let mut browser = connect(port, &cookie).await;
+    browser.call(json!({ "type": "work/start" })).await;
+
+    // A Work thread opened in a project folder is not linked among the Ask folders.
+    let project = scratch.dir.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let opened = browser
+        .call(json!({ "type": "work/send", "message": { "id": 1, "method": "thread/start", "params": { "cwd": project.to_string_lossy() } } }))
+        .await;
+    assert_eq!(opened["result"], Value::Null, "{opened}");
+    let (frame, reply) = next_frame(&mut app_server).await;
+    assert_eq!(frame["method"], "thread/start");
+    reply.send(json!({ "id": 1, "result": { "thread": { "id": "thr-work-1" } } })).unwrap();
+    assert_eq!(browser.message().await["result"]["thread"]["id"], "thr-work-1");
+    assert!(server.ask_root().join("thr-work-1").symlink_metadata().is_err());
+
+    // A request asked on a connection the tab stopped takes no answer on the next one.
+    reply.send(json!({ "id": "ap-1", "method": "item/commandExecution/requestApproval", "params": {} })).unwrap();
+    assert_eq!(browser.message().await["id"], "ap-1");
+    assert_eq!(browser.call(json!({ "type": "work/stop" })).await["result"], Value::Null);
+    browser.call(json!({ "type": "work/start" })).await;
+    let stale = browser.call(json!({ "type": "work/send", "message": { "id": "ap-1", "result": { "decision": "approved" } } })).await;
+    assert!(stale.get("error").is_some(), "{stale}");
+
+    // Nor one asked on a connection the server closed.
+    browser.call(json!({ "type": "work/send", "message": { "id": 2, "method": "thread/list", "params": {} } })).await;
+    let (_, reply) = next_frame(&mut app_server).await;
+    reply.send(json!({ "id": "ap-2", "method": "item/commandExecution/requestApproval", "params": {} })).unwrap();
+    assert_eq!(browser.message().await["id"], "ap-2");
+    reply.send(Value::Null).unwrap();
+    loop {
+        let frame = browser.frame().await;
+        if frame.pointer("/event/channel") == Some(&json!("work://exit")) {
+            break;
+        }
+    }
+    browser.call(json!({ "type": "work/start" })).await;
+    let stale = browser.call(json!({ "type": "work/send", "message": { "id": "ap-2", "result": { "decision": "approved" } } })).await;
+    assert!(stale.get("error").is_some(), "{stale}");
+    // The new connection works, and nothing stale reached it.
+    browser.call(json!({ "type": "work/send", "message": { "id": 3, "method": "thread/list", "params": {} } })).await;
+    assert_eq!(next_frame(&mut app_server).await.0["id"], 3);
+
+    let _ = stop.send(());
+    serving.await.unwrap().unwrap();
 }
