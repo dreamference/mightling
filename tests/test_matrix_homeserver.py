@@ -697,3 +697,20 @@ def test_the_homeserver_runs_with_no_federation_no_previews_and_a_kept_volume():
     }
     assert argv[argv.index("--restart") + 1] == "unless-stopped"
     assert argv[argv.index("-v") + 1] == f"{mh.MATRIX_VOLUME}:/var/lib/tuwunel"
+
+
+def test_the_loopback_proxy_points_at_the_address_docker_gives_the_container(machine):
+    # On the sidecar network (push on) the container has no fixed address: the proxy follows
+    # whatever Docker reports, not the internal network's address.
+    real = machine.run
+
+    def run(argv, timeout=120, env=None):
+        result = real(argv, timeout, env)
+        if argv[:3] == ["docker", "inspect", "-f"] and "IPAddress" in argv[3] and result.stdout:
+            return subprocess.CompletedProcess(argv, 0, "172.20.0.7 ", "")
+        return result
+
+    machine.run = run
+    assert MatrixHomeserver.start() == 0
+    service = pathlib.Path(MatrixHomeserver.unit_dir(), mh.PROXY_SERVICE_UNIT).read_text()
+    assert f"ExecStart={mh.SOCKET_PROXYD} 172.20.0.7:{mh.MATRIX_PORT}" in service
