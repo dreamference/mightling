@@ -1612,6 +1612,34 @@ def test_a_free_lane_is_one_with_fewer_tasks_of_its_own_than_it_holds(fake_host,
     assert hosts == ["http://x", REPLICA["host"]]
 
 
+def test_a_wait_after_a_start_is_noted_again(fake_host, monkeypatch):
+    # Waiting, a start, then the same wait: two waits, each in the report.
+    import threading
+    from dreamference.night_shift.night_shift_best_of_n import NightShiftBestOfN
+    reasons = iter(["a Mightling session is open", None, "a Mightling session is open"])
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
+    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(lambda seconds: clock.update(now=clock["now"] + seconds)))
+    monkeypatch.setattr(NightShiftRunner, "start_blocker", classmethod(
+        lambda cls, *args, **kwargs: next(reasons, "a Mightling session is open")))
+
+    class Run:
+        in_model = False
+        current_unit = None
+
+        def __init__(self):
+            self.stop_event = threading.Event()
+
+        def run(self):
+            pass
+    monkeypatch.setattr(NightShiftBestOfN, "task_run", classmethod(lambda cls, *args, **kwargs: Run()))
+    notes = []
+    NightShiftRunner.schedule(Path("/nonexistent"), [{"id": "t0", "repo": "r"}, {"id": "t1", "repo": "r"}],
+                              NightShiftSettings({}), "ling", "http://x", datetime.fromtimestamp(1030.0).astimezone(),
+                              1, notes)
+    assert len([note for note in notes if "waiting to start" in note]) == 2, notes
+
+
 @pytest.fixture
 def two_nodes(setup, fake_host, monkeypatch):
     """This machine as both sender and node: the pairing reaches `serve-job` in this process, and
