@@ -16,3 +16,13 @@ def test_a_profile_that_cannot_be_read_is_skipped_and_the_rest_still_count(machi
     assert SandboxPrerequisite.profiles_attaching("/usr/bin/bwrap") == [
         str(machine["profiles"] / "local-bwrap")
     ]
+
+
+def test_a_closed_input_is_not_now_and_nothing_runs_as_root(machine, monkeypatch):  # noqa: F811
+    def closed(prompt=""):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", closed)
+    assert SandboxPrerequisite.gate("server", "start") is True
+    assert machine["root"] == []
+    assert not SandboxPrerequisite.decision_path().exists()
