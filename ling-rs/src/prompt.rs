@@ -1003,4 +1003,10 @@ mod tests {
         let given: Vec<OsString> = vec!["ling".into(), "-c".into(), "model_catalog_json = \"/mine.json\"".into()];
         assert_eq!(with_catalog(given.clone(), Path::new("/h/model_catalog.high-swe.json")), given);
     }
+
+    #[test]
+    fn a_session_that_is_not_interactive_prints_no_prompt_line() {
+        let resolved = Resolved { prompt: Prompt::high_swe(), source: Source::Environment, skipped: Vec::new() };
+        assert!(startup_lines(&resolved, false).is_empty());
+    }
 }
