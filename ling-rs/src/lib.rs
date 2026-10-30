@@ -2119,6 +2119,7 @@ mod tests {
             parsed.get("chatgpt_base_url").and_then(toml::Value::as_str),
             Some(OFFLINE_CHATGPT_BASE_URL)
         );
+        assert_eq!(parsed.get("suppress_unstable_features_warning").and_then(toml::Value::as_bool), Some(true));
         let tui = parsed.get("tui").and_then(toml::Value::as_table);
         assert!(tui.is_some_and(|tui| !tui.contains_key("model_catalog_json")));
         let base_url = parsed
