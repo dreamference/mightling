@@ -1,6 +1,7 @@
 """Removing what the retired Onyx web chat left, in two separately confirmed steps
 (specs/DREAMFERENCE_MIGHTLING_ASK.md §10, Phase C). Docker is a recorder; nothing is removed."""
 
+import pathlib
 import subprocess
 
 import pytest
@@ -239,3 +240,146 @@ def test_removing_without_docker_says_so_instead_of_failing_with_a_traceback(mon
     monkeypatch.setattr(subprocess, "run", no_docker)
     assert RetiredWebChat.remove(yes=True) == 1
     assert "Docker could not be run" in capsys.readouterr().out
+
+
+def test_tagged_onyx_images_are_removed_by_name_and_only_untagged_ones_by_id(deployment):
+    # By id, `docker rmi` would refuse an image another tag of which is still used.
+    _, fake = deployment
+    fake.images.append("onyxdotapp/onyx-backend:<none>")
+    assert RetiredWebChat.images() == ["onyxdotapp/onyx-backend:v4.5", "onyxdotapp/onyx-web-server:v4.5",
+                                       _image_id("onyxdotapp/onyx-backend:<none>")]
+
+
+def test_a_former_sidecar_that_is_not_there_is_no_orphan(deployment):
+    _, fake = deployment
+    del fake.sidecars["dreamference-image-search"]
+    assert RetiredWebChat.orphan_sidecars() == []
+
+
+def test_containers_compose_could_not_remove_are_reported_and_the_data_is_not_offered(deployment, monkeypatch, capsys):
+    _, fake = deployment
+
+    def stuck(argv, **kwargs):
+        result = fake(argv, **kwargs)
+        fake.containers = ["puffin-api_server-1"]
+        return result
+
+    monkeypatch.setattr(subprocess, "run", stuck)
+    asked = []
+    assert RetiredWebChat.remove(yes=True, ask=lambda question: asked.append(question) or True) == 1
+    assert "Some containers are still there: puffin-api_server-1" in capsys.readouterr().out
+    assert asked == [] and fake.volumes
+
+
+@pytest.mark.parametrize("left", ["images", "orphans", "networks"])
+def test_each_kind_of_data_left_alone_is_still_offered_for_deletion(deployment, left):
+    _, fake = deployment
+    fake.containers, fake.volumes = [], []
+    if left != "images":
+        fake.images = ["postgres:15.2-alpine"]
+    if left != "orphans":
+        fake.sidecars["dreamference-image-search"] = SIDECAR_NETWORK
+        fake.on_network = {}
+    if left != "networks":
+        fake.networks = []
+    asked = []
+    assert RetiredWebChat.remove(ask=lambda question: asked.append(question) or True) == 0
+    assert len(asked) == 1
+    assert fake.images == ["postgres:15.2-alpine"] and fake.networks == []
+    if left == "orphans":
+        assert fake.sidecars == {"dreamference-stt": SIDECAR_NETWORK}
+
+
+def _at_terminal(monkeypatch, answer):
+    monkeypatch.setattr(retired_web_chat.sys, "stdin", type("T", (), {"isatty": staticmethod(lambda: True)})())
+    terminal = {"isatty": staticmethod(lambda: True), "write": lambda self, text: None, "flush": lambda self: None}
+    monkeypatch.setattr(retired_web_chat.sys, "stdout", type("T", (), terminal)())
+    monkeypatch.setattr("builtins.input", answer)
+
+
+def test_without_a_terminal_the_answer_is_no_and_nothing_is_read(monkeypatch):
+    monkeypatch.setattr(retired_web_chat.sys, "stdin", type("T", (), {"isatty": staticmethod(lambda: False)})())
+
+    def no_input(question):
+        raise AssertionError("read an answer without a terminal")
+
+    monkeypatch.setattr("builtins.input", no_input)
+    assert RetiredWebChat._ask_terminal("Remove? ") is False
+
+
+@pytest.mark.parametrize(("typed", "yes"), [("y", True), (" YES\n", True), ("Y", True), ("", False), ("no", False)])
+def test_only_y_or_yes_in_any_case_counts_as_yes(monkeypatch, typed, yes):
+    _at_terminal(monkeypatch, lambda question: typed)
+    assert RetiredWebChat._ask_terminal("Remove? ") is yes
+
+
+def test_a_closed_terminal_answers_no(monkeypatch):
+    def closed(question):
+        raise EOFError
+
+    _at_terminal(monkeypatch, closed)
+    assert RetiredWebChat._ask_terminal("Remove? ") is False
+
+
+@pytest.fixture
+def offer(deployment, monkeypatch):
+    from conftest import REAL_RETIRED_OFFER
+
+    monkeypatch.setattr(RetiredWebChat, "offer", REAL_RETIRED_OFFER)
+    asked = []
+
+    def at_terminal(command, answers=("n", "n")):
+        # In the test itself: pytest puts its own stdout back after the fixtures are set up.
+        replies = iter(answers)
+        _at_terminal(monkeypatch, lambda question: asked.append(question) or next(replies))
+        RetiredWebChat.offer(command)
+        return asked
+
+    return deployment[1], at_terminal
+
+
+def test_a_decision_file_that_does_not_say_declined_still_lets_the_offer_ask(offer):
+    _, at_terminal = offer
+    pathlib.Path(retired_web_chat.DECISION_FILE).write_text('{"declined": false}')
+    assert len(at_terminal("status")) == 1
+
+
+def test_chat_makes_its_own_offer(offer):
+    fake, at_terminal = offer
+    assert at_terminal("chat") == [] and fake.commands == []
+
+
+def test_no_offer_without_the_deployment_folder_even_at_a_terminal(offer, monkeypatch, tmp_path):
+    fake, at_terminal = offer
+    monkeypatch.setattr(retired_web_chat, "ONYX_DEPLOYMENT_DIR", str(tmp_path / "absent"))
+    assert at_terminal("status") == [] and fake.commands == []
+    assert RetiredWebChat.describe()[-1] == "Deployment folder: none (left as it is)"
+
+
+def test_no_offer_once_the_containers_are_gone(offer):
+    # `chat remove` deletes the data the user keeps; the offer is about the running containers.
+    fake, at_terminal = offer
+    fake.containers = []
+    assert at_terminal("status") == []
+
+
+def test_an_offer_that_could_not_ask_is_made_again(offer, monkeypatch):
+    fake, at_terminal = offer
+    calls = []
+
+    def docker_away_once(argv, **kwargs):
+        if argv[:2] == ["docker", "ps"]:
+            calls.append(argv)
+            if len(calls) == 2:
+                raise OSError("Docker is restarting")
+        return fake(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", docker_away_once)
+    assert at_terminal("status") == [] and not RetiredWebChat._declined()
+
+
+def test_an_offer_taken_is_not_remembered_as_declined(offer):
+    fake, at_terminal = offer
+    assert len(at_terminal("status", answers=("y", "n"))) == 2
+    assert fake.containers == [] and fake.volumes
+    assert not RetiredWebChat._declined()
