@@ -1717,6 +1717,9 @@ def test_only_a_job_repository_can_be_pushed_to_or_fetched_from(monkeypatch, cap
         "jobs/x",
         "/etc/passwd",
         "~/.mightling",
+        "calc-0123456789.git",
+        "x/jobs/calc-0123456789.git",
+        "../jobs/calc-0123456789.git",
     ):
         assert NodeServe.serve(f"git-receive-pack '{path}'") == 2, path
         assert NodeServe.serve(f"git-upload-pack '{path}'") == 2, path
