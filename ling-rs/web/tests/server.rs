@@ -1781,3 +1781,70 @@ async fn a_sync_agents_secret_opens_nothing_outside_the_hub() {
         assert_eq!(call(&server, get).await.0, StatusCode::UNAUTHORIZED, "{path}");
     }
 }
+
+fn sync_pair(code: &str) -> Request<Body> {
+    request("POST", "/api/sync/pair")
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "code": code, "name": "laptop-sync" }).to_string()))
+        .unwrap()
+}
+
+fn wrong_code(code: &str) -> &'static str {
+    if code == "00000000" { "11111111" } else { "00000000" }
+}
+
+#[tokio::test]
+async fn the_count_of_wrong_codes_starts_again_after_ten_withdraw_the_pending_ones() {
+    let scratch = scratch("guess-again");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    for _ in 0..auth::PAIRING_ATTEMPTS {
+        assert_eq!(call(&server, pair_form("00000000", "x")).await.0, StatusCode::UNAUTHORIZED);
+    }
+    // A code issued afterwards outlives one more wrong guess.
+    let code = auth::issue_pairing_code(&server.config.state_dir).unwrap();
+    assert_eq!(call(&server, pair_form(wrong_code(&code), "x")).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(call(&server, pair_form(&code, "phone")).await.0, StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn a_right_code_starts_the_count_of_wrong_ones_again() {
+    let scratch = scratch("guess-reset");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let state = server.config.state_dir.clone();
+    hub_on(&server);
+    let code = auth::issue_pairing_code(&state).unwrap();
+    for _ in 0..auth::PAIRING_ATTEMPTS - 1 {
+        assert_eq!(call(&server, pair_form(wrong_code(&code), "x")).await.0, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(call(&server, pair_form(&code, "phone")).await.0, StatusCode::SEE_OTHER);
+    let code = auth::issue_pairing_code(&state).unwrap();
+    assert_eq!(call(&server, pair_form(wrong_code(&code), "x")).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(call(&server, pair_form(&code, "laptop")).await.0, StatusCode::SEE_OTHER, "the form's own success");
+
+    // The same for a sync agent paired with the hub.
+    for _ in 0..auth::PAIRING_ATTEMPTS - 1 {
+        assert_eq!(call(&server, pair_form("00000000", "x")).await.0, StatusCode::UNAUTHORIZED);
+    }
+    let code = auth::issue_pairing_code(&state).unwrap();
+    assert_eq!(call(&server, sync_pair(&code)).await.0, StatusCode::OK);
+    let code = auth::issue_pairing_code(&state).unwrap();
+    assert_eq!(call(&server, pair_form(wrong_code(&code), "x")).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(call(&server, pair_form(&code, "tablet")).await.0, StatusCode::SEE_OTHER, "the hub's success");
+}
+
+#[tokio::test]
+async fn wrong_codes_sent_to_the_hub_count_toward_the_ten() {
+    let scratch = scratch("guess-hub");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    hub_on(&server);
+    let code = auth::issue_pairing_code(&server.config.state_dir).unwrap();
+    for _ in 0..auth::PAIRING_ATTEMPTS {
+        assert_eq!(call(&server, sync_pair(wrong_code(&code))).await.0, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(call(&server, sync_pair(&code)).await.0, StatusCode::UNAUTHORIZED, "the right code no longer works");
+}
+
+fn hub_on(server: &Arc<Server>) {
+    ling_web_server::sync_store::set_enabled(&server.config.codex_home, true).unwrap();
+}
