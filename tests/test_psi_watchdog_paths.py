@@ -81,6 +81,14 @@ def test_avg10_at_the_default_limit_starts_the_spike_clock(pressure_file, monkey
     assert no_docker_cli == []
 
 
+def test_avg60_at_the_default_floor_trips_at_once(pressure_file, monkeypatch, no_docker_cli):
+    pressure_file.write_text("full avg10=0.00 avg60=25.00 avg300=0.00 total=1\n")
+    monkeypatch.setattr(MemoryPressureWatchdog, "_kill", lambda self: True)
+    wd = MemoryPressureWatchdog("test-container")
+    assert wd._sample(None) is None
+    assert wd.tripped is True
+
+
 def test_the_cgroup_is_found_from_the_container_id_and_probed(tmp_path, monkeypatch):
     procs = tmp_path / "docker" / "abc123" / "cgroup.procs"
     procs.parent.mkdir(parents=True)
