@@ -594,4 +594,12 @@ mod tests {
         let plan = plan_drop(&policy, &items, &DropState::default(), 44_000);
         assert_eq!((plan.newly.len(), plan.saving, plan.accepted), (0, 0, false));
     }
+
+    #[test]
+    fn nothing_to_drop_never_replaces_the_summary_even_under_the_target() {
+        let items: Vec<Value> = history(12, 5).into_iter().map(|e| e.item).collect();
+        let plan = plan_drop(&policy(), &items, &DropState::default(), 1_000);
+        assert!(plan.newly.is_empty());
+        assert!(!plan.accepted);
+    }
 }
