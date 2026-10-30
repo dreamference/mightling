@@ -16,11 +16,14 @@ from dreamference.audit.sync_egress_audit import EXEC_ID, THREAD_ID
 PORT = 41234
 
 
-@pytest.mark.parametrize("files, published, exec_held", [
-    ([], False, True),
-    ([f"{THREAD_ID}.json", f"{EXEC_ID}.json"], True, False),
-    ([f"{THREAD_ID}.json", f"{EXEC_ID}.jsonl"], True, False),
-])
+@pytest.mark.parametrize(
+    "files, published, exec_held",
+    [
+        ([], False, True),
+        ([f"{THREAD_ID}.json", f"{EXEC_ID}.json"], True, False),
+        ([f"{THREAD_ID}.json", f"{EXEC_ID}.jsonl"], True, False),
+    ],
+)
 def test_the_hub_is_read_for_the_published_thread_and_the_held_exec_session(
     tmp_path, monkeypatch, files, published, exec_held
 ):

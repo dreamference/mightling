@@ -27,7 +27,10 @@ def test_the_docs_audit_names_every_name_it_asked_a_resolver_for():
 def test_the_docs_audit_without_a_process_traced_is_a_failed_trace_not_a_pass():
     # A clean trace of nothing proves nothing: strace never attached.
     verdict = DocsEgressAudit.judge(EgressTrace(), indexed=True, found=True)
-    assert (verdict.status, verdict.problems) == (TRACE_FAILED, ["strace recorded no process: it could not attach"])
+    assert (verdict.status, verdict.problems) == (
+        TRACE_FAILED,
+        ["strace recorded no process: it could not attach"],
+    )
 
 
 def test_the_loopback_allowlist_is_the_model_server_and_the_services_on_their_own_ports():
@@ -63,7 +66,10 @@ urllib.request.urlopen(preview + "seen", timeout=5).read()
     # The machine's own services are not asked which bridges are enabled.
     monkeypatch.setattr(EgressAudit, "declared_exceptions", classmethod(lambda cls: []))
     code = EgressAudit.run(
-        mightling_bin="/opt/ling", vllm_host="http://localhost:8000", app=True, app_bin="/opt/Mightling"
+        mightling_bin="/opt/ling",
+        vllm_host="http://localhost:8000",
+        app=True,
+        app_bin="/opt/Mightling",
     )
     out = capsys.readouterr().out
     # The connect was read, and allowed only as the preview page.
