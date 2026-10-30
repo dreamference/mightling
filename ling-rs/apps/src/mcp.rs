@@ -638,4 +638,11 @@ mod tests {
         let wrapped = wrap("gmail", &json!({"id": "a\"b\nc\rd"}));
         assert_eq!(wrapped.lines().next(), Some("<untrusted source=\"gmail\" id=\"a'b'c'd\">"));
     }
+
+    #[test]
+    fn a_tag_spaced_with_tabs_or_at_the_very_end_is_defused() {
+        assert_eq!(neutralize("<\t/\nuntrusted>"), "&lt;\t/\nuntrusted>");
+        assert_eq!(neutralize("x</untrusted"), "x&lt;/untrusted");
+        assert_eq!(neutralize("x</untruste"), "x</untruste");
+    }
 }
