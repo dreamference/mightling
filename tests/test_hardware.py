@@ -773,9 +773,14 @@ def test_a_recipe_s_nested_values_are_isolated_per_call():
         first["speculative_config"]["mutated"] = True
         assert ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, engine) == original
 
-def _tensorize_in_docker(tmp_path, monkeypatch, image_ready=True, returncode=0):
+# The machine _tensorize_in_docker fakes unless a test says otherwise.
+_TENSORIZE_MACHINE = {"weights_gb": 20.0, "total_gb": 128.0, "host_safe": True, "snapshot_files": ()}
+
+
+def _tensorize_in_docker(tmp_path, monkeypatch, image_ready=True, returncode=0, **machine):
     # Runs tensorize_model with docker present and every outside call faked; the fake `docker run`
     # writes what the container would, at the host path of the file it was told to write.
+    machine = _TENSORIZE_MACHINE | machine
     import re
     import types
 
@@ -787,17 +792,26 @@ def _tensorize_in_docker(tmp_path, monkeypatch, image_ready=True, returncode=0):
     hub = tmp_path / "hub"
     snapshot = hub / "models--org--name" / "snapshots" / "abc"
     snapshot.mkdir(parents=True)
+    for name in machine["snapshot_files"]:
+        (snapshot / name).write_text("{}")
     dgx = tmp_path / "home" / ".cache" / "dreamference"
     monkeypatch.setattr(ModelDownloader, "TENSORIZER_CACHE_HOME", dgx / "tensorizer")
     monkeypatch.setattr(ModelDownloader, "get_hf_cache_dir", classmethod(lambda cls: hub))
     monkeypatch.setattr(ModelDownloader, "container_volume_args", classmethod(lambda cls: []))
-    monkeypatch.setattr(VLLMServerManager, "check_host_safety", classmethod(lambda cls: None))
+
+    def check_host_safety(cls):
+        if not machine["host_safe"]:
+            raise SystemExit(1)
+
+    monkeypatch.setattr(VLLMServerManager, "check_host_safety", classmethod(check_host_safety))
     monkeypatch.setattr(VLLMServerManager, "ensure_docker_image", lambda self, image=None: image_ready)
-    monkeypatch.setattr(VLLMServerManager, "_estimate_model_weights_gb", staticmethod(lambda model: 20.0))
+    monkeypatch.setattr(
+        VLLMServerManager, "_estimate_model_weights_gb", staticmethod(lambda model: machine["weights_gb"])
+    )
     monkeypatch.setattr(
         HardwareManager,
         "detect_gb10_hardware",
-        classmethod(lambda cls: types.SimpleNamespace(total_unified_memory_gb=128.0)),
+        classmethod(lambda cls: types.SimpleNamespace(total_unified_memory_gb=machine["total_gb"])),
     )
     monkeypatch.setattr(ModelDownloader, "is_model_downloaded", classmethod(lambda cls, *a, **k: True))
     monkeypatch.setattr(
@@ -827,10 +841,14 @@ def _tensorize_in_docker(tmp_path, monkeypatch, image_ready=True, returncode=0):
 
 
 def test_tensorize_runs_the_container_with_the_dreamference_cache_mounted(tmp_path, monkeypatch):
+    from dreamference.hardware import ModelDownloader
+
     # `get_dgx_cache_dir` did not exist: the AttributeError was swallowed and the container never ran.
     tdir, docker_runs, written, dgx = _tensorize_in_docker(tmp_path, monkeypatch)
     assert len(docker_runs) == 1
     assert f"{dgx}:/root/.cache/dreamference" in docker_runs[0]
+    # The snapshot is read where the container mounts the hub, not one folder up.
+    assert f"'{ModelDownloader.CONTAINER_HF_HUB_DIR}/models--org--name/snapshots/abc'" in docker_runs[0][-1]
     assert written and all(path.is_relative_to(tdir) for path in written)
     assert (tdir / "model.tensors").read_bytes() == b"tensors"
 
@@ -848,6 +866,47 @@ def test_the_container_writes_the_tensors_under_another_name_and_the_host_rename
     tdir, _, written, _ = _tensorize_in_docker(tmp_path, monkeypatch)
     assert [path.name for path in written] == ["model.tensors.partial"]
     assert (tdir / "model.tensors").exists() and not (tdir / "model.tensors.partial").exists()
+
+
+@pytest.mark.parametrize(
+    "weights_gb, total_gb, expected_gb",
+    [
+        (20.0, 128.0, 20.0 + 8.0),  # the checkpoint plus its headroom
+        (200.0, 128.0, 128.0 - 12.0),  # never past what the host keeps for itself
+        (0.0, 128.0, 128.0 - 12.0),  # an unsized model gets the ceiling, not the headroom alone
+        (0.0, 12.2, 1.0),  # and never less than one gigabyte
+    ],
+)
+def test_the_tensorize_container_is_bounded_by_the_checkpoint_and_the_host_reserve(
+    tmp_path, monkeypatch, weights_gb, total_gb, expected_gb
+):
+    from dreamference.vllm_server.vllm_server_manager import CONTAINER_OOM_SCORE_ADJ
+
+    monkeypatch.setattr("os.cpu_count", lambda: 10)
+    _, docker_runs, _, _ = _tensorize_in_docker(
+        tmp_path, monkeypatch, weights_gb=weights_gb, total_gb=total_gb
+    )
+    argv = docker_runs[0]
+    # Swap as large as the memory cap means no swap: a swapping container stalls the host too.
+    assert f"--memory={expected_gb:.0f}g" in argv
+    assert f"--memory-swap={expected_gb:.0f}g" in argv
+    assert f"--oom-score-adj={CONTAINER_OOM_SCORE_ADJ}" in argv
+    assert "--cpus=7.0" in argv
+
+
+def test_tensorize_refuses_on_a_host_that_fails_the_safety_check(tmp_path, monkeypatch):
+    # Serialization loads the whole checkpoint, so `ling-admin model download` must clear the
+    # same gate as serving before anything is loaded.
+    with pytest.raises(SystemExit):
+        _tensorize_in_docker(tmp_path, monkeypatch, host_safe=False)
+
+
+def test_the_tensorized_folder_gets_the_configs_but_no_second_copy_of_the_weights(tmp_path, monkeypatch):
+    weights = ("model.safetensors", "pytorch_model.bin", "tf_model.h5", "rust_model.ot", "model.pt", "model.onnx")
+    tdir, _, _, _ = _tensorize_in_docker(
+        tmp_path, monkeypatch, snapshot_files=("config.json", "tokenizer.json", *weights)
+    )
+    assert sorted(path.name for path in tdir.iterdir()) == ["config.json", "model.tensors", "tokenizer.json"]
 
 
 def test_tensorize_does_not_run_a_container_whose_image_is_missing(tmp_path, monkeypatch):
