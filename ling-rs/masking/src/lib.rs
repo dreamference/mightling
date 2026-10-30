@@ -871,4 +871,10 @@ mod tests {
         assert_eq!(saving_tokens(&values[2], &dir), 0);
         assert_eq!(plan_move(&policy(), &values, &State::default(), 1_000_000, &dir), Some(vec![]));
     }
+
+    #[test]
+    fn blank_lines_are_not_the_first_or_last_line_kept() {
+        let text = placeholder("\n\n  \nfirst line\n\nlast line\n\n", Path::new("/m/outputs/c.txt"));
+        assert_eq!(text.lines().skip(1).collect::<Vec<_>>(), ["first line", "… last line"]);
+    }
 }
