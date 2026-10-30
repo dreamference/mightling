@@ -45,6 +45,8 @@ DEFAULT_USE_TENSORIZER: Final[bool] = False
 # Whether the Mightling agent's prompt advertises `ling-admin gmail` when an account is connected.
 # Read by the Rust launcher too (DREAMFERENCE_MIGHTLING_GMAIL, then `mightling_gmail` in the TOML file).
 DEFAULT_MIGHTLING_GMAIL: Final[bool] = True
+# A repository's own file may only turn it off (owner decision 2026-10-30); the user's file decides.
+GMAIL_KEY: Final[str] = "mightling_gmail"
 # Whether the Mightling agent is handed a rule-built ledger (files, failed commands, last test result)
 # after each compaction (specs/DREAMFERENCE_MIGHTLING_COMPACTION.md §10.1). Read by the Rust launcher
 # (DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER, then `mightling_compaction_ledger` in the TOML file); a test
@@ -141,6 +143,7 @@ class DreamferenceConfig:
         self._repository_file: bool = ConfigPathResolver.is_repository_file(self.config_file_path, config_file)
         if self._repository_file:
             self._take_network_keys_from_user_file()
+            self._let_repository_turn_gmail_only_off()
 
         # The values another source supplied (the environment, or the user's own file in place of
         # a repository's host), which save_config() leaves as the file held them.
@@ -548,6 +551,19 @@ class DreamferenceConfig:
                 self._warn_ignored(key)
             if key in user_data:
                 self.file_data[key] = user_data[key]
+
+    def _let_repository_turn_gmail_only_off(self) -> None:
+        """Keep a repository's `mightling_gmail = false` and ignore its `true` (owner decision 2026-10-30).
+
+        A clone ships this file and the agent can write it, so it must not reopen Gmail after the
+        user closed it. The user's own file decides, unless the repository's closes it.
+        """
+        if self.file_data.get(GMAIL_KEY) is False:
+            return
+        self.file_data.pop(GMAIL_KEY, None)
+        user_data = ConfigFileStorageManager.load_config_dict(ConfigPathResolver.user_path())
+        if GMAIL_KEY in user_data:
+            self.file_data[GMAIL_KEY] = user_data[GMAIL_KEY]
 
     def _warn_ignored(self, key: str) -> None:
         """Say once per process, file and key that a repository's network key was not used.
