@@ -526,4 +526,13 @@ mod tests {
         let ledger = Ledger::from_rollout(&rollout, &dir, Some(""));
         assert_eq!(ledger.failed.iter().map(|(code, _)| *code).collect::<Vec<_>>(), vec![3, 4, 5, 6, 7]);
     }
+
+    #[test]
+    fn a_status_line_names_the_path_after_a_rename_without_quotes() {
+        let dir = scratch("status");
+        let ledger = Ledger::from_rollout("", &dir, Some(" M a.py\n\n?? b.py\n"));
+        assert_eq!(ledger.changed, vec![" M a.py", "?? b.py"]);
+        assert_eq!(status_path("R  old.py -> new.py"), "new.py");
+        assert_eq!(status_path("?? \"a b.py\""), "a b.py");
+    }
 }
