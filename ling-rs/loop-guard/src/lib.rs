@@ -578,4 +578,33 @@ mod tests {
         assert_eq!(found.kind, Kind::Periodic { period: 48, count: 4 });
         assert_eq!(found.cut, "Start.".len() + block.len());
     }
+
+    #[test]
+    fn compression_is_checked_when_the_window_fills_and_every_64_bytes_after() {
+        let t = Thresholds {
+            max_run: 0,
+            max_char_run: 0,
+            min_count: 1000,
+            compression_window: 128,
+            min_compression_ratio: 0.8,
+            ..defaults()
+        };
+        // Printable noise does not deflate below the ratio; half a window of one letter does.
+        let mut seed = 7u32;
+        let noise: String = (0..128)
+            .map(|_| {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                char::from(b'!' + ((seed >> 16) % 94) as u8)
+            })
+            .collect();
+        let mut d = Detector::new(t);
+        let mut found = None;
+        for c in noise.chars().chain("a".repeat(200).chars()) {
+            found = found.or(d.push(&c.to_string()));
+        }
+        let found = found.expect("a loop");
+        assert_eq!(found.kind.name(), "compression", "{found:?}");
+        // Checked at 128 bytes (noise, passes) and at 192: the window then starts at 64.
+        assert_eq!(found.cut, 64, "{found:?}");
+    }
 }
