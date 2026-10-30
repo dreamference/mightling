@@ -244,7 +244,7 @@ def test_a_task_from_another_machine_never_gets_the_owners_test(setup, monkeypat
 
 
 def test_tests_the_window_cut_off_leave_the_task_interrupted_not_committed(setup, monkeypatch):
-    status, record, run = run_task(setup, monkeypatch, "change", deadline_s=3, test="sleep 30")
+    status, _record, run = run_task(setup, monkeypatch, "change", deadline_s=3, test="sleep 30")
     assert status == "interrupted" and run.worktree.is_dir()
     assert "night:" not in git(setup["repo"], "log", "--format=%s", "night/20261001-0100-abc").stdout
 
@@ -343,6 +343,7 @@ def test_a_commands_output_replaces_the_last_unless_appended(setup):
 
 
 def test_a_command_that_ignores_the_stop_is_killed(setup, monkeypatch):
+    import contextlib
     import signal
 
     import dreamference.night_shift.night_shift_task_run as task_run_module
@@ -358,15 +359,13 @@ def test_a_command_that_ignores_the_stop_is_killed(setup, monkeypatch):
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
     finally:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
 
 
 def test_stopping_a_command_stops_the_processes_it_started(setup):
+    import contextlib
     import signal
-
     record = queue(setup["night"], setup["repo"])
     run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() - 1)
     pid_file = setup["night"] / "pid"
@@ -383,10 +382,8 @@ def test_stopping_a_command_stops_the_processes_it_started(setup):
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
     finally:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
 
 
 def test_a_running_task_keeps_only_what_is_left_of_its_memory_allowance(fake_host, monkeypatch):
@@ -1360,6 +1357,7 @@ def test_the_window_closing_stops_the_running_task_and_leaves_the_rest_queued(fa
     # A task stops at its own timeout or the window's end, whichever comes first; at the window's
     # end the running one is asked to stop and the ones not started stay queued.
     import threading
+
     from dreamference.night_shift.night_shift_best_of_n import NightShiftBestOfN
     runs = []
 
@@ -1379,7 +1377,8 @@ def test_the_window_closing_stops_the_running_task_and_leaves_the_rest_queued(fa
         return runs[-1]
     clock = {"now": 1000.0}
     monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
-    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(lambda seconds: clock.update(now=clock["now"] + seconds)))
+    monkeypatch.setattr(NightShiftRunner, "sleep",
+                        staticmethod(lambda seconds: clock.update(now=clock["now"] + seconds)))
     monkeypatch.setattr(NightShiftBestOfN, "task_run", classmethod(task_run))
     notes = []
     end = datetime.fromtimestamp(1012.0).astimezone()
@@ -1645,7 +1644,8 @@ def test_enable_writes_absolute_paths_and_the_window(tmp_path, monkeypatch):
 def test_enable_refuses_a_window_it_cannot_read_and_installs_nothing(monkeypatch, capsys):
     commands = []
     monkeypatch.setattr(NightShiftScheduler, "systemctl",
-                        staticmethod(lambda args: commands.append(args) or subprocess.CompletedProcess(args, 0, "", "")))
+                        staticmethod(lambda args: commands.append(args)
+                                     or subprocess.CompletedProcess(args, 0, "", "")))
     assert not NightShiftScheduler.enable("tonight")
     assert "❌" in capsys.readouterr().out
     assert commands == [] and not (NightShiftScheduler.unit_dir() / "mightling-night.timer").exists()
@@ -1654,7 +1654,8 @@ def test_enable_refuses_a_window_it_cannot_read_and_installs_nothing(monkeypatch
 def test_enable_fails_when_systemctl_fails_and_starts_nothing_after(monkeypatch, capsys):
     commands = []
     monkeypatch.setattr(NightShiftScheduler, "systemctl",
-                        staticmethod(lambda args: commands.append(args) or subprocess.CompletedProcess(args, 1, "", "no bus")))
+                        staticmethod(lambda args: commands.append(args)
+                                     or subprocess.CompletedProcess(args, 1, "", "no bus")))
     monkeypatch.setattr(NightShiftScheduler, "lingering", classmethod(lambda cls: True))
     assert not NightShiftScheduler.enable("01:30-06:15")
     assert commands == [["daemon-reload"]]
@@ -1817,7 +1818,8 @@ def test_the_nodes_are_asked_only_when_one_is_paired_and_wanted(fake_host, monke
     assert [lane["host"] for lane in lanes] == ["http://x"] and notes == []
 
 
-def test_a_running_request_on_a_lane_is_the_nights_only_if_its_task_is_on_that_lane_and_in_the_model(fake_host, monkeypatch):
+def test_a_running_request_on_a_lane_is_the_nights_only_if_its_task_is_on_that_lane_and_in_the_model(
+        fake_host, monkeypatch):
     class Running:
         current_unit = None
 
@@ -1825,8 +1827,9 @@ def test_a_running_request_on_a_lane_is_the_nights_only_if_its_task_is_on_that_l
             self.lane_host, self.in_model = lane_host, in_model
     settings = NightShiftSettings({})
     monkeypatch.setattr(FakeHost, "samples", [{"running": 1.0, "served": 1.0, "kv_pool": 1.0}])
-    blocker = lambda *runs: NightShiftRunner.start_blocker(REPLICA["host"], "p", [(None, run) for run in runs],
-                                                           settings, local=False)
+    def blocker(*runs):
+        return NightShiftRunner.start_blocker(REPLICA["host"], "p", [(None, run) for run in runs],
+                                              settings, local=False)
     assert blocker(Running(REPLICA["host"], True)) is None
     # A task on this machine's lane does not account for a request on the replica.
     assert "not the night run's" in blocker(Running("http://x", True))
@@ -1864,6 +1867,7 @@ def test_each_running_task_keeps_its_memory_allowance_and_no_more(fake_host, mon
 def test_a_free_lane_is_one_with_fewer_tasks_of_its_own_than_it_holds(fake_host, monkeypatch):
     # This machine holds one task and the replica one: two tasks start, one on each, and no third.
     import threading
+
     from dreamference.night_shift.night_shift_best_of_n import NightShiftBestOfN
     hosts = []
 
@@ -1882,7 +1886,8 @@ def test_a_free_lane_is_one_with_fewer_tasks_of_its_own_than_it_holds(fake_host,
         return Run()
     clock = {"now": 1000.0}
     monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
-    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(lambda seconds: clock.update(now=clock["now"] + seconds)))
+    monkeypatch.setattr(NightShiftRunner, "sleep",
+                        staticmethod(lambda seconds: clock.update(now=clock["now"] + seconds)))
     monkeypatch.setattr(NightShiftRunner, "start_blocker", classmethod(lambda cls, *args, **kwargs: None))
     monkeypatch.setattr(NightShiftBestOfN, "task_run", classmethod(task_run))
     local = {"name": "this machine", "node": None, "host": "http://x", "parallel": 1, "budget": None}
@@ -1896,11 +1901,13 @@ def test_a_free_lane_is_one_with_fewer_tasks_of_its_own_than_it_holds(fake_host,
 def test_a_wait_after_a_start_is_noted_again(fake_host, monkeypatch):
     # Waiting, a start, then the same wait: two waits, each in the report.
     import threading
+
     from dreamference.night_shift.night_shift_best_of_n import NightShiftBestOfN
     reasons = iter(["a Mightling session is open", None, "a Mightling session is open"])
     clock = {"now": 1000.0}
     monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
-    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(lambda seconds: clock.update(now=clock["now"] + seconds)))
+    monkeypatch.setattr(NightShiftRunner, "sleep",
+                        staticmethod(lambda seconds: clock.update(now=clock["now"] + seconds)))
     monkeypatch.setattr(NightShiftRunner, "start_blocker", classmethod(
         lambda cls, *args, **kwargs: next(reasons, "a Mightling session is open")))
 

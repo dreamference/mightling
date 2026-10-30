@@ -314,8 +314,15 @@ def test_an_attempt_that_would_not_fit_the_window_is_not_started(tmp_path):
 def test_the_first_attempt_keeps_the_schedulers_deadline_and_a_later_one_gets_its_own(tmp_path):
     task = {"id": "t", "repo": str(tmp_path), "base": "b", "task": "x"}
     deadline, window_end = time.time() + 60, time.time() + 3600
-    run = NightShiftBestOfN(tmp_path, task, NightShiftSettings({"task_timeout": "10m"}), "ling",
-                            deadline, best_of=3, window_end=window_end)
+    run = NightShiftBestOfN(
+        tmp_path,
+        task,
+        NightShiftSettings({"task_timeout": "10m"}),
+        "ling",
+        deadline,
+        best_of=3,
+        window_end=window_end,
+    )
     assert run._attempt_deadline(1) == deadline
     assert time.time() + 590 <= run._attempt_deadline(2) <= time.time() + 600
     run.window_end = time.time() + 120
@@ -331,8 +338,11 @@ def test_no_attempt_starts_once_the_window_has_closed(bon, monkeypatch):
 
 
 def test_an_attempt_that_would_not_fit_is_not_started_and_the_record_says_why(bon, monkeypatch):
-    monkeypatch.setattr(NightShiftBestOfN, "wont_fit",
-                        lambda self, number, outcomes: "too late" if number == 2 else None)
+    monkeypatch.setattr(
+        NightShiftBestOfN,
+        "wont_fit",
+        lambda self, number, outcomes: "too late" if number == 2 else None,
+    )
     status, record, _ = run_best_of(bon, monkeypatch, ["good", "good", "good"])
     assert status == "done"
     best = record["result"]["best_of"]
@@ -356,31 +366,50 @@ def test_a_cancel_during_the_last_attempt_commits_none_of_the_earlier_ones(bon, 
     assert not any((bon["night"] / "worktrees").iterdir())
 
 
-@pytest.mark.parametrize("statuses, ends", [
-    (["no-change", "stalled"], "stalled"),
-    (["failed", "timed-out"], "no-change"),
-    (["timed-out", "timed-out"], "no-change"),
-    (["failed", "failed"], "failed"),
-])
+@pytest.mark.parametrize(
+    "statuses, ends",
+    [
+        (["no-change", "stalled"], "stalled"),
+        (["failed", "timed-out"], "no-change"),
+        (["timed-out", "timed-out"], "no-change"),
+        (["failed", "failed"], "failed"),
+    ],
+)
 def test_with_no_candidate_the_task_ends_as_its_most_telling_attempt(bon, statuses, ends):
     record = queue(bon["night"], bon["repo"], test=TEST)
-    run = NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"],
-                            time.time() + 60, best_of=len(statuses))
-    outcomes = [{"attempt": i + 1, "status": s, "result": {"last_message": f"attempt {i + 1} said so"}}
-                for i, s in enumerate(statuses)]
+    run = NightShiftBestOfN(
+        bon["night"],
+        record,
+        NightShiftSettings({}),
+        bon["ling"],
+        time.time() + 60,
+        best_of=len(statuses),
+    )
+    outcomes = [
+        {"attempt": i + 1, "status": s, "result": {"last_message": f"attempt {i + 1} said so"}}
+        for i, s in enumerate(statuses)
+    ]
     assert run._no_candidate(outcomes) == ends
     result = NightShiftQueue.read(bon["night"], record["id"])["result"]
     # The last word is kept only where it explains the end: a stall or a failure.
-    assert result.get("last_message") == (f"attempt {len(statuses)} said so" if ends in ("stalled", "failed") else None)
+    assert result.get("last_message") == (
+        f"attempt {len(statuses)} said so" if ends in ("stalled", "failed") else None
+    )
 
 
 def test_without_a_model_server_the_judge_is_skipped_not_asked(bon, monkeypatch):
     asked = []
     monkeypatch.setattr(NightShiftBestOfN, "JUDGE", None)
-    monkeypatch.setattr(NightShiftChooser, "server_judge", staticmethod(lambda *a, **k: asked.append(a)))
+    monkeypatch.setattr(
+        NightShiftChooser, "server_judge", staticmethod(lambda *a, **k: asked.append(a))
+    )
     record = queue(bon["night"], bon["repo"], test=TEST)
-    run = NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60, best_of=2)
-    passed = [{"attempt": i, "status": "candidate", "result": {"test_result": "passed"}} for i in (1, 2)]
+    run = NightShiftBestOfN(
+        bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60, best_of=2
+    )
+    passed = [
+        {"attempt": i, "status": "candidate", "result": {"test_result": "passed"}} for i in (1, 2)
+    ]
     chosen, choice = run._choose(passed)
     assert choice["stage"] == "judge skipped: no model server" and chosen["attempt"] == 1
     assert asked == []
@@ -388,13 +417,25 @@ def test_without_a_model_server_the_judge_is_skipped_not_asked(bon, monkeypatch)
 
 def test_the_server_judge_never_waits_past_the_window_and_always_gets_a_minute(bon, monkeypatch):
     from dreamference.night_shift.night_shift_best_of_n import MIN_JUDGE_TIMEOUT_S
+
     timeouts = []
     monkeypatch.setattr(NightShiftBestOfN, "JUDGE", None)
-    monkeypatch.setattr(NightShiftChooser, "server_judge",
-                        staticmethod(lambda server, issue, seed, timeout, log: timeouts.append(timeout)))
+    monkeypatch.setattr(
+        NightShiftChooser,
+        "server_judge",
+        staticmethod(lambda server, issue, seed, timeout, log: timeouts.append(timeout)),
+    )
     record = queue(bon["night"], bon["repo"], test=TEST)
-    run = NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
-                            best_of=2, model_host="http://x", window_end=time.time() + 100)
+    run = NightShiftBestOfN(
+        bon["night"],
+        record,
+        NightShiftSettings({}),
+        bon["ling"],
+        time.time() + 60,
+        best_of=2,
+        model_host="http://x",
+        window_end=time.time() + 100,
+    )
     run._judge(0, [])
     run.window_end = time.time() - 10
     run._judge(0, [])
@@ -430,9 +471,14 @@ def test_a_commit_that_fails_fails_the_task_and_keeps_no_attempt(bon, monkeypatc
 
 def test_a_task_dropped_before_it_starts_counts_no_attempt(bon, monkeypatch):
     record = queue(bon["night"], bon["repo"], test=TEST)
-    NightShiftQueue.update(bon["night"], record["id"],
-                           lambda task: NightShiftQueue.set_status(task, "cancel-requested"))
-    run = NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60, best_of=3)
+    NightShiftQueue.update(
+        bon["night"],
+        record["id"],
+        lambda task: NightShiftQueue.set_status(task, "cancel-requested"),
+    )
+    run = NightShiftBestOfN(
+        bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60, best_of=3
+    )
     assert run.run() == "cancelled"
     after = NightShiftQueue.read(bon["night"], record["id"])
     assert (after["attempts"], after["result"]) == (0, None)
@@ -449,10 +495,18 @@ def test_a_skipped_judge_names_no_tie_at_the_top():
 
 def test_stopping_the_run_stops_the_attempt_that_is_working(bon, monkeypatch):
     import threading
+
     monkeypatch.setenv("FAKE_BON_PLAN", json.dumps(["hang", "good"]))
     record = queue(bon["night"], bon["repo"], test=TEST)
-    run = NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
-                            best_of=2, model_host="http://x")
+    run = NightShiftBestOfN(
+        bon["night"],
+        record,
+        NightShiftSettings({}),
+        bon["ling"],
+        time.time() + 60,
+        best_of=2,
+        model_host="http://x",
+    )
     outcome = {}
     worker = threading.Thread(target=lambda: outcome.update(status=run.run()), daemon=True)
     worker.start()
@@ -467,7 +521,12 @@ def test_stopping_the_run_stops_the_attempt_that_is_working(bon, monkeypatch):
 
 def test_a_run_has_at_least_one_attempt(tmp_path):
     task = {"id": "t", "repo": str(tmp_path), "base": "b", "task": "x"}
-    assert NightShiftBestOfN(tmp_path, task, NightShiftSettings({}), "ling", time.time() + 60, best_of=0).best_of == 1
+    assert (
+        NightShiftBestOfN(
+            tmp_path, task, NightShiftSettings({}), "ling", time.time() + 60, best_of=0
+        ).best_of
+        == 1
+    )
 
 
 def test_the_judges_seed_is_the_tasks_own(bon, monkeypatch):
@@ -478,11 +537,20 @@ def test_the_judges_seed_is_the_tasks_own(bon, monkeypatch):
         return lambda a, b: (5.0, 5.0)
 
     monkeypatch.setattr(NightShiftBestOfN, "JUDGE", staticmethod(judge))
-    passed = [{"attempt": i, "status": "candidate", "result": {"test_result": "passed"}} for i in (1, 2)]
+    passed = [
+        {"attempt": i, "status": "candidate", "result": {"test_result": "passed"}} for i in (1, 2)
+    ]
     for task_id in ("20261001-0100-abc", "20261001-0100-abd", "20261001-0100-abc"):
         record = queue(bon["night"], bon["repo"], test=TEST, task_id=task_id)
-        NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
-                          best_of=2, model_host="http://x")._choose(passed)
+        NightShiftBestOfN(
+            bon["night"],
+            record,
+            NightShiftSettings({}),
+            bon["ling"],
+            time.time() + 60,
+            best_of=2,
+            model_host="http://x",
+        )._choose(passed)
     assert seeds[0] == seeds[2] != seeds[1]
 
 
@@ -493,25 +561,28 @@ def test_clip_keeps_a_text_of_exactly_the_limit_whole():
 
 def test_a_swiss_round_pairs_only_neighbours_within_the_window():
     import random
+
     ids = [f"x{i}" for i in range(11)]
     scores = {cid: 10.0 - i for i, cid in enumerate(ids)}
     # x0 has met each of its eight neighbours; x9 is ninth, beyond the window.
     played = {frozenset(("x0", f"x{i}")) for i in range(1, 9)}
-    pairs = NightShiftChooser.pairings(ids, scores, played, {cid: 2 for cid in ids}, random.Random(0))
+    pairs = NightShiftChooser.pairings(ids, scores, played, dict.fromkeys(ids, 2), random.Random(0))
     assert not any("x0" in pair for pair in pairs)
 
 
 def test_a_swiss_round_reaches_the_eighth_neighbour():
     import random
+
     ids = [f"x{i}" for i in range(11)]
     scores = {cid: 10.0 - i for i, cid in enumerate(ids)}
     played = {frozenset(("x0", f"x{i}")) for i in range(1, 8)}
-    pairs = NightShiftChooser.pairings(ids, scores, played, {cid: 2 for cid in ids}, random.Random(0))
+    pairs = NightShiftChooser.pairings(ids, scores, played, dict.fromkeys(ids, 2), random.Random(0))
     assert ("x0", "x8") in pairs
 
 
 def test_one_swiss_round_is_one_round():
     import random
+
     candidates = [ChooserCandidate(f"a{i}", "p", [f"a{i}"]) for i in range(1, 7)]
     counts = {c.id: 0 for c in candidates}
     swiss = []
@@ -530,6 +601,7 @@ def test_one_swiss_round_is_one_round():
 
 def test_every_attempt_tied_at_the_top_is_named():
     import random
+
     candidates = [ChooserCandidate(f"a{i}", "p", [f"a{i}"], p2p_failed=0) for i in range(1, 4)]
     choice = NightShiftChooser.choose(candidates, lambda a, b: (5.0, 5.0), random.Random("t"))
     assert choice["chosen"] == ["a1", "a2", "a3"]
@@ -537,7 +609,10 @@ def test_every_attempt_tied_at_the_top_is_named():
 
 def test_the_judge_clips_the_issue_it_is_given():
     from dreamference.night_shift.night_shift_chooser import MAX_ISSUE_CHARS
-    content = NightShiftChooser.messages("x" * (MAX_ISSUE_CHARS + 5), "diff A", "diff B")[1]["content"]
+
+    content = NightShiftChooser.messages("x" * (MAX_ISSUE_CHARS + 5), "diff A", "diff B")[1][
+        "content"
+    ]
     assert "x" * MAX_ISSUE_CHARS + "\n[... cut: 5 more characters]" in content
     assert "x" * (MAX_ISSUE_CHARS + 1) not in content
 
@@ -557,16 +632,20 @@ def test_an_attempt_starts_from_the_base_whatever_an_earlier_run_left(bon, monke
 
 def test_an_attempt_is_a_session_of_its_own_even_for_a_task_with_one(bon):
     record = dict(queue(bon["night"], bon["repo"], test=TEST), session="an-earlier-session")
-    single = NightShiftTaskRun(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60)
-    attempt = NightShiftTaskRun(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
-                                attempt=1)
+    single = NightShiftTaskRun(
+        bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60
+    )
+    attempt = NightShiftTaskRun(
+        bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60, attempt=1
+    )
     assert single.session == "an-earlier-session" and attempt.session is None
 
 
 def test_an_attempt_the_window_ended_is_interrupted_not_a_candidate(bon):
     record = queue(bon["night"], bon["repo"], test=TEST)
-    run = NightShiftTaskRun(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
-                            attempt=1)
+    run = NightShiftTaskRun(
+        bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60, attempt=1
+    )
     assert run._prepare_worktree() is None
     (run.worktree / "hello.txt").write_text("hi\n")
     assert run._interrupted() == "candidate"  # its own time ran out: what it changed is a candidate
@@ -579,8 +658,9 @@ def test_an_attempt_of_a_task_being_dropped_stops_before_it_runs(bon, monkeypatc
     record = queue(bon["night"], bon["repo"], test=TEST)
     path = bon["night"] / "tasks" / f"{record['id']}.json"
     path.write_text(json.dumps(dict(json.loads(path.read_text()), status="cancel-requested")))
-    run = NightShiftTaskRun(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
-                            attempt=1)
+    run = NightShiftTaskRun(
+        bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60, attempt=1
+    )
     assert run.run() == "cancelled" and run.outcome["status"] == "cancelled"
     assert not bon["calls"].exists() or bon["calls"].read_text() == ""
 
@@ -589,8 +669,14 @@ def test_the_scope_of_a_best_of_run_is_its_working_attempts(bon):
     from types import SimpleNamespace
 
     record = queue(bon["night"], bon["repo"], test=TEST)
-    run = NightShiftBestOfN.task_run(bon["night"], record, NightShiftSettings({"best_of": 3}), bon["ling"],
-                                     time.time() + 60, model_host="http://x")
+    run = NightShiftBestOfN.task_run(
+        bon["night"],
+        record,
+        NightShiftSettings({"best_of": 3}),
+        bon["ling"],
+        time.time() + 60,
+        model_host="http://x",
+    )
     assert run.current_unit is None
     run.current = SimpleNamespace(current_unit="mightling-night-20261001-0100-abc-a2-1")
     assert run.current_unit == "mightling-night-20261001-0100-abc-a2-1"
@@ -847,13 +933,25 @@ def test_server_judge_asks_the_model_once_and_reads_a_reasoning_only_answer():
 
         def do_POST(self):
             self.rfile.read(int(self.headers["Content-Length"]))
-            self.reply({"choices": [{"message": {"content": None,
-                                                 "reasoning_content": "RATING_A: 3\nRATING_B: 9"}}]})
+            self.reply(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": None,
+                                "reasoning_content": "RATING_A: 3\nRATING_B: 9",
+                            }
+                        }
+                    ]
+                }
+            )
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        compare = NightShiftChooser.server_judge(f"http://127.0.0.1:{server.server_port}", "Fix the bug")
+        compare = NightShiftChooser.server_judge(
+            f"http://127.0.0.1:{server.server_port}", "Fix the bug"
+        )
         a, b = ChooserCandidate("a1", "diff A", ["a1"]), ChooserCandidate("a2", "diff B", ["a2"])
         assert compare(a, b) == (3.0, 9.0) and compare(b, a) == (3.0, 9.0)
         assert gets == ["/v1/models"]
