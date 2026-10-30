@@ -106,6 +106,20 @@ mod tests {
     }
 
     #[test]
+    fn the_pair_page_escapes_a_quote_in_its_message_and_its_code() {
+        assert!(pair_html(Some("say \"hi\"")).contains("say &quot;hi&quot;"));
+        let page = pair_html_with(None, Some("\"><b>x"));
+        assert!(page.contains("&quot;&gt;&lt;b&gt;x"), "{page}");
+        assert!(!page.contains("<b>x"), "{page}");
+    }
+
+    #[test]
+    fn a_page_without_a_head_gets_the_bridge_first() {
+        let page = "<p>no head</p>";
+        assert_eq!(with_bridge(page), format!("{BRIDGE_TAG}\n{page}"));
+    }
+
+    #[test]
     fn locked_html_includes_the_bridge_only_on_the_front() {
         assert!(!locked_html(false).contains(BRIDGE_TAG));
         assert!(locked_html(true).contains(BRIDGE_TAG));
