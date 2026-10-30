@@ -439,3 +439,17 @@ def test_turning_the_github_mirror_on_uses_the_account_given_or_the_one_kept(
     assert ForgeCommand.run_github_mirror(mirror_arguments(account=account)) == 0
     assert github_mirror == [(True, saved)]
     assert "Destinations: none yet" in capsys.readouterr().out
+
+
+# -- forge repositories [key]
+
+
+@pytest.mark.parametrize("text", ["[1, 2]", '"scope"', "7"])
+def test_a_repositories_file_that_is_not_an_object_reads_as_no_repositories(text):
+    from dreamference.forge.forge_repositories import CONFIG_NAME, ForgeRepositories
+    from dreamference.forge.forge_settings import ForgeSettings
+
+    path = ForgeSettings.secret_path(CONFIG_NAME)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    assert ForgeRepositories.config() == {"default_scope": "off", "repositories": {}}
