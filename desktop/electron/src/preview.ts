@@ -12,6 +12,21 @@ import { BrowserWindow, WebContentsView, session, type Session, type WebContents
 
 import { PICK_SCRIPT, consoleLine, decide, inward, type Decision, type SiteChoice } from "./preview-rules";
 
+/**
+ * The proxy the preview session holds while any tab is at `/airgapped on`: a proxy auto-config script
+ * that answers DIRECT for loopback (a dev server loads as ever) and fails every other address, so it
+ * never connects anywhere, not even to a dead proxy's port. Chromium does not fall back to a direct
+ * connection when the script fails. The request rules cannot see a peer connection's STUN or TURN
+ * traffic (TURN over TCP would go direct, and ask a resolver for its name); this closes that.
+ */
+export const AIR_GAP_PAC = [
+  "function FindProxyForURL(url, host) {",
+  '  if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1") return "DIRECT";',
+  '  throw new Error("air gap");',
+  "}",
+].join("\n");
+export const AIR_GAP_PROXY = { mode: "pac_script" as const, pacScript: `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(AIR_GAP_PAC)}` };
+
 export const PREVIEW_PARTITION = "persist:mightling-preview";
 
 /** The isolated world comment mode's picker runs in (anything but 0, the page's own). */
@@ -68,6 +83,9 @@ export class Previews {
   private readonly asked = new Map<string, string>();
   private configured: Session | null = null;
   private rechecking: ReturnType<typeof setInterval> | null = null;
+  /** Whether the session holds the air-gap proxy now, and the change in flight (changes run one after another). */
+  private proxyDead = false;
+  private proxying: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly emit: (window: BrowserWindow, event: PreviewEvent) => void,
@@ -114,6 +132,20 @@ export class Previews {
     return ses;
   }
 
+  /** Puts the session's proxy where the tabs' air-gap levels say: the air-gap one while any tab is at `on`, the system's otherwise. */
+  private syncProxy(): Promise<void> {
+    this.proxying = this.proxying.then(async () => {
+      const dead = [...this.previews.values()].some((preview) => preview.airgapOn);
+      if (dead === this.proxyDead) return;
+      this.proxyDead = dead;
+      const ses = this.session();
+      await ses.setProxy(dead ? AIR_GAP_PROXY : { mode: "system" });
+      // What a page already had open goes through the old setting; it closes, so the new one decides.
+      if (dead) await ses.closeAllConnections();
+    }).catch(() => {});
+    return this.proxying;
+  }
+
   private byContents(id: number): [string, Preview] | null {
     for (const entry of this.previews) if (!entry[1].view.webContents.isDestroyed() && entry[1].view.webContents.id === id) return entry;
     return null;
@@ -155,6 +187,7 @@ export class Previews {
     this.session();
     const preview: Preview = { view, window, thread, airgapOn: await this.airgapOn(thread), console: [] };
     this.previews.set(id, preview);
+    await this.syncProxy();
     if (!this.rechecking) {
       this.rechecking = setInterval(() => void this.recheck().catch(() => {}), RECHECK_MS);
       this.rechecking.unref?.();
@@ -210,6 +243,7 @@ export class Previews {
     });
     window.on("closed", () => {
       this.previews.delete(id);
+      void this.syncProxy();
       if (!contents.isDestroyed()) contents.close();
       if (!this.previews.size && this.rechecking) {
         clearInterval(this.rechecking);
@@ -224,6 +258,7 @@ export class Previews {
     if (!preview) return;
     preview.thread = thread;
     preview.airgapOn = await this.airgapOn(thread);
+    await this.syncProxy();
     this.asked.delete(id);
     const decision = this.decision(preview, url);
     if (decision.verdict !== "allow") {
@@ -248,6 +283,7 @@ export class Previews {
         preview.view.webContents.reload();
       }
     }));
+    await this.syncProxy();
   }
 
   /** Allow once (this run of the app) or after Settings › Browser changed: load the page again. */
@@ -306,6 +342,7 @@ export class Previews {
     const preview = this.previews.get(id);
     if (!preview) return;
     this.previews.delete(id);
+    void this.syncProxy();
     this.asked.delete(id);
     if (!preview.window.isDestroyed()) preview.window.contentView.removeChildView(preview.view);
     if (!preview.view.webContents.isDestroyed()) preview.view.webContents.close();

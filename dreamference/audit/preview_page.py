@@ -5,7 +5,8 @@ The page the desktop app's audit session opens in a preview tab
 This module provides the PreviewPage class: a loopback HTTP server, for the length of one
 `ling-admin audit egress --app` session, serving one page that reaches for the internet every
 way a page can (a picture, a script, a stylesheet, a `fetch`, DNS prefetch and preconnect hints (in the page and added by script),
-a link followed by script). The app opens it in a preview tab (`MIGHTLING_APP_AUDIT_PREVIEW`);
+a link followed by script, and a WebRTC peer connection with a STUN server and a TURN server
+over TCP). The app opens it in a preview tab (`MIGHTLING_APP_AUDIT_PREVIEW`);
 the preview's rules must turn every one of those away before a connection or a DNS query, which
 the trace then shows. The page's own port is the one loopback port it adds to the allowlist.
 """
@@ -32,6 +33,16 @@ hint.rel = "dns-prefetch";
 hint.href = "//example.net";
 document.head.append(hint);
 setTimeout(() => document.getElementById("out").click(), 500);
+// A peer connection with a STUN server and a TURN server over TCP: neither passes the request rules,
+// so only the session's proxy (a dead one at /airgapped on) and the WebRTC policy keep them off the network.
+try {
+  const peer = new RTCPeerConnection({ iceServers: [
+    { urls: "stun:stun.example.org:3478" },
+    { urls: "turn:turn.example.net:443?transport=tcp", username: "audit", credential: "audit" },
+  ] });
+  peer.createDataChannel("audit");
+  peer.createOffer().then((offer) => peer.setLocalDescription(offer)).catch(() => {});
+} catch (error) {}
 fetch("/seen");
 </script>
 </body></html>

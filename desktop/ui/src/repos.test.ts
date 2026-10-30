@@ -3,7 +3,7 @@
 // repository service on `ling web` (CHAT_REPOS §10 G4, G6, G9, G13).
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as bridge from "./bridge";
 import { parseDiff } from "./diff";
@@ -685,6 +685,24 @@ describe("G9: Git bar, single-use confirm nonces, and refusals", () => {
     const outcome = await executeGitAction(api, "01234567", step.pending, { openTab: (url) => opened.push(url) });
     expect(opened).toEqual([]);
     expect(outcome).toEqual({ text: "Pull request #3" });
+  });
+
+  it("opens the pull request in a new tab in a browser, and never calls window.open in the app (which denies it)", async () => {
+    const api = chatRepos(async (url) => {
+      if (url.startsWith("/api/repos/state?")) return jsonResponse(sampleState({ confirm: "nonce-pr-1" }));
+      return jsonResponse({ number: 3, url: "https://forge.example/org/widget/pulls/3" });
+    });
+    try {
+      for (const [type, calls] of [["web", 1], ["electron", 0]] as const) {
+        const open = vi.fn();
+        vi.stubGlobal("window", { open, mightlingWindowType: type });
+        const step = await beginGitAction(api, "01234567", "pr");
+        await executeGitAction(api, "01234567", step.pending);
+        expect(open, type).toHaveBeenCalledTimes(calls);
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("shows a file whose diff could not be read by its header only, never invented lines", async () => {

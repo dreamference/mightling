@@ -38,8 +38,6 @@ import tempfile
 from pathlib import Path
 from typing import Final, List, Optional
 
-from dreamference.chat.desktop_installer import DesktopInstaller
-from dreamference.chat.desktop_runner import DesktopRunner
 
 REPO_ROOT: Final[str] = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -342,6 +340,7 @@ class CodexBrandedBuilder:
             print("❌ npm is needed to build ling: `ling web` serves the Mightling UI from inside the binary.")
             print("💡 Install Node.js 20 or later, then build again.")
             return None
+        from dreamference.chat.desktop_runner import DesktopRunner
         environment = DesktopRunner._environment()
         # Again whenever the lock file changed since the last install (DesktopRunner.packages_current).
         if not DesktopRunner.packages_current(Path(WEB_UI_DIR)):
@@ -813,6 +812,7 @@ class CodexBrandedBuilder:
         """
         # The toolchain version itself is pinned by codex-rs/rust-toolchain.toml; rustup fetches it
         # on the first cargo invocation, so only rustup has to exist beforehand.
+        from dreamference.chat.desktop_installer import DesktopInstaller
         if not DesktopInstaller.install_rust():
             return False
 
@@ -828,6 +828,7 @@ class CodexBrandedBuilder:
         if web_ui is None:
             return False
 
+        from dreamference.chat.desktop_runner import DesktopRunner
         environment = DesktopRunner._environment()
         environment.update(rusty_v8)
         environment["LING_WEB_UI_DIST"] = web_ui
@@ -1015,8 +1016,10 @@ class CodexBrandedBuilder:
         if not force and cls.crate_is_current(crate_dir, stamp_name, bin_names):
             cls.link_onto_path()
             return True
+        from dreamference.chat.desktop_installer import DesktopInstaller
         if not DesktopInstaller.install_rust():
             return False
+        from dreamference.chat.desktop_runner import DesktopRunner
         environment = DesktopRunner._environment()
         # A flag rather than CARGO_TARGET_DIR, which would key sccache's cache on the folder.
         environment.pop("CARGO_TARGET_DIR", None)

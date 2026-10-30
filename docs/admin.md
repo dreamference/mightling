@@ -435,6 +435,15 @@ Build the arm64 instance images of a dataset nobody publishes them for (multilin
 | `--force` | Build again an image already there. |
 | `--validate` | Then validate each built image: the reference patch must resolve, a no-op patch must not. |
 
+#### `ling-admin swe-bench pin-images`
+
+Compare local community images with their pinned digests.
+
+| Option | Description |
+|---|---|
+| `--accept` | Pin the local digest of these images. |
+| `--new` | Pin every local image that has no pin yet. |
+
 #### `ling-admin swe-bench shard`
 
 Split a task list into K balanced shards, written as lists of their own.

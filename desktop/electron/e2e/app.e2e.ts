@@ -14,6 +14,18 @@ import { closeApp, closeLeftovers, launch } from "./apps";
 
 const main = path.join(__dirname, "..", ".vite", "build", "early-bootstrap.cjs");
 
+// Playwright starts Electron with `--no-sandbox`; the tests that spawn it themselves do the same where
+// the SUID helper is not set up (root-owned, mode 4755), or Electron aborts before the app runs.
+const sandboxFlags = ((): string[] => {
+  try {
+    const helper = path.join(path.dirname(require("electron") as unknown as string), "chrome-sandbox");
+    const info = fs.statSync(helper);
+    return info.uid === 0 && (info.mode & 0o4000) !== 0 ? [] : ["--no-sandbox"];
+  } catch {
+    return ["--no-sandbox"];
+  }
+})();
+
 test.skip(!process.env.DISPLAY || !fs.existsSync(main), "needs a display and the Vite build");
 test.afterEach(closeLeftovers);
 
@@ -217,7 +229,7 @@ test("SIGTERM quits the app, the agent's server with it", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-e2e-term-"));
   const ling = standIn(home);
   const electronBinary = require("electron") as unknown as string;
-  const child = spawn(electronBinary, [main, "--work"], {
+  const child = spawn(electronBinary, [...sandboxFlags, main, "--work"], {
     env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".mightling"), MIGHTLING_BIN: ling, MIGHTLING_HIDDEN: "1", MIGHTLING_LEGACY_MIGRATION: "0" },
     stdio: "ignore",
   });
@@ -294,7 +306,7 @@ test("SIGTERM quits the app while a read of the user's folders hangs", async () 
   const fifo = path.join(home, "never-written");
   execFileSync("mkfifo", [fifo]);
   const electronBinary = require("electron") as unknown as string;
-  const child = spawn(electronBinary, [main, "--work"], {
+  const child = spawn(electronBinary, [...sandboxFlags, main, "--work"], {
     env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".mightling"), MIGHTLING_BIN: ling, MIGHTLING_HIDDEN: "1", MIGHTLING_LEGACY_MIGRATION: "0", MIGHTLING_TEST_PENDING_READ: fifo },
     stdio: "ignore",
   });

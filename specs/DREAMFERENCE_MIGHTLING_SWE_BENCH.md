@@ -130,7 +130,7 @@ Steps:
 
 **The agent has no network except the model server.** With one, it can find the real fix: every instance is a public GitHub issue with a merged pull request, and `ling`'s prompt tells the model to run `ling-search` and `ling-fetch`.
 
-- **Mechanism:** `docker network create --internal mightling-swe-bench`. The model server listens on every interface by design, so the container reaches it at the network's gateway address and reaches nothing else. Measured (§9): from such a network `http://<gateway>:8000/v1/models` answers 200, and both `https://1.1.1.1` and `https://github.com` fail.
+- **Mechanism:** `docker network create --internal mightling-swe-bench`. The model server listens on every interface by design, so the container reaches it at the network's gateway address. The network has no route out, but the host's INPUT chain is not filtered, so the container also reaches every other host service listening on all interfaces through the gateway address, not only the model gate (accepted risk, owner 2026-10-30; no firewall rule is installed). Measured (§9): from such a network `http://<gateway>:8000/v1/models` answers 200, and both `https://1.1.1.1` and `https://github.com` fail.
 - **Cost:** the prompt still names the web commands, and they fail. The model may spend turns finding that out until `/airgapped on` exists ([MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)), which a run then sets.
 - **No package installs:** an instance whose tests need a dependency the image lacks cannot fetch it. That is the benchmark's rule too.
 - The web binaries and `ling-admin` are **not** mounted into the container.

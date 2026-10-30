@@ -76,15 +76,13 @@ describe("the app's windows", () => {
     }
   });
 
-  it("open in the browser only a web address links.ts allows, as the page's own link/open does", () => {
+  it("never opens a window nor hands a window.open address to the system's browser (links go through link/open, which checks the air gap)", () => {
     openWork({ preload: "/p/preload.cjs", show: false, theme: "light", view: "work" });
     const openExternal = vi.mocked(shell.openExternal);
     openExternal.mockClear();
-    for (const url of ["https://user:secret@example.com/", "https://user@example.com/", `https://example.com/${"a".repeat(2100)}`, "file:///etc/passwd", "javascript:alert(1)"]) {
+    for (const url of ["https://example.com/a b", "https://user:secret@example.com/", "file:///etc/passwd", "javascript:alert(1)"]) {
       expect(made[0].open?.({ url }), url).toEqual({ action: "deny" });
     }
     expect(openExternal).not.toHaveBeenCalled();
-    made[0].open?.({ url: "https://example.com/a b" });
-    expect(openExternal).toHaveBeenCalledWith("https://example.com/a%20b");
   });
 });

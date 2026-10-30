@@ -159,6 +159,8 @@ For a new session, the first of:
 2. `mightling_prompt` in the configuration file the launcher already reads (`DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml`, `~/.config/dreamference/config.toml`);
 3. `default`.
 
+A trusted project's `.codex/config.toml` is read by Codex above the user's `config.toml` and can replace the prompt through `model_catalog_json`, `model_instructions_file`, `instructions`, `developer_instructions` and `experimental_compact_prompt_file`; none is on Codex's project-local denylist. Owner decision 2026-10-30: accepted, with no patch. It changes what the model is told, not what is enforced (air gap, sandbox, guards), and only a trusted project can do it.
+
 An unknown name is skipped with one line on stderr naming it and the tier it came from, and the next tier is used: a typo must not start a session with an empty prompt.
 
 ### 4.2 Phase 1: one catalog per prompt, chosen on the command line

@@ -1011,7 +1011,7 @@ pub fn host_is_local(host: &str) -> bool {
 }
 
 /// Whether to advertise Gmail to the model: `DREAMFERENCE_MIGHTLING_GMAIL`, then `mightling_gmail` in the
-/// config file, then on. The same tiers as the host, and the same setting Dreamference's Python
+/// config file (a repository's own file can only turn it off), then on. The same tiers as the host, and the same setting Dreamference's Python
 /// config reads.
 pub fn mightling_gmail_enabled() -> bool {
     if let Ok(setting) = std::env::var("DREAMFERENCE_MIGHTLING_GMAIL")
@@ -1019,10 +1019,27 @@ pub fn mightling_gmail_enabled() -> bool {
     {
         return matches!(setting.to_lowercase().as_str(), "1" | "true" | "yes");
     }
-    config_file()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| mightling_gmail_from_toml(&text))
-        .unwrap_or(true)
+    let read = |path: PathBuf| std::fs::read_to_string(path).ok();
+    let chosen = config_file();
+    let user_path = ling_airgapped::user_config_file();
+    let from_repository = chosen.as_ref().is_some_and(|path| {
+        !std::env::var("DREAMFERENCE_CONFIG_PATH").is_ok_and(|named| !named.is_empty())
+            && user_path.as_ref().is_none_or(|user| !compat::same_file(user, path))
+    });
+    let user = if from_repository { user_path.and_then(read) } else { None };
+    mightling_gmail_from_files(chosen.and_then(read).as_deref(), from_repository, user.as_deref())
+}
+
+/// [`mightling_gmail_enabled`]'s file tiers, given the file chosen, whether it is the repository's
+/// own, and the user's file. A repository's file may only turn Gmail off (owner decision
+/// 2026-10-30): its `mightling_gmail = true` counts for nothing, so a clone cannot reopen what the
+/// user closed, and the user's file decides otherwise.
+fn mightling_gmail_from_files(chosen: Option<&str>, from_repository: bool, user: Option<&str>) -> bool {
+    let chosen = chosen.and_then(mightling_gmail_from_toml);
+    if !from_repository {
+        return chosen.unwrap_or(true);
+    }
+    chosen != Some(false) && user.and_then(mightling_gmail_from_toml).unwrap_or(true)
 }
 
 fn mightling_gmail_from_toml(text: &str) -> Option<bool> {
@@ -2486,6 +2503,24 @@ mod tests {
     fn gmail_can_be_switched_off_in_the_config_file() {
         assert_eq!(mightling_gmail_from_toml("mightling_gmail = false\n"), Some(false));
         assert_eq!(mightling_gmail_from_toml("vllm_host = \"x\"\n"), None);
+    }
+
+    #[test]
+    fn a_repository_file_can_only_turn_gmail_off() {
+        let on = "mightling_gmail = true\n";
+        let off = "mightling_gmail = false\n";
+        // The user's file closed it: the clone's `true` does not reopen it.
+        assert!(!mightling_gmail_from_files(Some(on), true, Some(off)));
+        // The clone closes it for itself.
+        assert!(!mightling_gmail_from_files(Some(off), true, Some(on)));
+        assert!(!mightling_gmail_from_files(Some(off), true, None));
+        // Silent or absent files leave the user's choice, then the default.
+        assert!(!mightling_gmail_from_files(Some("vllm_host = \"x\"\n"), true, Some(off)));
+        assert!(mightling_gmail_from_files(Some(on), true, None));
+        assert!(mightling_gmail_from_files(None, true, None));
+        // The user's own file (or one named by the environment) is not the repository's.
+        assert!(mightling_gmail_from_files(Some(on), false, None));
+        assert!(!mightling_gmail_from_files(Some(off), false, None));
     }
 
     #[test]

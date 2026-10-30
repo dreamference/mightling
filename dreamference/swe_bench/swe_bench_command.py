@@ -1,4 +1,4 @@
-"""`ling-admin swe-bench {setup,build-images,smoke,run,eval,report,status,clean,shard,merge}`
+"""`ling-admin swe-bench {setup,build-images,smoke,run,eval,report,status,clean,pin-images,shard,merge}`
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §3).
 
 The parser and the dispatch live here so the CLI controller only registers and calls them.
@@ -19,6 +19,7 @@ from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_hooks import HOOK_SETS
 from dreamference.swe_bench.swe_bench_image_builder import SweBenchImageBuilder
 from dreamference.swe_bench.swe_bench_image_cache import SweBenchImageCache
+from dreamference.swe_bench.swe_bench_image_pins import SweBenchImagePins
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_instance_run import REFINE_VERSIONS, TASK_RULES
 from dreamference.swe_bench.swe_bench_report import SweBenchReport
@@ -33,14 +34,34 @@ LIST_COMMANDS: Final[tuple[str, str]] = ("shard", "merge")
 
 # Builds the images of a dataset nobody publishes arm64 images for.
 BUILD_COMMAND: Final[str] = "build-images"
+PIN_COMMAND: Final[str] = "pin-images"
 
 USAGE: Final[str] = (
-    "usage: ling-admin swe-bench {setup,build-images,smoke,run,eval,report,status,clean,shard,merge}"
+    "usage: ling-admin swe-bench {setup,build-images,smoke,run,eval,report,status,clean,pin-images,shard,merge}"
 )
 
 
 class SweBenchCommand:
     """The `swe-bench` subcommands."""
+
+    @classmethod
+    def add_pin_parser(cls, add: Callable[..., argparse.ArgumentParser]) -> None:
+        """Adds `swe-bench pin-images`.
+
+        Args:
+            add: The `swe-bench` subparsers' `add_parser`.
+        """
+        pin = add("pin-images", help="Compare local community images with their pinned digests")
+        pin.add_argument(
+            "--accept",
+            nargs="+",
+            metavar="IMAGE",
+            default=[],
+            help="Pin the local digest of these images",
+        )
+        pin.add_argument(
+            "--new", action="store_true", help="Pin every local image that has no pin yet"
+        )
 
     @classmethod
     def add_output_arms(cls, run: argparse.ArgumentParser) -> None:
@@ -189,6 +210,7 @@ class SweBenchCommand:
             add: The `swe-bench` subparsers' `add_parser`.
         """
         cls.add_build_parser(add)
+        cls.add_pin_parser(add)
         shard = add(
             "shard", help="Split a task list into K balanced shards, written as lists of their own"
         )
@@ -556,7 +578,7 @@ class SweBenchCommand:
                 args.remove_images,
                 args.image_chunk,
             )
-        if command in (*LIST_COMMANDS, BUILD_COMMAND):
+        if command in (*LIST_COMMANDS, BUILD_COMMAND, PIN_COMMAND):
             return cls.dispatch_lists(args)
         if command == "report":
             return cls.report(
@@ -581,6 +603,8 @@ class SweBenchCommand:
         """
         if args.swe_bench_command == BUILD_COMMAND:
             return cls.build_images(args)
+        if args.swe_bench_command == PIN_COMMAND:
+            return SweBenchImagePins.review(args.accept, args.new)
         if args.swe_bench_command == LIST_COMMANDS[0]:
             return cls.shard(
                 Path(args.list),

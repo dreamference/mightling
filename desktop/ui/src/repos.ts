@@ -648,7 +648,9 @@ export async function executeGitAction(
         const res = await api.pr(thread, pending.confirm);
         if (!safePrUrl(res.url)) return { text: `Pull request #${res.number}` };
         const openTab = options.openTab ?? ((url: string) => {
-          if (typeof window !== "undefined" && typeof window.open === "function") {
+          // The app denies window.open (its links go through bridge.openWebLink, which GitBar passes in);
+          // only a browser tab, `ling web`, has a window to open.
+          if (typeof window !== "undefined" && window.mightlingWindowType !== "electron" && typeof window.open === "function") {
             window.open(url, "_blank", "noopener,noreferrer");
           }
         });
