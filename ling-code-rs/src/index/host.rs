@@ -528,6 +528,26 @@ mod tests {
     }
 
     #[test]
+    fn a_scope_without_a_memory_limit_counts_as_the_whole_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = FakeHost::new(dir.path(), 20);
+        // 40 GiB total, 5% earlyoom line: reserve is 2 + 4 = 6 GiB.
+        host.total = 40 * GIB;
+        // systemd reports `MemoryMax=infinity` as the largest number it holds.
+        host.scopes.lock().unwrap().push(LiveScope {
+            unit: "unlimited".into(),
+            cap: u64::MAX,
+            current: 30 * GIB,
+        });
+        // 20 − 6 − (40 − 30) = 4 GiB.
+        let admitted = admit(&host, need(Kind::Universal, 0), 8 * GIB)
+            .unwrap()
+            .unwrap();
+        assert_eq!(admitted.cap, 4 * GIB);
+        assert_eq!(*host.slice_max.lock().unwrap(), Some(44 * GIB));
+    }
+
+    #[test]
     fn first_runs_use_the_floor() {
         assert_eq!(need(Kind::Universal, 0), 512 * MIB);
         assert_eq!(need(Kind::Static, 0), 3 * GIB);
