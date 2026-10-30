@@ -1553,6 +1553,11 @@ def test_a_running_request_on_a_lane_is_the_nights_only_if_its_task_is_on_that_l
     assert "not the night run's" in blocker(Running(REPLICA["host"], False))
 
 
+def test_a_silent_metrics_endpoint_holds_the_next_start_back(fake_host):
+    FakeHost.samples = [None]
+    assert "/metrics does not answer" in NightShiftRunner.start_blocker("http://x", "p", [], NightShiftSettings({}))
+
+
 @pytest.fixture
 def two_nodes(setup, fake_host, monkeypatch):
     """This machine as both sender and node: the pairing reaches `serve-job` in this process, and
