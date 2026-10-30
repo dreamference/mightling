@@ -10,6 +10,8 @@ import subprocess
 import pytest
 
 from dreamference.node import node_role_provisioner
+from dreamference.node.fleet_model_plan import FleetModelPlan
+from dreamference.node.fleet_probe import FleetProbe
 from dreamference.node.node_provisioner import NodeProvisioner
 from dreamference.node.node_role_provisioner import (
     DERIVE_FLAG,
@@ -152,3 +154,73 @@ def test_a_missing_ssh_keygen_is_a_failed_command_not_a_crash(keygen, tmp_path):
     answer = NodeRoleProvisioner._make_key(["ssh-keygen", DERIVE_FLAG], private, public)
     assert answer.returncode == 1 and answer.stderr == "ssh-keygen"
     assert not public.exists()
+
+
+# Models, the forge and key-only SSH
+
+
+def test_only_the_folders_with_no_copy_anywhere_are_downloaded(monkeypatch):
+    steps, run = role()
+    run.plan, run.model = {"folders": ["a", "b"]}, "the-model"
+    run._state = lambda host: {}
+    monkeypatch.setattr(
+        FleetProbe, "missing_models", classmethod(lambda cls, state, folders: folders)
+    )
+    monkeypatch.setattr(
+        FleetModelPlan,
+        "local_folders",
+        classmethod(lambda cls, folders: [f for f in folders if f == "a"]),
+    )
+    session = Session()
+    assert steps.download_missing(HOST, session) is True
+    assert session.commands == ["ling-admin model download --model the-model"]
+    assert run.results[HOST]["done"] == [
+        "ling-admin model download --model the-model (b: no copy here)"
+    ]
+
+
+@pytest.fixture
+def mirrors(monkeypatch):
+    from dreamference.forge.forge_mirrors import ForgeMirrors
+
+    synced = {"code": 0, "calls": 0}
+
+    def sync(cls, quiet=False):
+        synced["calls"] += 1
+        return synced["code"]
+
+    monkeypatch.setattr(ForgeMirrors, "sync", classmethod(sync))
+    return synced
+
+
+def test_no_forge_asks_nothing_of_the_machine(mirrors):
+    steps, _ = role(no_forge=True)
+    session = Session()
+    assert steps.forge_mirror(HOST, session) is True
+    assert session.commands == [] and mirrors["calls"] == 0
+
+
+def test_a_forge_that_will_not_start_fails_and_syncs_nothing(mirrors):
+    steps, run = role()
+    session = Session({"mightling-forge": (1, "", ""), "forge on": (1, "", "no docker")})
+    assert steps.forge_mirror(HOST, session) is False
+    assert run.results[HOST]["reason"] == "no docker" and mirrors["calls"] == 0
+
+
+def test_a_mirror_sync_that_did_not_complete_is_a_warning_not_a_failure(mirrors, capsys):
+    mirrors["code"] = 1
+    steps, run = role()
+    assert steps.forge_mirror(HOST, Session()) is True
+    assert "forge mirrors sync` did not complete" in capsys.readouterr().out
+    assert "failed" not in run.results[HOST]
+
+
+def test_a_key_only_drop_in_that_will_not_install_leaves_passwords_on():
+    steps, run = role()
+    session = Session(
+        {INSTALL: (1, "", "sshd -t: bad option"), "passwordauthentication no": (1, "", "")}
+    )
+    session.key_logins = [True]
+    assert steps.key_only_ssh(HOST, session) is False
+    assert run.results[HOST]["reason"] == "sshd -t: bad option"
+    assert session.key_logins == [], "the key was proven once and the change stopped there"
