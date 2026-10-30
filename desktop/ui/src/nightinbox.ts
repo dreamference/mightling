@@ -24,7 +24,17 @@ type Run = Pick<NightTask, "id" | "status" | "at">;
 export function isUnread(task: Run, seen: string | null, read: readonly string[]): boolean {
   if (!INBOX_STATUSES.includes(task.status)) return false;
   if (read.includes(task.id)) return false;
-  return !seen || (task.at ?? "") > seen;
+  return !seen || finishedAfter(task.at, seen);
+}
+
+/**
+ * Whether `at` is later than `seen`, as times: Night Shift writes local time with its offset
+ * (night_shift_queue.py `now`), Mark all as read UTC (`toISOString`), so their text does not sort.
+ */
+function finishedAfter(at: string | null, seen: string): boolean {
+  const finished = Date.parse(at ?? "");
+  const marked = Date.parse(seen);
+  return Number.isNaN(finished) || Number.isNaN(marked) ? (at ?? "") > seen : finished > marked;
 }
 
 /** How many finished runs are unread. */

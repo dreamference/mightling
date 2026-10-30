@@ -15,6 +15,12 @@ describe("Night Shift's inbox", () => {
     expect(unreadRuns([run("a"), run("b"), run("c", "running")], null, ["a"])).toBe(1);
   });
 
+  it("compares a run's finish with Mark all as read as times, not as text in two time zones", () => {
+    // Night Shift writes local time with its offset; Mark all as read stores UTC (`toISOString`).
+    expect(isUnread(run("a", "done", "2026-10-20T10:50:00-05:00"), "2026-10-20T15:45:00.000Z", [])).toBe(true);
+    expect(isUnread(run("a", "done", "2026-10-20T16:40:00+01:00"), "2026-10-20T15:45:00.000Z", [])).toBe(false);
+  });
+
   it("remembers an opened run once, the oldest dropped beyond the bound", () => {
     expect(markRead(["a"], "b")).toEqual(["a", "b"]);
     expect(markRead(["a", "b"], "a")).toEqual(["a", "b"]);

@@ -21,6 +21,9 @@ describe("Night Shift's unread results", () => {
     expect(isUnread({ ...done, status: "queued" }, null, [])).toBe(false);
     expect(isUnread({ ...done, status: "no-change" }, null, [])).toBe(true);
     expect(unreadRuns([done, { ...done, id: "b" }, { ...done, id: "c", status: "running" }], null, ["b"])).toBe(1);
+    // Night Shift writes local time with its offset, Mark all as read UTC: compared as times.
+    expect(isUnread({ ...done, at: "2026-10-20T10:50:00-05:00" }, "2026-10-20T15:45:00.000Z", [])).toBe(true);
+    expect(isUnread({ ...done, at: "2026-10-20T16:40:00+01:00" }, "2026-10-20T15:45:00.000Z", [])).toBe(false);
     // Preferences of the wrong shape count as no marks.
     expect(unreadRuns([done], 5, "a")).toBe(1);
   });
