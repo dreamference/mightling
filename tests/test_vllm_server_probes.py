@@ -114,3 +114,19 @@ def test_reserved_memory_is_asked_of_the_container_only_while_one_runs(monkeypat
     assert asked == []
     mgr.process = object()
     assert mgr.get_container_reserved_memory() == "CPU 3%"
+
+
+def test_a_docker_or_vllm_probe_that_cannot_run_reports_absent(monkeypatch):
+    from dreamference.vllm_server import vllm_server_manager as vsm
+
+    def cannot_run(*a, **k):
+        raise OSError("exec format error")
+
+    monkeypatch.setattr(vsm.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(vsm.subprocess, "run", cannot_run)
+    mgr = VLLMServerManager()
+    assert mgr.is_docker_available() is False
+    assert mgr.is_image_present("some-image:tag") is False
+
+    monkeypatch.setattr(vsm.shutil, "which", lambda name: None)
+    assert mgr.is_vllm_installed() is False
