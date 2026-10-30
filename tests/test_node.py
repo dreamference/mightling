@@ -1729,6 +1729,18 @@ def test_a_probe_that_cannot_start_is_a_reason_not_to_run_a_job(job_node, monkey
     assert "cannot sandbox a job" in reason and "no such file: bwrap" in reason
 
 
+def test_a_job_whose_memory_and_the_reserve_just_fit_is_admitted(job_node, monkeypatch):
+    from dreamference.night_shift import NightShiftHost
+    from dreamference.node import NodeJob
+
+    record = NodeJob.validate(job_request(commit=job_node["commit"], memory="8G"))
+    fits = (8 + 8) * 1024**3  # the job's cap and the eight GiB the node keeps for itself
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: fits))
+    assert NodeJob.admission_blocker(record) is None
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: fits - 1))
+    assert "GiB of memory available" in NodeJob.admission_blocker(record)
+
+
 def test_a_job_stopped_by_its_limits_is_settled_and_a_cancel_is_kept(job_node, monkeypatch):
     from dreamference.node import NodeJob
 
