@@ -1418,3 +1418,14 @@ def test_a_release_install_is_current_only_with_both_binaries_runnable(tmp_path,
         assert CodexBrandedBuilder.is_current() is (name == "codex-code-mode-host")
     (tmp_path / "bin" / "codex-code-mode-host").chmod(0o644)
     assert CodexBrandedBuilder.is_current() is False
+
+
+def test_a_checkout_needs_both_the_patch_series_and_the_launcher_crate(tmp_path, monkeypatch):
+    monkeypatch.setattr(builder_module, "CODEX_PATCH_DIR", str(tmp_path / "patches"))
+    monkeypatch.setattr(builder_module, "MIGHTLING_CRATE_DIR", str(tmp_path / "ling-rs"))
+    (tmp_path / "patches").mkdir()
+    assert CodexBrandedBuilder.has_source() is False
+    (tmp_path / "ling-rs").mkdir()
+    assert CodexBrandedBuilder.has_source() is True
+    (tmp_path / "patches").rmdir()
+    assert CodexBrandedBuilder.has_source() is False
