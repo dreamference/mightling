@@ -19,16 +19,21 @@ from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 class FakeDocker:
     """Stands in for `subprocess.run`: answers inspections from `modes`/`networks`, records all."""
 
-    def __init__(self, modes=None, networks=None, existing_networks=()):
+    def __init__(self, modes=None, networks=None, existing_networks=(), ports=None, failing=None):
         self.modes = dict(modes or {})          # container -> HostConfig.NetworkMode
         self.networks = dict(networks or {})    # container -> attached network names
         self.existing_networks = set(existing_networks)
+        self.ports = dict(ports or {})          # container -> host address its port is published on
+        self.failing = dict(failing or {})      # argv prefix -> stderr of a command that fails
         self.calls = []
 
     def __call__(self, argv, **kwargs):
         self.calls.append(list(argv))
         ok = lambda out="": SimpleNamespace(returncode=0, stdout=out, stderr="")
         fail = SimpleNamespace(returncode=1, stdout="", stderr="no such object")
+        failed = [stderr for prefix, stderr in self.failing.items() if argv[:len(prefix)] == list(prefix)]
+        if failed:
+            return SimpleNamespace(returncode=1, stdout="", stderr=failed[0])
         if argv[:3] == ["docker", "network", "inspect"]:
             return ok(argv[3]) if argv[3] in self.existing_networks else fail
         if argv[:3] == ["docker", "network", "create"]:
@@ -40,7 +45,8 @@ class FakeDocker:
                 return fail
             if "NetworkMode" in argv[-1]:
                 return ok(self.modes[name] + "\n")
-            return ok(" ".join(self.networks.get(name, [])) + " \n")
+            ports = "PortBindings" in argv[-1]
+            return ok((self.ports.get(name, "") if ports else " ".join(self.networks.get(name, []))) + " \n")
         if argv[:3] == ["docker", "rm", "-f"]:
             self.modes.pop(argv[3], None)
             return ok()
@@ -106,3 +112,68 @@ def test_a_searxng_already_on_a_user_defined_network_is_left_alone(docker):
     assert SearxngSidecar.start()
     assert fake.commands("docker", "rm") == [] and fake.commands("docker", "run") == []
     assert fake.commands("docker", "start") == [["docker", "start", SEARXNG_CONTAINER_NAME]]
+
+
+def test_a_network_another_start_created_meanwhile_counts_as_there(docker):
+    # Two sidecars starting at once both find no network; the second create loses the race.
+    fake = docker(failing={("docker", "network", "create"): f"network with name {SIDECAR_NETWORK} already exists"})
+    assert SidecarNetwork.ensure()
+    assert fake.commands("docker", "network", "create")
+
+
+def test_a_network_docker_could_not_create_is_reported(docker):
+    docker(failing={("docker", "network", "create"): "permission denied"})
+    assert not SidecarNetwork.ensure()
+
+
+def test_searxng_restarts_with_the_machine_and_reads_its_settings_from_the_config_folder(docker):
+    fake = docker()
+    assert SearxngSidecar.start()
+    (run,) = fake.commands("docker", "run", "-d")
+    assert run[run.index("--restart") + 1] == "unless-stopped"
+    assert run[run.index("-v") + 1] == f"{SearxngSidecar.config_dir()}:/etc/searxng"
+
+
+def test_searxng_says_when_it_wrote_its_settings(docker):
+    docker()
+    said = []
+    assert SearxngSidecar.start(said.append)
+    assert said == [f"📝 Wrote SearXNG's settings: {SearxngSidecar.config_dir()}/settings.yml"]
+
+
+def test_a_replaced_searxng_does_not_rejoin_the_network_it_is_created_on(docker):
+    fake = docker(modes={SEARXNG_CONTAINER_NAME: "bridge"},
+                  networks={SEARXNG_CONTAINER_NAME: ["bridge", SIDECAR_NETWORK, "other_net"]})
+    assert SearxngSidecar.start()
+    assert fake.commands("docker", "network", "connect") == [
+        ["docker", "network", "connect", "other_net", SEARXNG_CONTAINER_NAME]]
+
+
+def test_a_searxng_published_on_every_address_is_moved_back_to_loopback(docker):
+    # The node was disabled since: `ling-search` on other machines must no longer reach it.
+    SearxngSettings.ensure(SearxngSidecar.config_dir())
+    fake = docker(modes={SEARXNG_CONTAINER_NAME: SIDECAR_NETWORK}, ports={SEARXNG_CONTAINER_NAME: "0.0.0.0"})
+    assert SearxngSidecar.start()
+    assert fake.commands("docker", "rm", "-f") == [["docker", "rm", "-f", SEARXNG_CONTAINER_NAME]]
+    (run,) = fake.commands("docker", "run", "-d")
+    assert run[run.index("-p") + 1] == "127.0.0.1:8888:8080"
+
+
+def test_a_searxng_on_the_default_bridge_is_replaced_even_on_the_right_address(docker):
+    SearxngSettings.ensure(SearxngSidecar.config_dir())
+    fake = docker(modes={SEARXNG_CONTAINER_NAME: "bridge"}, ports={SEARXNG_CONTAINER_NAME: "127.0.0.1"})
+    assert SearxngSidecar.start()
+    assert fake.commands("docker", "rm", "-f") and fake.commands("docker", "run", "-d")
+    assert fake.commands("docker", "start") == []
+
+
+def test_searxng_reports_a_container_docker_could_not_start(docker):
+    SearxngSettings.ensure(SearxngSidecar.config_dir())
+    docker(modes={SEARXNG_CONTAINER_NAME: SIDECAR_NETWORK}, failing={("docker", "start"): "port is already allocated"})
+    assert not SearxngSidecar.start()
+
+
+def test_searxng_reports_a_container_docker_could_not_create(docker, capsys):
+    docker(failing={("docker", "run", "-d"): "pull access denied"})
+    assert not SearxngSidecar.start()
+    assert "pull access denied" in capsys.readouterr().out

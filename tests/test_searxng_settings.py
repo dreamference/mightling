@@ -270,3 +270,18 @@ def test_the_owner_writes_through_a_throwaway_container_without_network(monkeypa
     )
     assert "/home/u/.config/searxng:/etc/searxng" in argv
     assert kwargs["input"] == "settings text"
+
+
+def test_the_owner_writes_as_root_and_a_failed_write_is_reported(monkeypatch):
+    # Only root in the throwaway container can write in a folder SearXNG's user took over.
+    seen = []
+    monkeypatch.setattr(
+        searxng_sidecar.subprocess,
+        "run",
+        lambda argv, **kwargs: (
+            seen.append(argv) or SimpleNamespace(returncode=1, stdout="", stderr="denied")
+        ),
+    )
+    assert not SearxngSidecar.write_settings_as_owner("/home/u/.config/searxng", "settings text")
+    (argv,) = seen
+    assert argv[argv.index("--user") + 1] == "0"
