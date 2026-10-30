@@ -1880,6 +1880,7 @@ mod tests {
         assert_eq!(context_window_from_card(&json!({"id": "m", "max_context_length": 32768})), Some(32_768));
         // The first one present wins; zero and strings are no answer.
         assert_eq!(context_window_from_card(&json!({"max_model_len": 0, "context_length": 4096})), Some(4096));
+        assert_eq!(context_window_from_card(&json!({"context_length": 4096, "max_model_len": 8192})), Some(8192));
         assert_eq!(context_window_from_card(&json!({"max_model_len": "8192"})), None);
         // Ollama's OpenAI endpoint reports nothing.
         assert_eq!(context_window_from_card(&json!({"id": "qwen", "object": "model", "owned_by": "library"})), None);
