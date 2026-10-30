@@ -945,6 +945,20 @@ mod tests {
     }
 
     #[test]
+    fn a_bracketed_host_and_a_padded_url_are_read_as_git_reads_them() {
+        let id = |url: &str| parse_remote(url).map(|r| (r.host, r.owner));
+        let expect = |host: &str| Some((host.to_string(), "acme".to_string()));
+        assert_eq!(
+            id("ssh://git@[2001:db8::1]:2222/acme/repo.git"),
+            expect("2001:db8::1")
+        );
+        assert_eq!(
+            id(" https://example.com/acme/repo.git\n"),
+            expect("example.com")
+        );
+    }
+
+    #[test]
     fn our_domains_leave_out_public_mail_and_web_flow() {
         let authors = Authors::from_addresses(
             [
