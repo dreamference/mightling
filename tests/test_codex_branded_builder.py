@@ -1814,3 +1814,12 @@ def test_an_installed_ling_is_not_built_again(monkeypatch):
     monkeypatch.setattr(CodexInstaller, "is_installed", classmethod(lambda cls: True))
     monkeypatch.setattr(CodexBrandedBuilder, "build", classmethod(lambda cls, force=False: pytest.fail("built")))
     assert CodexInstaller.install_if_missing() is True
+
+
+def test_a_release_install_refreshes_its_links_when_asked_to_build(monkeypatch):
+    linked = []
+    monkeypatch.setattr(CodexBrandedBuilder, "has_source", classmethod(lambda cls: False))
+    monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: linked.append(True)))
+    assert CodexBrandedBuilder.build() is True
+    assert linked == [True]
