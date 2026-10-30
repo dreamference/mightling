@@ -5580,6 +5580,15 @@ def test_this_machines_name_with_a_trailing_dot_is_local(monkeypatch):
         assert not SweBenchRunner.remote_server(host), host
 
 
+def test_a_remote_server_leaves_this_gate_open_even_when_the_network_has_a_subnet(gated, monkeypatch):
+    monkeypatch.setenv("DREAMFERENCE_VLLM_HOST", "http://node-b.local:8300")
+    monkeypatch.setattr(SweBenchRunner, "open_relays", classmethod(lambda cls, gateway, lanes: []))
+    assert run(gated, instances=["acme__widget-1"]) == 0
+    assert gated["written"] == [] and gated["gate"].run_record() is None
+    sessions = json.loads((SweBenchRunStore("r1").directory / "gate.json").read_text())["sessions"]
+    assert sessions[0]["gate"].startswith("open: ")
+
+
 def test_the_image_chunk_defaults_to_25_and_is_read_from_the_config():
     assert SweBenchSettings({}).image_chunk == 25
     assert SweBenchSettings({"image_chunk": 10}).image_chunk == 10
