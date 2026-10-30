@@ -3608,6 +3608,15 @@ def test_the_gate_is_the_runs_only_when_it_holds_the_runs_own_record(hold):
         assert (hold.enforced, hold.priority(), hold.paused()) == expected, answer
 
 
+def test_a_gate_once_in_force_is_reported_in_force_after_its_probe_goes_quiet(hold):
+    FakeGate.answer = {"gate": "mightling", "state": "closed", "id": hold.id}
+    hold.tick()
+    FakeGate.answer = None
+    hold.tick()
+    assert not hold.enforced
+    assert [session["gate"] for session in gate_record()["sessions"]] == ["in force"]
+
+
 def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
     from dreamference.vllm_server.model_gate import ModelGate
 
