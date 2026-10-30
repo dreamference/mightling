@@ -965,4 +965,11 @@ mod tests {
         let lines = list_lines(&resolve_from(None, None, &installed), &installed);
         assert_eq!(lines[0], "Prompt for new sessions: default (default)");
     }
+
+    #[test]
+    fn a_name_in_the_environment_is_trimmed() {
+        let resolved = resolve_from(Some(" high-swe \n"), None, &Installed::built_in());
+        assert_eq!((resolved.prompt.name.as_str(), resolved.source), ("high-swe", Source::Environment));
+        assert!(resolved.skipped.is_empty());
+    }
 }
