@@ -537,4 +537,13 @@ mod tests {
         assert_eq!(classify("https://www.google.com/searchfoo?q=x"), None);
         assert_eq!(classify("https://www.google.com/search/x?q=x"), None);
     }
+
+    #[test]
+    fn an_empty_query_parameter_is_skipped_for_the_next() {
+        assert_eq!(
+            classify("https://www.google.com/search?q=&q=+&q=x"),
+            search("x", None)
+        );
+        assert_eq!(classify("https://www.google.com/search?q="), None);
+    }
 }
