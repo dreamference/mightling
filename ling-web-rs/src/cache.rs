@@ -392,4 +392,15 @@ mod tests {
             key("http://127.0.0.1:8888", "lisbon tram", "general", "en")
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stamp_far_in_the_future_waits_at_most_the_longest_wait() {
+        let cache = Cache::at(scratch("future")).unwrap();
+        let now = SystemTime::now();
+        let future = unix_millis(now + Duration::from_secs(3600));
+        std::fs::write(cache.dir().join(STAMP_FILE), future.to_string()).unwrap();
+        assert_eq!(cache.reserve(now), MAX_WAIT);
+        let _ = std::fs::remove_dir_all(cache.dir());
+    }
 }
