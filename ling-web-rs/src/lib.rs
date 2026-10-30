@@ -280,6 +280,15 @@ mod tests {
     }
 
     #[test]
+    fn a_no_proxy_entry_with_a_port_names_its_host() {
+        let proxy = ("https_proxy", "http://p:3128");
+        assert!(!proxied(
+            "https://a.com:8443/x",
+            &[proxy, ("no_proxy", "a.com:8443")]
+        ));
+    }
+
+    #[test]
     fn a_web_command_refuses_at_on_and_in_a_sandbox_without_network() {
         assert_eq!(refusal(Level::On, false), Some(AIRGAPPED_ON_MESSAGE));
         assert_eq!(refusal(Level::On, true), Some(AIRGAPPED_ON_MESSAGE));
