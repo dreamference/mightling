@@ -1370,3 +1370,27 @@ def test_the_build_key_changes_when_a_launcher_file_is_renamed(tmp_path, monkeyp
     first = CodexBrandedBuilder.build_key()
     (crate / "src" / "a.rs").rename(crate / "src" / "b.rs")
     assert CodexBrandedBuilder.build_key() != first
+
+
+def _installed_ling(tmp_path, monkeypatch, key="k"):
+    """`ling` and its code-mode host installed under a stamp for `key`, nothing else required."""
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path))
+    monkeypatch.setattr(builder_module, "BUILDS_SIGNAL", False)
+    monkeypatch.setattr(builder_module, "BUILDS_DELEGATE", False)
+    monkeypatch.setattr(CodexBrandedBuilder, "build_key", classmethod(lambda cls: key))
+    (tmp_path / "build-key").write_text("k\n")
+    for name in ("ling", "codex-code-mode-host"):
+        path = tmp_path / "bin" / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755)
+    return tmp_path / "bin" / "codex-code-mode-host"
+
+
+def test_ling_is_current_only_under_a_stamp_for_its_inputs(tmp_path, monkeypatch):
+    _installed_ling(tmp_path, monkeypatch)
+    assert CodexBrandedBuilder.is_current() is True
+    (tmp_path / "build-key").write_text("built from older patches\n")
+    assert CodexBrandedBuilder.is_current() is False
+    (tmp_path / "build-key").unlink()
+    assert CodexBrandedBuilder.is_current() is False
