@@ -1210,3 +1210,12 @@ def test_the_system_bus_and_other_unix_sockets_are_not_a_lookup():
         + '5 write(3</tmp/ling.log>, "asked org.freedesktop.resolve1", 30) = 30\n'
     )
     assert trace.local_resolvers == {}
+
+
+def test_the_preview_page_opens_a_peer_connection_with_a_stun_and_a_tcp_turn_server():
+    from dreamference.audit.preview_page import PAGE
+
+    assert "new RTCPeerConnection" in PAGE
+    assert "stun:" in PAGE
+    assert "turn:" in PAGE and "transport=tcp" in PAGE
+    assert PAGE.index("RTCPeerConnection") < PAGE.index('fetch("/seen")')

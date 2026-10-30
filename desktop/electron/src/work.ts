@@ -9,11 +9,10 @@
 // before the first paint.
 
 import path from "node:path";
-import { BrowserWindow, app, shell, type Rectangle } from "electron";
+import { BrowserWindow, app, type Rectangle } from "electron";
 
 import appConfig from "../app.json";
 import { WORK_URL } from "./app-protocol";
-import { webUrl } from "./links";
 import { themeArgument, windowColours, type Theme } from "./theme";
 import { place, track } from "./window-state";
 import type { PaneKind } from "./windows";
@@ -82,12 +81,9 @@ export function openWork(options: WorkOptions): BrowserWindow {
 /** The navigation lock every window of the app gets: no other page, no new window, no embedded guest. */
 function lockDown(window: BrowserWindow): void {
   const contents = window.webContents;
-  contents.setWindowOpenHandler(({ url }) => {
-    // The rules of the page's own link/open (links.ts): http or https, no user name or password.
-    const target = webUrl(url);
-    if (target) void shell.openExternal(target);
-    return { action: "deny" };
-  });
+  // Never a window, never an external open from here: the page's links go through its own link/open
+  // message (links.ts rules, and the air-gap check `offline()` that window.open would skip).
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
   // The page is bundled; it never navigates anywhere else, nor is redirected there.
   contents.on("will-navigate", (event, url) => {
     if (!staysOnPage(url)) event.preventDefault();

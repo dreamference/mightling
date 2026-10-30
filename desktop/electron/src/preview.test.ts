@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 // The preview session's request rules, as Electron would call them: one handler for every request.
+const proxies = vi.hoisted(() => ({ set: [] as Array<{ mode: string; pacScript?: string }>, closed: 0 }));
 const rules = vi.hoisted(() => ({ beforeRequest: null as null | ((details: { url: string; webContentsId?: number; resourceType?: string; frame?: { origin: string } | null }, callback: (answer: { cancel: boolean }) => void) => void) }));
 
 vi.mock("electron", () => {
@@ -8,6 +9,8 @@ vi.mock("electron", () => {
     setPermissionRequestHandler: () => {},
     setPermissionCheckHandler: () => {},
     setSpellCheckerEnabled: () => {},
+    setProxy: async (config: { mode: string; pacScript?: string }) => { proxies.set.push(config); },
+    closeAllConnections: async () => { proxies.closed += 1; },
     on: () => {},
     webRequest: {
       onBeforeRequest: (_filter: unknown, handler: typeof rules.beforeRequest) => { rules.beforeRequest = handler; },
@@ -36,7 +39,7 @@ vi.mock("electron", () => {
   return { BrowserWindow: class {}, WebContentsView, session: { fromPartition: () => ses } };
 });
 
-import { Previews } from "./preview";
+import { AIR_GAP_PAC, AIR_GAP_PROXY, Previews } from "./preview";
 
 const asked = (url: string) => new Promise<boolean>((resolve) => rules.beforeRequest!({ url, webContentsId: 7 }, ({ cancel }) => resolve(cancel)));
 
@@ -85,5 +88,30 @@ describe("an internet page and this machine", () => {
     // The tab itself may still go there: a navigation the user sees.
     expect(await from("http://localhost:5173/", "mainFrame", "https://example.com")).toBe(false);
     expect(await from("https://example.com/api", "xhr", "https://example.com")).toBe(false);
+  });
+});
+
+describe("a preview's proxy at /airgapped", () => {
+  it("is dead for everything but this machine while any tab is at on, and the system's again when none is", async () => {
+    proxies.set.length = 0;
+    proxies.closed = 0;
+    let on = true;
+    const previews = new Previews(() => {}, () => ({ sites: {}, devTools: false }), async () => on);
+    const window = { contentView: { addChildView: () => {} }, on: () => {} };
+    await previews.open(window as never, "proxy", "http://localhost:5173/", "thread-1");
+    expect(proxies.set.map((config) => config.mode)).toEqual(["pac_script"]);
+    expect(proxies.closed).toBe(1);
+    on = false;
+    await previews.recheck();
+    expect(proxies.set.map((config) => config.mode)).toEqual(["pac_script", "system"]);
+    expect(proxies.closed).toBe(1);
+  });
+
+  it("has a script that lets loopback through and fails everything else", () => {
+    const find = new Function("shExpMatch", "isInNet", `${AIR_GAP_PAC}; return FindProxyForURL;`)(() => false, () => false) as (url: string, host: string) => string;
+    expect(find("http://localhost:5173/", "localhost")).toBe("DIRECT");
+    expect(find("http://127.0.0.1:5173/", "127.0.0.1")).toBe("DIRECT");
+    expect(() => find("https://example.com/", "example.com")).toThrow();
+    expect(AIR_GAP_PROXY.pacScript.startsWith("data:application/x-ns-proxy-autoconfig,")).toBe(true);
   });
 });
