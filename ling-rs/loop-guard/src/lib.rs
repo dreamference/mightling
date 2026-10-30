@@ -563,4 +563,19 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn a_block_ending_in_a_short_repeat_is_caught_when_its_last_copy_closes() {
+        // Forty distinct words, then a two-piece pattern four times: the short repeat inside the
+        // block is no reason to pass the block's own repetition.
+        let words: String = (0..40u8).map(|i| format!(" q{}{}", char::from(b'a' + i / 26), char::from(b'a' + i % 26))).collect();
+        let block = format!("{words}{}", " x y".repeat(4));
+        let off = Thresholds { max_run: 0, max_char_run: 0, compression_window: 0, ..defaults() };
+        let text = format!("Start.{}", block.repeat(4));
+        // The fourth copy's last piece is still open.
+        assert_eq!(scan(&text, &off), None);
+        let found = scan(&format!("{text}."), &off).expect("a loop");
+        assert_eq!(found.kind, Kind::Periodic { period: 48, count: 4 });
+        assert_eq!(found.cut, "Start.".len() + block.len());
+    }
 }
