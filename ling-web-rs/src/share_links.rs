@@ -554,4 +554,16 @@ mod tests {
             place("Synthetic Park", Some("38.7, -9.1"))
         );
     }
+
+    #[test]
+    fn a_segment_with_a_coordinate_that_is_not_a_number_has_no_coordinates() {
+        assert_eq!(
+            classify("https://www.google.com/maps/place/Park/@38.7,abc,14z"),
+            place("Park", None)
+        );
+        assert_eq!(
+            classify("https://www.google.com/maps/place/Park/@abc,-9.1,14z"),
+            place("Park", None)
+        );
+    }
 }
