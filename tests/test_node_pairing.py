@@ -370,6 +370,13 @@ def test_only_a_name_inside_the_overlay_domain_is_an_overlay_name():
     assert not NodePairing.is_overlay_name(f"spark-1{OVERLAY_DOMAIN}")  # it only ends like one
 
 
+def test_a_host_key_pinned_for_one_node_does_not_refuse_another():
+    other = "66666666-7777-4888-9999-000000000000"
+    assert NodePairing.pin_host_keys(NODE, ["ssh-ed25519 AAAAone"])
+    assert NodePairing.pin_host_keys(other, ["ssh-ed25519 AAAAtwo"])
+    assert not NodePairing.pin_host_keys(NODE, ["ssh-ed25519 AAAAtwo"])
+
+
 # -- the forced command ------------------------------------------------------------------------------
 
 
