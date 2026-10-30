@@ -1440,4 +1440,16 @@ mod tests {
         assert!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default().contains("False"));
         assert!(!session.checkout.join("later.py").exists());
     }
+
+    #[test]
+    fn a_clean_discard_keeps_no_snapshot() {
+        let fixture = Fixture::new("clean-discard");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (session, cwd, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        let (lines, code) = command(&home, &cwd, "discard", true);
+        assert_eq!(code, 0, "{lines:?}");
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(git_text(&repo, &["for-each-ref", SNAPSHOTS]).as_deref(), Some(""));
+        assert!(session.checkout.is_dir());
+    }
 }
