@@ -779,4 +779,18 @@ mod tests {
         run(&scratch.0, &mut items, policy().high + 1);
         assert_eq!(items, before);
     }
+
+    #[test]
+    fn only_outputs_are_rewritten_for_a_masked_id() {
+        let scratch = Scratch::new("only-outputs");
+        let mut items = history(3, 20);
+        let key = segment_key(&items.iter().map(|e| e.item.clone()).collect::<Vec<_>>()).unwrap_or_default();
+        // Not an output, though it carries a masked id and a long `output` field.
+        let other = json!({"type": "local_shell_call", "call_id": "call_001", "status": "completed", "output": "z".repeat(1_000)});
+        items.push(Envelope { item: other.clone(), meta: 3 });
+        State { masked: ["call_001".to_string()].into(), after_last_move: Some(1) }.save(&scratch.0, &key).unwrap_or_default();
+        run(&scratch.0, &mut items, 0);
+        assert_eq!(masked(&items), vec![4]);
+        assert_eq!(items[items.len() - 1].item, other);
+    }
 }
