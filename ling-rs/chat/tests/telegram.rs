@@ -255,6 +255,22 @@ async fn a_message_from_a_stranger_is_refused_even_in_a_paired_users_chat() {
     assert_eq!(stand.bodies("sendMessage")[0]["text"], ling_chat::telegram::UNPAIRED_REPLY);
 }
 
+/// Creating, renaming, closing or reopening a topic is not a question: nothing reaches the hub and
+/// nothing is answered.
+#[tokio::test]
+async fn a_topics_service_messages_are_not_questions() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let (hub, mut inbound) = mpsc::unbounded_channel();
+    let mut poller = Poller::new(api, scratch("service"), hub);
+    for (n, field) in ["forum_topic_created", "forum_topic_edited", "forum_topic_closed", "forum_topic_reopened"].into_iter().enumerate() {
+        let update = json!({ "update_id": 20 + n, "message": { "message_id": 30 + n, "message_thread_id": 7, "is_topic_message": true,
+            "from": { "id": 111 }, "chat": { "id": 111, "type": "private" }, field: { "name": "Plans" } } });
+        poller.handle(&update).await;
+    }
+    assert!(inbound.try_recv().is_err());
+    assert!(stand.bodies("sendMessage").is_empty());
+}
+
 #[tokio::test]
 async fn buttons_and_the_stop_button_come_from_paired_users_only() {
     let (stand, api) = stand_in(default_answer()).await;
