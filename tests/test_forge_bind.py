@@ -41,3 +41,13 @@ def test_interfaces_that_cannot_be_listed_are_none(monkeypatch, run):
 def test_the_interfaces_are_ip_s_list(monkeypatch):
     monkeypatch.setattr(forge_bind.subprocess, "run", answering('[{"ifname": "eth0"}]'))
     assert ForgeBind.interfaces() == [{"ifname": "eth0"}]
+
+
+def test_an_unreadable_avahi_conf_allows_and_denies_nothing(monkeypatch, tmp_path):
+    monkeypatch.setattr(forge_bind, "AVAHI_CONF", tmp_path / "missing.conf")
+    assert ForgeBind.avahi_rules() == ([], [])
+
+    conf = tmp_path / "avahi-daemon.conf"
+    conf.write_text("[server]\nallow-interfaces=eth0, wlan0\ndeny-interfaces=docker0\n")
+    monkeypatch.setattr(forge_bind, "AVAHI_CONF", conf)
+    assert ForgeBind.avahi_rules() == (["eth0", "wlan0"], ["docker0"])
