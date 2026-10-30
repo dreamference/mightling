@@ -2334,6 +2334,16 @@ mod tests {
     }
 
     #[test]
+    fn the_vendors_plugin_features_are_turned_off_whatever_the_file_says() {
+        for key in plugins::VENDOR_FEATURES {
+            let text = updated_config(&format!("[features]\n{key} = true\n"), Path::new("/h/c.json"), "http://x:8000")
+                .unwrap_or_default();
+            let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+            assert_eq!(parsed["features"].get(key).and_then(toml::Value::as_bool), Some(false), "{key}");
+        }
+    }
+
+    #[test]
     fn user_choices_in_config_are_kept() {
         // Preferences only: the update check reaches api.github.com and is forced off instead
         // (settings_that_reach_openai_are_overridden_not_just_defaulted).
