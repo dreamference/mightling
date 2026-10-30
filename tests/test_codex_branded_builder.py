@@ -1205,3 +1205,75 @@ def test_a_patch_that_does_not_fit_stops_the_export_and_names_the_release_tag(
     assert "0001-brand.patch does not apply" in out
     assert builder_module.CODEX_RELEASE_TAG in out
     assert (tmp_path / "export" / "codex-rs" / "main.rs").read_text() == "codex\n"
+
+
+V8_TARGET = "x86_64-unknown-linux-gnu"
+V8_CHECKSUMS = f"rusty_v8_{builder_module.RUSTY_V8_PROFILE}_{V8_TARGET}.sha256"
+V8_ARCHIVE = f"librusty_v8_{builder_module.RUSTY_V8_PROFILE}_{V8_TARGET}.a.gz"
+V8_BINDING = f"src_binding_{builder_module.RUSTY_V8_PROFILE}_{V8_TARGET}.rs"
+
+
+def _digest(data: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()
+
+
+def _v8_release(tmp_path, monkeypatch, served=None, manifest_returncode=0, manifest=None):
+    """A stand-in export, submodule manifest and release server for `fetch_rusty_v8`.
+
+    `served` maps a file name to the bytes the release serves; by default every file matches its
+    pinned digest. Returns the export directory, the manifest paths `git show` was asked for, and
+    the names that were downloaded.
+    """
+    honest = {V8_ARCHIVE: b"v8 archive", V8_BINDING: b"// v8 bindings"}
+    # Upstream writes some checksum files with CRLF and a `*` (binary mode) before the name.
+    honest[V8_CHECKSUMS] = (
+        f"{_digest(honest[V8_ARCHIVE])} *{V8_ARCHIVE}\r\n{_digest(honest[V8_BINDING])}  {V8_BINDING}\r\n"
+    ).encode()
+    files = {**honest, **(served or {})}
+    if manifest is None:
+        manifest = (
+            f"{'0' * 64}  rusty_v8_{builder_module.RUSTY_V8_PROFILE}_aarch64-apple-darwin.sha256\n"
+            f"{_digest(honest[V8_CHECKSUMS])}  {V8_CHECKSUMS}\n"
+        )
+    export = tmp_path / "export"
+    (export / "codex-rs").mkdir(parents=True)
+    (export / "codex-rs" / "Cargo.toml").write_text(
+        '[workspace.dependencies]\nrusty_v8 = "=9.9.9"\nv8 = "=146.4.0"\n'
+    )
+    shown, downloaded = [], []
+
+    def run(command, **kwargs):
+        shown.append(command[-1])
+        return subprocess.CompletedProcess(command, manifest_returncode, stdout=manifest, stderr="")
+
+    def download(cls, url, path):
+        name = url.rsplit("/", 1)[-1]
+        downloaded.append(name)
+        assert url == f"{builder_module.RUSTY_V8_RELEASE_URL.format(version='146.4.0')}/{name}"
+        if name not in files:
+            raise OSError(f"404 {name}")
+        Path(path).write_bytes(files[name])
+
+    monkeypatch.setattr(builder_module, "BUILD_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(CodexBrandedBuilder, "host_target", classmethod(lambda cls: V8_TARGET))
+    monkeypatch.setattr(CodexBrandedBuilder, "download", classmethod(download))
+    monkeypatch.setattr(builder_module.subprocess, "run", run)
+    return str(export), shown, downloaded
+
+
+def test_the_prebuilt_v8_is_verified_through_the_manifest_the_submodule_pins(tmp_path, monkeypatch):
+    # The chain of trust: the manifest committed in the submodule pins the per-target checksum
+    # file, and that file pins the archive and its bindings. Each lands in a per-version cache.
+    export, shown, downloaded = _v8_release(tmp_path, monkeypatch)
+    env = CodexBrandedBuilder.fetch_rusty_v8(export)
+    assert shown == ["HEAD:third_party/v8/rusty_v8_146_4_0_release_manifests.sha256"]
+    assert downloaded == [V8_CHECKSUMS, V8_ARCHIVE, V8_BINDING]
+    cache = tmp_path / "cache" / "rusty_v8" / "146.4.0"
+    assert env == {
+        "RUSTY_V8_ARCHIVE": str(cache / V8_ARCHIVE),
+        "RUSTY_V8_SRC_BINDING_PATH": str(cache / V8_BINDING),
+    }
+    assert Path(env["RUSTY_V8_ARCHIVE"]).read_bytes() == b"v8 archive"
+    assert Path(env["RUSTY_V8_SRC_BINDING_PATH"]).read_bytes() == b"// v8 bindings"
