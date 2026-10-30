@@ -1026,6 +1026,22 @@ mod tests {
     }
 
     #[test]
+    fn an_item_already_passed_on_is_not_passed_on_again_at_a_stop() {
+        let (nudged, _) = memory();
+        let events = vec![
+            Ok(message_added()),
+            Ok(ResponseEvent::OutputTextDelta("Done.".into())),
+            Ok(ResponseEvent::OutputItemDone(item(json!({"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Done."}]})))),
+            Err(ModelResponseError::Stream("Incomplete response returned, reason: max_output_tokens".into())),
+        ];
+        let out = run(events, nudged, true);
+        assert_eq!(
+            done_items(&out),
+            vec![("assistant".to_string(), "Done.".to_string()), ("developer".to_string(), LENGTH_NUDGE.to_string())]
+        );
+    }
+
+    #[test]
     fn with_the_detector_off_only_the_cap_is_handled() {
         let (nudged, _) = memory();
         let out = run(looping_reasoning(12), nudged, false);
