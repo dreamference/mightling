@@ -591,6 +591,12 @@ def test_a_web_start_that_fails_or_has_no_ling_is_not_counted(machine, monkeypat
     assert NodeAdvertiser.serve_web(True) is False
 
 
+def test_a_node_that_is_not_advertised_has_nothing_to_report(capsys):
+    NodeAdvertiser.on_server_ready()
+    NodeAdvertiser.on_server_stopped()
+    assert capsys.readouterr().out == ""
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
