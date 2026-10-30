@@ -1908,6 +1908,8 @@ mod tests {
         assert_eq!(configured_context_window_from(Some(""), Some("mightling_context_window = 8192\n")), Some(8192));
         assert_eq!(configured_context_window_from(Some("lots"), None), None);
         assert_eq!(configured_context_window_from(Some("0"), None), None);
+        assert_eq!(configured_context_window_from(Some(" 131072\n"), None), Some(131_072));
+        assert_eq!(configured_context_window_from(None, Some("mightling_context_window = 0\n")), None);
         assert_eq!(configured_context_window_from(None, Some("mightling_context_window = -5\n")), None);
         assert_eq!(configured_context_window_from(None, Some("other = 1\n")), None);
         assert_eq!(configured_context_window_from(None, None), None);
