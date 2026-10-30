@@ -1312,4 +1312,18 @@ mod tests {
         assert_eq!(code, 0, "{lines:?}");
         assert!(repo.join("three.py").is_file() && !other.join("three.py").exists(), "{lines:?}");
     }
+
+    #[test]
+    fn prune_keeps_a_session_that_git_cannot_read() {
+        let fixture = Fixture::new("unreadable");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (mut session, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("auth.py"), "changed\n").unwrap_or_default();
+        session.pid = u32::MAX - 1;
+        session.write().unwrap_or_default();
+        // Its link to the repository is broken: what it holds cannot be read, so it is kept.
+        std::fs::write(session.checkout.join(".git"), "gitdir: /nonexistent\n").unwrap_or_default();
+        assert_eq!(prune(&home, &repo), 1);
+        assert_eq!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default(), "changed\n");
+    }
 }
