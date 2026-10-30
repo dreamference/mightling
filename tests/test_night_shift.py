@@ -273,6 +273,39 @@ def test_a_task_runs_in_a_scope_with_a_hard_memory_cap_and_no_swap(setup, monkey
     ]
 
 
+def capped(setup, monkeypatch, deadline, waits=5, scope=False):
+    """A task run whose commands never start: each `wait` times out `waits` times, then exits 0."""
+    import dreamference.night_shift.night_shift_task_run as task_run_module
+
+    record = queue(setup["night"], setup["repo"])
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], deadline)
+    run.USE_SCOPE = scope
+    run.seen_units, run.stopped = [], []
+
+    class Process:
+        pid = -1
+
+        def __init__(self):
+            self.left = waits
+
+        def wait(self, timeout=None):
+            run.seen_units.append(run.current_unit)
+            if self.left <= 0:
+                return 0
+            self.left -= 1
+            raise subprocess.TimeoutExpired("fake", timeout)
+
+    monkeypatch.setattr(task_run_module.subprocess, "Popen", lambda argv, **kwargs: Process())
+    monkeypatch.setattr(run, "_terminate", lambda process, unit: run.stopped.append(unit))
+    return run
+
+
+def test_the_scope_a_command_runs_in_is_known_while_it_runs_and_forgotten_after(setup, monkeypatch):
+    run = capped(setup, monkeypatch, time.time() + 60, waits=0, scope=True)
+    assert run._run_capped(["true"], setup["repo"], setup["night"] / "out.log", None) == 0
+    assert run.seen_units == ["mightling-night-20261001-0100-abc-1"] and run.current_unit is None
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
