@@ -151,3 +151,38 @@ def test_the_callers_tensorizer_choice_overrides_the_recipe_and_reaches_the_draf
     with pytest.raises(Stop):
         launch.go(use_tensorizer=False, draft_model="drafter")
     assert launch.seen["downloads"] == [("model", False), ("drafter", False)]
+
+
+# -- a launch given up, and a stop -------------------------------------------------------------------
+
+
+class FakeWatchdog:
+    def __init__(self, events):
+        self.events = events
+
+    def stop(self):
+        self.events.append("watchdog stopped")
+
+
+def test_an_abandoned_launch_disarms_the_watchdog_and_takes_the_gate_down(monkeypatch):
+    events = []
+    mgr = VLLMServerManager()
+    mgr.watchdog = FakeWatchdog(events)
+    monkeypatch.setattr(ModelGate, "stop", classmethod(lambda cls, port: events.append(("gate", port))))
+
+    mgr._abandon_launch(18001)
+
+    assert events == ["watchdog stopped", ("gate", 18001)]
+    assert mgr.watchdog is None
+
+
+def test_a_gate_that_cannot_be_reached_does_not_hide_the_launchs_own_error(monkeypatch):
+    mgr = VLLMServerManager()
+    mgr.watchdog = None
+
+    def no_docker(cls, port):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(ModelGate, "stop", classmethod(no_docker))
+
+    mgr._abandon_launch(18001)
