@@ -1084,6 +1084,17 @@ mod tests {
     }
 
     #[test]
+    fn a_stop_drops_the_held_tool_calls_for_good() {
+        let (nudged, _) = memory();
+        let mut watch = Watch::new("t".into(), Surface::Ask, Thresholds::default(), true, nudged);
+        let call = item(json!({"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"ls\"}", "call_id": "c1"}));
+        assert!(watch.on_event(Ok(ResponseEvent::OutputItemDone(call))).0.is_empty());
+        let (_, over) = watch.on_event(Err(ModelResponseError::Stream("Incomplete response returned, reason: max_output_tokens".into())));
+        assert!(over);
+        assert!(watch.on_end().is_empty());
+    }
+
+    #[test]
     fn with_the_detector_off_only_the_cap_is_handled() {
         let (nudged, _) = memory();
         let out = run(looping_reasoning(12), nudged, false);
