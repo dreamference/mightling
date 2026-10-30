@@ -475,3 +475,103 @@ def test_the_free_space_of_a_forge_not_yet_made_is_measured_where_it_will_live(
     monkeypatch.setattr(forge_storage.shutil, "disk_usage", usage)
     assert ForgeStorage.free_gb() == 3
     assert measured == [tmp_path]
+
+
+# -- forge move promote [key]
+
+
+@pytest.fixture
+def promotion(monkeypatch):
+    """Promotion over stand-ins: this node is `here`, a restore answers as the test says."""
+    from dreamference.forge.forge_mirrors import ForgeMirrors
+    from dreamference.forge.forge_service import ForgeService
+    from dreamference.node.node_pairing import NodePairing
+
+    seen = {"restored": [], "synced": 0, "ran": []}
+    state = {"latest": Path("forge-20261027-063000"), "result": {"ok": True}, "target": None}
+    state["answer"] = subprocess.CompletedProcess([], 0, "", "")
+
+    def restore(cls, folder, node):
+        seen["restored"].append(folder)
+        return state["result"]
+
+    def run(cls, record, request, **_):
+        seen["ran"].append(request)
+        return state["answer"]
+
+    monkeypatch.setattr(ForgeService, "host_name", classmethod(lambda cls: "this-node"))
+    monkeypatch.setattr(ForgeBackup, "latest", classmethod(lambda cls: state["latest"]))
+    monkeypatch.setattr(ForgeMove, "restore_here", classmethod(restore))
+    monkeypatch.setattr(
+        ForgeMirrors, "sync", classmethod(lambda cls, **_: seen.update(synced=seen["synced"] + 1))
+    )
+    monkeypatch.setattr(NodePairing, "find", classmethod(lambda cls, name, **_: state["target"]))
+    monkeypatch.setattr(NodePairing, "run", classmethod(run))
+    return state, seen
+
+
+def test_promoting_here_without_a_backup_set_restores_nothing(promotion, capsys):
+    state, seen = promotion
+    state["latest"] = None
+    assert ForgeMove.promote("here") == 1
+    assert "holds no backup set" in capsys.readouterr().out
+    assert seen["restored"] == [] and seen["synced"] == 0
+
+
+def test_promoting_a_node_that_is_not_paired_asks_nothing(promotion, capsys):
+    _, seen = promotion
+    assert ForgeMove.promote("stranger") == 1
+    assert "stranger is not a paired node" in capsys.readouterr().out
+    assert seen["ran"] == [] and seen["synced"] == 0
+
+
+def test_a_failed_promotion_here_syncs_no_mirrors(promotion, capsys):
+    state, seen = promotion
+    state["result"] = {"ok": False, "error": "the set did not restore"}
+    assert ForgeMove.promote(None) == 1
+    assert "Promotion failed: the set did not restore" in capsys.readouterr().out
+    assert seen["synced"] == 0
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "error"),
+    [("", "", "no answer"), ("not json\n", "permission denied", "permission denied")],
+)
+def test_a_remote_promotion_without_a_readable_answer_fails_and_syncs_no_mirrors(
+    promotion, stdout, stderr, error, capsys
+):
+    state, seen = promotion
+    state["target"] = {"node": "n-2", "name": "node-2"}
+    state["answer"] = subprocess.CompletedProcess([], 1, stdout, stderr)
+    assert ForgeMove.promote("node-2") == 1
+    assert f"Promotion failed: {error}" in capsys.readouterr().out
+    assert seen["ran"] == ["forge-promote"] and seen["synced"] == 0
+
+
+def test_a_remote_promotion_that_answers_ok_syncs_the_mirrors(promotion, capsys):
+    state, seen = promotion
+    state["target"] = {"node": "n-2", "name": "node-2"}
+    state["answer"] = subprocess.CompletedProcess([], 0, 'restoring\n{"ok": true}\n', "")
+    assert ForgeMove.promote("node-2") == 0
+    assert seen["synced"] == 1 and seen["restored"] == []
+
+
+def test_serving_a_promotion_without_a_backup_set_answers_an_error(promotion, capsys):
+    state, seen = promotion
+    state["latest"] = None
+    assert ForgeMove.serve_promote() == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": False,
+        "error": "no backup set on this node",
+    }
+    assert seen["restored"] == []
+
+
+@pytest.mark.parametrize(("ok", "code"), [(True, 0), (False, 1)])
+def test_serving_a_promotion_answers_the_restores_result_and_its_exit_code(
+    promotion, ok, code, capsys
+):
+    state, _ = promotion
+    state["result"] = {"ok": ok}
+    assert ForgeMove.serve_promote() == code
+    assert json.loads(capsys.readouterr().out) == {"ok": ok}
