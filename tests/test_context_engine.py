@@ -232,3 +232,202 @@ def test_every_connection_to_the_context_database_maps_it_into_memory(tmp_path, 
     assert len(opened) == 4
     for conn in opened:
         assert conn.statements[0] == "PRAGMA mmap_size = 2147483648;"
+
+
+def _keyword_only(monkeypatch):
+    from dreamference.context_engine import embedding_calculator
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+
+
+def test_python_symbols_are_classes_and_functions_with_bare_signatures(tmp_path, monkeypatch):
+    # Spec §2: no bases, positional argument names only, methods are functions, names unqualified.
+    _keyword_only(monkeypatch)
+    (tmp_path / "shapes.py").write_text(
+        "class Square(Shape, metaclass=Meta):\n"
+        '    """A square."""\n'
+        "    def area(self, scale: float = 1.0, *, exact=False) -> float:\n"
+        "        return 1.0\n"
+        "\n"
+        "async def fetch(url, timeout=3):\n"
+        '    """Fetches."""\n'
+        "    return url\n"
+    )
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_workspace(force_reindex=True)
+    found = {s.name: s for s in engine.symbols}
+    assert set(found) == {"Square", "area", "fetch"}
+    assert (found["Square"].symbol_type, found["Square"].signature) == ("class", "class Square")
+    assert (found["Square"].line_start, found["Square"].line_end) == (1, 4)
+    assert found["Square"].docstring == "A square."
+    assert (found["area"].symbol_type, found["area"].signature) == ("function", "def area(self, scale)")
+    assert (found["fetch"].symbol_type, found["fetch"].signature) == ("function", "def fetch(url, timeout)")
+    assert all(s.file_path == "shapes.py" for s in engine.symbols)
+
+
+def test_other_languages_and_unparsable_python_have_no_symbols_but_are_still_searched(tmp_path, monkeypatch):
+    _keyword_only(monkeypatch)
+    (tmp_path / "lib.rs").write_text("fn tokenizer_frobnicate() {}\n")
+    (tmp_path / "broken.py").write_text("def quuxify(:\n")
+    (tmp_path / "fine.py").write_text("def ok():\n    pass\n")
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    summary = engine.index_workspace(force_reindex=True)
+    assert summary["total_indexed_files"] == 3
+    assert [s.name for s in engine.symbols] == ["ok"]
+    assert engine.search_code("frobnicate")[0]["rel_path"] == "lib.rs"
+    assert engine.search_code("quuxify")[0]["rel_path"] == "broken.py"
+
+
+def test_symlinks_and_ignored_extensions_are_not_indexed(tmp_path, monkeypatch):
+    _keyword_only(monkeypatch)
+    (tmp_path / "real.py").write_text("x = 1\n")
+    (tmp_path / "alias.py").symlink_to(tmp_path / "real.py")
+    (tmp_path / "logo.png").write_text("not really a picture\n")
+    (tmp_path / "module.pyc").write_text("compiled\n")
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    assert [p.name for p in engine.collect_files()] == ["real.py"]
+
+
+def test_a_submodule_is_not_entered(tmp_path, monkeypatch):
+    import subprocess
+
+    _keyword_only(monkeypatch)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "protocol.file.allow=always"]
+    vendor = tmp_path / "vendor_src"
+    vendor.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=vendor, check=True)
+    (vendor / "inside.py").write_text("x = 1\n")
+    subprocess.run([*git, "add", "."], cwd=vendor, check=True)
+    subprocess.run([*git, "commit", "-qm", "vendor"], cwd=vendor, check=True)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    (workspace / "app.py").write_text("x = 2\n")
+    subprocess.run([*git, "submodule", "add", "-q", str(vendor), "vendor"], cwd=workspace, check=True,
+                   capture_output=True)
+    assert (workspace / "vendor" / "inside.py").is_file()
+    engine = ContextEngine(workspace_root=str(workspace))
+    assert sorted(p.name for p in engine.collect_files()) == [".gitmodules", "app.py"]
+
+
+def test_a_full_reindex_replaces_every_table_of_the_previous_run(tmp_path, monkeypatch):
+    import sqlite3
+
+    import numpy as np
+
+    from dreamference.context_engine import embedding_calculator
+
+    class FakeModel:
+        def encode(self, texts, batch_size=32, normalize_embeddings=True, convert_to_numpy=True):
+            return np.ones((len(texts), 2), dtype=np.float32) / np.sqrt(2)
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_model", FakeModel())
+    (tmp_path / "keep.py").write_text("def keep():\n    pass\n")
+    (tmp_path / "gone.py").write_text("def gone():\n    pass\n")
+    ContextEngine(workspace_root=str(tmp_path)).index_workspace(force_reindex=True)
+    (tmp_path / "gone.py").unlink()
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_workspace(force_reindex=True)
+    conn = sqlite3.connect(engine.sqlite_file)
+    tables = {
+        "files": "SELECT rel_path FROM files",
+        "symbols": "SELECT file_path FROM symbols",
+        "fts_context": "SELECT rel_path FROM fts_context",
+        "embeddings": "SELECT rel_path FROM embeddings",
+    }
+    for table, query in tables.items():
+        assert {row[0] for row in conn.execute(query)} == {"keep.py"}, table
+    conn.close()
+
+
+def test_without_force_a_saved_index_is_reused_without_reading_the_files(tmp_path, monkeypatch):
+    _keyword_only(monkeypatch)
+    (tmp_path / "a.py").write_text("def alpha():\n    pass\n")
+    ContextEngine(workspace_root=str(tmp_path)).index_workspace(force_reindex=True)
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    monkeypatch.setattr(engine, "collect_files", lambda: (_ for _ in ()).throw(AssertionError("re-read")))
+    summary = engine.index_workspace()
+    assert (summary["total_indexed_files"], summary["total_ast_symbols"]) == (1, 1)
+    assert engine.search_code("alpha")[0]["rel_path"] == "a.py"
+
+
+def test_a_search_result_is_the_file_with_all_its_symbols_and_top_k_bounds_the_list(tmp_path, monkeypatch):
+    _keyword_only(monkeypatch)
+    for i in range(4):
+        (tmp_path / f"m{i}.py").write_text(f"def shared_{i}():\n    pass\n\ndef other_{i}():\n    pass\n")
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_workspace(force_reindex=True)
+    results = engine.search_code("shared", top_k=2)
+    assert len(results) == 2
+    assert [r["score"] for r in results] == sorted((r["score"] for r in results), reverse=True)
+    for result in results:
+        assert set(result) == {"rel_path", "score", "symbols", "size_bytes"}
+        assert len(result["symbols"]) == 2
+    assert len(engine.search_code("shared")) == 4
+
+
+def test_documents_are_encoded_in_batches_of_eight_and_normalised(tmp_path, monkeypatch):
+    import numpy as np
+
+    from dreamference.context_engine import embedding_calculator
+
+    calls = []
+
+    class FakeModel:
+        def encode(self, texts, batch_size=32, normalize_embeddings=False, convert_to_numpy=False):
+            calls.append((batch_size, normalize_embeddings))
+            return np.ones((len(texts), 2), dtype=np.float32)
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_model", FakeModel())
+    vectors = embedding_calculator.EmbeddingCalculator.compute_embeddings({"a.py": "x", "b.py": "y"})
+    assert calls == [(8, True)]
+    assert set(vectors) == {"a.py", "b.py"} and vectors["a.py"].dtype == np.float32
+
+
+def test_a_model_that_fails_to_load_is_reported_once_and_search_goes_keyword_only(tmp_path, monkeypatch, capsys):
+    # An offline machine without the model cached: loading fails, indexing and search carry on.
+    from dreamference.context_engine import embedding_calculator
+
+    attempts = []
+
+    class OfflineSentenceTransformer:
+        def __init__(self, *args, **kwargs):
+            attempts.append(args)
+            raise OSError("no network")
+
+    monkeypatch.setattr(embedding_calculator, "SentenceTransformer", OfflineSentenceTransformer)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_model", None)
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", False)
+    (tmp_path / "a.py").write_text("def alpha():\n    pass\n")
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_workspace(force_reindex=True)
+    engine.index_workspace(force_reindex=True)
+    assert engine.search_code("alpha")[0]["rel_path"] == "a.py"
+    assert len(attempts) == 1
+    assert engine.file_embeddings == {}
+    out = capsys.readouterr().out
+    assert out.count(f"Embedding model {embedding_calculator.EMBEDDING_MODEL} is unavailable") == 1
+
+
+def test_the_parse_pool_is_sized_to_the_work(tmp_path, monkeypatch):
+    # Each worker is a fork of a parent that has imported torch: one per 32 files, at most 8.
+    from concurrent.futures import ThreadPoolExecutor
+
+    from dreamference.context_engine import context_engine
+
+    _keyword_only(monkeypatch)
+    sizes = []
+
+    def pool(max_workers):
+        sizes.append(max_workers)
+        return ThreadPoolExecutor(max_workers=max_workers)
+
+    monkeypatch.setattr(context_engine, "ProcessPoolExecutor", pool)
+    monkeypatch.setattr(context_engine.os, "cpu_count", lambda: 64)
+    for count in (3, 70, 400):
+        workspace = tmp_path / str(count)
+        workspace.mkdir()
+        for i in range(count):
+            (workspace / f"f{i}.txt").write_text("x\n")
+        ContextEngine(workspace_root=str(workspace)).index_workspace(force_reindex=True)
+    assert sizes == [1, 3, 8]
