@@ -9,8 +9,10 @@ import subprocess
 
 import pytest
 
+from dreamference.node import node_role_provisioner
 from dreamference.node.node_provisioner import NodeProvisioner
 from dreamference.node.node_role_provisioner import (
+    DERIVE_FLAG,
     NodeRoleProvisioner,
 )
 
@@ -101,3 +103,52 @@ def test_an_nvidia_runtime_already_there_is_kept_and_one_with_no_path_is_replace
     empty = json.dumps({"runtimes": {"nvidia": {"path": ""}}, "max-download-attempts": 100})
     merged = json.loads(NodeRoleProvisioner.merge_daemon_json(empty))
     assert merged["runtimes"]["nvidia"]["path"] == "nvidia-container-runtime"
+
+
+# The main node's key
+
+
+@pytest.fixture
+def keygen(monkeypatch):
+    """`ssh-keygen` on this machine: records each argv and answers from `reply`."""
+    state = {"argv": [], "reply": subprocess.CompletedProcess([], 0, "", "")}
+
+    def run(argv, **_):
+        state["argv"].append(argv)
+        if isinstance(state["reply"], BaseException):
+            raise state["reply"]
+        return state["reply"]
+
+    monkeypatch.setattr(node_role_provisioner.subprocess, "run", run)
+    return state
+
+
+def test_a_missing_public_half_is_derived_from_the_private_key(keygen, tmp_path):
+    private = tmp_path / "id_ed25519"
+    private.write_text("private")
+    keygen["reply"] = subprocess.CompletedProcess([], 0, "ssh-ed25519 AAAAmainkey main\n", "")
+    steps, _ = role()
+    session = Session({"grep -qF": (0, "", "")}, identity=private)
+
+    assert steps.authorize_key(HOST, session) is True
+
+    assert keygen["argv"] == [["ssh-keygen", DERIVE_FLAG, "-f", str(private)]]
+    assert (tmp_path / "id_ed25519.pub").read_text() == "ssh-ed25519 AAAAmainkey main\n"
+    assert sent(session, "grep -qF 'ssh-ed25519 AAAAmainkey'")
+
+
+def test_a_key_that_cannot_be_made_authorises_nothing(keygen, tmp_path):
+    keygen["reply"] = subprocess.CompletedProcess([], 1, "", "Saving key failed")
+    steps, run = role()
+    session = Session(identity=tmp_path / "id_ed25519")
+    assert steps.authorize_key(HOST, session) is False
+    assert run.results[HOST]["reason"] == "Saving key failed"
+    assert session.commands == [] and not (tmp_path / "id_ed25519.pub").exists()
+
+
+def test_a_missing_ssh_keygen_is_a_failed_command_not_a_crash(keygen, tmp_path):
+    keygen["reply"] = FileNotFoundError("ssh-keygen")
+    private, public = tmp_path / "keys" / "id", tmp_path / "keys" / "id.pub"
+    answer = NodeRoleProvisioner._make_key(["ssh-keygen", DERIVE_FLAG], private, public)
+    assert answer.returncode == 1 and answer.stderr == "ssh-keygen"
+    assert not public.exists()
