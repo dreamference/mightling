@@ -297,6 +297,26 @@ def test_the_desktop_app_is_checked_against_the_signed_sha256sums():
     assert "$AllSums = $Signed" in app
 
 
+def ps_function(name: str) -> str:
+    """The body of install.ps1's function `name`, up to its closing brace at the start of a line."""
+    text = script()
+    start = text.index(f"function {name}(")
+    return text[start : text.index("\n}\n", start)]
+
+
+def test_signing_is_required_from_the_cut_over_on_and_for_a_tag_that_is_not_a_version():
+    # install.sh's signing_required: a name that is no version needs a signature, and so does
+    # the cut-over release itself; only a release older than it may come unsigned.
+    body = ps_function("Test-SigningRequired")
+    returns = re.findall(r"(?:if \((.*)\) \{ )?return \$(true|false)", body)
+    assert returns == [
+        ('$Name.TrimStart("v") -notmatch "^(\\d+)\\.(\\d+)\\.(\\d+)"', "true"),
+        ("$Have[$I] -gt $Since[$I]", "true"),
+        ("$Have[$I] -lt $Since[$I]", "false"),
+        ("", "true"),
+    ]
+
+
 def code_lines() -> list:
     """install.ps1's lines without comments, the elevated script's included."""
     lines = []
