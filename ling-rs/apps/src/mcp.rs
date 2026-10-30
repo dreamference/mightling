@@ -560,4 +560,16 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn limits_are_held_between_one_and_the_tools_maximum() {
+        let stub = Stub::new(200, json!({"messages": []}));
+        call(App::Gmail, &stub, "gmail_search", &json!({"query": "x", "limit": 0}));
+        call(App::Calendar, &stub, "calendar_events", &json!({"limit": 99}));
+        call(App::Calendar, &stub, "calendar_search", &json!({"query": "x", "limit": 50}));
+        let asked = stub.asked.borrow();
+        assert_eq!(asked[0], "/search?query=x&limit=1");
+        assert_eq!(asked[1], "/calendar/events?limit=50");
+        assert_eq!(asked[2], "/calendar/events?limit=50&q=x");
+    }
 }
