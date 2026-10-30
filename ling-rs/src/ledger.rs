@@ -545,4 +545,18 @@ mod tests {
         .to_string();
         assert_eq!(Ledger::from_rollout(&line, &dir, Some("")).read, vec!["src/a.py"]);
     }
+
+    #[test]
+    fn the_last_test_summary_is_the_last_one_printed() {
+        let dir = scratch("lasttest");
+        let rollout = [
+            call("1", "pytest a"),
+            output("1", 0, "1 passed in 0.1s"),
+            call("2", "pytest b"),
+            output("2", 0, "2 passed in 0.2s\n3 passed in 0.3s"),
+        ]
+        .join("\n");
+        let ledger = Ledger::from_rollout(&rollout, &dir, Some(""));
+        assert_eq!(ledger.last_test, Some(("3 passed in 0.3s".to_string(), "pytest b".to_string())));
+    }
 }
