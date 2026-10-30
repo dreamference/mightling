@@ -1710,3 +1710,24 @@ def test_force_reaches_every_build_and_any_failure_fails_the_whole(monkeypatch):
         assert CodexBrandedBuilder.build() is False
         # A failing step does not keep the others from running.
         assert len(seen) == 4
+
+
+def test_force_rebuilds_a_current_crate_and_without_it_the_links_are_refreshed(tmp_path, monkeypatch):
+    crate = _fake_crate(tmp_path, monkeypatch)
+    cargo, linked = builder_module.subprocess.call, []
+    calls = []
+    monkeypatch.setattr(
+        builder_module.subprocess, "call", lambda *a, **k: calls.append(1) or cargo(*a, **k)
+    )
+    monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: linked.append(1)))
+
+    def build(force=False):
+        return CodexBrandedBuilder.build_crate(
+            str(crate), str(tmp_path / "cache"), "stamp", ("x",), force=force
+        )
+
+    assert build() is True and len(calls) == 1
+    linked.clear()
+    assert build() is True and len(calls) == 1
+    assert linked == [1]
+    assert build(force=True) is True and len(calls) == 2
