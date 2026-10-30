@@ -582,6 +582,40 @@ mod tests {
     }
 
     #[test]
+    fn every_secret_folder_and_what_is_inside_it_is_refused() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let codex = home.join(".mightling");
+        for dir in [
+            ".mightling",
+            ".codex",
+            ".ssh",
+            ".gnupg",
+            ".config",
+            ".password-store",
+            ".local/share/keyrings",
+            ".mozilla",
+            ".thunderbird",
+            "snap/firefox",
+            "snap/chromium",
+            ".var/app",
+            ".aws",
+            ".kube",
+            ".docker",
+        ] {
+            let inside = home.join(dir).join("inner");
+            std::fs::create_dir_all(&inside).unwrap();
+            for root in [home.join(dir), inside] {
+                assert!(
+                    validate_root_in(&root, &home, &codex).is_err(),
+                    "{}",
+                    root.display()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn two_writers_at_once_keep_both_changes() {
         // One writer holds the lock while it saves; the other, started first, waits and then
         // reads the file afresh, so neither change is lost.
