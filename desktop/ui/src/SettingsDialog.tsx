@@ -465,7 +465,12 @@ function AppearancePage({ prefs, onChange, notice }: SettingsProps) {
       </fieldset>
       <div className="buttons dialog-buttons">
         <button onClick={exportTheme}>Save the theme to a file</button>
-        <label className="file-button">Use a theme file<input type="file" accept="application/json,.json" hidden onChange={(event) => void importTheme(event.target.files?.[0])} /></label>
+        <label className="file-button">Use a theme file<input type="file" accept="application/json,.json" hidden onChange={(event) => {
+          // Cleared, so the same file picked again after an edit is read again.
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          void importTheme(file);
+        }} /></label>
         <button onClick={() => onChange({ appearance: {} })}>Back to Mightling's own</button>
       </div>
     </>
@@ -880,7 +885,7 @@ function Pets({ prefs, onChange, notice }: SettingsProps) {
       <fieldset>
         <legend>Look</legend>
         <label><input type="radio" name="pet-look" checked={!prefs.petImage} onChange={() => onChange({ petImage: null })} /> Mightling's ling</label>
-        <label><input type="radio" name="pet-look" checked={Boolean(prefs.petImage)} onChange={() => bridge.chooseImage().then((file) => file && onChange({ petImage: file })).catch(notice)} /> A picture of your own{prefs.petImage ? `: ${prefs.petImage.split("/").pop()}` : " (PNG, GIF, WebP, SVG or JPEG, 2 MB at most)"}</label>
+        <label><input type="radio" name="pet-look" checked={Boolean(prefs.petImage)} onChange={() => bridge.chooseImage().then((file) => file && onChange({ petImage: file })).catch(notice)} /> A picture of your own{prefs.petImage ? `: ${prefs.petImage.split(/[\\/]/).pop()}` : " (PNG, GIF, WebP, SVG or JPEG, 2 MB at most)"}</label>
         {prefs.petImage ? <button className="link-button" onClick={() => bridge.chooseImage().then((file) => file && onChange({ petImage: file })).catch(notice)}>Choose another picture</button> : null}
       </fieldset>
     </>
