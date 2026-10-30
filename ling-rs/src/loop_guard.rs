@@ -1011,6 +1011,21 @@ mod tests {
     }
 
     #[test]
+    fn a_looping_reasoning_summary_is_cut_too() {
+        let (nudged, _) = memory();
+        let events: Vec<_> = looping_reasoning(12)
+            .into_iter()
+            .map(|e| match e {
+                Ok(ResponseEvent::ReasoningContentDelta { delta, .. }) => Ok(ResponseEvent::ReasoningSummaryDelta { delta, summary_index: 0 }),
+                other => other,
+            })
+            .collect();
+        let out = run(events, nudged, true);
+        assert_eq!(end_turn(&out), Some(Some(false)));
+        assert_eq!(done_items(&out).last(), Some(&("developer".to_string(), LOOP_NUDGE.to_string())));
+    }
+
+    #[test]
     fn with_the_detector_off_only_the_cap_is_handled() {
         let (nudged, _) = memory();
         let out = run(looping_reasoning(12), nudged, false);
