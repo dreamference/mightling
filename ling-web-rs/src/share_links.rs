@@ -515,4 +515,11 @@ mod tests {
             search("x", None)
         );
     }
+
+    #[test]
+    fn a_label_after_google_is_a_two_or_three_letter_code() {
+        assert_eq!(classify("https://google.example/search?q=x"), None);
+        assert_eq!(classify("https://www.google.coms/search?q=x"), None);
+        assert_eq!(classify("https://google.c/search?q=x"), None);
+    }
 }
