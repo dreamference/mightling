@@ -968,6 +968,7 @@ def test_the_ten_minute_tick_keeps_the_phone_account_in_line_and_reports_a_failu
     monkeypatch, capsys
 ):
     """CHAT_REPOS §3.3: the forge of record's timer re-checks the phone account; a failure is said."""
+    monkeypatch.setattr(ForgeService, "rebind", classmethod(lambda cls: False))
     monkeypatch.setattr(ForgeService, "housekeeping", classmethod(lambda cls: None))
     monkeypatch.setattr(ForgeSettings, "role", classmethod(lambda cls: "record"))
     monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: True))
