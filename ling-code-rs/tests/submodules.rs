@@ -1418,3 +1418,18 @@ fn a_detached_checkout_at_a_tag_reports_the_tag() {
     let ours = all.iter().find(|s| s.path == "ours").unwrap();
     assert_eq!(ours.tag.as_deref(), Some("v1.0"));
 }
+
+#[test]
+fn only_a_plain_relative_gitmodules_path_is_examined() {
+    let f = fixture();
+    f.write(
+        ".gitmodules",
+        "[submodule \"up\"]\n\tpath = ../escape\n\turl = https://example.com/acme/up.git\n\
+         [submodule \"abs\"]\n\tpath = /tmp/elsewhere\n\turl = https://example.com/acme/abs.git\n\
+         [submodule \"dot\"]\n\tpath = ./dot\n\turl = https://example.com/acme/dot.git\n\
+         [submodule \"kept\"]\n\tpath = kept/\n\turl = https://example.com/acme/kept.git\n",
+    );
+    let paths: Vec<String> = decisions(&f.repo).into_iter().map(|s| s.path).collect();
+    // A trailing slash is git's own spelling of the same path.
+    assert_eq!(paths, ["kept"]);
+}
