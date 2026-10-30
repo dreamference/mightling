@@ -1016,7 +1016,7 @@ class ModelMatrixRegistry:
             list[dict[str, Any]]: The applicable assets (`repo`, `revision`, `flag`), possibly empty.
         """
         overrides = cls.get_launch_overrides(model_key, engine)
-        engine = overrides.get("engine")
+        engine = cls.engine_of(overrides)
         features = set(overrides.get("engine_features") or [])
         return [
             dict(asset)
