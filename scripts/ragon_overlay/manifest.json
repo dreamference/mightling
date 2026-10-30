@@ -1,7 +1,7 @@
 {
   "dreamference/cli/legacy_name_migration.py": {
     "replaces": "dreamference/cli/legacy_name_migration.py",
-    "sha256": "23420c413315ab34e291d95ee2644dd5ba36efca0326f2ba0a08226e2eba70ca"
+    "sha256": "5c43c5a7fc3314d438208f6cd8e1a9e8cdd77d172411f8eb89a922d17dbd1fed"
   },
   "ragon-rs/src/rename.rs": {
     "replaces": "ling-rs/src/rename.rs",
@@ -9,6 +9,6 @@
   },
   "tests/test_legacy_name_migration.py": {
     "replaces": "tests/test_legacy_name_migration.py",
-    "sha256": "d320c6ef91533c4c1134e5a41b974e71812103f4f7d6650e41be8166c0eb3e1f"
+    "sha256": "3376442ddcd47ed3934fc79ebc0ae3a4d8e2ba9010e251d8858e8d9217174261"
   }
 }
