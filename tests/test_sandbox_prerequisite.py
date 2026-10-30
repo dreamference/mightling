@@ -63,7 +63,9 @@ def test_a_sandbox_that_cannot_be_tried_asks_nothing(machine):
     assert SandboxPrerequisite.gate("night", "run") is True
 
 
-@pytest.mark.parametrize("command, subcommand", [("mcp", None), ("host", "check"), ("node", "serve-job")])
+@pytest.mark.parametrize("command, subcommand", [
+    ("mcp", None), ("host", "check"), ("node", "serve-job"), ("node", "askpass"), ("node", "prepare"),
+])
 def test_protocol_and_host_commands_are_never_asked(machine, command, subcommand):
     assert SandboxPrerequisite.gate(command, subcommand) is True
 
