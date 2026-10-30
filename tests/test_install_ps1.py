@@ -333,6 +333,23 @@ def test_the_signed_sha256sums_must_list_the_per_target_sums():
     assert 'if (-not $Signed.ContainsKey($SumsName)) { Fail "SHA256SUMS has no checksum' in block
 
 
+def test_a_new_key_is_trusted_only_when_endorsed_and_beside_the_current_keys():
+    block = signature_block()
+    transition = block[block.index('if ($Assets.ContainsKey("release-key-transition.pub"))') :]
+    missing = transition.index('if (-not $Assets.ContainsKey("release-key-transition.pub.sig")) {')
+    refused = transition[missing:].split("\n", 2)[1].strip()
+    assert refused.startswith('Fail "release $Tag names a new release key')
+    endorsed = transition.index('$Signers "mightling-release-key" $NewKeySig $NewKey')
+    added = transition.index("$Lines += Get-Signers (Get-Content -Path $NewKey)")
+    assert missing < endorsed < added
+    assert "$Lines = Get-Signers (Get-Content" not in block
+
+
+def test_a_signature_counts_only_when_ssh_keygen_accepts_it():
+    body = ps_function("Test-Signature")
+    assert re.findall(r"return .*", body) == ["return ($Process.ExitCode -eq 0)"]
+
+
 def code_lines() -> list:
     """install.ps1's lines without comments, the elevated script's included."""
     lines = []
