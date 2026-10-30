@@ -1185,4 +1185,12 @@ mod tests {
         assert!(finished_item(json!({"type": "function_call", "name": "f", "arguments": "{}", "call_id": "c"}), "x").is_none());
         assert!(finished_item(json!("not an object"), "x").is_none());
     }
+
+    #[test]
+    fn the_status_says_which_detectors_are_off() {
+        let lines = status_lines(None, &no_env, "");
+        let line = |name: &str| lines.iter().find(|l| l.trim_start().starts_with(name)).cloned().unwrap_or_default();
+        assert!(line("exec").contains("detector off"), "{lines:?}");
+        assert!(line("work").contains("detector on "), "{lines:?}");
+    }
 }
