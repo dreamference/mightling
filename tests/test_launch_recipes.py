@@ -356,3 +356,26 @@ def test_the_tool_call_parser_follows_request_recipe_then_family(vllm_recipes):
     assert resolve("test-vllm-nvfp4", "auto") == "qwen3_xml"
     assert resolve("example/Mistral-Small-Instruct") == "mistral"
     assert resolve("example/unknown-model") == "hermes"
+
+
+def test_the_tool_call_parser_is_read_from_the_recipe_of_the_engine_launched(monkeypatch):
+    from dreamference.hardware.model_spec import ModelSpec
+
+    monkeypatch.setitem(
+        ModelMatrixRegistry.MATRIX,
+        "test-two-engines",
+        ModelSpec(
+            name="Test two engines",
+            params_b=1.0,
+            supported_precisions=["BF16"],
+            min_memory_gb=1.0,
+            max_memory_gb=2.0,
+            compatible_gb10=True,
+            notes="Test only.",
+            hf_repo_id="example/two-engines",
+            launch_overrides={"engine": "vllm", "tool_call_parser": "qwen3_xml"},
+            engine_recipes={"sglang": {"engine": "sglang", "tool_call_parser": "qwen3_coder"}},
+        ),
+    )
+    cmd = VLLMServerManager().build_launch_command(model="test-two-engines", engine="sglang")
+    assert _flag(cmd, "--tool-call-parser") == "qwen3_coder"
