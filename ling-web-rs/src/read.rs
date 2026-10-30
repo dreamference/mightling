@@ -643,4 +643,17 @@ mod tests {
         let text = render_text(&read);
         assert!(text.contains("url=\"https://b.example/moved\">"), "{text}");
     }
+
+    #[test]
+    fn a_page_is_fetched_long_enough_to_fill_its_share() {
+        let read = read(
+            found(vec![result("A", "https://a.example/", "")]),
+            1,
+            &|url: &str, max_chars| Ok(page(url, "", &"a".repeat(max_chars as usize))),
+        );
+        assert_eq!(
+            read.sources[0].text.as_deref().map(str::len),
+            Some(FETCH_CHARS as usize)
+        );
+    }
 }
