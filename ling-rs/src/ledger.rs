@@ -598,4 +598,17 @@ mod tests {
         let ledger = Ledger::from_rollout(&[patch("1"), patch("2")].join("\n"), &dir, None);
         assert_eq!(ledger.changed, vec!["src/a.py"]);
     }
+
+    #[test]
+    fn only_words_that_name_a_file_count() {
+        let dir = scratch("words");
+        std::fs::write(dir.join("test"), "x").unwrap_or_default();
+        std::fs::write(dir.join("src/a.py"), "x").unwrap_or_default();
+        std::fs::create_dir_all(dir.join(".git")).unwrap_or_default();
+        std::fs::write(dir.join(".git/HEAD"), "x").unwrap_or_default();
+        // A bare word is a command, a trailing full stop ends a sentence, a directory and git's
+        // own files are not what was read.
+        let command = "cargo test; echo see src/a.py.; ls ./src; cat .git/HEAD";
+        assert_eq!(workspace_files(command, &dir, &dir), vec!["src/a.py"]);
+    }
 }
