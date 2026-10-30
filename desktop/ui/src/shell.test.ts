@@ -80,3 +80,15 @@ describe("the shell", () => {
     expect(conflicts(effectiveKeymap())).toEqual(["Ctrl+N in global: newChat and modelPicker"]);
   });
 });
+
+describe("an undo that fails", () => {
+  it("stays on the stack to be tried again", async () => {
+    const stack = new UndoStack();
+    let fails = true;
+    stack.push({ label: "Archive", undo: () => { if (fails) throw new Error("offline"); }, redo: () => {} });
+    await expect(stack.undo()).rejects.toThrow("offline");
+    expect(stack.canUndo).toBe(true);
+    fails = false;
+    expect(await stack.undo()).toBe("Archive");
+  });
+});
