@@ -510,6 +510,24 @@ def test_a_swiss_round_reaches_the_eighth_neighbour():
     assert ("x0", "x8") in pairs
 
 
+def test_one_swiss_round_is_one_round():
+    import random
+    candidates = [ChooserCandidate(f"a{i}", "p", [f"a{i}"]) for i in range(1, 7)]
+    counts = {c.id: 0 for c in candidates}
+    swiss = []
+
+    def compare(a, b):
+        if counts[a.id] >= 2 and counts[b.id] >= 2:
+            swiss.append((a.id, b.id))
+        counts[a.id] += 1
+        counts[b.id] += 1
+        return (6.0, 4.0) if a.id < b.id else (4.0, 6.0)
+
+    NightShiftChooser.tournament(candidates, compare, random.Random("t"), swiss_rounds=1)
+    in_swiss = [cid for pair in swiss for cid in pair]
+    assert swiss and len(in_swiss) == len(set(in_swiss))
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
