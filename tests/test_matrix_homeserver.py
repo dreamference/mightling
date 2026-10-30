@@ -245,6 +245,10 @@ def test_remove_needs_yes_and_then_deletes_everything(machine):
     assert MatrixHomeserver.remove(False) == 1
     assert not machine.runs
     assert MatrixHomeserver.remove(True) == 0
+    # The tailnet stops offering the name and the proxy stops listening before the data goes.
+    assert machine.argv("tailscale", "serve", "--https=443", "off")
+    assert machine.argv("systemctl", "--user", "disable", "--now", mh.PROXY_SOCKET_UNIT)
+    assert machine.argv("systemctl", "--user", "stop", mh.PROXY_SERVICE_UNIT)
     assert machine.argv("docker", "volume", "rm", mh.MATRIX_VOLUME)
     assert machine.argv("docker", "network", "rm", mh.MATRIX_NETWORK)
     assert not pathlib.Path(MatrixHomeserver._path("matrix.json")).exists()
