@@ -641,4 +641,20 @@ mod tests {
         let input = json!({"transcript_path": rollout, "cwd": dir}).to_string();
         assert!(hook(&input).is_some());
     }
+
+    #[test]
+    fn a_custom_tools_output_is_read_like_a_commands() {
+        let dir = scratch("custom");
+        let rollout = [
+            json!({"type": "response_item", "payload": {"type": "custom_tool_call", "name": "exec",
+                "call_id": "1", "input": "cargo test"}})
+            .to_string(),
+            json!({"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "1",
+                "output": "test result: ok. 3 passed; 0 failed"}})
+            .to_string(),
+        ]
+        .join("\n");
+        let ledger = Ledger::from_rollout(&rollout, &dir, Some(""));
+        assert_eq!(ledger.last_test, Some(("test result: ok. 3 passed; 0 failed".to_string(), "cargo test".to_string())));
+    }
 }
