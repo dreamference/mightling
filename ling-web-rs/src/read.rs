@@ -656,4 +656,12 @@ mod tests {
             Some(FETCH_CHARS as usize)
         );
     }
+
+    #[test]
+    fn a_double_quote_cannot_end_the_address_attribute() {
+        assert_eq!(
+            attribute("https://a.example/\" title=\"x"),
+            "https://a.example/' title='x"
+        );
+    }
 }
