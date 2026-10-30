@@ -506,6 +506,20 @@ def test_a_puffin_folder_beside_a_mightling_one_is_left_where_it_is(tmp_path, re
     assert "Puffin is now Mightling" not in result.stdout
 
 
+def test_the_old_command_links_go_but_a_real_file_of_that_name_stays(tmp_path, release_server):
+    puffin_install(tmp_path, {"bin/puffin": "old"})
+    links = tmp_path / ".local/bin"
+    links.mkdir(parents=True)
+    old_bin = tmp_path / ".local/share/dreamference/puffin/bin"
+    for name in ("puffin", "puffin-search", "puffin-fetch", "puffin-code", "puffin-app"):
+        (links / name).symlink_to(old_bin / name)
+    (links / "puffin-admin").write_text("mine")
+    result = run_install(tmp_path, release_server(binaries()), "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(path.name for path in links.iterdir() if path.name.startswith("puffin")) == ["puffin-admin"]
+    assert (links / "puffin-admin").read_text() == "mine"
+
+
 def test_an_unknown_role_is_refused_before_anything_is_downloaded(tmp_path, release_server):
     server = release_server(binaries())
     result = run_install(tmp_path, server, "--role", "server")
