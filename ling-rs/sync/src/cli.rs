@@ -602,12 +602,26 @@ mod tests {
         for ip in ["127.0.0.1", "10.1.2.3", "172.16.0.9", "192.168.50.105", "169.254.1.1", "100.64.0.1", "100.101.102.103", "::1", "fd12::1", "fe80::1"] {
             assert!(private_ip(ip.parse().unwrap()), "{ip}");
         }
-        for ip in ["8.8.8.8", "100.128.0.1", "172.32.0.1", "2001:4860::8888", "1.1.1.1"] {
+        assert!(private_ip("::ffff:192.168.1.1".parse().unwrap()), "an IPv4-mapped address is its IPv4 one");
+        for ip in ["8.8.8.8", "100.128.0.1", "172.32.0.1", "2001:4860::8888", "1.1.1.1", "::ffff:8.8.8.8", "fec0::1", "ff02::1"] {
             assert!(!private_ip(ip.parse().unwrap()), "{ip}");
         }
         assert_eq!(hub_base("192.168.50.105", 3100).unwrap(), "http://192.168.50.105:3100");
         assert_eq!(hub_base("[::1]", 3100).unwrap(), "http://[::1]:3100");
         assert!(hub_base("8.8.8.8", 3100).unwrap_err().contains("not on your own network"));
+    }
+
+    #[tokio::test]
+    async fn on_the_node_the_hub_is_loopback_without_asking_the_tiers() {
+        let device = DeviceFile { device: "ab12".to_string(), name: "node".to_string(), secret: "s".repeat(64), port: 3101, local: true };
+        let environment = Environment {
+            codex_home: PathBuf::from("/nonexistent"),
+            home: PathBuf::from("/nonexistent"),
+            ling: PathBuf::from("/nonexistent"),
+            is_node: true,
+            resolve_node: Arc::new(|| Err("no node found".to_string())),
+        };
+        assert_eq!(resolve_base(&device, &environment).await.unwrap(), "http://127.0.0.1:3101");
     }
 
     #[test]
