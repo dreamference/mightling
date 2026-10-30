@@ -339,6 +339,23 @@ def test_an_attempt_that_would_not_fit_is_not_started_and_the_record_says_why(bo
     assert (best["ran"], best["why"]) == (1, "too late")
 
 
+def test_a_cancel_during_the_last_attempt_commits_none_of_the_earlier_ones(bon, monkeypatch):
+    real_run = NightShiftTaskRun.run
+
+    def run(self):
+        if self.attempt == 2:  # `/night drop` while attempt 2 works
+            NightShiftQueue.transition(self.night_dir, self.task_id, "cancel-requested")
+            return NightShiftQueue.transition(self.night_dir, self.task_id, "cancelled")
+        return real_run(self)
+
+    monkeypatch.setattr(NightShiftTaskRun, "run", run)
+    status, record, _ = run_best_of(bon, monkeypatch, ["good", "good"], n=2)
+    assert status == "cancelled" and record["status"] == "cancelled"
+    assert "best_of" not in record["result"]
+    assert branches(bon["repo"]) == []
+    assert not any((bon["night"] / "worktrees").iterdir())
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
