@@ -602,4 +602,13 @@ mod tests {
         assert!(plan.newly.is_empty());
         assert!(!plan.accepted);
     }
+
+    #[test]
+    fn a_drop_that_lands_exactly_on_the_target_replaces_the_summary() {
+        let items: Vec<Value> = history(30, 20).into_iter().map(|e| e.item).collect();
+        let saving = plan_drop(&policy(), &items, &DropState::default(), 44_000).saving;
+        let target = policy().target();
+        assert!(plan_drop(&policy(), &items, &DropState::default(), target + saving).accepted);
+        assert!(!plan_drop(&policy(), &items, &DropState::default(), target + saving + 1).accepted);
+    }
 }
