@@ -1923,3 +1923,20 @@ async fn only_the_owner_changes_a_scope_and_an_unknown_device_is_named() {
     assert!(body.contains("No paired device has that id."), "{body}");
     assert_eq!(auth::load_devices(&state).len(), 1);
 }
+
+#[tokio::test]
+async fn every_answer_carries_the_safety_headers() {
+    let scratch = scratch("safety-headers");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let owner = sign_in(&server).await;
+    let refused = request("GET", "/api/apps").body(Body::empty()).unwrap();
+    let wrong_host = Request::builder().uri("/").header(header::HOST, "evil.example").body(Body::empty()).unwrap();
+    let served = request("GET", "/healthz").header(header::COOKIE, &owner).body(Body::empty()).unwrap();
+    for (what, request) in [("refused", refused), ("wrong host", wrong_host), ("served", served)] {
+        let (_, headers, _) = call(&server, request).await;
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{what}");
+        assert_eq!(headers[header::REFERRER_POLICY], "no-referrer", "{what}");
+        assert_eq!(headers[header::X_FRAME_OPTIONS], "DENY", "{what}");
+        assert_eq!(headers[header::CACHE_CONTROL], "no-store", "{what}");
+    }
+}
