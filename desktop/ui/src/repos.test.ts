@@ -17,6 +17,7 @@ import {
   beginGitAction,
   browserChatId,
   chatRepos,
+  checkoutThreadForCwd,
   executeGitAction,
   filesIn,
   formatAnonymityRefusal,
@@ -24,6 +25,7 @@ import {
   matchesFullAccessConfirmation,
   openRepoForWork,
   recordCheckout,
+  recordRepos,
   repoName,
   repoOf,
   repoOption,
@@ -952,5 +954,43 @@ describe("G7: Full Access typed confirmation and sandbox chip", () => {
         },
       },
     ]);
+  });
+});
+
+describe("which folder is a repository checkout, and what a refusal says", () => {
+  it("takes a folder for a checkout only by its recorded path, the service's own layout, or a listed id at its end", () => {
+    resetChatRepos();
+    expect(checkoutThreadForCwd("/srv/chat-repos/org/widget/web-ABCDEF01")).toBe("abcdef01");
+    expect(checkoutThreadForCwd("C:\\data\\chat-repos\\org\\widget\\telegram-0123abcd")).toBe("0123abcd");
+    for (const cwd of [null, undefined, "", "/srv/chat-repos/widget/web-abcdef01", "/srv/chat-repos/org/widget/sms-abcdef01", "/srv/chat-repos/org/widget/web-abcdef0", "/home/u/src/0123abcd", "/home/u/src/proj-0123abcd"]) {
+      expect(checkoutThreadForCwd(cwd), String(cwd)).toBeNull();
+    }
+    recordRepos([{ repo: "org/widget", checkouts: ["0123abcd"] } as unknown as ChatRepoSummary]);
+    expect(checkoutThreadForCwd("/home/u/src/0123abcd")).toBe("0123abcd");
+    expect(checkoutThreadForCwd("/home/u/src/proj-0123abcd")).toBe("0123abcd");
+    expect(checkoutThreadForCwd("/home/u/src/proj0123abcd")).toBeNull();
+    expect(checkoutThreadForCwd("/home/u/src/0123abcd/sub")).toBeNull();
+    resetChatRepos();
+    expect(checkoutThreadForCwd("/home/u/src/0123abcd")).toBeNull();
+  });
+
+  it("opens no pull request link it cannot read as an address", () => {
+    for (const url of ["", "not a url", "//evil.example/pulls/1", "forge/org/widget", "file:///etc/passwd", "ftp://forge.example/x"]) {
+      expect(safePrUrl(url), url).toBe(false);
+    }
+  });
+
+  it("says a refusal by the server's error, else its reason, else what was refused, and an anonymity finding by file and entry alone", async () => {
+    const pushWith = async (answer: Response) => {
+      const api = chatRepos(async (url) => (url.startsWith("/api/repos/state?") ? jsonResponse(sampleState({ confirm: "nonce-push-7" })) : answer));
+      const step = await beginGitAction(api, "01234567", "push");
+      return (await executeGitAction(api, "01234567", step.pending)).text;
+    };
+    expect(await pushWith(jsonResponse({ error: "the branch moved", reason: "ignored" }, 409))).toBe("the branch moved");
+    expect(await pushWith(jsonResponse({ reason: "main is protected" }, 403))).toBe("main is protected");
+    expect(await pushWith(jsonResponse({}, 500))).toBe("Push refused");
+    expect(await pushWith(new Response("", { status: 502 }))).toBe("Push refused");
+    expect(await pushWith(new Response("Bad gateway", { status: 502 }))).toBe("Bad gateway");
+    expect(await pushWith(jsonResponse({ findings: [{ file: "a.ts", secret: "s3cr3t" }] }, 422))).toBe("Push refused by the anonymity check: a.ts (entry 0)");
   });
 });
