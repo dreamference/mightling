@@ -376,4 +376,12 @@ mod tests {
         assert!(output.status.success(), "{stdout}");
         assert!(stdout.contains("1 passed"), "{stdout}");
     }
+
+    #[test]
+    fn a_key_ignores_spaces_around_the_query() {
+        assert_eq!(
+            key("http://127.0.0.1:8888", "  lisbon tram \n", "general", "en"),
+            key("http://127.0.0.1:8888", "lisbon tram", "general", "en")
+        );
+    }
 }
