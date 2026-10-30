@@ -2158,7 +2158,7 @@ mod tests {
 
     #[test]
     fn settings_that_reach_openai_are_overridden_not_just_defaulted() {
-        let existing = "check_for_update_on_startup = true\n[tui]\npet = \"otter\"\ntheme = \"x\"\n";
+        let existing = "check_for_update_on_startup = true\nchatgpt_base_url = \"https://chatgpt.com/\"\n[tui]\npet = \"otter\"\ntheme = \"x\"\n";
         let text = updated_config(existing, Path::new("/h/c.json"), "http://x:8000")
             .unwrap_or_default();
         let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
@@ -2166,6 +2166,7 @@ mod tests {
             parsed.get("check_for_update_on_startup").and_then(toml::Value::as_bool),
             Some(false)
         );
+        assert_eq!(parsed.get("chatgpt_base_url").and_then(toml::Value::as_str), Some(OFFLINE_CHATGPT_BASE_URL));
         let tui = parsed.get("tui").and_then(toml::Value::as_table);
         assert!(tui.is_some_and(|tui| !tui.contains_key("pet") && tui.contains_key("theme")));
     }
