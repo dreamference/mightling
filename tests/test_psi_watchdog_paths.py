@@ -393,6 +393,8 @@ def _serve_once(path, reply):
         (b"HTTP/1.1 204 No Content\r\n\r\n", True),
         # Already exited: not this watchdog's failure, but not a kill either.
         (b"HTTP/1.1 404 Not Found\r\n\r\n", False),
+        # An interim answer is not dockerd saying the kill was done.
+        (b"HTTP/1.1 101 Switching Protocols\r\n\r\n", False),
         (b"garbage", False),
     ],
 )
