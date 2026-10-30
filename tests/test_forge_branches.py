@@ -5,8 +5,11 @@ would leave the process is a stand-in.
 """
 
 import io
+import json
+import stat
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -233,3 +236,83 @@ def test_a_forge_without_a_role_or_not_running_is_never_rebound(monkeypatch, rol
     monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: running))
     monkeypatch.setattr(ForgeService, "restart", classmethod(lambda cls: pytest.fail("restarted")))
     assert ForgeService.rebind() is False
+
+
+# -- forge backup take [key]
+
+
+def stub_dump(monkeypatch, refs):
+    """`forgejo dump` writes its archive; the repositories' refs read as given, one per call."""
+    from dreamference.forge.forge_container import ForgeContainer
+    from dreamference.forge.forge_settings import ForgeSettings
+
+    dumps = ForgeSettings.data_dir() / "dumps"
+
+    def dump(cls, arguments, timeout=0):
+        (dumps / Path(arguments[-1]).name).write_bytes(b"dump")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    seen = iter(refs)
+    monkeypatch.setattr(ForgeContainer, "forgejo", classmethod(dump))
+    monkeypatch.setattr(ForgeBackup, "repository_refs", classmethod(lambda cls, root: next(seen)))
+    return dumps
+
+
+@pytest.mark.parametrize("unreadable", ["before", "after"])
+def test_a_dump_whose_refs_git_cannot_read_makes_no_set(monkeypatch, unreadable, capsys):
+    refs = {"o/r": {"refs/heads/main": "a" * 40}}
+    dumps = stub_dump(monkeypatch, [None, refs] if unreadable == "before" else [refs, None])
+    assert ForgeBackup.take() is None
+    assert "git could not read a repository" in capsys.readouterr().out
+    assert list(dumps.iterdir()) == []
+    assert not ForgeBackup.local_dir().exists()
+
+
+def test_a_set_keeps_its_refs_and_private_secrets_bundles_small_repositories_and_replaces_older_sets(
+    monkeypatch,
+):
+    from dreamference.forge import forge_backup
+    from dreamference.forge.forge_anonymity import ForgeAnonymity
+    from dreamference.forge.forge_settings import ForgeSettings
+    from dreamference.forge.forge_storage import ForgeStorage
+
+    head = {"refs/heads/main": "a" * 40}
+    refs = {"o/small": head, "o/big": head, "o/empty": {}}
+    stub_dump(monkeypatch, [refs, refs])
+    local = ForgeBackup.local_dir()
+    older, other = local / "forge-20261001-000000", local / "notes"
+    older.mkdir(parents=True)
+    other.mkdir()
+    monkeypatch.setattr(
+        ForgeBackup,
+        "snapshot_database",
+        classmethod(lambda cls, source, target: target.write_bytes(b"db") or True),
+    )
+    monkeypatch.setattr(ForgeBackup, "node_id", classmethod(lambda cls: "node-1"))
+    monkeypatch.setattr(ForgeSettings, "read_secret", classmethod(lambda cls, key: f"secret-{key}"))
+    monkeypatch.setattr(ForgeAnonymity, "read_denylist", classmethod(lambda cls: ""))
+    big = forge_backup.BUNDLE_LIMIT_BYTES
+    monkeypatch.setattr(
+        ForgeStorage, "size", classmethod(lambda cls, path: big if "big" in path.name else 1)
+    )
+    bundled = []
+    monkeypatch.setattr(
+        forge_backup.subprocess,
+        "run",
+        lambda argv, **_: bundled.append(argv) or subprocess.CompletedProcess(argv, 0),
+    )
+
+    folder = ForgeBackup.take()
+    assert folder is not None and folder.parent == local
+    manifest = json.loads((folder / "manifest.json").read_text())
+    assert manifest["refs"] == refs and manifest["node"] == "node-1"
+    assert (folder / "dump.tar.gz").read_bytes() == b"dump"
+    secrets = folder / "secrets.json"
+    assert stat.S_IMODE(secrets.stat().st_mode) == 0o600
+    assert stat.S_IMODE(local.stat().st_mode) == 0o700
+    assert forge_backup.DENYLIST_KEY not in json.loads(secrets.read_text()), (
+        "an empty value is left out"
+    )
+    assert [Path(argv[argv.index("create") + 2]).name for argv in bundled] == ["o__small.bundle"]
+    assert not older.exists(), "an older set is replaced"
+    assert other.is_dir(), "a folder that is not a set is left alone"
