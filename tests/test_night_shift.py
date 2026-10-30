@@ -266,8 +266,11 @@ def test_a_task_runs_in_a_scope_with_a_hard_memory_cap_and_no_swap(setup, monkey
     with pytest.raises(RuntimeError):
         run._run_capped(["true"], setup["repo"], setup["night"] / "out.log", None)
     argv = started[0]
-    assert argv[:3] == ["systemd-run", "--user", "--scope"]
-    assert argv[argv.index("MemoryMax=8G") - 1] == "-p" and argv[argv.index("MemorySwapMax=0") - 1] == "-p"
+    assert argv[:argv.index("true")] == [
+        "systemd-run", "--user", "--scope", "--quiet", "--unit=mightling-night-20261001-0100-abc-1",
+        "-p", "MemoryMax=8G", "-p", "MemorySwapMax=0", "-p", "CPUQuota=400%", "--",
+        "choom", "-n", "500", "--",
+    ]
 
 
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
