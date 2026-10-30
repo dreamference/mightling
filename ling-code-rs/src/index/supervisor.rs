@@ -795,6 +795,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_hostile_argument_stays_one_word_inside_the_sandboxed_scope() {
         let dir = tempfile::tempdir().unwrap();

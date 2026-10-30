@@ -370,6 +370,7 @@ mod tests {
         assert!(!repo.state_dir().join("plans").exists(), "no plan written");
     }
 
+    #[cfg(unix)]
     #[test]
     fn disk_use_and_running_reflect_filesystem_and_process_state() {
         let dir = tempfile::tempdir().unwrap();
