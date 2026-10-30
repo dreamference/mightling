@@ -223,3 +223,39 @@ def test_a_mirror_names_its_record_by_name_node_or_unknown_and_a_frozen_forge_sa
         "Forge of record: rec",
         "⚠️  Frozen: pushes are refused while the role moves.",
     ]
+
+
+def test_each_repository_line_names_its_kind_archive_anonymity_destination_and_pull(monkeypatch):
+    repositories = [
+        {"full_name": "o/b", "name": "b", "private": True},
+        {
+            "full_name": "o/a",
+            "name": "a",
+            "private": False,
+            "archived": True,
+            "mirror": True,
+            "mirror_updated": "not a time",
+        },
+    ]
+    monkeypatch.setattr(ForgeRepositories, "all", classmethod(lambda cls: repositories))
+    monkeypatch.setattr(
+        ForgeRepositories,
+        "settings",
+        classmethod(
+            lambda cls, name: {"scope": "full", "github": "gh/a" if name == "o/a" else None}
+        ),
+    )
+    assert ForgeCommand.repository_lines() == [
+        "  o/a: shared, archived, anonymity full, → gh/a, pulled never",
+        "  o/b: private, anonymity full",
+    ]
+
+
+def test_repositories_that_cannot_be_listed_are_reported_as_unreadable(monkeypatch):
+    def unreadable(cls):
+        raise RuntimeError("the forge did not list /repos/search (HTTP 500)")
+
+    monkeypatch.setattr(ForgeRepositories, "all", classmethod(unreadable))
+    assert ForgeCommand.repository_lines() == [
+        "Repositories: unreadable (the forge did not list /repos/search (HTTP 500))"
+    ]
