@@ -36,7 +36,8 @@ export function useSynced(enabled: boolean): { status: SyncStatus | null; count:
     if (!enabled) return;
     let stopped = false;
     void (async () => {
-      const found = await api.status();
+      // A hub that cannot be reached is a hub that is not there, as a status that is not JSON.
+      const found = await api.status().catch(() => null);
       if (stopped || !found) return;
       setStatus(found);
       refresh();
