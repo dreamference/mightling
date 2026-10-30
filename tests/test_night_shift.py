@@ -1257,9 +1257,43 @@ def test_one_steady_request_keeps_the_model_busy(fake_host, monkeypatch):
     assert "session is open" in NightShiftRunner.wait_for_idle("http://x", "ling", 1, far_end())
 
 
-def test_a_silent_metrics_endpoint_never_counts_as_idle(fake_host):
+def test_a_silent_metrics_endpoint_never_counts_as_idle(fake_host, monkeypatch):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
+
+    def advance(seconds):
+        clock["now"] += seconds
+    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(advance))
     FakeHost.samples = [None]
     assert "/metrics does not answer" in NightShiftRunner.wait_for_idle("http://x", "ling", 0, far_end())
+
+
+def test_a_few_lost_metrics_reads_do_not_end_the_wait(fake_host, monkeypatch):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
+    naps = []
+
+    def advance(seconds):
+        naps.append(seconds)
+        clock["now"] += seconds
+    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(advance))
+    idle = {"running": 0.0, "served": 1.0, "kv_pool": 1.0}
+    FakeHost.samples = [None, None, None, idle, idle]
+    assert NightShiftRunner.wait_for_idle("http://x", "ling", 0, far_end()) is None
+    assert naps[:3] == [2.0, 4.0, 8.0]
+
+
+def test_a_miss_restarts_the_quiet_period(fake_host, monkeypatch):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
+
+    def advance(seconds):
+        clock["now"] += seconds
+    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(advance))
+    idle = {"running": 0.0, "served": 1.0, "kv_pool": 1.0}
+    FakeHost.samples = [idle, None, idle, idle]
+    assert NightShiftRunner.wait_for_idle("http://x", "ling", 1, far_end()) is None
+    assert clock["now"] - 1000.0 >= 60
 
 
 def test_a_night_picks_up_queued_and_interrupted_tasks_and_no_finished_one(tmp_path):

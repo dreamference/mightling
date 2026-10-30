@@ -37,6 +37,7 @@ MEMORY_RESERVE: Final[int] = 8 * GIB
 
 POLL_S: Final[float] = 5.0
 IDLE_POLL_S: Final[float] = 30.0
+METRICS_MISS_GRACE_S: Final[float] = 120.0
 
 
 class NightShiftRunner:
@@ -207,13 +208,28 @@ class NightShiftRunner:
         """
         quiet_since: Optional[float] = None
         last_served: Optional[float] = None
+        first_miss: float | None = None
+        misses = 0
         while True:
             now = time.time()
             if not cls.ignore_sessions and cls.host.interactive_mightling_pids(mightling_bin):
                 return "a Mightling session is open (interactive use wins)"
             metrics = cls.host.metrics(vllm_host)
             if metrics is None:
-                return "the model server's /metrics does not answer"
+                # One lost or slow read (a flaky mDNS name) is not a dead server: back off and
+                # retry; only a silence of METRICS_MISS_GRACE_S ends the wait. A miss proves
+                # nothing about idleness, so the quiet period starts over.
+                if first_miss is None:
+                    first_miss = now
+                if now - first_miss >= METRICS_MISS_GRACE_S:
+                    return "the model server's /metrics does not answer"
+                if datetime.now().astimezone() >= end:
+                    return f"the model was in use until the window closed ({idle_minutes:g} idle minutes needed)"
+                quiet_since = None
+                misses += 1
+                cls.sleep(min(IDLE_POLL_S, 2.0 ** misses))
+                continue
+            first_miss, misses = None, 0
             busy = metrics["running"] > 0 or (last_served is not None and metrics["served"] != last_served)
             last_served = metrics["served"]
             if busy or quiet_since is None:
