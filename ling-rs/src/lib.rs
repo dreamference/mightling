@@ -2043,6 +2043,9 @@ mod tests {
         body["data"].as_array_mut().unwrap().rotate_left(1);
         assert_eq!(parse_served_model(&body).unwrap().id, ADAPTER_BASE);
         assert_eq!(parse_served_model(&json!({"data": [{"id": "lora", "parent": "b"}]})).unwrap().id, "lora");
+        // vLLM lists its base with `"parent": null`.
+        let vllm = json!({"data": [{"id": "lora", "parent": "b"}, {"id": "b", "parent": null}]});
+        assert_eq!(parse_served_model(&vllm).unwrap().id, "b");
     }
 
     #[test]
