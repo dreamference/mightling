@@ -271,6 +271,15 @@ mod tests {
     }
 
     #[test]
+    fn no_proxy_reads_the_host_after_a_user_and_password() {
+        let proxy = ("https_proxy", "http://p:3128");
+        assert!(!proxied(
+            "https://user:secret@a.com/x",
+            &[proxy, ("no_proxy", "a.com")]
+        ));
+    }
+
+    #[test]
     fn a_web_command_refuses_at_on_and_in_a_sandbox_without_network() {
         assert_eq!(refusal(Level::On, false), Some(AIRGAPPED_ON_MESSAGE));
         assert_eq!(refusal(Level::On, true), Some(AIRGAPPED_ON_MESSAGE));
