@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 import tempfile
 import tomllib
 from pathlib import Path
@@ -1749,3 +1750,16 @@ def test_without_its_crate_a_crate_binary_is_current_only_if_installed(tmp_path,
     (tmp_path / "bin" / "x").write_text("#!/bin/sh\n")
     (tmp_path / "bin" / "x").chmod(0o755)
     assert CodexBrandedBuilder.crate_is_current(missing, "stamp", ("x",)) is True
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="ling-docs is built on Linux")
+def test_a_failed_docs_index_build_fails_and_downloads_nothing(monkeypatch):
+    from dreamference.runner import docs_index_setup
+
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "build_crate", classmethod(lambda cls, *args, force=False: False)
+    )
+    monkeypatch.setattr(
+        docs_index_setup.DocsIndexSetup, "install", classmethod(lambda cls, machine=None: pytest.fail("installed"))
+    )
+    assert CodexBrandedBuilder.build_docs_index() is False
