@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Final
 
 from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS as DEFAULT_MODEL
-from dreamference.hardware.model_matrix_registry import ENGINE_VLLM, ModelMatrixRegistry
+from dreamference.hardware.model_matrix_registry import ENGINE_VLLM, QWEN38_LING_SESSIONS, ModelMatrixRegistry
 from dreamference.vllm_server.vllm_server_status import VLLMServerStatus
 from dreamference.vllm_server.vllm_log_streamer import VLLMLogStreamer
 from dreamference.vllm_server.psi_watchdog import MemoryPressureWatchdog
@@ -35,6 +35,10 @@ DEFAULT_GPU_MEMORY_UTILIZATION: Final[float] = 0.50
 # page cache to stream weights. On unified memory every byte vLLM pins is a byte the compositor,
 # journald and the input stack no longer have.
 HOST_MEMORY_RESERVE_GB: Final[float] = 12.0
+# ling-serve's own `--host-reserve-mb` default (16,384 MiB): it refuses a start that would leave the
+# host less than this, so the pre-load check counts it. dreamference never passes or lowers the flag.
+LING_SERVE_HOST_RESERVE_MIB: Final[int] = 16384
+LING_SERVE_HOST_RESERVE_GB: Final[float] = LING_SERVE_HOST_RESERVE_MIB * 2**20 / 1e9
 # Extra memory a load needs *transiently*, beyond the arena it settles into: page cache for the
 # shards being streamed, the loader's staging buffers, and the host's own growth while it waits.
 # Expressed as a fraction of checkpoint size because that is what it scales with — a 78 GB
@@ -583,6 +587,7 @@ class VLLMServerManager:
         gate: bool = False,
         serve_adapters: bool = True,
         engine: str | None = None,
+        ling_sessions: int | None = None,
     ) -> List[str]:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
@@ -634,6 +639,8 @@ class VLLMServerManager:
                 `server start` could not prepare what serving them needs.
             engine (str | None): The engine to serve the model with (`server start --engine`,
                 `server_engine` in the config); None is the model's default recipe's.
+            ling_sessions (int | None): Fewer ling-serve sessions than the recipe's, when `start_server`
+                cut them to fit the memory available; the batch follows (never above the sessions).
 
         Returns:
             List[str]: Complete executable command list.
@@ -661,6 +668,8 @@ class VLLMServerManager:
         engine_port = ModelGate.engine_port(port) if gate else port
 
         recipe = get_model_launch_overrides(model, engine)
+        if ling_sessions:
+            recipe = self.with_ling_sessions(recipe, ling_sessions)
 
         def resolved(value: Any, key: str, fallback: Any) -> Any:
             """Explicit caller argument wins; otherwise the model recipe; otherwise the module default."""
@@ -1588,6 +1597,50 @@ class VLLMServerManager:
 
         return cleared
 
+    @staticmethod
+    def with_ling_sessions(recipe: dict[str, Any], sessions: int) -> dict[str, Any]:
+        """Copies an `engine: ling` recipe with `sessions` sessions and a batch no larger than that.
+
+        Args:
+            recipe: The model's recipe (left unchanged).
+            sessions: The number of sessions to ask of ling-serve.
+
+        Returns:
+            dict[str, Any]: The reduced copy.
+        """
+        reduced = dict(recipe)
+        reduced["sessions"] = sessions
+        reduced["batch"] = min(recipe.get("batch") or sessions, sessions)
+        return reduced
+
+    def fit_ling_sessions(
+        self, docker_image: str, model: str, recipe: dict[str, Any], available_gb: float, extra_gb: float
+    ) -> int | None:
+        """Finds the most sessions below the recipe's that fit, and warns that it cut them.
+
+        Args:
+            docker_image: The pinned ling-serve image.
+            model: The registry model.
+            recipe: The model's `engine: ling` recipe.
+            available_gb: MemAvailable now.
+            extra_gb: What a start needs beside the plan: the engine's reserve, the load peak, side services.
+
+        Returns:
+            int | None: The session count to start with, or None when not even one fits (or no plan).
+        """
+        for n in range(QWEN38_LING_SESSIONS - 1, 0, -1):
+            plan = self.ling_serve_plan(docker_image, model, self.with_ling_sessions(recipe, n))
+            if plan is None:
+                return None
+            if available_gb >= plan["planned_bytes"] / 1e9 + extra_gb:
+                sys.stdout.write(
+                    f"⚠️  Only {n} of {QWEN38_LING_SESSIONS} sessions fit in the memory available "
+                    f"({available_gb:.1f} GB). Starting with {n}; close other programs and "
+                    f"restart the server to get all {QWEN38_LING_SESSIONS}.\n"
+                )
+                return n
+        return None
+
     @classmethod
     def ling_serve_plan(cls, docker_image: str, model: str, recipe: dict[str, Any]) -> dict[str, int] | None:
         """Asks ling-serve for the memory it plans to take, before anything is loaded.
@@ -1857,6 +1910,7 @@ class VLLMServerManager:
         # its recipe's 0.50 arena is not what it takes: for it this check is made below, against the
         # engine's own plan, once the checkpoint is on disk for the engine to read.
         engine_plans = LingServeLaunchBuilder.is_ling(overrides)
+        ling_sessions: int | None = None
         if not engine_plans and actual_free_gb < required_gb:
             # The arena is a fraction of total memory, so the fix is expressed as the fraction
             # that would fit — otherwise the operator is left to work backwards from four numbers.
@@ -1916,8 +1970,22 @@ class VLLMServerManager:
                 basis_gb = plan["planned_bytes"] / 1e9
                 basis = (f"ling-serve's plan: {plan['sessions']} sessions x {plan['max_context']:,} tokens, "
                          f"batch {plan['batch']}")
-            required_gb = basis_gb + transient_gb + side_gb
-            if actual_free_gb < required_gb:
+            # The engine refuses a start that leaves the host less than its own reserve, so that
+            # counts too; with no plan the arena is the old figure, unchanged.
+            reserve_gb = LING_SERVE_HOST_RESERVE_GB if plan is not None else 0.0
+            required_gb = basis_gb + reserve_gb + transient_gb + side_gb
+            # The registry's session count is a default, not a demand: cut it to what fits and say
+            # so. A count anyone else set (a recipe that differs from the default) is theirs, and
+            # is refused below as before.
+            if (
+                plan is not None
+                and actual_free_gb < required_gb
+                and overrides.get("sessions") == QWEN38_LING_SESSIONS
+            ):
+                ling_sessions = self.fit_ling_sessions(
+                    docker_image, model, overrides, actual_free_gb, reserve_gb + transient_gb + side_gb
+                )
+            if not ling_sessions and actual_free_gb < required_gb:
                 _abort(
                     "Not enough memory to start ling-serve.",
                     f"   Plan:        {basis_gb:.2f} GB ({basis})\n"
@@ -1976,6 +2044,7 @@ class VLLMServerManager:
 
         # Step 2: Build launch command
         launch = dict(
+            ling_sessions=ling_sessions,
             model=model,
             port=port,
             quantization=quantization,

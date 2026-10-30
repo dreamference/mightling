@@ -40,7 +40,9 @@ bit for bit.
 
 **Memory is sized when the server starts.** ling-serve plans its footprint before it allocates
 anything; `ling-admin server start` runs the
-same plan first and, if the host would be left short, stops and says by how much. While serving, a
+same plan first, counting the 16 GB the engine keeps for the host. If four conversations do not fit, it starts
+with three, two or one, whichever is the most that does, and prints a warning saying so; if even one does not
+fit, it stops and says by how much. While serving, a
 request that arrives when the host is nearly out of memory is answered with HTTP 503 and the reason,
 instead of risking the machine. About {{TBD}} GB of memory in use while serving four conversations.
 `ling-admin status` shows the engine, its sessions and batch, and whether the KV cache is paged (it is not in 1.8.0).
