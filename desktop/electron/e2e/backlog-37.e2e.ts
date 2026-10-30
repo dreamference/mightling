@@ -20,6 +20,8 @@ test("B37: Ctrl+Alt+S opens an unkept side chat beside the thread, its first mes
     await page.getByRole("button", { name: "Work", exact: true }).click();
     await page.locator(".thread", { hasText: "Fix the flaky retry test" }).click();
     await expect(page.locator(".bar .title")).toHaveText("Fix the flaky retry test");
+    // The recap is of the turns the thread has loaded: they arrive after the title does.
+    await expect(page.getByText("The loop swallowed the last")).toBeVisible();
     await page.keyboard.press("Control+Alt+s");
     const pane = page.getByRole("complementary", { name: "Side chat" });
     await expect(pane).toContainText("its 2 latest messages");
