@@ -282,3 +282,15 @@ def test_an_engine_that_only_runs_in_docker_is_refused_without_it(engine, monkey
     monkeypatch.setattr(mgr, "is_docker_available", lambda: False)
     with pytest.raises(RuntimeError, match="Docker is required"):
         mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2", engine=engine)
+
+
+def test_a_swe_bench_cap_is_never_below_one(vllm_recipes, monkeypatch):
+    import dataclasses
+
+    spec = ModelMatrixRegistry.MATRIX["test-vllm-nvfp4"]
+    monkeypatch.setitem(
+        ModelMatrixRegistry.MATRIX,
+        "test-vllm-nvfp4",
+        dataclasses.replace(spec, swe_bench_max_parallel=0),
+    )
+    assert ModelMatrixRegistry.swe_bench_max_parallel("test-vllm-nvfp4") == 1
