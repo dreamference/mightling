@@ -171,3 +171,23 @@ def test_a_pin_held_only_by_another_engines_recipe_still_counts(monkeypatch):
     assert ModelMatrixRegistry.pinned_revision("test-engine-pinned") == "1" * 40
     assert ModelMatrixRegistry.pinned_revision("Example/Engine-Drafter") == "2" * 40
     assert ModelMatrixRegistry.pinned_revision("example/engine-drafter") == "2" * 40
+
+
+def test_a_release_source_is_found_in_any_case_and_handed_out_as_a_copy(monkeypatch):
+    from dreamference.hardware import model_matrix_registry
+
+    files = {"model.safetensors": {"url": "https://example.invalid/m", "sha256": "0" * 64}}
+    monkeypatch.setitem(
+        model_matrix_registry.RELEASE_HOSTED_MODELS,
+        "Dreamference/Test-Hosted",
+        {"revision": "v1", "files": files},
+    )
+    source = ModelMatrixRegistry.get_release_source("dreamference/test-hosted")
+    assert source == {"revision": "v1", "files": files}
+    # A caller that edits what it was given changes nothing in the registry.
+    source["files"].clear()
+    source = ModelMatrixRegistry.get_release_source("DREAMFERENCE/TEST-HOSTED")
+    assert source is not None and source["files"] == {
+        "model.safetensors": files["model.safetensors"]
+    }
+    assert files
