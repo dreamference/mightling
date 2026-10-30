@@ -728,6 +728,25 @@ mod tests {
             "{script}"
         );
     }
+
+    #[test]
+    fn a_hostile_argument_stays_one_word_inside_the_sandboxed_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut plan = repo_and_plan(dir.path(), Kind::Executing, 1);
+        let evil = "x'; touch /tmp/pwned; echo '".to_string();
+        plan.runs[0].spec.argv = vec!["indexer".into(), evil.clone()];
+        let argv = scope_argv(&plan.runs[0], &dir.path().join("peak file"));
+        let pos = |a: &str| argv.iter().position(|x| x == a).unwrap();
+        assert_eq!(&argv[..3], ["choom", "-n", "1000"]);
+        assert!(pos("choom") < pos("nice") && pos("nice") < pos("bwrap"));
+        assert!(argv.contains(&"--unshare-net".to_string()), "{argv:?}");
+        let n = argv.len();
+        assert_eq!(&argv[n - 4..n - 1], ["--", "/bin/sh", "-c"]);
+        let script = &argv[n - 1];
+        assert!(script.starts_with("'indexer' 'x'\\''; touch"), "{script}");
+        let peak = format!("> '{}/peak file'", dir.path().display());
+        assert!(script.contains(&peak), "{script}");
+    }
 }
 
 #[cfg(test)]
