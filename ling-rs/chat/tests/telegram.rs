@@ -243,6 +243,18 @@ async fn a_paired_account_does_not_spend_a_code() {
     assert_eq!(TelegramConfig::load(&dir).unwrap().users, vec![111, 333]);
 }
 
+/// A message is judged by who sent it, not by the chat it is in.
+#[tokio::test]
+async fn a_message_from_a_stranger_is_refused_even_in_a_paired_users_chat() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let (hub, mut inbound) = mpsc::unbounded_channel();
+    let mut poller = Poller::new(api, scratch("sender"), hub);
+    let update = json!({ "update_id": 12, "message": { "message_id": 13, "from": { "id": 999 }, "chat": { "id": 111, "type": "private" }, "text": "hello" } });
+    poller.handle(&update).await;
+    assert!(inbound.try_recv().is_err());
+    assert_eq!(stand.bodies("sendMessage")[0]["text"], ling_chat::telegram::UNPAIRED_REPLY);
+}
+
 #[tokio::test]
 async fn buttons_and_the_stop_button_come_from_paired_users_only() {
     let (stand, api) = stand_in(default_answer()).await;
