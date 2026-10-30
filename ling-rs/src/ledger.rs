@@ -616,4 +616,10 @@ mod tests {
     fn a_negative_exit_code_is_read() {
         assert_eq!(exit_code("Process exited with code -1\nOutput:\n"), Some(-1));
     }
+
+    #[test]
+    fn a_run_with_only_failures_or_errors_has_a_summary() {
+        assert!(is_test_summary("2 failed in 0.31s"));
+        assert!(is_test_summary("1 error in 0.20s"));
+    }
 }
