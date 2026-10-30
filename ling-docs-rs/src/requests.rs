@@ -116,6 +116,14 @@ mod tests {
     }
 
     #[test]
+    fn a_queue_over_one_mebibyte_is_dropped_unread() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(path(dir.path()), "index\n".repeat((1 << 20) / 6 + 1)).unwrap();
+        assert!(drain(dir.path()).is_empty());
+        assert!(!path(dir.path()).exists());
+    }
+
+    #[test]
     fn a_planted_symlink_is_not_followed() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("elsewhere"), "index\n").unwrap();
