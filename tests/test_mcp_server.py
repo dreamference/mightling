@@ -164,8 +164,11 @@ def test_web_search_sends_the_category_time_range_and_detected_language():
     assert "time_range" not in second
 
 
-def _stdio_replies(tmp_path, stdin: bytes) -> list:
-    """Feeds raw bytes to the real stdio loop of this checkout and returns its replies."""
+def _stdio_replies(tmp_path, stdin: bytes, prelude: str = "") -> list:
+    """Feeds raw bytes to the real stdio loop of this checkout and returns its replies.
+
+    `prelude` is Python run in the server's process before the loop starts.
+    """
     import os
     import subprocess
     import sys
@@ -175,7 +178,7 @@ def _stdio_replies(tmp_path, stdin: bytes) -> list:
     root = str(Path(__file__).resolve().parents[1])
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [root, os.environ.get("PYTHONPATH")]))}
     out = subprocess.run(
-        [sys.executable, "-c", "from dreamference.mcp_server import main; main()"],
+        [sys.executable, "-c", prelude + "from dreamference.mcp_server import main; main()"],
         input=stdin, capture_output=True, timeout=60, cwd=tmp_path, env=env,
     ).stdout
     return [json.loads(line) for line in out.decode().splitlines()]
@@ -221,3 +224,21 @@ def test_code_search_asks_the_router_for_as_many_rows_as_top_k(tmp_path, monkeyp
     assert calls.read_text().splitlines() == [
         "search --json --limit 60 -- loader", "search --json --limit 200 -- loader"
     ]
+
+
+def test_a_line_longer_than_the_limit_is_a_parse_error_and_the_server_keeps_answering(tmp_path):
+    # The limit is lowered for the test; the reader drops what it held of the long line, so its
+    # tail may come back as a second parse error, but every reply before the ping is one.
+    prelude = "import dreamference.mcp_server.mcp_server as m; m.LINE_LIMIT = 4096; "
+    ping = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}).encode()
+    replies = _stdio_replies(tmp_path, b'{"x": "' + b"y" * 20_000 + b'"}\n' + ping + b"\n", prelude)
+    assert replies[0]["error"] == {"code": -32700, "message": "Parse error: line too long"}
+    assert all(r["id"] is None and r["error"]["code"] == -32700 for r in replies[:-1])
+    assert replies[-1] == {"jsonrpc": "2.0", "id": 2, "result": {}}
+
+
+def test_blank_lines_get_no_reply_and_a_request_whose_id_is_zero_gets_one(tmp_path):
+    # Zero is an id like any other: only a request with no id at all is a notification.
+    ping = json.dumps({"jsonrpc": "2.0", "id": 0, "method": "ping"}).encode()
+    replies = _stdio_replies(tmp_path, b"\n   \n" + ping + b"\n\n")
+    assert replies == [{"jsonrpc": "2.0", "id": 0, "result": {}}]
