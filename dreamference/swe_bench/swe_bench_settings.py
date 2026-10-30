@@ -68,9 +68,10 @@ DEFAULT_BUILD_CPUS: Final[str] = "0-11"
 # linux/amd64 and an x86-64 Miniconda, so a local build produces images this machine cannot run.
 # Third-party and unaudited; every result names it.
 COMMUNITY_IMAGE_REPO: Final[str] = "greynewell/swe-bench-arm64"
+# Its digests are pinned in `image_digests/` (`SweBenchImagePins`).
 
-# The internal Docker network of the agent's containers: it reaches the model server at the
-# network's gateway and nothing else.
+# The internal Docker network of the agent's containers: it has no route out and reaches the model
+# server at the network's gateway, and with it every host service listening on all interfaces.
 NETWORK_NAME: Final[str] = "mightling-swe-bench"
 
 # Five instances from five repositories, each validated on this machine on 2026-10-01 (the gold

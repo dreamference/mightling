@@ -10,7 +10,7 @@ setup(
     packages=find_packages(),
     # Data a release install needs at run time, which a wheel carries only when named here:
     # the code index's pinned tools and npm lockfile (`ling-admin code setup`).
-    package_data={"dreamference.cli": ["code_index_pins/*"]},
+    package_data={"dreamference.cli": ["code_index_pins/*"], "dreamference.swe_bench": ["image_digests/*"]},
     # Floors for requests, sentence-transformers, sqlite-vec and Pillow are the first
     # releases without a published advisory (specs/DREAMFERENCE_MIGHTLING_DEPENDENCY_AUDIT.md).
     install_requires=[
