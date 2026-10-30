@@ -674,3 +674,26 @@ def test_the_cli_routes_every_matrix_command_and_remove_needs_yes(machine, monke
         ("remove", False),
         ("remove", True),
     ]
+
+
+def test_the_homeserver_runs_with_no_federation_no_previews_and_a_kept_volume():
+    # The internal network keeps the homeserver in; these settings are the second layer (no
+    # trusted servers to ask for keys, no URL previews). Registration stays on, behind the token,
+    # so `add-user` works; the database lives in the volume, so `push` (which recreates the
+    # container) keeps the accounts; `unless-stopped` keeps a stopped homeserver stopped.
+    argv = MatrixHomeserver.run_command("n.ts.net", push=False)
+    env = dict(
+        argv[i + 1].split("=", 1) for i, arg in enumerate(argv) if arg == "-e" and "=" in argv[i + 1]
+    )
+    assert env == {
+        "TUWUNEL_SERVER_NAME": "n.ts.net",
+        "TUWUNEL_DATABASE_PATH": "/var/lib/tuwunel",
+        "TUWUNEL_ADDRESS": "0.0.0.0",
+        "TUWUNEL_PORT": str(mh.MATRIX_PORT),
+        "TUWUNEL_ALLOW_FEDERATION": "false",
+        "TUWUNEL_ALLOW_REGISTRATION": "true",
+        "TUWUNEL_TRUSTED_SERVERS": "[]",
+        "TUWUNEL_URL_PREVIEW_DOMAIN_EXPLICIT_ALLOWLIST": "[]",
+    }
+    assert argv[argv.index("--restart") + 1] == "unless-stopped"
+    assert argv[argv.index("-v") + 1] == f"{mh.MATRIX_VOLUME}:/var/lib/tuwunel"
