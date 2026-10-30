@@ -5,6 +5,7 @@ start reports nothing; a file is taken for this machine's swap only when fstab o
 and a reading that fails is the empty or zero answer that makes setup cautious.
 """
 
+import io
 import subprocess
 
 import pytest
@@ -81,3 +82,41 @@ def test_a_blkid_that_fails_does_not_make_a_file_the_swap_file(monkeypatch, no_f
 
     monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
     assert HostSafetySetup.is_swap_file("/swap.img") is False
+
+
+def _shadow_open(monkeypatch, content):
+    def fake(path, *args, **kwargs):
+        if isinstance(content, Exception):
+            raise content
+        return io.StringIO(content)
+
+    monkeypatch.setattr(host_safety_setup, "open", fake, raising=False)
+
+
+def test_unreadable_proc_swaps_means_no_swap_areas(monkeypatch):
+    _shadow_open(monkeypatch, PermissionError("/proc/swaps"))
+    assert HostSafetySetup.swap_areas() == []
+
+
+@pytest.mark.parametrize(
+    ("meminfo", "expected"),
+    [
+        ("MemTotal: 134217728 kB\nMemAvailable: 8388608 kB\n", 8.0),
+        ("MemTotal: 134217728 kB\n", 0.0),
+        ("MemAvailable: plenty kB\n", 0.0),
+        ("MemAvailable:\n", 0.0),
+        (OSError("/proc/meminfo"), 0.0),
+    ],
+)
+def test_available_memory_is_zero_unless_meminfo_states_it(monkeypatch, meminfo, expected):
+    _shadow_open(monkeypatch, meminfo)
+    assert HostSafetySetup._mem_available_gb() == expected
+
+
+def test_a_missing_file_or_disk_reads_as_zero_gigabytes(tmp_path):
+    sized = tmp_path / "swap.img"
+    with sized.open("wb") as handle:
+        handle.truncate(2 * 1024**3)
+    assert HostSafetySetup._file_gb(str(sized)) == 2.0
+    assert HostSafetySetup._file_gb(str(tmp_path / "missing")) == 0.0
+    assert HostSafetySetup._disk_free_gb(str(tmp_path / "missing")) == 0.0
