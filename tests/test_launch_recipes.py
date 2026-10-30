@@ -200,3 +200,31 @@ def test_a_key_is_found_whatever_its_case_padding_and_separators(vllm_recipes):
     assert ModelMatrixRegistry.get_spec("example/vllm_moe_nvfp4") is spec
     assert ModelMatrixRegistry.get_spec("TestvLLMrecipe(NVFP4+self-speculation)") is spec
     assert ModelMatrixRegistry.get_spec("example/vllm-moe") is None
+
+
+def test_an_exact_repository_or_display_name_wins_over_a_loose_match(monkeypatch):
+    from dreamference.hardware.model_spec import ModelSpec
+
+    def spec(name, hf_repo_id):
+        return ModelSpec(
+            name=name,
+            params_b=1.0,
+            supported_precisions=["BF16"],
+            min_memory_gb=1.0,
+            max_memory_gb=2.0,
+            compatible_gb10=True,
+            notes="Test only.",
+            hf_repo_id=hf_repo_id,
+        )
+
+    # The loose entries come first, so a lookup that skipped the exact match would stop at them.
+    loose_repo, loose_name = spec("Loose A", "example/loose-a"), spec("Loose B", "example/loose-b")
+    exact = spec("Repo B", "Example/Repo-A")
+    monkeypatch.setattr(
+        ModelMatrixRegistry,
+        "MATRIX",
+        {"example-repo-a": loose_repo, "repo-b": loose_name, "exact": exact},
+    )
+    assert ModelMatrixRegistry.get_spec("Example/Repo-A") is exact
+    assert ModelMatrixRegistry.get_spec("Repo B") is exact
+    assert ModelMatrixRegistry.get_spec("example_repo_a") is loose_repo
