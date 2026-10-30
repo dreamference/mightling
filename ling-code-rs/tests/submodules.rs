@@ -1433,3 +1433,48 @@ fn only_a_plain_relative_gitmodules_path_is_examined() {
     // A trailing slash is git's own spelling of the same path.
     assert_eq!(paths, ["kept"]);
 }
+
+/// A linked worktree of the fixture after committing its submodules, with `ours` cloned into it.
+fn linked_worktree(f: &Fixture, submodule: &str) -> PathBuf {
+    git(&f.repo.root, &["commit", "-qm", "submodules"]);
+    let wt = f.dir.path().join("wt");
+    git(
+        &f.repo.root,
+        &["worktree", "add", "-q", wt.to_str().unwrap()],
+    );
+    git(
+        &wt,
+        &[
+            "clone",
+            "-q",
+            f.dir
+                .path()
+                .join(format!("origin-{submodule}"))
+                .to_str()
+                .unwrap(),
+            submodule,
+        ],
+    );
+    wt
+}
+
+#[test]
+fn the_size_guard_is_not_read_from_the_main_worktree_of_a_linked_one() {
+    let f = with_submodules();
+    let wt = linked_worktree(&f, "ours");
+    let config = f.repo.root.join("dreamference.toml");
+    std::fs::write(&config, "code_index_submodule_max_files = 1\n").unwrap();
+    let repo = Repo {
+        root: wt,
+        main_root: f.repo.root.clone(),
+        is_git: true,
+    };
+    let settings = Settings {
+        config_path: Some(config),
+        submodule_max_files: 1,
+        ..Settings::default()
+    };
+    let all = submodules::evaluate(&repo, &settings);
+    let ours = all.iter().find(|s| s.path == "ours").unwrap();
+    assert_eq!((ours.indexed, ours.reason.clone()), (true, Reason::Yours));
+}
