@@ -586,4 +586,12 @@ mod tests {
         let policy = DropPolicy { keep_recent: 0, ..policy() };
         assert_eq!(plan_drop(&policy, &edge, &DropState::default(), 44_000).newly.len(), 1);
     }
+
+    #[test]
+    fn an_output_no_longer_than_its_placeholder_is_not_dropped() {
+        let policy = DropPolicy { keep_recent: 0, min_chars: 0, ..policy() };
+        let items = vec![call("c", "ls"), json!({"type": "function_call_output", "call_id": "c", "output": "ok"})];
+        let plan = plan_drop(&policy, &items, &DropState::default(), 44_000);
+        assert_eq!((plan.newly.len(), plan.saving, plan.accepted), (0, 0, false));
+    }
 }
