@@ -615,7 +615,7 @@ pub fn universal_run(
         },
         scip_output: None,
         converted: None,
-        need: super::host::need(Kind::Universal, recorded_peak_mb),
+        need: super::host::need(Kind::Universal, recorded_peak_mb, ceiling),
         ceiling,
         unit: unit_name(repo, "codebase-memory"),
     })
@@ -1113,7 +1113,7 @@ pub fn exact_run(
         },
         scip_output: Some(scip_file),
         converted: Some(converted),
-        need: super::host::need(target.kind, recorded_peak_mb),
+        need: super::host::need(target.kind, recorded_peak_mb, ceiling),
         ceiling,
         unit: unit_name(repo, &slug),
     })
@@ -1230,18 +1230,19 @@ pub fn build_with(
     let tools = Tools::find();
     let manifest = Manifest::load(&repo.scip_dir());
     let graph = crate::manifest::GraphSnapshot::load(&repo.scip_dir());
+    let graph_peak = graph.as_ref().map_or(0, |g| g.peak_rss_mb);
     let mut runs = Vec::new();
     let mut skipped = Vec::new();
     if settings.exact_only() {
         skipped.push("codebase-memory: off (layers = exact)".to_string());
     } else {
-        match universal_run(
-            repo,
-            settings,
-            &tools,
-            graph.map(|g| g.peak_rss_mb).unwrap_or(0),
-        ) {
-            Some(run) => runs.push(run),
+        match universal_run(repo, settings, &tools, graph_peak) {
+            Some(mut run) => {
+                if graph.as_ref().is_some_and(|g| g.peak_cap_bounded) {
+                    run.need = super::host::need(run.kind, graph_peak, u64::MAX);
+                }
+                runs.push(run)
+            }
             None => skipped
                 .push("codebase-memory-mcp is not installed (`ling-admin code setup`)".to_string()),
         }
@@ -1281,13 +1282,18 @@ pub fn build_with(
             ));
             continue;
         }
-        let peak = manifest
+        let last = manifest
             .runs
-            .get(&super::store::key(target.indexer, &target.root))
-            .map(|e| e.peak_rss_mb)
-            .unwrap_or(0);
+            .get(&super::store::key(target.indexer, &target.root));
+        let peak = last.map_or(0, |e| e.peak_rss_mb);
         match exact_run(repo, settings, &tools, &target, peak) {
-            Some(run) => runs.push(run),
+            Some(mut run) => {
+                // Killed at its ceiling, the peak is a lower bound: the need is not capped.
+                if last.is_some_and(|e| e.peak_cap_bounded) {
+                    run.need = super::host::need(run.kind, peak, u64::MAX);
+                }
+                runs.push(run)
+            }
             None => skipped.push(format!(
                 "{} for {}: not installed (`ling-admin code setup`)",
                 target.indexer,

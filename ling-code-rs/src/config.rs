@@ -108,7 +108,9 @@ impl Settings {
             config_in_repo: user_config.is_some(),
             ..Settings::default()
         };
-        settings.read_file(user_config.as_deref());
+        for warning in settings.read_file(user_config.as_deref()) {
+            eprintln!("ling-code: {warning}");
+        }
         if let Some(host) = env("DREAMFERENCE_VLLM_HOST") {
             settings.vllm_host = host.trim_end_matches('/').to_string();
         }
@@ -126,15 +128,30 @@ impl Settings {
         self.layers == Layers::Exact
     }
 
-    fn read_file(&mut self, user_config: Option<&Path>) {
+    /// Applies the file; returns what to tell the user (an unreadable file is not an error).
+    ///
+    /// The memory ceilings and `code_index_min_interval_s` are not honoured from the repository's
+    /// own file (`config_in_repo`): each prints one line naming the key. A file that does not
+    /// parse prints one line naming it and the error, and the defaults stand.
+    fn read_file(&mut self, user_config: Option<&Path>) -> Vec<String> {
         let settings = self;
-        let Some(table) = settings
-            .config_path
-            .as_ref()
-            .and_then(|p| crate::paths::read_repo_file(p, crate::paths::REPO_READ_CAP))
-            .and_then(|t| t.parse::<toml::Table>().ok())
-        else {
-            return;
+        let mut warnings = Vec::new();
+        let Some(path) = settings.config_path.clone() else {
+            return warnings;
+        };
+        let Some(text) = crate::paths::read_repo_file(&path, crate::paths::REPO_READ_CAP) else {
+            return warnings;
+        };
+        let table = match text.parse::<toml::Table>() {
+            Ok(table) => table,
+            Err(err) => {
+                warnings.push(format!(
+                    "cannot parse {}: {}; using the defaults",
+                    path.display(),
+                    err.to_string().trim().replace('\n', " ")
+                ));
+                return warnings;
+            }
         };
         let int = |key: &str| {
             table
@@ -143,6 +160,19 @@ impl Settings {
                 .filter(|v| *v >= 0)
                 .map(|v| v as u64)
         };
+        let mut limit = |key: &str| {
+            if settings.config_in_repo && table.contains_key(key) {
+                warnings.push(format!(
+                    "ignoring {key} in {}: a file inside the repository cannot set it",
+                    path.display()
+                ));
+                return None;
+            }
+            int(key)
+        };
+        let memory_ceiling = limit("code_index_memory_ceiling_mb");
+        let small_ceiling = limit("code_index_small_ceiling_mb");
+        let min_interval = limit("code_index_min_interval_s");
         // The session probes this host outside the sandbox: a file a clone ships names none, not
         // even one on this machine, as the launcher rules; the user's own file names it instead.
         let host = if settings.config_in_repo {
@@ -178,13 +208,13 @@ impl Settings {
         if let Some(v) = int("code_index_max_files") {
             settings.max_files = v as usize
         }
-        if let Some(v) = int("code_index_memory_ceiling_mb") {
+        if let Some(v) = memory_ceiling {
             settings.memory_ceiling_mb = v
         }
-        if let Some(v) = int("code_index_small_ceiling_mb") {
+        if let Some(v) = small_ceiling {
             settings.small_ceiling_mb = v
         }
-        if let Some(v) = int("code_index_min_interval_s") {
+        if let Some(v) = min_interval {
             settings.min_interval_s = v
         }
         if let Some(v) = int("code_index_stale_commits") {
@@ -212,6 +242,7 @@ impl Settings {
         {
             settings.layers = v
         }
+        warnings
     }
 }
 
@@ -412,6 +443,70 @@ mightling_code_layers = "exact"
             Settings::default().memory_ceiling_mb,
             "negative values are ignored"
         );
+    }
+
+    #[test]
+    fn a_file_inside_the_repository_cannot_set_the_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("dreamference.toml");
+        std::fs::write(
+            &file,
+            "code_index_memory_ceiling_mb = 999999\ncode_index_small_ceiling_mb = 999999\n\
+             code_index_min_interval_s = 0\ncode_index_row_limit = 7\n",
+        )
+        .unwrap();
+        let mut s = Settings {
+            config_path: Some(file.clone()),
+            config_in_repo: true,
+            ..Settings::default()
+        };
+        let warnings = s.read_file(None);
+        let d = Settings::default();
+        assert_eq!(s.memory_ceiling_mb, d.memory_ceiling_mb);
+        assert_eq!(s.small_ceiling_mb, d.small_ceiling_mb);
+        assert_eq!(s.min_interval_s, d.min_interval_s);
+        assert_eq!(s.row_limit, 7, "other keys still apply");
+        assert_eq!(warnings.len(), 3, "{warnings:?}");
+        for key in [
+            "code_index_memory_ceiling_mb",
+            "code_index_small_ceiling_mb",
+            "code_index_min_interval_s",
+        ] {
+            assert_eq!(
+                warnings.iter().filter(|w| w.contains(key)).count(),
+                1,
+                "{key}: {warnings:?}"
+            );
+        }
+        let mut outside = Settings {
+            config_path: Some(file),
+            ..Settings::default()
+        };
+        assert!(outside.read_file(None).is_empty());
+        assert_eq!(outside.memory_ceiling_mb, 999_999);
+        assert_eq!(outside.min_interval_s, 0);
+    }
+
+    #[test]
+    fn a_parse_error_is_reported_with_the_file_and_the_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.toml");
+        std::fs::write(&file, "code_index_row_limit = = 3\n").unwrap();
+        let mut s = Settings {
+            config_path: Some(file.clone()),
+            ..Settings::default()
+        };
+        let warnings = s.read_file(None);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains(&file.display().to_string()));
+        assert!(warnings[0].contains("parse"));
+        assert!(!warnings[0].contains('\n'), "one line");
+        assert_eq!(s.row_limit, Settings::default().row_limit);
+        let mut missing = Settings {
+            config_path: Some(dir.path().join("absent.toml")),
+            ..Settings::default()
+        };
+        assert!(missing.read_file(None).is_empty(), "no file is no error");
     }
 
     #[test]

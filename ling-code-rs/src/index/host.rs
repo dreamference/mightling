@@ -243,12 +243,14 @@ pub fn reserve(host: &dyn Host) -> u64 {
     (host.mem_total() as f64 * percent / 100.0) as u64 + 4 * GIB
 }
 
-/// What a run needs: 1.2 × its recorded peak, or its kind's floor.
-pub fn need(kind: Kind, recorded_peak_mb: u64) -> u64 {
+/// What a run needs: 1.2 × its recorded peak, held to `ceiling` (the host-wide limit of its
+/// kind), or its kind's floor. A run last killed at the ceiling passes `u64::MAX`: its peak is
+/// only a lower bound, so the higher figure stays.
+pub fn need(kind: Kind, recorded_peak_mb: u64, ceiling: u64) -> u64 {
     if recorded_peak_mb == 0 {
         kind.floor()
     } else {
-        (recorded_peak_mb * MIB) * 6 / 5
+        ((recorded_peak_mb * MIB) * 6 / 5).min(ceiling)
     }
 }
 
@@ -434,10 +436,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // 121 GiB total, 5% earlyoom line: reserve is 6.05 + 4 = ~10.05 GiB.
         let host = FakeHost::new(dir.path(), 12);
-        assert!(admit(&host, need(Kind::Static, 0), 4 * GIB)
+        assert!(admit(&host, need(Kind::Static, 0, u64::MAX), 4 * GIB)
             .unwrap()
             .is_err());
-        assert!(admit(&host, need(Kind::Universal, 0), 4 * GIB)
+        assert!(admit(&host, need(Kind::Universal, 0, u64::MAX), 4 * GIB)
             .unwrap()
             .is_ok());
     }
@@ -451,7 +453,7 @@ mod tests {
             cap: 20 * GIB,
             current: GIB,
         });
-        let admitted = admit(&host, need(Kind::Executing, 0), 40 * GIB)
+        let admitted = admit(&host, need(Kind::Executing, 0, u64::MAX), 40 * GIB)
             .unwrap()
             .unwrap();
         // 40 − 10.05 − 19 ≈ 10.95 GiB.
@@ -472,15 +474,17 @@ mod tests {
     fn two_admissions_that_fit_alone_but_not_together_start_one() {
         let dir = tempfile::tempdir().unwrap();
         let host = FakeHost::new(dir.path(), 36);
-        let first = admit(&host, need(Kind::Executing, 21_500), 40 * GIB)
+        let first = admit(&host, need(Kind::Executing, 21_500, u64::MAX), 40 * GIB)
             .unwrap()
             .unwrap();
         host.start_scope("mightling-index-a", first.cap, &[], Path::new("/dev/null"))
             .unwrap();
         first.release();
-        assert!(admit(&host, need(Kind::Executing, 21_500), 40 * GIB)
-            .unwrap()
-            .is_err());
+        assert!(
+            admit(&host, need(Kind::Executing, 21_500, u64::MAX), 40 * GIB)
+                .unwrap()
+                .is_err()
+        );
     }
 
     // The racing children are reaped by the scope's cleanup, not by a wait here.
@@ -494,7 +498,13 @@ mod tests {
             .map(|i| {
                 let host = host.clone();
                 std::thread::spawn(move || {
-                    match admit(host.as_ref(), need(Kind::Executing, 21_500), 40 * GIB).unwrap() {
+                    match admit(
+                        host.as_ref(),
+                        need(Kind::Executing, 21_500, u64::MAX),
+                        40 * GIB,
+                    )
+                    .unwrap()
+                    {
                         Ok(admitted) => {
                             std::thread::sleep(std::time::Duration::from_millis(50));
                             host.start_scope(
@@ -540,7 +550,7 @@ mod tests {
             current: 30 * GIB,
         });
         // 20 − 6 − (40 − 30) = 4 GiB.
-        let admitted = admit(&host, need(Kind::Universal, 0), 8 * GIB)
+        let admitted = admit(&host, need(Kind::Universal, 0, u64::MAX), 8 * GIB)
             .unwrap()
             .unwrap();
         assert_eq!(admitted.cap, 4 * GIB);
@@ -549,10 +559,20 @@ mod tests {
 
     #[test]
     fn first_runs_use_the_floor() {
-        assert_eq!(need(Kind::Universal, 0), 512 * MIB);
-        assert_eq!(need(Kind::Static, 0), 3 * GIB);
-        assert_eq!(need(Kind::Executing, 0), 8 * GIB);
-        assert_eq!(need(Kind::Executing, 1000), 1200 * MIB);
+        assert_eq!(need(Kind::Universal, 0, u64::MAX), 512 * MIB);
+        assert_eq!(need(Kind::Static, 0, u64::MAX), 3 * GIB);
+        assert_eq!(need(Kind::Executing, 0, u64::MAX), 8 * GIB);
+        assert_eq!(need(Kind::Executing, 1000, u64::MAX), 1200 * MIB);
+        assert_eq!(
+            need(Kind::Executing, 1000, 1100 * MIB),
+            1100 * MIB,
+            "capped"
+        );
+        assert_eq!(
+            need(Kind::Executing, 0, 1100 * MIB),
+            8 * GIB,
+            "floor is not"
+        );
     }
 
     #[test]
@@ -604,7 +624,7 @@ mod tests {
             cap: 2 * GIB,
             current: 3 * GIB,
         });
-        let admitted = admit(&host, need(Kind::Universal, 0), 4 * GIB)
+        let admitted = admit(&host, need(Kind::Universal, 0, u64::MAX), 4 * GIB)
             .unwrap()
             .unwrap();
         assert_eq!(admitted.cap, 4 * GIB);
