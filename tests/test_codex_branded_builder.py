@@ -1808,3 +1808,9 @@ def test_ling_is_installed_only_with_both_ling_and_the_web_tools_current(
     monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: ling_current))
     monkeypatch.setattr(CodexBrandedBuilder, "web_tools_are_current", classmethod(lambda cls: web_current))
     assert CodexInstaller.is_installed() is False
+
+
+def test_an_installed_ling_is_not_built_again(monkeypatch):
+    monkeypatch.setattr(CodexInstaller, "is_installed", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexBrandedBuilder, "build", classmethod(lambda cls, force=False: pytest.fail("built")))
+    assert CodexInstaller.install_if_missing() is True
