@@ -754,3 +754,18 @@ def test_start_stops_when_docker_refuses_to_create_the_internal_network(machine,
     assert MatrixHomeserver.start() == 1
     assert "internal Docker network" in capsys.readouterr().out
     assert not machine.argv("docker", "run")
+
+
+def test_an_account_answer_without_its_token_or_its_id_is_a_failure_not_a_crash(
+    machine, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        MatrixHomeserver, "register", classmethod(lambda cls, *a: {"user_id": "@mightling:x"})
+    )
+    assert MatrixHomeserver.start() == 1
+    assert "bot account" in capsys.readouterr().out
+    assert not pathlib.Path(MatrixHomeserver._path("matrix.json")).exists()
+    monkeypatch.setattr(MatrixHomeserver, "register", classmethod(lambda cls, *a: {"access_token": "t"}))
+    assert MatrixHomeserver.add_user("owner") == 1
+    assert "Could not create owner" in capsys.readouterr().out
+    assert not pathlib.Path(MatrixHomeserver._path("matrix.json")).exists()
