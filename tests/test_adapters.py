@@ -503,6 +503,38 @@ def test_an_adapter_the_recipe_cannot_serve_is_refused(keys, remote, changes, re
         AdapterInstaller.install(None, f"{ADAPTER_REPO}@{COMMIT}", served(base_snapshot()))
 
 
+def test_an_adapter_config_that_disagrees_with_its_manifest_is_refused(tmp_path, keys):
+    manifest = AdapterManifest.parse(make_adapter(tmp_path, keys))
+    AdapterVerifier.check_config(manifest, tmp_path)
+    config = tmp_path / "adapter_config.json"
+    for record, reason in (
+        ({"r": 8, "target_modules": ["q_proj"]}, "says rank 8"),
+        ({"r": 16, "target_modules": []}, "names no target_modules"),
+    ):
+        config.write_text(json.dumps(record))
+        with pytest.raises(ValueError, match=reason):
+            AdapterVerifier.check_config(manifest, tmp_path)
+
+
+def test_an_adapter_of_a_base_served_without_adapters_is_refused(tmp_path, keys):
+    repo = ModelMatrixRegistry.resolve_hf_repo("qwen3.8-27b-minima-nvfp4-dflash2")
+    base = {"repo": repo, "revision": BASE_REVISION, "digest": "sha256:" + "b" * 64}
+    manifest = AdapterManifest.parse(make_adapter(tmp_path, keys, base=base))
+    with pytest.raises(ValueError, match="not served with adapters"):
+        AdapterVerifier.check_config(manifest, tmp_path)
+
+
+def test_a_drafter_adapter_file_that_differs_from_its_digest_is_refused(tmp_path, keys):
+    (tmp_path / "drafter").mkdir()
+    (tmp_path / "drafter" / "adapter_model.safetensors").write_bytes(b"changed")
+    signed = "sha256:" + hashlib.sha256(b"signed").hexdigest()
+    make_adapter(
+        tmp_path, keys, drafter_adapter={"files": {"drafter/adapter_model.safetensors": signed}}
+    )
+    with pytest.raises(ValueError, match="drafter/adapter_model.safetensors does not match"):
+        AdapterVerifier.check_files(tmp_path, signed=True)
+
+
 def test_remove_drops_the_entry_and_the_snapshot_through_the_cache_api(
     keys, remote, catalogued, monkeypatch
 ):
