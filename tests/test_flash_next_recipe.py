@@ -166,7 +166,7 @@ def start(monkeypatch):
     from dreamference.hardware.hardware_manager import HardwareManager
 
     mgr = VLLMServerManager()
-    seen = {"host_safety": 0, "downloads": [], "launched": False}
+    seen = {"host_safety": 0, "downloads": [], "launched": False, "resets": []}
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
     monkeypatch.setattr(mgr, "ensure_docker_image", lambda image: True)
     monkeypatch.setattr(mgr, "_stop_index_scopes", lambda: None)
@@ -175,7 +175,9 @@ def start(monkeypatch):
     )
     monkeypatch.setattr(mgr, "_evict_model_page_cache", lambda model: 0.0)
     monkeypatch.setattr(mgr, "_estimate_model_weights_gb", lambda model: WEIGHTS)
-    monkeypatch.setattr(mgr, "_reset_stale_compile_cache", lambda *a, **k: False)
+    monkeypatch.setattr(
+        mgr, "_reset_stale_compile_cache", lambda *a, **k: seen["resets"].append((a, k)) or False
+    )
     monkeypatch.setattr(
         "dreamference.hardware.download_model",
         lambda *a, **k: seen["downloads"].append((a[0], k.get("revision"))) or True,
@@ -191,9 +193,9 @@ def start(monkeypatch):
     monkeypatch.setattr(vllm_server_manager, "MemoryPressureWatchdog", FakeWatchdog)
     FakeWatchdog.started = []
 
-    def go(available: float) -> dict:
+    def go(available: float, **launch) -> dict:
         monkeypatch.setattr(HardwareManager, "detect_gb10_hardware", gb10(available))
-        mgr.start_server(model=FLASH_NEXT, background=False, gate=False)
+        mgr.start_server(model=FLASH_NEXT, background=False, gate=False, **launch)
         return seen
 
     return go
@@ -338,3 +340,13 @@ def test_the_probe_fails_when_long_prompts_drift(fake_server, tmp_path):
     assert (
         probe.corrupted("!" * 50) and probe.corrupted("") and probe.corrupted("fine text") is None
     )
+
+
+def test_a_vllm_launch_resets_a_stale_compile_cache_for_its_own_speculation(start):
+    # The reset is keyed by what this launch speculates with, so it gets the launch's own
+    # arguments; given a drafter, the depth changes the signature.
+    seen = start(113.5, num_speculative_tokens=3)
+    ((args, kwargs),) = seen["resets"]
+    assert args[0] == FLASH_NEXT
+    assert kwargs["draft_model"] is None
+    assert kwargs["num_speculative_tokens"] == 3
