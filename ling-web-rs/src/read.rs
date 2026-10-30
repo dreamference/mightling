@@ -632,4 +632,15 @@ mod tests {
         );
         assert!(text.contains("\n# Page title\n\n"), "{text}");
     }
+
+    #[test]
+    fn an_extract_names_the_address_the_page_was_read_from() {
+        let read = read(
+            found(vec![result("A", "https://a.example/", "")]),
+            1,
+            &|_: &str, _| Ok(page("https://b.example/moved", "", "text")),
+        );
+        let text = render_text(&read);
+        assert!(text.contains("url=\"https://b.example/moved\">"), "{text}");
+    }
 }
