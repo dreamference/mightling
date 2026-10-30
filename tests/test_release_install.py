@@ -1674,6 +1674,17 @@ def test_a_new_key_endorsed_by_the_current_one_is_accepted(tmp_path, release_ser
     assert "signed by Mightling's release key" in result.stdout
 
 
+def test_the_current_key_still_signs_a_release_that_names_the_next_one(tmp_path, release_server):
+    next_key = KEYS["next"].with_suffix(".pub").read_bytes()
+    assets = binaries(signed=False)
+    assets["release-key-transition.pub"] = next_key
+    assets["release-key-transition.pub.sig"] = ssh_sign(next_key, "release", "mightling-release-key")
+    sign(assets, key="release")
+    result = run_install(tmp_path, release_server(assets), "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "signed by Mightling's release key" in result.stdout
+
+
 def test_a_new_key_that_endorses_itself_is_refused(tmp_path, release_server):
     attacker = KEYS["attacker"].with_suffix(".pub").read_bytes()
     for endorser, namespace in (("attacker", "mightling-release-key"), ("release", "mightling-release")):
