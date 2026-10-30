@@ -607,4 +607,14 @@ mod tests {
         // Checked at 128 bytes (noise, passes) and at 192: the window then starts at 64.
         assert_eq!(found.cut, 64, "{found:?}");
     }
+
+    #[test]
+    fn a_compression_window_starting_inside_a_character_starts_after_it() {
+        let t = Thresholds { max_run: 0, max_char_run: 0, compression_window: 127, min_compression_ratio: 0.5, ..defaults() };
+        let text = format!("xy{}", "я".repeat(200));
+        let found = Detector::new(t).push(&text).expect("a loop");
+        assert_eq!(found.kind.name(), "compression", "{found:?}");
+        // The window would start inside the character at byte 274.
+        assert_eq!(found.cut, 276);
+    }
 }
