@@ -34,6 +34,9 @@ from dreamference.node import (
 from dreamference.node.fleet_askpass import FleetAskpass
 from dreamference.node.fleet_session import FleetSession
 from tests.test_fleet_hub_fetch import FOLDER, authorised_lines, completed, lan_sessions
+from tests.test_node_pairing import NODE as PAIRING_NODE
+from tests.test_node_pairing import Session as PairingSession
+from tests.test_node_pairing import answer as pairing_answer
 
 SECRET = "pa55-for-the-test"
 
@@ -610,3 +613,32 @@ def test_a_node_settings_file_that_is_not_an_object_keeps_every_bind_on_loopback
     NodeSettings.path().parent.mkdir(parents=True, exist_ok=True)
     NodeSettings.path().write_text(text)
     assert NodeSettings.load() == {"advertise": False, "web": False}
+
+
+# -- node pairing [key]
+
+
+def test_pairing_over_a_session_stops_when_ssh_keygen_cannot_make_the_key(monkeypatch, capsys):
+    monkeypatch.setattr(NodePairing, "ensure_key", classmethod(lambda cls: None))
+    session = PairingSession(pairing_answer(0, f"{PAIRING_NODE}\nspark-1\n"))
+    assert NodePairing.pair_over_session(session) is None
+    assert "ssh-keygen could not create" in capsys.readouterr().out
+    # Nothing was authorised over the session and no host key was pinned.
+    assert [command for command, _ in session.commands if "authorize" in command] == []
+    assert not NodePairing.known_hosts().exists()
+    assert not NodePairing.record_path(PAIRING_NODE).exists()
+
+
+def test_a_confirmed_unpairing_forgets_the_node_without_a_warning(monkeypatch, capsys):
+    record = {"node": PAIRING_NODE, "name": "spark-1", "address": "192.0.2.7", "user": "owner"}
+    NodePairing._save(record)
+    monkeypatch.setattr(
+        NodePairing, "run", classmethod(lambda cls, record, request, **_: pairing_answer(0))
+    )
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, **_: calls.append(argv) or pairing_answer())
+    assert NodePairing.remove("spark-1")
+    out = capsys.readouterr().out
+    assert "did not confirm" not in out and "no longer paired" in out
+    assert not NodePairing.record_path(PAIRING_NODE).exists()
+    assert [argv[:3] for argv in calls] == [["ssh-keygen", "-q", "-R"]]
