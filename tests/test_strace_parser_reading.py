@@ -26,3 +26,19 @@ def test_an_abstract_socket_named_like_a_resolver_is_not_one():
     )
     assert trace.local_resolvers == {}
     assert trace.unix_sockets == {"@/run/avahi-daemon/socket": 1}
+
+
+def execve(program: str, *argv: str) -> str:
+    args = ", ".join(f'"{arg}"' for arg in argv)
+    return f'4 execve("{program}", [{args}], 0x0 /* 1 var */) = 0\n'
+
+
+@pytest.mark.parametrize("line, command", [
+    (execve("/usr/bin/git", "git", "push", "origin"), "git push origin"),
+    (execve("/usr/bin/git", "git", "pull"), "git pull"),
+    (execve("/usr/bin/git", "git", "clone", "https://example.com/r.git"), "git clone https://example.com/r.git"),
+    (execve("/usr/lib/git-core/git-remote-http", "git-remote-http", "origin", "http://example.com/r.git"),
+     "git-remote-http origin http://example.com/r.git"),
+])
+def test_every_git_command_that_reaches_a_network_is_recorded(line, command):
+    assert StraceParser.parse(line).networked_git == [command]
