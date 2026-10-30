@@ -1456,6 +1456,8 @@ def test_settings_parse_durations_and_windows():
     assert (start.hour, end.hour) == (23, 5)
     with pytest.raises(ValueError):
         NightShiftSettings.parse_duration("soon")
+    with pytest.raises(ValueError):
+        NightShiftSettings.parse_window("23:00-05:00 tomorrow")
 
 
 def test_the_reports_review_command_quotes_a_repository_with_a_space():
