@@ -783,3 +783,9 @@ def test_a_command_gets_the_extra_variables_on_top_of_the_callers_environment(mo
         [sys.executable, "-c", script], env={"MIGHTLING_TEST_ADDED": "added"}
     )
     assert result.stdout.split() == ["kept", "added"]
+
+
+def test_a_tailscale_status_that_fails_gives_no_name_even_beside_a_running_answer(monkeypatch):
+    running = {"BackendState": "Running", "Self": {"DNSName": "n.ts.net."}}
+    _stub_run(monkeypatch, json.dumps(running), returncode=1)
+    assert MatrixHomeserver.tailscale_name() is None
