@@ -777,6 +777,7 @@ mod tests {
         assert_eq!(surface_of_cwd(Path::new("/home/u/.mightling/ask/chat-9f/sub"), home), Surface::Phone);
         assert_eq!(surface_of_cwd(Path::new("/home/u/src/project"), home), Surface::Work);
         assert_eq!(surface_of_cwd(Path::new("/home/u/.mightling/asking"), home), Surface::Work);
+        assert_eq!(surface_of_cwd(Path::new("/home/u/.mightling/ask/q-chat-1"), home), Surface::Ask);
     }
 
     #[test]
