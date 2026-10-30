@@ -246,4 +246,17 @@ mod tests {
             "syncMessage": {"sentMessage": {"destinationUuid": "me", "timestamp": 5}}}});
         assert_eq!(parse(&empty, OwnAccount { uuid: Some("me"), number: None }).unwrap().body, Body::Other);
     }
+
+    #[test]
+    fn a_v2_group_is_a_group_and_a_null_group_is_none() {
+        let me = OwnAccount { uuid: Some("me"), number: None };
+        let v2 = json!({"envelope": {"sourceUuid": "x", "timestamp": 1, "dataMessage": {"message": "hi", "groupV2": {"id": "g"}}}});
+        assert_eq!(parse(&v2, me).unwrap().body, Body::Group);
+        let v2_synced = json!({"envelope": {"sourceUuid": "me", "timestamp": 2,
+            "syncMessage": {"sentMessage": {"destinationUuid": "me", "message": "hi all", "groupV2": {"id": "g"}, "timestamp": 2}}}});
+        assert_eq!(parse(&v2_synced, me).unwrap().body, Body::Group);
+        let no_group = json!({"envelope": {"sourceUuid": "x", "timestamp": 3, "dataMessage": {"message": "hi", "groupInfo": null, "groupV2": null}}});
+        assert!(matches!(parse(&no_group, me).unwrap().body, Body::Direct { .. }));
+    }
+
 }
