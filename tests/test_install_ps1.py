@@ -263,3 +263,33 @@ def test_the_desktop_app_is_checked_against_the_signed_sha256sums():
     text = script()
     app = text[text.index("$AppSetup = $null") :]
     assert "$AllSums = $Signed" in app
+
+
+def code_lines() -> list:
+    """install.ps1's lines without comments, the elevated script's included."""
+    lines = []
+    for line in script().splitlines():
+        code = line.split(" #", 1)[0].rstrip()
+        if code.strip() and not code.lstrip().startswith("#"):
+            lines.append(code)
+    return lines
+
+
+def test_install_ps1_uses_only_what_windows_powershell_5_1_has():
+    """Section 6: a standard Windows 11 machine has only 5.1, and windows.yml runs it on Windows only.
+
+    No null-coalescing (`??`), null-conditional (`?.`), ternary, pipeline chain (`&&`, `||`) or
+    `ForEach-Object -Parallel`, all PowerShell 7; and every web call with `-UseBasicParsing`, without
+    which 5.1 needs Internet Explorer's engine (gone on Windows 11) to parse the page.
+    """
+    lines = code_lines()
+    for line in lines:
+        assert "??" not in line and "?." not in line, line
+        assert "&&" not in line and "||" not in line, line
+        assert "-Parallel" not in line, line
+        # `<condition> ? <a> : <b>`; `| ? { … }` (Where-Object's alias) is 5.1 as well.
+        assert not re.search(r"[^|\s]\s+\?\s+\S.*\s:\s", line), line
+    calls = [line for line in lines if re.search(r"Invoke-(WebRequest|RestMethod)\b", line, re.IGNORECASE)]
+    assert calls
+    for call in calls:
+        assert "-UseBasicParsing" in call, call
