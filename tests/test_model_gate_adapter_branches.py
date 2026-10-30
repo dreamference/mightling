@@ -53,3 +53,17 @@ def test_a_request_for_the_base_goes_through_unchanged(adapters):
     body = json.dumps({"model": "org/base", "messages": []}).encode()
 
     assert asyncio.run(adapters.rewrite(body, LISTING)) == (None, body, None)
+
+
+# -- models --------------------------------------------------------------------------------------------
+
+
+def test_an_engine_list_that_cannot_be_read_lists_no_models():
+    for body in (b"<html>", b"[]"):
+        assert ModelGateAdapters.models(body, LISTING) == {"object": "list", "data": []}
+
+
+def test_adapters_are_not_listed_when_the_engine_does_not_list_their_base():
+    body = json.dumps({"object": "list", "data": [{"id": "org/other"}]}).encode()
+
+    assert ModelGateAdapters.models(body, LISTING)["data"] == [{"id": "org/other"}]
