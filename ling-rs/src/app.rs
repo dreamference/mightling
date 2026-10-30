@@ -222,7 +222,7 @@ pub async fn open(args: &[String]) -> i32 {
 
     let Some(executable) = find_executable() else {
         eprintln!("❌ ling-app is not installed.");
-        eprintln!("💡 Build and register it with: ling-admin desktop build");
+        eprintln!("💡 {}", install_hint(cfg!(windows)));
         return 1;
     };
     // Nothing to check first: the app starts its own app-server, and says in its window
@@ -363,12 +363,58 @@ pub fn find_executable() -> Option<PathBuf> {
     }) {
         return Some(on_path);
     }
+    if cfg!(windows) {
+        return installed_windows_app();
+    }
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .or_else(|| home_dir().map(|home| home.join(".local/share")))?;
     let entry = std::fs::read_to_string(data_home.join("applications").join(DESKTOP_ENTRY)).ok()?;
     exec_path(&entry).filter(|path| is_executable(path))
+}
+
+/// The desktop app's executable on Windows, where the installer put it.
+const WINDOWS_APP: &str = "Mightling.exe";
+
+/// How to get the desktop app: Windows has the installer script, not `ling-admin`.
+pub fn install_hint(windows: bool) -> &'static str {
+    if windows {
+        "Install the desktop app with install.ps1 (run it again without -NoApp)"
+    } else {
+        "Build and register it with: ling-admin desktop build"
+    }
+}
+
+/// The app on Windows: where install.ps1's record beside `bin` says (`uninstall::app_record`), else
+/// the folder the app's own installer registered under HKCU.
+fn installed_windows_app() -> Option<PathBuf> {
+    let recorded = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().and_then(crate::uninstall::app_record))
+        .and_then(|(_, app)| app);
+    #[cfg(windows)]
+    let registered = crate::uninstall::registered_app_dir();
+    #[cfg(not(windows))]
+    let registered = None;
+    windows_app_in(recorded, registered, &|path: &Path| path.is_file())
+}
+
+/// The first of the app folders (the record's, then the registry's) that holds the app's
+/// executable; a record that names the executable itself is taken as it is.
+pub fn windows_app_in(
+    recorded: Option<PathBuf>,
+    registered: Option<PathBuf>,
+    is_file: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    [recorded, registered].into_iter().flatten().find_map(|path| {
+        let executable = if path.file_name().is_some_and(|name| name.eq_ignore_ascii_case(WINDOWS_APP)) {
+            path
+        } else {
+            path.join(WINDOWS_APP)
+        };
+        is_file(&executable).then_some(executable)
+    })
 }
 
 /// The program named on a desktop entry's `Exec=` line, without its arguments or field codes.
@@ -652,5 +698,31 @@ mod tests {
         assert!(window(&args("--chat --work")).is_err());
         assert!(window(&args("--ask --thread t1")).is_err());
         assert!(window(&args("Cargo.toml")).is_err() || !std::path::Path::new("Cargo.toml").exists());
+    }
+
+    #[test]
+    fn the_windows_app_is_found_by_the_record_then_the_registry() {
+        let present = |paths: &'static [&'static str]| move |p: &Path| paths.iter().any(|q| p == Path::new(q));
+        let record = Some(PathBuf::from("/a/App"));
+        let registry = Some(PathBuf::from("/b/App"));
+        let both = present(&["/a/App/Mightling.exe", "/b/App/Mightling.exe"]);
+        assert_eq!(windows_app_in(record.clone(), registry.clone(), &both), Some(PathBuf::from("/a/App/Mightling.exe")));
+        let only_registry = present(&["/b/App/Mightling.exe"]);
+        assert_eq!(windows_app_in(record.clone(), registry.clone(), &only_registry), Some(PathBuf::from("/b/App/Mightling.exe")));
+        assert_eq!(windows_app_in(None, registry, &only_registry), Some(PathBuf::from("/b/App/Mightling.exe")));
+        assert_eq!(windows_app_in(record, None, &only_registry), None);
+        assert_eq!(windows_app_in(None, None, &both), None);
+        // A record that names the executable itself.
+        let direct = present(&["/c/Mightling.exe"]);
+        assert_eq!(
+            windows_app_in(Some(PathBuf::from("/c/Mightling.exe")), None, &direct),
+            Some(PathBuf::from("/c/Mightling.exe"))
+        );
+    }
+
+    #[test]
+    fn the_install_hint_names_the_windows_installer_there() {
+        assert!(install_hint(true).contains("install.ps1") && !install_hint(true).contains("ling-admin"));
+        assert!(install_hint(false).contains("ling-admin desktop build"));
     }
 }
