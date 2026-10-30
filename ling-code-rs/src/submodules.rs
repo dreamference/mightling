@@ -977,6 +977,46 @@ mod tests {
     }
 
     #[test]
+    fn choices_are_read_for_the_main_worktree_and_no_other_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main");
+        let linked = dir.path().join("linked");
+        let other = dir.path().join("other");
+        for d in [&main, &linked, &other] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let key = |p: &Path| p.canonicalize().unwrap().to_string_lossy().into_owned();
+        let file = dir.path().join("ling-code.toml");
+        let in_linked = Repo {
+            root: linked.clone(),
+            main_root: main.clone(),
+            is_git: true,
+        };
+        std::fs::write(
+            &file,
+            format!(
+                "[projects.{:?}.submodules]\nlib = \"include\"\n",
+                key(&main)
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            choices_in(&file, &in_linked),
+            [("lib".to_string(), Choice::Include)]
+        );
+        // Another project's table is not this one's.
+        std::fs::write(
+            &file,
+            format!(
+                "[projects.{:?}.submodules]\nlib = \"include\"\n",
+                key(&other)
+            ),
+        )
+        .unwrap();
+        assert_eq!(choices_in(&file, &in_linked), []);
+    }
+
+    #[test]
     fn our_domains_leave_out_public_mail_and_web_flow() {
         let authors = Authors::from_addresses(
             [
