@@ -80,3 +80,26 @@ def test_the_served_models_are_the_entries_with_an_id_and_none_on_a_failure(monk
 
     monkeypatch.setattr(requests, "get", unreachable)
     assert VLLMServerManager().get_models() == []
+
+
+def test_a_warm_up_the_server_refuses_or_cannot_aim_is_no_warm_up(monkeypatch):
+    posted = []
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "get_models", lambda: [])
+    monkeypatch.setattr(requests, "post", lambda *a, **k: posted.append(a) or _Response(200))
+    assert mgr.warm_up(timeout=0.1) is None
+    assert posted == [], "with no model listed there is nothing to warm"
+
+    monkeypatch.setattr(mgr, "get_models", lambda: ["served-model"])
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _Response(500))
+    assert mgr.warm_up(timeout=0.1) is None
+
+    def broke(*a, **k):
+        raise requests.Timeout("slow")
+
+    monkeypatch.setattr(requests, "post", broke)
+    assert mgr.warm_up(timeout=0.1) is None
+
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _Response(200))
+    elapsed = mgr.warm_up(timeout=0.1)
+    assert elapsed is not None and elapsed >= 0.0
