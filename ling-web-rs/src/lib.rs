@@ -251,6 +251,14 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_proxy_variable_counts_as_unset() {
+        assert!(proxied(
+            "https://a.com/x",
+            &[("https_proxy", ""), ("ALL_PROXY", "http://p:3128")]
+        ));
+    }
+
+    #[test]
     fn a_web_command_refuses_at_on_and_in_a_sandbox_without_network() {
         assert_eq!(refusal(Level::On, false), Some(AIRGAPPED_ON_MESSAGE));
         assert_eq!(refusal(Level::On, true), Some(AIRGAPPED_ON_MESSAGE));
