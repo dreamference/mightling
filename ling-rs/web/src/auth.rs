@@ -663,6 +663,35 @@ mod tests {
     }
 
     #[test]
+    fn a_device_name_is_cut_to_sixty_four_characters() {
+        assert_eq!(clean_device_name(&"x".repeat(100)).chars().count(), 64);
+        assert_eq!(clean_device_name("\u{7}\n"), "unnamed device");
+    }
+
+    #[test]
+    fn a_device_used_after_a_minute_has_its_last_use_written_to_it_alone() {
+        let state = scratch("last-used");
+        let (_, first) = add_device(&state, "first").unwrap();
+        let (_, second) = add_device(&state, "second").unwrap();
+        // Two devices under one id (ids are short): the use is written to the one whose token it was.
+        change_devices(&state, |devices| {
+            let id = devices[0].id.clone();
+            for device in devices.iter_mut() {
+                device.id = id.clone();
+                device.last_used = 0;
+            }
+            ((), true)
+        })
+        .unwrap();
+        assert!(device_for_token(&state, &second).is_some());
+        let devices = load_devices(&state);
+        assert_eq!(devices[0].last_used, 0, "the other device's last use is untouched");
+        assert!(devices[1].last_used + 30 >= now_secs(), "the use was written");
+        assert!(device_for_token(&state, &first).is_some());
+        assert!(load_devices(&state)[0].last_used + 30 >= now_secs());
+    }
+
+    #[test]
     fn devices_paired_and_revoked_at_once_are_none_of_them_lost() {
         let state = scratch("devices-at-once");
         let (kept_id, _) = add_device(&state, "kept").unwrap();
