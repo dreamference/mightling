@@ -205,6 +205,32 @@ def test_readiness_waiter_warms_the_model_the_server_runs_not_the_configured_one
     assert asked == ["served/other-model"]
 
 
+def test_ctrl_c_while_waiting_is_a_cancel_not_a_ready_server(monkeypatch, capsys):
+    from dreamference.runner import VLLMReadinessWaiter
+
+    waiter = VLLMReadinessWaiter(config=DreamferenceConfig())
+
+    def interrupted(timeout=None):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(waiter.vllm_manager, "check_health", interrupted)
+    assert waiter.wait_for_vllm(max_wait=5) is False
+    assert "Cancelled" in capsys.readouterr().out
+
+
+def test_a_warm_up_that_cannot_reach_the_server_is_not_ready(monkeypatch):
+    from dreamference.runner import vllm_readiness_waiter as waiter_module
+
+    waiter = waiter_module.VLLMReadinessWaiter(config=DreamferenceConfig())
+    monkeypatch.setattr(waiter.vllm_manager, "get_models", lambda timeout=2.0: ["m"])
+
+    def unreachable(request, timeout=None):
+        raise ConnectionRefusedError(111, "Connection refused")
+
+    monkeypatch.setattr(waiter_module.urllib.request, "urlopen", unreachable)
+    assert waiter._pre_warm() is False
+
+
 def test_continue_keeps_a_config_it_cannot_read_before_writing_its_own(tmp_path, monkeypatch):
     # Continue reads JSON with comments; json.load cannot, and the user's file was overwritten.
     monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
