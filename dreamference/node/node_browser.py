@@ -87,7 +87,7 @@ class NodeBrowser:
             parsed = ipaddress.ip_address(address)
         except ValueError:
             return address
-        if parsed.version == 6 and parsed.is_link_local and interface:
+        if parsed.version == 6 and parsed.is_link_local and parsed.scope_id is None and interface:
             return f"{address}%{interface}"
         return address
 

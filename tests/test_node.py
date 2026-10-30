@@ -787,6 +787,10 @@ def test_addresses_rank_ipv4_then_global_ipv6_then_link_local_then_anything_else
     assert NodeBrowser.scoped("fe80::5", "") == "fe80::5"  # no interface, no scope to add
 
 
+def test_a_link_local_address_that_has_its_scope_is_left_as_it_is():
+    assert NodeBrowser.scoped("fe80::5%eth0", "eth0") == "fe80::5%eth0"
+
+
 def _discover(monkeypatch, nodes, ssh, match=None):
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: nodes))
     monkeypatch.setattr(NodeBrowser, "browse_service", classmethod(lambda cls, service, timeout=6: ssh))
