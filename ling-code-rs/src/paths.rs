@@ -588,6 +588,29 @@ mod state_file_tests {
         let _reader = options.open(&fifo).unwrap();
         assert!(open_state_file(&state, "session.lock", true).is_err());
     }
+
+    #[test]
+    fn a_fifo_without_a_reader_is_refused_without_blocking() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        std::fs::create_dir(&state).unwrap();
+        let fifo = state.join("session.lock");
+        let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let opened = state.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(open_state_file(&opened, "session.lock", true).is_err());
+        });
+        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(refused) => assert!(refused),
+            Err(_) => {
+                // Release the blocked open before failing.
+                let _reader = std::fs::File::open(&fifo);
+                panic!("opening a FIFO without a reader blocked");
+            }
+        }
+    }
 }
 
 #[cfg(test)]
