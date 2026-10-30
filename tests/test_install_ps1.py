@@ -328,6 +328,11 @@ def test_each_binary_is_unpacked_only_after_its_own_checksum_matches():
         assert loop.index(guard) < unpacked, guard
 
 
+def test_the_signed_sha256sums_must_list_the_per_target_sums():
+    block = signature_block()
+    assert 'if (-not $Signed.ContainsKey($SumsName)) { Fail "SHA256SUMS has no checksum' in block
+
+
 def code_lines() -> list:
     """install.ps1's lines without comments, the elevated script's included."""
     lines = []
