@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from dreamference.audit import EgressAudit
+from dreamference.audit import CompatPrintSession, EgressAudit, TuiSession
 
 HOST = "http://localhost:8000"
 # The class itself: tests/conftest.py wraps subprocess.Popen in a guard while a test runs.
@@ -104,3 +104,64 @@ sleep 300
     _, replied, _ = EgressAudit.trace_session("/opt/ling", HOST, "hi", str(work_dir), "exec")
     assert replied is False
     assert _gone(int(leader_pid.read_text()))
+
+
+@pytest.fixture
+def after_build(monkeypatch):
+    """`EgressAudit.after_build` with the model server, the tools on PATH and the sessions replaced."""
+    state = {
+        "which": lambda name: f"/usr/bin/{name}",
+        "missing": [],
+        "asked": [],
+        "runs": [],
+        "code": 0,
+    }
+    monkeypatch.setattr("shutil.which", lambda name: state["which"](name))
+    monkeypatch.setattr(TuiSession, "missing_modules", classmethod(lambda cls: state["missing"]))
+    monkeypatch.setattr(CompatPrintSession, "after_build", classmethod(lambda cls, run: []))
+
+    def served(cls, host, timeout=3.0):
+        state["asked"].append(host)
+        return ("model", 4096)
+
+    def run(cls, write_json=False, vllm_host=None, tui=False, **options):
+        state["runs"].append({"tui": tui, "vllm_host": vllm_host})
+        return state["code"]
+
+    monkeypatch.setattr("dreamference.night_shift.NightShiftHost.served_model", classmethod(served))
+    monkeypatch.setattr(EgressAudit, "run", classmethod(run))
+    return state
+
+
+def test_after_a_build_without_strace_the_audit_is_skipped_and_the_build_kept(after_build, capsys):
+    after_build["which"] = lambda name: None if name == "strace" else f"/usr/bin/{name}"
+    assert EgressAudit.after_build(vllm_host=HOST) is None
+    out = capsys.readouterr().out
+    assert (
+        "Egress audit skipped: strace is not installed" in out and "ling-admin audit egress" in out
+    )
+    # Neither the model server nor a session is started for an audit that cannot trace.
+    assert after_build["asked"] == [] and after_build["runs"] == []
+
+
+def test_after_a_build_without_the_terminal_modules_only_exec_is_traced_and_its_verdict_kept(
+    after_build, capsys
+):
+    after_build["missing"] = ["pexpect", "pyte"]
+    after_build["code"] = 1
+    assert EgressAudit.after_build(vllm_host=HOST) == 1
+    out = capsys.readouterr().out
+    assert after_build["runs"] == [{"tui": False, "vllm_host": HOST}]
+    assert (
+        "full-screen interface was not traced" in out
+        and "This build reaches something it should not" in out
+    )
+
+
+def test_after_a_build_the_configured_model_server_is_audited_by_default(after_build):
+    from dreamference.config import DreamferenceConfig
+
+    configured = DreamferenceConfig().vllm_host
+    assert EgressAudit.after_build() == 0
+    assert after_build["asked"] == [configured]
+    assert [run["vllm_host"] for run in after_build["runs"]] == [configured, configured]
