@@ -390,8 +390,9 @@ class ModelDownloader:
             # A failed attempt may have left part of the file, which would read as tensorized.
             tensors_file.unlink(missing_ok=True)
             staging.unlink(missing_ok=True)
-            print(f"⚠️  'tensorizer' not installed — skipping tensorize step (normal download will be used).")
-            return True
+            # download_model goes on either way; the result says whether the file now exists.
+            print(f"⚠️  No tensorize attempt succeeded — skipping tensorize step (normal download will be used).")
+            return False
 
         # Copy metadata and tokenizer config files alongside model.tensors
         for fpath in snapshot_dir.iterdir():
