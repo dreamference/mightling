@@ -14,6 +14,8 @@ import sys
 import tarfile
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 INDUSTRY = ROOT / "scripts" / "industry_evals"
 sys.path.insert(0, str(INDUSTRY))
@@ -191,6 +193,12 @@ def test_the_ifeval_runner_answers_each_prompt_scores_it_and_writes_the_summary(
 def test_the_ifeval_runner_refuses_an_empty_cache(tmp_path, capsys):
     assert IFEVAL.main(["--cache", str(tmp_path), "--no-model", "--no-jail"]) == 2
     assert "setup_cache.py ifeval" in capsys.readouterr().err
+
+
+def test_the_ifeval_runner_runs_unjailed_only_without_a_model(tmp_path, capsys):
+    with pytest.raises(SystemExit) as stop:
+        IFEVAL.main(["--cache", str(tmp_path), "--no-jail"])
+    assert stop.value.code == 2 and "always jailed" in capsys.readouterr().err
 
 
 class FakeGuard:

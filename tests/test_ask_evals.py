@@ -486,6 +486,29 @@ def test_the_jail_has_no_network_but_its_loopback(tmp_path):
     assert Path(argv[argv.index("--") + 1]).name == "python3"
 
 
+def test_an_unjailed_run_is_refused_unless_there_is_no_model(tmp_path, capsys):
+    """`--no-jail` is for tests: with a model behind it, a run could reach the real web."""
+    with pytest.raises(SystemExit) as stop:
+        RUNNER.main(["--only", "s8-", "--no-jail", "--runs", str(tmp_path / "runs")])
+    assert stop.value.code == 2 and "always jailed" in capsys.readouterr().err
+    assert not (tmp_path / "runs").exists()
+
+
+def test_the_suite_refuses_to_run_without_bwrap(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(RUNNER.shutil, "which", lambda name: None)
+    status = RUNNER.main(["--only", "s8-", "--no-model", "--out", str(tmp_path / "o.jsonl")])
+    assert status == 2 and "never runs unjailed" in capsys.readouterr().err
+    assert not (tmp_path / "o.jsonl").exists()
+
+
+def test_the_suite_refuses_to_run_when_no_model_answers(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(RUNNER, "model_info", lambda port: {})
+    monkeypatch.setattr(RUNNER.shutil, "which", lambda name: "/usr/bin/bwrap")
+    status = RUNNER.main(["--only", "s8-", "--model-port", "18999", "--runs", str(tmp_path / "r")])
+    assert status == 2 and "No model server answers on 127.0.0.1:18999" in capsys.readouterr().err
+    assert not (tmp_path / "r").exists()
+
+
 def test_the_plan_lists_every_scenario_and_runs_nothing(capsys):
     assert RUNNER.main(["--plan"]) == 0
     printed = capsys.readouterr().out
