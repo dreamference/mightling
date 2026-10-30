@@ -1161,6 +1161,10 @@ mod tests {
             vec!["wlan0".to_string()]
         );
     }
+    #[test]
+    fn a_wifi_line_without_a_device_name_is_skipped() {
+        assert!(connected_wifi_devices(":wifi:connected\n").is_empty());
+    }
 
     #[test]
     fn the_radio_says_on_off_or_nothing() {
