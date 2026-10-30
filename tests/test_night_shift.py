@@ -1526,6 +1526,16 @@ def test_without_a_paired_node_the_run_has_one_lane_and_asks_nobody(fake_host, m
     assert len(lanes) == 1 and lanes[0]["host"] == "http://x" and notes == []
 
 
+@pytest.mark.parametrize("paired, nodes", [([], "paired"), ([{"name": "spark-2"}], "none")])
+def test_the_nodes_are_asked_only_when_one_is_paired_and_wanted(fake_host, monkeypatch, paired, nodes):
+    from dreamference.node import NodePairing
+    from dreamference.node.node_lanes import NodeLanes
+    monkeypatch.setattr(NodePairing, "paired", classmethod(lambda cls: list(paired)))
+    monkeypatch.setattr(NodeLanes, "lanes", classmethod(lambda cls, *args, **kwargs: pytest.fail("asked the nodes")))
+    lanes, notes = NightShiftRunner.lanes("http://x", NightShiftSettings({"nodes": nodes}))
+    assert [lane["host"] for lane in lanes] == ["http://x"] and notes == []
+
+
 @pytest.fixture
 def two_nodes(setup, fake_host, monkeypatch):
     """This machine as both sender and node: the pairing reaches `serve-job` in this process, and
