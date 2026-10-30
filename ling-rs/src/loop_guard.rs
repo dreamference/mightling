@@ -793,6 +793,19 @@ mod tests {
     }
 
     #[test]
+    fn any_one_layer_on_is_enough_for_the_request_to_be_changed() {
+        let off = Settings { guard: false, budget: None, sampling: None, thresholds: Thresholds::default() };
+        assert!(off.untouched());
+        let guard = Settings { guard: true, ..off.clone() };
+        let budget = Settings { budget: Some(1_024), ..off.clone() };
+        let sampling = Settings { sampling: Some(NONTHINKING.to_string()), ..off.clone() };
+        for one in [guard, budget, sampling] {
+            assert!(!one.untouched(), "{one:?}");
+            assert!(metadata(Surface::Exec, &one).is_some(), "{one:?}");
+        }
+    }
+
+    #[test]
     fn a_benchmark_arm_switches_each_layer_on_through_the_environment() {
         let env = |name: &str| match name {
             GUARD_ENV => Some("on".to_string()),
