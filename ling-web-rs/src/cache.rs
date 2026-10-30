@@ -322,4 +322,16 @@ mod tests {
         assert!(Cache::at(dir.clone()).is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_to_a_directory_is_not_used() {
+        let target = scratch("link-target");
+        let link = scratch("link");
+        assert!(Cache::at(target.clone()).is_some());
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(Cache::at(link.clone()).is_none());
+        let _ = std::fs::remove_file(link);
+        let _ = std::fs::remove_dir_all(target);
+    }
 }
