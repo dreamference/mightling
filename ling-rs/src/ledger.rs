@@ -611,4 +611,9 @@ mod tests {
         let command = "cargo test; echo see src/a.py.; ls ./src; cat .git/HEAD";
         assert_eq!(workspace_files(command, &dir, &dir), vec!["src/a.py"]);
     }
+
+    #[test]
+    fn a_negative_exit_code_is_read() {
+        assert_eq!(exit_code("Process exited with code -1\nOutput:\n"), Some(-1));
+    }
 }
