@@ -1100,3 +1100,20 @@ fn a_search_that_found_only_answers_is_kept_in_the_cache() {
     assert_eq!(server.requests().len(), 1);
     let _ = std::fs::remove_dir_all(cache);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_search_over_another_time_range_is_not_answered_from_the_cache() {
+    let server =
+        Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
+    let cache = fresh_cache_dir();
+    let cache = cache.to_str().unwrap();
+    let env = [
+        ("DREAMFERENCE_SEARXNG_URL", server.base.as_str()),
+        (ling_web::cache::CACHE_DIR_ENV, cache),
+    ];
+    assert!(search(&["--time", "day", "q"], &env).status.success());
+    assert!(search(&["--time", "week", "q"], &env).status.success());
+    assert_eq!(server.requests().len(), 2, "{:?}", server.requests());
+    let _ = std::fs::remove_dir_all(cache);
+}
