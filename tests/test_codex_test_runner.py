@@ -46,7 +46,9 @@ def test_every_skipped_package_and_target_exists_in_the_pinned_codex():
     for entry in skips["package"]:
         assert entry["name"] in packages
     for entry in skips["target"]:
-        assert pathlib.Path(os.path.join(packages[entry["package"]], "tests", f"{entry['test']}.rs")).is_file()
+        assert pathlib.Path(
+            os.path.join(packages[entry["package"]], "tests", f"{entry['test']}.rs")
+        ).is_file()
 
 
 def test_a_skip_without_a_reason_is_refused(tmp_path):
@@ -78,9 +80,10 @@ def test_binaries_are_built_first_and_a_package_with_a_skipped_target_runs_on_it
         commands = CodexTestRunner.commands(skips, "/x/codex-rs", {}, None, 8)
     build, workspace, package = commands
     assert build[:2] == ["cargo", "build"] and "--bins" in build
-    assert build[
-        build.index("--exclude") : build.index("--exclude") + 2
-    ] == ["--exclude", "codex-voice-host"]
+    assert build[build.index("--exclude") : build.index("--exclude") + 2] == [
+        "--exclude",
+        "codex-voice-host",
+    ]
     assert "codex-code-mode-host" in workspace and "codex-voice-host" in workspace
     assert package[package.index("-p") + 1] == "codex-code-mode-host"
     assert "stdio" not in package and package[-4:-2] == ["--test", "grpc"]
@@ -318,7 +321,9 @@ def test_the_overlay_snapshots_keep_upstreams_widths():
         relative = os.path.relpath(path, runner_module.SNAPSHOT_OVERLAY_DIR)
         with pathlib.Path(path).open(encoding="utf-8") as handle:
             lines = handle.read().split("\n")
-        with pathlib.Path(os.path.join(CODEX_SUBMODULE_DIR, "codex-rs", relative)).open(encoding="utf-8") as handle:
+        with pathlib.Path(os.path.join(CODEX_SUBMODULE_DIR, "codex-rs", relative)).open(
+            encoding="utf-8"
+        ) as handle:
             upstream = handle.read().split("\n")
         rows = {_cells(line) for line in lines if len(line) > 1 and line[0] == line[-1] == '"'}
         upstream_rows = {
@@ -755,6 +760,13 @@ def test_the_run_defaults_to_eight_tests_at_a_time_under_24g():
     assert runner_module.DEFAULT_TEST_THREADS == 8
     assert runner_module.DEFAULT_MEMORY_MAX == "24G"
     assert runner_module.TEST_BUILD_DISK_GIB == 40
+    # The command line carries its own defaults; they must say the same.
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+
+    args = DreamferenceCLIController.build_parser().parse_args(["codex", "test"])
+    assert args.test_threads == runner_module.DEFAULT_TEST_THREADS
+    assert args.memory_max == runner_module.DEFAULT_MEMORY_MAX
+    assert args.jobs == runner_module.DEFAULT_BUILD_JOBS
 
 
 def test_the_test_build_keeps_no_debug_info_in_its_own_target_directory(tmp_path):
