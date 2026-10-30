@@ -1308,6 +1308,21 @@ def test_a_refused_admission_still_waits_for_the_tasks_on_other_nodes(setup, fak
     assert "Not run: the model server at http://x is not answering" in report
 
 
+def test_a_night_with_only_tasks_on_other_nodes_still_waits_for_them(setup, fake_host, monkeypatch):
+    # Nothing is queued here, but last night's hand-off is still out there: its result is collected.
+    from dreamference.night_shift import NightShiftRemote
+    elsewhere = {"id": "20261001-0100-a99", "status": "sent", "on": "spark-2"}
+    waits = []
+    monkeypatch.setattr(NightShiftRemote, "sent_tasks", classmethod(lambda cls, night_dir: [elsewhere]))
+    monkeypatch.setattr(NightShiftRemote, "hand_off", classmethod(lambda cls, night_dir, pending, notes: []))
+    monkeypatch.setattr(NightShiftRemote, "collect",
+                        classmethod(lambda cls, night_dir, sent, end, notes, wait: waits.append((wait, sent))))
+    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"],
+                                mightling_bin=setup["ling"], vllm_host="http://x",
+                                settings=NightShiftSettings({})) == 0
+    assert waits and waits[-1] == (True, [elsewhere])
+
+
 def test_a_repeating_task_not_queued_on_an_empty_night_still_reaches_a_report(tmp_path):
     from dreamference.night_shift.night_shift_recurring import NightShiftRecurring
     night, gone = tmp_path / "night", tmp_path / "gone"
