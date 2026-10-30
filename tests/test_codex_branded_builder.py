@@ -1322,3 +1322,12 @@ def test_a_cached_v8_file_is_reused_only_while_it_still_matches(tmp_path, monkey
     assert CodexBrandedBuilder.fetch_rusty_v8(export) == first
     assert downloaded[3:] == [V8_ARCHIVE]
     assert Path(first["RUSTY_V8_ARCHIVE"]).read_bytes() == b"v8 archive"
+
+
+def test_a_failed_v8_download_stops_the_fetch(tmp_path, monkeypatch):
+    def offline(cls, url, path):
+        raise TimeoutError("timed out")
+
+    export, _, _ = _v8_release(tmp_path, monkeypatch)
+    monkeypatch.setattr(CodexBrandedBuilder, "download", classmethod(offline))
+    assert CodexBrandedBuilder.fetch_rusty_v8(export) is None
