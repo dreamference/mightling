@@ -4,6 +4,7 @@ Refusals, fallbacks and exit codes. Nothing here runs docker, ssh or Forgejo: ev
 would leave the process is a stand-in.
 """
 
+import argparse
 import io
 import json
 import stat
@@ -348,3 +349,93 @@ def test_a_tick_that_restarted_the_forge_or_has_no_running_forge_of_record_does_
     monkeypatch.setattr(ForgeService, "ensure_phone", classmethod(never))
     monkeypatch.setattr(ForgeMirrors, "sync", classmethod(never))
     assert ForgeService.tick() == 0
+
+
+# -- forge command [key]
+
+
+def test_an_unknown_forge_command_prints_the_usage(capsys):
+    from dreamference.forge.forge_command import USAGE_EXIT, ForgeCommand
+
+    assert ForgeCommand.dispatch(argparse.Namespace(forge_command="shell")) == USAGE_EXIT
+    assert "usage" in capsys.readouterr().out.lower()
+
+
+@pytest.mark.parametrize(("node", "back"), [("node-2", True), (None, False)])
+def test_a_forge_move_needs_exactly_one_of_a_node_or_back(monkeypatch, node, back, capsys):
+    from dreamference.forge.forge_command import USAGE_EXIT, ForgeCommand
+
+    monkeypatch.setattr(ForgeMove, "move", classmethod(lambda cls, *a, **k: pytest.fail("moved")))
+    assert ForgeCommand.run_move(argparse.Namespace(node=node, back=back)) == USAGE_EXIT
+    assert "forge move <node> | --back" in capsys.readouterr().out
+
+
+def test_a_forge_key_command_other_than_add_prints_the_usage(monkeypatch):
+    from dreamference.forge.forge_accounts import ForgeAccounts
+    from dreamference.forge.forge_command import USAGE_EXIT, ForgeCommand
+
+    monkeypatch.setattr(
+        ForgeAccounts, "add_key", classmethod(lambda cls, *a, **k: pytest.fail("added"))
+    )
+    assert ForgeCommand.run_key(argparse.Namespace(key_command=None, file="k.pub")) == USAGE_EXIT
+    assert (
+        ForgeCommand.run_key(argparse.Namespace(key_command="remove", file="k.pub")) == USAGE_EXIT
+    )
+
+
+def test_a_forge_key_file_that_cannot_be_read_adds_nothing(monkeypatch, tmp_path, capsys):
+    from dreamference.forge.forge_accounts import ForgeAccounts
+    from dreamference.forge.forge_command import KEY_ADD, ForgeCommand
+
+    monkeypatch.setattr(
+        ForgeAccounts, "add_key", classmethod(lambda cls, *a, **k: pytest.fail("added"))
+    )
+    missing = tmp_path / "absent.pub"
+    assert ForgeCommand.run_key(argparse.Namespace(key_command=KEY_ADD, file=str(missing))) == 1
+    assert "❌" in capsys.readouterr().out
+
+
+@pytest.fixture
+def github_mirror(monkeypatch):
+    from dreamference.forge.forge_github_mirror import ForgeGithubMirror
+
+    seen = []
+    monkeypatch.setattr(ForgeGithubMirror, "run", classmethod(lambda cls: seen.append("run") or 3))
+    monkeypatch.setattr(ForgeGithubMirror, "settings", classmethod(lambda cls: {"account": "kept"}))
+    monkeypatch.setattr(
+        ForgeGithubMirror,
+        "save_settings",
+        classmethod(lambda cls, enabled, account: seen.append((enabled, account))),
+    )
+    monkeypatch.setattr(ForgeGithubMirror, "destinations", classmethod(lambda cls: []))
+    return seen
+
+
+def mirror_arguments(run=False, off=False, account=None):
+    return argparse.Namespace(run=run, off=off, account=account, all_branches=not (run or off))
+
+
+def test_running_the_github_mirror_returns_its_exit_code_and_changes_no_setting(github_mirror):
+    from dreamference.forge.forge_command import ForgeCommand
+
+    assert ForgeCommand.run_github_mirror(mirror_arguments(run=True)) == 3
+    assert github_mirror == ["run"]
+
+
+def test_turning_the_github_mirror_off_keeps_its_account(github_mirror, capsys):
+    from dreamference.forge.forge_command import ForgeCommand
+
+    assert ForgeCommand.run_github_mirror(mirror_arguments(off=True)) == 0
+    assert github_mirror == [(False, "kept")]
+    assert "nothing on GitHub was changed" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("account", "saved"), [(None, "kept"), ("other", "other")])
+def test_turning_the_github_mirror_on_uses_the_account_given_or_the_one_kept(
+    github_mirror, account, saved, capsys
+):
+    from dreamference.forge.forge_command import ForgeCommand
+
+    assert ForgeCommand.run_github_mirror(mirror_arguments(account=account)) == 0
+    assert github_mirror == [(True, saved)]
+    assert "Destinations: none yet" in capsys.readouterr().out
