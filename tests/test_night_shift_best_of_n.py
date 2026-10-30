@@ -574,6 +574,17 @@ def test_an_attempt_the_window_ended_is_interrupted_not_a_candidate(bon):
     assert run._interrupted() == "interrupted" and run.outcome["status"] == "interrupted"
 
 
+def test_an_attempt_of_a_task_being_dropped_stops_before_it_runs(bon, monkeypatch):
+    monkeypatch.setenv("FAKE_BON_PLAN", json.dumps(["good"]))
+    record = queue(bon["night"], bon["repo"], test=TEST)
+    path = bon["night"] / "tasks" / f"{record['id']}.json"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), status="cancel-requested")))
+    run = NightShiftTaskRun(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
+                            attempt=1)
+    assert run.run() == "cancelled" and run.outcome["status"] == "cancelled"
+    assert not bon["calls"].exists() or bon["calls"].read_text() == ""
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
