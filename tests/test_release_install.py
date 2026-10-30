@@ -1591,7 +1591,8 @@ def test_the_installer_trusts_the_keys_ling_update_compiles_in():
 
 
 def test_an_unsigned_release_from_the_cut_over_on_is_refused(tmp_path, release_server):
-    for tag in ("v1.5.0", "v9.9.9"):
+    # 2.0.0: a later major release with a smaller minor number.
+    for tag in ("v1.5.0", "v9.9.9", "v2.0.0"):
         server = release_server(binaries(signed=False), tag=tag)
         result = run_install(tmp_path, server, "--role", "client", "--version", tag)
         assert result.returncode == 1, tag
