@@ -527,6 +527,13 @@ def test_an_unknown_role_is_refused_before_anything_is_downloaded(tmp_path, rele
     assert server.requests == []
 
 
+def test_an_unknown_argument_is_refused_before_anything_is_downloaded(tmp_path, release_server):
+    server = release_server(binaries())
+    result = run_install(tmp_path, server, "--roll", "client")
+    assert result.returncode == 1 and "unknown argument: --roll" in result.stderr
+    assert server.requests == []
+
+
 def test_the_machine_decides_the_role(tmp_path, release_server):
     # A GB10 gets the node (which then needs the release's wheel); anything else, the client.
     server = release_server(binaries())
