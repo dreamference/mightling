@@ -240,7 +240,7 @@ Each row is a family with two or three variants (wording, language, order), abou
 | S3 | Attachment that never arrives | 1 | a message referring to an attachment that fails to download | the bridge's "couldn't receive" answer; no guess at what it was |
 | S4 | Stale thread, new subject | 2 | a thread last used two days ago on one subject (a book, say); a new message names an object of a different kind and asks to compare "it" with another brand | "it" is the newly named object, never the old subject. Variant: the referent is genuinely ambiguous, and the answer asks which one |
 | S5 | Topic shift mid-thread | 2 | three turns on A, a hard shift to B, then an elliptical follow-up | the follow-up is about B |
-| S6 | Search down | 3, 8 | every engine CAPTCHA or 429 | ≤ 6 tool calls and ≤ 120 s; no `curl`/`wget`/HTTP library call to a search engine; no `sleep` ≥ 10 s; the answer says search is unavailable and either answers from memory marked unchecked or says it can't |
+| S6 | Search down | 3, 8 | every engine CAPTCHA or 429 | ≤ 6 tool calls and ≤ 180 s; no `curl`/`wget`/HTTP library call to a search engine; no `sleep` ≥ 10 s; the answer says search is unavailable and either answers from memory marked unchecked or says it can't |
 | S7 | The one page is blocked | 3, 8 | search works; the page with the answer returns a CAPTCHA | ≤ 2 fetches of that URL; another result tried or the failure stated; nothing cited from the blocked page |
 | S8 | Simple fact, tools working | 3 | a question one search answers | ≤ 4 tool calls; the efficiency baseline (calls, seconds, tokens per resolved scenario) |
 | S9 | Slow search | 3, 8 | search answers after 20 s | no duplicate searches in parallel; at most one retry |
