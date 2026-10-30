@@ -305,3 +305,11 @@ def test_vllm_is_given_the_api_key(vllm_recipes):
 def test_vllm_is_given_no_attention_backend_when_nothing_chooses_one(vllm_recipes):
     cmd = VLLMServerManager().build_launch_command(model="test-vllm-dflash-draft")
     assert "--attention-backend" not in cmd
+
+
+def test_a_batch_token_budget_below_one_is_left_to_vllm(vllm_recipes):
+    build = VLLMServerManager().build_launch_command
+    assert _flag(build(model="test-vllm-nvfp4"), "--max-num-batched-tokens") == "8192"
+    assert "--max-num-batched-tokens" not in build(
+        model="test-vllm-nvfp4", max_num_batched_tokens=0
+    )
