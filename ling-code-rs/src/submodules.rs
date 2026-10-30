@@ -939,6 +939,12 @@ mod tests {
     }
 
     #[test]
+    fn a_local_path_with_a_colon_is_not_an_scp_remote() {
+        // git reads `host:path` as scp-like only when no slash comes before the colon.
+        assert!(parse_remote("srv/git:acme/repo.git").is_none());
+    }
+
+    #[test]
     fn our_domains_leave_out_public_mail_and_web_flow() {
         let authors = Authors::from_addresses(
             [
