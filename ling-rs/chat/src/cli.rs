@@ -768,4 +768,16 @@ mod tests {
             assert!(!user_airgapped(&dir.join("missing.toml")));
         }
     }
+
+    #[test]
+    fn telegram_off_deletes_the_token_and_withdraws_the_pending_codes() {
+        let dir = std::env::temp_dir().join(format!("ling-chat-tg-off-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        TelegramConfig::new("123:abc".to_string()).save(&dir).unwrap();
+        let code = store::issue_pairing_code(&dir).unwrap();
+        assert_eq!(telegram_off(&dir), 0);
+        assert!(TelegramConfig::load(&dir).is_none());
+        assert!(!store::take_pairing_code(&dir, &code));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
