@@ -315,6 +315,17 @@ fn a_sandbox_without_network_is_named_as_the_sandbox_not_as_the_level() {
 }
 
 #[test]
+fn an_empty_sandbox_variable_leaves_the_network_on() {
+    let server = Server::start(|_| response("200 OK", "text/plain", b"page", ""));
+    let output = fetch(
+        &[&format!("{}/page", server.base)],
+        &[("CODEX_SANDBOX_NETWORK_DISABLED", "")],
+    );
+    assert_eq!(stdout(&output), "page\n");
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
 fn search_json_has_the_documented_fields() {
     let server =
         Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
