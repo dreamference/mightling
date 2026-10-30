@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -441,7 +442,7 @@ def test_turning_the_github_mirror_on_uses_the_account_given_or_the_one_kept(
     assert "Destinations: none yet" in capsys.readouterr().out
 
 
-# -- forge repositories [key]
+# -- forge repositories and storage [key]
 
 
 @pytest.mark.parametrize("text", ["[1, 2]", '"scope"', "7"])
@@ -453,3 +454,24 @@ def test_a_repositories_file_that_is_not_an_object_reads_as_no_repositories(text
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     assert ForgeRepositories.config() == {"default_scope": "off", "repositories": {}}
+
+
+def test_the_free_space_of_a_forge_not_yet_made_is_measured_where_it_will_live(
+    monkeypatch, tmp_path
+):
+    from dreamference.forge import forge_storage
+    from dreamference.forge.forge_settings import ForgeSettings
+    from dreamference.forge.forge_storage import GB, ForgeStorage
+
+    monkeypatch.setattr(
+        ForgeSettings, "share_dir", classmethod(lambda cls: tmp_path / "not" / "yet" / "forge")
+    )
+    measured = []
+
+    def usage(path):
+        measured.append(path)
+        return SimpleNamespace(total=9 * GB, used=6 * GB, free=3 * GB)
+
+    monkeypatch.setattr(forge_storage.shutil, "disk_usage", usage)
+    assert ForgeStorage.free_gb() == 3
+    assert measured == [tmp_path]
