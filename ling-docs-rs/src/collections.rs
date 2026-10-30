@@ -661,6 +661,19 @@ mod tests {
     }
 
     #[test]
+    fn a_second_folder_under_a_name_in_use_is_refused() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::create_dir_all(home.join("a/notes")).unwrap();
+        std::fs::create_dir_all(home.join("b/notes")).unwrap();
+        let mut docs = DocsToml::default();
+        docs.add(&home.join("a/notes"), None, &home).unwrap();
+        let err = docs.add(&home.join("b/notes"), None, &home).unwrap_err();
+        assert!(err.to_string().contains("exists already"), "{err}");
+        assert_eq!(docs.collections.len(), 1);
+    }
+
+    #[test]
     fn two_writers_at_once_keep_both_changes() {
         // One writer holds the lock while it saves; the other, started first, waits and then
         // reads the file afresh, so neither change is lost.
