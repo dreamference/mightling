@@ -427,6 +427,19 @@ def test_a_release_without_a_required_binary_installs_nothing(tmp_path, release_
     assert nothing_installed(tmp_path)
 
 
+def test_sums_written_in_binary_mode_are_read(tmp_path, release_server):
+    # `sha256sum --binary`, and shasum on a Mac, mark each file name with a `*`.
+    assets = binaries(signed=False)
+    sums = f"ling-{TARGET}.sha256sums"
+    assets[sums] = assets[sums].replace(b"  ", b" *")
+    sign(assets)
+    assets["SHA256SUMS"] = assets["SHA256SUMS"].replace(b"  ", b" *")
+    assets["SHA256SUMS.sig"] = ssh_sign(assets["SHA256SUMS"])
+    result = run_install(tmp_path, release_server(assets), "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / ".local/bin/ling").is_symlink()
+
+
 def test_a_machine_the_release_has_no_binaries_for_is_told_which_exist(tmp_path, release_server):
     result = run_install(tmp_path, release_server(binaries()), "--role", "client", uname_m="x86_64")
     assert result.returncode == 1
