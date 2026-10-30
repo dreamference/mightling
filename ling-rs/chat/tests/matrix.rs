@@ -302,6 +302,10 @@ async fn answers_are_formatted_typing_is_renewed_and_reactions_answer_approvals(
 async fn the_bridge_opens_a_room_per_allowed_user_and_keeps_its_place() {
     let (stand, root) = stand_in().await;
     let (dir, _config) = setup("run", &root);
+    // A room left over from a user who is no longer allowed.
+    let mut stale = MatrixState::load(&dir);
+    stale.rooms.insert("@gone:node.tail.ts.net".to_string(), "!old:node.tail.ts.net".to_string());
+    stale.save(&dir).unwrap();
     stand.syncs.lock().unwrap().push_back(json!({ "next_batch": "s1" }));
     let (hub, _inbound) = mpsc::unbounded_channel();
     let (syncer, _) = ling_chat::matrix::pair_for_tests(MatrixApi::new(&root, "bot-token"), dir.clone(), BOT, hub);
@@ -317,6 +321,7 @@ async fn the_bridge_opens_a_room_per_allowed_user_and_keeps_its_place() {
     tokio::time::timeout(Duration::from_secs(5), task).await.unwrap().unwrap();
     let state = MatrixState::load(&dir);
     assert_eq!(state.rooms.get(OWNER).map(String::as_str), Some("!dm:node.tail.ts.net"));
+    assert!(!state.rooms.contains_key("@gone:node.tail.ts.net"), "a user no longer allowed loses their room");
     assert!(state.next_batch.is_some());
     let created = stand.calls("POST", "/createRoom");
     assert_eq!(created.len(), 1, "one room per user, not one per sync");
