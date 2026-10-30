@@ -72,3 +72,10 @@ def test_images_mcp_serves_before_anything_can_print(before_the_command, monkeyp
     assert _exit_code(["images", "mcp"]) == 3
     assert before_the_command == []
 
+
+def test_the_sandbox_check_gets_a_hyphenated_commands_subcommand(before_the_command, monkeypatch):
+    from dreamference.swe_bench.swe_bench_command import SweBenchCommand
+
+    monkeypatch.setattr(SweBenchCommand, "dispatch", classmethod(lambda cls, args: 0))
+    assert _exit_code(["swe-bench", "status"]) == 0
+    assert ("gate", "swe-bench", "status") in before_the_command
