@@ -7,6 +7,7 @@ alias (§3) and the environment table's defaults (§6). Nothing here starts a se
 
 import argparse
 import json
+import os
 import socket
 import subprocess
 
@@ -76,7 +77,9 @@ def test_a_global_agent_picks_the_runner_for_run(clean_env, monkeypatch):
         (["run", "hello", "--compat", "off", "--debug"], ("CodexRunner", True, {"compat": "off"})),
     ],
 )
-def test_each_agent_runs_its_own_runner_and_run_exits_with_the_sessions_code(clean_env, monkeypatch, argv, session):
+def test_each_agent_runs_its_own_runner_and_run_exits_with_the_sessions_code(
+    clean_env, monkeypatch, argv, session
+):
     from dreamference.runner import ClineRunner, CodexRunner, ContinueRunner, OpenHandsRunner
 
     sessions = []
@@ -84,7 +87,9 @@ def test_each_agent_runs_its_own_runner_and_run_exits_with_the_sessions_code(cle
         monkeypatch.setattr(
             each,
             "run_session",
-            lambda self, prompt, debug=False, **k: sessions.append((type(self).__name__, prompt, debug, k)) or 7,
+            lambda self, prompt, debug=False, **k: (
+                sessions.append((type(self).__name__, prompt, debug, k)) or 7
+            ),
         )
     with pytest.raises(SystemExit) as exit_info:
         DreamferenceCLIController.run_cli(argv)
@@ -323,6 +328,41 @@ def test_init_writes_the_config_at_the_resolved_path_and_reindexes(clean_env, mo
     text = target.read_text(encoding="utf-8")
     assert 'agent_runner = "codex"' in text  # the loopback host is the default and is not written
     assert str(target) in capsys.readouterr().out.replace("\n", "")
+
+
+def test_init_takes_the_model_and_host_its_options_name(clean_env, monkeypatch, capsys):
+    from dreamference.context_engine import ContextEngine
+
+    downloads = []
+    monkeypatch.setattr(
+        controller,
+        "download_model_with_drafter",
+        lambda model, hf_token=None, auto_tensorize=False: downloads.append(model),
+    )
+    monkeypatch.setattr(controller, "download_model", lambda *a, **k: downloads.append(a[0]))
+    monkeypatch.setattr(
+        ContextEngine,
+        "index_workspace",
+        lambda self, force_reindex=False: {"total_indexed_files": 0, "total_ast_symbols": 0},
+    )
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+    target = clean_env / "mine.toml"
+    DreamferenceCLIController.run_cli(
+        [
+            "--config",
+            str(target),
+            "init",
+            "--model",
+            "my-model",
+            "--vllm-host",
+            "http://10.6.6.6:8000",
+        ]
+    )
+    assert downloads == ["my-model"]
+    out = capsys.readouterr().out
+    assert "http://10.6.6.6:8000" in out
+    assert "10.6.6.6" in os.environ["NO_PROXY"].split(",")
 
 
 def recorded_docker(monkeypatch):
