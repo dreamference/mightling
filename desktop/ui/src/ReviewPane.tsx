@@ -205,7 +205,10 @@ export function ReviewPane(props: ReviewPaneProps) {
 
   const rootRef = useRef(root);
   rootRef.current = root;
+  /** Counts the loads: an answer for a scope or commit the pane has since left is dropped, as one for another folder is. */
+  const loads = useRef(0);
   const load = useCallback(async () => {
+    const ask = ++loads.current;
     setError(null);
     if (scope === "turn") {
       setDiff(props.turnDiff ?? "");
@@ -225,13 +228,14 @@ export function ReviewPane(props: ReviewPaneProps) {
     try {
       const [answer, now] = await Promise.all([bridge.git.diff(root, scope, scope === "commit" ? commit : null), bridge.git.status(root)]);
       // An answer for a repository, or a folder, the pane has since left is dropped.
-      if (rootRef.current !== root || cwdRef.current !== cwd) return;
+      if (loads.current !== ask || rootRef.current !== root || cwdRef.current !== cwd) return;
       setDiff(answer.diff);
       setAgainst(answer.against);
       setStatus(now);
       setShown({ cwd, root });
       if (scope === "commit" && commits.length === 0) setCommits(await bridge.git.log(root));
     } catch (failure) {
+      if (loads.current !== ask) return;
       setDiff("");
       setError(failure instanceof Error ? failure.message : String(failure));
     }
