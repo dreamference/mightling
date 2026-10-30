@@ -735,6 +735,15 @@ mod tests {
     }
 
     #[test]
+    fn the_turn_end_switch_ignores_case_and_a_blank_one_is_unset() {
+        let off: toml::Table = "mightling_turn_end_compaction = false".parse().unwrap();
+        assert!(turn_end_enabled(Some("ON"), &off));
+        assert!(turn_end_enabled(Some("Yes"), &off));
+        // An empty variable says nothing: the default, on, applies.
+        assert!(turn_end_enabled(Some(""), &toml::Table::new()));
+    }
+
+    #[test]
     fn turn_end_follows_the_limit_on_the_command_line() {
         let given = with_limit(args(&["ling"]), Some(94_144), "");
         assert_eq!(
