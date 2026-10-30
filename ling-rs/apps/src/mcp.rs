@@ -626,4 +626,10 @@ mod tests {
         let one = render(App::Gmail, 200, &json!({"id": "x", "body": "hello"}));
         assert_eq!(text(&one), "<untrusted source=\"gmail\" id=\"x\">\nid: x\nbody:\nhello\n</untrusted>");
     }
+
+    #[test]
+    fn long_fields_come_last_and_a_null_is_blank() {
+        let wrapped = wrap("gmail", &json!({"id": "x", "body": "B", "subject": "S", "cc": null}));
+        assert_eq!(wrapped, "<untrusted source=\"gmail\" id=\"x\">\ncc: \nid: x\nsubject: S\nbody:\nB\n</untrusted>");
+    }
 }
