@@ -1806,3 +1806,17 @@ def test_a_new_key_whose_endorsement_is_missing_is_refused(tmp_path, release_ser
     assert result.returncode == 1
     assert "its endorsement could not be downloaded" in result.stderr
     assert nothing_installed(tmp_path)
+
+
+def test_a_home_that_cannot_be_written_is_named_before_anything_is_downloaded(tmp_path, release_server):
+    (tmp_path / ".local").mkdir()
+    (tmp_path / ".local").chmod(0o500)
+    try:
+        server = release_server(binaries())
+        result = run_install(tmp_path, server, "--role", "client")
+    finally:
+        (tmp_path / ".local").chmod(0o700)
+    assert result.returncode != 0
+    assert "cannot write" in result.stdout + result.stderr
+    assert "mkdir:" not in result.stdout + result.stderr
+    assert not [r for r in server.requests if "releases" in r]
