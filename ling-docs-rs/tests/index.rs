@@ -2134,3 +2134,28 @@ fn a_night_shift_run_defers_indexing() {
     let outcome = index::run(&env, &docs, None, false).unwrap();
     assert_eq!(outcome[0].1, Outcome::Ok);
 }
+
+#[test]
+fn a_database_over_the_size_cap_defers_indexing() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home, docs, host) = one_note();
+    let mut env = env(&host, &home, exe());
+    assert_eq!(
+        index::run(&env, &docs, None, false).unwrap()[0].1,
+        Outcome::Ok
+    );
+    std::fs::write(
+        home.join("Documents/more.md"),
+        "# More\n\nThe kettle is green.\n",
+    )
+    .unwrap();
+    let db = std::fs::metadata(ling_docs::config::db_path("documents")).unwrap();
+    env.settings.max_index_gb = db.len() as f64 / (1u64 << 30) as f64 / 2.0;
+    let started = host.started.lock().unwrap().len();
+    let outcome = index::run(&env, &docs, None, false).unwrap();
+    assert!(
+        matches!(&outcome[0].1, Outcome::Deferred(why) if why.contains("docs_max_index_gb")),
+        "{outcome:?}"
+    );
+    assert_eq!(host.started.lock().unwrap().len(), started);
+}
