@@ -86,3 +86,12 @@ def test_an_engine_that_does_not_answer_leaves_the_adapters_unsynced(adapters, m
     assert calls == [("GET", "/v1/models")]
     assert adapters.synced is False
     assert adapters.loaded == {}
+
+
+# -- the engine's answer -------------------------------------------------------------------------------
+
+
+def test_a_chunked_answer_is_joined_and_stops_at_its_last_chunk():
+    answer = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n1\r\nc\r\n0\r\n\r\n2\r\nzz\r\n"
+
+    assert ModelGateAdapters.parse_response(answer) == (200, b"abc")
