@@ -8,17 +8,20 @@ import type { ContinueTarget } from "./continueproject";
 
 export function ContinueDialog(props: { question: string; targets: ContinueTarget[]; busy: boolean; onPick: (target: ContinueTarget) => void; onClose: () => void }) {
   const first = useRef<HTMLButtonElement>(null);
+  // Focused once when it opens: the window re-renders while a turn streams, and that keeps the focus where it is.
+  const close = useRef(props.onClose);
+  close.current = props.onClose;
   useEffect(() => {
     first.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
-      props.onClose();
+      close.current();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [props]);
+  }, []);
   return (
     <div className="dialog-backdrop" onClick={props.onClose}>
       <section className="dialog continue-dialog" role="dialog" aria-label="Continue in a project" onClick={(event) => event.stopPropagation()}>

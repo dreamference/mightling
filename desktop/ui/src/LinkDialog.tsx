@@ -19,17 +19,20 @@ export function siteOf(url: string): string {
 
 export function LinkDialog(props: { url: string; airgappedOn: boolean; onOpen: () => void; onClose: () => void; notice: (message: unknown) => void }) {
   const first = useRef<HTMLButtonElement>(null);
+  // Focused once when it opens: the window re-renders while a turn streams, and that keeps the focus where it is.
+  const close = useRef(props.onClose);
+  close.current = props.onClose;
   useEffect(() => {
     first.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
-      props.onClose();
+      close.current();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [props]);
+  }, []);
   const copy = () => {
     copyText(props.url).then((copied) => (copied ? props.onClose() : props.notice("The address could not be copied: select it and copy it by hand."))).catch(props.notice);
   };
