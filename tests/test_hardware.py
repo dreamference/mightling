@@ -904,6 +904,25 @@ def test_the_sparse_head_comes_with_the_ling_engine_recipe_once_it_has_the_featu
     assert registry.ModelMatrixRegistry.get_engine_assets(key, "sglang") == []
 
 
+def test_an_engine_asset_reads_the_recipe_s_engine_as_engine_of_does(monkeypatch):
+    # A recipe without `engine` runs on vLLM (engine_of); its vLLM assets were dropped, since
+    # the filter compared the asset's engine with the missing key, and `SGLang` with `sglang`.
+    import dreamference.hardware.model_matrix_registry as registry
+
+    asset = {"repo": "someone/asset", "engine": "vllm", "feature": "f"}
+    for engine in (None, "VLLM"):
+        overrides = {"engine_features": ["f"], "engine_assets": [asset]}
+        if engine:
+            overrides["engine"] = engine
+        monkeypatch.setattr(
+            registry.ModelMatrixRegistry,
+            "get_launch_overrides",
+            classmethod(lambda cls, k, engine=None, o=overrides: o),
+        )
+        assets = registry.ModelMatrixRegistry.get_engine_assets(registry.DEFAULT_MODEL_ALIAS)
+        assert [a["repo"] for a in assets] == ["someone/asset"]
+
+
 def test_two_fetches_of_one_release_asset_at_once_both_land_it(monkeypatch):
     # Both streamed into the one `<sha256>.incomplete`: the second truncated what the first was
     # writing, moved it into place, and the first's own move then failed on a file that was gone.
