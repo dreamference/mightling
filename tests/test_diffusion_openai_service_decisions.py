@@ -9,10 +9,16 @@ end-of-sequence ids to the sampler.
 
 import http.client
 import json
+import types
 
 import pytest
 import requests
+import torch
 from test_diffusion_server import _serve, _StubRunner
+
+from dreamference.vllm_server.diffusion_openai_service import (
+    block_diffusion_sample,
+)
 
 
 class _Recorder(_StubRunner):
@@ -120,3 +126,47 @@ def test_a_chat_without_messages_reaches_the_model_as_an_empty_conversation(serv
     resp = requests.post(f"{base}/v1/chat/completions", json={"temperature": 0.5}, timeout=5)
     assert resp.status_code == 200 and resp.json()["object"] == "chat.completion"
     assert runner.calls == [("chat", [], 0.5)]
+
+
+def _toy(target, vocab=100, gap=1.0):
+    """A model whose prediction for each generated position is `target[position - 2]`."""
+
+    class Toy(torch.nn.Module):
+        dtype = torch.float32
+
+        def forward(self, input_ids, attention_mask):
+            n = input_ids.shape[1]
+            logits = torch.zeros(1, n, vocab)
+            for position in range(2, n):
+                logits[0, position, target[(position - 2) % len(target)]] = gap
+            return types.SimpleNamespace(logits=logits)
+
+    return Toy()
+
+
+def test_with_no_end_of_sequence_every_block_is_filled_and_the_cap_still_holds():
+    model = _toy([5, 6, 7, 8])
+    prompt = torch.tensor([[3, 4]])
+    tokens = block_diffusion_sample(
+        model, prompt, mask_id=99, eos_id=None, max_new_tokens=6, block_size=4, steps=6
+    )
+    assert tokens == [5, 6, 7, 8, 5, 6], "two whole blocks, cut to the six asked for"
+    tokens = block_diffusion_sample(
+        model, prompt, mask_id=99, eos_id=9, max_new_tokens=8, block_size=4, steps=8
+    )
+    assert tokens == [5, 6, 7, 8, 5, 6, 7, 8], "an end-of-sequence id never produced cuts nothing"
+
+
+def test_a_temperature_above_zero_samples_from_the_models_distribution():
+    torch.manual_seed(0)
+    tokens = block_diffusion_sample(
+        _toy([5, 6, 7, 9, 1, 1, 1, 1], gap=1000.0),
+        torch.tensor([[3, 4]]),
+        mask_id=99,
+        eos_id=9,
+        max_new_tokens=8,
+        block_size=4,
+        steps=8,
+        temperature=0.7,
+    )
+    assert tokens == [5, 6, 7]
