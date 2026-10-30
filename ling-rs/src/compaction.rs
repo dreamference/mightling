@@ -893,6 +893,22 @@ mod tests {
     }
 
     #[test]
+    fn a_users_group_that_only_looks_like_ours_is_not_taken() {
+        let path = Path::new("/h/config.toml");
+        // Another matcher, and two handlers under ours: both are the user's.
+        for existing in [
+            "[[hooks.SessionStart]]\nmatcher = \"startup\"\n\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\ncommand = \"/usr/bin/ling ledger\"\n",
+            "[[hooks.SessionStart]]\nmatcher = \"compact\"\n\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\ncommand = \"/a/ling ledger\"\n\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\ncommand = \"/b/ling ledger\"\n",
+        ] {
+            let before: toml::Table = existing.parse().unwrap();
+            let updated = with_ledger_hook(existing, path, "/opt/ling ledger", true).unwrap_or_default();
+            let parsed: toml::Table = updated.parse().unwrap_or_default();
+            assert_eq!(parsed["hooks"]["SessionStart"][0], before["hooks"]["SessionStart"][0], "{updated}");
+            assert_eq!(parsed["hooks"]["SessionStart"][1]["hooks"][0]["command"].as_str(), Some("/opt/ling ledger"));
+        }
+    }
+
+    #[test]
     #[cfg(not(windows))]
     fn a_path_the_shell_would_split_is_quoted() {
         assert_eq!(hook_command(Path::new("/opt/ling/bin/ling")), "/opt/ling/bin/ling ledger");
