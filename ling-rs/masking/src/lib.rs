@@ -883,4 +883,15 @@ mod tests {
         let text = placeholder("Exit code: 2\nWall time: 1.0 seconds\nOutput:\nerror: no such file\ndone", Path::new("/m/outputs/c.txt"));
         assert_eq!(text.lines().skip(1).collect::<Vec<_>>(), ["Exit code: 2", "… done"]);
     }
+
+    #[test]
+    fn a_line_is_kept_only_where_twelve_of_its_characters_fit() {
+        let line = "a line well over twelve characters";
+        for length in 100..200 {
+            let text = placeholder(line, &PathBuf::from("p".repeat(length)));
+            if let Some(kept) = text.lines().nth(1) {
+                assert!(kept.chars().count() >= 12, "path of {length}: {kept:?}");
+            }
+        }
+    }
 }
