@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -769,3 +770,16 @@ def test_an_account_answer_without_its_token_or_its_id_is_a_failure_not_a_crash(
     assert MatrixHomeserver.add_user("owner") == 1
     assert "Could not create owner" in capsys.readouterr().out
     assert not pathlib.Path(MatrixHomeserver._path("matrix.json")).exists()
+
+
+def test_a_command_gets_the_extra_variables_on_top_of_the_callers_environment(monkeypatch):
+    # `docker run` needs the caller's PATH, HOME and DOCKER_HOST beside the registration token.
+    monkeypatch.setenv("MIGHTLING_TEST_INHERITED", "kept")
+    script = (
+        "import os; print(os.environ.get('MIGHTLING_TEST_INHERITED'),"
+        " os.environ.get('MIGHTLING_TEST_ADDED'))"
+    )
+    result = MatrixHomeserver._run(
+        [sys.executable, "-c", script], env={"MIGHTLING_TEST_ADDED": "added"}
+    )
+    assert result.stdout.split() == ["kept", "added"]
