@@ -1270,3 +1270,33 @@ fn the_superprojects_remote_is_the_one_git_would_use() {
         None
     );
 }
+
+#[test]
+fn the_users_own_address_counts_as_ours() {
+    let f = fixture();
+    let root = f.repo.root.clone();
+    git(
+        &root,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://example.com/acme/super.git",
+        ],
+    );
+    // Configured, but on no commit of the superproject yet.
+    git(&root, &["config", "user.email", "mine@corp.example"]);
+    let lib = library(
+        f.dir.path(),
+        "lib",
+        "mine@corp.example",
+        &[("a.py", "x = 1\n")],
+        2,
+    );
+    add_submodule(&root, &lib, "lib", Some("https://example.com/acme/lib.git"));
+    let all = decisions(&f.repo);
+    assert_eq!(
+        (all[0].indexed, all[0].reason.clone(), all[0].ours),
+        (true, Reason::Yours, 2)
+    );
+}
