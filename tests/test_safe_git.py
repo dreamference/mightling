@@ -362,3 +362,41 @@ def test_a_git_that_cannot_be_started_is_an_exit_code_not_an_exception(tmp_path,
     result = SafeGit.run(["status"], tmp_path)
     assert result.returncode == 126
     assert "Permission denied" in result.stderr
+
+
+def test_global_flags_without_a_value_still_reach_the_subcommand():
+    assert SafeGit.safe_flags(["--no-pager", "-P", "diff", "x"]) == [
+        "--no-pager",
+        "-P",
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "x",
+    ]
+    assert SafeGit.safe_flags(["--git-dir=/r", "--bare", "push", "o"]) == [
+        "--git-dir=/r",
+        "--bare",
+        "push",
+        "--receive-pack=git-receive-pack",
+        "o",
+    ]
+    # No subcommand, nothing to place a flag after.
+    assert SafeGit.safe_flags(["--version"]) == ["--version"]
+    assert SafeGit.safe_flags(["-c", "a=b"]) == ["-c", "a=b"]
+
+
+def test_a_config_git_cannot_list_blanks_no_driver(tmp_path, monkeypatch):
+    # What a failing `git config --list` printed is not read as the checkout's config.
+    listed = b"local\0filter.lfs.clean\ngit-lfs clean\0"
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 128, listed, b"fatal"),
+    )
+    assert SafeGit.driver_overrides(tmp_path) == []
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, listed, b""),
+    )
+    assert SafeGit.driver_overrides(tmp_path) == ["filter.lfs.clean="]
