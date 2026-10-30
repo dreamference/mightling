@@ -997,4 +997,10 @@ mod tests {
             assert!(text.contains("# Your documents") && text.contains("Masked outputs."), "{}", prompt.name);
         }
     }
+
+    #[test]
+    fn a_catalog_the_user_named_with_spaces_is_still_theirs() {
+        let given: Vec<OsString> = vec!["ling".into(), "-c".into(), "model_catalog_json = \"/mine.json\"".into()];
+        assert_eq!(with_catalog(given.clone(), Path::new("/h/model_catalog.high-swe.json")), given);
+    }
 }
