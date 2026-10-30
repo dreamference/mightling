@@ -789,6 +789,16 @@ mod tests {
         assert_eq!(command_line_value(&out, TURN_END_KEY).as_deref(), Some("20"));
     }
 
+    #[test]
+    fn a_key_is_matched_as_codex_trims_it_and_a_bare_one_counts_as_set() {
+        // Codex trims the key of a `-c` (`utils/cli/src/config_override.rs`).
+        let spaced = args(&["ling", "-c", "model_auto_compact_token_limit = 49152"]);
+        assert_eq!(with_limit(spaced.clone(), Some(94_144), ""), spaced);
+        let bare = args(&["ling", "-c", "model_auto_compact_token_limit"]);
+        assert_eq!(command_line_value(&bare, LIMIT_KEY).as_deref(), Some(""));
+        assert_eq!(with_limit(bare.clone(), Some(94_144), ""), bare);
+    }
+
     /// The hook below is the one a live session accepted on 2026-10-02: defined in a `config.toml`
     /// exactly like this, the hook ran after a compaction with no `--dangerously-bypass-hook-trust`.
     /// The path keeps that day's binary name (before the product was renamed) but not its home
