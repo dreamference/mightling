@@ -519,6 +519,15 @@ def test_status_says_what_clients_see(machine, monkeypatch):
     assert "SearXNG published on: 0.0.0.0" in text
 
 
+def test_enable_advertises_only_what_answers(machine, monkeypatch):
+    monkeypatch.setattr(NodeAdvertiser, "model_answers", classmethod(lambda cls, port: False))
+    monkeypatch.setattr(NodeAdvertiser, "ling_executable", classmethod(lambda cls: None))
+    NodeServiceFile.service_path.write_text("")  # already this user's file: no sudo
+    assert NodeAdvertiser.enable() is True
+    records = NodeServiceFile.read()
+    assert records["state"] == "stopped" and "web" not in records
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
