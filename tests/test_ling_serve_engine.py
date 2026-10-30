@@ -670,3 +670,20 @@ def test_the_pin_script_moves_the_three_constants_and_refuses_bad_input():
     for bad in (("abc", digest, []), (commit, "sha256:12", []), (commit, digest, ["nope"])):
         with pytest.raises(ValueError):
             module.repin(text, *bad)
+
+
+def test_server_status_names_the_engine_commit_drafter_and_step_graphs():
+    from dreamference.vllm_server.ling_serve_launch_builder import (
+        LING_ENGINE_COMMIT_LABEL,
+        STEP_GRAPHS_FLAG,
+    )
+
+    recipe = {"speculative_config": {"model": "example/drafter", "revision": "d" * 40}}
+    args = LingServeLaunchBuilder.server_args("example/target", recipe, 8000, None)
+    facts = LingServeLaunchBuilder.facts("img", {LING_ENGINE_COMMIT_LABEL: "c" * 40}, args)
+    assert facts["Engine"] == f"ling-serve (ling-engine {'c' * 12})"
+    assert facts["Speculative"] == "DFlash2, block default, via models--example--drafter"
+    assert facts["Step graphs"] == "Off"
+    assert LingServeLaunchBuilder.facts("img", {}, [*args, STEP_GRAPHS_FLAG])["Step graphs"] == "On"
+    # A flag left without its value, last on the line, reads as unset rather than failing.
+    assert LingServeLaunchBuilder.facts("img", {}, ["--draft"])["Speculative"] == "Disabled"
