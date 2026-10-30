@@ -10,6 +10,7 @@ test's own HOME, because the argv is the thing worth testing there.
 
 import base64
 import contextlib
+import datetime
 import hashlib
 import io
 import json
@@ -197,6 +198,63 @@ def test_an_existing_ca_is_kept(monkeypatch):
         classmethod(lambda cls, argv, input_text=None: pytest.fail("openssl ran")),
     )
     assert RemoteCertificateAuthority.ensure("another.example.org")
+
+
+@needs_openssl
+def test_the_cas_folders_are_private_and_names_compare_as_dns_names_do():
+    assert RemoteCertificateAuthority.ensure(BOX)
+    certificate, _ = RemoteCertificateAuthority.issue("control-plane", [BOX])
+    for folder in (RemoteCertificateAuthority.ca_key().parent, certificate.parent):
+        assert oct(folder.stat().st_mode & 0o777) == "0o700", folder.name
+
+    def text(path):
+        argv = ["openssl", "x509", "-in", str(path), "-noout", "-text"]
+        return subprocess.run(argv, capture_output=True, text=True).stdout
+
+    assert re.search(
+        r"Key Usage: critical\s+Certificate Sign, CRL Sign",
+        text(RemoteCertificateAuthority.ca_certificate()),
+    )
+    assert re.search(r"Basic Constraints: critical\s+CA:FALSE", text(certificate))
+    assert RemoteCertificateAuthority.permits(BOX.upper())
+    assert RemoteCertificateAuthority.permits(BOX + ".")
+    assert not RemoteCertificateAuthority.permits("not" + BOX), "a suffix is not a subdomain"
+    assert RemoteCertificateAuthority.expiry(certificate).tzinfo is datetime.UTC
+
+
+def _openssl_says(monkeypatch, out, code=0):
+    calls = []
+
+    def run(cls, argv, input_text=None):
+        calls.append(argv)
+        return _done(argv, out, code, "openssl failed" if code else "")
+
+    monkeypatch.setattr(RemoteCertificateAuthority, "_run", classmethod(run))
+    return calls
+
+
+def test_permits_reads_only_the_dns_entries_of_a_ca_openssl_could_read(monkeypatch):
+    head = "X509v3 Name Constraints: critical\n    Permitted:\n"
+    _openssl_says(monkeypatch, head + "      DNS:.example.org\n")
+    assert RemoteCertificateAuthority.permits("relay.example.org"), "a leading dot is a domain"
+    _openssl_says(monkeypatch, head + "      URI:.example.org\n")
+    assert not RemoteCertificateAuthority.permits("relay.example.org"), "a URI is not a DNS name"
+    _openssl_says(monkeypatch, head + "      DNS:example.org\n", code=1)
+    assert not RemoteCertificateAuthority.permits("relay.example.org")
+
+
+def test_a_failed_openssl_run_is_a_failure_not_a_ca_or_a_date(monkeypatch):
+    calls = _openssl_says(monkeypatch, "notAfter=Jan  1 00:00:00 2030 GMT", code=1)
+    assert RemoteCertificateAuthority.expiry(pathlib.Path("leaf.crt")) is None
+    assert not RemoteCertificateAuthority.ensure(BOX)
+    assert RemoteCertificateAuthority.issue("relay", [BOX]) is None
+    calls.clear()
+    RemoteCertificateAuthority.ca_certificate().write_text("a certificate with no key")
+    assert not RemoteCertificateAuthority.ensure(BOX) and calls[0][:3] == [
+        "openssl",
+        "req",
+        "-x509",
+    ]
 
 
 # -- the control plane ------------------------------------------------------------------------------
@@ -1017,6 +1075,12 @@ def test_a_box_under_another_name_needs_a_new_ca(seams, monkeypatch, capsys):
     monkeypatch.setattr(RemoteCertificateAuthority, "permits", classmethod(lambda cls, d: False))
     assert RemoteAccess.setup(BOX, yes=True) == 1
     assert "remove --purge" in capsys.readouterr().out and seams == []
+
+
+def test_a_box_under_another_name_with_no_ca_yet_goes_ahead(seams, monkeypatch):
+    RemoteSettings.write({"dns_name": "old.example.org", "overlay_name": "x"})
+    monkeypatch.setattr(RemoteCertificateAuthority, "permits", classmethod(lambda cls, d: False))
+    assert RemoteAccess.setup(BOX, yes=True) == 0 and seams[1][0] == "ca"
 
 
 def test_declining_changes_nothing(seams, monkeypatch):
