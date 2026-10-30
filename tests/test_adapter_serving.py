@@ -437,6 +437,7 @@ class Engine(BaseHTTPRequestHandler):
     seen: ClassVar[list] = []
     loaded: ClassVar[list] = []
     load_seconds: ClassVar[float] = 0.0
+    load_status: ClassVar[int] = 200
 
     def log_message(self, *args):
         pass
@@ -459,6 +460,12 @@ class Engine(BaseHTTPRequestHandler):
         Engine.seen.append(("POST", self.path, self.headers.get("Authorization"), body))
         if self.path == "/load_lora_adapter":
             time.sleep(Engine.load_seconds)
+            if Engine.load_status != 200:
+                self.send_response(Engine.load_status)
+                self.send_header("Content-Length", "6")
+                self.end_headers()
+                self.wfile.write(b"no gpu")
+                return
             Engine.loaded.append(body["lora_name"])
         elif self.path == "/unload_lora_adapter":
             Engine.loaded.remove(body["lora_name"])
@@ -467,7 +474,7 @@ class Engine(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def gate(tmp_path):
-    Engine.seen, Engine.loaded, Engine.load_seconds = [], [], 0.0
+    Engine.seen, Engine.loaded, Engine.load_seconds, Engine.load_status = [], [], 0.0, 200
     engine = ThreadingHTTPServer(("127.0.0.1", 0), Engine)
     threading.Thread(target=engine.serve_forever, daemon=True).start()
     state = tmp_path / "gate"
@@ -542,6 +549,44 @@ def test_an_adapter_whose_files_changed_is_refused_and_never_loaded(gate):
         and json.load(refused.value)["error"]["code"] == "adapter_unavailable"
     )
     assert not [entry for entry in Engine.seen if entry[1] == "/load_lora_adapter"]
+
+
+def test_an_adapter_the_engine_fails_to_load_is_refused_and_tried_again_next_time(gate):
+    Engine.load_status = 500
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        call(gate["port"], "/v1/responses", {"model": f"{BASE}+rust"})
+    assert refused.value.code == 503 and "no gpu" in json.load(refused.value)["error"]["message"]
+    assert not [entry for entry in Engine.seen if entry[1] == "/v1/responses"]
+    Engine.load_status = 200
+    call(gate["port"], "/v1/responses", {"model": f"{BASE}+rust"})
+    assert len([entry for entry in Engine.seen if entry[1] == "/load_lora_adapter"]) == 2
+
+
+def test_an_adapter_the_engine_holds_that_the_list_does_not_name_is_unloaded(gate):
+    Engine.loaded = ["removed", "cpp"]
+    call(gate["port"], "/v1/responses", {"model": f"{BASE}+cpp"})
+    unloads = [entry[3]["lora_name"] for entry in Engine.seen if entry[1] == "/unload_lora_adapter"]
+    # cpp is on the list and was given at the engine's start: it is used, never loaded again.
+    assert unloads == ["removed"] and Engine.loaded == ["cpp"]
+    assert not [entry for entry in Engine.seen if entry[1] == "/load_lora_adapter"]
+
+
+@pytest.mark.parametrize(
+    ("framing", "data"),
+    [
+        (("length", 9), b"012345678"),
+        (("chunked", 0), b"5\r\n01234\r\n4\r\n5678\r\n0\r\n\r\n"),
+    ],
+)
+def test_a_body_past_the_gates_limit_is_not_read(framing, data):
+    async def read(limit):
+        reader = asyncio.StreamReader()
+        reader.feed_data(data)
+        reader.feed_eof()
+        return await ModelGateAdapters.read_body(reader, framing, limit)
+
+    assert asyncio.run(read(9)) == b"012345678"
+    assert asyncio.run(read(8)) is None
 
 
 def test_concurrent_first_requests_for_an_adapter_wait_on_one_load(gate):
