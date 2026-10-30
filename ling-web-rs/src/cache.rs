@@ -348,4 +348,32 @@ mod tests {
         assert_eq!(cache.get(&asked, now), None);
         let _ = std::fs::remove_dir_all(cache.dir());
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_user_name_with_a_slash_does_not_name_the_folder() {
+        // The fallback folder is under `std::env::temp_dir`, which follows TMPDIR: the test runs
+        // again in a child with TMPDIR set to a scratch folder, never the real temporary folder.
+        const CHILD: &str = "LING_SEARCH_CACHE_TEST_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let cache = Cache::open_from(None, None, None, Some("other/../x")).unwrap();
+            assert_eq!(cache.dir(), std::env::temp_dir().join("ling-search-user"));
+            return;
+        }
+        let tmp = scratch("user");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cache::tests::a_user_name_with_a_slash_does_not_name_the_folder",
+            ])
+            .env(CHILD, "1")
+            .env("TMPDIR", &tmp)
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{stdout}");
+        assert!(stdout.contains("1 passed"), "{stdout}");
+    }
 }
