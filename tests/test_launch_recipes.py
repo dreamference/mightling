@@ -294,3 +294,9 @@ def test_a_swe_bench_cap_is_never_below_one(vllm_recipes, monkeypatch):
         dataclasses.replace(spec, swe_bench_max_parallel=0),
     )
     assert ModelMatrixRegistry.swe_bench_max_parallel("test-vllm-nvfp4") == 1
+
+
+def test_vllm_is_given_the_api_key(vllm_recipes):
+    build = VLLMServerManager().build_launch_command
+    assert _flag(build(model="test-vllm-nvfp4", api_key="test-key"), "--api-key") == "test-key"
+    assert "--api-key" not in build(model="test-vllm-nvfp4")
