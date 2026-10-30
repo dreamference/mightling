@@ -33,7 +33,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Final, List, Optional, Tuple
+from typing import Final, List, Optional, TextIO, Tuple
 
 PROFILE_NAME: Final[str] = "puffin-bwrap"
 APPARMOR_DIR: Final[str] = "/etc/apparmor.d"
@@ -78,9 +78,7 @@ class SandboxPrerequisite:
                 # Fixed outside `host setup` (`node prepare`, a profile loaded by hand), which
                 # would otherwise leave the timer off with nothing saying so. On stderr: this
                 # runs before any command, and stdout may be what a script reads.
-                cls._forget()
-                print("💡 bubblewrap can sandbox again, and Night Shift was turned off for it; "
-                      "`ling-admin night enable` puts the timer back.", file=sys.stderr)
+                cls._forget_saying_how_to_restore_night(file=sys.stderr)
             return True
         needed = (command, subcommand) in NEEDS_SANDBOX
         if cls.turned_off():
@@ -133,12 +131,21 @@ class SandboxPrerequisite:
             print(f"❌ The profile is installed, but bubblewrap is still refused. "
                   f"`sudo aa-status | grep {PROFILE_NAME}` shows whether it loaded.")
             return False
+        print("✅ bubblewrap can now sandbox from any login: ling's commands, Night Shift and node jobs.")
+        cls._forget_saying_how_to_restore_night()
+        return True
+
+    @classmethod
+    def _forget_saying_how_to_restore_night(cls, file: TextIO | None = None) -> None:
+        """Forgets an "off" answer and, if there was one, says how to put Night Shift back.
+
+        Turning it off removed the timer, and nothing puts it back by itself.
+        """
         was_off = cls.turned_off()
         cls._forget()
-        print("✅ bubblewrap can now sandbox from any login: ling's commands, Night Shift and node jobs.")
         if was_off:
-            print("💡 Night Shift was turned off for this; `ling-admin night enable` puts the timer back.")
-        return True
+            print("💡 Night Shift was turned off while bubblewrap could not sandbox; "
+                  "`ling-admin night enable` puts the timer back.", file=file)
 
     @classmethod
     def turn_off(cls) -> None:
