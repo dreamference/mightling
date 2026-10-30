@@ -611,6 +611,18 @@ mod state_file_tests {
             }
         }
     }
+
+    #[test]
+    fn a_refused_symlink_is_named_in_the_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "keep").unwrap();
+        let state = dir.path().join("state");
+        std::fs::create_dir(&state).unwrap();
+        std::os::unix::fs::symlink(&outside, state.join("session.lock")).unwrap();
+        let err = open_state_file(&state, "session.lock", true).unwrap_err();
+        assert!(err.to_string().contains("not writing through it"), "{err}");
+    }
 }
 
 #[cfg(test)]
