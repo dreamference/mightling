@@ -1763,3 +1763,11 @@ def test_a_failed_docs_index_build_fails_and_downloads_nothing(monkeypatch):
         docs_index_setup.DocsIndexSetup, "install", classmethod(lambda cls, machine=None: pytest.fail("installed"))
     )
     assert CodexBrandedBuilder.build_docs_index() is False
+
+
+def test_linking_again_moves_an_existing_link_to_the_new_target(tmp_path):
+    link = tmp_path / "bin" / "ling"
+    link.parent.mkdir()
+    link.symlink_to("/old/install/ling")
+    CodexBrandedBuilder._link("/new/install/ling", str(link))
+    assert link.readlink() == Path("/new/install/ling")
