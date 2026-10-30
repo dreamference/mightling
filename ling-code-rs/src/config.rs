@@ -443,4 +443,21 @@ mightling_code_layers = "exact"
         assert!(!is_trusted_in(&codex, &untrusted));
         assert!(!is_trusted_in(&codex, &dir.path().join("other")));
     }
+
+    #[test]
+    fn a_trust_entry_listed_through_a_link_trusts_the_directory_it_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let codex = dir.path().join("codex");
+        let repo = dir.path().join("repo");
+        let link = dir.path().join("repo-link");
+        std::fs::create_dir_all(&codex).unwrap();
+        std::fs::create_dir_all(&repo).unwrap();
+        std::os::unix::fs::symlink(&repo, &link).unwrap();
+        let config = format!(
+            "[projects.{:?}]\ntrust_level = \"trusted\"\n",
+            link.to_string_lossy()
+        );
+        std::fs::write(codex.join("config.toml"), config).unwrap();
+        assert!(is_trusted_in(&codex, &repo));
+    }
 }
