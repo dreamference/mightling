@@ -1137,6 +1137,7 @@ def test_host_safety_reports_every_failure_at_once(monkeypatch, capsys):
     (["/usr/bin/earlyoom", "-m", "5", "-s", "10"], "swap"),      # explicitly gated
     (["/usr/bin/earlyoom", "-s", "50,100"], "swap"),             # SIGTERM point still gated
     (["/usr/bin/earlyoom", "-s", "wat"], "swap"),                # unparseable: assume gated
+    (["/usr/bin/earlyoom", "-m", "5", "-s", "100", "-s", "wat"], "swap"),  # the last one counts
     # Swap gate open, but the memory threshold kills healthy loads. This is the configuration
     # that SIGTERMed EngineCore three times on 2026-08-14 at 9.82%, 9.79% and 9.90% available.
     (["/usr/bin/earlyoom", "-m", "10", "-s", "100"], "memory"),
