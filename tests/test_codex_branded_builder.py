@@ -1454,3 +1454,17 @@ def test_without_the_submodule_nothing_is_exported(tmp_path, monkeypatch, capsys
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "export")) is False
     assert "git submodule update --init codex" in capsys.readouterr().out
     assert not (tmp_path / "export").exists()
+
+
+@pytest.mark.parametrize("failure", ["git-archive", "unpack"])
+def test_a_failed_export_is_not_built(stand_in_codex, tmp_path, monkeypatch, failure):
+    # Either half failing leaves a partial tree; with no patches to trip over, only the check stops it.
+    def extract(cls, stream, destination):
+        stream.read()
+        return failure == "git-archive"
+
+    if failure == "git-archive":
+        monkeypatch.setattr(CodexBrandedBuilder, "source_commit", classmethod(lambda cls: "f" * 40))
+    monkeypatch.setattr(CodexBrandedBuilder, "extract_archive", classmethod(extract))
+    monkeypatch.setattr(CodexBrandedBuilder, "patches", classmethod(lambda cls: []))
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "export")) is False
