@@ -252,6 +252,12 @@ pub fn app_record(bin: &Path) -> Option<(PathBuf, Option<PathBuf>)> {
     Some((record, app))
 }
 
+/// The desktop app's folder as its installer registered it (or its one place), for `ling app`.
+#[cfg(windows)]
+pub fn registered_app_dir() -> Option<PathBuf> {
+    platform::app_dir()
+}
+
 /// The release files present in `dir`, by file name, sorted.
 pub fn release_files_in(dir: &Path, files: &[String]) -> Vec<String> {
     let mut found: Vec<String> = std::fs::read_dir(dir)
@@ -451,7 +457,7 @@ mod platform {
     const HIDDEN_CONSOLE: u32 = 0x0800_0000 | 0x0000_0200;
 
     /// The desktop app's folder: where its installer says it is, else its one place.
-    fn app_dir() -> Option<PathBuf> {
+    pub fn app_dir() -> Option<PathBuf> {
         registry::read_string(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Mightling", "InstallLocation")
             .map(|(text, _)| PathBuf::from(text))
             .filter(|dir| !dir.as_os_str().is_empty())
