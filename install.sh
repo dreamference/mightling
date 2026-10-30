@@ -82,7 +82,8 @@ set -euo pipefail
 RELEASE_KEYS='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKIG5+J3RTa4AaoT0o2qIhVr7bGvaa+T5b84rDv31ptj mightling-release-2026-10'
 SIGNED_SINCE="1.5.0"
 
-REPO="${MIGHTLING_RELEASE_REPO:-dreamference/mightling}"
+PUBLIC_REPO="dreamference/mightling"
+REPO="${MIGHTLING_RELEASE_REPO:-$PUBLIC_REPO}"
 API="${MIGHTLING_RELEASE_API:-https://api.github.com}"
 INSTALL_DIR="${MIGHTLING_INSTALL_DIR:-$HOME/.local/share/dreamference/mightling}"
 VENV_DIR="${MIGHTLING_VENV:-$HOME/.local/share/dreamference/venv}"
@@ -302,12 +303,12 @@ if [ -n "$FROM" ]; then
         cp "$path" "$WORK/$1"
     }
 else
-    # A token is used when GH_TOKEN or GITHUB_TOKEN is set; a logged-in gh's token only for a fork
-    # named by MIGHTLING_RELEASE_REPO (the public repository needs none, and a gh login carries far more
-    # access than reading a release). It is only ever sent to the API root, never to a download URL
-    # the release names.
+    # A token is used when GH_TOKEN or GITHUB_TOKEN is set; a logged-in gh's token only when
+    # MIGHTLING_RELEASE_REPO names another repository, a fork (the public repository needs none, and
+    # a gh login carries far more access than reading a release). It is only ever sent to the API
+    # root, never to a download URL the release names.
     TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
-    if [ -z "$TOKEN" ] && [ -n "${MIGHTLING_RELEASE_REPO:-}" ] && command -v gh >/dev/null 2>&1; then
+    if [ -z "$TOKEN" ] && [ "$REPO" != "$PUBLIC_REPO" ] && command -v gh >/dev/null 2>&1; then
         TOKEN="$(gh auth token 2>/dev/null || true)"
     fi
     auth=()
