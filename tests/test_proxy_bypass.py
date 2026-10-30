@@ -60,6 +60,23 @@ def test_every_ling_admin_command_starts_with_local_traffic_exempt(monkeypatch):
     assert os.environ["NO_PROXY"] == os.environ["no_proxy"] == "corp.example,localhost,127.0.0.1,::1,10.4.5.6"
 
 
+def test_the_model_server_named_in_the_configuration_file_is_exempt_too(monkeypatch, tmp_path):
+    # Not only the environment's host: the one the configuration file names, once it is read.
+    from dreamference.chat.image_search_sidecar import ImageSearchSidecar
+    from dreamference.cli import dreamference_cli_controller as controller
+    from dreamference.cli.legacy_name_migration import LegacyNameMigration
+    config = tmp_path / "dreamference.toml"
+    config.write_text('vllm_host = "http://10.7.8.9:8000"\n')
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+    monkeypatch.delenv("DREAMFERENCE_VLLM_HOST", raising=False)
+    monkeypatch.setattr(LegacyNameMigration, "run", classmethod(lambda cls: None))
+    monkeypatch.setattr(ImageSearchSidecar, "status_lines", classmethod(lambda cls: []))
+    with pytest.raises(SystemExit):
+        controller.DreamferenceCLIController.run_cli(["--config", str(config), "images", "status"])
+    assert "10.7.8.9" in os.environ["NO_PROXY"].split(",")
+
+
 def test_a_host_with_a_comma_or_a_space_is_no_entry():
     # `http://10.0.0.1,evil:8000` gave the host `10.0.0.1,evil`, which NO_PROXY readers split in two.
     assert ProxyBypass.host_name("http://10.0.0.1,evil:8000") is None
