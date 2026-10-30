@@ -184,6 +184,55 @@ mod tests {
     }
 
     #[test]
+    fn a_name_is_whole_ids_after_the_time() {
+        assert_eq!(parse_name(&format!("rollout-2026-09-30T10-38-40x{THREAD}.jsonl")), None, "the time ends with a dash");
+        assert_eq!(parse_name(&format!("rollout-2026-09-30T10-38-40-{THREAD}_../../x.jsonl")), None, "the rollout half is an id");
+        assert_eq!(parse_name(&format!("rollout-2026-09-30T10-38-40-../../x_{OTHER}.jsonl")), None, "the thread half is an id");
+    }
+
+    #[test]
+    fn a_rollout_on_disk_both_ways_is_counted_once_plain() {
+        let home = scratch("twice");
+        let day = home.join("sessions/2026/09/30");
+        std::fs::create_dir_all(&day).unwrap();
+        let name = format!("rollout-2026-09-30T10-38-40-{THREAD}.jsonl");
+        std::fs::write(day.join(&name), b"{}\n").unwrap();
+        std::fs::write(day.join(format!("{name}.zst")), zstd::encode_all(&b"{}\n"[..], 3).unwrap()).unwrap();
+        let found = scan(&home);
+        assert_eq!(found.len(), 1);
+        assert!(!found[0].compressed);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_named_like_a_rollout_is_not_read() {
+        let home = scratch("link");
+        let day = home.join("sessions/2026/09/30");
+        std::fs::create_dir_all(&day).unwrap();
+        let elsewhere = home.join("private.txt");
+        std::fs::write(&elsewhere, b"not a rollout\n").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, day.join(format!("rollout-2026-09-30T10-38-40-{THREAD}.jsonl"))).unwrap();
+        assert!(scan(&home).is_empty());
+    }
+
+    #[test]
+    fn only_a_first_line_of_type_session_meta_is_the_meta() {
+        let home = scratch("meta");
+        let path = home.join(format!("rollout-2026-09-30T10-38-40-{THREAD}.jsonl"));
+        std::fs::write(&path, b"{\"type\":\"response_item\",\"payload\":{\"source\":\"cli\"}}\n").unwrap();
+        let local = Local {
+            path,
+            file: String::new(),
+            thread: THREAD.to_string(),
+            rollout: THREAD.to_string(),
+            archived: false,
+            compressed: false,
+            stamp: (0, 0),
+        };
+        assert_eq!(session_meta(&local), None);
+    }
+
+    #[test]
     fn the_latest_name_of_each_thread_is_read() {
         let home = scratch("names");
         assert!(names(&home).is_empty());
