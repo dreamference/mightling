@@ -8,6 +8,7 @@ container, pull an image or reach the network.
 
 import json
 import subprocess
+import sys
 from typing import IO, Any, Dict, Final, List, Optional
 
 # The variable `image_path` reads from an image's configuration.
@@ -109,14 +110,23 @@ class SweBenchDocker:
             image: The image reference.
 
         Returns:
-            Optional[str]: Its digest, or None when it could not be pulled.
+            Optional[str]: Its digest, or None when it could not be pulled or its digest differs from the pinned one
+            (`SweBenchImagePins`; an image pulled just now is removed again).
         """
+        from dreamference.swe_bench.swe_bench_image_pins import SweBenchImagePins
         digest = cls.image_digest(image)
-        if digest:
-            return digest
-        if cls.run(["pull", "-q", image], timeout=3600).returncode != 0:
+        pulled = False
+        if not digest:
+            if cls.run(["pull", "-q", image], timeout=3600).returncode != 0:
+                return None
+            digest, pulled = cls.image_digest(image), True
+        problem = SweBenchImagePins.problem(image, digest)
+        if problem:
+            sys.stdout.write(f"❌ {problem}\n")
+            if pulled:
+                cls.run(["rmi", image], timeout=300)
             return None
-        return cls.image_digest(image)
+        return digest
 
     @classmethod
     def ensure_network(cls, name: str) -> Optional[str]:
