@@ -958,4 +958,11 @@ mod tests {
         assert!(installed.notes.iter().any(|note| note.contains("latin.md could not be read")), "{:?}", installed.notes);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    #[test]
+    fn the_default_tier_is_listed_as_default() {
+        let installed = Installed::built_in();
+        let lines = list_lines(&resolve_from(None, None, &installed), &installed);
+        assert_eq!(lines[0], "Prompt for new sessions: default (default)");
+    }
 }
