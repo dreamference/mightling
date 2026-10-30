@@ -756,6 +756,15 @@ def test_the_parser_checks_a_job_id_itself_before_asking_the_job_store(monkeypat
     assert called == []
 
 
+def test_an_empty_count_is_refused(monkeypatch):
+    from dreamference.node import NodeServe
+
+    called = handlers_that_record(monkeypatch)
+    for request in ("model-receive qwen3.8-27b-nvfp4-dflash2 ''", "job-logs 20261002-1200-abc ''"):
+        assert NodeServe.serve(request) == 2, request
+    assert called == []
+
+
 def test_serve_job_runs_this_nodes_own_mightling_admin(monkeypatch, capsys):
     from dreamference.node import NodeServe
 
