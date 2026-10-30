@@ -1203,3 +1203,70 @@ fn a_dot_slash_url_stays_with_the_superprojects_owner() {
         (true, Namespace::Same, true)
     );
 }
+
+/// The remote relative URLs resolve against: the branch's own remote when it exists, then
+/// `origin`, then the only remote; with several and none of those, there is none.
+#[test]
+fn the_superprojects_remote_is_the_one_git_would_use() {
+    let our_namespace = |remotes: &[(&str, &str)], branch_remote: Option<&str>| {
+        let f = fixture();
+        let root = f.repo.root.clone();
+        for (name, url) in remotes {
+            git(&root, &["remote", "add", *name, *url]);
+        }
+        if let Some(remote) = branch_remote {
+            let branch = git(&root, &["symbolic-ref", "--short", "HEAD"]);
+            git(
+                &root,
+                &[
+                    "config",
+                    &format!("branch.{}.remote", branch.trim()),
+                    remote,
+                ],
+            );
+        }
+        let lib = library(
+            f.dir.path(),
+            "lib",
+            "t@localhost",
+            &[("a.py", "x = 1\n")],
+            2,
+        );
+        add_submodule(&root, &lib, "lib", Some("https://example.com/acme/lib.git"));
+        decisions(&f.repo)[0].our_namespace.clone()
+    };
+    let acme = Some("example.com/acme".to_string());
+    // The branch's remote beats origin.
+    assert_eq!(
+        our_namespace(
+            &[
+                ("origin", "https://example.com/other-org/super.git"),
+                ("upstream", "https://example.com/acme/super.git"),
+            ],
+            Some("upstream"),
+        ),
+        acme
+    );
+    // A branch remote that does not exist is passed over for origin, which beats the others.
+    assert_eq!(
+        our_namespace(
+            &[
+                ("a", "https://example.com/other-org/super.git"),
+                ("origin", "https://example.com/acme/super.git"),
+            ],
+            Some("gone"),
+        ),
+        acme
+    );
+    // Two remotes, neither origin nor the branch's: no namespace to compare.
+    assert_eq!(
+        our_namespace(
+            &[
+                ("a", "https://example.com/acme/super.git"),
+                ("b", "https://example.com/acme/super.git"),
+            ],
+            None,
+        ),
+        None
+    );
+}
