@@ -11,6 +11,7 @@ import types
 import pytest
 
 from dreamference.hardware.adapter_installer import AdapterInstaller
+from dreamference.hardware.model_downloader import ModelDownloader
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
@@ -54,3 +55,64 @@ def test_a_download_fetches_only_the_named_files_at_the_commit(monkeypatch, tmp_
             "token": "secret",
         }
     ]
+
+
+class _Cache:
+    def __init__(self, repos):
+        self.repos = repos
+        self.deleted = []
+
+    def delete_revisions(self, *revisions):
+        self.deleted.append(revisions)
+        return types.SimpleNamespace(execute=lambda: self.deleted.append("executed"))
+
+
+def _repo(repo_id, *commits):
+    revisions = [types.SimpleNamespace(commit_hash=commit) for commit in commits]
+    return types.SimpleNamespace(repo_id=repo_id, revisions=revisions)
+
+
+@pytest.fixture
+def cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(ModelDownloader, "get_hf_cache_dir", classmethod(lambda cls: tmp_path))
+    found = _Cache(
+        [
+            _repo("org/adapter", COMMIT, "f" * 40),
+            _repo("org/other", COMMIT),
+        ]
+    )
+    scanned = []
+
+    def scan_cache_dir(path):
+        scanned.append(path)
+        return found
+
+    _hub(monkeypatch, scan_cache_dir=scan_cache_dir)
+    found.scanned = scanned
+    return found
+
+
+def test_only_the_one_revision_of_the_one_repository_is_deleted(cache, tmp_path):
+    AdapterInstaller.delete_snapshot("org/adapter", COMMIT)
+    assert cache.scanned == [tmp_path]
+    assert cache.deleted == [(COMMIT,), "executed"]
+
+
+@pytest.mark.parametrize(("repo", "commit"), [("org/adapter", "e" * 40), ("org/missing", COMMIT)])
+def test_without_a_matching_revision_nothing_is_deleted(cache, repo, commit):
+    AdapterInstaller.delete_snapshot(repo, commit)
+    assert cache.deleted == []
+
+
+@pytest.mark.parametrize("error", [OSError("unreadable"), ValueError("not a cache")])
+def test_a_cache_that_cannot_be_scanned_is_left_alone(monkeypatch, error):
+    def scan_cache_dir(path):
+        raise error
+
+    _hub(monkeypatch, scan_cache_dir=scan_cache_dir)
+    assert AdapterInstaller.delete_snapshot("org/adapter", COMMIT) is None
+
+
+def test_without_the_library_nothing_is_deleted(monkeypatch):
+    monkeypatch.setitem(sys.modules, "huggingface_hub", None)
+    assert AdapterInstaller.delete_snapshot("org/adapter", COMMIT) is None
