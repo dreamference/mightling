@@ -73,3 +73,37 @@ def test_the_leaf_crate_masks_at_on_and_leaves_off_alone():
     body = text[text.index("pub fn host_sockets_at(on: bool)") :]
     body = body[: body.index("\n}\n")]
     assert "if on { host_sockets() } else { Vec::new() }" in body
+
+
+def test_the_patch_denies_the_sockets_only_at_on_without_the_submodule():
+    # The check above needs the Codex submodule, which a test run's copy of the tree lacks, so the
+    # patch's own lines are pinned here: the command's level is resolved once; at `on` its network
+    # is cut, a full-write disk becomes a bubblewrap root that can still write (or bwrap would be
+    # skipped, and with it the denials) and every socket found is denied; at `off` nothing changes.
+    patch = (REPO / "codex-patches" / "0019-airgapped.patch").read_text(encoding="utf-8")
+    helper = patch.split("+++ b/codex-rs/linux-sandbox/src/linux_run_main.rs\n", 1)[1]
+    helper = helper.split("\ndiff --git ", 1)[0]
+    added = [line[1:].strip() for line in helper.splitlines() if line.startswith("+")]
+    assert "let on = ling_airgapped::sealed_for_command();" in added
+    cut = added.index(
+        "if let PermissionProfile::Managed { network, .. } | PermissionProfile::External { network }"
+        " = &mut permission_profile && on {"
+    )
+    assert added[cut + 1] == "*network = NetworkSandboxPolicy::Restricted;"
+    assert (
+        "seal_file_system(&mut file_system_sandbox_policy, on, ling_airgapped::host_sockets_at(on));"
+        in added
+    )
+    start = next(i for i, line in enumerate(added) if line.startswith("fn seal_file_system("))
+    seal = added[start:]
+    assert seal[1] == (
+        "if on && matches!(policy.kind, codex_protocol::protocol::FileSystemSandboxKind::Unrestricted) {"
+    )
+    assert seal[2] == (
+        "*policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry::new("
+        "FileSystemPath::Special { value: FileSystemSpecialPath::Root }, FileSystemAccessMode::Write)]);"
+    )
+    assert seal[4].startswith("policy.entries.extend(sockets.into_iter()")
+    assert seal[4].endswith(
+        ".map(|p| FileSystemSandboxEntry::new(p.into(), FileSystemAccessMode::Deny)));"
+    )
