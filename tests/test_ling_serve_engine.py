@@ -693,9 +693,9 @@ def test_the_recipe_asks_for_four_sessions_but_an_engine_without_the_pool_does_n
     assert paged.index("--kv-pages") < paged.index("--graphs")
 
 
-def test_paging_and_fair_pairing_are_off_in_the_recipe_and_switchable_per_launch(monkeypatch):
+def test_paging_is_on_and_fair_pairing_off_in_the_recipe_and_switchable_per_launch(monkeypatch):
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
-    assert recipe["paging"] is False and recipe["fair_pairing"] is False
+    assert recipe["paging"] is True and recipe["fair_pairing"] is False
     monkeypatch.delenv("DREAMFERENCE_LING_PAGING", raising=False)
     monkeypatch.delenv("DREAMFERENCE_LING_FAIR_PAIRING", raising=False)
     features = ["kv-pages", "paging-switch", "fair-pairing"]
@@ -708,7 +708,14 @@ def test_paging_and_fair_pairing_are_off_in_the_recipe_and_switchable_per_launch
             262144,
         )
 
-    off = args()
+    default = args()
+    assert (
+        "--kv-pages" in default
+        and "--no-kv-pages" not in default
+        and flag(default, "--sessions") == "4"
+    )
+    assert flag(default, "--fair-pairing") == "0"
+    off = args(paging=False)
     # Flat and unfair, said explicitly; the sessions the pool would hold are not asked of flat slots.
     assert "--no-kv-pages" in off and "--kv-pages" not in off and "--sessions" not in off
     assert flag(off, "--fair-pairing") == "0"
