@@ -384,4 +384,12 @@ mod tests {
             key("http://127.0.0.1:8888", "lisbon tram", "general", "en")
         );
     }
+
+    #[test]
+    fn a_key_ignores_a_slash_after_the_address() {
+        assert_eq!(
+            key("http://127.0.0.1:8888/", "lisbon tram", "general", "en"),
+            key("http://127.0.0.1:8888", "lisbon tram", "general", "en")
+        );
+    }
 }
