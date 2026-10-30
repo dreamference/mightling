@@ -595,6 +595,28 @@ def test_addresses_rank_ipv4_then_global_ipv6_then_link_local_then_anything_else
     assert NodeBrowser.scoped("fe80::5", "") == "fe80::5"  # no interface, no scope to add
 
 
+def _discover(monkeypatch, nodes, ssh, match=None):
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: nodes))
+    monkeypatch.setattr(NodeBrowser, "browse_service", classmethod(lambda cls, service, timeout=6: ssh))
+    return [entry["name"] for entry in NodeBrowser.unprovisioned(match=match)]
+
+
+def _ssh_host(name, host):
+    return {"name": name, "host": host, "address": "10.0.0.9", "port": "22"}
+
+
+def test_discovery_matches_a_gb10_name_in_any_case_in_the_host_or_the_service_name(monkeypatch):
+    ssh = [
+        _ssh_host("Spark-1A2B", "dhcp-12.local"),  # only the service name says GB10
+        _ssh_host("My Spark", "gx10-3c4d.local"),  # only the host name does
+        _ssh_host("sparkle", "sparkle.local"),  # a name that only starts like one
+        _ssh_host("zgx-5e6f", "zgx-5e6f.local"),
+        _ssh_host("zgx-5e6f [ssh]", "ZGX-5E6F.local"),  # the same machine again
+    ]
+    assert _discover(monkeypatch, [], ssh) == ["Spark-1A2B", "My Spark", "zgx-5e6f"]
+    assert _discover(monkeypatch, [], [_ssh_host("Laptop", "laptop.local")], match="^LAP") == ["Laptop"]
+
+
 def test_a_browse_runs_avahi_browse_for_the_service_asked_and_returns_nothing_without_it(monkeypatch):
     from dreamference.node import node_browser
 
