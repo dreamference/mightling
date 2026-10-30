@@ -1136,3 +1136,28 @@ fn searches_that_reach_searxng_are_spaced_apart() {
     assert_eq!(server.requests().len(), 2);
     let _ = std::fs::remove_dir_all(cache);
 }
+
+#[test]
+fn a_share_link_is_resolved_without_requesting_google() {
+    let proxy = Server::start(|_| {
+        response(
+            "302 Found",
+            "text/html",
+            b"",
+            "Location: http://www.google.com/search?q=lisbon+tram\r\n",
+        )
+    });
+    let output = fetch(
+        &["http://share.google/AbC123"],
+        &[("http_proxy", &proxy.base)],
+    );
+    assert_eq!(
+        proxy.requests(),
+        vec!["GET http://share.google/AbC123 HTTP/1.1".to_string()]
+    );
+    assert!(
+        stdout(&output).contains("lisbon tram"),
+        "{}",
+        stdout(&output)
+    );
+}
