@@ -350,6 +350,12 @@ def test_a_signature_counts_only_when_ssh_keygen_accepts_it():
     assert re.findall(r"return .*", body) == ["return ($Process.ExitCode -eq 0)"]
 
 
+def test_keys_and_sums_are_read_as_install_sh_reads_them():
+    # Comment lines are no keys; a sum line may mark a binary file with `*` and give upper case.
+    assert 'Where-Object { $_ -and -not $_.StartsWith("#") }' in ps_function("Get-Signers")
+    assert '$Table[$Parts[1].TrimStart("*")] = $Parts[0].ToLower()' in ps_function("Read-Sums")
+
+
 def code_lines() -> list:
     """install.ps1's lines without comments, the elevated script's included."""
     lines = []
