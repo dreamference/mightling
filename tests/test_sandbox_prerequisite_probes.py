@@ -5,6 +5,9 @@ now", never "fix it" with sudo; the restriction is known only from the kernel's 
 only a person at a terminal on both ends is asked anything.
 """
 
+import io
+import sys
+
 import pytest
 from test_sandbox_prerequisite import machine  # noqa: F401 - fixture
 
@@ -40,3 +43,22 @@ def test_the_restriction_is_read_from_the_kernels_setting(tmp_path, monkeypatch,
 def test_a_kernel_without_the_setting_leaves_the_restriction_unknown(tmp_path, monkeypatch):
     monkeypatch.setattr(sandbox_prerequisite, "USERNS_SYSCTL", str(tmp_path / "missing"))
     assert SandboxPrerequisite._userns_restricted() is None
+
+
+class _Stream(io.StringIO):
+    def __init__(self, tty):
+        super().__init__()
+        self.tty = tty
+
+    def isatty(self):
+        return self.tty
+
+
+@pytest.mark.parametrize(
+    ("stdin", "stdout", "interactive"),
+    [(True, True, True), (True, False, False), (False, True, False)],
+)
+def test_only_a_terminal_on_both_ends_counts_as_a_person(monkeypatch, stdin, stdout, interactive):
+    monkeypatch.setattr(sys, "stdin", _Stream(stdin))
+    monkeypatch.setattr(sys, "stdout", _Stream(stdout))
+    assert SandboxPrerequisite._interactive() is interactive
