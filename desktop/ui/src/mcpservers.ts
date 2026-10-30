@@ -57,9 +57,14 @@ export function bearerVariable(text: string): string | null {
   return ENV_NAME.test(name) ? name : null;
 }
 
-/** Whether a folder is absolute (POSIX, or a Windows drive). */
+/** Whether a folder is absolute (POSIX, a Windows drive or a Windows share). */
 function absolute(folder: string): boolean {
-  return folder.startsWith("/") || /^[A-Za-z]:[\\/]/.test(folder);
+  return /^([\\/]|[A-Za-z]:[\\/])/.test(folder);
+}
+
+/** A command's arguments as typed: split on spaces, a "double" or 'single' quoted one kept whole (no escapes: `C:\dir` stays). */
+function splitArguments(text: string): string[] {
+  return Array.from(text.matchAll(/"([^"]*)"|'([^']*)'|[^\s"']+/g), (match) => match[1] ?? match[2] ?? match[0]);
 }
 
 /** Why the form cannot be added yet, in words; null when it can. `taken` names the servers config.toml has. */
@@ -102,7 +107,7 @@ export function serverValue(form: McpServerForm): Record<string, unknown> {
   }
   const value: Record<string, unknown> = { command: form.target.trim() };
   const args = form.args.trim();
-  if (args) value.args = args.split(/\s+/);
+  if (args) value.args = splitArguments(args);
   const env = parseLines(form.env, "=", ENV_NAME).values;
   if (Object.keys(env).length) value.env = env;
   if (form.cwd.trim()) value.cwd = form.cwd.trim();

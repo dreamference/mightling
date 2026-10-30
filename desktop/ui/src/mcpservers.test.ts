@@ -14,6 +14,12 @@ describe("MCP servers", () => {
     expect(serverValue(form)).toEqual({ command: "node", args: ["server.js", "--port", "8080"], env: { PORT: "8080", URL: "http://a:1/b?c=d" }, cwd: "/srv/app" });
   });
 
+  it("keep a quoted argument whole and take a Windows share as a working folder", () => {
+    const form = serverForm({ name: "docs", target: "node", args: `server.js --root "C:\\My Files" --name 'a b' ""`, cwd: "\\\\nas\\share\\app" });
+    expect(formProblem(form, free)).toBeNull();
+    expect(serverValue(form).args).toEqual(["server.js", "--root", "C:\\My Files", "--name", "a b", ""]);
+  });
+
   it("write a URL with its headers and the bearer token's variable, by name only", () => {
     const form = serverForm({ name: "remote", kind: "url", target: "https://mcp.example/mcp", headers: "X-Team: core\nX-Trace: on", bearer: "${MCP_TOKEN}" });
     expect(formProblem(form, free)).toBeNull();
