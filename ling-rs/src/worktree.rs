@@ -1407,4 +1407,18 @@ mod tests {
         assert!(lines.last().is_some_and(|line| line.ends_with(&format!("git merge {}", session.branch))), "{lines:?}");
         assert_eq!(std::fs::read_to_string(repo.join("new.py")).unwrap_or_default(), "mine\n");
     }
+
+    #[test]
+    fn binary_files_and_trailing_whitespace_are_applied_as_they_are() {
+        let fixture = Fixture::new("bytes");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (session, cwd, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        let bytes: Vec<u8> = (0..=255).collect();
+        std::fs::write(session.checkout.join("blob.bin"), &bytes).unwrap_or_default();
+        std::fs::write(session.checkout.join("spaces.txt"), "trailing  \n\tmixed \t\n").unwrap_or_default();
+        let (lines, code) = command(&home, &cwd, "apply", true);
+        assert_eq!(code, 0, "{lines:?}");
+        assert_eq!(std::fs::read(repo.join("blob.bin")).unwrap_or_default(), bytes);
+        assert_eq!(std::fs::read_to_string(repo.join("spaces.txt")).unwrap_or_default(), "trailing  \n\tmixed \t\n");
+    }
 }
