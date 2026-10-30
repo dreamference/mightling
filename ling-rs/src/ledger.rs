@@ -565,4 +565,16 @@ mod tests {
         let ledger = Ledger { changed: (0..MAX_CHANGED).map(|index| format!(" M {index}")).collect(), ..Ledger::default() };
         assert!(!ledger.render().contains("more"));
     }
+
+    #[test]
+    fn a_ledger_past_the_threshold_is_cut_on_a_character_boundary() {
+        // Lines of two-byte characters, shifted a byte at a time so that some cut falls inside one.
+        for pad in 0..8 {
+            let mut changed: Vec<String> = (0..MAX_CHANGED).map(|index| format!("{index}{}", "é".repeat(100))).collect();
+            changed[0].insert_str(0, &"a".repeat(pad));
+            let ledger = Ledger { changed, ..Ledger::default() };
+            let text = ledger.render();
+            assert!(text.len() <= MAX_CHARS + "\n…".len() && text.ends_with("\n…"), "{}", text.len());
+        }
+    }
 }
