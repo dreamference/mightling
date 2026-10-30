@@ -550,6 +550,7 @@ def test_the_machine_decides_the_role(tmp_path, release_server):
     on_gb10 = run_install(tmp_path, server, gpu="NVIDIA GB10")
     assert "role: node" in on_gb10.stdout and "not a GB10" not in on_gb10.stdout
     assert "role: client" in run_install(tmp_path, server, "--role", "client", gpu="NVIDIA GB10").stdout
+    assert "role: client" in run_install(tmp_path, server, "--role=client", gpu="NVIDIA GB10").stdout
     # An x86 machine with some NVIDIA GPU is not one.
     assert "no binaries for x86_64" in run_install(tmp_path, server, uname_m="x86_64", gpu="NVIDIA GB10").stderr
 
