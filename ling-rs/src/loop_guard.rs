@@ -1002,6 +1002,15 @@ mod tests {
     }
 
     #[test]
+    fn only_the_assistant_s_messages_are_watched() {
+        let (nudged, _) = memory();
+        let mut events = looping_reasoning(12);
+        events[0] = Ok(ResponseEvent::OutputItemAdded(item(json!({"type": "message", "id": "msg_0", "role": "user", "content": []}))));
+        let out = run(events, nudged, true);
+        assert_eq!(end_turn(&out), Some(None));
+    }
+
+    #[test]
     fn with_the_detector_off_only_the_cap_is_handled() {
         let (nudged, _) = memory();
         let out = run(looping_reasoning(12), nudged, false);
