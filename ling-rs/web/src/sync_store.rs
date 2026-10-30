@@ -562,8 +562,10 @@ impl Store {
         auth::write_private(&self.dir.join("rollouts").join(format!("{}.json", record.rollout)), &serde_json::to_string(record).unwrap_or_default())
     }
 
+    /// `send_replace`, not `send`: with no client waiting, `send` would drop the new cursor and the
+    /// next wait from an older one would sit out its whole time.
     fn announce(&self, seq: u64) {
-        let _ = self.changed.send(seq);
+        self.changed.send_replace(seq);
     }
 
     /// Waits until the cursor passes `since`, or `wait` runs out.
