@@ -214,6 +214,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $server = Start-Process -PassThru -NoNewWindow python -ArgumentList ".github\scripts\fake_release.py", "dist", "8787", "dreamference/mightling", "v0.0.0-ci"
           Start-Sleep -Seconds 3
+          # The stand-in release is unsigned; only a named pre-signing tag may install unsigned.
           $env:MIGHTLING_RELEASE_API = "http://127.0.0.1:8787"
           $env:MIGHTLING_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "mightling-install\bin"
           # A fresh profile's user PATH: one entry, REG_EXPAND_SZ, with a variable in it. install.ps1
@@ -226,12 +227,12 @@ jobs:
           $envKey.SetValue("Path", $fresh, [Microsoft.Win32.RegistryValueKind]::ExpandString)
           try {
             Write-Host "PowerShell $($PSVersionTable.PSVersion)"
-            & powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
+            & powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Version v0.0.0-ci
             if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed" }
             & (Join-Path $env:MIGHTLING_INSTALL_DIR "ling.exe") --version
             if ($LASTEXITCODE -ne 0) { throw "the installed ling.exe did not run" }
             # Again, over the installed files: the replace-aside path.
-            & powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
+            & powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Version v0.0.0-ci
             if ($LASTEXITCODE -ne 0) { throw "a second install.ps1 failed" }
             Get-ChildItem $env:MIGHTLING_INSTALL_DIR | Format-Table Name, Length
             $rawPath = $envKey.GetValue("Path", "", $noExpand)
