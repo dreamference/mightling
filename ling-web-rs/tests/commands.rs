@@ -830,6 +830,18 @@ fn a_page_cut_at_the_size_cap_is_marked_truncated() {
 }
 
 #[test]
+fn a_page_of_exactly_the_size_cap_is_whole() {
+    let mut body = b"<p>whole</p><!--".to_vec();
+    body.resize(5 * 1024 * 1024 - 3, b'a');
+    body.extend_from_slice(b"-->");
+    let server = Server::start(move |_| response("200 OK", "text/html", &body, ""));
+    let output = fetch(&[&server.base, "--json"], &[]);
+    let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(printed["text"], "whole");
+    assert_eq!(printed["truncated"], false);
+}
+
+#[test]
 fn a_binary_body_is_refused_rather_than_printed_as_text() {
     let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01".to_vec();
     let server = Server::start(move |_| response("200 OK", "image/png", &png, ""));
