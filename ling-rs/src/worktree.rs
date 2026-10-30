@@ -1191,4 +1191,18 @@ mod tests {
         let roundabout = repo.join("..").join(inside);
         assert_eq!(session_at(&home, &roundabout).map(|found| found.id), Some(session.id));
     }
+
+    #[test]
+    fn worktree_mode_also_tells_of_kept_sessions() {
+        let fixture = Fixture::new("kept");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (mut earlier, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(earlier.checkout.join("auth.py"), "changed\n").unwrap_or_default();
+        earlier.pid = u32::MAX - 1;
+        earlier.write().unwrap_or_default();
+        write_mode(&home, Mode::Worktree).unwrap_or_default();
+        let prepared = prepare(vec!["ling".into()], Vec::new(), &home, true, &repo);
+        assert!(prepared.cwd.is_some(), "{:?}", prepared.lines);
+        assert_eq!(prepared.lines.last(), kept_line(1).as_ref(), "{:?}", prepared.lines);
+    }
 }
