@@ -639,6 +639,9 @@ def test_verify_catches_a_signature_pin_name_or_base_that_changed_after_the_inst
     signature.unlink()
     signature.write_bytes(sign(keys, (folder / "manifest.json").read_bytes(), key="stranger"))
     assert "not a Dreamference" in AdapterInstaller.verify(entry, base)
+    # An entry that records no trust is held to the Dreamference signature, not waved through.
+    untrusted = {key: value for key, value in entry.items() if key != "trust"}
+    assert "not a Dreamference" in AdapterInstaller.verify(untrusted, base)
 
 
 # -- the base digest and the served id ---------------------------------------------------------------
