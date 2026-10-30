@@ -646,7 +646,7 @@ def test_the_authorised_line_forces_one_command_and_forbids_the_rest():
         assert restriction in line.split(" ssh-ed25519 ")[0]
     assert line.endswith(" mightling-node")  # the sender's own comment is not kept
     assert "owner@laptop" not in line
-    for bad in ("", "not a key", PUBLIC_KEY + "\nssh-ed25519 AAAA second", "rm -rf /"):
+    for bad in ("", "not a key", "ssh-ed25519", PUBLIC_KEY + "\nssh-ed25519 AAAA second", "rm -rf /"):
         with pytest.raises(ValueError):
             NodePairing.authorized_line(bad, "/x node serve-job")
     with pytest.raises(ValueError):
