@@ -460,7 +460,7 @@ LING_ENGINE_FAIR_PAIRING_SINCE: Final[str] = "51b7372fbd69b43e83d980ea5e1047bcb8
 QWEN38_LING_SESSIONS: Final[int] = 4
 # Whether the recipe turns the page pool on. Off at 1.8.0 (see the recipe); the pinned engine
 # (P4d merged) is flat by default and takes `--kv-pages` only when asked.
-QWEN38_LING_KV_PAGES: Final[bool] = False
+QWEN38_LING_KV_PAGES: Final[bool] = True
 QWEN38_LING_BATCH: Final[int] = 4
 # Each flat session's context when the pool is off (the coordinator's decision of 2026-10-29: 1.8.0
 # serves four flat sessions, paging off): the 786,432 positions of three flat sessions at 262,144,

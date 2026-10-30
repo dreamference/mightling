@@ -77,7 +77,7 @@ def test_the_image_is_pinned_by_digest_and_the_engine_commit_is_a_full_hash():
     assert QWEN38_LING_ENGINE_COMMIT.startswith("4853a93")
     assert recipe["engine_features"] == ["kv-pages", "sparse-head", "paging-switch", "fair-pairing"]
     # The owner's decision of 2026-10-29: the recipe does not turn paging on at 1.8.0.
-    assert recipe["kv_pages"] is False
+    assert recipe["kv_pages"] is True  # this variant: the pool on
     assert re.fullmatch(r"[0-9a-f]{40}", QWEN38_LING_ENGINE_COMMIT)
     assert re.fullmatch(r"ghcr\.io/dreamference/ling-serve@sha256:[0-9a-f]{64}", QWEN38_LING_IMAGE)
     assert recipe["docker_image"] == QWEN38_LING_IMAGE
@@ -89,7 +89,7 @@ def test_both_engines_serve_the_same_checkpoint_and_context():
     assert ling["revision"] == sglang["revision"]
     assert sglang["max_model_len"] == 262144
     # Flat at 1.8.0 (the pool off), ling-serve's four sessions share three full contexts' positions.
-    assert ling["kv_pages"] is False and ling["max_model_len"] == QWEN38_LING_FLAT_CONTEXT
+    assert ling["kv_pages"] is True and ling["max_model_len"] == 262144
     assert QWEN38_LING_FLAT_CONTEXT * 4 == 262144 * 3 and QWEN38_LING_FLAT_CONTEXT % 2048 == 0
     assert ling["speculative_config"]["num_speculative_tokens"] == 12
     # The same memory envelope: the container cap does not change with the engine.
@@ -122,7 +122,7 @@ def test_ling_serve_runs_inside_the_same_guarded_container_with_the_nights_flags
         "models--RadixArk--Qwen3.8-27B-NVFP4/snapshots/52d1adc5f38aa5ebf099c29ed7025ba34cfbb854"
     )
     assert flag(server, "--served-model-name") == SERVED_ID
-    assert flag(server, "--max-context") == str(QWEN38_LING_FLAT_CONTEXT)
+    assert flag(server, "--max-context") == "262144"
     assert flag(server, "--draft-block") == "12"
     assert "--graphs" in server and "--pdl" in server
     # Flags ling-serve does not have exit it with status 2 (`unknown argument`).
@@ -314,7 +314,7 @@ def test_the_drift_check_compares_ling_serve_with_its_own_recipe():
     assert Cli._detect_recipe_drift(DEFAULT_MODEL_ALIAS, 8000, sglang) == {
         "Recipe Match": "Running flags match the registry recipe"
     }
-    drifted = [a if a != str(QWEN38_LING_FLAT_CONTEXT) else "65536" for a in running]
+    drifted = [a if a != "262144" else "65536" for a in running]
     rows = Cli._detect_recipe_drift(DEFAULT_MODEL_ALIAS, 8000, drifted)
     assert "  drift --max-context" in rows
 
@@ -654,7 +654,7 @@ def test_image_input_is_on_on_a_paged_engine_and_untouched_on_an_older_one():
     assert "--vision" not in flat
     # The pin has the flag, with the pool off (1.8.0's flat sessions) or on.
     pinned = LingServeLaunchBuilder.server_args("RadixArk/Qwen3.8-27B-NVFP4", recipe, 8000, 262144)
-    assert flag(pinned, "--vision") == "on" and "--kv-pages" not in pinned
+    assert flag(pinned, "--vision") == "on" and "--kv-pages" in pinned
     paged = LingServeLaunchBuilder.server_args(
         "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(), 8000, 262144
     )
@@ -746,7 +746,7 @@ def test_the_recipe_asks_for_four_sessions_but_an_engine_without_the_pool_does_n
         model=DEFAULT_MODEL_ALIAS, gate=True, engine=ENGINE_LING
     )
     assert flag(off, "--sessions") == flag(off, "--batch") == "4"
-    assert flag(off, "--max-context") == str(QWEN38_LING_FLAT_CONTEXT) and "--kv-pages" not in off
+    assert flag(off, "--max-context") == "262144" and "--kv-pages" in off
     assert "--vision" in off
     paged = LingServeLaunchBuilder.server_args(
         "RadixArk/Qwen3.8-27B-NVFP4", _paged_recipe(), 8000, 262144
@@ -756,9 +756,9 @@ def test_the_recipe_asks_for_four_sessions_but_an_engine_without_the_pool_does_n
     assert paged.index("--kv-pages") < paged.index("--graphs")
 
 
-def test_paging_and_fair_pairing_are_off_in_the_recipe_and_switchable_per_launch(monkeypatch):
+def test_paging_is_on_and_fair_pairing_off_in_the_recipe_and_switchable_per_launch(monkeypatch):
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
-    assert recipe["kv_pages"] is False and recipe["fair_pairing"] is False
+    assert recipe["kv_pages"] is True and recipe["fair_pairing"] is False
     monkeypatch.delenv("DREAMFERENCE_LING_PAGING", raising=False)
     monkeypatch.delenv("DREAMFERENCE_LING_FAIR_PAIRING", raising=False)
     features = ["kv-pages", "paging-switch", "fair-pairing"]
@@ -771,7 +771,7 @@ def test_paging_and_fair_pairing_are_off_in_the_recipe_and_switchable_per_launch
             262144,
         )
 
-    off = args()
+    off = args(kv_pages=False)
     # Flat and unfair, said explicitly; the sessions are the recipe's, flat or paged.
     assert "--no-kv-pages" in off and "--kv-pages" not in off and "--sessions" in off
     assert flag(off, "--fair-pairing") == "0"
@@ -826,7 +826,7 @@ def test_server_status_reports_sessions_and_paging():
     assert facts["Sessions"] == "4 (batch 4)" and facts["KV cache"] == "Paged"
     flat = LingServeLaunchBuilder.server_args(
         "RadixArk/Qwen3.8-27B-NVFP4",
-        get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING),
+        {**get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING), "kv_pages": False},
         8000,
         262144,
     )
