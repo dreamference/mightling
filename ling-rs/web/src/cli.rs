@@ -840,7 +840,54 @@ mod tests {
             ling: PathBuf::from("/nonexistent/ling"),
             child_env: Vec::new(),
         };
+        // Refused before its port is read: a bad port would be a 2.
+        let words = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert_eq!(run_cli(&words(&["serve", "--lan", "--port", "x"]), environment.clone()).await, 1);
         assert_eq!(run_cli(&["serve".to_string(), "--lan".to_string()], environment).await, 1);
         assert!(!home.join(".mightling/web/server.json").exists());
+    }
+
+    #[tokio::test]
+    async fn a_server_without_the_lan_listens_on_loopback_alone() {
+        for listener in bind(0, false).await.unwrap() {
+            assert!(listener.local_addr().unwrap().ip().is_loopback(), "{:?}", listener.local_addr());
+        }
+    }
+
+    #[test]
+    fn the_lan_names_leave_out_loopback_and_the_unspecified_address() {
+        for name in lan_names() {
+            if let Ok(ip) = name.parse::<std::net::Ipv4Addr>() {
+                assert!(!ip.is_loopback() && !ip.is_unspecified(), "{name}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_server_without_the_lan_names_no_lan_address() {
+        let home = scratch("loopback-only");
+        let environment = Environment {
+            codex_home: home.join(".mightling"),
+            home: home.clone(),
+            ling: PathBuf::from("/nonexistent/ling"),
+            child_env: Vec::new(),
+        };
+        let file = server_file(&environment.state_dir());
+        let args = ["serve".to_string(), "--port".to_string(), "0".to_string()];
+        let serve = run_cli(&args, environment);
+        let written = async {
+            while !file.exists() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        tokio::select! {
+            code = serve => panic!("the server stopped with {code}"),
+            () = written => {}
+            () = tokio::time::sleep(Duration::from_secs(20)) => panic!("no server file"),
+        }
+        let text = std::fs::read_to_string(&file).unwrap();
+        let urls = serde_json::from_str::<Value>(&text).unwrap()["urls"].clone();
+        assert_eq!(urls, json!(["http://127.0.0.1:0/"]), "{text}");
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
