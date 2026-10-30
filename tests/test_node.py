@@ -589,6 +589,12 @@ def test_a_node_seen_under_two_names_is_one_node_at_its_first_address_of_the_bes
     assert (node["name"], node["address"]) == ("gx10-1a2b", "10.0.0.5")
 
 
+def test_addresses_rank_ipv4_then_global_ipv6_then_link_local_then_anything_else():
+    addresses = ("10.0.0.5", "2001:db8::5", "fe80::5%eth0", "gx10-1a2b.local")
+    assert [NodeBrowser.rank(address) for address in addresses] == [0, 1, 2, 3]
+    assert NodeBrowser.scoped("fe80::5", "") == "fe80::5"  # no interface, no scope to add
+
+
 def test_a_browse_runs_avahi_browse_for_the_service_asked_and_returns_nothing_without_it(monkeypatch):
     from dreamference.node import node_browser
 
