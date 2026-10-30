@@ -356,3 +356,45 @@ def test_saving_replaces_the_file_whole_through_a_link_and_keeps_its_mode(tmp_pa
         storage.ConfigFileStorageManager.save_config_dict(link, {"model": "z"})
     assert real.read_text(encoding="utf-8") == 'model = "y"\n'
     assert sorted(entry.name for entry in real.parent.iterdir()) == ["config.toml"]
+
+
+def test_refine_from_the_environment_is_on_only_if_it_says_so(tmp_path, monkeypatch):
+    # An argument outranks the variable, the variable the file; a blank variable counts as unset.
+    path = tmp_path / "dreamference.toml"
+    path.write_text("mightling_refine = true\n")
+    for value, expected in (("yes", True), ("ON", True), ("off", False), ("maybe", False), ("  ", True)):
+        monkeypatch.setenv("DREAMFERENCE_MIGHTLING_REFINE", value)
+        assert DreamferenceConfig(config_file=str(path)).mightling_refine is expected, value
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_REFINE", "off")
+    assert DreamferenceConfig(config_file=str(path), mightling_refine=True).mightling_refine is True
+
+
+def test_without_the_older_toml_package_a_file_tomllib_refuses_reads_as_empty(tmp_path, monkeypatch, capsys):
+    import tomllib
+
+    import pytest
+
+    import dreamference.config.config_file_storage_manager as storage
+
+    monkeypatch.setattr(storage, "optional_module", lambda name: None)
+    with pytest.raises(tomllib.TOMLDecodeError):
+        storage.ConfigFileStorageManager._load_toml("model = \n")
+    path = tmp_path / "config.toml"
+    path.write_text("model = \n")
+    assert storage.ConfigFileStorageManager.load_config_dict(path) == {}
+    assert "Error reading" in capsys.readouterr().out
+
+
+def test_a_draft_model_is_checked_together_with_the_main_model(tmp_path, monkeypatch):
+    import dreamference.hardware as hardware
+
+    asked = []
+
+    def speculative(model, draft):
+        asked.append((model, draft))
+        return False, "does not fit"
+
+    monkeypatch.setattr(hardware, "check_speculative_compatibility", speculative)
+    config = DreamferenceConfig(config_file=str(tmp_path / "none.toml"), draft_model="small-draft")
+    assert config.validate_model() == (False, "does not fit")
+    assert asked == [(config.model, "small-draft")]
