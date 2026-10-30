@@ -7,6 +7,7 @@ tests of the guard leave it unset."""
 import shutil
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -176,6 +177,19 @@ def test_a_machine_with_nothing_old_says_nothing(opted_in, capsys, monkeypatch, 
     monkeypatch.setattr("sys.executable", str(tmp_path / "bin/python"))
     assert LegacyNameMigration.run() == []
     assert capsys.readouterr().err == ""
+
+
+def test_a_file_that_is_not_utf8_stops_its_step_not_the_command(opted_in, capsys, monkeypatch, tmp_path):
+    # The migration runs before every ragon-admin command: an authorized_keys with a Latin-1
+    # comment raised UnicodeDecodeError, which is no OSError, out of every one of them.
+    (tmp_path / "bin").mkdir()
+    monkeypatch.setattr("sys.executable", str(tmp_path / "bin/python"))
+    keys = NodeServe.authorized_keys()
+    keys.parent.mkdir(parents=True, exist_ok=True)
+    keys.write_bytes(b"ssh-ed25519 AAAAmine caf\xe9@laptop\n")
+    done = LegacyNameMigration.run()
+    assert len(done) == 1 and done[0].startswith("could not finish rewrite_authorized_keys: ")
+    assert keys.read_bytes() == b"ssh-ed25519 AAAAmine caf\xe9@laptop\n"
 
 
 def test_a_project_file_with_old_keys_is_named_not_rewritten(
@@ -1067,3 +1081,45 @@ def test_an_old_unit_file_alone_still_gets_a_line_without_accounts(monkeypatch, 
 )
 def test_rewrite_unit_text_table(old, new):
     assert LegacyNameMigration.rewrite_unit_text(old + "\n") == new + "\n"
+
+
+def test_authorized_keys_is_replaced_whole_or_not_at_all(tmp_path):
+    # It was rewritten in place: a write cut short left sshd a truncated file, locking out every
+    # key in it, the owner's own included.
+    keys = NodeServe.authorized_keys()
+    keys.parent.mkdir(parents=True, exist_ok=True)
+    before = (
+        "ssh-ed25519 AAAAmine me@laptop\n"
+        f'command="{tmp_path}/puffin-admin node serve-job --key k1",no-pty ssh-ed25519 AAAAsender puffin-node\n'
+    )
+    keys.write_text(before)
+    keys.chmod(0o600)
+
+    with patch.object(Path, "replace", side_effect=OSError("disk full")), pytest.raises(OSError):
+        LegacyNameMigration.rewrite_authorized_keys()
+    assert keys.read_text() == before
+    assert LegacyNameMigration.rewrite_authorized_keys()
+    assert KEY_COMMENT in keys.read_text() and "AAAAmine" in keys.read_text()
+    assert oct(keys.stat().st_mode & 0o777) == "0o600"
+    assert [entry.name for entry in keys.parent.iterdir()] == [keys.name]
+
+
+def test_an_old_key_beside_a_newer_name_is_dropped_not_doubled(tmp_path):
+    # Renaming it beside the new key wrote the key twice, which no TOML reader loads: every
+    # setting in the file fell back to its default. The newest name wins: ragon_, mightling_, puffin_.
+    import tomllib
+
+    config = tmp_path / "config.toml"
+    config.write_text(
+        'puffin_airgapped = "off"\nmightling_airgapped = "on"\npuffin_model = "m"\n'
+        'mightling_prompt = "a"\nragon_prompt = "b"\n'
+        '[night]\nmightling_airgapped = "x"\n[forge]\npuffin_airgapped = "on"\n'
+    )
+    assert LegacyNameMigration.rewrite_keys(config)
+    assert tomllib.loads(config.read_text()) == {
+        "ragon_airgapped": "on",
+        "ragon_model": "m",
+        "ragon_prompt": "b",
+        "night": {"ragon_airgapped": "x"},
+        "forge": {"ragon_airgapped": "on"},
+    }
