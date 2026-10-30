@@ -1069,4 +1069,15 @@ mod tests {
         let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
         assert_eq!((found.result_count, found.answers.len()), (0, 1));
     }
+
+    #[test]
+    fn an_empty_publication_date_is_no_date() {
+        let payload = searxng(
+            json!([{"title": "A", "url": "https://a.example/x", "engine": "bing", "publishedDate": ""}]),
+            json!([]),
+            json!([]),
+        );
+        let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
+        assert_eq!(found.results[0].published, None);
+    }
 }
