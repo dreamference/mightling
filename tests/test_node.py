@@ -127,6 +127,14 @@ def test_a_service_file_of_another_service_is_not_a_node():
     assert NodeServiceFile.parse(text.replace("_mightling-node._tcp", "_http._tcp")) is None
 
 
+def test_the_forge_record_names_the_node_and_only_a_known_role_is_read_back():
+    text = NodeServiceFile.render(8000, NODE_ID, "1.3.0", forge=("mirror", 3300))
+    block = NodeServiceFile.service_block(text, "_mightling-forge._tcp")
+    assert f"<txt-record>node={NODE_ID}</txt-record>" in block
+    assert NodeServiceFile.parse_forge(text) == ("mirror", 3300)
+    assert NodeServiceFile.parse_forge(text.replace("role=mirror", "role=owner")) is None
+
+
 def test_a_node_that_was_never_enabled_is_never_advertised_by_a_side_effect():
     assert not NodeServiceFile.service_path.exists()
     assert NodeServiceFile.update(state="ready") is None
