@@ -1904,3 +1904,22 @@ async fn the_configured_mini_app_host_alone_is_the_front_and_an_empty_host_never
     assert!(!server.front_host_ok(&with_header(header::HOST, "other.example.ts.net")), "another public name is not the mini app's");
     assert!(!server.front_host_ok(&with_header(header::HOST, HOST)));
 }
+
+#[tokio::test]
+async fn only_the_owner_changes_a_scope_and_an_unknown_device_is_named() {
+    let scratch = scratch("scope-owner");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let state = server.config.state_dir.clone();
+    let (_, token) = auth::add_device(&state, "phone").unwrap();
+    let id = auth::load_devices(&state)[0].id.clone();
+    let device = format!("{}={token}", auth::DEVICE_COOKIE);
+    let (status, _, _) = call(&server, devices_post("/devices/scope", &device, &format!("device={id}&scope=watch"))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(auth::load_devices(&state)[0].scope, auth::Scope::Control, "a device does not narrow itself or another");
+
+    let owner = sign_in(&server).await;
+    let (status, _, body) = call(&server, devices_post("/devices/revoke", &owner, "device=no-such-id")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("No paired device has that id."), "{body}");
+    assert_eq!(auth::load_devices(&state).len(), 1);
+}
