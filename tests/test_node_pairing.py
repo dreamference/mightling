@@ -349,7 +349,12 @@ def test_removing_a_pairing_forgets_the_node_even_when_it_does_not_confirm(monke
     )
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda argv, **_: calls.append(argv) or answer())
+    browsed = []  # an unpairing goes to the address it has; it does not browse the network first
+    monkeypatch.setattr(
+        NodePairing, "resolve", classmethod(lambda cls, record, *_, **__: browsed.append(record))
+    )
     assert NodePairing.remove("spark-1")
+    assert browsed == []
     out = capsys.readouterr().out
     assert "did not confirm" in out and "no longer paired" in out
     assert not NodePairing.record_path(NODE).exists()
