@@ -747,6 +747,19 @@ def test_a_longer_name_or_an_unbalanced_quote_reaches_no_handler(monkeypatch):
     assert called == []
 
 
+def test_a_job_folder_and_a_job_repository_are_named_only_by_a_whole_id():
+    from dreamference.node import NodeJob
+
+    assert NodeJob.job_dir("20261002-1200-abc").name == "20261002-1200-abc"
+    for job_id in ("20261002-1200-abc/../../x", "20261002-1200-/..", "20261002-1200-abc0"):
+        with pytest.raises(ValueError):
+            NodeJob.job_dir(job_id)
+    assert NodeJob.repo_path("calc-0123456789").name == "calc-0123456789.git"
+    for slug in ("calc..x", "-x", ".git", "_x"):
+        with pytest.raises(ValueError):
+            NodeJob.repo_path(slug)
+
+
 def test_the_parser_checks_a_job_id_itself_before_asking_the_job_store(monkeypatch):
     from dreamference.node import NodeServe
 
