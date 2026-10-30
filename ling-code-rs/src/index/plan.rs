@@ -1620,6 +1620,49 @@ mod tests {
             .unwrap_or_else(|| panic!("no run for {}", target.indexer))
     }
 
+    #[test]
+    fn executing_indexers_get_the_memory_ceiling_and_static_ones_the_small_one() {
+        let (dir, repo) = make_repo(&[("a/tsconfig.json", "{}"), ("a/x.ts", "export {};\n")]);
+        std::env::set_var("MIGHTLING_CODE_SCRATCH_DIR", dir.path().join("scratch"));
+        let tools = fake_tools(dir.path());
+        let settings = Settings {
+            memory_ceiling_mb: 9000,
+            small_ceiling_mb: 1000,
+            ..Settings::default()
+        };
+        let targets = [
+            (Target::new(Kind::Executing, "scip-java", "a"), 9000),
+            (
+                Target {
+                    file: "App.sln".into(),
+                    ..Target::new(Kind::Executing, "scip-dotnet", "a")
+                },
+                9000,
+            ),
+            (Target::new(Kind::Static, "scip-typescript", "a"), 1000),
+            (
+                Target {
+                    file: "compile_commands.json".into(),
+                    on_demand: true,
+                    ..Target::new(Kind::Static, "scip-clang", "a")
+                },
+                1000,
+            ),
+            (
+                Target {
+                    on_demand: true,
+                    ..Target::new(Kind::Static, "scip-go", "a")
+                },
+                1000,
+            ),
+        ];
+        for (target, mb) in targets {
+            let run = exact_run(&repo, &settings, &tools, &target, 0)
+                .unwrap_or_else(|| panic!("no run for {}", target.indexer));
+            assert_eq!(run.ceiling, mb << 20, "{}", target.indexer);
+        }
+    }
+
     fn env_of<'a>(run: &'a Run, key: &str) -> Option<&'a str> {
         run.spec
             .env
