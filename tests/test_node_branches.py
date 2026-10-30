@@ -642,3 +642,29 @@ def test_a_confirmed_unpairing_forgets_the_node_without_a_warning(monkeypatch, c
     assert "did not confirm" not in out and "no longer paired" in out
     assert not NodePairing.record_path(PAIRING_NODE).exists()
     assert [argv[:3] for argv in calls] == [["ssh-keygen", "-q", "-R"]]
+
+
+# -- fleet bundle [key]
+
+
+@pytest.mark.parametrize(
+    ("code", "stdout", "stderr", "shown"),
+    [
+        (0, "../../escaped\n", "", "../../escaped"),
+        (0, "v1.8.0/../../x\n", "", "v1.8.0/../../x"),
+        (0, "\n", "", "Could not find the latest release"),
+        (1, "v1.8.0\n", "HTTP 404", "HTTP 404"),
+    ],
+)
+def test_the_latest_release_tag_must_be_a_plain_version(monkeypatch, code, stdout, stderr, shown):
+    from dreamference.node import fleet_bundle as bundle_module
+    from dreamference.node.fleet_bundle import FleetBundle
+
+    monkeypatch.setattr(
+        bundle_module.subprocess,
+        "run",
+        lambda argv, **_: subprocess.CompletedProcess(argv, code, stdout, stderr),
+    )
+    with pytest.raises(OSError, match="Could not find the latest release") as raised:
+        FleetBundle.latest_tag()
+    assert shown in str(raised.value)
