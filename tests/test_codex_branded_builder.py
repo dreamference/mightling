@@ -1738,3 +1738,14 @@ def test_a_crate_is_not_built_without_rust(tmp_path, monkeypatch):
     monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: False))
     monkeypatch.setattr(builder_module.subprocess, "call", lambda *a, **k: pytest.fail("cargo ran"))
     assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is False
+
+
+def test_without_its_crate_a_crate_binary_is_current_only_if_installed(tmp_path, monkeypatch):
+    # A release install has the binaries but not the crate to build them from.
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path))
+    missing = str(tmp_path / "no-crate")
+    assert CodexBrandedBuilder.crate_is_current(missing, "stamp", ("x",)) is False
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "x").write_text("#!/bin/sh\n")
+    (tmp_path / "bin" / "x").chmod(0o755)
+    assert CodexBrandedBuilder.crate_is_current(missing, "stamp", ("x",)) is True
