@@ -651,6 +651,28 @@ def test_the_target_names_the_v8_assets_and_release_assets_per_platform(monkeypa
     assert CodexBrandedBuilder.host_target() == target
 
 
+@pytest.mark.parametrize("machine, target", [
+    # platform.machine() on Windows; ARM64 on an RTX Spark laptop (WINDOWS_ARM section 16.1).
+    ("ARM64", "aarch64-pc-windows-msvc"),
+    ("AMD64", "x86_64-pc-windows-msvc"),
+])
+def test_a_windows_machine_builds_for_the_msvc_target_and_fetches_v8s_lib(machine, target):
+    assert CodexBrandedBuilder.target_for(machine, windows=True) == target
+    assert CodexBrandedBuilder.v8_archive_name(target) == f"rusty_v8_{builder_module.RUSTY_V8_PROFILE}_{target}.lib.gz"
+
+
+def test_v8_elsewhere_is_the_static_library_upstream_names_lib_a():
+    name = CodexBrandedBuilder.v8_archive_name("aarch64-unknown-linux-gnu")
+    assert name == f"librusty_v8_{builder_module.RUSTY_V8_PROFILE}_aarch64-unknown-linux-gnu.a.gz"
+
+
+def test_a_windows_checkout_keeps_the_patches_and_shell_scripts_as_lf():
+    """With core.autocrlf=true a CRLF patch no longer applies to the LF export, and bash reads the CR."""
+    rules = (Path(__file__).resolve().parent.parent / ".gitattributes").read_text().splitlines()
+    assert "*.patch -text" in rules
+    assert "*.sh text eol=lf" in rules
+
+
 @pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
 def test_the_remaining_codex_names_on_screen_say_mightling(tmp_path):
     # Found by driving the real TUI through every popup/inline slash command, an approval prompt,
