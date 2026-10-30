@@ -1078,3 +1078,41 @@ def test_sessions_set_by_the_recipe_are_refused_not_cut(monkeypatch, capsys):
         mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
     assert calls["asked"] == [3]
     assert "Only" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("available_gb", [110.0, 85.0, 70.0])
+def test_the_plan_only_call_and_the_launch_ask_the_engine_for_the_same_sessions(
+    monkeypatch, available_gb
+):
+    """What --plan-only was asked is what the launch asks: sessions, batch and context agree, cut or not."""
+    mgr, calls = _cut_setup(monkeypatch, available_gb)
+    planned: list = []
+    real_plan = mgr.ling_serve_plan
+
+    def plan(image, model, recipe):
+        planned.append(
+            LingServeLaunchBuilder.server_args("repo", recipe, 8000, recipe.get("max_model_len"))
+        )
+        return real_plan(image, model, recipe)
+
+    monkeypatch.setattr(mgr, "ling_serve_plan", plan)
+    seen: dict = {}
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+    real_build = VLLMServerManager.build_launch_command
+    monkeypatch.setattr(
+        mgr,
+        "build_launch_command",
+        lambda **kw: (
+            seen.setdefault("cmd", real_build(mgr, **kw))
+            and (_ for _ in ()).throw(TypeError("stop"))
+        ),
+    )
+    with pytest.raises(TypeError):
+        mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
+
+    def asked(args):
+        return {f: args[args.index(f) + 1] for f in ("--sessions", "--batch", "--max-context")}
+
+    assert asked(planned[-1]) == asked(seen["cmd"])
+    assert asked(seen["cmd"])["--sessions"] == str(planned_sessions := calls["asked"][-1])
+    assert planned_sessions == int(asked(planned[-1])["--sessions"])
