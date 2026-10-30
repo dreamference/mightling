@@ -53,6 +53,12 @@ def test_explicit_engine_ling_with_an_adapter_is_refused(ling_default, adapters,
     assert "--engine ling cannot serve the installed adapters" in capsys.readouterr().out
 
 
+def test_ling_with_no_sglang_entry_stays_on_ling(adapters, monkeypatch, capsys):
+    monkeypatch.setattr(ModelMatrixRegistry, "engines", classmethod(lambda cls, key: [ENGINE_LING]))
+    assert Cli._engine_for_adapters(MODEL, None, from_flag=False) is None
+    assert capsys.readouterr().out == ""
+
+
 def test_ling_without_adapters_is_untouched(ling_default, no_adapters, capsys):
     assert Cli._engine_for_adapters(MODEL, None, from_flag=False) is None
     assert Cli._engine_for_adapters(MODEL, ENGINE_LING, from_flag=True) == ENGINE_LING

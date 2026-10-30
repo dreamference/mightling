@@ -781,6 +781,25 @@ def test_a_runtime_patch_that_cannot_be_prepared_stops_the_start(monkeypatch):
     assert "no longer match" in str(stopped.value.code)
 
 
+@pytest.mark.parametrize(
+    ("gate", "api_key", "gated"), [(True, None, True), (True, "k", False), (False, None, False)]
+)
+def test_adapters_are_prepared_only_behind_the_gate_with_no_key_of_the_callers(
+    monkeypatch, gate, api_key, gated
+):
+    mgr = VLLMServerManager()
+    _quiet_start(monkeypatch, mgr, gate_starts=True)
+    asked = []
+    monkeypatch.setattr(
+        "dreamference.vllm_server.adapter_serving.AdapterServing.prepare",
+        classmethod(lambda cls, model, image, gated, engine=None: asked.append(gated) or True),
+    )
+    mgr.start_server(
+        model="qwen3.8-27b-nvfp4-dflash2", background=False, gate=gate, api_key=api_key
+    )
+    assert asked == [gated]
+
+
 def test_no_gate_removes_one_an_earlier_start_left(monkeypatch):
     mgr = VLLMServerManager()
     built, events = _quiet_start(monkeypatch, mgr, gate_starts=True)
