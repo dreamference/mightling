@@ -154,6 +154,24 @@ fn search_asks_searxng_for_json_and_prints_results() {
 }
 
 #[test]
+fn search_follows_a_redirect_from_searxng() {
+    let server = Server::start(|line| {
+        if line.starts_with("GET /search?") {
+            response("302 Found", "text/plain", b"", "Location: /moved\r\n")
+        } else {
+            response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), "")
+        }
+    });
+    let output = search(&["q"], &[("DREAMFERENCE_SEARXNG_URL", &server.base)]);
+    assert!(
+        stdout(&output).starts_with("1. Lisbon - BBC Weather\n"),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[test]
 fn a_category_a_time_range_and_a_language_reach_searxng() {
     let server =
         Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
