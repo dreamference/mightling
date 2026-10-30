@@ -821,4 +821,21 @@ mod tests {
         assert_eq!(plan.first(), Some(&6), "{plan:?}");
         assert!(!plan.contains(&2) && !plan.contains(&4), "{plan:?}");
     }
+
+    #[test]
+    fn an_output_of_exactly_the_minimum_length_can_be_masked() {
+        let scratch = Scratch::new("edge");
+        let outputs = |chars: usize| -> Vec<Value> {
+            (0..=KEEP_RECENT)
+                .flat_map(|n| {
+                    let id = format!("call_{n:03}");
+                    [call(&id, "ls"), json!({"type": "function_call_output", "call_id": id, "output": "y".repeat(chars)})]
+                })
+                .collect()
+        };
+        let edge = outputs(MIN_MASKABLE_CHARS);
+        assert_eq!(plan_move(&policy(), &edge, &State::default(), 1_000_000, &scratch.0), Some(vec![1]));
+        let short = outputs(MIN_MASKABLE_CHARS - 1);
+        assert_eq!(plan_move(&policy(), &short, &State::default(), 1_000_000, &scratch.0), Some(vec![]));
+    }
 }
