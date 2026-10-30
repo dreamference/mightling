@@ -1210,3 +1210,19 @@ def test_the_system_bus_and_other_unix_sockets_are_not_a_lookup():
         + '5 write(3</tmp/ling.log>, "asked org.freedesktop.resolve1", 30) = 30\n'
     )
     assert trace.local_resolvers == {}
+
+
+def test_the_matrix_line_asks_the_users_systemd_about_the_socket_matrix_start_enables(
+    monkeypatch, tmp_path
+):
+    # The audit names the unit by a constant of its own: a rename on either side would silently
+    # leave an enabled homeserver out of the declared exceptions.
+    from dreamference.audit import egress_audit
+    from dreamference.chat import matrix_homeserver
+
+    assert egress_audit.MATRIX_PROXY_UNIT == matrix_homeserver.PROXY_SOCKET_UNIT
+    _chat_files(monkeypatch, tmp_path, {"matrix-admin.json": {"push": False}})
+    calls = _fake_units(monkeypatch, {matrix_homeserver.PROXY_SOCKET_UNIT})
+    assert EgressAudit.declared_exceptions()
+    unit = matrix_homeserver.PROXY_SOCKET_UNIT
+    assert ["systemctl", "--user", "is-enabled", "--quiet", unit] in calls
