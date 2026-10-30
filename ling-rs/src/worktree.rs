@@ -1265,4 +1265,25 @@ mod tests {
             assert_eq!(with_status_line(vec!["ling".into()], &user, &home, true).len(), 1, "{user:?}");
         }
     }
+
+    #[test]
+    fn a_bare_command_is_status_and_apply_or_discard_in_place_fails() {
+        let fixture = Fixture::new("in-place");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (lines, code) = command(&home, &repo, "", false);
+        assert_eq!(code, 0);
+        assert_eq!(lines[0], "Worktree mode off: new sessions edit in place (the default).");
+        let (lines, code) = command(&home, &repo, "apply", false);
+        assert_eq!(code, 1);
+        assert!(lines[0].contains("is edited in place: there is nothing to apply"), "{lines:?}");
+        let (lines, code) = command(&home, &repo, "discard", false);
+        assert_eq!(code, 1);
+        assert!(lines[0].contains("is edited in place: there is no worktree to discard"), "{lines:?}");
+        let (lines, code) = command(&home, &repo, "apply nope", false);
+        assert_eq!(code, 1);
+        assert!(lines[0].starts_with("No worktree session nope"), "{lines:?}");
+        let (lines, code) = command(&home, &repo, "frobnicate", false);
+        assert_eq!(code, 2);
+        assert_eq!(lines, vec!["Unknown: frobnicate".to_string(), CLI_USAGE.to_string()]);
+    }
 }
