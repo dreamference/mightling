@@ -87,6 +87,8 @@ def test_a_node_advertising_something_that_is_not_a_node_id_is_not_found_by_a_br
     )
     assert NodePairing.discover("spark-1") is None
     assert NodePairing.discover("spark-2")["node"] == NODE
+    assert NodePairing.discover("111") is None  # an id is found by four characters or more
+    assert NodePairing.discover("1111")["node"] == NODE
 
 
 def test_a_record_is_never_named_by_something_that_is_not_a_node_id():
