@@ -192,6 +192,19 @@ def test_a_change_is_committed_on_its_branch_and_the_checkout_is_untouched(setup
     assert record["session"]
 
 
+def test_a_task_whose_branch_is_left_from_an_earlier_night_carries_on_from_it(setup, monkeypatch):
+    git(setup["repo"], "branch", "night/20261001-0100-abc")
+    other = setup["repo"].parent / "earlier"
+    git(setup["repo"], "worktree", "add", "-q", str(other), "night/20261001-0100-abc")
+    (other / "earlier.txt").write_text("from the first night\n")
+    git(other, "add", "earlier.txt")
+    git(other, "commit", "-qm", "earlier")
+    git(setup["repo"], "worktree", "remove", "--force", str(other))
+    status, _, _ = run_task(setup, monkeypatch, "change", test="test -f hello.txt")
+    assert status == "done"
+    assert git(setup["repo"], "show", "night/20261001-0100-abc:earlier.txt").stdout == "from the first night\n"
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
