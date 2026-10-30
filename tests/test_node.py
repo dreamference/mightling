@@ -528,6 +528,22 @@ def test_enable_advertises_only_what_answers(machine, monkeypatch):
     assert records["state"] == "stopped" and "web" not in records
 
 
+def test_enable_yes_installs_the_file_as_this_user_and_removes_the_staged_copy(machine, monkeypatch):
+    import getpass
+
+    asked = []
+
+    def privileged(cls, command, purpose, yes=False):
+        asked.append((command, yes, Path(command[-2]).read_text()))
+        return False
+
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(privileged))
+    assert NodeAdvertiser.enable(yes=True) is False
+    ((command, yes, text),) = asked
+    assert yes is True and command[3:5] == ["-o", getpass.getuser()] and "_mightling-node._tcp" in text
+    assert not Path(command[-2]).exists()
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
