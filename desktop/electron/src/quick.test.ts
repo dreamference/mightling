@@ -70,6 +70,42 @@ describe("Quick Entry's recent questions (DESKTOP §16 B24)", () => {
     expect(recent.list()).toEqual([]);
   });
 
+  it("lists nothing it cannot place under Ask's root, so the box opens nothing else", () => {
+    const rootless = new RecentQuestions(() => null);
+    rootless.observe({ id: 1, result: { data: [thread("a", "/r/ask/a", "First", 1)] } });
+    expect(rootless.list()).toEqual([]);
+    expect(rootless.listed("a")).toBe(false);
+
+    const recent = new RecentQuestions(() => "/r/ask");
+    recent.observe({ id: 1, result: { data: [
+      thread("up", "/r/ask/../other/x", "Escapes the root", 1),
+      thread("root", "/r/ask", "The root itself", 2),
+      thread("none", "", "No folder", 3),
+      thread("blank", "/r/ask/b", "   ", 4),
+      thread(7 as unknown as string, "/r/ask/n", "A number for an id", 5),
+    ] } });
+    recent.observe(null);
+    recent.observe("text");
+    recent.observe({ method: "thread/started", params: { thread: null } });
+    expect(recent.list()).toEqual([]);
+    for (const id of ["up", "root", "none", "blank", 7]) expect(recent.listed(id), String(id)).toBe(false);
+  });
+
+  it("titles a question by its name before its preview, keeps a newer time, and renames or moves up only what it listed", () => {
+    const recent = new RecentQuestions(() => "/r/ask");
+    recent.observe({ id: 2, result: { thread: thread("n", "/r/ask/n", "the preview", 10, { name: "  Named \n question " }) } });
+    expect(recent.list()).toEqual([{ id: "n", title: "Named question" }]);
+    recent.observe({ method: "thread/name/updated", params: { threadId: "n", threadName: "   " } });
+    expect(recent.list()).toEqual([{ id: "n", title: "Named question" }]);
+    recent.observe({ method: "thread/name/updated", params: { threadId: "other", threadName: "X" } });
+    recent.observe({ method: "turn/started", params: { threadId: "other" } });
+    expect(recent.listed("other")).toBe(false);
+    recent.observe({ id: 3, result: { data: [thread("late", "/r/ask/l", "Late", 50), thread("mid", "/r/ask/m", "Mid", 20)] } });
+    // An older answer read again does not move a question back.
+    recent.observe({ id: 4, result: { thread: thread("late", "/r/ask/l", "Late", 5) } });
+    expect(recent.list().map((question) => question.id)).toEqual(["late", "mid", "n"]);
+  });
+
   it("grows the box by a line a question, up to five", () => {
     expect(quickSize(0)).toEqual(QUICK_SIZE);
     expect(quickSize(2).height).toBe(QUICK_SIZE.height + 8 + 56);
