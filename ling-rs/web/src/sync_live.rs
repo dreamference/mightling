@@ -807,4 +807,271 @@ mod tests {
         assert_eq!((notices[0].kind.as_str(), notices[0].text.as_str()), ("approval", "Approval needed: Fix the login"));
         assert!(live.notices(latest).0.is_empty());
     }
+    fn send_ask(thread: Option<&str>, text: Option<&str>) -> Ask {
+        Ask { kind: "send".to_string(), thread: thread.map(str::to_string), text: text.map(str::to_string), ..Ask::default() }
+    }
+
+    fn event(thread: &str, message: Value) -> HostEvent {
+        HostEvent { thread: thread.to_string(), message }
+    }
+
+    fn only_x_is_owned_by_desk(thread: &str) -> Option<String> {
+        (thread == "x").then(|| "desk".to_string())
+    }
+
+    fn nobody_owns(_: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn a_message_has_a_thread_and_words_and_is_at_most_text_cap_long() {
+        let live = Live::new(scratch("send-checks"));
+        let phone = device("ph", auth::Scope::Control, false);
+        assert!(live.command(&phone, send_ask(Some(T), Some(&"x".repeat(TEXT_CAP))), "lap").is_ok(), "exactly the cap is allowed");
+        assert!(matches!(live.command(&phone, send_ask(Some(T), Some(&"x".repeat(TEXT_CAP + 1))), "lap"), Err(Refused::BadRequest(_))));
+        assert!(matches!(live.command(&phone, send_ask(Some(T), None), "lap"), Err(Refused::BadRequest(_))), "no words");
+        assert!(matches!(live.command(&phone, send_ask(Some(T), Some("   ")), "lap"), Err(Refused::BadRequest(_))), "blank words");
+        assert!(matches!(live.command(&phone, send_ask(None, Some("hello")), "lap"), Err(Refused::BadRequest(_))), "no thread");
+    }
+
+    #[test]
+    fn an_approval_is_accepted_or_declined_and_nothing_else() {
+        let live = Live::new(scratch("decision"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        live.host_post(&laptop, post(vec![approval(7)], &[T]), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        let decide = |decision: Option<&str>| Ask {
+            kind: "approve".to_string(),
+            thread: Some(T.to_string()),
+            request: Some(json!(7)),
+            decision: decision.map(str::to_string),
+            ..Ask::default()
+        };
+        for wrong in [None, Some("maybe"), Some("Accept"), Some("")] {
+            assert!(matches!(live.command(&phone, decide(wrong), "lap"), Err(Refused::BadRequest(_))), "{wrong:?}");
+        }
+        assert!(live.command(&phone, decide(Some("decline")), "lap").is_ok());
+    }
+
+    #[test]
+    fn a_new_thread_needs_words_as_well_as_a_project_the_device_offers() {
+        let live = Live::new(scratch("start-words"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        live.host_post(&laptop, post(vec![], &[]), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        let start = |text: Option<&str>| Ask { kind: "start".to_string(), cwd: Some("/home/user/app".to_string()), text: text.map(str::to_string), ..Ask::default() };
+        assert!(matches!(live.command(&phone, start(None), "lap"), Err(Refused::BadRequest(_))));
+        assert!(matches!(live.command(&phone, start(Some("  ")), "lap"), Err(Refused::BadRequest(_))));
+        assert!(live.command(&phone, start(Some("go")), "lap").is_ok());
+    }
+
+    #[test]
+    fn the_queue_for_an_offline_device_is_counted_per_thread_and_a_device_is_online_by_its_own_hosts() {
+        let live = Live::new(scratch("per-thread"));
+        let phone = device("ph", auth::Scope::Control, false);
+        for n in 0..QUEUE_PER_THREAD {
+            live.command(&phone, send_ask(Some(T), Some(&format!("m{n}"))), "lap").unwrap();
+        }
+        assert_eq!(live.command(&phone, send_ask(Some(T), Some("too many")), "lap"), Err(Refused::QueueFull));
+        assert_eq!(live.command(&phone, send_ask(Some("another-thread"), Some("hello")), "lap").unwrap().state, "waiting", "another thread has its own ten");
+
+        // A host of one device does not make another device online.
+        let desk = device("desk", auth::Scope::Control, true);
+        live.host_post(&desk, post(vec![], &[]), &owners, &title);
+        assert_eq!(live.command(&phone, send_ask(Some(T), Some("to lap")), "lap"), Err(Refused::QueueFull), "lap is still offline, so its queue is full");
+        assert!(live.presence("desk").online && !live.presence("lap").online && live.presence("lap").last_seen == 0);
+        assert!(live.presence("desk").projects == ["/home/user/app"] && live.presence("lap").projects.is_empty());
+    }
+
+    #[test]
+    fn a_host_is_named_by_its_post_or_else_by_its_device() {
+        let live = Live::new(scratch("host-names"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        let desk = device("desk", auth::Scope::Control, true);
+        for caller in [&laptop, &desk] {
+            let mut unnamed = post(vec![], &[]);
+            unnamed.host = "  ".to_string();
+            live.host_post(caller, unnamed, &owners, &title);
+        }
+        assert!(live.presence("lap").online && live.presence("desk").online, "two devices' unnamed hosts are two hosts");
+    }
+
+    #[test]
+    fn a_thread_held_by_another_device_is_not_held_by_a_host_that_says_so() {
+        let live = Live::new(scratch("holding"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        let mut first = post(vec![], &["x"]);
+        first.host = "a".to_string();
+        live.host_post(&laptop, first, &only_x_is_owned_by_desk, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        live.command(&phone, send_ask(Some("x"), Some("go")), "lap").unwrap();
+        let mut second = post(vec![], &[]);
+        second.host = "b".to_string();
+        assert_eq!(live.host_post(&laptop, second, &only_x_is_owned_by_desk, &title).len(), 1, "host a's claim to x was dropped, so b may take it");
+    }
+
+    #[test]
+    fn a_thread_held_by_one_host_is_not_handed_to_another_host_of_the_device() {
+        let live = Live::new(scratch("held-elsewhere"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        let mut holder = post(vec![], &[T]);
+        holder.host = "a".to_string();
+        live.host_post(&laptop, holder.clone(), &owners, &title);
+        let mut other = post(vec![], &[]);
+        other.host = "b".to_string();
+        live.host_post(&laptop, other.clone(), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        live.command(&phone, send_ask(Some(T), Some("go")), "lap").unwrap();
+        assert!(live.host_post(&laptop, other, &owners, &title).is_empty(), "b does not hold the thread");
+        assert_eq!(live.host_post(&laptop, holder, &owners, &title).len(), 1);
+    }
+
+    #[test]
+    fn a_command_is_handed_only_to_a_host_of_the_device_it_is_for() {
+        let live = Live::new(scratch("own-device"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        let desk = device("desk", auth::Scope::Control, true);
+        live.host_post(&laptop, post(vec![], &[T]), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        let sent = live.command(&phone, send_ask(Some(T), Some("go")), "lap").unwrap();
+        assert!(live.host_post(&desk, post(vec![], &[]), &owners, &title).is_empty());
+        assert_eq!(live.command_state(sent.id).unwrap().state, "queued");
+        assert_eq!(live.host_post(&laptop, post(vec![], &[T]), &owners, &title).len(), 1);
+    }
+
+    #[test]
+    fn only_the_device_a_command_went_to_says_how_it_went_and_it_has_two_minutes() {
+        let live = Live::new(scratch("acks"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        let desk = device("desk", auth::Scope::Control, true);
+        live.host_post(&laptop, post(vec![], &[T]), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        let sent = live.command(&phone, send_ask(Some(T), Some("go")), "lap").unwrap();
+        let waiting = live.command(&phone, send_ask(Some(T), Some("and then")), "lap").unwrap();
+        assert_eq!(live.host_post(&laptop, post(vec![], &[T]), &owners, &title).len(), 2);
+        let mut forged = post(vec![], &[]);
+        forged.acks = vec![Ack { id: sent.id, ok: true, ..Ack::default() }];
+        live.host_post(&desk, forged, &owners, &title);
+        assert_eq!(live.command_state(sent.id).unwrap().state, "delivered", "another device cannot answer for it");
+
+        // A delivered command nobody answered fails after two minutes, not before.
+        live.host_post(&laptop, post(vec![], &[T]), &owners, &title);
+        assert_eq!(live.command_state(waiting.id).unwrap().state, "delivered");
+        let later = |seconds: u64| live.lock().commands.iter_mut().filter(|command| command.id == sent.id).for_each(|command| command.delivered = Some(("app-1".to_string(), SystemTime::now() - Duration::from_secs(seconds))));
+        later(ANSWER_WITHIN.as_secs() - 20);
+        live.host_post(&laptop, post(vec![], &[T]), &owners, &title);
+        assert_eq!(live.command_state(sent.id).unwrap().state, "delivered");
+        later(ANSWER_WITHIN.as_secs() + 20);
+        live.host_post(&laptop, post(vec![], &[T]), &owners, &title);
+        let failed = live.command_state(sent.id).unwrap();
+        assert_eq!((failed.state.as_str(), failed.error.is_some()), ("failed", true));
+        assert_eq!(live.command_state(waiting.id).unwrap().state, "delivered", "the other one is not yet late");
+    }
+
+    #[test]
+    fn a_message_waits_a_day_for_an_offline_device_and_then_expires() {
+        let live = Live::new(scratch("a-day"));
+        let phone = device("ph", auth::Scope::Control, false);
+        let sent = live.command(&phone, send_ask(Some(T), Some("go")), "lap").unwrap();
+        assert_eq!(sent.state, "waiting");
+        let old = |hours: u64| live.lock().commands.iter_mut().for_each(|command| command.at = now_secs() - hours * 60 * 60);
+        let laptop = device("lap", auth::Scope::Control, true);
+        old(25);
+        assert!(live.host_post(&laptop, post(vec![], &[]), &owners, &title).is_empty(), "too old to hand over");
+        assert_eq!(live.command_state(sent.id).unwrap().state, "expired");
+    }
+
+    #[test]
+    fn what_a_host_posts_about_a_thread_is_kept_by_what_it_is() {
+        let live = Live::new(scratch("ingest"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        let mut batch = post(vec![], &[T]);
+        batch.events = vec![
+            event("", json!({ "method": "item/completed", "params": {} })),
+            event(T, json!({ "id": 5, "result": { "ok": true } })),
+            event(T, approval(8)),
+        ];
+        live.host_post(&laptop, batch, &owners, &title);
+        assert!(live.follow("", 0).events.is_empty(), "an event with no thread is dropped");
+        assert_eq!(live.follow(T, 0).pending, [approval(8)], "an answer (an id and no method) is not a question waiting");
+        // A turn that ends takes its unanswered questions with it.
+        live.host_post(&laptop, post(vec![json!({ "method": "turn/completed", "params": { "threadId": T } })], &[T]), &owners, &title);
+        assert!(live.follow(T, 0).pending.is_empty());
+    }
+
+    #[test]
+    fn a_thread_the_store_does_not_hold_makes_no_notice() {
+        let live = Live::new(scratch("untitled"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        let mut batch = post(vec![], &[]);
+        batch.events = vec![event("not-published", approval(1))];
+        live.host_post(&laptop, batch, &nobody_owns, &nobody_owns);
+        assert!(live.notices(0).0.is_empty());
+        assert_eq!(live.follow("not-published", 0).pending.len(), 1, "buffered all the same");
+    }
+
+    #[test]
+    fn a_follower_that_is_up_to_date_is_not_told_to_reload_nor_given_the_last_event_again() {
+        let live = Live::new(scratch("up-to-date"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        let turn = |n: u64| json!({ "method": "item/completed", "params": { "threadId": T, "n": n } });
+        live.host_post(&laptop, post(vec![turn(1), turn(2)], &[T]), &owners, &title);
+        let all = live.follow(T, 0);
+        let first = all.events[0].0;
+        assert_eq!(live.follow(T, first).events.len(), 1, "after the first, only the second");
+        let current = live.follow(T, all.next);
+        assert!(!current.reset && current.events.is_empty() && current.next == all.next, "{current:?}");
+    }
+
+    #[test]
+    fn a_follower_that_saw_the_last_dropped_event_missed_nothing() {
+        let live = Live::new(scratch("dropped"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        let deltas: Vec<Value> = (0..BUFFER + 50).map(|n| json!({ "method": "item/agentMessage/delta", "params": { "threadId": T, "delta": format!("{n} ") } })).collect();
+        live.host_post(&laptop, post(deltas, &[T]), &owners, &title);
+        let dropped = live.lock().threads[T].dropped;
+        assert_eq!(dropped, 50);
+        assert!(!live.follow(T, dropped).reset, "everything after the dropped events is still there");
+        assert!(live.follow(T, dropped - 1).reset);
+    }
+
+    #[test]
+    fn a_message_delivered_but_not_yet_answered_still_shows_as_queued_to_a_follower() {
+        let live = Live::new(scratch("queued-view"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        live.host_post(&laptop, post(vec![], &[T]), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        live.command(&phone, send_ask(Some(T), Some("go")), "lap").unwrap();
+        assert_eq!(live.follow(T, 0).queued.len(), 1);
+        live.host_post(&laptop, post(vec![], &[T]), &owners, &title);
+        let following = live.follow(T, 0);
+        assert_eq!((following.queued.len(), following.queued[0].state.as_str()), (1, "delivered"));
+    }
+
+    #[test]
+    fn notices_after_the_newest_are_none_and_a_reader_up_to_date_is_not_sent_them_again() {
+        let live = Live::new(scratch("notice-cursor"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        live.host_post(&laptop, post(vec![approval(1)], &[T]), &owners, &title);
+        let (notices, latest) = live.notices(0);
+        assert_eq!(notices.len(), 1);
+        assert!(live.notices(latest).0.is_empty());
+        assert!(live.notices(live.seq()).0.is_empty(), "a reader that has caught up with every number is not given the notices again");
+    }
+
+    #[test]
+    fn a_deleted_thread_is_forgotten_with_what_waited_for_it() {
+        let live = Live::new(scratch("forget"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        live.host_post(&laptop, post(vec![approval(1)], &[T]), &owners, &title);
+        live.host_post(&laptop, post(vec![], &[T]), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        let taken = live.command(&phone, send_ask(Some(T), Some("first")), "lap").unwrap();
+        assert_eq!(live.host_post(&laptop, post(vec![], &[T]), &owners, &title).len(), 1);
+        let queued = live.command(&phone, send_ask(Some(T), Some("go")), "lap").unwrap();
+        live.forget_thread(T);
+        assert!(live.command_state(queued.id).is_none(), "a message queued for a deleted thread is dropped");
+        assert_eq!(live.command_state(taken.id).unwrap().state, "delivered", "one the host already has is its to answer");
+        assert!(live.follow(T, 0).events.is_empty() && live.follow(T, 0).pending.is_empty());
+    }
 }
