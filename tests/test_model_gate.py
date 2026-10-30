@@ -72,6 +72,18 @@ def test_the_gate_is_open_without_a_live_run(tmp_path):
     assert ModelGateService.state(str(tmp_path))["state"] == "open"
 
 
+def test_a_record_without_a_heartbeat_or_a_list_of_networks_leaves_it_open(tmp_path):
+    for broken in (
+        run_record(heartbeat=None),
+        run_record(heartbeat="now"),
+        run_record(networks="10.200.0.0/16"),
+        run_record(networks={"subnet": "10.200.0.0/16"}),
+    ):
+        write(tmp_path, RUN_FILE, broken)
+        state = ModelGateService.state(str(tmp_path))
+        assert state["state"] == "open" and state["stale"] == "n1-default", broken
+
+
 def test_a_live_run_closes_it_and_a_pause_opens_it(tmp_path):
     write(tmp_path, RUN_FILE, run_record())
     state = ModelGateService.state(str(tmp_path))
