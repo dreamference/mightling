@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from dreamference.chat.desktop_installer import DesktopInstaller
 from dreamference.runner import codex_branded_builder as builder_module
 from dreamference.runner.codex_branded_builder import (
     CODEX_LOCKFILE,
@@ -415,7 +416,7 @@ def test_ling_is_not_built_without_the_ui_it_serves(tmp_path, capsys):
             "fetch_rusty_v8",
             return_value={"RUSTY_V8_ARCHIVE": "a", "RUSTY_V8_SRC_BINDING_PATH": "b"},
         ),
-        patch.object(builder_module.DesktopInstaller, "install_rust", return_value=True),
+        patch.object(DesktopInstaller, "install_rust", return_value=True),
         patch.object(CodexBrandedBuilder, "build_web_ui", return_value=None),
         patch.object(
             builder_module.subprocess, "call", side_effect=AssertionError("cargo must not run")
@@ -470,7 +471,7 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
             "fetch_rusty_v8",
             return_value={"RUSTY_V8_ARCHIVE": "a", "RUSTY_V8_SRC_BINDING_PATH": "b"},
         ),
-        patch.object(builder_module.DesktopInstaller, "install_rust", return_value=True),
+        patch.object(DesktopInstaller, "install_rust", return_value=True),
         patch.object(CodexBrandedBuilder, "build_web_tools", return_value=True),
         patch.object(CodexBrandedBuilder, "build_code_index", return_value=True),
         patch.object(CodexBrandedBuilder, "build_docs_index", return_value=True),
@@ -645,7 +646,7 @@ def test_the_web_commands_build_from_their_own_crate_with_its_lockfile(tmp_path,
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(builder_module, "WEB_BUILD_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(
-        builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+        DesktopInstaller, "install_rust", classmethod(lambda cls: True)
     )
     monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
@@ -721,7 +722,7 @@ def test_mightling_code_builds_from_its_own_crate_and_is_linked_onto_path(tmp_pa
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(builder_module, "CODE_BUILD_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(
-        builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+        DesktopInstaller, "install_rust", classmethod(lambda cls: True)
     )
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
     monkeypatch.setattr(
@@ -769,7 +770,7 @@ def test_ling_docs_builds_from_its_own_crate_installs_its_runtime_and_is_linked(
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(builder_module, "DOCS_BUILD_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(
-        builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+        DesktopInstaller, "install_rust", classmethod(lambda cls: True)
     )
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
     monkeypatch.setattr(
@@ -994,7 +995,7 @@ def test_the_codex_and_crate_builds_take_the_compile_cache(tmp_path, monkeypatch
         classmethod(lambda cls, environment: {"RUSTC_WRAPPER": "/x/sccache"}),
     )
     monkeypatch.setattr(
-        builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+        DesktopInstaller, "install_rust", classmethod(lambda cls: True)
     )
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
@@ -1030,7 +1031,7 @@ def _fake_crate(tmp_path, monkeypatch, during_build=None):
 
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(
-        builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True)
+        DesktopInstaller, "install_rust", classmethod(lambda cls: True)
     )
     monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
@@ -1606,7 +1607,7 @@ def _codex_build(tmp_path, monkeypatch, **steps):
     monkeypatch.setattr(builder_module, "IS_WINDOWS", False)
     monkeypatch.setenv("CARGO_TARGET_DIR", str(tmp_path / "elsewhere"))
     monkeypatch.setattr(
-        builder_module.DesktopInstaller,
+        DesktopInstaller,
         "install_rust",
         classmethod(lambda cls: result["install_rust"]),
     )
@@ -1736,7 +1737,7 @@ def test_force_rebuilds_a_current_crate_and_without_it_the_links_are_refreshed(t
 
 def test_a_crate_is_not_built_without_rust(tmp_path, monkeypatch):
     crate = _fake_crate(tmp_path, monkeypatch)
-    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: False))
+    monkeypatch.setattr(DesktopInstaller, "install_rust", classmethod(lambda cls: False))
     monkeypatch.setattr(builder_module.subprocess, "call", lambda *a, **k: pytest.fail("cargo ran"))
     assert CodexBrandedBuilder.build_crate(str(crate), str(tmp_path / "cache"), "stamp", ("x",)) is False
 

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from dreamference.chat.desktop_installer import DesktopInstaller
 from dreamference.chat.desktop_runner import DesktopRunner
 from dreamference.runner import codex_branded_builder
 from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
@@ -1159,7 +1160,7 @@ def test_a_release_install_is_current_and_never_starts_a_build(release_install, 
     def no_build(*args, **kwargs):
         raise AssertionError("a release install must not run cargo or install Rust")
     monkeypatch.setattr(subprocess, "call", no_build)
-    monkeypatch.setattr(codex_branded_builder.DesktopInstaller, "install_rust", no_build)
+    monkeypatch.setattr(DesktopInstaller, "install_rust", no_build)
 
     assert not CodexBrandedBuilder.has_source()
     assert not CodexInstaller.is_installed()
