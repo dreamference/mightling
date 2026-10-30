@@ -901,3 +901,41 @@ def test_the_sealing_key_is_readable_by_its_owner_only(tmp_path):
     assert len(key) == 32
     assert (tmp_path / "credentials.key").stat().st_mode & 0o777 == 0o600
     assert GmailSearchService._key(str(tmp_path)) == key
+
+
+def test_a_sealing_key_of_the_wrong_length_is_replaced(tmp_path):
+    from dreamference.chat.gmail_search_service import KEY_NAME, GmailSearchService
+
+    (tmp_path / KEY_NAME).write_bytes(b"short")
+    key = GmailSearchService._key(str(tmp_path))
+    assert len(key) == 32 and (tmp_path / KEY_NAME).read_bytes() == key
+
+
+def test_a_broken_key_another_request_left_is_replaced_not_used(tmp_path, monkeypatch):
+    # The race is lost to a file that is no key: sealing with it would lose every token.
+    from dreamference.chat import gmail_search_service as svc_mod
+    from dreamference.chat.gmail_search_service import KEY_NAME, GmailSearchService
+
+    real = svc_mod.secrets.token_bytes
+
+    def racing(n):
+        (tmp_path / KEY_NAME).write_bytes(b"half")
+        return real(n)
+
+    monkeypatch.setattr(svc_mod.secrets, "token_bytes", racing)
+    key = GmailSearchService._key(str(tmp_path))
+    assert len(key) == 32 and (tmp_path / KEY_NAME).read_bytes() == key
+    assert [path.name for path in tmp_path.iterdir()] == [KEY_NAME]
+
+
+def test_a_file_system_without_hard_links_still_gets_a_whole_key(tmp_path, monkeypatch):
+    from dreamference.chat.gmail_search_service import KEY_NAME, GmailSearchService
+
+    def no_links(self, target):
+        raise PermissionError("hard links not supported")
+
+    monkeypatch.setattr(type(tmp_path), "hardlink_to", no_links)
+    key = GmailSearchService._key(str(tmp_path))
+    assert len(key) == 32 and (tmp_path / KEY_NAME).read_bytes() == key
+    assert (tmp_path / KEY_NAME).stat().st_mode & 0o777 == 0o600
+    assert [path.name for path in tmp_path.iterdir()] == [KEY_NAME]
