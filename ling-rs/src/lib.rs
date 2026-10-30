@@ -2252,6 +2252,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn another_launchers_staging_file_is_left_alone() {
+        let dir = std::env::temp_dir().join(format!("mightling-atomic-other-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap_or_default();
+        // Two launchers starting at once each stage under a name of their own.
+        let theirs = dir.join(".config.toml.tmp");
+        std::fs::write(&theirs, "theirs = 1\n").unwrap_or_default();
+        write_atomically(&dir.join("config.toml"), b"new = 2\n").expect("write");
+        assert_eq!(std::fs::read_to_string(&theirs).unwrap_or_default(), "theirs = 1\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_config_replaced_whole_keeps_its_mode() {
