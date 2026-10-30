@@ -892,6 +892,13 @@ mod tests {
             r#"{"kind": "management", "management": {"connected": true}}"#
         ));
     }
+    #[test]
+    fn management_is_connected_only_by_the_word_true() {
+        for value in ["t", "tru", "false", "1"] {
+            let status = format!("{{\"management\": {{\"connected\": {value}}}}}");
+            assert!(!management_connected(&status), "{status}");
+        }
+    }
 
     #[test]
     fn a_pin_names_the_remembered_node_only_by_its_whole_name_address_or_a_long_id_prefix() {
