@@ -587,4 +587,23 @@ mod tests {
         .unwrap();
         assert_eq!(read.sources.len(), MAX_PAGES);
     }
+
+    #[test]
+    fn a_few_more_results_are_asked_for_than_pages_are_read() {
+        let base = searxng_answering(
+            r#"{"answers": [], "unresponsive_engines": [], "results": [
+                {"title": "f1", "url": "ftp://one.example/"}, {"title": "f2", "url": "ftp://two.example/"},
+                {"title": "3", "url": "https://three.example/"}, {"title": "4", "url": "https://four.example/"}]}"#,
+        );
+        let read = search_and_read_from(&base, "q", 2, Level::Off, None, |url: &str, _| {
+            Ok(page(url, "", "text"))
+        })
+        .unwrap();
+        let urls: Vec<&str> = read
+            .sources
+            .iter()
+            .map(|source| source.result.url.as_str())
+            .collect();
+        assert_eq!(urls, ["https://three.example/", "https://four.example/"]);
+    }
 }
