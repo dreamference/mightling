@@ -555,6 +555,14 @@ def test_an_attempt_starts_from_the_base_whatever_an_earlier_run_left(bon, monke
     assert git(bon["repo"], "show", "night/20261001-0100-abc:stray.txt").returncode != 0
 
 
+def test_an_attempt_is_a_session_of_its_own_even_for_a_task_with_one(bon):
+    record = dict(queue(bon["night"], bon["repo"], test=TEST), session="an-earlier-session")
+    single = NightShiftTaskRun(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60)
+    attempt = NightShiftTaskRun(bon["night"], record, NightShiftSettings({}), bon["ling"], time.time() + 60,
+                                attempt=1)
+    assert single.session == "an-earlier-session" and attempt.session is None
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
