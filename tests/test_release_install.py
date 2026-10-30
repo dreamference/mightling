@@ -534,6 +534,14 @@ def test_an_unknown_argument_is_refused_before_anything_is_downloaded(tmp_path, 
     assert server.requests == []
 
 
+def test_role_both_is_the_node(tmp_path, release_server):
+    # A node is a client of itself too, so `both` is taken as the node.
+    server = release_server(binaries(target="aarch64-apple-darwin"))
+    result = run_install(tmp_path, server, "--role", "both", uname_s="Darwin", uname_m="arm64")
+    assert result.returncode == 1 and "macOS" in result.stderr
+    assert server.requests == []
+
+
 def test_the_machine_decides_the_role(tmp_path, release_server):
     # A GB10 gets the node (which then needs the release's wheel); anything else, the client.
     server = release_server(binaries())
