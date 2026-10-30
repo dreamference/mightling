@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ScriptedServer } from "./scripted-server";
-import { TerminalHub, decode, encode, shellCommand, terminalMessage } from "./terminal";
+import { TerminalHub, decode, encode, plainTail, shellCommand, terminalMessage } from "./terminal";
 
 describe("a terminal tab", () => {
   it("runs a login shell under the thread's permission profile and echoes what is typed", async () => {
@@ -122,5 +122,12 @@ describe("a terminal's text for the thread", () => {
       hub.deliver({ method: "command/exec/outputDelta", params: { processId: "p1", stream: "stdout", deltaBase64: btoa(String.fromCharCode(byte)), capReached: false } } as never);
     }
     expect(hub.tail("p1", 5)).toBe("é");
+  });
+});
+
+describe("a tab's output as text", () => {
+  it("drops the terminal's other escapes too: a character set, keypad modes, cursor saves", () => {
+    // `tput sgr0` writes ESC ( B before ESC [ m; less writes ESC = and ESC >.
+    expect(plainTail("\x1b(B\x1b[mdone\x1b=\x1b>\x1b7 ok\x1b8\x1b]0;title\x07")).toBe("done ok");
   });
 });

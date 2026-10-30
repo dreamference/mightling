@@ -49,7 +49,9 @@ const PENDING_KEPT = 1024 * 1024;
 
 /** A tab's last `lines` lines of output as plain text, without the terminal's control sequences. */
 export function plainTail(text: string, lines = 80): string {
-  const plain = text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "").replace(/\r\n/g, "\n").replace(/\r/g, "");
+  const plain = text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")
+    // Then every other escape (a character set `ESC ( B`, keypad modes `ESC =`, cursor saves `ESC 7`).
+    .replace(/\x1b[ -\/]*[0-~]/g, "").replace(/\r\n/g, "\n").replace(/\r/g, "");
   return plain.split("\n").slice(-lines).join("\n").trim();
 }
 
