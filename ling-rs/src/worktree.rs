@@ -1068,7 +1068,8 @@ mod tests {
         // Status in place names the folder and branch, and leaves the footer the authority.
         let (lines, _) = command(&home, &repo, "status", true);
         assert_eq!(lines[0], "Worktree mode off: new sessions edit in place (the default).");
-        assert_eq!(lines[1], format!("This session edits {} in place, on main.", repo.display()));
+        // git names the folder with forward slashes on Windows too.
+        assert_eq!(lines[1].replace('\\', "/"), format!("This session edits {} in place, on main.", repo.display()).replace('\\', "/"));
         assert!(lines[2].starts_with("The footer's folder is where edits land"), "{lines:?}");
     }
 
