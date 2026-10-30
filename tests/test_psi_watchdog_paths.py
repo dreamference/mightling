@@ -196,6 +196,20 @@ def test_each_known_cgroup_layout_is_found(monkeypatch, layout):
     assert wd._cgroup_procs == layout
 
 
+def test_a_failed_inspect_is_not_read_as_an_id(monkeypatch):
+    # Whatever a failing `docker inspect` printed, it is not the container's ID.
+    monkeypatch.setattr(
+        psi_watchdog.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd, 1, stdout="[]\n", stderr="Error: No such object: test-container\n"
+        ),
+    )
+    wd = MemoryPressureWatchdog("test-container")
+    wd._ensure_cgroup_resolved()
+    assert wd._container_id is None and wd._cgroup_procs is None
+
+
 def test_the_probe_skips_a_pid_that_has_exited(monkeypatch):
     probed = []
 
