@@ -1671,3 +1671,17 @@ def test_a_codex_install_replaces_ling_rather_than_writing_into_it(tmp_path, mon
     assert (bin_dir / "ling").read_text() == "built codex"
     assert (tmp_path / "running").read_text() == "the running ling"
     assert not [p.name for p in bin_dir.iterdir() if p.name.endswith(".new")]
+
+
+def test_force_rebuilds_ling_even_when_it_is_current(tmp_path, monkeypatch):
+    built = []
+    monkeypatch.setattr(builder_module, "BUILD_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexBrandedBuilder, "_lock_exclusive", classmethod(lambda cls, handle: None))
+    monkeypatch.setattr(CodexBrandedBuilder, "_build_locked", classmethod(lambda cls: built.append(1) or True))
+    monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: built.append("link")))
+    assert CodexBrandedBuilder._build_codex(force=True) is True
+    assert built == [1]
+    # Without force a current build is not redone, but its links are still refreshed.
+    assert CodexBrandedBuilder._build_codex() is True
+    assert built == [1, "link"]
