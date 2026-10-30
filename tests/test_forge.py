@@ -1,5 +1,6 @@
 """The node's forge (specs/DREAMFERENCE_MIGHTLING_FORGEJO.md): nothing here runs docker or reaches a node."""
 
+import configparser
 import datetime
 import io
 import json
@@ -163,6 +164,60 @@ def test_app_ini_is_lan_only_private_and_never_push_mirrors(tmp_path):
     mirror = ForgeAppIni.path(tmp_path).read_text()
     assert "ALLOW_LOCALNETWORKS = true" in mirror and "ALLOWED_DOMAINS = forge-record" in mirror
     assert "[actions]\nENABLED = false" in mirror
+
+
+def app_ini(path):
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    parser.read_string("[DEFAULT]\n" + path.read_text())
+    return parser
+
+
+SHUT_FOR_BOTH_ROLES = {
+    ("server", "OFFLINE_MODE"): "true",
+    ("security", "DISABLE_GIT_HOOKS"): "true",
+    ("security", "MIN_PASSWORD_LENGTH"): "12",
+    ("service", "DEFAULT_ORG_VISIBILITY"): "limited",
+    ("service", "DEFAULT_USER_VISIBILITY"): "limited",
+    ("openid", "ENABLE_OPENID_SIGNIN"): "false",
+    ("openid", "ENABLE_OPENID_SIGNUP"): "false",
+    ("picture", "DISABLE_GRAVATAR"): "true",
+    ("picture", "ENABLE_FEDERATED_AVATAR"): "false",
+    ("federation", "ENABLED"): "false",
+    ("packages", "ENABLED"): "false",
+    ("mirror", "DISABLE_NEW_PUSH"): "true",
+}
+
+
+@pytest.mark.parametrize(
+    "role, mirroring, local_networks, domains",
+    [("record", "false", "false", ""), ("mirror", "true", "true", "forge-record")],
+)
+def test_app_ini_reaches_nothing_outside_and_only_a_mirror_pulls_from_the_forge_of_record(
+    tmp_path, role, mirroring, local_networks, domains
+):
+    parser = app_ini(ForgeAppIni.write(tmp_path, "gx10-1a2b", role))
+    expected = SHUT_FOR_BOTH_ROLES | {
+        ("mirror", "ENABLED"): mirroring,
+        ("migrations", "ALLOW_LOCALNETWORKS"): local_networks,
+        ("migrations", "ALLOWED_DOMAINS"): domains,
+    }
+    assert {key: parser.get(*key) for key in expected} == expected
+
+
+def test_a_secret_left_blank_in_app_ini_is_made_again(tmp_path):
+    path = ForgeAppIni.write(tmp_path, "gx10-1a2b", "record")
+    secrets = ForgeAppIni.read_secrets(tmp_path)
+    lines = [
+        "SECRET_KEY =" if line.startswith("SECRET_KEY =") else line
+        for line in path.read_text().splitlines()
+    ]
+    path.write_text("\n".join(lines) + "\n")
+    assert ForgeAppIni.read_secrets(tmp_path) == {
+        key: value for key, value in secrets.items() if key != "security.SECRET_KEY"
+    }
+    ForgeAppIni.write(tmp_path, "gx10-1a2b", "record")
+    assert app_ini(path).get("security", "SECRET_KEY")
 
 
 def test_the_switch_defaults_on_and_is_kept_in_the_nodes_config(monkeypatch):
