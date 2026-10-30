@@ -674,6 +674,25 @@ mod tests {
     }
 
     #[test]
+    fn a_default_folder_named_as_the_home_folder_or_a_relative_path_falls_back() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::create_dir_all(home.join(".config")).unwrap();
+        std::fs::write(
+            home.join(".config/user-dirs.dirs"),
+            "XDG_DOCUMENTS_DIR=\"$HOME/\"\nXDG_DOWNLOAD_DIR=\"src\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            default_folders(&home),
+            [
+                ("documents", home.join("Documents")),
+                ("downloads", home.join("Downloads")),
+            ]
+        );
+    }
+
+    #[test]
     fn two_writers_at_once_keep_both_changes() {
         // One writer holds the lock while it saves; the other, started first, waits and then
         // reads the file afresh, so neither change is lost.
