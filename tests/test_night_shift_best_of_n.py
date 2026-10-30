@@ -501,6 +501,15 @@ def test_a_swiss_round_pairs_only_neighbours_within_the_window():
     assert not any("x0" in pair for pair in pairs)
 
 
+def test_a_swiss_round_reaches_the_eighth_neighbour():
+    import random
+    ids = [f"x{i}" for i in range(11)]
+    scores = {cid: 10.0 - i for i, cid in enumerate(ids)}
+    played = {frozenset(("x0", f"x{i}")) for i in range(1, 8)}
+    pairs = NightShiftChooser.pairings(ids, scores, played, {cid: 2 for cid in ids}, random.Random(0))
+    assert ("x0", "x8") in pairs
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
