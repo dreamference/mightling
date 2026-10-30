@@ -1741,6 +1741,25 @@ def test_a_job_whose_memory_and_the_reserve_just_fit_is_admitted(job_node, monke
     assert "GiB of memory available" in NodeJob.admission_blocker(record)
 
 
+def test_a_job_whose_unit_does_not_start_is_refused_and_recorded_as_failed(job_node, monkeypatch):
+    from dreamference.node import NodeJob
+
+    run = subprocess.run
+    monkeypatch.setattr(NodeJob, "USE_UNIT", True)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kwargs: (
+            subprocess.CompletedProcess(argv, 1, "", "Failed to connect to bus\n")
+            if argv[0] == "systemd-run"
+            else run(argv, **kwargs)
+        ),
+    )
+    with pytest.raises(ValueError, match="could not start the job's unit: Failed to connect"):
+        NodeJob.submit(job_request(commit=job_node["commit"]), "/x")
+    assert NodeJob.read("20261002-1200-abc")["status"] == "failed"
+
+
 def test_a_job_stopped_by_its_limits_is_settled_and_a_cancel_is_kept(job_node, monkeypatch):
     from dreamference.node import NodeJob
 
