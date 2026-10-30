@@ -3,7 +3,8 @@
 // question…" opens a small box above the other windows; Enter sends it as a new Ask question in the
 // app window, which comes forward with the answer streaming; Esc or a click elsewhere puts the box
 // away. The box is the app's page at `#quick` on the same preload and channel as the pet, and may
-// ask for two things only (main.ts `handleQuick`). The shortcut is Electron's `globalShortcut`: X11,
+// ask for four things only: its recent questions, one opened, a question sent, and itself hidden
+// (main.ts `handleQuick`). The shortcut is Electron's `globalShortcut`: X11,
 // macOS and Windows; on a Wayland session it registers nothing, which Settings says. The box lists
 // the most recent Ask questions, each a click away (DESKTOP §16 B24), learnt from the app-server's
 // messages as the main process routes them (`RecentQuestions`).
