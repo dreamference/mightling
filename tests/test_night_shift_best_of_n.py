@@ -486,6 +486,11 @@ def test_the_judges_seed_is_the_tasks_own(bon, monkeypatch):
     assert seeds[0] == seeds[2] != seeds[1]
 
 
+def test_clip_keeps_a_text_of_exactly_the_limit_whole():
+    assert NightShiftChooser.clip("abc", 3) == "abc"
+    assert NightShiftChooser.clip("abcd", 3) == "abc\n[... cut: 1 more characters]"
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
