@@ -572,6 +572,22 @@ mod state_file_tests {
         assert!(state_file_in(&linked, "code_index.building").is_err());
         assert!(!state.join("code_index.building").exists());
     }
+
+    #[test]
+    fn a_fifo_with_a_reader_is_not_taken_for_a_state_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        std::fs::create_dir(&state).unwrap();
+        let fifo = state.join("session.lock");
+        let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        // With a reader the open for writing succeeds; the type check is what refuses it.
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NONBLOCK);
+        let _reader = options.open(&fifo).unwrap();
+        assert!(open_state_file(&state, "session.lock", true).is_err());
+    }
 }
 
 #[cfg(test)]
