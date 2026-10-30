@@ -7,6 +7,7 @@ here reaches Google or Docker.
 
 import io
 import json
+import pathlib
 import subprocess
 import urllib.error
 import urllib.parse
@@ -378,15 +379,20 @@ def test_the_container_is_on_the_sidecar_network_published_on_loopback():
 class FakeDocker:
     """Records docker commands and answers `inspect` with a fixed state."""
 
-    def __init__(self, state: str, env: str = "MIGHTLING_GMAIL_SECRET=s3cret") -> None:
+    def __init__(
+        self, state: str, env: str = "MIGHTLING_GMAIL_SECRET=s3cret", failing: tuple[str, ...] = ()
+    ) -> None:
         self.state = state
         self.env = env
+        self.failing = failing  # docker subcommands that fail
         self.commands: list[list[str]] = []
         self.environments: list[dict[str, str] | None] = []
 
     def __call__(self, argv, **kwargs):
         self.commands.append(list(argv))
         self.environments.append(kwargs.get("env"))
+        if argv[1] in self.failing:
+            return subprocess.CompletedProcess(argv, 1, "", f"docker {argv[1]} failed")
         if argv[:2] == ["docker", "rm"]:
             self.state = ""
         if argv[:2] == ["docker", "inspect"]:
@@ -409,8 +415,13 @@ def staging(monkeypatch, tmp_path):
     return tmp_path
 
 
-def _docker(monkeypatch, state: str, env: str = "MIGHTLING_GMAIL_SECRET=s3cret") -> FakeDocker:
-    fake = FakeDocker(state, env)
+def _docker(
+    monkeypatch,
+    state: str,
+    env: str = "MIGHTLING_GMAIL_SECRET=s3cret",
+    failing: tuple[str, ...] = (),
+) -> FakeDocker:
+    fake = FakeDocker(state, env, failing)
     monkeypatch.setattr(subprocess, "run", fake)
     return fake
 
@@ -451,7 +462,14 @@ def test_a_running_service_restarts_only_when_its_staged_code_changed(monkeypatc
     assert not [c for c in fake.commands if c[:2] in (["docker", "restart"], ["docker", "run"])]
 
 
-@pytest.mark.parametrize("env", ["PUFFIN_GMAIL_SECRET=s3cret", "MIGHTLING_GMAIL_SECRET=old"])
+@pytest.mark.parametrize(
+    "env",
+    [
+        "PUFFIN_GMAIL_SECRET=s3cret",
+        "MIGHTLING_GMAIL_SECRET=old",
+        "MIGHTLING_GMAIL_SECRET=s3cret-old",
+    ],
+)
 def test_a_container_without_todays_secret_is_replaced(monkeypatch, staging, env):
     # Made before the rename, the container hands the service PUFFIN_GMAIL_SECRET: every client
     # was told "unauthorised", and the current code started in it would check no secret at all.
@@ -471,6 +489,7 @@ def test_server_start_starts_it_only_on_a_node_without_one(monkeypatch):
         GoogleService, "start", classmethod(lambda cls: started.append(True) or True)
     )
     monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: None))
+    monkeypatch.setattr(GoogleService, "state", classmethod(lambda cls: ""))
     assert GoogleService.ensure_on_node() is None
     monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: "node-1"))
     monkeypatch.setattr(GoogleService, "state", classmethod(lambda cls: "running"))
@@ -575,3 +594,115 @@ def test_the_shared_secret_is_kept_where_only_its_owner_can_read_it(monkeypatch,
     assert folder.stat().st_mode & 0o777 == 0o700
     assert (folder / "service-secret").stat().st_mode & 0o777 == 0o600
     assert GoogleService.secret() == value
+
+
+def test_server_start_goes_on_when_docker_does_not_answer(monkeypatch):
+    from dreamference.node.node_identity import NodeIdentity
+
+    def hung(cls):
+        raise subprocess.TimeoutExpired(["docker", "inspect"], 30)
+
+    monkeypatch.setattr(GoogleService, "problem", "")
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: "node-1"))
+    monkeypatch.setattr(GoogleService, "state", classmethod(hung))
+    assert GoogleService.ensure_on_node() is False
+    assert GoogleService.problem.startswith("The Google service was not started: ")
+
+
+def test_a_changed_staged_file_is_replaced_and_the_service_restarted(monkeypatch, staging):
+    from dreamference.chat import gmail_search_service
+
+    (staging / "service.py").write_text("# an older service\n")
+    fake = _docker(monkeypatch, "running")
+    assert GoogleService.start() is True
+    assert (staging / "service.py").read_bytes() == pathlib.Path(
+        gmail_search_service.__file__
+    ).read_bytes()
+    assert ["docker", "restart", GOOGLE_CONTAINER_NAME] in fake.commands
+
+
+def test_a_stopped_service_is_started_even_when_its_code_is_current(monkeypatch, staging):
+    _docker(monkeypatch, "running")
+    assert GoogleService.start() is True
+    fake = _docker(monkeypatch, "exited")
+    assert GoogleService.start() is True
+    assert fake.commands[-1] == ["docker", "start", GOOGLE_CONTAINER_NAME]
+
+
+def test_the_staging_folder_holding_the_tokens_is_private(tmp_path):
+    assert GoogleService.stage(str(tmp_path / "gmail"))
+    assert (tmp_path / "gmail").stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize(
+    ("state", "failing", "problem"),
+    [
+        ("", ("network",), "Could not create the Docker network dreamference-sidecars."),
+        ("", ("run",), "Could not start the Google service: docker run failed"),
+        ("exited", ("start",), f"Could not start {GOOGLE_CONTAINER_NAME}: docker start failed"),
+    ],
+)
+def test_a_google_service_start_that_fails_says_why(monkeypatch, staging, state, failing, problem):
+    monkeypatch.setattr(GoogleService, "problem", "an earlier failure")
+    _docker(monkeypatch, state, failing=failing)
+    assert GoogleService.start() is False
+    assert GoogleService.problem == problem
+
+
+def test_a_start_without_a_secret_creates_nothing_and_removes_nothing(monkeypatch, staging):
+    monkeypatch.setattr(GoogleService, "secret", classmethod(lambda cls: None))
+    monkeypatch.setattr(GoogleService, "problem", "")
+    fake = _docker(monkeypatch, "")
+    assert GoogleService.start() is False
+    assert GoogleService.problem == "Could not store the service's shared secret."
+    fake = _docker(monkeypatch, "running")
+    assert GoogleService.start() is False
+    assert not [c for c in fake.commands if c[:2] in (["docker", "rm"], ["docker", "run"])]
+
+
+def test_stop_says_when_the_container_is_left(monkeypatch):
+    fake = _docker(monkeypatch, "running")
+    assert GoogleService.stop() is True
+    assert ["docker", "rm", "-f", GOOGLE_CONTAINER_NAME] in fake.commands
+    _docker(monkeypatch, "running", failing=("rm",))
+    assert GoogleService.stop() is False
+
+
+def test_an_existing_shared_secret_is_read_as_its_owner_wrote_it(monkeypatch, tmp_path):
+    # Read without its line end and without minting a new one: the clients send it as stored.
+    import secrets
+
+    import dreamference.chat.gmail_credentials as credentials
+
+    (tmp_path / "service-secret").write_text("kept-secret\n")
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        secrets, "token_urlsafe", lambda size: pytest.fail("a new secret was minted")
+    )
+    assert GoogleService.secret() == "kept-secret"
+
+
+def test_a_new_shared_secret_is_long_and_leaves_no_temporary_file(monkeypatch, tmp_path):
+    import dreamference.chat.gmail_credentials as credentials
+
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(tmp_path / "gmail"))
+    value = GoogleService.secret()
+    assert value and len(value) >= 43  # 32 random bytes
+    assert [path.name for path in (tmp_path / "gmail").iterdir()] == ["service-secret"]
+
+
+def test_a_shared_secret_that_cannot_be_stored_is_reported(monkeypatch, tmp_path):
+    import dreamference.chat.gmail_credentials as credentials
+
+    (tmp_path / "file").write_text("")
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(tmp_path / "file" / "gmail"))
+    monkeypatch.setattr(GoogleService, "problem", "")
+    assert GoogleService.secret() is None
+    assert GoogleService.problem.startswith("Could not store the Google service's shared secret: ")
+
+
+def test_a_google_service_start_forgets_the_last_failure(monkeypatch, staging):
+    monkeypatch.setattr(GoogleService, "problem", "Could not start the Google service: earlier")
+    _docker(monkeypatch, "")
+    assert GoogleService.start() is True
+    assert GoogleService.problem == ""
