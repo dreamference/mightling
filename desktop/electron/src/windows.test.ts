@@ -261,4 +261,65 @@ describe("the window hub", () => {
     expect(() => paneAction({ kind: "compose", text: "x".repeat(PANE_TEXT_MAX + 1) }, "t1")).toThrow("text for the composer");
     expect(() => paneAction({ kind: "openFile", path: "" }, "t1")).toThrow("must be named");
   });
+
+  it("refuses every composer method from a window that does not own the thread, and from a pane", () => {
+    const hub = new WindowHub();
+    hub.open("1", "full");
+    hub.open("2", "popout");
+    hub.open("3", "pane");
+    hub.show("1", "t1");
+    hub.show("2", "t1");
+    const composer = [
+      "turn/start", "turn/steer", "turn/interrupt", "thread/shellCommand", "review/start", "thread/compact/start", "thread/revert",
+      "thread/queue/add", "thread/queue/update", "thread/queue/delete", "thread/queue/reorder", "thread/queue/start",
+      "thread/goal/set", "thread/goal/clear",
+    ];
+    expect([...COMPOSER_METHODS].sort()).toEqual([...composer].sort());
+    for (const method of composer) {
+      const message = { id: 7, method, params: { threadId: "t1" } };
+      expect(() => hub.outgoing("2", message), method).toThrow("in another window");
+      expect(() => hub.outgoing("3", message), method).toThrow("a detached pane has no composer");
+      expect(hub.outgoing("1", message).send, method).toEqual({ ...message, id: "1␟7" });
+    }
+    // Reading, naming and archiving stay open to every window.
+    expect(hub.outgoing("2", { id: 8, method: "thread/read", params: { threadId: "t1" } }).send).toEqual({ id: "2␟8", method: "thread/read", params: { threadId: "t1" } });
+  });
+
+  it("refuses an answer from a pane, and an error for an answer, outside the owner's window", () => {
+    const hub = new WindowHub();
+    hub.open("1", "full");
+    hub.open("2", "full");
+    hub.open("3", "pane");
+    hub.show("1", "t1");
+    // A thread no window owns: any window but a pane answers for it.
+    hub.incoming({ id: "srv-1", method: "item/commandExecution/requestApproval", params: { threadId: "t9" } });
+    expect(() => hub.outgoing("3", { id: "srv-1", result: { decision: "accept" } })).toThrow("in another window");
+    expect(() => hub.outgoing("3", { id: "srv-1", error: { code: -1, message: "declined" } })).toThrow("in another window");
+    expect(hub.outgoing("2", { id: "srv-1", result: { decision: "accept" } }).send).toEqual({ id: "srv-1", result: { decision: "accept" } });
+    // An error is an answer too: refusing a request is the owner's alone.
+    hub.incoming({ id: "srv-2", method: "item/fileChange/requestApproval", params: { threadId: "t1" } });
+    expect(() => hub.outgoing("2", { id: "srv-2", error: { code: -1, message: "declined" } })).toThrow("in another window");
+    expect(hub.outgoing("1", { id: "srv-2", error: { code: -1, message: "declined" } }).send).toEqual({ id: "srv-2", error: { code: -1, message: "declined" } });
+  });
+
+  it("forgets a server request once it is answered, resolved, or the server is gone", () => {
+    const hub = new WindowHub();
+    hub.open("1", "full");
+    hub.open("2", "full");
+    hub.show("1", "t1");
+    const answer = (id: string) => ({ id, result: { decision: "accept" } });
+    // Answered by its owner: a late answer from elsewhere is left to the server's policy, which no longer waits for it.
+    hub.incoming({ id: "srv-1", method: "item/commandExecution/requestApproval", params: { threadId: "t1" } });
+    hub.outgoing("1", answer("srv-1"));
+    expect(hub.outgoing("2", answer("srv-1")).send).toEqual(answer("srv-1"));
+    // Resolved by the server: the same.
+    hub.incoming({ id: "srv-2", method: "item/commandExecution/requestApproval", params: { threadId: "t1" } });
+    hub.incoming({ method: "serverRequest/resolved", params: { threadId: "t1", requestId: "srv-2" } });
+    expect(hub.outgoing("2", answer("srv-2")).send).toEqual(answer("srv-2"));
+    // A new server numbers its requests afresh: a request of the old one says nothing about the new one's.
+    hub.incoming({ id: 0, method: "item/commandExecution/requestApproval", params: { threadId: "t1" } });
+    hub.reset();
+    hub.incoming({ id: 0, method: "account/chatgptAuthTokens/refresh", params: {} });
+    expect(hub.outgoing("2", { id: 0, result: {} }).send).toEqual({ id: 0, result: {} });
+  });
 });
