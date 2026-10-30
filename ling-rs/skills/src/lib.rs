@@ -424,6 +424,34 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_budget_lines_change_at_eighty_percent_and_past_the_limit() {
+        let fixture = Fixture::new("start-budget-lines");
+        fixture.skill(".mightling/skills/mine", "mine", "");
+        let mut plan = catalog::plan(&fixture.machine(), &Settings::default());
+        plan.limit = Some(100);
+        let lines = |plan: &mut Plan, used: usize| {
+            plan.entries[0].cost = used;
+            budget_lines(plan)
+        };
+        assert_eq!(lines(&mut plan, 79), Vec::<String>::new());
+        assert_eq!(lines(&mut plan, 80), vec![format!("Skills: 80 of 100 catalogue tokens; {NEARLY_FULL}")]);
+        assert_eq!(lines(&mut plan, 100), vec![format!("Skills: 100 of 100 catalogue tokens; {NEARLY_FULL}")]);
+        let over = lines(&mut plan, 101);
+        assert_eq!(over.len(), 1);
+        assert!(over[0].starts_with("Skills: 101 of 100 catalogue tokens even without linked skills"), "{over:?}");
+    }
+
+    #[test]
+    fn a_start_says_when_the_links_could_not_be_updated() {
+        let fixture = Fixture::new("start-links-failed");
+        fixture.skill(".claude/skills/comms", "comms", "");
+        std::fs::write(fixture.codex_home.join("skills"), "not a folder").unwrap_or_default();
+        let started = start(&fixture.machine(), false, "t1");
+        let failed = |line: &String| line.starts_with("Skills: the links to other agents' skills could not be updated: ");
+        assert!(started.lines.iter().any(failed), "{:?}", started.lines);
+    }
+
     fn config(fixture: &Fixture) -> String {
         std::fs::read_to_string(fixture.codex_home.join("config.toml")).unwrap_or_default()
     }
