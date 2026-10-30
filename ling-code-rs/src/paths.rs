@@ -538,6 +538,24 @@ mod state_file_tests {
         assert!(repo.source_text("src/lib.rs").is_some());
         assert_eq!(repo.source_text("/src/lib.rs"), None);
     }
+
+    #[test]
+    fn a_source_file_the_checkout_links_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "fn main() {}\n").unwrap();
+        std::os::unix::fs::symlink("src/lib.rs", root.join("linked.rs")).unwrap();
+        let repo = Repo {
+            root: root.clone(),
+            main_root: root,
+            is_git: false,
+        };
+        assert_eq!(
+            repo.source_text("linked.rs").as_deref(),
+            Some("fn main() {}\n")
+        );
+    }
 }
 
 #[cfg(test)]
