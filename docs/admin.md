@@ -392,6 +392,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--test-guard` | The launcher's test guard in every session: a change that weakens an existing test is pointed out, and the first stop while it stands is held once (spec §29) |
 | `--finish-check` | The launcher's finish check in every session: the first stop after a change no test has run on, mid-work, or calling failures pre-existing unchecked is held once (spec §29) |
 | `--review-turn` | After the agent stops with a changed tree, resume its session once more to re-read the issue, read its diff, run the tests of the modules it changed and fix what does not hold, within the task's time limit; the patch is collected after that turn (default off) |
+| `--strategy-hint` | Append strategy hint N (1 to 6) after the issue in every prompt, so the rounds of a best-of-N night work in different ways; 0 for none (default 0) |
 | `--remove-images` | With --eval: work one repository at a time, in chunks of at most --image-chunk instances, and remove a chunk's images once it is graded. |
 | `--image-chunk` | With --eval --remove-images: the most instances of one repository whose images are on disk at once (default [swe_bench] image_chunk, 25; 0: the whole repository) |
 | `--shard` | A new run covers only the I-th of K shards of the selected instances, balanced by difficulty and repository and the same on every machine, so K machines share one list; `swe-bench merge` puts the K runs back together. |

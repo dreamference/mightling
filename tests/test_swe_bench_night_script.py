@@ -1526,3 +1526,36 @@ def test_start_refuses_a_worktree_without_the_drop_flag(tmp_path):
     assert result.returncode == 1
     assert f"{worktree} does not have --drop-old-outputs: pin REF to a commit that has it." in result.stdout
     assert not (tmp_path / "night7").exists()
+
+
+def test_the_diverse_arm_hints_every_attempt_but_the_first(tmp_path):
+    status, recorded, folder = best_of_night(tmp_path, arms="diverse")
+    assert status == 0 and (folder / "done").exists()
+    rounds = runs(recorded)
+    assert [r.split("--name ")[1].split()[0] for r in rounds] == [
+        "n11-diverse-1",
+        "n11-diverse-2",
+        "n11-diverse-3",
+    ]
+    assert "--strategy-hint" not in rounds[0]
+    assert rounds[1].count("--strategy-hint 1 ") == 1 and rounds[2].count("--strategy-hint 2 ") == 1
+    assert all("--task-rules" not in r for r in rounds)
+
+
+def test_the_diverse_arm_stacks_and_needs_best_of(tmp_path):
+    status, recorded, _ = best_of_night(tmp_path, arms="tests-v2+diverse", best_of="2")
+    assert status == 0
+    first, second = runs(recorded)
+    assert "--task-rules tests-v2" in first and "--strategy-hint" not in first
+    assert "--task-rules tests-v2" in second and "--strategy-hint 1 " in second
+    (tmp_path / "one").mkdir()
+    status, recorded, folder = best_of_night(tmp_path / "one", arms="default diverse", best_of="1")
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists()
+
+
+@pytest.mark.parametrize("arm", ["diverse-3", "diversity", "divers"])
+def test_a_misspelt_diverse_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = best_of_night(tmp_path, arms=arm)
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists() and not (folder / "done").exists()

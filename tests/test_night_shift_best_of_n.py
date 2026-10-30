@@ -35,7 +35,10 @@ from dreamference.night_shift import (
     NightShiftRunner,
     NightShiftSettings,
     NightShiftTaskRun,
+    StrategyHints,
 )
+from dreamference.night_shift.night_shift_task_run import PREAMBLE
+from dreamference.night_shift.strategy_hints import DEFAULT_HINTS, HINT_INTRO
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -955,3 +958,61 @@ def test_server_judge_asks_the_model_once_and_reads_a_reasoning_only_answer():
         assert gets == ["/v1/models"]
     finally:
         server.shutdown()
+
+
+# -- diverse attempts (`[night] best_of_hints`) -----------------------------------------------------
+
+
+def attempt_prompts(bon):
+    """The first prompt of every session, by attempt number."""
+    execs = [json.loads(line) for line in bon["calls"].read_text().splitlines()]
+    return {int(c[c.index("-C") + 1].rsplit("-a", 1)[1]): c[-1] for c in execs}
+
+
+def plain_prompt(bon, k):
+    """Attempt k's prompt as it was before strategy hints existed."""
+    return PREAMBLE.format(
+        repo=bon["repo"],
+        branch=f"night/20261001-0100-abc-a{k}",
+        test_line=f"- When the change is made, run `{TEST}` and fix what it reports.\n",
+        task="Add hello.txt",
+    )
+
+
+def test_without_best_of_hints_every_attempts_prompt_is_byte_identical(bon, monkeypatch):
+    status, record, _ = run_best_of(bon, monkeypatch, ["good", "good", "good"])
+    assert status == "done"
+    assert attempt_prompts(bon) == {k: plain_prompt(bon, k) for k in (1, 2, 3)}
+    assert all("hint" not in entry for entry in record["result"]["best_of"]["attempts"])
+    assert "hint:" not in NightShiftReport.render(datetime.now(), [record], [])
+
+
+def test_best_of_hints_append_a_hint_after_the_task_from_the_second_attempt(bon, monkeypatch):
+    status, record, _ = run_best_of(bon, monkeypatch, ["good", "good", "good"], best_of_hints=True)
+    assert status == "done"
+    prompts = attempt_prompts(bon)
+    # Attempt 1 is the single-run baseline; the others end with their hint, after the task.
+    assert prompts[1] == plain_prompt(bon, 1)
+    for k in (2, 3):
+        assert prompts[k] == plain_prompt(bon, k) + HINT_INTRO + DEFAULT_HINTS[k - 2]
+        assert prompts[k].index("Add hello.txt") < prompts[k].index(DEFAULT_HINTS[k - 2])
+    attempts = record["result"]["best_of"]["attempts"]
+    assert "hint" not in attempts[0]
+    assert [entry["hint"] for entry in attempts[1:]] == list(DEFAULT_HINTS[:2])
+    report = NightShiftReport.render(datetime.now(), [record], [])
+    assert f"hint: {DEFAULT_HINTS[0]}" in report and f"hint: {DEFAULT_HINTS[1]}" in report
+
+
+def test_a_tasks_own_hints_win_over_the_settings_and_hints_wrap_round():
+    settings = NightShiftSettings({"best_of": 3, "best_of_hints": True})
+    assert settings.best_of_hints == DEFAULT_HINTS
+    assert NightShiftSettings({}).best_of_hints == ()
+    assert NightShiftBestOfN.hints_for({}, settings) == DEFAULT_HINTS
+    assert NightShiftBestOfN.hints_for({"best_of_hints": False}, settings) == ()
+    assert NightShiftBestOfN.hints_for({"best_of_hints": ["Go slow. "]}, settings) == ("Go slow.",)
+    assert StrategyHints.resolve("off") == () and StrategyHints.resolve("default") == DEFAULT_HINTS
+    assert StrategyHints.hint_for(1, ("a", "b")) is None
+    assert [StrategyHints.hint_for(k, ("a", "b")) for k in (2, 3, 4)] == ["a", "b", "a"]
+    assert StrategyHints.hint_for(2, ()) is None
+    assert StrategyHints.append("task", None) == "task"
+    assert 3 <= len(DEFAULT_HINTS) <= 8

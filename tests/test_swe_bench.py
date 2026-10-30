@@ -5992,3 +5992,65 @@ def test_the_specs_turn_end_threshold_and_index_wait_figures():
     """
     assert SweBenchRunner.turn_end_percent("on", 262144, 49152) == 13
     assert (SweBenchRunner.INDEX_WAIT_S, SweBenchRunner.INDEX_POLL_S) == (30 * 60, 15)
+
+
+# -- the strategy hint arm (`--strategy-hint`, diverse best-of-N) ----------------------------------
+
+
+def test_the_strategy_hint_follows_the_issue_and_without_it_the_prompt_is_unchanged(bench):
+    from dreamference.night_shift.strategy_hints import DEFAULT_HINTS, HINT_INTRO
+
+    issue = "The widget is broken."
+    plain = SweBenchInstanceRun.compose_prompt(issue)
+    assert SweBenchInstanceRun.compose_prompt(issue, strategy_hint="") == plain
+    hinted = SweBenchInstanceRun.compose_prompt(issue, strategy_hint=DEFAULT_HINTS[0])
+    assert hinted == plain + HINT_INTRO + DEFAULT_HINTS[0]
+    fix = SweBenchInstanceRun.compose_fix_prompt(issue, "x")
+    assert SweBenchInstanceRun.compose_fix_prompt(
+        issue, "x", strategy_hint=DEFAULT_HINTS[1]
+    ) == fix + HINT_INTRO + DEFAULT_HINTS[1]
+
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    assert run(bench, name="hint2", instances=["acme__widget-1"], strategy_hint=2) == 0
+    statement = "The widget is broken in acme__widget-1."
+    prompts = [prompt for prompt, _ in mightling_prompts(bench["docker"])]
+    assert prompts == [
+        SweBenchInstanceRun.compose_prompt(statement),
+        SweBenchInstanceRun.compose_prompt(statement) + HINT_INTRO + DEFAULT_HINTS[1],
+    ]
+    plain_manifest = SweBenchRunStore("plain").manifest()
+    assert plain_manifest["strategy_hint"] == 0 and plain_manifest["strategy_hint_text"] == ""
+    manifest = SweBenchRunStore("hint2").manifest()
+    assert manifest["strategy_hint"] == 2 and manifest["strategy_hint_text"] == DEFAULT_HINTS[1]
+    # A resumed run keeps the text it started with.
+    assert run(bench, name="hint2", instances=["acme__widget-2"]) == 0
+    assert mightling_prompts(bench["docker"])[-1][0].endswith(HINT_INTRO + DEFAULT_HINTS[1])
+    for name in ("plain", "hint2"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    assert "differs: strategy_hint: 2 | 0" in SweBenchReport.against(
+        SweBenchRunStore("hint2"), SweBenchRunStore("plain")
+    )
+    assert f"Strategy hint       2: {DEFAULT_HINTS[1]}" in SweBenchReport.render(
+        SweBenchRunStore("hint2")
+    )
+    assert "Strategy hint" not in SweBenchReport.render(SweBenchRunStore("plain"))
+
+
+def test_a_strategy_hint_out_of_range_is_refused_and_the_flag_is_parsed(bench, monkeypatch):
+    import argparse
+
+    from dreamference.night_shift.strategy_hints import DEFAULT_HINTS
+
+    assert run(bench, name="bad", strategy_hint=len(DEFAULT_HINTS) + 1) == 1
+    assert run(bench, name="bad", strategy_hint=-1) == 1
+    seen = {}
+    monkeypatch.setattr(
+        SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0)
+    )
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    words = ["swe-bench", "run", "--strategy-hint", "3", "--name", "x"]
+    assert SweBenchCommand.dispatch(parser.parse_args(words)) == 0
+    assert seen["strategy_hint"] == 3
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["strategy_hint"] == 0

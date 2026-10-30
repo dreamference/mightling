@@ -21,6 +21,7 @@ from dreamference.night_shift.night_shift_runner import NightShiftRunner
 from dreamference.night_shift.night_shift_scheduler import NightShiftScheduler
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
+from dreamference.night_shift.strategy_hints import StrategyHints
 
 __all__ = [
     "ArchiveOutcome",
@@ -41,4 +42,5 @@ __all__ = [
     "NightShiftScheduler",
     "NightShiftSettings",
     "NightShiftTaskRun",
+    "StrategyHints",
 ]

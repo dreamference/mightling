@@ -43,6 +43,29 @@ class SweBenchCommand:
     """The `swe-bench` subcommands."""
 
     @classmethod
+    def add_prompt_arms(cls, run: argparse.ArgumentParser) -> None:
+        """Adds the arms on what the agent is asked to `swe-bench run`: the review turn and the hint.
+
+        Args:
+            run: The `run` subcommand's parser.
+        """
+        run.add_argument(
+            "--review-turn",
+            action="store_true",
+            help="After the agent stops with a changed tree, resume its session once more to re-read the issue, "
+            "read its diff, run the tests of the modules it changed and fix what does not hold, "
+            "within the task's time limit; the patch is collected after that turn (default off)",
+        )
+        run.add_argument(
+            "--strategy-hint",
+            type=int,
+            default=0,
+            metavar="N",
+            help="Append strategy hint N (1 to 6) after the issue in every prompt, so the rounds "
+            "of a best-of-N night work in different ways; 0 for none (default 0)",
+        )
+
+    @classmethod
     def add_output_arms(cls, run: argparse.ArgumentParser) -> None:
         """Adds the arms on what becomes of the model's output to `swe-bench run`.
 
@@ -420,13 +443,7 @@ class SweBenchCommand:
             "drops); the launcher's own choice when absent: function on SGLang and vLLM (spec §23)",
         )
         cls.add_output_arms(run)
-        run.add_argument(
-            "--review-turn",
-            action="store_true",
-            help="After the agent stops with a changed tree, resume its session once more to re-read the issue, "
-            "read its diff, run the tests of the modules it changed and fix what does not hold, "
-            "within the task's time limit; the patch is collected after that turn (default off)",
-        )
+        cls.add_prompt_arms(run)
 
         evaluate = commands.add_parser(
             "eval",
@@ -548,6 +565,7 @@ class SweBenchCommand:
                 image_chunk=args.image_chunk,
                 test_guard=args.test_guard,
                 finish_check=args.finish_check,
+                strategy_hint=args.strategy_hint,
             )
         if command == "eval":
             return cls.evaluate(

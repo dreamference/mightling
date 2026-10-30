@@ -55,6 +55,7 @@ COMPARED_FIELDS: Final[tuple] = (
     "sampling",
     "test_guard",
     "finish_check",
+    "strategy_hint",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {
@@ -78,6 +79,7 @@ MISSING_FIELDS: Final[dict] = {
     "sampling": "default",
     "test_guard": False,
     "finish_check": False,
+    "strategy_hint": 0,
 }
 # The guards' holds in the order a report lists them (ling-rs/src/guard.rs), and the guards' names.
 GUARD_HOLDS: Final[tuple] = ("untested", "pre-existing", "mid-work", "test-edits")
@@ -523,6 +525,28 @@ class SweBenchReport:
             f"into the task, {sum(1 for b in restart['diff_bytes'] if b)} with a diff to hand over: "
             + ", ".join(restart["restarted"])
         )
+
+    @classmethod
+    def prompt_lines(cls, manifest: dict) -> list[str]:
+        """The report's lines on what a run added to the prompt: task rules and a strategy hint.
+
+        Args:
+            manifest: The run's manifest.
+
+        Returns:
+            list[str]: One line for each that the run had; none for the plain prompt.
+        """
+        lines = []
+        if manifest.get("task_rules"):
+            lines.append(
+                f"Task rules          {', '.join(manifest['task_rules'])} (lines added to the task prompt)"
+            )
+        if manifest.get("strategy_hint"):
+            lines.append(
+                f"Strategy hint       {manifest['strategy_hint']}: "
+                f"{manifest.get('strategy_hint_text', '')} (appended after the issue)"
+            )
+        return lines
 
     @classmethod
     def turn_end_line(cls, manifest: dict[str, Any]) -> str:
@@ -1035,10 +1059,7 @@ class SweBenchReport:
             f"Nudges              stall {summary['nudges_fired'].get('stall', 0)}     "
             f"completion {summary['nudges_fired'].get('completion', 0)}",
         ]
-        if manifest.get("task_rules"):
-            lines.append(
-                f"Task rules          {', '.join(manifest['task_rules'])} (lines added to the task prompt)"
-            )
+        lines.extend(cls.prompt_lines(manifest))
         lines.append(cls.review_line(summary["review"]))
         lines.append(cls.turn_end_line(manifest))
         lines.append(cls.restart_line(summary["restart"]))

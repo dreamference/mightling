@@ -24,6 +24,9 @@ Rules kept on purpose:
 - Without a test command the regression filter has nothing to go on and the judge alone decides;
   the report says so.
 - With refine mode on, every attempt studies the task in its own session first.
+- With `[night] best_of_hints` (or the task's own `best_of_hints`) every attempt after the first
+  gets a strategy hint after the task text (`StrategyHints`), recorded as the attempt's `hint`;
+  off by default, when every attempt gets the same prompt.
 - A judge call that fails counts as unreadable (a tie at the floor), so a judge fault never stops
   the night; a tie at the top goes to the attempt whose tests passed, then the earliest.
 """
@@ -42,6 +45,7 @@ from dreamference.night_shift.night_shift_chooser import JUDGE_TIMEOUT_S, Compar
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 from dreamference.night_shift.night_shift_task_run import DONE, NO_HOOKS, NightShiftTaskRun
+from dreamference.night_shift.strategy_hints import StrategyHints
 from dreamference.runner.safe_git import SafeGit
 
 # Statuses of an attempt that ended without a candidate, worst last: what the task becomes when no
@@ -107,6 +111,8 @@ class NightShiftBestOfN:
         self.mightling_bin = mightling_bin
         self.deadline = deadline
         self.best_of = max(1, best_of)
+        # Every attempt but the first gets a strategy hint after the task (`StrategyHints`).
+        self.hints: tuple[str, ...] = self.hints_for(task, settings)
         self.model_host = model_host
         self.context_budget = context_budget
         self.model_node = model_node
@@ -159,6 +165,22 @@ class NightShiftBestOfN:
         except (TypeError, ValueError):
             wanted = int(getattr(settings, "best_of", 1))
         return max(1, wanted)
+
+    @classmethod
+    def hints_for(cls, task: dict[str, Any], settings: NightShiftSettings) -> tuple[str, ...]:
+        """The strategy hints a task's attempts get.
+
+        Args:
+            task: The task record.
+            settings: Night Shift settings.
+
+        Returns:
+            tuple[str, ...]: The task's own `best_of_hints` when it has one, else
+            `[night] best_of_hints`; empty when they are off.
+        """
+        if task.get("best_of_hints") is not None:
+            return StrategyHints.resolve(task["best_of_hints"])
+        return tuple(getattr(settings, "best_of_hints", ()) or ())
 
     @classmethod
     def task_run(
@@ -246,6 +268,7 @@ class NightShiftBestOfN:
                 model_node=self.model_node,
                 window_end=self.window_end,
                 attempt=number,
+                hint=StrategyHints.hint_for(number, self.hints),
             )
             attempt.stop_event = self.stop_event
             attempt.lane_host = self.lane_host
@@ -256,6 +279,8 @@ class NightShiftBestOfN:
                 self.current = None
             outcome = attempt.outcome or {"attempt": number, "status": status, "result": {}}
             outcome["paths"] = (str(attempt.worktree), attempt.branch)
+            if attempt.hint:
+                outcome["hint"] = attempt.hint
             self.attempt_runs[number] = attempt
             # Every attempt's logs stay in `logs/`, named in the record, whichever is chosen.
             outcome["log"] = str(attempt.log_path)
@@ -486,7 +511,7 @@ class NightShiftBestOfN:
             for key in ("test_result", "diff", "timed_out"):
                 if result.get(key) is not None:
                     entry[key] = result[key]
-            for key in ("log", "test_log"):
+            for key in ("hint", "log", "test_log"):
                 if outcome.get(key):
                     entry[key] = outcome[key]
             if result.get("diff_stat"):

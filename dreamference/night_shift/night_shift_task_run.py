@@ -38,6 +38,7 @@ from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 from dreamference.night_shift.refine_prompt import NIGHT_WRITES, RefinePrompt
+from dreamference.night_shift.strategy_hints import StrategyHints
 from dreamference.runner.codex_installer import ADAPTER_ENV
 from dreamference.runner.safe_git import SafeGit
 
@@ -116,6 +117,7 @@ class NightShiftTaskRun:
         model_node: str | None = None,
         window_end: float | None = None,
         attempt: int | None = None,
+        hint: str | None = None,
     ) -> None:
         """Args:
         night_dir: The queue directory.
@@ -138,6 +140,8 @@ class NightShiftTaskRun:
             session of its own, it never writes the task's record, and where a single run
             would commit it stages its change and leaves the worktree for the chooser
             (`outcome`).
+        hint: The attempt's strategy hint (`StrategyHints`), appended after the task text of
+            its first prompt; None for none.
         """
         self.model_host = model_host
         self.model_node = model_node
@@ -189,8 +193,9 @@ class NightShiftTaskRun:
         self.unit_counter = 0
         self.current_unit: str | None = None
         self.started = time.time()
-        # Best-of-N: this run is attempt `attempt` of the task; its end is `outcome`, not the record.
-        self.attempt: int | None = attempt
+        # Best-of-N: this run is attempt `attempt` of the task, told `hint`; its end is `outcome`,
+        # not the record.
+        self.attempt, self.hint = attempt, hint
         self.outcome: dict[str, Any] | None = None
         if attempt is not None:
             suffix = f"-a{attempt}"
@@ -332,7 +337,10 @@ class NightShiftTaskRun:
         return None if code == 0 else f"git worktree add failed: {output.strip()[-300:]}"
 
     def compose_prompt(self, test_command: str | None) -> str:
-        """Builds the first prompt: the fixed preamble, then the task verbatim.
+        """Builds the first prompt: the fixed preamble, the task verbatim, then the attempt's hint.
+
+        The hint comes after the task, so every attempt shares the prompt's prefix; in refine mode
+        the fix block follows it (`RefinePrompt.compose_fix`).
 
         Args:
             test_command: The command that decides pass or fail, if any.
@@ -345,8 +353,11 @@ class NightShiftTaskRun:
             if test_command
             else ""
         )
-        return PREAMBLE.format(
-            repo=self.repo, branch=self.branch, test_line=test_line, task=self.text
+        return StrategyHints.append(
+            PREAMBLE.format(
+                repo=self.repo, branch=self.branch, test_line=test_line, task=self.text
+            ),
+            self.hint,
         )
 
     def refine_enabled(self) -> bool:
