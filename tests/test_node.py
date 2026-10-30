@@ -179,6 +179,13 @@ def test_a_forge_without_a_role_is_refused():
         NodeServiceFile.render(8000, NODE_ID, "1.3.0", forge=("", 3300))
 
 
+def test_a_web_record_that_is_not_a_number_is_dropped_on_update():
+    path = NodeServiceFile.service_path
+    path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.3.0", web_port=3100).replace("web=3100", "web=x"))
+    assert NodeServiceFile.update(state="ready") is True
+    assert "web" not in NodeServiceFile.read()
+
+
 def test_a_node_that_was_never_enabled_is_never_advertised_by_a_side_effect():
     assert not NodeServiceFile.service_path.exists()
     assert NodeServiceFile.update(state="ready") is None
