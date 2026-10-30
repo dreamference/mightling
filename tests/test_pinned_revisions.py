@@ -139,3 +139,35 @@ def test_download_all_fetches_every_pinned_entry_at_its_pin(hub):
         if spec.compatible_gb10 and ModelMatrixRegistry.is_offered(key):
             assert fetched[spec.hf_repo_id] == ModelMatrixRegistry.pinned_revision(key), key
     assert fetched[DRAFTER_REPO] == DRAFTER_PIN
+
+
+def test_a_pin_held_only_by_another_engines_recipe_still_counts(monkeypatch):
+    from dreamference.hardware.model_spec import ModelSpec
+
+    # The default recipe pins nothing; the ling recipe pins the checkpoint and its drafter, whose
+    # repository id is written with capitals as the Hub spells it.
+    monkeypatch.setitem(
+        ModelMatrixRegistry.MATRIX,
+        "test-engine-pinned",
+        ModelSpec(
+            name="Test engine-pinned",
+            params_b=1.0,
+            supported_precisions=["BF16"],
+            min_memory_gb=1.0,
+            max_memory_gb=2.0,
+            compatible_gb10=True,
+            notes="Test only.",
+            hf_repo_id="example/engine-pinned",
+            launch_overrides={"engine": "vllm"},
+            engine_recipes={
+                "ling": {
+                    "engine": "ling",
+                    "revision": "1" * 40,
+                    "speculative_config": {"model": "Example/Engine-Drafter", "revision": "2" * 40},
+                }
+            },
+        ),
+    )
+    assert ModelMatrixRegistry.pinned_revision("test-engine-pinned") == "1" * 40
+    assert ModelMatrixRegistry.pinned_revision("Example/Engine-Drafter") == "2" * 40
+    assert ModelMatrixRegistry.pinned_revision("example/engine-drafter") == "2" * 40
