@@ -746,6 +746,16 @@ def test_a_longer_name_or_an_unbalanced_quote_reaches_no_handler(monkeypatch):
     assert called == []
 
 
+def test_the_parser_checks_a_job_id_itself_before_asking_the_job_store(monkeypatch):
+    from dreamference.node import NodeServe
+
+    called = handlers_that_record(monkeypatch)
+    for operation in ("job-fetched", "job-out", "job-cancel", "job-logs"):
+        for job_id in ("../../etc", "20261002-1200-abc/..", "x"):
+            assert NodeServe.serve(f"{operation} {job_id}") == 2, (operation, job_id)
+    assert called == []
+
+
 def test_serve_job_runs_this_nodes_own_mightling_admin(monkeypatch, capsys):
     from dreamference.node import NodeServe
 
