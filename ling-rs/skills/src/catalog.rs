@@ -965,13 +965,13 @@ mod tests {
     fn a_link_is_named_by_its_folder_when_the_frontmatter_name_is_not_a_plain_name() {
         let fixture = Fixture::new("catalog-link-names");
         let cases = [("up", "../escape"), ("hid", ".hidden"), ("nest", "a/b"), ("back", "a\\b"), ("drive", "C:evil")];
-        for (folder, name) in cases.into_iter().chain([("nul", "\"a\\0b\""), ("plain", "plain-name")]) {
+        for (folder, name) in cases.into_iter().chain([("zero", "\"a\\0b\""), ("plain", "plain-name")]) {
             fixture.skill(&format!(".claude/skills/{folder}"), name, "");
         }
         let sets = plan(&fixture.machine(), &Settings::default()).link_sets(&fixture.home);
         let claude = sets.iter().find(|set| set.agent == "claude").map(|set| set.links.clone()).unwrap_or_default();
         let names: Vec<&str> = claude.keys().map(String::as_str).collect();
-        assert_eq!(names, vec!["back", "drive", "hid", "nest", "nul", "plain-name", "up"]);
+        assert_eq!(names, vec!["back", "drive", "hid", "nest", "plain-name", "up", "zero"]);
         assert_eq!(claude.get("up"), Some(&fixture.home.join(".claude/skills/up")));
     }
 
