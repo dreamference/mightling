@@ -832,6 +832,22 @@ mod tests {
     }
 
     #[test]
+    fn the_guard_variable_takes_the_usual_words_and_ignores_others() {
+        let with = |value: &'static str| move |name: &str| (name == GUARD_ENV).then(|| value.to_string());
+        for on in ["on", "1", "true", "yes", " ON\n", "Yes"] {
+            assert!(settings_for(Surface::Exec, None, &with(on)).guard, "{on:?}");
+        }
+        for off in ["off", "0", "false", "no", " Off "] {
+            assert!(!settings_for(Surface::Work, None, &with(off)).guard, "{off:?}");
+        }
+        // An unknown word leaves the surface's default.
+        assert!(settings_for(Surface::Work, None, &with("maybe")).guard);
+        assert!(!settings_for(Surface::Exec, None, &with("maybe")).guard);
+        let budget = |name: &str| (name == BUDGET_ENV).then(|| " 2048\n".to_string());
+        assert_eq!(settings_for(Surface::Exec, None, &budget).budget, Some(2_048));
+    }
+
+    #[test]
     fn the_file_sets_surfaces_and_thresholds_and_the_environment_wins() {
         let table: toml::Table = "phone_max_output_tokens = 6000\nexec_guard = true\nask_max_output_tokens = 0\n\
             min_count = 5\nmin_compression_ratio = 0.08\nsampling = \"nonthinking\"\n"
