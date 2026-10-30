@@ -464,3 +464,137 @@ def test_a_renewal_mints_the_token_for_the_owner_in_the_user_list(monkeypatch):
     monkeypatch.setattr(RemoteControlPlane, "_request", classmethod(request))
     assert RemoteControlPlane.renew_token(BOX, "tok") == "new-token"
     assert calls == [("GET", "/api/users"), ("POST", "/api/users/u1/tokens")]
+
+
+# -- the relay's certificate ------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cloudflare(monkeypatch):
+    """Cloudflare as a script: `replies` maps (method) to (status, body); every call is kept."""
+    calls = []
+    replies = {"GET": (500, {}), "POST": (200, {}), "DELETE": (200, {})}
+
+    def fake(cls, method, path, body=None):
+        calls.append((method, path, body))
+        reply = replies[method]
+        return reply(path) if callable(reply) else reply
+
+    monkeypatch.setattr(RemotePublicCertificate, "zone_id", classmethod(lambda cls, name: "z1"))
+    monkeypatch.setattr(RemotePublicCertificate, "_cloudflare", classmethod(fake))
+    return calls, replies
+
+
+def test_a_relay_name_in_no_zone_gets_no_dns_record(monkeypatch, cloudflare, caplog):
+    calls, _ = cloudflare
+    monkeypatch.setattr(RemotePublicCertificate, "zone_id", classmethod(lambda cls, name: None))
+    with caplog.at_level("ERROR"):
+        assert RemoteRelayCertificate.ensure_addresses(RELAY, BOX) is False
+    assert calls == [] and "holds no zone" in caplog.text
+
+
+def test_addresses_that_cloudflare_will_not_list_change_nothing(cloudflare, caplog):
+    calls, _ = cloudflare
+    with caplog.at_level("ERROR"):
+        assert RemoteRelayCertificate.ensure_addresses(RELAY, BOX) is False
+    assert {method for method, *_ in calls} == {"GET"}, "nothing was deleted or added"
+    assert "did not list the A records" in caplog.text
+
+
+def test_an_address_record_cloudflare_refuses_fails_the_relay_name(cloudflare, caplog):
+    calls, replies = cloudflare
+
+    def listing(path):
+        if f"name={BOX}" in path:
+            return 200, {"result": [{"id": "src", "content": "192.0.2.7"}]}
+        return 200, {"result": [{"id": "old", "content": "192.0.2.9", "proxied": True}]}
+
+    replies["GET"] = listing
+    replies["POST"] = (403, {"errors": [{"message": "no"}]})
+    with caplog.at_level("ERROR"):
+        assert RemoteRelayCertificate.ensure_addresses(RELAY, BOX) is False
+    changes = [(method, body and body["content"]) for method, _, body in calls if method != "GET"]
+    assert changes == [("DELETE", None), ("POST", "192.0.2.7")]
+    assert "refused a A record" in caplog.text
+
+
+def _node_ca_relay(monkeypatch, tmp_path, update=True):
+    """The node CA's relay certificate and the box's update, recorded."""
+    crt, key = tmp_path / "relay.crt", tmp_path / "relay.key"
+    crt.write_text("node-ca-crt")
+    key.write_text("node-ca-key")
+    sent = []
+    monkeypatch.setattr(
+        RemoteCertificateAuthority, "issue", classmethod(lambda cls, label, names: (crt, key))
+    )
+    monkeypatch.setattr(
+        RemoteBox,
+        "update_relay",
+        classmethod(lambda cls, name, c, k, ssh: sent.append((name, c, k, ssh)) or update),
+    )
+    return sent
+
+
+def test_a_relay_whose_management_cannot_be_pointed_is_put_back_on_the_node_ca(
+    monkeypatch, tmp_path
+):
+    record = {"dns_name": BOX, "ssh": "the-box"}
+    with_relay = {**record, "relay_name": RELAY, "relay_pushed": "fp"}
+    RemoteSettings.write(with_relay)
+    sent = _node_ca_relay(monkeypatch, tmp_path)
+    points = []
+
+    def point(cls, dns_name):
+        points.append(dns_name)
+        return len(points) > 1
+
+    monkeypatch.setattr(RemoteRelayCertificate, "push", classmethod(lambda cls, r, n: True))
+    monkeypatch.setattr(RemoteRelayCertificate, "_point_management", classmethod(point))
+    assert RemoteRelayCertificate.switch(record, RELAY) is False
+    assert sent == [(BOX, "node-ca-crt", "node-ca-key", "the-box")]
+    assert RemoteSettings.read() == record, "the relay's name and fingerprint are out of the record"
+    assert points == [BOX, BOX], "management was pointed, failed, and pointed back"
+
+
+def test_a_relay_that_cannot_be_put_back_keeps_its_own_record(monkeypatch, tmp_path):
+    with_relay = {"dns_name": BOX, "ssh": "the-box", "relay_name": RELAY}
+    RemoteSettings.write(with_relay)
+    _node_ca_relay(monkeypatch, tmp_path, update=False)
+    monkeypatch.setattr(RemoteRelayCertificate, "_point_management", _never("_point_management"))
+    assert RemoteRelayCertificate.off(with_relay) is False
+    assert RemoteSettings.read() == with_relay
+
+
+def test_no_node_ca_relay_certificate_leaves_the_relay_as_it_is(monkeypatch):
+    with_relay = {"dns_name": BOX, "relay_name": RELAY}
+    RemoteSettings.write(with_relay)
+    monkeypatch.setattr(
+        RemoteCertificateAuthority, "issue", classmethod(lambda cls, label, names: None)
+    )
+    monkeypatch.setattr(RemoteBox, "update_relay", _never("update_relay"))
+    assert RemoteRelayCertificate.off(with_relay) is False
+    assert RemoteSettings.read() == with_relay
+
+
+def test_management_is_not_pointed_without_the_relays_secret(monkeypatch, caplog):
+    monkeypatch.setattr(RemotePublicCertificate, "serve", _never("serve"))
+    with caplog.at_level("ERROR"):
+        assert RemoteRelayCertificate._point_management(BOX) is False
+    assert "secret or the store key is missing" in caplog.text
+
+
+def test_management_is_not_pointed_without_the_served_certificate(monkeypatch):
+    RemoteSettings.write_private("relay-secret", "s")
+    RemoteSettings.write_private("store-key", "k")
+    monkeypatch.setattr(RemotePublicCertificate, "serve", _never("serve"))
+    assert RemoteRelayCertificate._point_management(BOX) is False
+
+
+def test_a_relay_certificate_that_cannot_be_renewed_is_not_pushed(monkeypatch):
+    record = {"dns_name": BOX, "relay_name": RELAY}
+    RemoteSettings.write(record)
+    monkeypatch.setattr(
+        RemoteRelayCertificate, "obtain", classmethod(lambda cls, n, staging=False: False)
+    )
+    monkeypatch.setattr(RemoteRelayCertificate, "push", _never("push"))
+    assert RemoteRelayCertificate.renew(record) is False
