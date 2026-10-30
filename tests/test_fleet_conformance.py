@@ -113,3 +113,37 @@ def test_a_failed_advert_leaves_the_enable_it_tried(fleet, monkeypatch):
     result = provisioner.results["spark-1"]
     assert result["failed"] == "advertise"
     assert result["left"] == "ssh owner@spark-1 ling-admin node enable --no-forge"
+
+
+def test_a_running_server_given_a_new_model_or_image_waits_for_restart(fleet, monkeypatch):
+    requests = []
+    monkeypatch.setattr(NodePairing, "run", classmethod(lambda cls, record, request, capture=True, input_text=None: (
+        requests.append(request) or subprocess.CompletedProcess([], 0, '{"model_port": 8000}', ""))))
+    FakeSession.machines = {"spark-1": StandIn()}
+    provisioner = NodeProvisioner(["spark-1"], {})
+    assert provisioner.run() == 0
+    result = provisioner.results["spark-1"]
+    assert result["state"] == "restart pending" and "start" not in requests
+    assert result["left"] == "ling-admin node provision spark-1 --restart"
+
+
+def test_restart_starts_the_changed_server_again(fleet, monkeypatch):
+    requests = []
+    monkeypatch.setattr(NodePairing, "run", classmethod(lambda cls, record, request, capture=True, input_text=None: (
+        requests.append(request) or subprocess.CompletedProcess([], 0, '{"model_port": 8000}', ""))))
+    monkeypatch.setattr(NodeProvisioner, "_wait_for_model", lambda self, host, port: "qwen")
+    FakeSession.machines = {"spark-1": StandIn()}
+    provisioner = NodeProvisioner(["spark-1"], {"restart": True})
+    assert provisioner.run() == 0
+    assert provisioner.results["spark-1"]["state"] == "ready" and "start" in requests
+    assert "left" not in provisioner.results["spark-1"]
+
+
+def test_a_running_server_with_nothing_new_is_ready(fleet):
+    machine = StandIn(ready=True)
+    machine.state["model"] = "qwen3.8-27b-nvfp4-dflash2"
+    machine.state["venv"] = "1"
+    FakeSession.machines = {"spark-1": machine}
+    provisioner = NodeProvisioner(["spark-1"], {})
+    assert provisioner.run() == 0
+    assert provisioner.results["spark-1"]["state"] == "ready" and "left" not in provisioner.results["spark-1"]

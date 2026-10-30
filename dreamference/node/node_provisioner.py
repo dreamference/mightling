@@ -616,6 +616,7 @@ class NodeProvisioner:
                     f"docker save | load of {image} failed",
                     f"ling-admin node provision {host}",
                 )
+            self._changed_server(host, image)
         for image in FleetProbe.missing_images(state, self.plan["pull_images"]):
             pulled = session.run(
                 FleetSession.with_docker_group(f"docker pull {image}"), timeout=2 * 60 * 60
@@ -627,7 +628,13 @@ class NodeProvisioner:
                     pulled.stderr.strip()[-200:],
                     f"ssh {self._user(host)}@{host} docker pull {image}",
                 )
+            self._changed_server(host, image)
         return True
+
+    def _changed_server(self, host: str, image: str | None = None) -> None:
+        # A model server already running keeps its old image or model until it restarts (§5).
+        if image is None or image == self.plan.get("image"):
+            self.results[host]["restart_pending"] = True
 
     def _step_assign(self, host: str, session: FleetSession) -> bool:
         from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
@@ -645,6 +652,7 @@ class NodeProvisioner:
                 f"ling-admin node set {host} --model {self.model}",
             )
         self.results[host]["model"] = self.model
+        self._changed_server(host)
         return True
 
     def _step_pair(self, host: str, session: FleetSession) -> bool:
@@ -689,9 +697,11 @@ class NodeProvisioner:
             return
         address = self.connect.get(host, host)
         running = self._served_model(address, port)
+        stale = running is not None and self.results[host].get("restart_pending")
         if running is None or self.options.get("restart"):
             NodePairing.run(record, "start", capture=True)
             running = self._wait_for_model(address, port)
+            stale = False
         if running is None:
             self._fail(
                 host,
@@ -700,11 +710,13 @@ class NodeProvisioner:
                 f"ling-admin node start {host}",
             )
             return
-        self.results[host]["state"] = "ready"
+        self.results[host]["state"] = "restart pending" if stale else "ready"
         self.results[host]["verify"] = self._verify(address, port, running)
         self.results[host]["complete"] = self.results[host]["verify"] == "ok"
         if not self.results[host]["complete"]:
             self.results[host]["left"] = f"ling-admin node status {host}"
+        elif stale:
+            self.results[host]["left"] = f"ling-admin node provision {host} --restart"
 
     def _info(self, record: dict[str, Any]) -> dict[str, Any]:
         answer = NodePairing.run(record, "info")
