@@ -850,6 +850,24 @@ mod tests {
     }
 
     #[test]
+    fn a_virtualenv_and_a_build_tree_are_not_entered() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("in.md"), b"x");
+        write(&root.join("venv/pyvenv.cfg"), b"x");
+        write(&root.join("venv/lib/README.md"), b"x");
+        write(&root.join("target/CACHEDIR.TAG"), b"x");
+        let found = walk(&Collection::new("docs", root.clone()), &home, true);
+        let rels: Vec<&str> = found.candidates.iter().map(|c| c.rel.as_str()).collect();
+        assert_eq!(rels, ["in.md"]);
+        // The change watch asks the same question.
+        assert!(!entered("venv", &root.join("venv")));
+        assert!(!entered("target", &root.join("target")));
+        assert!(entered("docs", &root));
+    }
+
+    #[test]
     fn collection_globs_max_size_and_image_flag_filter_candidates() {
         let home = tempfile::tempdir().unwrap();
         let home = home.path().canonicalize().unwrap();
