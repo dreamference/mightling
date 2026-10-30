@@ -320,6 +320,17 @@ def test_a_command_stops_at_the_earlier_of_its_timeout_and_the_deadline(setup, m
     assert run._run_capped(["true"], setup["repo"], setup["night"] / "out.log", 0) == "timeout"
 
 
+def test_a_command_never_waits_for_a_git_password_and_knows_it_is_the_night_run(setup):
+    from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
+
+    record = queue(setup["night"], setup["repo"])
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() + 60)
+    out = setup["night"] / "env.log"
+    assert run._run_capped(["env"], setup["repo"], out, 30) == 0
+    lines = out.read_text().splitlines()
+    assert "GIT_TERMINAL_PROMPT=0" in lines and f"{NIGHT_RUN_ENV}=1" in lines
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
