@@ -535,4 +535,14 @@ mod tests {
         assert_eq!(status_path("R  old.py -> new.py"), "new.py");
         assert_eq!(status_path("?? \"a b.py\""), "a b.py");
     }
+
+    #[test]
+    fn a_command_run_in_another_directory_names_files_from_there() {
+        let dir = scratch("workdir");
+        std::fs::write(dir.join("src/a.py"), "x").unwrap_or_default();
+        let line = json!({"type": "response_item", "payload": {"type": "function_call", "name": "exec_command",
+            "call_id": "1", "arguments": json!({"cmd": "cat a.py", "workdir": dir.join("src")}).to_string()}})
+        .to_string();
+        assert_eq!(Ledger::from_rollout(&line, &dir, Some("")).read, vec!["src/a.py"]);
+    }
 }
