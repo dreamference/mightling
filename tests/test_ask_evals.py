@@ -27,7 +27,7 @@ SUITE = ROOT / "scripts" / "ask_evals"
 sys.path.insert(0, str(SUITE))
 
 from askevals import checks, images, metrics, rollout  # noqa: E402
-from askevals.standins import CAPTCHA_PAGE, StandIns, read_log, search_answer  # noqa: E402
+from askevals.standins import CAPTCHA_PAGE, ONE_DOWN, StandIns, read_log, search_answer  # noqa: E402
 
 
 def _load_runner():
@@ -56,7 +56,7 @@ KNOWN_EXPECT = {
     "min_answer_chars",
     "any_of",
 }
-FAULTS = {None, "captcha", "rate_limited", "forbidden", "reset", "stall", "empty"}
+FAULTS = {None, "captcha", "rate_limited", "forbidden", "reset", "stall", "empty", "one_down"}
 
 
 # Metrics.
@@ -164,6 +164,14 @@ def test_search_faults_look_like_searxng_when_every_engine_refuses():
     assert status == 200 and not body["results"]
     assert all(reason.endswith("CAPTCHA") for _, reason in body["unresponsive_engines"])
     assert "CAPTCHA" in CAPTCHA_PAGE
+
+
+def test_with_one_engine_down_the_others_still_answer():
+    found = {"results": [{"title": "T", "url": "http://a.example.test/p", "content": "c"}]}
+    status, body = search_answer("q", {**found, "fault": "one_down"})
+    assert status == 200 and body["results"][0]["url"] == "http://a.example.test/p"
+    assert body["unresponsive_engines"] == ONE_DOWN and len(ONE_DOWN) == 1
+    assert search_answer("q", {"fault": "empty", **found})[1]["results"] == []
 
 
 # Images.
