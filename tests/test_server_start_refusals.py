@@ -233,3 +233,18 @@ def test_a_model_neither_fetched_nor_registered_weighs_nothing(monkeypatch):
     monkeypatch.setattr(ModelMatrixRegistry, "get_spec", classmethod(unknown))
 
     assert VLLMServerManager._estimate_model_weights_gb("model") == 0.0
+
+
+def test_the_eviction_counts_the_models_files_and_skips_its_directories(monkeypatch, tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "a.safetensors").write_bytes(b"x" * 2048)
+    (tmp_path / "sub" / "b.safetensors").write_bytes(b"x" * 1024)
+    monkeypatch.setattr(ModelDownloader, "get_model_snapshot_dir", classmethod(lambda cls, key: tmp_path))
+
+    assert VLLMServerManager._evict_model_page_cache("model") == 3 * 1024 / 1024 ** 3
+
+
+def test_a_model_without_a_snapshot_has_nothing_to_evict(monkeypatch):
+    monkeypatch.setattr(ModelDownloader, "get_model_snapshot_dir", classmethod(lambda cls, key: None))
+
+    assert VLLMServerManager._evict_model_page_cache("model") == 0.0
