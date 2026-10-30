@@ -1572,3 +1572,72 @@ def test_an_export_that_cannot_be_written_is_reported_not_raised(tmp_path, capsy
     (tmp_path / "codex-rs").write_text("a file where the tree's directory goes")
     assert CodexBrandedBuilder.extract_archive(_tar(("codex-rs/main.rs", None)), str(tmp_path)) is False
     assert "Could not unpack the exported source" in capsys.readouterr().out
+
+
+def _codex_build(tmp_path, monkeypatch, **steps):
+    """`_build_locked` with every step before and around cargo replaced; `steps` override one.
+
+    Returns the cargo calls and the number of times the links were refreshed.
+    """
+    calls, linked = [], []
+    release = tmp_path / "cache" / "target" / "release"
+
+    def cargo(command, cwd=None, env=None):
+        calls.append((command, env))
+        release.mkdir(parents=True, exist_ok=True)
+        for name in [command[i + 1] for i, arg in enumerate(command) if arg == "--bin"]:
+            (release / name).write_text(f"built {name}")
+            (release / name).chmod(0o755)
+        return 0
+
+    defaults = {
+        "install_rust": True,
+        "build_key": "k",
+        "prepare_source": True,
+        "fetch_rusty_v8": {"RUSTY_V8_ARCHIVE": "a", "RUSTY_V8_SRC_BINDING_PATH": "b"},
+        "build_web_ui": "/ui/dist",
+    }
+    result = {**defaults, **steps}
+    monkeypatch.setattr(builder_module, "BUILD_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
+    monkeypatch.setattr(builder_module, "BUILDS_SIGNAL", True)
+    monkeypatch.setattr(builder_module, "BUILDS_DELEGATE", True)
+    monkeypatch.setattr(builder_module, "IS_WINDOWS", False)
+    monkeypatch.setenv("CARGO_TARGET_DIR", str(tmp_path / "elsewhere"))
+    monkeypatch.setattr(
+        builder_module.DesktopInstaller,
+        "install_rust",
+        classmethod(lambda cls: result["install_rust"]),
+    )
+    monkeypatch.setattr(CodexBrandedBuilder, "build_key", classmethod(lambda cls: result["build_key"]))
+    for name in ("prepare_source", "fetch_rusty_v8"):
+        monkeypatch.setattr(
+            CodexBrandedBuilder, name, classmethod(lambda cls, source_dir, name=name: result[name])
+        )
+    monkeypatch.setattr(CodexBrandedBuilder, "build_web_ui", classmethod(lambda cls: result["build_web_ui"]))
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "compiler_cache_environment", classmethod(lambda cls, env: {})
+    )
+    monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: linked.append(1)))
+    monkeypatch.setattr(builder_module.subprocess, "call", cargo)
+    return calls, linked
+
+
+def test_a_codex_build_installs_every_binary_under_its_name_and_stamps_the_key(tmp_path, monkeypatch):
+    calls, linked = _codex_build(tmp_path, monkeypatch)
+    assert CodexBrandedBuilder._build_locked() is True
+    ((command, env),) = calls
+    # The lock pins the third-party crates, but stamp_version rewrites the workspace's own entries.
+    assert "--locked" not in command
+    assert command[command.index("codex-code-mode-host") - 1] == "-p"
+    assert "CARGO_TARGET_DIR" not in env
+    bin_dir = tmp_path / "install" / "bin"
+    # Cargo's `codex` is installed as `ling`; nothing named codex is put on the machine.
+    assert (bin_dir / "ling").read_text() == "built codex"
+    assert not (bin_dir / "codex").exists()
+    for name in ("codex-code-mode-host", "ling-signal", "ling-delegate"):
+        assert (bin_dir / name).read_text() == f"built {name}"
+        assert os.access(bin_dir / name, os.X_OK)
+    assert (tmp_path / "install" / "build-key").read_text() == "k\n"
+    assert linked == [1]
+    assert CodexBrandedBuilder.is_current() is True
