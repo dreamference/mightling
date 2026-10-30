@@ -225,6 +225,37 @@ mod tests {
     }
 
     #[test]
+    fn a_device_file_from_before_local_is_a_remote_device() {
+        let home = scratch("older");
+        std::fs::create_dir_all(sync_dir(&home)).unwrap();
+        std::fs::write(device_path(&home), "device = \"ab12\"\nsecret = \"s\"\n").unwrap();
+        let device = DeviceFile::load(&home).unwrap();
+        assert!(!device.local, "only `ling sync enable` on the node itself makes the hub loopback");
+        assert_eq!(device.port, 3100);
+    }
+
+    #[test]
+    fn exclude_takes_the_home_folder_and_paths_with_spaces_around() {
+        let home = Path::new("/home/u");
+        let settings = Settings::parse("[sync]\nexclude = [\"~\", \"  /srv/x  \"]\n", Some(home));
+        assert_eq!(settings.exclude, [PathBuf::from("/home/u"), PathBuf::from("/srv/x")]);
+        assert!(settings.excluded("/home/u/anything"));
+        assert!(settings.excluded("/srv/x/app"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclude_keeps_the_configuration_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("mode");
+        let config = dir.join("config.toml");
+        std::fs::write(&config, "vllm_host = \"http://n:8000\"\n").unwrap();
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(add_exclude(&config, Path::new("/w/secret")), Ok(true));
+        assert_eq!(std::fs::metadata(&config).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
     fn a_configuration_that_does_not_read_is_not_the_defaults() {
         let dir = scratch("unreadable");
         let config = dir.join("config.toml");
