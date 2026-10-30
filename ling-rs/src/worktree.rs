@@ -1347,4 +1347,18 @@ mod tests {
         assert_eq!(code, 0, "{lines:?}");
         assert!(repo.join("two.py").is_file());
     }
+
+    #[test]
+    fn apply_leaves_the_worktree_index_alone_and_status_then_has_nothing_to_apply() {
+        let fixture = Fixture::new("index");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (session, cwd, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("new.py"), "x = 1\n").unwrap_or_default();
+        let (lines, code) = command(&home, &cwd, "apply", true);
+        assert_eq!(code, 0, "{lines:?}");
+        // The worktree's own index was not touched: the new file is still untracked there.
+        assert_eq!(git_text(&session.checkout, &["status", "--porcelain"]).as_deref(), Some("?? new.py"));
+        let (lines, _) = command(&home, &cwd, "status", true);
+        assert!(lines.iter().any(|line| line == "Nothing to apply."), "{lines:?}");
+    }
 }
