@@ -1555,3 +1555,15 @@ fn a_linked_worktree_runs_on_the_main_worktrees_trust() {
     );
     assert!(!out.contains("is not trusted"), "{out}");
 }
+
+#[test]
+fn a_submodule_checkout_is_its_own_main_worktree() {
+    let f = with_submodules();
+    let ours = f.repo.root.join("ours");
+    // Its git directory is `.git/modules/ours` of the superproject, shared with no worktree.
+    let repo = ling_code::paths::Repo::discover(&ours).unwrap();
+    assert_eq!(
+        repo.main_root.canonicalize().unwrap(),
+        ours.canonicalize().unwrap()
+    );
+}
