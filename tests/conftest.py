@@ -368,7 +368,7 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     # The HuggingFace cache follows these before HOME; a user's own setting would lead a test
     # that builds a docker command into creating folders in the real cache.
-    for name in ("HF_HOME", "HF_HUB_CACHE", "XDG_CACHE_HOME"):
+    for name in ("HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME"):
         monkeypatch.delenv(name, raising=False)
     # `ling` exports CODEX_HOME to every command it runs, so a suite started by the agent, or by
     # Night Shift's sandboxed test run, resolved `$CODEX_HOME/night` and the rest to the real
