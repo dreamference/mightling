@@ -455,6 +455,14 @@ def test_a_rate_limited_api_is_named_not_reported_as_a_missing_tag(tmp_path, rel
     assert "no tag" not in result.stderr
 
 
+def test_an_answer_without_a_tag_installs_nothing(tmp_path, release_server):
+    server = release_server(binaries())
+    server.document = lambda port: FakeRelease.document(server, port).replace('"tag_name"', '"tag"')
+    result = run_install(tmp_path, server, "--role", "client")
+    assert result.returncode == 1 and "has no tag" in result.stderr
+    assert nothing_installed(tmp_path)
+
+
 @pytest.mark.parametrize("version", [("--version", "1.4.0"), ("--version=1.4.0",)])
 def test_a_named_version_is_fetched_by_its_tag(tmp_path, release_server, version):
     server = release_server(binaries(), tag="v1.4.0")
