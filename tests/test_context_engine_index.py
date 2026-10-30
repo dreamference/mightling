@@ -5,6 +5,7 @@ Indexing runs beside a resident model server, so its memory is a safety property
 not compared with the constants they would change together with.
 """
 
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -202,3 +203,45 @@ def test_a_forced_rebuild_forgets_a_deleted_file_in_memory_and_on_disk(
     assert storage.search_fts(["vanished"], 5) == {}
     assert set(storage.search_fts(["alpha"], 5)) == {"a.py"}
     assert set(storage.load_embeddings()) == {"a.py"}
+
+
+@pytest.mark.usefixtures("keyword_only")
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file whatever its mode")
+def test_a_file_that_cannot_be_read_is_skipped_and_the_rest_is_indexed(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text("def main():\n    pass\n")
+    locked = tmp_path / "locked.py"
+    locked.write_text("def hidden():\n    pass\n")
+    locked.chmod(0)
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    # The parser runs in worker processes; asked directly, it answers None instead of raising.
+    assert engine._process_single_file(locked) is None
+    parsed = engine._process_single_file(tmp_path / "app.py")
+    assert parsed is not None
+    assert [symbol.name for symbol in parsed[0].symbols] == ["main"]
+
+    engine.index_workspace(force_reindex=True)
+    assert set(engine.indexed_files) == {"app.py"}
+
+
+def test_a_missing_or_unreadable_index_file_means_rebuild_not_a_crash(tmp_path: Path) -> None:
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    assert not engine.index_file.exists()
+    assert engine.load_index() is False
+    engine.index_file.parent.mkdir(parents=True, exist_ok=True)
+    engine.index_file.write_text('{"tf_idf_index": {}, "files": ', encoding="utf-8")
+    assert engine.load_index() is False
+    assert engine.indexed_files == {}
+
+
+@pytest.mark.usefixtures("keyword_only")
+def test_keyword_search_answers_nothing_for_punctuation_or_a_broken_database(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a.py").write_text("def alpha():\n    pass\n")
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_workspace(force_reindex=True)
+    storage = engine.sqlite_storage
+    # No token survives the filter that keeps FTS5 syntax out of the MATCH expression.
+    assert storage.search_fts(['"', "*", "a-b"], 5) == {}
+    storage.db_path.write_bytes(b"not a database")
+    assert storage.search_fts(["alpha"], 5) == {}
