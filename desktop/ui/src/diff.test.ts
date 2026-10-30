@@ -156,6 +156,15 @@ describe("an edit in the review pane (item 16)", () => {
     expect(editPatch(file, 0, "")?.split("\n")[3]).toBe("@@ -3,4 +2,0 @@");
   });
 
+  it("writes into a hunk that only took lines out where they were, not a line higher", () => {
+    // git puts a range of no lines at the line before it: the insertion goes after that line.
+    const [emptied] = parseDiff(["diff --git a/x b/x", "--- a/x", "+++ b/x", "@@ -1,2 +0,0 @@", "-a", "-b"].join("\n"));
+    expect(editable(emptied, 0)).toBe(true);
+    expect(editPatch(emptied, 0, "c")?.split("\n")[3]).toBe("@@ -0,0 +1,1 @@");
+    const [cut] = parseDiff(["diff --git a/x b/x", "--- a/x", "+++ b/x", "@@ -5,2 +4,0 @@", "-a", "-b"].join("\n"));
+    expect(editPatch(cut, 0, "c")?.split("\n")[3]).toBe("@@ -4,0 +5,1 @@");
+  });
+
   it("is not offered for a deleted file, a binary one, or a hunk that ends without a newline", () => {
     const [deleted] = parseDiff(["diff --git a/x b/x", "deleted file mode 100644", "--- a/x", "+++ /dev/null", "@@ -1 +0,0 @@", "-gone"].join("\n"));
     expect(editable(deleted, 0)).toBe(false);

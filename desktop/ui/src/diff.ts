@@ -169,7 +169,9 @@ export function editPatch(file: FileDiff, index: number, edited: string): string
   while (tail < oldLines.length - head && tail < newLines.length - head && oldLines[oldLines.length - 1 - tail] === newLines[newLines.length - 1 - tail]) tail++;
   const removed = oldLines.slice(head, oldLines.length - tail);
   const added = newLines.slice(head, newLines.length - tail);
-  const start = hunk.newStart;
+  // A range of no lines starts at the line before it (git's own rule): a hunk that only took lines out
+  // already has its start there, so lines written into it go after that line.
+  const start = oldLines.length ? hunk.newStart : hunk.newStart + 1;
   const header = `@@ -${oldLines.length ? start : start - 1},${oldLines.length} +${newLines.length ? start : start - 1},${newLines.length} @@`;
   return [
     `diff --git a/${file.path} b/${file.path}`,
