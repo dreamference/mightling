@@ -71,3 +71,33 @@ def test_what_a_client_sends_after_its_request_is_read_and_dropped():
         return await reader.read()
 
     assert _run(b"GET /v1/models HTTP/1.1\r\n\r\n", watch) == b""
+
+
+# -- copy_body -----------------------------------------------------------------------------------------
+
+
+def test_a_body_the_client_cuts_short_is_moved_as_far_as_it_came():
+    sink = Sink()
+
+    _run(b"0123", lambda reader: ModelGateService.copy_body(reader, ("length", 10), sink))
+
+    assert sink.data == b"0123"
+
+
+def test_a_discarded_chunked_body_is_read_no_further_than_the_limit():
+    async def discard(reader):
+        await ModelGateService.copy_body(reader, ("chunked", 0), None, limit=4)
+        return await reader.read()
+
+    assert _run(b"4\r\nabcd\r\n4\r\nefgh\r\n0\r\n\r\n", discard) == b"4\r\nefgh\r\n0\r\n\r\n"
+
+
+def test_a_chunked_bodys_trailers_go_to_the_engine_with_it():
+    sink = Sink()
+    body = b"2\r\nab\r\n0\r\nX-Trailer: 1\r\n\r\n"
+
+    _run(
+        body + b"GET /next", lambda reader: ModelGateService.copy_body(reader, ("chunked", 0), sink)
+    )
+
+    assert sink.data == body
