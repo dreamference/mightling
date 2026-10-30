@@ -391,6 +391,15 @@ def test_a_gh_login_is_used_only_for_a_fork(tmp_path, release_server, repo, env_
     assert (tmp_path / "gh.log").exists() == (sent == "Bearer from-gh")
 
 
+def test_github_token_is_used_when_gh_token_is_not_set(tmp_path, release_server):
+    # GitHub Actions sets GITHUB_TOKEN; with it, gh is not asked.
+    server = release_server(binaries())
+    result = run_install(tmp_path, server, "--role", "client", env_extra={"GITHUB_TOKEN": "from-actions"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert {auth for _, auth in server.requests} == {"Bearer from-actions"}
+    assert not (tmp_path / "gh.log").exists()
+
+
 def test_a_download_that_fails_its_checksum_installs_nothing(tmp_path, release_server):
     # The last archive is the tampered one: the ones before it passed, and must not be placed.
     result = run_install(tmp_path, release_server(binaries(corrupt="ling-fetch")), "--role", "client")
