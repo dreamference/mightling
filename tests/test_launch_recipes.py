@@ -102,6 +102,22 @@ def test_a_changed_signature_without_a_cache_has_nothing_to_clear(
     ).read_text() == VLLMServerManager._compile_cache_signature("test-vllm-dflash")
 
 
+def test_an_rm_that_exits_nonzero_is_a_failed_clear(vllm_recipes, cache_home, monkeypatch):
+    # `docker run` reports a failed rm only through its exit status, not by raising.
+    old = "example/vllm-dflash-int4-AutoRound|dflash|example/vllm-dflash-drafter|8"
+    _stale_cache(cache_home, old)
+
+    def run(cmd, check=False, **kwargs):
+        result = subprocess.CompletedProcess(cmd, 1)
+        if check:
+            result.check_returncode()
+        return result
+
+    monkeypatch.setattr(vllm_server_manager.subprocess, "run", run)
+    assert VLLMServerManager._reset_stale_compile_cache("test-vllm-dflash") is False
+    assert (cache_home / ".compile_signature").read_text() == old
+
+
 def test_an_unreadable_signature_counts_as_none(vllm_recipes, cache_home, docker_runs):
     # A directory where the file should be: reading it fails, which must not stop the launch.
     (cache_home / ".compile_signature").mkdir(parents=True)
