@@ -1241,6 +1241,14 @@ def test_the_index_refresh_takes_at_most_half_of_what_is_left(fake_host, fake_in
     assert len(fake_index.calls) == 1 and "the window is nearly over" in notes[0]
 
 
+def test_another_machines_job_repository_is_never_indexed(fake_host, fake_index, tmp_path):
+    (tmp_path / "job").mkdir()
+    tasks = [{"repo": str(tmp_path / "job"), "remote": {"from": "spark-1"}}]
+    notes = []
+    NightShiftRunner.refresh_indexes(tasks, NightShiftSettings({}), far_end(), notes)
+    assert fake_index.calls == [] and notes == []
+
+
 def test_index_output_is_condensed_for_the_report():
     output = (
         "skipped: scip-go for svc: runs on demand (`ling-code index`)\n"
