@@ -670,4 +670,13 @@ mod tests {
         assert_eq!(std::fs::read_to_string(scratch.0.join("log.jsonl.old")).unwrap_or_default(), old);
         assert_eq!(std::fs::read_to_string(scratch.0.join("log.jsonl")).unwrap_or_default().lines().count(), 1);
     }
+
+    #[test]
+    fn the_defaults_leave_fifteen_percent_free() {
+        let policy = DropPolicy::for_limit(100_000);
+        let expected =
+            DropPolicy { limit: 100_000, keep_recent: KEEP_RECENT, min_chars: crate::MIN_MASKABLE_CHARS, room_percent: ROOM_PERCENT };
+        assert_eq!(policy, expected);
+        assert_eq!(policy.target(), 85_000);
+    }
 }
