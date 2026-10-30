@@ -631,4 +631,14 @@ mod tests {
         assert_eq!(cut.chars().count(), MAX_COMMAND_CHARS);
         assert!(cut.ends_with('…'));
     }
+
+    #[test]
+    fn a_hook_input_without_a_source_is_answered() {
+        let dir = scratch("nosource");
+        std::fs::write(dir.join("a.txt"), "x").unwrap_or_default();
+        let rollout = dir.join("rollout.jsonl");
+        std::fs::write(&rollout, [call("1", "cat a.txt"), output("1", 0, "x")].join("\n")).unwrap_or_default();
+        let input = json!({"transcript_path": rollout, "cwd": dir}).to_string();
+        assert!(hook(&input).is_some());
+    }
 }
