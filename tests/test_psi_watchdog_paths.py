@@ -4,6 +4,7 @@ None of these start the watchdog's thread: each calls the method under test dire
 kernel files, `docker`, `os.kill` and Docker's socket replaced by stand-ins under tmp.
 """
 
+import io
 import shutil
 import socket
 import subprocess
@@ -239,6 +240,17 @@ def test_an_unknown_or_unreadable_cgroup_lists_no_pids(tmp_path):
     procs.write_text("4242\nnot-a-pid\n4243\n")
     wd._cgroup_procs = str(procs)
     assert wd._read_cgroup_pids() == [4242, 4243]
+
+
+def test_a_cgroup_file_that_does_not_decode_lists_no_pids(monkeypatch):
+    class Undecodable(io.StringIO):
+        def read(self, *args):
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    monkeypatch.setattr(psi_watchdog, "open", lambda *args, **kwargs: Undecodable(), raising=False)
+    wd = MemoryPressureWatchdog("test-container")
+    wd._cgroup_procs = "/sys/fs/cgroup/docker/abc123/cgroup.procs"
+    assert wd._read_cgroup_pids() == []
 
 
 def test_permission_lost_mid_kill_falls_through_to_the_socket(tmp_path, monkeypatch, no_docker_cli):
