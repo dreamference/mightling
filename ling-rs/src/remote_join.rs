@@ -873,6 +873,158 @@ mod tests {
     }
 
     #[test]
+    fn a_length_is_read_from_at_most_four_bytes_with_no_leading_zero() {
+        let mut leading_zero = vec![0x04, 0x82, 0x00, 0x80];
+        leading_zero.extend([0u8; 0x80]);
+        assert!(der(&leading_zero).is_err(), "a leading zero even when the contents are there");
+        let mut wrapping = vec![0x04, 0x89, 0x01, 0, 0, 0, 0, 0, 0, 0, 0x80];
+        wrapping.extend([0u8; 0x80]);
+        assert!(der(&wrapping).is_err(), "nine length bytes that wrap round to 0x80");
+        assert_eq!(der_only(&[0x04, 0x00], 0x30), Err("the CA in the bundle is not a well-formed certificate".to_string()));
+    }
+
+    /// One DER element with `tag` around `contents`.
+    fn tlv(tag: u8, contents: &[u8]) -> Vec<u8> {
+        let mut out = vec![tag];
+        match contents.len() {
+            n if n < 0x80 => out.push(n as u8),
+            n if n < 0x100 => out.extend([0x81, n as u8]),
+            n => out.extend([0x82, (n >> 8) as u8, n as u8]),
+        }
+        out.extend(contents);
+        out
+    }
+
+    fn extension(oid: &[u8], flag: Option<u8>, value: &[u8]) -> Vec<u8> {
+        let mut fields = tlv(0x06, oid);
+        if let Some(flag) = flag {
+            fields.extend(tlv(0x01, &[flag]));
+        }
+        fields.extend(tlv(0x04, value));
+        tlv(0x30, &fields)
+    }
+
+    /// Name constraints whose permitted subtrees are `subtrees`, under `tag` (0xa0 permitted).
+    fn name_constraints(tag: u8, subtrees: &[Vec<u8>]) -> Vec<u8> {
+        tlv(0x30, &tlv(tag, &subtrees.concat()))
+    }
+
+    fn dns(name: &str) -> Vec<u8> {
+        tlv(0x30, &tlv(0x82, name.as_bytes()))
+    }
+
+    /// A certificate with only what `constrained_ca` reads: the extensions, no key or signature.
+    fn certificate(tbs_tag: u8, lists: &[Vec<Vec<u8>>]) -> String {
+        let tbs: Vec<u8> = lists.iter().map(|list| tlv(0xa3, &tlv(0x30, &list.concat()))).collect::<Vec<_>>().concat();
+        let der = tlv(0x30, &tlv(tbs_tag, &[tlv(0x02, &[1]), tbs].concat()));
+        let body = base64::engine::general_purpose::STANDARD.encode(der);
+        format!("-----BEGIN CERTIFICATE-----\n{body}\n-----END CERTIFICATE-----\n")
+    }
+
+    fn constrained(subtrees: &[Vec<u8>]) -> Vec<Vec<u8>> {
+        vec![
+            extension(BASIC_CONSTRAINTS, Some(0xff), CA_PATHLEN_ZERO),
+            extension(NAME_CONSTRAINTS, Some(0xff), &name_constraints(0xa0, subtrees)),
+        ]
+    }
+
+    #[test]
+    fn a_dns_constraint_may_have_a_leading_dot_and_any_case() {
+        for name in ["example.org", ".example.org", "Example.ORG"] {
+            assert_eq!(constrained_ca(&certificate(0x30, &[constrained(&[dns(name)])]), "relay.example.org"), Ok(()), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_ca_read_by_hand_still_needs_each_check() {
+        let host = "relay.example.org";
+        let names = |subtrees: &[Vec<u8>]| extension(NAME_CONSTRAINTS, Some(0xff), &name_constraints(0xa0, subtrees));
+        let basic = extension(BASIC_CONSTRAINTS, Some(0xff), CA_PATHLEN_ZERO);
+        let good = constrained(&[dns("example.org")]);
+        let mut subtree_with_a_minimum = tlv(0x82, b"example.org");
+        subtree_with_a_minimum.extend(tlv(0x80, &[0]));
+        for (label, ca) in [
+            ("the to-be-signed part is not a SEQUENCE", certificate(0x31, &[good.clone()])),
+            ("two extension lists", certificate(0x30, &[good.clone(), good.clone()])),
+            (
+                "name constraints marked FALSE in the flag",
+                certificate(0x30, &[vec![basic.clone(), extension(NAME_CONSTRAINTS, Some(0x00), &name_constraints(0xa0, &[dns("example.org")]))]]),
+            ),
+            ("name constraints twice", certificate(0x30, &[vec![basic.clone(), names(&[dns("example.org")]), names(&[dns("example.org")])]])),
+            ("only an excluded subtree", certificate(0x30, &[vec![basic.clone(), extension(NAME_CONSTRAINTS, Some(0xff), &name_constraints(0xa1, &[dns("example.org")]))]])),
+            ("an email domain", certificate(0x30, &[constrained(&[tlv(0x30, &tlv(0x81, b"example.org"))])])),
+            ("a subtree that is a SET", certificate(0x30, &[constrained(&[tlv(0x31, &tlv(0x82, b"example.org"))])])),
+            ("a subtree with a minimum", certificate(0x30, &[constrained(&[tlv(0x30, &subtree_with_a_minimum)])])),
+        ] {
+            assert!(constrained_ca(&ca, host).is_err(), "{label}");
+        }
+        assert_eq!(constrained_ca(&certificate(0x30, &[good]), host), Ok(()), "the same CA without the fault");
+    }
+
+    #[test]
+    fn a_key_of_exactly_one_block_is_used_as_it_is() {
+        assert_eq!(hex(&hmac_sha256(&[b'k'; 64], b"m")), "3b7a8d453e76edb519238a515105a57508d0f169f480ebeee120a9e7803289fa");
+        assert_eq!(hex(&hmac_sha256(&[b'k'; 65], b"m")), "c2d7d4c2256ddb097409ec0c67e1d58fa1a007fc6932cac0d892a525d08af7cc");
+    }
+
+    #[test]
+    fn a_code_is_eight_digits_exactly() {
+        for bad in ["123456789", "1234567a", "1234567"] {
+            assert_eq!(parse_code(bad), None, "{bad}");
+        }
+    }
+
+    /// `verify` on the good bundle with `key` set to `value`.
+    fn verify_with(key: &str, value: &str, node_id: &str) -> Result<Bundle, String> {
+        let nonce = "ab".repeat(16);
+        let mut json: serde_json::Value = serde_json::from_str(&bundle_text()).unwrap();
+        json[key] = serde_json::Value::String(value.to_string());
+        let text = json.to_string();
+        verify("12345678", &nonce, &answer("12345678", &nonce, &text), node_id)
+    }
+
+    #[test]
+    fn an_empty_or_short_proof_is_no_proof() {
+        let nonce = "ab".repeat(16);
+        let text = bundle_text();
+        let mac = server_mac("12345678", &nonce, &text);
+        for wrong in ["", &mac[..32], &mac[..63]] {
+            let answer = serde_json::json!({"bundle": text, "mac": wrong});
+            assert!(verify("12345678", &nonce, &answer, NODE_ID).unwrap_err().contains("does not prove the code"), "{wrong:?}");
+        }
+        let upper = serde_json::json!({"bundle": text, "mac": mac.to_ascii_uppercase()});
+        assert!(verify("12345678", &nonce, &upper, NODE_ID).is_ok(), "a proof in capitals");
+    }
+
+    #[test]
+    fn verify_accepts_what_only_differs_in_form() {
+        assert!(verify_with("node", NODE_ID, "").is_ok(), "no node browsed: any node's bundle");
+        let upper = format!("MIGHTLING-{}.NETBIRD.SELFHOSTED", NODE_ID.to_ascii_uppercase());
+        assert_eq!(verify_with("overlay_name", &upper, NODE_ID).unwrap().overlay_name, format!("mightling-{NODE_ID}.netbird.selfhosted"));
+    }
+
+    #[test]
+    fn verify_refuses_each_field_on_its_own() {
+        let own = format!("mightling-{NODE_ID}");
+        let cases = [
+            ("overlay_domain", "evil.example".to_string(), "not the node's own overlay name"),
+            ("overlay_domain", "d.selfhosted".to_string(), "not the node's own overlay name"),
+            ("overlay_name", format!("{own}.evil.example"), "not the node's own overlay name"),
+            ("management_url", "https://".to_string(), "is not an HTTPS URL"),
+            ("management_url", "https://evil.example/.relay.example.org".to_string(), "is not an HTTPS URL"),
+            ("ca", format!("-----END CERTIFICATE-----\n{GOOD_CA}"), "is not one certificate"),
+            ("ca", format!("{GOOD_CA}\n-----"), "is not one certificate"),
+            ("ca", GOOD_CA.replacen('\n', "\n-----BEGIN PRIVATE KEY-----\n", 1), "is not one certificate"),
+            ("setup_key", String::new(), "setup key in the bundle is malformed"),
+            ("setup_key", "A1B2_C3D4".to_string(), "setup key in the bundle is malformed"),
+        ];
+        for (key, value, error) in cases {
+            let refused = verify_with(key, &value, NODE_ID).unwrap_err();
+            assert!(refused.contains(error), "{key}={value:?}: {refused}");
+        }
+    }
+
+    #[test]
     fn the_command_line_wants_join_and_eight_digits() {
         let args = |line: &str| line.split(' ').map(str::to_string).collect::<Vec<_>>();
         assert_eq!(Request::from_args(&args("join --code 12345678")), Request::Join { code: "12345678".into(), node: None });
