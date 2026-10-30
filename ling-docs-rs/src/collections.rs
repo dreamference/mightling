@@ -616,6 +616,24 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_holding_a_collection_and_a_file_are_refused() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::create_dir_all(home.join("notes/sub")).unwrap();
+        std::fs::write(home.join("notes.txt"), "x").unwrap();
+        let mut docs = DocsToml::default();
+        docs.add(&home.join("notes/sub"), Some("sub"), &home)
+            .unwrap();
+        assert!(docs.add(&home.join("notes"), None, &home).is_err());
+        assert!(docs
+            .add(&home.join("notes.txt"), Some("file"), &home)
+            .unwrap_err()
+            .to_string()
+            .contains("not a folder"));
+        assert_eq!(docs.collections.len(), 1);
+    }
+
+    #[test]
     fn two_writers_at_once_keep_both_changes() {
         // One writer holds the lock while it saves; the other, started first, waits and then
         // reads the file afresh, so neither change is lost.
