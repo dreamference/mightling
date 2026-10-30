@@ -174,3 +174,18 @@ def test_without_a_group_database_docker_access_is_assumed(monkeypatch):
     monkeypatch.setattr(host_safety_setup, "grp", None)
 
     assert HostSafetySetup._may_use_docker() is True
+
+
+# -- setup -----------------------------------------------------------------------------------------
+
+
+def test_a_sandbox_still_broken_after_setup_keeps_the_night_shift_turned_off(monkeypatch):
+    sandbox_step = {"name": "let bubblewrap create its sandbox", "why": "it cannot", "commands": [["true"]]}
+    monkeypatch.setattr(HostSafetySetup, "steps", classmethod(lambda cls: [sandbox_step]))
+    monkeypatch.setattr(HostSafetySetup, "root_mode", classmethod(lambda cls, yes=False, helper=False: None))
+    monkeypatch.setattr(HostSafetySetup, "_ignore_hangup", classmethod(lambda cls: None))
+    monkeypatch.setattr(SandboxPrerequisite, "turned_off", classmethod(lambda cls: True))
+    monkeypatch.setattr(SandboxPrerequisite, "_forget",
+                        classmethod(lambda cls: pytest.fail("the turned-off answer was forgotten")))
+
+    assert HostSafetySetup.setup(yes=True) is False
