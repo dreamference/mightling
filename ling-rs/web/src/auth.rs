@@ -771,12 +771,39 @@ mod tests {
     }
 
     #[test]
+    fn an_ipv6_address_is_named_in_brackets() {
+        let lan = Addresses::new(3100, &["2001:DB8::5".to_string()]);
+        assert!(lan.host_ok(Some("[2001:db8::5]:3100")));
+        assert!(lan.origin_ok(Some("http://[2001:db8::5]:3100")));
+    }
+
+    #[test]
+    fn a_blank_public_name_lets_no_empty_host_in() {
+        let addresses = Addresses::new(3100, &[]).with_public(&[String::new(), "  ".to_string()]);
+        assert!(!addresses.host_ok(Some("")));
+        assert!(!addresses.host_ok(Some("  ")));
+        assert!(!addresses.origin_ok(Some("http://")));
+    }
+
+    #[test]
+    fn an_origin_counts_only_over_http_or_https() {
+        let local = Addresses::new(3100, &[]);
+        assert!(local.origin_ok(Some("https://localhost:3100")));
+        for origin in ["ws://localhost:3100", "ftp://127.0.0.1:3100", "chrome-extension://localhost:3100"] {
+            assert!(!local.origin_ok(Some(origin)), "{origin}");
+        }
+    }
+
+    #[test]
     fn cookies_are_read_by_name() {
         let header = Some("a=1; mightling_session=abc; mightling_device=def");
         assert_eq!(cookie(header, SESSION_COOKIE), Some("abc"));
         assert_eq!(cookie(header, DEVICE_COOKIE), Some("def"));
         assert_eq!(cookie(header, "missing"), None);
         assert_eq!(cookie(None, SESSION_COOKIE), None);
+        let longer = Some("mightling_sessionx=abc; mightling_device_old=def");
+        assert_eq!(cookie(longer, SESSION_COOKIE), None, "a longer name is another cookie");
+        assert_eq!(cookie(longer, DEVICE_COOKIE), None);
     }
 
     #[test]
