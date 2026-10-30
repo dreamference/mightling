@@ -781,6 +781,31 @@ def test_a_runtime_patch_that_cannot_be_prepared_stops_the_start(monkeypatch):
     assert "no longer match" in str(stopped.value.code)
 
 
+def test_a_chat_template_that_cannot_be_prepared_stops_the_start(monkeypatch, capsys):
+    # A patch anchor the checkpoint's template lacks would serve the refusals the patches remove
+    # (specs/DREAMFERENCE_ARCHITECTURE.md §3.3).
+    mgr = VLLMServerManager()
+    built, events = _quiet_start(monkeypatch, mgr, gate_starts=True)
+    monkeypatch.setattr(
+        "dreamference.vllm_server.chat_template_patcher.ChatTemplatePatcher.prepare",
+        classmethod(lambda cls, *a: None),
+    )
+    with pytest.raises(SystemExit) as stopped:
+        mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False)
+    assert stopped.value.code == 1
+    assert built == [] and ("docker", "run") not in events
+    assert "❌ The recipe's chat template could not be prepared" in capsys.readouterr().out
+
+
+def test_host_safety_is_checked_before_the_engine_starts(monkeypatch):
+    # The first of the two host-safety layers runs before the load (§3.3).
+    mgr = VLLMServerManager()
+    _, events = _quiet_start(monkeypatch, mgr, gate_starts=True)
+    monkeypatch.setattr(mgr, "check_host_safety", lambda: events.append(("host safety",)))
+    mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False)
+    assert events.index(("host safety",)) < events.index(("docker", "run"))
+
+
 def test_no_gate_removes_one_an_earlier_start_left(monkeypatch):
     mgr = VLLMServerManager()
     built, events = _quiet_start(monkeypatch, mgr, gate_starts=True)
