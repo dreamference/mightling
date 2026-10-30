@@ -672,6 +672,7 @@ def test_authorising_adds_one_restricted_line_and_unpairing_removes_only_it(caps
     assert NodeServe.unauthorize("not-a-tag") is False
     assert NodeServe.unauthorize(tag) is True
     assert path.read_text() == "ssh-rsa AAAAB3own the-users-own-key\n"
+    assert oct(path.stat().st_mode & 0o777) == "0o600"  # the rewritten file is as private
 
 
 def test_serve_job_refuses_everything_that_is_not_an_operation(monkeypatch, capsys):
