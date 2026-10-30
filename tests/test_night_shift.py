@@ -1424,6 +1424,15 @@ def test_enable_writes_absolute_paths_and_the_window(tmp_path, monkeypatch):
     assert not (NightShiftScheduler.unit_dir() / "mightling-night.timer").exists()
 
 
+def test_enable_refuses_a_window_it_cannot_read_and_installs_nothing(monkeypatch, capsys):
+    commands = []
+    monkeypatch.setattr(NightShiftScheduler, "systemctl",
+                        staticmethod(lambda args: commands.append(args) or subprocess.CompletedProcess(args, 0, "", "")))
+    assert not NightShiftScheduler.enable("tonight")
+    assert "❌" in capsys.readouterr().out
+    assert commands == [] and not (NightShiftScheduler.unit_dir() / "mightling-night.timer").exists()
+
+
 def test_disable_says_so_and_keeps_the_timer_when_systemctl_cannot_stop_it(monkeypatch, capsys):
     ok = staticmethod(lambda args: subprocess.CompletedProcess(args, 0, "", ""))
     monkeypatch.setattr(NightShiftScheduler, "systemctl", ok)
