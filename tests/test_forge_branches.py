@@ -316,3 +316,35 @@ def test_a_set_keeps_its_refs_and_private_secrets_bundles_small_repositories_and
     assert [Path(argv[argv.index("create") + 2]).name for argv in bundled] == ["o__small.bundle"]
     assert not older.exists(), "an older set is replaced"
     assert other.is_dir(), "a folder that is not a set is left alone"
+
+
+# -- forge service tick [key]
+
+
+@pytest.mark.parametrize(
+    ("role", "running", "restarted"),
+    [("record", True, True), ("record", False, False), (None, False, False)],
+)
+def test_a_tick_that_restarted_the_forge_or_has_no_running_forge_of_record_does_no_record_work(
+    monkeypatch, role, running, restarted
+):
+    from dreamference.forge.forge_container import ForgeContainer
+    from dreamference.forge.forge_github_mirror import ForgeGithubMirror
+    from dreamference.forge.forge_mirrors import ForgeMirrors
+    from dreamference.forge.forge_repositories import ForgeRepositories
+    from dreamference.forge.forge_service import ForgeService
+    from dreamference.forge.forge_settings import ForgeSettings
+
+    def never(*_args, **_kwargs):
+        pytest.fail("record work ran")
+
+    monkeypatch.setattr(ForgeService, "housekeeping", classmethod(lambda cls: None))
+    monkeypatch.setattr(ForgeService, "rebind", classmethod(lambda cls: restarted))
+    monkeypatch.setattr(ForgeSettings, "role", classmethod(lambda cls: role))
+    monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: running))
+    monkeypatch.setattr(ForgeRepositories, "remove_push_mirrors", classmethod(lambda cls: []))
+    monkeypatch.setattr(ForgeRepositories, "install_hooks", classmethod(never))
+    monkeypatch.setattr(ForgeGithubMirror, "run", classmethod(never))
+    monkeypatch.setattr(ForgeService, "ensure_phone", classmethod(never))
+    monkeypatch.setattr(ForgeMirrors, "sync", classmethod(never))
+    assert ForgeService.tick() == 0
