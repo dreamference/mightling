@@ -658,4 +658,16 @@ mod tests {
         assert_eq!(line["outputs"], json!(50));
         assert_eq!(line["accepted"], json!(true));
     }
+
+    #[test]
+    fn a_log_past_its_size_is_started_afresh() {
+        let scratch = Scratch::new("rotate");
+        std::fs::create_dir_all(&scratch.0).unwrap_or_default();
+        let old = format!("{}\n", "z".repeat(MAX_LOG_BYTES as usize));
+        std::fs::write(scratch.0.join("log.jsonl"), &old).unwrap_or_default();
+        let mut items = history(12, 5);
+        assert!(!drop_with(&policy(), &scratch.0, &mut items, 44_000, |e| &mut e.item));
+        assert_eq!(std::fs::read_to_string(scratch.0.join("log.jsonl.old")).unwrap_or_default(), old);
+        assert_eq!(std::fs::read_to_string(scratch.0.join("log.jsonl")).unwrap_or_default().lines().count(), 1);
+    }
 }
