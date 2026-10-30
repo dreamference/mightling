@@ -640,3 +640,37 @@ def test_push_off_puts_the_container_back_on_the_internal_network(machine, capsy
     capsys.readouterr()
     assert MatrixHomeserver.status() == 0
     assert "internal, no route out" in capsys.readouterr().out
+
+
+def test_the_cli_routes_every_matrix_command_and_remove_needs_yes(machine, monkeypatch):
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+
+    called: list[Any] = []
+    for name in ("start", "stop", "status"):
+        monkeypatch.setattr(
+            MatrixHomeserver, name, classmethod(lambda cls, name=name: called.append(name) or 0)
+        )
+    monkeypatch.setattr(
+        MatrixHomeserver, "set_push", classmethod(lambda cls, on: called.append(("push", on)) or 0)
+    )
+    monkeypatch.setattr(
+        MatrixHomeserver,
+        "remove",
+        classmethod(lambda cls, confirmed: called.append(("remove", confirmed)) or 0),
+    )
+    for argv in (["start"], ["stop"], ["status"], ["push", "on"], ["push", "off"], ["remove"]):
+        with pytest.raises(SystemExit) as exit_info:
+            DreamferenceCLIController.run_cli(["matrix", *argv])
+        assert exit_info.value.code == 0
+    with pytest.raises(SystemExit):
+        DreamferenceCLIController.run_cli(["matrix", "remove", "--yes"])
+    # `remove` without --yes reaches the command unconfirmed, which then deletes nothing.
+    assert called == [
+        "start",
+        "stop",
+        "status",
+        ("push", True),
+        ("push", False),
+        ("remove", False),
+        ("remove", True),
+    ]
