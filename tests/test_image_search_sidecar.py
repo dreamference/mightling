@@ -790,3 +790,40 @@ def test_a_probe_that_times_out_says_it_did_not_run(monkeypatch):
 ])
 def test_a_probe_answered_without_a_tool_list_says_so(monkeypatch, stdout):
     assert "does not serve the image_search tool (exit 0)" in _probe(monkeypatch, stdout)
+
+
+def test_a_secret_that_cannot_be_stored_is_none_with_the_reason(monkeypatch, tmp_path):
+    blocked = tmp_path / "a-file"
+    blocked.write_text("")
+    monkeypatch.setattr(image_search_sidecar, "IMAGE_SEARCH_DATA_DIR", str(blocked / "image-search"))
+    monkeypatch.setattr(image_search_sidecar, "IMAGE_SEARCH_SECRET_FILE", str(blocked / "image-search" / "secret"))
+    monkeypatch.setattr(ImageSearchSidecar, "problem", "")
+    assert ImageSearchSidecar.secret() is None
+    assert ImageSearchSidecar.problem.startswith("Could not store the image search secret")
+
+
+def test_an_empty_secret_another_start_left_is_replaced_not_kept(monkeypatch, store):
+    real = image_search_sidecar.secrets_module.token_urlsafe
+    made = []
+
+    def racing(size):
+        store.mkdir(parents=True, exist_ok=True)
+        (store / "secret").write_text("\n")
+        made.append(real(size))
+        return made[0]
+
+    monkeypatch.setattr(image_search_sidecar.secrets_module, "token_urlsafe", racing)
+    assert ImageSearchSidecar.secret() == made[0]
+    assert (store / "secret").read_text() == made[0]
+    assert sorted(path.name for path in store.iterdir()) == ["secret"]
+
+
+def test_a_service_that_cannot_be_staged_is_not_started(monkeypatch, store):
+    store.mkdir()
+    (store / "data").write_text("")  # where the image store should be made
+    monkeypatch.setattr(ImageSearchSidecar, "problem", "")
+    fake = FakeDocker()
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert ImageSearchSidecar.start("http://localhost:8000", "configured") is False
+    assert ImageSearchSidecar.problem.startswith("Could not stage the image search service")
+    assert fake.commands == []
