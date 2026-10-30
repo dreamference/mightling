@@ -340,7 +340,11 @@ def test_only_a_checkpoint_whose_every_precision_declares_itself_skips_the_guess
         notes="Test only.",
         hf_repo_id="example/precisions",
     )
-    for precisions, declares in ((["nvfp4"], True), (["NVFP4", "BF16"], False)):
+    for precisions, declares in (
+        (["nvfp4"], True),
+        (["NVFP4", "BF16"], False),
+        (["AUTOROUND-INT4"], True),
+    ):
         spec = dataclasses.replace(base, supported_precisions=precisions)
         monkeypatch.setitem(ModelMatrixRegistry.MATRIX, "test-precisions", spec)
         assert ModelMatrixRegistry.declares_own_quantization("test-precisions") is declares
