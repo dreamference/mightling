@@ -6,8 +6,10 @@ the page-cache eviction counts only the files the kernel took the advice for.
 """
 
 import json
+import subprocess
 import urllib.error
 
+import pytest
 import requests
 
 from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
@@ -130,3 +132,26 @@ def test_a_docker_or_vllm_probe_that_cannot_run_reports_absent(monkeypatch):
 
     monkeypatch.setattr(vsm.shutil, "which", lambda name: None)
     assert mgr.is_vllm_installed() is False
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [subprocess.CalledProcessError(1, ["docker", "pull"]), OSError("docker vanished")],
+)
+def test_a_registry_image_that_cannot_be_pulled_is_never_built_in_its_place(
+    monkeypatch, capsys, failure
+):
+    from dreamference.vllm_server import vllm_server_manager as vsm
+
+    ran = []
+
+    def run(cmd, **kwargs):
+        ran.append(cmd)
+        raise failure
+
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "is_image_present", lambda image: False)
+    monkeypatch.setattr(vsm.subprocess, "run", run)
+    assert mgr.ensure_docker_image("registry.example/team/engine:1") is False
+    assert ran == [["docker", "pull", "registry.example/team/engine:1"]]
+    assert "Failed to pull" in capsys.readouterr().out
