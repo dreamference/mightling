@@ -399,4 +399,10 @@ mod tests {
         let old = json!({"connected": true, "email": "a@x.com, ,b@y.com,"});
         assert_eq!(parse_status(&old).iter().map(|account| account.email.as_str()).collect::<Vec<_>>(), ["a@x.com", "b@y.com"]);
     }
+
+    #[test]
+    fn an_old_service_that_says_it_is_not_connected_has_no_accounts() {
+        assert!(parse_status(&json!({"connected": false, "email": "a@x.com"})).is_empty());
+        assert!(parse_status(&json!({"email": "a@x.com"})).is_empty());
+    }
 }
