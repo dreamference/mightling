@@ -894,4 +894,11 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn an_empty_output_is_shown_as_the_header_alone() {
+        let path = Path::new("/m/outputs/c.txt");
+        assert_eq!(placeholder("", path), "[output moved out of context, 0 chars: /m/outputs/c.txt]");
+        assert!(!placeholder("Wall time: 0.1 seconds\nOutput:\n\n", path).contains('\n'));
+    }
 }
