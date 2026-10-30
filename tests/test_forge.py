@@ -524,6 +524,81 @@ def test_the_budget_prunes_artefacts_before_logs_and_never_repositories(monkeypa
     assert "Still below the floor" in lines[-1]
 
 
+def test_the_usage_counts_logs_and_dumps_never_backups_or_links_and_never_below_zero(tmp_path):
+    data, share = ForgeSettings.data_dir(), ForgeSettings.share_dir()
+    for relative, size in (
+        (data / "data/actions_artifacts/a.zip", 1),
+        (data / "data/actions_log/l.log", 2),
+        (data / "log/forgejo.log", 4),
+        (data / "dumps/d.zip", 8),
+        (share / "dumps/s.zip", 16),
+        (share / "backups/forge-20261027-063000/dump.tar.gz", 1000),
+        (data / "data/forgejo.db", 32),
+        (tmp_path / "elsewhere/big.pack", 5000),
+    ):
+        relative.parent.mkdir(parents=True, exist_ok=True)
+        relative.write_bytes(b"x" * size)
+    (data / "data/linked.pack").symlink_to(tmp_path / "elsewhere/big.pack")
+    assert ForgeStorage.size(data / "data") == 1 + 2 + 32, "a link is not counted"
+    usage = ForgeStorage.usage()
+    assert usage == {
+        "repositories": 0,
+        "logs_artefacts": 7,
+        "dumps": 24,
+        "other": 32,
+        "total": 63,
+    }
+    # Repositories kept on another disk through a link are counted, the rest never below 0.
+    (data / "git").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    assert ForgeStorage.usage()["repositories"] == 5000
+    assert ForgeStorage.usage()["other"] == 0
+
+
+@pytest.mark.parametrize(
+    "stdout, night", [("ling-swe-night.service loaded active\n", True), ("\n", False)]
+)
+def test_a_night_runs_when_a_swe_bench_unit_is_active(monkeypatch, stdout, night):
+    monkeypatch.setattr(
+        "dreamference.forge.forge_storage.subprocess.run",
+        lambda argv, **k: subprocess.CompletedProcess(argv, 0, stdout, ""),
+    )
+    assert ForgeStorage.night_running() is night
+
+
+def test_the_prune_takes_each_kind_oldest_first_and_files_only():
+    artefacts = ForgeSettings.data_dir() / "data/actions_artifacts"
+    # Named and nested out of their age order: c is the oldest, d the newest.
+    oldest_first = [
+        artefacts / name for name in ("run-1/c.zip", "a.zip", "run-1/e.zip", "b.zip", "d.zip")
+    ]
+    oldest_first += [
+        ForgeSettings.data_dir() / "log/forgejo.log",
+        ForgeSettings.share_dir() / "dumps/d.zip",
+    ]
+    for path in oldest_first:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+    for age, path in enumerate(oldest_first[:5]):
+        os.utime(path, (1_000_000 + age, 1_000_000 + age))
+    assert ForgeStorage.candidates() == oldest_first
+
+
+def test_the_prune_stops_at_the_floor_plus_the_margin_and_goes_past_a_file_it_cannot_remove(
+    monkeypatch,
+):
+    folder = ForgeSettings.data_dir() / "log"
+    folder.mkdir(parents=True)
+    kept = folder / "kept.log"
+    kept.write_bytes(b"x" * 5)
+    monkeypatch.setattr("dreamference.forge.forge_storage.GB", 1)
+    assert ForgeStorage.prune(free_gb=160, night=False) == [], "150 GB plus 10 is enough"
+    monkeypatch.setattr(
+        ForgeStorage, "candidates", classmethod(lambda cls: [folder / "gone.log", kept])
+    )
+    lines = ForgeStorage.prune(free_gb=159, night=False)
+    assert not kept.exists() and "Still below" not in lines[-1]
+
+
 # -- backups ---------------------------------------------------------------------------------------
 
 
