@@ -186,3 +186,16 @@ def test_a_gate_that_cannot_be_reached_does_not_hide_the_launchs_own_error(monke
     monkeypatch.setattr(ModelGate, "stop", classmethod(no_docker))
 
     mgr._abandon_launch(18001)
+
+
+def test_a_stop_disarms_the_watchdog_before_the_container_goes(monkeypatch):
+    events = []
+    mgr = VLLMServerManager()
+    mgr.watchdog = FakeWatchdog(events)
+    monkeypatch.setattr(vllm_server_manager.subprocess, "run", lambda argv, **k: events.append(argv))
+    monkeypatch.setattr(ModelGate, "stop", classmethod(lambda cls, port: events.append(("gate", port))))
+
+    mgr.stop_server(18001)
+
+    assert events == ["watchdog stopped", ["docker", "stop", "dreamference-vllm-18001"], ("gate", 18001)]
+    assert mgr.watchdog is None
