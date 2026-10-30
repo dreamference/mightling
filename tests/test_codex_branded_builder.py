@@ -1478,3 +1478,14 @@ def test_the_launchers_own_build_output_is_not_exported(stand_in_codex, tmp_path
     launcher = tmp_path / "export" / builder_module.MIGHTLING_CRATE_DEST
     assert (launcher / "Cargo.toml").is_file()
     assert not (launcher / "target").exists()
+
+
+def test_a_patch_that_checks_clean_but_fails_to_apply_stops_the_export(
+    stand_in_codex, tmp_path, monkeypatch
+):
+    def git_apply(cls, source_dir, *args):
+        return subprocess.CompletedProcess(["git", "apply", *args], 0 if "--check" in args else 1)
+
+    monkeypatch.setattr(CodexBrandedBuilder, "git_apply", classmethod(git_apply))
+    with pytest.raises(subprocess.CalledProcessError):
+        CodexBrandedBuilder.prepare_source(str(tmp_path / "export"))
