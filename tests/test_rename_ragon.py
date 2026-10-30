@@ -537,3 +537,30 @@ def test_the_renamed_build_workflow_no_longer_adds_puffin_assets(tmp_path, monke
     text = target.read_text(encoding="utf-8")
     assert "dist/puffin" not in text and "puffin-$target" not in text
     assert "release.yml adds the older asset names" in text
+
+
+def test_format_clean_reads_which_files_ruff_would_reformat(tmp_path):
+    # ruff 0.9 stopped printing `Would reformat: path`; reading only that, every file looked
+    # clean and the rename reformatted files that were not clean before it.
+    (tmp_path / "dreamference").mkdir()
+    (tmp_path / "dreamference" / "clean.py").write_text("x = 1\n")
+    (tmp_path / "dreamference" / "dirty.py").write_text("x=1\n")
+    paths = ["dreamference/clean.py", "dreamference/dirty.py", "notes.md"]
+    assert rr.format_clean(str(tmp_path), paths) == {"dreamference/clean.py"}
+
+
+def test_tidy_sorts_the_imports_only_where_the_rename_unsorted_them(tmp_path):
+    # A renamed name can sort before its neighbour; a block that was unsorted before the rename
+    # is left alone, as the ratchet counts it.
+    (tmp_path / "dreamference").mkdir()
+    unsorted = "import os\nimport json\n\nprint(os, json)\n"
+    (tmp_path / "dreamference" / "renamed.py").write_text(unsorted)
+    (tmp_path / "dreamference" / "before.py").write_text(unsorted)
+    clean = {"dreamference/renamed.py", "dreamference/before.py"}
+    rr.tidy(str(tmp_path), clean, {"dreamference/before.py": 1})
+    assert (
+        (tmp_path / "dreamference" / "renamed.py")
+        .read_text()
+        .startswith("import json\nimport os\n")
+    )
+    assert (tmp_path / "dreamference" / "before.py").read_text() == unsorted
