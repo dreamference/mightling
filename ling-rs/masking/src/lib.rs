@@ -901,4 +901,17 @@ mod tests {
         assert_eq!(placeholder("", path), "[output moved out of context, 0 chars: /m/outputs/c.txt]");
         assert!(!placeholder("Wall time: 0.1 seconds\nOutput:\n\n", path).contains('\n'));
     }
+
+    #[test]
+    fn the_segment_key_is_the_first_call_of_any_kind() {
+        for kind in ["function_call", "custom_tool_call", "local_shell_call"] {
+            let values = vec![
+                json!({"type": "message", "role": "user", "content": []}),
+                json!({"type": "function_call_output", "call_id": "orphan", "output": "x"}),
+                json!({"type": kind, "call_id": "first"}),
+                call("second", "ls"),
+            ];
+            assert_eq!(segment_key(&values).as_deref(), Some("first"), "{kind}");
+        }
+    }
 }
