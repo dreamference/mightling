@@ -41,3 +41,13 @@ def test_a_sudo_that_cannot_be_asked_is_not_passwordless(monkeypatch, error):
 
     monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
     assert REAL_PASSWORDLESS_SUDO() is False
+
+
+@pytest.mark.parametrize("error", [OSError("no systemd"), subprocess.TimeoutExpired(["bwrap"], 30)])
+def test_a_sandbox_probe_that_cannot_start_reports_nothing(monkeypatch, error):
+    def run(command, **kwargs):
+        raise error
+
+    monkeypatch.setattr(host_safety_setup.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
+    assert HostSafetySetup.sandbox_works() is None
