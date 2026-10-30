@@ -1,5 +1,6 @@
 """The node's forge (specs/DREAMFERENCE_MIGHTLING_FORGEJO.md): nothing here runs docker or reaches a node."""
 
+import datetime
 import io
 import json
 import os
@@ -533,6 +534,39 @@ def test_retention_keeps_seven_days_and_four_weeks():
         f"forge-202610{d:02d}-063000" for d in range(26, 20, -1)
     ]
     assert len(kept) == 11 and len(set(kept)) == 11
+
+
+def test_retention_keeps_the_newest_of_each_of_the_four_weeks_before_the_seven_days():
+    start = datetime.date(2026, 8, 31)
+    names = [f"forge-{start + datetime.timedelta(days):%Y%m%d}-063000" for days in range(60)]
+    names.append("forge-20261029-180000")
+    assert ForgeBackup.kept(names) == [
+        "forge-20261029-180000",
+        *(f"forge-202610{day}-063000" for day in range(28, 21, -1)),
+        # The newest left of each week (Monday to Sunday): Thursday the 22nd, then Sundays.
+        "forge-20261018-063000",
+        "forge-20261011-063000",
+        "forge-20261004-063000",
+    ]
+
+
+def test_the_retention_removes_old_sets_keeps_bundles_in_the_newest_and_leaves_other_folders(
+    tmp_path,
+):
+    names = [f"forge-202610{day:02d}-063000" for day in range(1, 29)]
+    for name in names:
+        (tmp_path / name / "bundles").mkdir(parents=True)
+    (tmp_path / "notes").mkdir()
+    ForgeBackup.keep(tmp_path)
+    left = sorted(item.name for item in tmp_path.iterdir())
+    assert left == sorted([*ForgeBackup.kept(names), "notes"]) and len(left) < len(names)
+    assert [name for name in left if (tmp_path / name / "bundles").exists()] == [names[-1]]
+
+
+def test_the_latest_set_is_the_newest_received_or_own():
+    (ForgeBackup.received_dir() / "forge-20261028-063000").mkdir(parents=True)
+    (ForgeBackup.local_dir() / "forge-20261029-063000").mkdir(parents=True)
+    assert ForgeBackup.latest().name == "forge-20261029-063000"
 
 
 def make_set(folder: Path, repositories: Path) -> dict:
