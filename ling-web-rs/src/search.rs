@@ -975,4 +975,19 @@ mod tests {
             "a.example/x?id=2"
         );
     }
+
+    #[test]
+    fn a_duplicate_without_an_engine_adds_no_empty_engine() {
+        let payload = searxng(
+            json!([
+                {"title": "A", "url": "https://a.example/x", "engine": "bing", "engines": ["bing"]},
+                {"title": "A", "url": "http://a.example/x"}
+            ]),
+            json!([]),
+            json!([]),
+        );
+        let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
+        assert_eq!(found.results.len(), 1);
+        assert_eq!(found.results[0].engines, ["bing"]);
+    }
 }
