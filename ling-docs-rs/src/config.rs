@@ -508,6 +508,19 @@ mod tests {
     }
 
     #[test]
+    fn a_blank_setting_leaves_a_scratch_home_unindexed() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("user");
+        let scratch = dir.path().join("scratch/codexhome");
+        for blank in ["", "  "] {
+            assert!(
+                !indexes_unasked_for(&scratch, &user, Some(blank)),
+                "{blank:?}"
+            );
+        }
+    }
+
+    #[test]
     fn defaults_are_the_specs() {
         let s = Settings::default();
         assert_eq!(
