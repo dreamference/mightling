@@ -2021,4 +2021,133 @@ mod tests {
         std::fs::write(plain.join("b.py"), "y = 2\n").unwrap();
         assert!(!ok(&plain));
     }
+
+    fn run_sh(script: &str) {
+        let out = Command::new("sh").arg("-c").arg(script).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{script}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn a_quoted_string_reaches_the_shell_as_one_word_whatever_it_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("pwned");
+        let nasty = format!(
+            "it's $(touch {m}) `touch {m}`; touch {m} \"x\" \\ *",
+            m = marker.display()
+        );
+        let out = Command::new("sh")
+            .arg("-c")
+            .arg(format!("printf %s {}", sh_quote(&nasty)))
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), nasty);
+        assert!(!marker.exists(), "the quoted text was executed");
+    }
+
+    #[test]
+    fn xml_text_cannot_close_an_attribute_or_open_a_tag() {
+        assert_eq!(
+            xml_escape(r#"a&b "c" <d>"#),
+            "a&amp;b &quot;c&quot; &lt;d&gt;"
+        );
+        assert_eq!(xml_escape("&lt;"), "&amp;lt;", "ampersand is escaped first");
+    }
+
+    #[test]
+    fn the_repository_root_is_named_in_words_and_a_subdirectory_by_its_path() {
+        assert_eq!(display_root(""), "the repository");
+        assert_eq!(display_root("services/api"), "services/api");
+        assert_eq!(root_python_note(0, ""), None);
+        let note = root_python_note(1, "").unwrap();
+        assert!(note.contains("1 more Python file at"), "{note}");
+        assert!(note.contains("the repository"), "{note}");
+        assert!(root_python_note(2, "sub")
+            .unwrap()
+            .contains("2 more Python files"));
+    }
+
+    #[test]
+    fn the_scratch_copy_of_a_git_repository_holds_the_tracked_files_and_no_untracked_ones() {
+        let (_dir, repo) = make_repo(&[
+            ("src/lib.rs", "pub fn f() {}\n"),
+            ("it's here/a b.txt", "tracked\n"),
+        ]);
+        std::fs::write(repo.root.join(".env"), "SECRET=1\n").unwrap();
+        std::fs::create_dir_all(repo.root.join("target")).unwrap();
+        std::fs::write(repo.root.join("target/out.o"), "x").unwrap();
+        let copy = repo.root.parent().unwrap().join("scratch copy");
+        std::fs::create_dir_all(&copy).unwrap();
+        std::fs::write(copy.join("stale"), "old").unwrap();
+
+        run_sh(&copy_sources(&repo, &repo.root, &copy));
+
+        assert!(copy.join("src/lib.rs").is_file());
+        assert!(copy.join("it's here/a b.txt").is_file());
+        assert!(
+            !copy.join(".env").exists(),
+            "an untracked secret was copied"
+        );
+        assert!(!copy.join("target").exists());
+        assert!(!copy.join("stale").exists(), "a previous copy is replaced");
+        assert!(!copy.join(".git").exists());
+        assert_eq!(
+            std::fs::read_to_string(repo.root.join(".env")).unwrap(),
+            "SECRET=1\n",
+            "the checkout is untouched"
+        );
+    }
+
+    #[test]
+    fn the_scratch_copy_outside_git_leaves_out_build_and_dependency_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("proj");
+        for f in [
+            "main.go",
+            "pkg/util.go",
+            "node_modules/dep/index.js",
+            "target/debug/x",
+            "build/out",
+            ".gradle/cache",
+        ] {
+            std::fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
+            std::fs::write(root.join(f), "x").unwrap();
+        }
+        let repo = Repo {
+            root: root.clone(),
+            main_root: root.clone(),
+            is_git: false,
+        };
+        let copy = dir.path().join("copy");
+        run_sh(&copy_sources(&repo, &root, &copy));
+        assert!(copy.join("main.go").is_file());
+        assert!(copy.join("pkg/util.go").is_file());
+        for left_out in ["node_modules", "target", "build", ".gradle"] {
+            assert!(!copy.join(left_out).exists(), "{left_out} was copied");
+        }
+    }
+
+    #[test]
+    fn a_linked_worktree_reads_its_git_data_from_the_main_checkout() {
+        let (dir, repo) = make_repo(&[("a.txt", "a\n")]);
+        let linked = dir.path().join("linked");
+        git(
+            &repo.root,
+            &["worktree", "add", "-q", linked.to_str().unwrap()],
+        );
+        let own = git_dirs(&repo.root);
+        assert_eq!(own.len(), 1, "{own:?}");
+        let dirs = git_dirs(&linked);
+        let main_git = repo.root.join(".git").canonicalize().unwrap();
+        assert!(
+            dirs.iter()
+                .any(|d| d.canonicalize().ok().as_ref() == Some(&main_git)),
+            "{dirs:?}"
+        );
+        assert!(dirs.iter().all(|d| d.is_absolute() && d.is_dir()));
+        assert!(git_dirs(&dir.path().join("nowhere")).is_empty());
+    }
 }
