@@ -356,6 +356,24 @@ def test_a_cancel_during_the_last_attempt_commits_none_of_the_earlier_ones(bon, 
     assert not any((bon["night"] / "worktrees").iterdir())
 
 
+@pytest.mark.parametrize("statuses, ends", [
+    (["no-change", "stalled"], "stalled"),
+    (["failed", "timed-out"], "no-change"),
+    (["timed-out", "timed-out"], "no-change"),
+    (["failed", "failed"], "failed"),
+])
+def test_with_no_candidate_the_task_ends_as_its_most_telling_attempt(bon, statuses, ends):
+    record = queue(bon["night"], bon["repo"], test=TEST)
+    run = NightShiftBestOfN(bon["night"], record, NightShiftSettings({}), bon["ling"],
+                            time.time() + 60, best_of=len(statuses))
+    outcomes = [{"attempt": i + 1, "status": s, "result": {"last_message": f"attempt {i + 1} said so"}}
+                for i, s in enumerate(statuses)]
+    assert run._no_candidate(outcomes) == ends
+    result = NightShiftQueue.read(bon["night"], record["id"])["result"]
+    # The last word is kept only where it explains the end: a stall or a failure.
+    assert result.get("last_message") == (f"attempt {len(statuses)} said so" if ends in ("stalled", "failed") else None)
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
