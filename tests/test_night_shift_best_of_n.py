@@ -535,6 +535,13 @@ def test_every_attempt_tied_at_the_top_is_named():
     assert choice["chosen"] == ["a1", "a2", "a3"]
 
 
+def test_the_judge_clips_the_issue_it_is_given():
+    from dreamference.night_shift.night_shift_chooser import MAX_ISSUE_CHARS
+    content = NightShiftChooser.messages("x" * (MAX_ISSUE_CHARS + 5), "diff A", "diff B")[1]["content"]
+    assert "x" * MAX_ISSUE_CHARS + "\n[... cut: 5 more characters]" in content
+    assert "x" * (MAX_ISSUE_CHARS + 1) not in content
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
