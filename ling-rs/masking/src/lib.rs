@@ -811,4 +811,14 @@ mod tests {
         apply_with(&policy, &scratch.0, &mut again, after + MIN_STEP_TOKENS, |e| &mut e.item);
         assert_eq!(masked(&again), first);
     }
+
+    #[test]
+    fn a_move_takes_only_outputs_not_masked_before() {
+        let scratch = Scratch::new("again");
+        let values: Vec<Value> = history(30, 60).into_iter().map(|e| e.item).collect();
+        let state = State { masked: ["call_000".to_string(), "call_001".to_string()].into(), after_last_move: None };
+        let plan = plan_move(&policy(), &values, &state, policy().high + 1, &scratch.0).unwrap_or_default();
+        assert_eq!(plan.first(), Some(&6), "{plan:?}");
+        assert!(!plan.contains(&2) && !plan.contains(&4), "{plan:?}");
+    }
 }
