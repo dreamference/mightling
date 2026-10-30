@@ -67,3 +67,13 @@ def test_a_failed_copy_still_removes_the_container_it_made(docker):
 
     assert SGLangRuntimePatcher.extract(IMAGE, "/sgl/srt/server.py") is None
     assert seen[-1] == ["docker", "rm", "-f", "c0ffee"]
+
+
+# -- ChatTemplatePatcher.prepare -------------------------------------------------------------------------
+
+
+def test_a_snapshot_without_a_chat_template_cannot_be_patched(monkeypatch, tmp_path):
+    monkeypatch.setattr(ModelDownloader, "get_hf_cache_dir", classmethod(lambda cls: tmp_path))
+    (tmp_path / "models--org--model" / "snapshots" / "abc123").mkdir(parents=True)
+
+    assert ChatTemplatePatcher.prepare("org/model", "abc123", [["a", "b"]]) is None
