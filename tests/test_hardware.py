@@ -994,3 +994,21 @@ def test_two_fetches_of_one_release_asset_at_once_both_land_it(monkeypatch):
     assert stat.S_IMODE(blob.stat().st_mode) == 0o644
     assert not list(blob.parent.glob("*.incomplete"))
     assert ModelDownloader.get_hf_cache_dir() in blob.parents
+
+
+def test_node_sync_carries_the_assets_of_every_engine_once(monkeypatch):
+    import dreamference.hardware.model_matrix_registry as registry
+    from dreamference.node.node_model_sync import NodeModelSync
+
+    assets = {
+        "sglang": [{"repo": "o/shared"}, {"repo": "o/sglang-head"}],
+        "ling": [{"repo": "o/shared"}, {"repo": "o/ling-head"}],
+    }
+    reg = registry.ModelMatrixRegistry
+    monkeypatch.setattr(reg, "resolve_hf_repo", classmethod(lambda cls, key: "o/model"))
+    monkeypatch.setattr(reg, "get_speculative_draft_repo", classmethod(lambda cls, key: None))
+    monkeypatch.setattr(reg, "engines", classmethod(lambda cls, key: ["sglang", "ling"]))
+    monkeypatch.setattr(
+        reg, "get_engine_assets", classmethod(lambda cls, key, engine=None: assets[engine])
+    )
+    assert NodeModelSync.repos("m") == ["o/model", "o/shared", "o/sglang-head", "o/ling-head"]
