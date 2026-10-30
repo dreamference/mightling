@@ -165,6 +165,7 @@ def test_server_start_exits_with_an_error_when_the_server_stopped_before_it_answ
 
     class Monitor:
         server_ready = False
+        fatal = None
 
         def start(self):
             pass
