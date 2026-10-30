@@ -14,6 +14,16 @@ describe("large payloads cross in pieces", () => {
     expect(back.take(pieces[0] as never)).toBeUndefined();
     expect(back.take(pieces[1] as never)).toEqual(big);
   });
+
+  it("splits a message only past the limit, and forgets the pieces of one it gave back", () => {
+    expect(chunked("abc", 5)).toEqual(["abc"]);
+    expect(chunked("abcd", 5)).toHaveLength(2);
+    const pieces = chunked({ text: "y".repeat(150) }, 100);
+    const back = new Reassembler();
+    back.take(pieces[0] as never);
+    expect(back.take(pieces[1] as never)).toEqual({ text: "y".repeat(150) });
+    expect(back.take(pieces[0] as never)).toBeUndefined();
+  });
 });
 
 describe("a refusal crosses as an answer", () => {
