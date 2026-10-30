@@ -1,5 +1,6 @@
 """The desktop QA reads the latest release tag from the /releases/latest redirect; with no
-published release that redirect points at /releases and the install.sh leg must skip."""
+published release that redirect points at /releases and the install.sh leg must skip.
+"""
 
 import re
 import subprocess
@@ -13,7 +14,9 @@ def tag(url: str) -> str:
     func = re.search(r"^release_tag\(\) \{.*?^\}", SCRIPT.read_text(), re.S | re.M).group(0)
     out = subprocess.run(
         ["bash", "-c", func + '\nrelease_tag "$1"', "_", url],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return out.stdout.strip()
 
