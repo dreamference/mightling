@@ -488,6 +488,13 @@ def test_a_puffin_installation_becomes_the_mightling_one_with_its_tools_renamed(
     assert "Puffin is now Mightling" in result.stdout
 
 
+def test_a_tool_already_under_its_new_name_is_not_replaced_by_the_old_one(tmp_path, release_server):
+    puffin_install(tmp_path, {"bin/puffin-code": "old", "bin/ling-code": "new"})
+    result = run_install(tmp_path, release_server(binaries()), "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / ".local/share/dreamference/mightling/bin/ling-code").read_text() == "new"
+
+
 def test_an_unknown_role_is_refused_before_anything_is_downloaded(tmp_path, release_server):
     server = release_server(binaries())
     result = run_install(tmp_path, server, "--role", "server")
