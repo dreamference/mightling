@@ -1075,3 +1075,55 @@ def test_the_shared_secret_is_compared_in_constant_time(served, monkeypatch):
     headers = {"X-Mightling-Image-Token": "wrong", "Content-Length": str(len(body))}
     assert _http(port, "POST", "/search", body=body, headers=headers)[0] == 403
     assert compared and searched == []
+
+
+def test_an_empty_body_is_refused():
+    def opener(url, pinned, timeout):
+        return _Response(200, body=b"")
+
+    with pytest.raises(FetchRejected, match="empty body"):
+        HardenedFetcher.fetch(
+            "http://img.example/a", 1024, 1.0, resolver=_resolver("93.184.216.34"), opener=opener
+        )
+
+
+def test_https_connects_to_the_pinned_address_and_verifies_the_hostname(monkeypatch):
+    # The address `assert_public` checked is the one connected to (no second lookup that a
+    # rebinding resolver could answer differently), while TLS still verifies the URL's name.
+    from dreamference.chat import image_search_service
+
+    connected, wrapped, sent = [], [], []
+
+    class FakeSocket:
+        def sendall(self, data):
+            sent.append(data)
+
+        def makefile(self, mode):
+            return io.BytesIO(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc")
+
+        def close(self):
+            pass
+
+    class FakeContext:
+        def wrap_socket(self, raw, server_hostname):
+            wrapped.append((raw, server_hostname))
+            return FakeSocket()
+
+    raw = object()
+
+    def create_connection(address, timeout):
+        connected.append(address)
+        return raw
+
+    monkeypatch.setattr(image_search_service.socket, "create_connection", create_connection)
+    monkeypatch.setattr(image_search_service.ssl, "create_default_context", FakeContext)
+
+    response = HardenedFetcher._open("https://img.example/cat.jpg?size=2", "93.184.216.34", 1.0)
+
+    assert connected == [("93.184.216.34", 443)]
+    assert wrapped == [(raw, "img.example")]
+    request = b"".join(sent)
+    assert request.startswith(b"GET /cat.jpg?size=2 HTTP/1.1\r\n")
+    assert b"\r\nHost: img.example\r\n" in request
+    assert response.status == 200
+    assert response.read() == b"abc"
