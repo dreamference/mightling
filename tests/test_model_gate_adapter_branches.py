@@ -67,3 +67,22 @@ def test_adapters_are_not_listed_when_the_engine_does_not_list_their_base():
     body = json.dumps({"object": "list", "data": [{"id": "org/other"}]}).encode()
 
     assert ModelGateAdapters.models(body, LISTING)["data"] == [{"id": "org/other"}]
+
+
+# -- sync ----------------------------------------------------------------------------------------------
+
+
+def test_an_engine_that_does_not_answer_leaves_the_adapters_unsynced(adapters, monkeypatch):
+    calls = []
+
+    async def engine_call(method, path, payload):
+        calls.append((method, path))
+        return 0, b""
+
+    monkeypatch.setattr(adapters, "engine_call", engine_call)
+
+    asyncio.run(adapters.sync(LISTING))
+
+    assert calls == [("GET", "/v1/models")]
+    assert adapters.synced is False
+    assert adapters.loaded == {}
