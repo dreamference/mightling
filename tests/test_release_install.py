@@ -824,7 +824,8 @@ def test_at_a_terminal_the_password_and_the_updates_are_asked_once_at_the_start(
     assert "terminal" not in logged(tmp_path, "admin.log")
 
 
-@pytest.mark.parametrize("failing, reboot", [(("apt-fail", "fwupd-fail"), False), (("apt-fail",), True)])
+@pytest.mark.parametrize("failing, reboot", [
+    (("apt-fail", "fwupd-fail"), False), (("apt-fail",), True), (("fwupd-fail",), True)])
 def test_the_reboot_is_asked_for_only_when_an_update_went_in(tmp_path, release_server, failing, reboot):
     # Both updates failing used to end with "Reboot now to finish the updates" all the same.
     env = {**fresh_gb10(tmp_path), "FAKE_SUDO": "password"}
@@ -834,7 +835,8 @@ def test_the_reboot_is_asked_for_only_when_an_update_went_in(tmp_path, release_s
                          terminal_input="secret\ny\n")
     out = result.stdout
     assert result.returncode == 1, out + result.stderr
-    assert "❌ system packages" in out
+    for name in failing:
+        assert {"apt-fail": "❌ system packages", "fwupd-fail": "❌ firmware"}[name] in out
     assert ("sudo reboot" in out) == reboot, out
 
 
