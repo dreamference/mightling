@@ -617,4 +617,13 @@ mod tests {
         assert_eq!(bare["isError"], true);
         assert_eq!(text(&bare), "The Google service answered HTTP 404.");
     }
+
+    #[test]
+    fn events_are_wrapped_one_by_one_and_a_single_item_whole() {
+        let events = render(App::Calendar, 200, &json!({"events": [{"id": "e1", "summary": "a"}, {"id": "e2", "summary": "b"}]}));
+        assert_eq!(text(&events).matches("</untrusted>").count(), 2, "{}", text(&events));
+        assert_eq!(text(&render(App::Calendar, 200, &json!({"events": []}))), "No results.");
+        let one = render(App::Gmail, 200, &json!({"id": "x", "body": "hello"}));
+        assert_eq!(text(&one), "<untrusted source=\"gmail\" id=\"x\">\nid: x\nbody:\nhello\n</untrusted>");
+    }
 }
