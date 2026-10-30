@@ -6,12 +6,14 @@ the page-cache eviction counts only the files the kernel took the advice for.
 """
 
 import json
+import os
 import subprocess
 import urllib.error
 
 import pytest
 import requests
 
+from dreamference.hardware import ModelDownloader
 from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
 
 
@@ -155,3 +157,53 @@ def test_a_registry_image_that_cannot_be_pulled_is_never_built_in_its_place(
     assert mgr.ensure_docker_image("registry.example/team/engine:1") is False
     assert ran == [["docker", "pull", "registry.example/team/engine:1"]]
     assert "Failed to pull" in capsys.readouterr().out
+
+
+def _snapshot(tmp_path, monkeypatch, sizes):
+    snapshot = tmp_path / "snapshot"
+    (snapshot / "sub").mkdir(parents=True)
+    for name, size in sizes.items():
+        (snapshot / name).write_bytes(b"x" * size)
+    monkeypatch.setattr(ModelDownloader, "get_model_snapshot_dir", lambda model: snapshot)
+    return snapshot
+
+
+def test_eviction_counts_only_the_files_the_kernel_took_the_advice_for(tmp_path, monkeypatch):
+    _snapshot(tmp_path, monkeypatch, {"a.safetensors": 1 << 20, "sub/b.safetensors": 3 << 20})
+    real_open, real_fadvise = os.open, os.posix_fadvise
+    names = {}
+
+    def opened(path, flags, *rest):
+        fd = real_open(path, flags, *rest)
+        names[fd] = os.path.basename(path)
+        return fd
+
+    def fadvise(fd, offset, length, advice):
+        if names.get(fd) == "b.safetensors":
+            raise OSError("declined")
+        return real_fadvise(fd, offset, length, advice)
+
+    monkeypatch.setattr(os, "open", opened)
+    monkeypatch.setattr(os, "posix_fadvise", fadvise)
+    assert VLLMServerManager._evict_model_page_cache("m") == pytest.approx((1 << 20) / (1 << 30))
+
+
+def test_eviction_skips_a_file_it_cannot_open_and_the_rest_still_count(tmp_path, monkeypatch):
+    _snapshot(tmp_path, monkeypatch, {"a.safetensors": 1 << 20, "locked.bin": 5 << 20})
+    real_open = os.open
+
+    def opened(path, flags, *rest):
+        if os.path.basename(path) == "locked.bin":
+            raise PermissionError("locked")
+        return real_open(path, flags, *rest)
+
+    monkeypatch.setattr(os, "open", opened)
+    assert VLLMServerManager._evict_model_page_cache("m") == pytest.approx((1 << 20) / (1 << 30))
+
+
+def test_eviction_of_a_model_the_downloader_cannot_place_evicts_nothing(monkeypatch):
+    def unknown(model):
+        raise KeyError(model)
+
+    monkeypatch.setattr(ModelDownloader, "get_model_snapshot_dir", unknown)
+    assert VLLMServerManager._evict_model_page_cache("no-such-model") == 0.0
