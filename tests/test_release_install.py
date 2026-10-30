@@ -495,6 +495,17 @@ def test_a_tool_already_under_its_new_name_is_not_replaced_by_the_old_one(tmp_pa
     assert (tmp_path / ".local/share/dreamference/mightling/bin/ling-code").read_text() == "new"
 
 
+def test_a_puffin_folder_beside_a_mightling_one_is_left_where_it_is(tmp_path, release_server):
+    old = puffin_install(tmp_path, {"bin/puffin": "old"})
+    new = tmp_path / ".local/share/dreamference/mightling"
+    new.mkdir(parents=True)
+    result = run_install(tmp_path, release_server(binaries()), "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (old / "bin/puffin").read_text() == "old"
+    assert not (new / "puffin").exists()
+    assert "Puffin is now Mightling" not in result.stdout
+
+
 def test_an_unknown_role_is_refused_before_anything_is_downloaded(tmp_path, release_server):
     server = release_server(binaries())
     result = run_install(tmp_path, server, "--role", "server")
