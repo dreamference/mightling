@@ -620,4 +620,17 @@ mod tests {
         let after_output = vec![call("c", "ls"), output.clone(), output];
         assert_eq!(placeholder_for(&after_output, 2), "[output of ls dropped at compaction (exit 0); re-run if needed]");
     }
+
+    #[test]
+    fn a_local_shell_calls_command_is_named_and_a_call_without_one_is_a_tool_call() {
+        let shell = json!({"type": "local_shell_call", "call_id": "s", "status": "completed", "action": {"type": "exec", "command": ["ls", "-la"]}});
+        assert_eq!(command_of(&shell), "ls -la");
+        let items = vec![shell, json!({"type": "function_call_output", "call_id": "s", "output": "x"})];
+        assert_eq!(placeholder_for(&items, 1), "[output of ls -la dropped at compaction; re-run if needed]");
+        let bare = vec![
+            json!({"type": "local_shell_call", "call_id": "b", "status": "completed"}),
+            json!({"type": "function_call_output", "call_id": "b", "output": "x"}),
+        ];
+        assert_eq!(placeholder_for(&bare, 1), "[output of a tool call dropped at compaction; re-run if needed]");
+    }
 }
