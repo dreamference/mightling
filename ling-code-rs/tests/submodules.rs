@@ -1407,3 +1407,14 @@ fn merges_by_others_do_not_outvote_your_commits() {
         (true, Reason::Yours, 2)
     );
 }
+
+#[test]
+fn a_detached_checkout_at_a_tag_reports_the_tag() {
+    let f = with_submodules();
+    let checkout = f.repo.root.join("ours");
+    git(&checkout, &["tag", "v1.0"]);
+    git(&checkout, &["checkout", "-q", "--detach"]);
+    let all = decisions(&f.repo);
+    let ours = all.iter().find(|s| s.path == "ours").unwrap();
+    assert_eq!(ours.tag.as_deref(), Some("v1.0"));
+}
