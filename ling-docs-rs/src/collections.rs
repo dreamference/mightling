@@ -486,6 +486,7 @@ mod tests {
             &codex.join("projects/p-1a2b/other"),
             &codex.join("sessions"),
             &codex.join("projects/bad id/knowledge"),
+            &codex.join("sessions/p-1a2b/knowledge"),
         ] {
             std::fs::create_dir_all(dir).unwrap();
         }
@@ -495,6 +496,7 @@ mod tests {
             codex.join("projects/p-1a2b/other"),
             codex.join("sessions"),
             codex.join("projects/bad id/knowledge"),
+            codex.join("sessions/p-1a2b/knowledge"),
             codex.join("projects"),
         ] {
             assert!(
