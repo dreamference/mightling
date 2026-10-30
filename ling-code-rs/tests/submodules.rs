@@ -1494,3 +1494,25 @@ fn the_size_guard_is_not_read_through_a_link_into_the_repository() {
     let ours = all.iter().find(|s| s.path == "ours").unwrap();
     assert_eq!((ours.indexed, ours.reason.clone()), (true, Reason::Yours));
 }
+
+#[test]
+fn the_trust_gate_reads_the_decision_of_the_targets_own_submodule() {
+    let f = with_submodules();
+    let all = decisions(&f.repo);
+    assert!(all[0].inherits_trust && !all[1].inherits_trust, "{all:?}");
+    let target = plan::Target {
+        kind: Kind::Executing,
+        indexer: "rust-analyzer",
+        root: "vendored/crate".to_string(),
+        on_demand: false,
+        file: String::new(),
+        submodule: "vendored".to_string(),
+    };
+    let nowhere = f.dir.path().join("no-codex-home");
+    let why = plan::untrusted_reason_in(&nowhere, &f.repo, true, &all, &target)
+        .expect("ours inheriting trust says nothing about vendored");
+    assert!(
+        why.contains("the submodule vendored is not trusted"),
+        "{why}"
+    );
+}
