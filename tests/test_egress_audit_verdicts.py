@@ -4,6 +4,7 @@ The docs audit's reasons, the app audit's loopback allowlist and preview page, a
 file a failing verdict leaves behind.
 """
 
+import json
 import os
 import stat
 import sys
@@ -11,7 +12,7 @@ from pathlib import Path
 
 from dreamference.audit import DocsEgressAudit, EgressAudit
 from dreamference.audit.egress_trace import EgressTrace
-from dreamference.audit.egress_verdict import FAIL, TRACE_FAILED
+from dreamference.audit.egress_verdict import FAIL, TRACE_FAILED, EgressVerdict
 from dreamference.chat.gmail_search_service import HOST_PORT as GMAIL_HOST_PORT
 from dreamference.chat.image_search_sidecar import IMAGE_SEARCH_HOST_PORT
 from dreamference.chat.searxng_sidecar import SEARXNG_HOST_PORT
@@ -67,3 +68,14 @@ urllib.request.urlopen(preview + "seen", timeout=5).read()
     out = capsys.readouterr().out
     # The connect was read, and allowed only as the preview page.
     assert code == 0 and "1x  the audit's preview page" in out
+
+
+def test_the_result_file_keeps_a_failing_verdict_and_its_reasons(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    trace = EgressTrace(destinations={"192.0.2.7:443": 1}, processes={"ling": 1})
+    verdict = EgressVerdict(FAIL, ["connected to 192.0.2.7:443 (1x): not on this machine"])
+    path = EgressAudit.write_result(trace, verdict, {8000: "model server"}, {})
+    result = json.loads(Path(path).read_text())
+    assert Path(path).parent == tmp_path / "audit"
+    assert (result["verdict"], result["problems"]) == (FAIL, verdict.problems)
+    assert result["destinations"] == {"192.0.2.7:443": 1}
