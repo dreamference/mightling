@@ -44,3 +44,9 @@ def test_the_container_gets_no_swap_beyond_its_memory_cap(host):
     prefix = _prefix({"container_headroom_gb": 4.0})
     assert _option(prefix, "--memory") == f"{TOTAL_GB * 0.5 + 4.0:.0f}g"
     assert _option(prefix, "--memory-swap") == _option(prefix, "--memory")
+
+
+def test_the_container_leaves_the_host_a_share_of_its_cpus(host, monkeypatch):
+    assert _option(_prefix({}), "--cpus") == "14.0"
+    monkeypatch.setattr("os.cpu_count", lambda: 1)
+    assert _option(_prefix({}), "--cpus") == "1.0"
