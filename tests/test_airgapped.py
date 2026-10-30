@@ -1,8 +1,11 @@
 """`/airgapped` (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md): the Python side of the setting, and what
 Python, the launcher and the web commands must agree on -- the default level, and one resolver."""
 
+import os
 import re
 from pathlib import Path
+
+import pytest
 
 import dreamference.config.dreamference_config as cfg_mod
 from dreamference.config import DreamferenceConfig
@@ -168,6 +171,17 @@ def test_a_config_path_that_is_not_a_file_is_passed_over_without_a_word(tmp_path
     (cwd / "dreamference.toml").mkdir()
     assert DreamferenceConfig.resolve_airgapped_level(cwd) == "on"
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file whatever its mode")
+def test_a_config_file_that_cannot_be_read_counts_as_absent_as_on_the_rust_side(tmp_path, monkeypatch):
+    # ling-rs/airgapped skips a file `read_to_string` refuses; the user's level still holds.
+    cwd = _two_files(tmp_path / "a", monkeypatch, 'mightling_airgapped = "off"\n', 'mightling_airgapped = "on"\n')
+    (cwd / "dreamference.toml").chmod(0)
+    assert DreamferenceConfig.resolve_airgapped_level(cwd) == "on"
+    cwd = _two_files(tmp_path / "b", monkeypatch, 'mightling_airgapped = "on"\n', None)
+    (cwd / "dreamference.toml").chmod(0)
+    assert DreamferenceConfig.resolve_airgapped_level(cwd) == "off"
 
 
 # -- the MCP server's web tools follow the level ---------------------------------------------------
