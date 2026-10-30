@@ -1487,4 +1487,18 @@ mod tests {
         assert!(lines[0].starts_with("Discarded:"), "{lines:?}");
         assert_ne!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default(), "changed\n");
     }
+
+    #[test]
+    fn a_discard_that_cannot_keep_a_snapshot_removes_nothing() {
+        let fixture = Fixture::new("no-snapshot");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (session, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("auth.py"), "changed\n").unwrap_or_default();
+        // Its link to the repository is broken: its changes cannot be read, so nothing is dropped.
+        std::fs::write(session.checkout.join(".git"), "gitdir: /nonexistent\n").unwrap_or_default();
+        let (lines, code) = discard(&session, false);
+        assert_eq!(code, 1, "{lines:?}");
+        assert!(lines[0].starts_with("Not discarded"), "{lines:?}");
+        assert_eq!(std::fs::read_to_string(session.checkout.join("auth.py")).unwrap_or_default(), "changed\n");
+    }
 }
