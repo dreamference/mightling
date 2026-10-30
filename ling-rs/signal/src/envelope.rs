@@ -238,4 +238,12 @@ mod tests {
             "syncMessage": {"sentMessage": {"destinationUuid": "friend", "message": "private", "timestamp": 7}}}});
         assert_eq!(parse(&by_uuid, OwnAccount { uuid: Some("me"), number: None }).unwrap().body, Body::Other);
     }
+
+    #[test]
+    fn an_empty_note_to_self_is_not_a_question() {
+        // A sticker or an edit synced from the phone: no text and no attachment.
+        let empty = json!({"envelope": {"sourceUuid": "me", "sourceDevice": 1, "timestamp": 5,
+            "syncMessage": {"sentMessage": {"destinationUuid": "me", "timestamp": 5}}}});
+        assert_eq!(parse(&empty, OwnAccount { uuid: Some("me"), number: None }).unwrap().body, Body::Other);
+    }
 }
