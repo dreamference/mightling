@@ -182,6 +182,16 @@ def test_read_only_means_a_get_or_head_of_a_listed_path_and_nothing_beside_it():
         assert not ModelGateService.allows(closed, "127.0.0.1", method, path), (method, path)
 
 
+def test_a_head_that_is_not_an_http_1_request_is_not_parsed():
+    for head in (
+        b"GET /v1/models HTTP/2.0\r\n\r\n",
+        b"GET /v1/models SPDY/3\r\n\r\n",
+        b"GET /v1/models\r\n\r\n",
+        b"GET /v1/models HTTP/1.1\r\nHost: x\r\nno colon here\r\n\r\n",
+    ):
+        assert ModelGateService.parse_head(head) is None, head
+
+
 def test_a_request_head_is_rewritten_to_one_request_per_connection():
     head = (
         b"POST /v1/responses HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\nKeep-Alive: 5\r\n"
