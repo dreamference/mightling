@@ -355,3 +355,100 @@ process.stdin.on("data", (chunk) => {
     }
   });
 });
+
+describe("what the app-server connection holds back (DESKTOP §4.3)", () => {
+  const saved = { CODEX_HOME: process.env.CODEX_HOME, MIGHTLING_BIN: process.env.MIGHTLING_BIN, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("answers only requests still waiting, reads a thread's level in its own folder, and keeps the observer to its answers", async () => {
+    const dir = scratch("server-guards");
+    const home = path.join(dir, "home");
+    // A Work project whose own configuration turns the air gap on: only `ling airgapped` run in it says so.
+    const repo = path.join(dir, "repo");
+    fs.mkdirSync(repo, { recursive: true });
+    fs.writeFileSync(path.join(repo, "AIRGAP_ON"), "");
+    fs.mkdirSync(path.join(home, "ask"), { recursive: true });
+    const asked = path.join(dir, "airgapped.jsonl");
+    const ling = nodeScript(dir, "ling", `const fs = require("fs");
+const path = require("path");
+const args = process.argv.slice(2);
+if (args[0] === "airgapped") {
+  fs.appendFileSync(${JSON.stringify(asked)}, JSON.stringify({ args, cwd: process.cwd() }) + "\\n");
+  process.stdout.write("Airgapped: " + (fs.existsSync(path.join(process.cwd(), "AIRGAP_ON")) ? "on" : "off") + " (stub)\\n");
+  process.exit(0);
+}
+const say = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+let buffer = "";
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let newline;
+  while ((newline = buffer.indexOf("\\n")) >= 0) {
+    const message = JSON.parse(buffer.slice(0, newline));
+    buffer = buffer.slice(newline + 1);
+    if (message.method === "thread/start") {
+      say({ id: message.id, result: { thread: { id: "thread-1", cwd: message.params.cwd } } });
+    } else if (message.method === "thread/list") {
+      say({ id: "req-1", method: "item/commandExecution/requestApproval", params: { threadId: "thread-1" } });
+      say({ id: "req-2", method: "item/fileChange/requestApproval", params: { threadId: "thread-1" } });
+      say({ method: "item/started", params: { threadId: "thread-1", requestId: "req-2" } });
+      say({ method: "serverRequest/resolved", params: { threadId: "thread-1", requestId: "req-1" } });
+      say({ id: message.id, result: { data: [] } });
+    } else if ("id" in message && message.method) {
+      say({ id: message.id, result: {} });
+    }
+  }
+});
+`);
+    process.env.CODEX_HOME = home;
+    process.env.MIGHTLING_BIN = ling;
+    const delivered: ForView[] = [];
+    const observed: Record<string, unknown>[] = [];
+    const server = new AppServer(null, { deliver: (message) => delivered.push(message), busyChanged: () => {} });
+    // An observer that claims everything still only takes answers from the windows.
+    server.observe((message) => {
+      observed.push(message as Record<string, unknown>);
+      return true;
+    });
+    server.start();
+    const seen = (id: unknown) => observed.some((message) => message.id === id && "result" in message);
+    const payloads = () => delivered.filter((message) => message.channel === "work://message").map((message) => message.payload as Record<string, unknown>);
+    try {
+      await server.send({ id: 1, method: "thread/start", params: { model: "m", cwd: repo } });
+      await until(() => seen(1));
+      // A Work thread's folder is not linked among the Ask questions.
+      expect(() => fs.lstatSync(path.join(home, "ask", "thread-1"))).toThrow();
+      // Its ! command is judged by the level in its own folder, and only by the thread's level.
+      fs.rmSync(asked);
+      await expect(server.send({ id: 2, method: "thread/shellCommand", params: { threadId: "thread-1", command: "curl example.com" } })).rejects.toThrow(/airgapped is on/);
+      const levels = fs.readFileSync(asked, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { args: string[]; cwd: string });
+      expect(levels.some((entry) => samePath(entry.cwd, repo))).toBe(true);
+      expect(levels.every((entry) => entry.args.includes("--thread") && entry.args.includes("thread-1"))).toBe(true);
+
+      await server.send({ id: 3, method: "thread/list", params: {} });
+      await until(() => seen(3));
+      // Resolved by the server, a request takes no answer; another notification naming it changes nothing.
+      await expect(server.send({ id: "req-1", result: { decision: "accept" } })).rejects.toThrow();
+      await server.send({ id: "req-2", result: { decision: "accept" } });
+      // The windows got the server's requests and notifications, never an answer the observer took.
+      expect(payloads().some((message) => message.id === "req-1" && message.method)).toBe(true);
+      expect(payloads().some((message) => message.method === "serverRequest/resolved")).toBe(true);
+      expect(payloads().some((message) => "result" in message)).toBe(false);
+
+      // No home folder: a named prompt is refused before anything is composed.
+      for (const key of ["CODEX_HOME", "HOME", "USERPROFILE"]) delete process.env[key];
+      await expect(server.send({ id: 4, method: "thread/start", params: { model: "m", prompt: "ask" } })).rejects.toThrow(/HOME is not set/);
+      process.env.CODEX_HOME = home;
+
+      // A server whose input is gone takes nothing more.
+      (server as unknown as { child: { stdin: { destroy(): void } } }).child.stdin.destroy();
+      await expect(server.send({ id: 5, method: "thread/list", params: {} })).rejects.toThrow("not running");
+    } finally {
+      server.stop();
+    }
+  });
+});
