@@ -184,6 +184,8 @@ class NightShiftReport:
         for key, label in (("log", "log"), ("test_log", "test log")):
             if entry.get(key):
                 parts.append(f"{label} `{entry[key]}`")
+        if entry.get("hint"):
+            parts.append(f"hint: {entry['hint']}")
         return f"  - Attempt {entry.get('attempt')}: " + ", ".join(parts)
 
     @classmethod

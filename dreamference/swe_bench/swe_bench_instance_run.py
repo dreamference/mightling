@@ -34,6 +34,7 @@ from dreamference.night_shift.refine_prompt import (
 from dreamference.night_shift.refine_prompt import (
     NO_REFINED as NO_REFINED_PIECE,
 )
+from dreamference.night_shift.strategy_hints import StrategyHints
 from dreamference.runner.codex_installer import ADAPTER_ENV
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
@@ -410,6 +411,7 @@ class SweBenchInstanceRun:
         apply_patch: str = "auto",
         exec_tool: str = "auto",
         turn_end_percent: int | None = None,
+        strategy_hint: str = "",
     ) -> None:
         """Args:
         store: The run's files.
@@ -442,6 +444,8 @@ class SweBenchInstanceRun:
         turn_end_percent: What `model_post_turn_compact_threshold_percent` gets on every exec
             command line (the turn-end compaction arm, spec §16): 0 for off, None leaves
             the key alone.
+        strategy_hint: The run's strategy hint (`--strategy-hint`, `StrategyHints`), appended
+            after the issue in the prompt that fixes it; empty for none.
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -461,6 +465,7 @@ class SweBenchInstanceRun:
         self.refine_version = refine_version
         self.task_rules: list[str] = list(task_rules or [])
         self.review_turn = review_turn
+        self.strategy_hint = strategy_hint
         self.hooks: list[str] = list(hooks or [])
         # The turn-end compaction arm (spec §16, night 10): Codex's own key on every exec command
         # line of this instance, 0 for off; None leaves it alone (`exec` then never compacts at a
@@ -511,21 +516,26 @@ class SweBenchInstanceRun:
         problem_statement: str,
         code_index: bool = False,
         task_rules: list[str] | None = None,
+        strategy_hint: str = "",
     ) -> str:
-        """Builds the prompt: the fixed preamble and the issue text, verbatim.
+        """Builds the prompt: the fixed preamble and the issue text, verbatim, then any strategy hint.
 
         Args:
             problem_statement: The dataset row's `problem_statement`.
             code_index: Whether the agent has the code index, which adds `CODE_INDEX_HINT`.
             task_rules: Names of `TASK_RULES` to add, in `TASK_RULES`' order.
+            strategy_hint: The run's strategy hint (`StrategyHints.append`); empty for none.
 
         Returns:
             str: The prompt.
         """
-        return PROMPT.format(
-            problem_statement=problem_statement,
-            code_index=CODE_INDEX_HINT if code_index else "",
-            task_rules=cls.task_rules_text(task_rules),
+        return StrategyHints.append(
+            PROMPT.format(
+                problem_statement=problem_statement,
+                code_index=CODE_INDEX_HINT if code_index else "",
+                task_rules=cls.task_rules_text(task_rules),
+            ),
+            strategy_hint,
         )
 
     @classmethod
@@ -573,8 +583,11 @@ class SweBenchInstanceRun:
         code_index: bool = False,
         task_rules: list[str] | None = None,
         version: str = "v1",
+        strategy_hint: str = "",
     ) -> str:
         """Builds the refine arm's second prompt: the issue verbatim, then the first step's description.
+
+        A strategy hint comes last, after the description.
 
         Args:
             problem_statement: The dataset row's `problem_statement`.
@@ -582,15 +595,19 @@ class SweBenchInstanceRun:
             code_index: Whether the agent has the code index, which adds `CODE_INDEX_HINT`.
             task_rules: Names of `TASK_RULES` to add, in `TASK_RULES`' order.
             version: Which texts (`FIX_PROMPTS`).
+            strategy_hint: The run's strategy hint (`StrategyHints.append`); empty for none.
 
         Returns:
             str: The prompt.
         """
-        return FIX_PROMPTS[version].format(
-            problem_statement=problem_statement,
-            refined=refined.strip() or NO_REFINED,
-            code_index=CODE_INDEX_HINT if code_index else "",
-            task_rules=cls.task_rules_text(task_rules),
+        return StrategyHints.append(
+            FIX_PROMPTS[version].format(
+                problem_statement=problem_statement,
+                refined=refined.strip() or NO_REFINED,
+                code_index=CODE_INDEX_HINT if code_index else "",
+                task_rules=cls.task_rules_text(task_rules),
+            ),
+            strategy_hint,
         )
 
     @classmethod
@@ -740,10 +757,11 @@ class SweBenchInstanceRun:
                 bool(self.code_index),
                 self.task_rules,
                 self.refine_version,
+                self.strategy_hint,
             )
         else:
             prompt = self.compose_prompt(
-                self.problem_statement, bool(self.code_index), self.task_rules
+                self.problem_statement, bool(self.code_index), self.task_rules, self.strategy_hint
             )
         if self.hooks:
             # Only now: the refine arm's study step is neither held nor counted.

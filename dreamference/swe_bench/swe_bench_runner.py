@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 from dreamference.night_shift.night_shift_host import NightShiftHost
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_runner import NightShiftRunner
+from dreamference.night_shift.strategy_hints import DEFAULT_HINTS
 from dreamference.runner.safe_git import SafeGit
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_code_index import ARMS, SweBenchCodeIndex
@@ -338,6 +339,7 @@ class SweBenchRunner:
         compat: str | None = None,
         test_guard: bool = False,
         finish_check: bool = False,
+        strategy_hint: int = 0,
     ) -> dict[str, Any]:
         """Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -414,6 +416,10 @@ class SweBenchRunner:
             "sampling": sampling or DEFAULT_SAMPLING,
             "test_guard": bool(test_guard),
             "finish_check": bool(finish_check),
+            # The hint's text is fixed when the run starts: a resumed run keeps it whatever
+            # later becomes of `DEFAULT_HINTS`.
+            "strategy_hint": int(strategy_hint or 0),
+            "strategy_hint_text": DEFAULT_HINTS[strategy_hint - 1] if strategy_hint else "",
             **({"hooks_gate_sha256": SweBenchHooks.gate_digest()} if hooks else {}),
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
@@ -525,6 +531,7 @@ class SweBenchRunner:
         image_chunk: int | None = None,
         test_guard: bool = False,
         finish_check: bool = False,
+        strategy_hint: int = 0,
     ) -> int:
         """Runs the agent over a run's instances, resuming a run of the same name.
 
@@ -602,6 +609,10 @@ class SweBenchRunner:
                 test has run on is held once, as are a stop mid-work and a failure called
                 pre-existing with no run on the unchanged code (spec §29). Off by default. A new
                 run only, like `code_index`.
+            strategy_hint: Hint N of `DEFAULT_HINTS` appended after the issue in every
+                instance's prompt (`StrategyHints`), so the rounds of a best-of-N night work in
+                different ways; 0, the default, leaves the prompt byte-identical. The manifest
+                records the number and the text. A new run only, like `code_index`.
             hooks: Hook sets registered in each instance's session (`HOOK_SETS`: `issue-v1`
                 holds the first edit once until the files and functions the issue names have
                 been read, and the first stop once until its example has been run; spec §20).
@@ -653,6 +664,9 @@ class SweBenchRunner:
             print(
                 f"❌ --task-rules takes: {', '.join(TASK_RULES)} (not {', '.join(unknown_rules)})."
             )
+            return 1
+        if not 0 <= strategy_hint <= len(DEFAULT_HINTS):
+            print(f"❌ --strategy-hint {strategy_hint}: 0 or 1 to {len(DEFAULT_HINTS)}.")  # noqa: T201 — CLI output
             return 1
         unknown_hooks = sorted(set(hooks or []) - set(HOOK_SETS))
         if unknown_hooks:
@@ -821,6 +835,7 @@ class SweBenchRunner:
                         sampling=sampling,
                         test_guard=test_guard,
                         finish_check=finish_check,
+                        strategy_hint=strategy_hint,
                     )
                     manifest.update(cls.shard_record(whole, wanted_shard))
                     store.write_manifest(manifest)
@@ -1354,6 +1369,8 @@ class SweBenchRunner:
                             refine=bool(manifest.get("refine", False)),
                             task_rules=manifest.get("task_rules") or [],
                             review_turn=bool(manifest.get("review_turn", False)),
+                            # A run made before the option existed had no hint.
+                            strategy_hint=str(manifest.get("strategy_hint_text") or ""),
                             # A run made before refine-v2 existed has no key: it ran v1.
                             refine_version=str(manifest.get("refine_version") or "v1"),
                             hooks=manifest.get("hooks") or [],

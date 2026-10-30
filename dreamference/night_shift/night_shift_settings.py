@@ -13,6 +13,7 @@ from typing import Any, Final
 
 from dreamference.config.config_path_resolver import ConfigPathResolver
 from dreamference.night_shift.refine_prompt import VERSIONS as REFINE_VERSIONS
+from dreamference.night_shift.strategy_hints import StrategyHints
 
 DEFAULT_WINDOW: Final[str] = "01:00-07:00"
 DEFAULT_MAX_PARALLEL: Final[int] = 3
@@ -63,6 +64,10 @@ class NightShiftSettings:
         # Attempts per task, chosen among by chooser v1 (`NightShiftBestOfN`); a task's own `best_of`
         # outranks it. Read at construction, so a test can lower the default for the single path.
         self.best_of: int = max(1, int(table.get("best_of", DEFAULT_BEST_OF)))
+        # A strategy hint after the task text of every attempt but the first (`StrategyHints`):
+        # off by default; `true` for the built-in set, or a list of hints. A task's own
+        # `best_of_hints` outranks it.
+        self.best_of_hints: tuple[str, ...] = StrategyHints.resolve(table.get("best_of_hints"))
         self.test: str | None = table.get("test")
         # The runner's test run executes agent-written code; `false` runs it with the user's rights
         # (for a test command that must reach Docker or write outside the worktree).

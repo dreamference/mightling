@@ -91,7 +91,9 @@ ARMS=${ARMS:-"default tests-v2"}
 # (`<PREFIX>-<arm>-1` .. `-N`, each graded), then chooser v1 (scripts/swe_bench_chooser_test.py,
 # whose chooser is Night Shift's NightShiftChooser) over the N runs against CHOOSER_SERVER with
 # CHOOSER_SEED (v1's measured seed), and reports best-of-N against the first run
-# (scripts/swe_bench_best_of.py). 1, the default, is the two-arm night.
+# (scripts/swe_bench_best_of.py). 1, the default, is the two-arm night. An arm with the part `diverse`
+# (diverse best-of-N, 2026-10-30) gives attempt k > 1 strategy hint k-1 (`--strategy-hint`), appended
+# after the issue; attempt 1 runs without one, byte-identical to the same arm's plain round 1.
 BEST_OF=${BEST_OF:-1}
 # The dataset every smoke and round runs (`swe-bench run --dataset`): verified, or multilingual for the
 # weekly non-Python check (docs/dev/swe-bench.md), which runs one arm (ARMS names one arm, BEST_OF 1):
@@ -197,7 +199,8 @@ pin_build() {
 # compaction spec §13), `test-guard` and `finish-check` (the launcher's guards: `--test-guard`,
 # `--finish-check`, spec §29), `sampling-nonthinking` (the model card's non-thinking sampling, filled in by the
 # model gate: `--sampling nonthinking`, docs/dev/loop-guard.md), `compat-claude` (the launcher's compatibility
-# mode in every session: `--compat claude`, MIGHTLING_LING_CLAUDE §11), or several of these joined with `+`
+# mode in every session: `--compat claude`, MIGHTLING_LING_CLAUDE §11), `diverse` (BEST_OF > 1 only: a strategy
+# hint per attempt after the first, `--strategy-hint`, added by `best_of_run`), or several of these joined with `+`
 # (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
 # every `,` and `+` into `-` (`n4-restart-2`).
 arm_flags() {
@@ -229,6 +232,9 @@ arm_flags() {
             finish-check) flags="$flags --finish-check" ;;
             test-guard*|test_guard*|testguard*) echo "❌ Arm $1: write the test guard's arm as test-guard." >&2; return 2 ;;
             finish*) echo "❌ Arm $1: write the finish check's arm as finish-check." >&2; return 2 ;;
+            diverse)  # a hint per attempt (best_of_run), not an option of the whole night
+                [ "${BEST_OF:-1}" -gt 1 ] || { echo "❌ Arm $1: the diverse arm hints attempts 2 to N; it needs BEST_OF > 1." >&2; return 2; } ;;
+            diverse*|divers*) echo "❌ Arm $1: write the diverse best-of-N arm as diverse." >&2; return 2 ;;
             *) flags="$flags --task-rules $part" ;;
         esac
     done
@@ -245,6 +251,8 @@ engine_args() {
     echo "${out# }"
 }
 arm_name() { echo "$1" | tr ,+ --; }
+# Whether any arm in $1 (one or several, space-separated) has the part $2.
+has_part() { echo "$1" | tr '+ ' '\n\n' | grep -qxF -- "$2"; }
 # The arm's model server on REMOTE (`sglang` or `engine`), or nothing: this machine's server.
 arm_server() { echo "$1" | tr + '\n' | sed -n 's/^on-//p' | head -1; }
 uses_remote() { case "$ARMS" in *on-sglang*|*on-engine*) return 0 ;; esac; return 1; }
@@ -457,6 +465,12 @@ start() {
         [ -f "$WT/scripts/swe_bench_best_of.py" ] && grep -q 'night_shift_chooser import' "$WT/scripts/swe_bench_chooser_test.py" \
             || { echo "❌ $WT does not run chooser v1 from Night Shift's package: pin REF to a commit that has it."; exit 1; }
     fi
+    if has_part "$ARMS" diverse; then
+        # The harness has six hints (DEFAULT_HINTS), one for each attempt after the first.
+        [ "$BEST_OF" -le 7 ] || { echo "❌ The diverse arm has six hints: BEST_OF is at most 7."; exit 2; }
+        grep -q -- '--strategy-hint' "$WT/dreamference/swe_bench/swe_bench_command.py" \
+            || { echo "❌ $WT has no --strategy-hint: pin REF to a commit that has it."; exit 1; }
+    fi
     case "$ARMS" in *turn-end-compaction-*)
         if ! grep -q -- '"--turn-end-compaction"' "$WT/dreamference/swe_bench/swe_bench_command.py"; then
             echo "❌ $WT does not have --turn-end-compaction: pin REF to a commit that has it."; exit 1
@@ -623,7 +637,7 @@ check_pin() {
 
 # BEST_OF > 1: the one arm N times, then chooser v1 over the N runs and the report against run 1.
 best_of_run() {
-    local arm name extra k round names=""
+    local arm name extra k round hint names=""
     set -- $ARMS
     [ $# -eq 1 ] || fail "BEST_OF=$BEST_OF with arms [$ARMS] (one arm)" 2
     arm=$1
@@ -633,11 +647,13 @@ best_of_run() {
     [ "$REFINE" = 1 ] && extra="$extra --refine"
     for k in $(seq 1 "$BEST_OF"); do
         round="$PREFIX-$name-$k"
+        hint=""
+        has_part "$arm" diverse && [ "$k" -gt 1 ] && hint="--strategy-hint $((k - 1))"
         check_pin
-        log "round $round (attempt $k of $BEST_OF)"
+        log "round $round (attempt $k of $BEST_OF${hint:+, $hint})"
         wait_out_index "before round $round"
         admin swe-bench run --dataset "$DATASET" --subset "$LIST" --name "$round" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) $(session_flags) \
+            --prompt default $extra $hint --eval --remove-images $(chunk_flags) $(shard_flags) $(session_flags) \
             --label "night $NIGHT, $name arm, attempt $k of $BEST_OF"
         rc=$?
         log "$round finished ($rc)"
