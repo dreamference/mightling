@@ -737,6 +737,15 @@ def test_an_operation_with_one_word_more_reaches_no_handler(monkeypatch):
     assert called == []
 
 
+def test_a_longer_name_or_an_unbalanced_quote_reaches_no_handler(monkeypatch):
+    from dreamference.node import NodeServe
+
+    called = handlers_that_record(monkeypatch)
+    for request in ("adapter-receive-all helper", "adapter-receive 'helper", "job-submit 'e30="):
+        assert NodeServe.serve(request) == 2, request
+    assert called == []
+
+
 def test_serve_job_runs_this_nodes_own_mightling_admin(monkeypatch, capsys):
     from dreamference.node import NodeServe
 
