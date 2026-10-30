@@ -1123,6 +1123,19 @@ mod tests {
     }
 
     #[test]
+    fn the_one_coding_node_beside_a_speech_node_is_used_even_while_stopped() {
+        let speech = Advert { main: false, ..spark2() };
+        let browser = Fixed::new(vec![speech, stopped(spark1())]);
+        match resolve(&Inputs::default(), &browser) {
+            Resolution::Found { advert, remember, .. } => {
+                assert_eq!(advert.node.node, spark1().node.node);
+                assert!(!remember);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
     fn a_node_uses_loopback_and_never_browses() {
         let browser = Fixed::new(vec![spark2()]);
         let inputs = Inputs { is_node: true, remembered: Some(spark2().node), ..Inputs::default() };
