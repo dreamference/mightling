@@ -722,6 +722,16 @@ def test_a_bundle_file_that_fails_its_checksum_installs_nothing(tmp_path):
     assert not (tmp_path / ".local/share/dreamference/mightling/bin/ling").exists()
 
 
+def test_a_bundle_of_a_release_without_its_signature_is_refused(tmp_path):
+    # Only a node's own build (VERSION this-<digest>) goes on its checksums alone; a bundle of a
+    # release carries that release's signature.
+    bundle = make_bundle(tmp_path / "bundle")
+    (bundle / "VERSION").write_text("v1.6.0\n")
+    result = run_install_from(tmp_path, bundle)
+    assert result.returncode == 1 and "release v1.6.0 is not signed" in result.stderr
+    assert not (tmp_path / ".local/share/dreamference/mightling/bin/ling").exists()
+
+
 def test_a_from_that_is_not_a_folder_is_named(tmp_path):
     result = run_install_from(tmp_path, tmp_path / "no-such-bundle")
     assert result.returncode == 1 and "--from:" in result.stderr and "is not a directory" in result.stderr
