@@ -232,6 +232,12 @@ echo "fwupdmgr $*" >> "$HOME/fwupd.log"
 case "$1" in get-updates) [ -f "$HOME/firmware.json" ] && cat "$HOME/firmware.json" || exit 2;; esac
 exit 0
 ''',
+    # A logged-in gh when FAKE_GH_TOKEN is set (its token), logged out otherwise; each call is logged.
+    "gh": r'''
+echo "gh $*" >> "$HOME/gh.log"
+[ "$1 $2" = "auth token" ] && [ -n "$FAKE_GH_TOKEN" ] && { echo "$FAKE_GH_TOKEN"; exit 0; }
+exit 1
+''',
     # `-m venv DIR` makes a virtualenv whose pip installs a ling-admin that records its arguments
     # ($HOME/admin.log) and fails the commands FAKE_ADMIN_FAIL names; FAKE_NO_VENV is a python3
     # without ensurepip until python3-venv is installed.
@@ -1259,6 +1265,20 @@ def test_the_token_is_not_sent_to_download_urls_on_another_host(tmp_path, releas
     assert result.returncode == 0, result.stderr
     assert any(header == "Bearer sekret" for _, header in api.requests)
     assert downloads.requests and all(header is None for _, header in downloads.requests)
+
+
+def test_a_logged_in_ghs_token_is_asked_for_only_for_another_repository(tmp_path, release_server):
+    # The public repository is read anonymously: a gh login usually carries far more access than
+    # reading a release. A fork named by MIGHTLING_RELEASE_REPO may be private and needs it.
+    for repo, asked in (("", False), ("dreamference/mightling", False), ("test/ling", True)):
+        home = tmp_path / (repo.replace("/", "-") or "unset")
+        home.mkdir()
+        server = release_server(binaries())
+        result = run_install(home, server, "--role", "client",
+                             env_extra={"MIGHTLING_RELEASE_REPO": repo, "FAKE_GH_TOKEN": "gh-sekret"})
+        assert result.returncode == 0, result.stderr
+        assert ("gh auth token" in logged(home, "gh.log")) is asked, repo
+        assert {header for _, header in server.requests} == {"Bearer gh-sekret" if asked else None}, repo
 
 
 def test_a_wheel_that_does_not_match_the_release_sums_is_not_installed(tmp_path, release_server):
