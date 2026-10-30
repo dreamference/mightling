@@ -1361,4 +1361,19 @@ mod tests {
         let (lines, _) = command(&home, &cwd, "status", true);
         assert!(lines.iter().any(|line| line == "Nothing to apply."), "{lines:?}");
     }
+
+    #[test]
+    fn apply_keeps_what_the_user_committed_since_the_session_began() {
+        let fixture = Fixture::new("user-commits");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (session, cwd, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(session.checkout.join("auth.py"), "def login():\n    return True\n").unwrap_or_default();
+        std::fs::write(repo.join("theirs.py"), "mine = 1\n").unwrap_or_default();
+        git(&repo, &["add", "-A"], None);
+        git(&repo, &["commit", "-qm", "the user's own work"], None);
+        let (lines, code) = command(&home, &cwd, "apply", true);
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(repo.join("theirs.py").is_file(), "{lines:?}");
+        assert_eq!(git_text(&repo, &["status", "--porcelain"]).as_deref(), Some(" M auth.py"));
+    }
 }
