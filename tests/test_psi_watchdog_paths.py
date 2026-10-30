@@ -351,9 +351,11 @@ def test_a_failed_kill_tells_the_operator_to_kill_it_by_hand(monkeypatch, capsys
     assert "docker kill test-container" in out
 
 
-def test_a_remote_docker_host_is_not_the_socket_path(monkeypatch):
+def test_a_remote_docker_host_is_not_the_socket_path(monkeypatch, fake_socket):
+    # Nor is it a reason to fall back to the local socket, which names some other dockerd.
     monkeypatch.setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")
     assert MemoryPressureWatchdog("test-container")._kill_via_docker_socket() is False
+    assert fake_socket == []
 
 
 @pytest.fixture
