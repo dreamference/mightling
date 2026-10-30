@@ -588,6 +588,48 @@ def test_the_suite_refuses_to_run_when_no_model_answers(tmp_path, monkeypatch, c
     assert not (tmp_path / "r").exists()
 
 
+class _Forwarder:
+    terminated = False
+
+    def terminate(self):
+        self.terminated = True
+
+
+def test_an_image_scenario_is_skipped_when_the_served_model_takes_no_images(
+    tmp_path, monkeypatch, capsys
+):
+    forwarder = _Forwarder()
+    monkeypatch.setattr(RUNNER.shutil, "which", lambda name: "/usr/bin/bwrap")
+    monkeypatch.setattr(RUNNER, "model_info", lambda port: {"has_image_understanding": False})
+    monkeypatch.setattr(RUNNER, "start_forwarder", lambda port: (forwarder, None))
+    monkeypatch.setattr(RUNNER.subprocess, "run", lambda *a, **k: pytest.fail("a session ran"))
+    out = tmp_path / "o.jsonl"
+    status = RUNNER.main(
+        ["--only", "s1-blank-image", "--out", str(out), "--runs", str(tmp_path / "runs")]
+    )
+    record = json.loads(out.read_text())
+    assert status == 0 and record["skipped"] and not record["pass"]
+    assert record["failures"] == ["the served model takes no images"]
+    assert capsys.readouterr().out.splitlines()[-1].startswith("skip  s1-blank-image")
+    assert forwarder.terminated
+
+
+def test_runs_live_under_the_cache_and_the_socket_in_the_runtime_folder(tmp_path, monkeypatch):
+    assert RUNNER.DEFAULT_RUNS.parts[-4:] == (".cache", "dreamference", "ask-evals", "runs")
+    started = []
+
+    def popen(argv, **kwargs):
+        started.append(argv)
+        Path(argv[4]).touch()
+        return _Forwarder()
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(RUNNER.subprocess, "Popen", popen)
+    _, path = RUNNER.start_forwarder(18000)
+    assert Path(path).parent == tmp_path and len(path.encode()) < 108  # a Unix socket's limit
+    assert started[0][3:] == ["unix", path, "127.0.0.1", "18000"]
+
+
 def test_the_plan_lists_every_scenario_and_runs_nothing(capsys):
     assert RUNNER.main(["--plan"]) == 0
     printed = capsys.readouterr().out
@@ -644,7 +686,7 @@ def _night(tmp_path, **extra):
     }
     if "ASK_EVALS" not in extra:
         env.pop("ASK_EVALS", None)
-    subprocess.run(
+    night = subprocess.run(
         ["bash", str(ROOT / "scripts" / "swe_bench_night1.sh"), "run"],
         env=env,
         capture_output=True,
@@ -652,6 +694,7 @@ def _night(tmp_path, **extra):
         timeout=60,
         check=False,
     )
+    (tmp_path / "night.out").write_text(night.stdout + night.stderr)
     return calls.read_text().splitlines() if calls.exists() else []
 
 
@@ -668,6 +711,28 @@ def test_a_switched_on_slot_runs_before_the_arms_and_holds_the_gate(tmp_path):
     assert "--reps 1,2,3" in line and "--model-port 18000" in line
     assert "--hold-gate night 20, assistant evals" in line
     assert "--ling " + str(Path.home() / ".local/share/dreamference/mightling/bin/ling") in line
+
+
+def test_a_slot_that_times_out_never_stops_the_night(tmp_path):
+    """The slot runs under `timeout 90m` by default; its failure is logged and the arms run."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "timeout"
+    fake.write_text(
+        "#!/bin/bash\n"
+        f'echo "timeout $*" >> "{tmp_path / "timeouts.txt"}"\n'
+        'while [[ "$1" == -* ]]; do case "$1" in -s | -k) shift 2 ;; *) shift ;; esac; done\n'
+        "shift\n"
+        '"$@"; rc=$?\n'
+        '[[ "$*" == *ask_evals/run.py* ]] && exit 124\n'
+        "exit $rc\n"
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    calls = _night(tmp_path, ASK_EVALS="1", PATH=f"{bin_dir}:{os.environ['PATH']}")
+    assert [c for c in calls if "swe-bench run " in c], (tmp_path / "night.out").read_text()[-2000:]
+    slot = [t for t in (tmp_path / "timeouts.txt").read_text().splitlines() if "ask_evals" in t]
+    assert len(slot) == 1 and slot[0].startswith("timeout 90m ")
+    assert "assistant evals finished (124)" in (tmp_path / "night.out").read_text()
 
 
 def test_a_stopped_run_opens_the_gate_and_removes_its_socket(tmp_path, monkeypatch):
