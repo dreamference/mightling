@@ -557,4 +557,11 @@ mod tests {
         show_dropped(&mut items, |e| &mut e.item);
         assert_eq!(items, before);
     }
+
+    #[test]
+    fn a_room_share_of_the_whole_limit_or_more_leaves_no_target() {
+        let policy = DropPolicy { room_percent: 150, ..policy() };
+        assert_eq!(policy.target(), 0);
+        assert_eq!(DropPolicy { room_percent: 100, ..policy }.target(), 0);
+    }
 }
