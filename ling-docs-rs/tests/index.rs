@@ -2096,3 +2096,41 @@ fn indexing_one_disabled_collection_says_it_is_disabled() {
     assert!(error.contains("no collection named `nothing`"), "{error}");
     assert!(host.started.lock().unwrap().is_empty());
 }
+
+/// A scratch home with one note in `Documents`, its collection, and a host to run it.
+fn one_note() -> (tempfile::TempDir, PathBuf, DocsToml, LocalHost) {
+    let (dir, home) = scratch_home();
+    std::fs::create_dir_all(home.join("Documents")).unwrap();
+    std::fs::write(
+        home.join("Documents/note.md"),
+        "# Note\n\nThe kettle is blue.\n",
+    )
+    .unwrap();
+    let mut docs = DocsToml::default();
+    docs.ensure_defaults(&home);
+    let host = LocalHost {
+        dir: home.join("locks"),
+        started: Mutex::new(Vec::new()),
+    };
+    (dir, home, docs, host)
+}
+
+#[test]
+fn a_night_shift_run_defers_indexing() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home, docs, host) = one_note();
+    let night = home.join(".mightling/night");
+    std::fs::create_dir_all(&night).unwrap();
+    let lock = std::fs::File::create(night.join("runner.lock")).unwrap();
+    ling_docs::host::flock(&lock, false).unwrap();
+    let env = env(&host, &home, exe());
+    let outcome = index::run(&env, &docs, None, false).unwrap();
+    assert!(
+        matches!(&outcome[0].1, Outcome::Deferred(why) if why.contains("Night Shift")),
+        "{outcome:?}"
+    );
+    assert!(host.started.lock().unwrap().is_empty());
+    drop(lock);
+    let outcome = index::run(&env, &docs, None, false).unwrap();
+    assert_eq!(outcome[0].1, Outcome::Ok);
+}
