@@ -862,4 +862,13 @@ mod tests {
         assert_eq!(plan_move(&policy, &values, &State::default(), policy.low + gain, &scratch.0), Some(vec![2]));
         assert_eq!(plan_move(&policy, &values, &State::default(), policy.low + gain + 1, &scratch.0), Some(vec![2, 4]));
     }
+
+    #[test]
+    fn an_output_its_placeholder_would_not_shorten_is_not_moved() {
+        // A folder path longer than the outputs: each placeholder, which names its copy, is too.
+        let dir = PathBuf::from(format!("/{}", "d/".repeat(800)));
+        let values: Vec<Value> = history(20, 20).into_iter().map(|e| e.item).collect();
+        assert_eq!(saving_tokens(&values[2], &dir), 0);
+        assert_eq!(plan_move(&policy(), &values, &State::default(), 1_000_000, &dir), Some(vec![]));
+    }
 }
