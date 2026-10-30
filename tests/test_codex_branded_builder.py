@@ -1293,3 +1293,19 @@ def test_no_v8_is_fetched_without_a_pinned_checksum_for_this_target(
     )
     assert CodexBrandedBuilder.fetch_rusty_v8(export) is None
     assert downloaded == []
+
+
+@pytest.mark.parametrize("tampered", [V8_CHECKSUMS, V8_ARCHIVE, V8_BINDING])
+def test_a_v8_file_that_does_not_match_its_pin_is_discarded(tmp_path, monkeypatch, tampered):
+    # A swapped checksum file vouches for a swapped archive; neither may reach Cargo or the cache.
+    evil = b"not v8"
+    served = {tampered: evil}
+    if tampered == V8_CHECKSUMS:
+        served = {
+            V8_ARCHIVE: evil,
+            V8_CHECKSUMS: f"{_digest(evil)}  {V8_ARCHIVE}\n{_digest(b'// v8 bindings')}  {V8_BINDING}\n".encode(),
+        }
+    export, _, downloaded = _v8_release(tmp_path, monkeypatch, served=served)
+    assert CodexBrandedBuilder.fetch_rusty_v8(export) is None
+    assert tampered in downloaded
+    assert not (tmp_path / "cache" / "rusty_v8" / "146.4.0" / tampered).exists()
