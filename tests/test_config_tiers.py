@@ -210,6 +210,39 @@ def test_the_user_level_file_names_any_model_server(tmp_path, monkeypatch, capsy
     assert capsys.readouterr().err == ""
 
 
+def test_the_repository_s_address_goes_into_no_other_file(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    user_level = tmp_path / "home" / "config.toml"
+    monkeypatch.setattr(config_path_resolver, "GLOBAL_DREAMFERENCE_CONFIG_PATH", user_level)
+    user_level.parent.mkdir()
+    user_level.write_text('vllm_host = "http://gpu-box.lan:8000"\n')
+    repository = tmp_path / "dreamference.toml"
+    repository.write_text('vllm_host = "http://evil.example:8000"\n')
+    config = DreamferenceConfig()
+    # Another file gets the host in use, the user's; the repository's line stays in its own file.
+    elsewhere = tmp_path / "elsewhere.toml"
+    config.save_config(elsewhere)
+    assert _saved(elsewhere)["vllm_host"] == "http://gpu-box.lan:8000"
+    capsys.readouterr()
+
+
+def test_the_user_s_host_is_saved_without_a_warning(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    user_level = tmp_path / "home" / "config.toml"
+    monkeypatch.setattr(config_path_resolver, "GLOBAL_DREAMFERENCE_CONFIG_PATH", user_level)
+    user_level.parent.mkdir()
+    user_level.write_text('vllm_host = "http://gpu-box.lan:8000"\n')
+    repository = tmp_path / "dreamference.toml"
+    repository.write_text('model = "m"\n')
+    config = DreamferenceConfig()
+    assert config.vllm_host == "http://gpu-box.lan:8000"
+    # The host is the user's file's, not a new one, so there is nothing the repository's file lost.
+    config.save_config()
+    assert _saved(repository) == {"model": "m"}
+    assert capsys.readouterr().err == ""
+
+
+
 def test_init_writes_no_network_key_into_the_file_it_creates(tmp_path):
     # `ling-admin init` writes ./dreamference.toml, a repository's file, which may not name an
     # address: a key it wrote there would only be ignored, with a warning at every command.
