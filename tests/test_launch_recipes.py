@@ -274,3 +274,11 @@ def test_a_70b_checkpoint_that_declares_its_quantization_gets_no_guess(vllm_reci
     assert "--quantization" not in build(model="test-vllm-70b-awq")
     # The same name in BF16 is the one the guess exists for.
     assert _flag(build(model="test-vllm-70b-bf16"), "--quantization") == "fp8"
+
+
+@pytest.mark.parametrize("engine", ["sglang", "ling"])
+def test_an_engine_that_only_runs_in_docker_is_refused_without_it(engine, monkeypatch):
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: False)
+    with pytest.raises(RuntimeError, match="Docker is required"):
+        mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2", engine=engine)
