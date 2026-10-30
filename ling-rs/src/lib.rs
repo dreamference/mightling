@@ -2321,6 +2321,19 @@ mod tests {
     }
 
     #[test]
+    fn the_provider_and_the_catalog_follow_the_launch_whatever_the_file_says() {
+        let existing = format!(
+            "model_catalog_json = \"/old.json\"\n[model_providers.{PROVIDER}]\nname = \"other\"\nbase_url = \"http://old:1/v1\"\n"
+        );
+        let text = updated_config(&existing, Path::new("/h/c.json"), "http://x:8000").unwrap_or_default();
+        let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+        assert_eq!(parsed.get("model_catalog_json").and_then(toml::Value::as_str), Some("/h/c.json"));
+        let provider = &parsed["model_providers"][PROVIDER];
+        assert_eq!(provider.get("name").and_then(toml::Value::as_str), Some(PROVIDER));
+        assert_eq!(provider.get("base_url").and_then(toml::Value::as_str), Some("http://x:8000/v1"));
+    }
+
+    #[test]
     fn user_choices_in_config_are_kept() {
         // Preferences only: the update check reaches api.github.com and is forced off instead
         // (settings_that_reach_openai_are_overridden_not_just_defaulted).
