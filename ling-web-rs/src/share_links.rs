@@ -522,4 +522,13 @@ mod tests {
         assert_eq!(classify("https://www.google.coms/search?q=x"), None);
         assert_eq!(classify("https://google.c/search?q=x"), None);
     }
+
+    #[test]
+    fn an_upper_case_host_is_still_google() {
+        assert_eq!(
+            classify("https://WWW.Google.COM/search?q=x"),
+            search("x", None)
+        );
+        assert!(is_share_link("https://SHARE.GOOGLE/AbC"));
+    }
 }
