@@ -256,3 +256,27 @@ def test_a_diffusion_model_chosen_at_the_default_is_still_written(tmp_path, monk
         path.write_text(f'diffusion_model = "{chosen}"\n')
     DreamferenceConfig(config_file=str(path), **arguments).save_config()
     assert _saved(path)["diffusion_model"] == chosen
+
+
+def test_the_server_tuning_keys_are_read_from_the_file_and_saved_back(tmp_path):
+    path = tmp_path / "dreamference.toml"
+    tuning = {
+        "enable_prefix_caching": False,
+        "enable_chunked_prefill": False,
+        "num_scheduler_steps": 3,
+        "attention_backend": "flashinfer",
+        "kv_cache_dtype": "fp8",
+        "guided_decoding_backend": "outlines",
+    }
+    path.write_text(
+        "enable_prefix_caching = false\n"
+        "enable_chunked_prefill = false\n"
+        "num_scheduler_steps = 3\n"
+        'attention_backend = "flashinfer"\n'
+        'kv_cache_dtype = "fp8"\n'
+        'guided_decoding_backend = "outlines"\n'
+    )
+    config = DreamferenceConfig(config_file=str(path))
+    assert {key: getattr(config, key) for key in tuning} == tuning
+    config.save_config()
+    assert _saved(path) == tuning
