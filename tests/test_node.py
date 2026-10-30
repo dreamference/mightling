@@ -569,6 +569,20 @@ def test_disable_that_can_neither_remove_nor_empty_the_file_says_so(machine, mon
     assert "still advertises this node" in capsys.readouterr().out
 
 
+def test_status_of_a_node_without_its_web_ui_or_its_file(machine, monkeypatch):
+    seen = [{"name": "laptop", "address": "10.0.0.9", "port": "8000"}]
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: seen))
+    text = NodeAdvertiser.status()
+    assert "enabled but not advertised" not in text and "(this node)" not in text
+    # Asking is not becoming a node: no id is made.
+    assert NodeIdentity.read() is None and NodeAdvertiser.summary()["node"] is None
+    NodeSettings.save(advertise=True, web=False)
+    text = NodeAdvertiser.status()
+    assert "Advertised: yes, without the web UI (--no-web)" in text
+    assert "The node is enabled but not advertised" in text
+    assert "Web UI (ling web, port 3100): this machine only" in text
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
