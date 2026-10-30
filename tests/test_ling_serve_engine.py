@@ -72,7 +72,7 @@ def test_the_image_is_pinned_by_digest_and_the_engine_commit_is_a_full_hash():
     # 1.8.0's engine: ling-engine main with P4d and fair pairing merged (4853a93), paging and fair
     # pairing off by default; it has the page pool and the sparse head.
     assert QWEN38_LING_ENGINE_COMMIT.startswith("4853a93")
-    assert recipe["engine_features"] == ["kv-pages", "sparse-head"]
+    assert recipe["engine_features"] == ["kv-pages", "sparse-head", "paging-switch", "fair-pairing"]
     # The owner's decision of 2026-10-29: the recipe does not turn paging on at 1.8.0.
     assert recipe["kv_pages"] is False
     assert re.fullmatch(r"[0-9a-f]{40}", QWEN38_LING_ENGINE_COMMIT)
@@ -163,6 +163,8 @@ def test_every_flag_the_builder_emits_is_one_ling_serve_parses():
         "--prefill-chunk-contended",
         "--side-prefill",
         "--kv-pages",
+        "--no-kv-pages",
+        "--fair-pairing",
         "--vision",
     }
     for gate in (False, True):
@@ -823,7 +825,8 @@ def test_server_status_reports_sessions_and_paging():
         262144,
     )
     flat_facts = LingServeLaunchBuilder.facts("img", {}, flat)
-    assert flat_facts["Sessions"] == "4 (batch 4)" and "KV cache" not in flat_facts
+    assert flat_facts["Sessions"] == "4 (batch 4)" and flat_facts["KV cache"] == "Flat"
+    assert flat_facts["Fair pairing"] == "Off"
 
 
 def test_the_plan_only_check_follows_the_same_arguments_as_the_launch(monkeypatch):
