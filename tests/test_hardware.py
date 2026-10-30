@@ -666,6 +666,34 @@ def test_an_interrupted_download_is_not_taken_for_a_downloaded_model():
     assert ModelDownloader.is_model_downloaded(model_key, revision) is True
 
 
+def test_an_unpinned_model_uses_the_complete_snapshot_its_download_check_accepted():
+    # is_model_downloaded() accepts any complete snapshot; the newest one, then taken for the
+    # model, could be an interrupted fetch, so tensorization and sizing read half a checkpoint.
+    import json
+    import os
+
+    from dreamference.hardware import ModelDownloader
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    repo = "someone/unpinned-model"
+    assert ModelMatrixRegistry.pinned_revision(repo) is None
+    snapshots = ModelDownloader.get_hf_cache_dir() / ("models--" + repo.replace("/", "--")) / "snapshots"
+    complete, partial = snapshots / "aaa", snapshots / "bbb"
+    for snapshot in (complete, partial):
+        snapshot.mkdir(parents=True)
+        (snapshot / "model.safetensors.index.json").write_text(
+            json.dumps({"weight_map": {"w": "model-00001-of-00001.safetensors"}})
+        )
+    (complete / "model-00001-of-00001.safetensors").write_bytes(b"\0")
+    os.utime(complete, (1, 1))
+    assert ModelDownloader.is_model_downloaded(repo) is True
+    assert ModelDownloader.get_model_snapshot_dir(repo) == complete
+    # With no complete snapshot, the newest still answers (eviction and sizing read partial ones).
+    (complete / "model-00001-of-00001.safetensors").unlink()
+    os.utime(complete, (1, 1))
+    assert ModelDownloader.get_model_snapshot_dir(repo) == partial
+
+
 def test_a_model_tensorized_at_one_pin_is_not_loaded_once_the_pin_moves(tmp_path, monkeypatch):
     from dreamference.hardware import ModelDownloader
     from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry

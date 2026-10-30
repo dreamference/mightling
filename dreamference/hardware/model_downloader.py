@@ -118,7 +118,8 @@ class ModelDownloader:
 
         The registry's pinned revision when it is on disk: a cache that also holds another
         revision (the Hub's default branch, fetched before every fetch honoured the pin) must not
-        have that one sized or tensorized in its place. Otherwise the newest snapshot.
+        have that one sized or tensorized in its place. Otherwise the newest complete snapshot,
+        the kind is_model_downloaded() accepts, then the newest of any.
 
         Args:
             model_key (str): Model key or repo ID.
@@ -139,7 +140,7 @@ class ModelDownloader:
         if cache_dir.exists():
             snapshots = [d for d in cache_dir.iterdir() if d.is_dir()]
             if snapshots:
-                return sorted(snapshots, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+                return max(snapshots, key=lambda p: (cls._snapshot_complete(p), p.stat().st_mtime))
         return None
 
     @classmethod
