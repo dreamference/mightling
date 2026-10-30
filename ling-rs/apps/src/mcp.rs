@@ -586,4 +586,16 @@ mod tests {
         }
         assert_eq!(stub.asked.borrow().len(), 1, "no request for a blank argument");
     }
+
+    #[test]
+    fn calendar_paths_encode_their_parts_and_pass_every_filter() {
+        let stub = Stub::new(200, json!({"events": []}));
+        call(App::Calendar, &stub, "calendar_events", &json!({"calendar": "a@x.com", "id": "e 1"}));
+        call(App::Calendar, &stub, "calendar_events", &json!({"from": "a", "to": "b", "calendar": "primary"}));
+        call(App::Calendar, &stub, "calendar_search", &json!({"query": "x", "calendar": "primary", "id": "e1"}));
+        let asked = stub.asked.borrow();
+        assert_eq!(asked[0], "/calendar/event/a%40x.com/e%201");
+        assert_eq!(asked[1], "/calendar/events?limit=25&from=a&to=b&calendar=primary");
+        assert_eq!(asked[2], "/calendar/events?limit=25&calendar=primary&q=x", "a search never reads one event");
+    }
 }
