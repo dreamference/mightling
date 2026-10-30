@@ -1021,4 +1021,15 @@ mod tests {
         assert_eq!(found.results[0].snippet, "first");
         assert_eq!(found.results[0].published.as_deref(), Some("2026-10-01"));
     }
+
+    #[test]
+    fn an_infobox_id_that_is_not_an_address_gives_way_to_its_link() {
+        let mut payload = searxng(json!([]), json!([]), json!([]));
+        payload["infoboxes"] = json!([{
+            "infobox": "Lisbon", "id": "Q597", "engine": "wikidata",
+            "urls": [{"title": "Wikidata", "url": "https://www.wikidata.org/wiki/Q597"}]
+        }]);
+        let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
+        assert_eq!(found.results[0].url, "https://www.wikidata.org/wiki/Q597");
+    }
 }
