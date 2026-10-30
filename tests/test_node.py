@@ -1420,6 +1420,8 @@ def test_the_sandbox_writes_only_the_worktree_hides_the_home_folder_and_the_gpu(
         tree, ["python3", "train.py"], network=True, job_id="20261002-1200-abc"
     )
     assert argv[0] == "bwrap" and argv[-3:] == ["--", "python3", "train.py"]
+    # Its own session (no reaching the terminal it was started from), process and IPC namespaces.
+    assert {"--new-session", "--unshare-pid", "--unshare-ipc"} <= set(argv)
     # One read-write bind, and it is the worktree; the system is read-only.
     binds = [argv[i + 1] for i, word in enumerate(argv) if word == "--bind"]
     assert binds == [str(tree)]
@@ -1433,6 +1435,7 @@ def test_the_sandbox_writes_only_the_worktree_hides_the_home_folder_and_the_gpu(
     environment = {argv[i + 1]: argv[i + 2] for i, word in enumerate(argv) if word == "--setenv"}
     assert (
         environment["CUDA_VISIBLE_DEVICES"] == ""
+        and environment["NVIDIA_VISIBLE_DEVICES"] == "none"
         and environment["MIGHTLING_JOB"] == "20261002-1200-abc"
     )
     assert "SSH_AUTH_SOCK" not in environment
