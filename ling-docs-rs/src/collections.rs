@@ -693,6 +693,22 @@ mod tests {
     }
 
     #[test]
+    fn a_removed_collection_under_a_default_name_keeps_the_default_away() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::create_dir_all(home.join("notes")).unwrap();
+        std::fs::create_dir_all(home.join("Documents")).unwrap();
+        let mut docs = DocsToml::default();
+        let added = docs
+            .add(&home.join("notes"), Some("documents"), &home)
+            .unwrap();
+        assert!(!added.default, "{added:?}");
+        docs.remove("documents").unwrap();
+        assert!(docs.ensure_defaults(&home).is_empty(), "{docs:?}");
+        assert_eq!(docs.removed_defaults, ["documents"]);
+    }
+
+    #[test]
     fn two_writers_at_once_keep_both_changes() {
         // One writer holds the lock while it saves; the other, started first, waits and then
         // reads the file afresh, so neither change is lost.
