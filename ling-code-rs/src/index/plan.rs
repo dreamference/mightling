@@ -2050,6 +2050,7 @@ mod tests {
         assert!(no_scip.unavailable("scip-go").unwrap().contains("scip CLI"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_copy_whose_file_list_fails_fails_instead_of_coming_out_empty() {
         let (dir, repo) = make_repo(&[("a.py", "x = 1\n")]);
