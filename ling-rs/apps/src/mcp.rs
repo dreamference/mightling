@@ -608,4 +608,13 @@ mod tests {
         assert_eq!(result["isError"], true);
         assert!(text(&result).contains("HTTP 200 with something that is not JSON"));
     }
+
+    #[test]
+    fn an_error_shows_its_hint_and_a_bare_failure_status_is_an_error() {
+        let hinted = render(App::Gmail, 401, &json!({"error": "unauthorised", "hint": "Run ling-admin google start."}));
+        assert_eq!(text(&hinted), "Gmail: unauthorised\nRun ling-admin google start.");
+        let bare = render(App::Gmail, 404, &json!({"messages": []}));
+        assert_eq!(bare["isError"], true);
+        assert_eq!(text(&bare), "The Google service answered HTTP 404.");
+    }
 }
