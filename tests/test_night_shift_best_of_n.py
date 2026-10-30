@@ -330,6 +330,15 @@ def test_no_attempt_starts_once_the_window_has_closed(bon, monkeypatch):
     assert best["ran"] == 0 and best["why"] == "the window closed before attempt 1 could start"
 
 
+def test_an_attempt_that_would_not_fit_is_not_started_and_the_record_says_why(bon, monkeypatch):
+    monkeypatch.setattr(NightShiftBestOfN, "wont_fit",
+                        lambda self, number, outcomes: "too late" if number == 2 else None)
+    status, record, _ = run_best_of(bon, monkeypatch, ["good", "good", "good"])
+    assert status == "done"
+    best = record["result"]["best_of"]
+    assert (best["ran"], best["why"]) == (1, "too late")
+
+
 def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
     holder = {}
 
