@@ -456,12 +456,10 @@ def test_a_branch_that_cannot_take_the_tasks_name_keeps_the_attempts(bon, monkey
 
 
 def test_a_commit_that_fails_fails_the_task_and_keeps_no_attempt(bon, monkeypatch):
-    real_git = NightShiftBestOfN._git
+    def commit_(self, message, identity=()):
+        return "failed", "hook said no"
 
-    def git_(self, cwd, *args):
-        return (1, "hook said no") if args[:1] == ("commit",) else real_git(self, cwd, *args)
-
-    monkeypatch.setattr(NightShiftBestOfN, "_git", git_)
+    monkeypatch.setattr(NightShiftTaskRun, "commit_in_sandbox", commit_)
     status, record, _ = run_best_of(bon, monkeypatch, ["good", "good"], n=2)
     assert status == "failed"
     assert record["history"][-1]["note"] == "git commit failed: hook said no"
