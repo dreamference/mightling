@@ -787,6 +787,21 @@ def test_serve_job_runs_this_nodes_own_mightling_admin(monkeypatch, capsys):
     assert info["node"] == node_id and info["linger"] is False and info["version"]
 
 
+def test_a_repository_name_is_never_a_model_key_even_in_the_matrix(monkeypatch):
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+    from dreamference.node import NodeServe
+
+    ran = []
+    monkeypatch.setattr(
+        NodeServe, "run_admin", classmethod(lambda cls, arguments: ran.append(arguments) or 0)
+    )
+    spec = ModelMatrixRegistry.MATRIX["qwen3.8-27b-nvfp4-dflash2"]
+    for name in ("radixark/qwen3.8-27b-nvfp4", "qwen 27b"):
+        monkeypatch.setitem(ModelMatrixRegistry.MATRIX, name, spec)
+        assert NodeServe.set_model(name) == 2, name
+    assert ran == []
+
+
 def test_only_a_key_of_the_nodes_own_matrix_is_loaded(monkeypatch, capsys):
     from dreamference.node import NodeServe
 
