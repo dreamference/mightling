@@ -4,6 +4,7 @@ The stand-in machines and sessions are the ones in test_fleet_provision.py.
 """
 
 import datetime
+import subprocess
 from pathlib import Path
 
 import test_fleet_provision
@@ -96,3 +97,19 @@ def test_each_machine_logs_to_its_own_dated_file(fleet, monkeypatch):
     today = datetime.date.today().isoformat()
     assert logs == {"spark-1": Path(node_provisioner.LOG_DIR) / f"{today}-spark-1.log"}
     assert node_provisioner.LOG_DIR.endswith("/.local/state/dreamference/fleet")
+
+
+def test_a_failed_advert_leaves_the_enable_it_tried(fleet, monkeypatch):
+    run = FakeSession.run
+
+    def refusing_enable(self, script, **options):
+        if "node enable" in script:
+            return subprocess.CompletedProcess(script, 1, "no avahi", "")
+        return run(self, script, **options)
+    monkeypatch.setattr(FakeSession, "run", refusing_enable)
+    FakeSession.machines = {"spark-1": StandIn()}
+    provisioner = NodeProvisioner(["spark-1"], {"web": True, "no_forge": True})
+    assert provisioner.run() == 1
+    result = provisioner.results["spark-1"]
+    assert result["failed"] == "advertise"
+    assert result["left"] == "ssh owner@spark-1 ling-admin node enable --no-forge"

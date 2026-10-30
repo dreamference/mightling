@@ -480,7 +480,7 @@ class NodeProvisioner:
                 host,
                 "advertise",
                 enabled.stdout.strip()[-200:],
-                f"ssh {self._user(host)}@{host} ling-admin node enable --no-web",
+                f"ssh {self._user(host)}@{host} ling-admin {' '.join(arguments)}",
             )
         self._done(host, "advertised on the LAN")
         return True
