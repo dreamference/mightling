@@ -1060,3 +1060,22 @@ fn json_that_is_not_an_object_is_not_a_searxng_answer() {
         stdout(&output)
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_search_that_found_nothing_is_not_kept_in_the_cache() {
+    let server = Server::start(|_| {
+        let body = r#"{"results": [], "answers": [], "unresponsive_engines": []}"#;
+        response("200 OK", "application/json", body.as_bytes(), "")
+    });
+    let cache = fresh_cache_dir();
+    let cache = cache.to_str().unwrap();
+    let env = [
+        ("DREAMFERENCE_SEARXNG_URL", server.base.as_str()),
+        (ling_web::cache::CACHE_DIR_ENV, cache),
+    ];
+    search(&["q"], &env);
+    search(&["q"], &env);
+    assert_eq!(server.requests().len(), 2);
+    let _ = std::fs::remove_dir_all(cache);
+}
