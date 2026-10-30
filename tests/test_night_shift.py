@@ -1433,6 +1433,17 @@ def test_enable_refuses_a_window_it_cannot_read_and_installs_nothing(monkeypatch
     assert commands == [] and not (NightShiftScheduler.unit_dir() / "mightling-night.timer").exists()
 
 
+def test_enable_fails_when_systemctl_fails_and_starts_nothing_after(monkeypatch, capsys):
+    commands = []
+    monkeypatch.setattr(NightShiftScheduler, "systemctl",
+                        staticmethod(lambda args: commands.append(args) or subprocess.CompletedProcess(args, 1, "", "no bus")))
+    monkeypatch.setattr(NightShiftScheduler, "lingering", classmethod(lambda cls: True))
+    assert not NightShiftScheduler.enable("01:30-06:15")
+    assert commands == [["daemon-reload"]]
+    out = capsys.readouterr().out
+    assert "❌ systemctl --user daemon-reload: no bus" in out and "✅" not in out
+
+
 def test_disable_says_so_and_keeps_the_timer_when_systemctl_cannot_stop_it(monkeypatch, capsys):
     ok = staticmethod(lambda args: subprocess.CompletedProcess(args, 0, "", ""))
     monkeypatch.setattr(NightShiftScheduler, "systemctl", ok)
