@@ -1933,6 +1933,7 @@ mod tests {
         assert_eq!(configured_context_window_from(Some("lots"), None), None);
         assert_eq!(configured_context_window_from(Some("0"), None), None);
         assert_eq!(configured_context_window_from(Some(" 131072\n"), None), Some(131_072));
+        assert_eq!(configured_context_window_from(Some(" 4096 "), None), Some(4096));
         assert_eq!(configured_context_window_from(None, Some("mightling_context_window = 0\n")), None);
         assert_eq!(configured_context_window_from(None, Some("mightling_context_window = -5\n")), None);
         assert_eq!(configured_context_window_from(None, Some("other = 1\n")), None);
@@ -2400,6 +2401,10 @@ mod tests {
     #[test]
     fn only_a_loopback_host_is_this_machine() {
         for host in ["http://localhost:8000", "http://127.0.0.1:8000/", "http://[::1]:8000", "localhost", "HTTP://LocalHost:8000", "http://127.0.1.1:8000", "https://[::1]:8000/v1", "http://0.0.0.0:8000", "http://[::]:8000", "http://127.0.0.1\\v1"] {
+            assert!(host_is_local(host), "{host}");
+        }
+        // The any-address, spaces around, and what follows the authority, which is no user info.
+        for host in ["0.0.0.0:8000", " http://localhost:8000 ", "http://localhost:8000\\@evil.example.com", "http://localhost:8000?x@evil.example.com", "http://localhost:8000#x@evil.example.com"] {
             assert!(host_is_local(host), "{host}");
         }
         for host in ["http://192.168.50.105:8000", "http://gx10-1a2b.local:8000", "http://[fd00::2]:8000", "", "http://127.example.com:8000", "http://localhost.example.com", "http://localhost:x@evil.example.com/", "http://127.0.0.1@evil.example.com:8000", "localhost@evil.example.com"] {
