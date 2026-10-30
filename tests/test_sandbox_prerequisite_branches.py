@@ -51,3 +51,11 @@ def test_a_profile_that_installs_but_does_not_help_is_not_a_fix(fix, monkeypatch
 
 
 # -- _ask ----------------------------------------------------------------------------------------------
+
+
+def test_an_answer_that_is_not_a_choice_is_asked_again(monkeypatch):
+    answers = iter(["9", "yes", "2"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+
+    assert SandboxPrerequisite._ask() == "off"
+    assert next(answers, None) is None
