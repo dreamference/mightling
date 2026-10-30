@@ -368,4 +368,15 @@ mod tests {
         assert_eq!(take_chars("héllo", 2), "hé");
         assert_eq!(take_chars("hé", 5), "hé");
     }
+
+    #[test]
+    fn an_empty_proxy_variable_is_no_proxy_and_the_next_one_is_read() {
+        assert!(matches!(
+            proxy_for("https://a.com/x", env(&[("https_proxy", " ")])),
+            Ok(None)
+        ));
+        let unusable = [("https_proxy", ""), ("ALL_PROXY", "socks5h://p:1080")];
+        let error = proxy_for("https://a.com/x", env(&unusable)).err().unwrap();
+        assert!(error.contains("ALL_PROXY"), "{error}");
+    }
 }
