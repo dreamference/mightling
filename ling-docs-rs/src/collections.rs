@@ -652,6 +652,15 @@ mod tests {
     }
 
     #[test]
+    fn a_default_folder_that_is_a_file_is_not_added() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::write(home.join("Documents"), b"not a folder").unwrap();
+        let mut docs = DocsToml::default();
+        assert!(docs.ensure_defaults(&home).is_empty(), "{docs:?}");
+    }
+
+    #[test]
     fn two_writers_at_once_keep_both_changes() {
         // One writer holds the lock while it saves; the other, started first, waits and then
         // reads the file afresh, so neither change is lost.
