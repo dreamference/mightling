@@ -1049,3 +1049,37 @@ fn a_choice_for_one_path_never_reaches_a_submodule_named_like_it() {
         "{out}"
     );
 }
+
+#[test]
+fn the_same_owner_on_another_host_is_another_organisation() {
+    let f = fixture();
+    let root = f.repo.root.clone();
+    git(
+        &root,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://example.com/acme/super.git",
+        ],
+    );
+    let lib = library(
+        f.dir.path(),
+        "lib",
+        "t@localhost",
+        &[("a.py", "x = 1\n")],
+        2,
+    );
+    add_submodule(
+        &root,
+        &lib,
+        "lib",
+        Some("https://other.example/acme/lib.git"),
+    );
+    let all = decisions(&f.repo);
+    assert_eq!(
+        (all[0].indexed, all[0].reason.clone(), all[0].namespace),
+        (false, Reason::OtherOrganisation, Namespace::Different)
+    );
+    assert!(!all[0].inherits_trust);
+}
