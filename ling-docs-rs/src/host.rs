@@ -539,6 +539,17 @@ mod tests {
     }
 
     #[test]
+    fn the_stand_in_host_sees_no_scopes_that_would_hold_back_its_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = RlimitHost {
+            lock_dir: dir.path().to_path_buf(),
+        };
+        // Its children are plain processes: no scope of the user's systemd counts against a run.
+        assert!(host.live_scopes().is_empty());
+        assert!(host.can_create_scopes());
+    }
+
+    #[test]
     fn a_budget_below_the_floor_defers() {
         let dir = tempfile::tempdir().unwrap();
         // 121 GiB total, 5% earlyoom line: reserve is 6.05 + 4 = ~10.05 GiB; 11 GiB leaves ~0.95.
