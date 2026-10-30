@@ -1375,6 +1375,48 @@ def test_revoke_deletes_exactly_one_peer(monkeypatch):
     )
 
 
+ODD_PEERS = [
+    {"id": "k", "name": "Kitchen", "dns_label": "kpc.netbird.selfhosted"},
+    {"id": "t", "name": "Office", "dns_label": "tv.netbird.selfhosted"},
+    {"id": "o", "name": "tv.netbird.selfhosted (old)", "dns_label": "old.netbird.selfhosted"},
+]
+
+
+@pytest.mark.parametrize(
+    "name, deleted",
+    [
+        ("kit", "k"),  # a prefix of the name alone
+        ("KPC", "k"),  # a prefix of the overlay name alone, in any case
+        (" Kitchen ", "k"),
+        ("tv.netbird.selfhosted", "t"),  # the exact overlay name wins over a prefix of a name
+    ],
+)
+def test_revoke_matches_a_name_or_an_overlay_name_by_prefix_in_any_case(monkeypatch, name, deleted):
+    _set_up()
+    gone = []
+    monkeypatch.setattr(RemoteControlPlane, "peers", classmethod(lambda cls, d, t: ODD_PEERS))
+    monkeypatch.setattr(
+        RemoteControlPlane, "delete_peer", classmethod(lambda cls, d, t, p: gone.append(p) or True)
+    )
+    assert RemoteAccess.revoke(name) == 0 and gone == [deleted]
+
+
+def test_revoke_knows_the_node_by_its_overlay_name_and_needs_one_to_refuse(monkeypatch):
+    _set_up()
+    gone = []
+    own = f"mightling-{NODE_ID}.netbird.selfhosted"
+    peers = [{"id": "n", "name": "node", "dns_label": own + "."}, *ODD_PEERS]
+    monkeypatch.setattr(RemoteControlPlane, "peers", classmethod(lambda cls, d, t: peers))
+    monkeypatch.setattr(
+        RemoteControlPlane, "delete_peer", classmethod(lambda cls, d, t, p: gone.append(p) or True)
+    )
+    assert RemoteAccess.revoke("node") == 1 and gone == [], "the root dot does not hide the node"
+    RemoteSettings.write({"dns_name": BOX})
+    assert RemoteAccess.revoke("kitchen") == 0 and gone == ["k"], (
+        "a record with no overlay name refuses nothing"
+    )
+
+
 def test_remove_keeps_the_ca_and_purge_deletes_everything(monkeypatch):
     _set_up()
     calls = []
@@ -1487,7 +1529,17 @@ def test_a_ttl_over_a_day_or_a_bad_name_mints_nothing(monkeypatch, tmp_path):
     minted = _bundle_file_ready(monkeypatch)
     assert RemoteAccess.bundle_file(str(tmp_path / "a"), ttl="25h") == 1
     assert RemoteAccess.bundle_file(str(tmp_path / "b"), join=True, name="Bad Name") == 1
+    assert RemoteAccess.bundle_file(str(tmp_path / "c"), name="a" * 64) == 1, "one DNS label"
     assert minted == [] and not (tmp_path / "a").exists() and not (tmp_path / "b").exists()
+    assert RemoteAccess.bundle_file(str(tmp_path / "d"), name="a" * 63) == 0
+
+
+def test_a_bundle_file_leaves_the_ca_out_when_the_certificate_is_public(monkeypatch, tmp_path):
+    _bundle_file_ready(monkeypatch)
+    RemoteSettings.write({**RemoteSettings.read(), "public_certificate": True})
+    target = tmp_path / "bundle.json"
+    assert RemoteAccess.bundle_file(str(target)) == 0
+    assert json.loads(target.read_text())["ca"] == ""
 
 
 def test_a_join_file_is_one_private_line_that_decodes_to_a_valid_script(
