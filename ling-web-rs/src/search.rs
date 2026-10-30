@@ -990,4 +990,18 @@ mod tests {
         assert_eq!(found.results.len(), 1);
         assert_eq!(found.results[0].engines, ["bing"]);
     }
+
+    #[test]
+    fn the_engine_of_a_duplicate_is_added_without_an_engines_list() {
+        let payload = searxng(
+            json!([
+                {"title": "A", "url": "https://a.example/x", "engine": "bing", "engines": ["bing"]},
+                {"title": "A", "url": "http://a.example/x", "engine": "yep"}
+            ]),
+            json!([]),
+            json!([]),
+        );
+        let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
+        assert_eq!(found.results[0].engines, ["bing", "yep"]);
+    }
 }
