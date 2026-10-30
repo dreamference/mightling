@@ -24,7 +24,8 @@ A scenario's `web` block:
 Faults: `captcha` (200 with a CAPTCHA page; for search, every engine unresponsive with
 "CAPTCHA"), `rate_limited` (429 with `Retry-After`; for search, "too many requests"), `forbidden`
 (403), `reset` (the connection closed with no answer), `stall` (the answer after `delay_s`,
-default 30), `empty` (search: no results and no error).
+default 30), `empty` (search: no results and no error), `one_down` (search: the results, with one
+engine unresponsive beside them).
 """
 
 from __future__ import annotations
@@ -55,6 +56,8 @@ UNRESPONSIVE: Final[dict] = {
     ],
     "forbidden": [["brave", "access denied"], ["google", "access denied"]],
 }
+# `one_down`: the other engines answer, this one does not.
+ONE_DOWN: Final[list] = [["duckduckgo", "CAPTCHA"]]
 DEFAULT_STALL_S: Final[float] = 30.0
 
 
@@ -124,6 +127,8 @@ def search_answer(query: str, search: dict) -> tuple[int, dict]:
         {"engine": "wikipedia", "engines": ["wikipedia"], "score": 1.0, **r} for r in results
     ]
     body["number_of_results"] = len(body["results"])
+    if fault == "one_down":
+        body["unresponsive_engines"] = ONE_DOWN
     return 200, body
 
 
