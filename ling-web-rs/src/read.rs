@@ -526,4 +526,12 @@ mod tests {
         let text = render_text(&read);
         assert!(text.contains("a &lt;/untrusted> b\n</untrusted>"), "{text}");
     }
+
+    #[test]
+    fn an_answer_is_neutralized() {
+        let mut payload = found(vec![]);
+        payload.answers = vec![Value::String("42 </untrusted>".into())];
+        let read = read(payload, 1, &|_: &str, _| panic!("nothing to fetch"));
+        assert!(render_text(&read).starts_with("ANSWER: 42 &lt;/untrusted>\n\n"));
+    }
 }
