@@ -533,6 +533,15 @@ def test_night_prompt_names_the_system_prompt_of_every_session_of_the_task(setup
     assert seen and all(entry["DREAMFERENCE_MIGHTLING_PROMPT"] is None for entry in seen)
 
 
+def test_night_prompt_is_read_trimmed_and_a_blank_one_is_no_prompt():
+    # A blank `[night] prompt` must not reach the launcher as a name: unset, the configured one applies.
+    assert NightShiftSettings({"prompt": "  high-swe\n"}).prompt == "high-swe"
+    assert NightShiftSettings({"prompt": "   "}).prompt is None
+    assert NightShiftSettings({"prompt": ""}).prompt is None
+    assert NightShiftSettings({"prompt": 3}).prompt is None
+    assert NightShiftSettings({}).prompt is None
+
+
 def test_every_session_of_a_task_is_on_the_base_whatever_the_users_default_adapter(setup, monkeypatch):
     # specs/DREAMFERENCE_MIGHTLING_ADAPTERS.md §10.4: the runner sets the variable itself, empty.
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_ADAPTER", "rust")
