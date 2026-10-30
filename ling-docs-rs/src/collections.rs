@@ -554,6 +554,25 @@ mod tests {
     }
 
     #[test]
+    fn a_home_named_through_a_link_is_still_refused_with_its_secret_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().canonicalize().unwrap().join("real");
+        std::fs::create_dir_all(real.join(".ssh/keys")).unwrap();
+        let link = dir.path().join("home");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let codex = link.join(".mightling");
+        assert!(validate_root_in(&real, &link, &codex)
+            .unwrap_err()
+            .to_string()
+            .contains("whole home folder"));
+        assert!(validate_root_in(real.parent().unwrap(), &link, &codex).is_err());
+        assert!(validate_root_in(&real.join(".ssh/keys"), &link, &codex)
+            .unwrap_err()
+            .to_string()
+            .contains("never indexed"));
+    }
+
+    #[test]
     fn two_writers_at_once_keep_both_changes() {
         // One writer holds the lock while it saves; the other, started first, waits and then
         // reads the file afresh, so neither change is lost.
