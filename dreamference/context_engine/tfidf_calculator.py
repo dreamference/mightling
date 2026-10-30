@@ -20,8 +20,8 @@ class TFIDFCalculator:
         """
         Splits source code and natural language text into normalized sub-words and identifiers.
 
-        Handles CamelCase splitting (e.g. 'DreamferenceConfig' -> ['dgx', 'coder', 'config'])
-        and snake_case splitting.
+        Splits CamelCase and snake_case (e.g. 'DreamferenceConfig' -> ['dreamference', 'config'],
+        'get_user_name' -> ['get', 'user', 'name']), and keeps the whole identifier as well.
 
         Args:
             text (str): Source text string.
@@ -32,8 +32,9 @@ class TFIDFCalculator:
         words = re.findall(r'[a-zA-Z0-9_]+', text)
         tokens: List[str] = []
         for word in words:
-            # Convert CamelCase to spaced sub-words
-            sub_words = re.sub('([a-z0-9])([A-Z])', r'\1 \2', word).lower().split()
+            # CamelCase and snake_case to spaced sub-words. Underscores used to stay in, so a
+            # snake_case query was one token, which the full-text search drops as not alphanumeric.
+            sub_words = re.sub('([a-z0-9])([A-Z])', r'\1 \2', word).replace("_", " ").lower().split()
             tokens.extend(sub_words)
             tokens.append(word.lower())
         return [t for t in tokens if len(t) > 1]

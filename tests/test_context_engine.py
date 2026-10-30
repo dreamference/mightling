@@ -179,3 +179,21 @@ def test_the_full_text_score_is_highest_for_the_strongest_match(tmp_path):
     conn.close()
     scores = storage.search_fts(["alpha"], top_k=5)
     assert scores["strong.py"] > scores["weak.py"] > 0
+
+
+def test_snake_case_and_camel_case_identifiers_are_split_into_their_words(tmp_path, monkeypatch):
+    # Only camelCase was split: `get_user_name` stayed one token, and the full-text search drops a
+    # token with an underscore as not alphanumeric, so a snake_case query never reached FTS5.
+    from dreamference.context_engine import embedding_calculator
+    from dreamference.context_engine.tfidf_calculator import TFIDFCalculator
+
+    assert TFIDFCalculator.tokenize("getUserName") == ["get", "user", "name", "getusername"]
+    assert TFIDFCalculator.tokenize("get_user_name") == ["get", "user", "name", "get_user_name"]
+    assert TFIDFCalculator.tokenize("x = DreamferenceConfig") == ["dreamference", "config", "dreamferenceconfig"]
+
+    monkeypatch.setattr(embedding_calculator.EmbeddingCalculator, "_unavailable", True)
+    (tmp_path / "users.py").write_text("def get_user_name(user_id):\n    return lookup(user_id)\n")
+    engine = ContextEngine(workspace_root=str(tmp_path))
+    engine.index_workspace(force_reindex=True)
+    assert engine.sqlite_storage.search_fts(TFIDFCalculator.tokenize("get_user_name"), top_k=5)
+    assert engine.search_code("user name")[0]["rel_path"] == "users.py"
