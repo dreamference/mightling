@@ -135,6 +135,21 @@ def test_the_forge_record_names_the_node_and_only_a_known_role_is_read_back():
     assert NodeServiceFile.parse_forge(text.replace("role=mirror", "role=owner")) is None
 
 
+def test_a_service_file_that_cannot_be_written_is_a_failure(monkeypatch):
+    path = NodeServiceFile.service_path
+    path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.3.0"))
+    original = Path.write_text
+
+    def refuse(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError(13, "Permission denied", str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", refuse)
+    assert NodeServiceFile.write("x") is False
+    assert NodeServiceFile.update(state="ready") is False
+
+
 def test_a_node_that_was_never_enabled_is_never_advertised_by_a_side_effect():
     assert not NodeServiceFile.service_path.exists()
     assert NodeServiceFile.update(state="ready") is None
