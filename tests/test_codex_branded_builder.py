@@ -1791,3 +1791,11 @@ def test_only_a_runnable_console_script_is_linked(tmp_path, monkeypatch):
     assert CodexBrandedBuilder.console_script_path("ling-admin") is None
     script.chmod(0o755)
     assert CodexBrandedBuilder.console_script_path("ling-admin") == str(script)
+
+
+def test_the_runner_does_not_resolve_a_branded_file_it_cannot_run(tmp_path):
+    binary = tmp_path / "bin" / "ling"
+    binary.parent.mkdir()
+    binary.write_text("#!/bin/sh\n")
+    with patch.object(builder_module, "INSTALL_DIR", str(tmp_path)):
+        assert CodexInstaller.get_codex_executable() is None
