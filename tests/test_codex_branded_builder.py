@@ -1823,3 +1823,9 @@ def test_a_release_install_refreshes_its_links_when_asked_to_build(monkeypatch):
     monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: linked.append(True)))
     assert CodexBrandedBuilder.build() is True
     assert linked == [True]
+
+
+def test_a_missing_ling_is_built_and_its_build_decides(monkeypatch):
+    monkeypatch.setattr(CodexInstaller, "is_installed", classmethod(lambda cls: False))
+    monkeypatch.setattr(CodexBrandedBuilder, "build", classmethod(lambda cls, force=False: False))
+    assert CodexInstaller.install_if_missing() is False
