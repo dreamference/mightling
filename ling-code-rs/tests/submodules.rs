@@ -1540,3 +1540,18 @@ fn a_submodules_own_trust_is_looked_up_in_the_main_worktree() {
         None
     );
 }
+
+#[test]
+fn a_linked_worktree_runs_on_the_main_worktrees_trust() {
+    let f = with_a_mixed_submodule("t@localhost", Some("https://example.com/acme/mixed.git"));
+    let wt = linked_worktree(&f, "mixed");
+    trust(&f, &[&f.repo.root]);
+    let (_, out) = f.run_in(&wt, &["submodules"], &[]);
+    assert!(out.contains("it inherits this repository's trust"), "{out}");
+    let (_, out) = f.run_in(&wt, &["status"], &[]);
+    assert!(
+        out.contains("exact: rust-analyzer for mixed/crate: "),
+        "{out}"
+    );
+    assert!(!out.contains("is not trusted"), "{out}");
+}
