@@ -877,6 +877,22 @@ mod tests {
     }
 
     #[test]
+    fn a_hooks_json_beside_the_config_keeps_the_hook_out_of_it() {
+        let dir = std::env::temp_dir().join(format!("mightling-compaction-hooks-json-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("config.toml");
+        std::fs::write(&config, "a = 1\n").unwrap();
+        register_ledger_hook(&config, true).unwrap();
+        assert!(std::fs::read_to_string(&config).unwrap().contains("ledger"));
+        std::fs::write(&config, "a = 1\n").unwrap();
+        std::fs::write(dir.join("hooks.json"), "{}").unwrap();
+        register_ledger_hook(&config, true).unwrap();
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), "a = 1\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     #[cfg(not(windows))]
     fn a_path_the_shell_would_split_is_quoted() {
         assert_eq!(hook_command(Path::new("/opt/ling/bin/ling")), "/opt/ling/bin/ling ledger");
