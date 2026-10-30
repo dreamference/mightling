@@ -153,3 +153,83 @@ def test_setup_validates_the_named_instances_rather_than_every_one_with_an_image
     )
     [(_, args, _)] = [call for call in ready["calls"] if call[0] == "validate"]
     assert args[1] == ["c__c-3", "b__b-2"]
+
+
+@pytest.fixture
+def smoke(monkeypatch):
+    """A smoke whose first step passes; `agent` says what the agent step leaves behind."""
+    agent = {"code": 0, "prediction": False, "log": "", "state": None, "graded": False}
+    seam(monkeypatch, SweBenchHarness, "rows", [{"instance_id": SMOKE_ID}], [])
+    seam(monkeypatch, SweBenchHarness, "installed_version", swe_bench_settings.HARNESS_VERSION, [])
+    seam(
+        monkeypatch,
+        SweBenchEvaluator,
+        "validate",
+        lambda dataset, ids, settings, force=False: dict.fromkeys(ids),
+        [],
+    )
+
+    def run(**kwargs):
+        store = SweBenchRunStore(kwargs["name"])
+        store.write_manifest({"name": store.name, "instances": [SMOKE_ID]})
+        if agent["prediction"]:
+            store.append_prediction(SMOKE_ID, "model", "diff --git a/x b/x\n")
+        if agent["log"]:
+            store.log_path(SMOKE_ID).parent.mkdir(parents=True, exist_ok=True)
+            store.log_path(SMOKE_ID).write_text(agent["log"])
+        if agent["state"]:
+            store.write_state(SMOKE_ID, agent["state"])
+        return agent["code"]
+
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: run(**kwargs)))
+    monkeypatch.setattr(
+        SweBenchEvaluator,
+        "results",
+        classmethod(
+            lambda cls, store, variant=None: (
+                (1, {}, {SMOKE_ID: {"resolved": True}}) if agent["graded"] else (None, {}, {})
+            )
+        ),
+    )
+    return agent
+
+
+def test_a_smoke_whose_agent_run_did_not_start_is_not_recorded(smoke, capsys):
+    smoke["code"] = 1
+    assert SweBenchCommand.smoke() == 1
+    out = capsys.readouterr().out
+    for problem in (
+        "the run did not start",
+        "no prediction was written",
+        "no agent log was written",
+        "the prediction was not graded",
+    ):
+        assert problem in out
+    assert not SweBenchRunner.smoke_path().exists()
+
+
+def test_a_smoke_whose_agent_failed_is_not_recorded_even_with_a_graded_prediction(smoke, capsys):
+    smoke.update(
+        prediction=True,
+        log="{}\n",
+        graded=True,
+        state={"status": "error", "notes": ["container died"]},
+    )
+    assert SweBenchCommand.smoke() == 1
+    out = capsys.readouterr().out
+    assert "Smoke failed: the agent run failed: container died." in out
+    assert not SweBenchRunner.smoke_path().exists()
+
+
+def test_a_smoke_with_an_empty_agent_log_is_not_recorded(smoke, capsys):
+    smoke.update(prediction=True, log="", graded=True, state={"status": "done"})
+    assert SweBenchCommand.smoke() == 1
+    assert "Smoke failed: no agent log was written." in capsys.readouterr().out
+    assert not SweBenchRunner.smoke_path().exists()
+
+
+def test_a_smoke_whose_agent_step_left_everything_is_recorded(smoke):
+    smoke.update(prediction=True, log="{}\n", graded=True, state={"status": "done", "wall_s": 12})
+    SweBenchRunner.smoke_path().parent.mkdir(parents=True, exist_ok=True)
+    assert SweBenchCommand.smoke() == 0
+    assert SweBenchRunner.smoke_path().is_file()
