@@ -104,3 +104,21 @@ def test_a_nudge_cut_off_by_the_window_leaves_the_task_interrupted_for_the_next_
     # The worktree and branch are kept for the session to resume.
     assert _left_behind(night, run) == ["worktree", "branch"]
     assert record["result"]["branch"] == run.branch
+
+
+@pytest.mark.parametrize("attempt", [None, 1])
+def test_a_runner_bug_fails_the_task_instead_of_leaving_it_running(night, monkeypatch, attempt):
+    def broken(self):
+        raise RuntimeError("worktree helper broke")
+
+    monkeypatch.setattr(NightShiftTaskRun, "_prepare_worktree", broken)
+    status, record, run = _run(night, monkeypatch, "change", attempt=attempt)
+    assert status == "failed"
+    if attempt is None:
+        assert record["status"] == "failed"
+        assert record["result"]["last_message"] == "night run error: worktree helper broke"
+    else:
+        # One attempt of a best-of-N task: the coordinator owns the record, the attempt its outcome.
+        assert record["status"] == "queued"
+        assert run.outcome["status"] == "failed"
+        assert run.outcome["result"]["last_message"] == "night run error: worktree helper broke"
