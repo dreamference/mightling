@@ -232,3 +232,71 @@ def test_openhands_refuses_a_workspace_whose_path_docker_would_misread(tmp_path,
 
     assert runner.run_session() == 1
     assert "':'" in capsys.readouterr().out
+
+
+def test_codex_runner_exits_1_without_a_spawn_when_ling_cannot_be_had(tmp_path, monkeypatch, capsys):
+    # A failed build, or no built binary, ends the session: nothing on PATH stands in for `ling`.
+    from dreamference.runner import CodexInstaller, CodexRunner
+
+    runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
+    monkeypatch.setattr("subprocess.call", lambda *a, **k: pytest.fail("nothing may start"))
+
+    monkeypatch.setattr(CodexInstaller, "install_if_missing", classmethod(lambda cls: False))
+    assert runner.run_session(prompt="fix it") == 1
+
+    monkeypatch.setattr(CodexInstaller, "install_if_missing", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: None))
+    assert runner.run_session(prompt="fix it") == 1
+    assert "`ling` is not built" in capsys.readouterr().out
+
+
+def test_codex_runner_exits_1_when_ling_cannot_be_started(tmp_path, monkeypatch, capsys):
+    from dreamference.runner import CodexInstaller, CodexRunner
+
+    runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
+    monkeypatch.setattr(CodexInstaller, "install_if_missing", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/opt/ling"))
+
+    def refuse(cmd, env=None, **kwargs):
+        raise PermissionError(13, "Permission denied", cmd[0])
+
+    monkeypatch.setattr("subprocess.call", refuse)
+    assert runner.run_session(prompt="fix it") == 1
+    assert "Failed to run ling" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("runner_class", [ClineRunner, ContinueRunner, OpenHandsRunner])
+def test_the_other_agents_start_nothing_while_the_model_server_is_down(
+    runner_class, tmp_path, monkeypatch
+):
+    from dreamference.runner import VLLMReadinessWaiter
+
+    monkeypatch.chdir(tmp_path)
+    runner = runner_class(config=DreamferenceConfig())
+    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: False)
+    monkeypatch.setattr(VLLMReadinessWaiter, "wait_for_vllm", lambda self, **kwargs: False)
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("nothing may start"))
+    monkeypatch.setattr("subprocess.call", lambda *a, **k: pytest.fail("nothing may start"))
+
+    assert runner.run_session() == 1
+
+
+@pytest.mark.parametrize(
+    ("runner_class", "installer", "check"),
+    [
+        (ClineRunner, ClineInstaller, "is_vscode_installed"),
+        (ContinueRunner, ContinueInstaller, "is_vscode_installed"),
+        (OpenHandsRunner, OpenHandsInstaller, "is_docker_available"),
+    ],
+)
+def test_the_other_agents_exit_1_without_the_program_they_run_in(
+    runner_class, installer, check, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    runner = runner_class(config=DreamferenceConfig())
+    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
+    monkeypatch.setattr(installer, check, classmethod(lambda cls: False))
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("nothing may start"))
+    monkeypatch.setattr("subprocess.call", lambda *a, **k: pytest.fail("nothing may start"))
+
+    assert runner.run_session() == 1
