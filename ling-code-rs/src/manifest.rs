@@ -212,6 +212,21 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn an_atomic_write_replaces_a_planted_link_instead_of_writing_through_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "keep").unwrap();
+        let path = dir.path().join("state/manifest.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, &path).unwrap();
+        write_atomic(&path, b"new").unwrap();
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
+        assert!(std::fs::symlink_metadata(&path).unwrap().is_file());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn a_planted_manifest_or_graph_link_is_not_followed() {
         // A clone can commit `.dreamference/scip/` with links to anything, /dev/zero included.
         let dir = tempfile::tempdir().unwrap();
