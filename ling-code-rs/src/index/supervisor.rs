@@ -661,6 +661,22 @@ mod tests {
     }
 
     #[test]
+    fn a_scope_gets_the_admitted_cap_not_the_ceiling() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = FakeHost::new(dir.path(), 12); // ~2 GiB above the reserve
+        let plan = repo_and_plan(dir.path(), Kind::Universal, 0);
+        execute(
+            &plan,
+            &host,
+            &FixedProbe(ModelState::Absent),
+            Duration::from_millis(1),
+        );
+        let started = host.started.lock().unwrap();
+        assert_eq!(started.len(), 1);
+        assert!(started[0].1 < 2 << 30, "{}", started[0].1);
+    }
+
+    #[test]
     fn a_peak_within_ten_percent_of_the_cap_is_marked_cap_bounded() {
         // A universal run gets the 4 GiB small ceiling here; 90% of it is 3686 MiB (§6.4).
         for (peak_mb, bounded) in [(3700u64, true), (3600, false)] {
