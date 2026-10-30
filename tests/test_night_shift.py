@@ -62,6 +62,10 @@ FAKE_MIGHTLING = textwrap.dedent("""\
         time.sleep(600)
     if mode == "error":
         sys.exit(1)
+    if mode == "change_then_error":
+        with open(os.path.join(cwd, "hello.txt"), "w") as handle:
+            handle.write("hi\\n")
+        sys.exit(1)
     if mode == "refine" and prompt.startswith("This is the first of two steps"):
         # Refine mode's study step: leaves a scratch file it was told not to, and answers.
         with open(os.path.join(cwd, "scratch.txt"), "w") as handle:
@@ -660,6 +664,12 @@ def test_an_exec_error_with_no_change_is_failed(setup, monkeypatch):
     status, record, _ = run_task(setup, monkeypatch, "error")
     assert status == "failed"
     assert record["result"]["last_message"]
+
+
+def test_an_exec_error_after_a_change_still_tests_and_commits_it(setup, monkeypatch):
+    status, record, _ = run_task(setup, monkeypatch, "change_then_error", test="test -f hello.txt")
+    assert status == "done" and record["result"]["test_result"] == "passed"
+    assert git(setup["repo"], "show", "night/20261001-0100-abc:hello.txt").stdout == "hi\n"
 
 
 def test_a_task_cut_off_keeps_its_worktree_and_resumes_its_session_next_time(setup, monkeypatch):
