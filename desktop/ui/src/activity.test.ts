@@ -32,6 +32,13 @@ describe("activity", () => {
     expect(merged([a, b], all, "/w/fetcher").map((entry) => entry.thread)).toEqual(["Retry"]);
   });
 
+  it("filters by a Windows project folder, its subfolders included", () => {
+    const sub = activityOf(thread("w", "C:\\w\\site\\web", "Hero"), [turn("t1", 100, [{ type: "commandExecution", id: "c1", command: "npm test", exitCode: 0 }])]);
+    const other = activityOf(thread("o", "C:\\w\\site2", "Other"), [turn("t2", 200, [{ type: "commandExecution", id: "c2", command: "npm test", exitCode: 0 }])]);
+    expect(merged([sub, other], all, "C:\\w\\site").map((entry) => entry.thread)).toEqual(["Hero"]);
+    expect(merged([sub, other], all, "C:\\w\\site\\").map((entry) => entry.thread)).toEqual(["Hero"]);
+  });
+
   it("names the days", () => {
     const now = new Date(2026, 9, 18, 12).getTime();
     expect(dayLabel(now / 1000, now)).toBe("Today");
