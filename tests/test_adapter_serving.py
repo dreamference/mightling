@@ -7,6 +7,7 @@ comes from a replaced `docker` call, and the engine behind the gate is a stand-i
 import asyncio
 import hashlib
 import json
+import os
 import pathlib
 import threading
 import time
@@ -17,9 +18,15 @@ from typing import ClassVar
 
 import pytest
 
+from dreamference.hardware.adapter_installer import AdapterInstaller
 from dreamference.hardware.adapter_store import AdapterStore
+from dreamference.hardware.adapter_verifier import AdapterVerifier
 from dreamference.hardware.model_downloader import ModelDownloader
-from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS, QWEN38_LORA_RECIPE
+from dreamference.hardware.model_matrix_registry import (
+    DEFAULT_MODEL_ALIAS,
+    QWEN38_LORA_RECIPE,
+    ModelMatrixRegistry,
+)
 from dreamference.vllm_server.adapter_serving import AdapterServing
 from dreamference.vllm_server.model_gate import ModelGate
 from dreamference.vllm_server.model_gate_adapters import (
@@ -39,8 +46,6 @@ COMMIT = "2" * 40
 
 def install(name="rust", base_revision=None, files=None):
     """An installed adapter whose files exist in the test's hub cache."""
-    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
-
     snapshot = f"models--dreamference--mightling-{name}/snapshots/{COMMIT}"
     folder = ModelDownloader.get_hf_cache_dir() / snapshot
     folder.mkdir(parents=True, exist_ok=True)
@@ -142,8 +147,58 @@ def test_an_installed_adapter_turns_on_the_recipes_lora_flags_behind_the_gate(
 
 
 def test_minima_never_serves_adapters(verified):
-    install(base_revision="16e768e7d0461b0b86e565ecedd08a24eca53e9a")
+    # Installed for Minima's own checkpoint: its recipe has no `lora` key, so nothing is chosen.
+    base = AdapterVerifier.base_for(MINIMA)
+    AdapterStore.put({**install(), "base_repo": base["repo"], "base_revision": base["revision"]})
+    assert AdapterServing.launch_adapters(MINIMA) == []
     assert "--enable-lora" not in VLLMServerManager().build_launch_command(model=MINIMA, gate=True)
+
+
+def test_an_adapter_of_another_base_revision_or_a_model_with_no_base_is_not_served(
+    verified, monkeypatch
+):
+    install(base_revision="f" * 40)
+    assert AdapterServing.launch_adapters(DEFAULT_MODEL_ALIAS) == []
+    install()
+    assert [e["name"] for e in AdapterServing.launch_adapters(DEFAULT_MODEL_ALIAS)] == ["rust"]
+    monkeypatch.setattr(AdapterVerifier, "base_for", classmethod(lambda cls, key: None))
+    assert AdapterServing.launch_adapters(DEFAULT_MODEL_ALIAS) == []
+
+
+def test_an_adapters_check_is_remembered_until_its_files_pin_or_base_change(monkeypatch):
+    AdapterServing.checked.clear()
+    calls = []
+    monkeypatch.setattr(
+        "dreamference.hardware.adapter_installer.AdapterInstaller.verify",
+        classmethod(lambda cls, entry, base: calls.append(entry["name"])),
+    )
+    entry = install()
+    base = AdapterVerifier.base_for(DEFAULT_MODEL_ALIAS)
+    AdapterServing.problem(entry, base)
+    AdapterServing.problem(entry, base)
+    assert len(calls) == 1
+    # The same size, written later.
+    weights = AdapterInstaller.folder_of(entry) / "adapter_model.safetensors"
+    stat = weights.stat()
+    os.utime(weights, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+    AdapterServing.problem(entry, base)
+    assert len(calls) == 2
+    AdapterServing.problem({**entry, "manifest_sha256": "sha256:" + "1" * 64}, base)
+    assert len(calls) == 3
+    AdapterServing.problem(entry, {**base, "revision": "f" * 40})
+    assert len(calls) == 4
+    AdapterServing.problem(entry, base)
+    assert len(calls) == 4
+
+
+def test_the_engine_is_given_at_start_only_as_many_adapters_as_it_holds():
+    recipe = {"lora": {"max_lora_rank": 16, "max_loras_per_batch": 1, "max_loaded_loras": 1}}
+    args = AdapterServing.server_args(
+        recipe, [{"name": "cpp", "snapshot": "c"}, {"name": "rust", "snapshot": "r"}]
+    )
+    assert args[args.index("--lora-paths") + 1 : args.index("--api-key")] == [
+        "cpp=/root/.cache/huggingface/hub/c"
+    ]
 
 
 def test_the_containers_cap_grows_by_the_loaded_cache_of_the_largest_adapter(monkeypatch):
@@ -242,14 +297,30 @@ def test_the_recipes_patch_passes_lora_path_at_both_places_responses_builds_a_re
     assert "lora_path=adapted_request.lora_path" in replacements[1]
 
 
+def test_prepare_mounts_the_recipes_patch_together_with_the_adapters(verified, monkeypatch):
+    given = []
+    monkeypatch.setattr(
+        SGLangRuntimePatcher,
+        "prepare",
+        classmethod(lambda cls, image, patches: given.append(patches)),
+    )
+    install()
+    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True) is True
+    recipe = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS)
+    assert given == [SGLangRuntimePatcher.for_launch(recipe, lora=True)]
+    assert given != [SGLangRuntimePatcher.for_launch(recipe, lora=False)]
+
+
 def test_prepare_writes_the_gates_list_or_removes_it(verified, monkeypatch):
     monkeypatch.setattr(
         SGLangRuntimePatcher, "prepare", classmethod(lambda cls, image, patches: None)
     )
     assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True) is True
     assert not (AdapterServing.gate_dir() / LIST_FILE).exists()
+    assert AdapterServing.gate_mounts() == []
     install()
     assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True) is True
+    assert (AdapterServing.gate_dir() / LIST_FILE).stat().st_mode & 0o777 == 0o600
     listing = json.loads((AdapterServing.gate_dir() / LIST_FILE).read_text())
     assert listing["base"] == BASE and listing["max_loaded"] == 8
     assert listing["adapters"]["rust"]["path"].startswith(
@@ -260,6 +331,10 @@ def test_prepare_writes_the_gates_list_or_removes_it(verified, monkeypatch):
     ].endswith(":/root/.cache/huggingface/hub:ro")
     AdapterServing.withdraw("rust")
     assert json.loads((AdapterServing.gate_dir() / LIST_FILE).read_text())["adapters"] == {}
+    # Behind no gate the list a former start wrote is removed, and the gate mounts nothing.
+    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=False) is True
+    assert not (AdapterServing.gate_dir() / LIST_FILE).exists()
+    assert AdapterServing.gate_mounts() == []
     monkeypatch.setattr(
         SGLangRuntimePatcher, "prepare", classmethod(lambda cls, image, patches: "no file")
     )
