@@ -569,3 +569,35 @@ def test_a_lan_copy_whose_key_the_donor_did_not_take_copies_nothing_and_cleans_u
     assert not any("rsync" in command for command in recipient.commands)
     assert any("sed -i" in command for command in donor.commands)
     assert any(command.startswith("rm -rf") for command in recipient.commands)
+
+
+# -- the role's steps: no key, no listing, no pass
+
+
+def role_steps():
+    from dreamference.node.node_provisioner import NodeProvisioner
+    from dreamference.node.node_role_provisioner import NodeRoleProvisioner
+
+    provisioner = NodeProvisioner(["new-node"], {"user": "user", "role": "night"})
+    return provisioner, NodeRoleProvisioner(provisioner, "night")
+
+
+def test_authorising_without_a_key_here_fails_the_step_and_sends_nothing(capsys):
+    provisioner, role = role_steps()
+    session = SimpleNamespace(identity=None, run=lambda *a, **k: pytest.fail("ran on the node"))
+    assert role.authorize_key("new-node", session) is False
+    assert provisioner.results["new-node"]["failed"] == "authorise the key"
+    assert provisioner.results["new-node"]["reason"] == "no key here"
+
+
+def test_a_node_missing_from_the_list_after_pairing_fails_the_step(monkeypatch):
+    provisioner, role = role_steps()
+    provisioner.results["new-node"] = {"host": "new-node", "done": [], "node": "n-new"}
+    paired = [{"node": "n-other", "name": "house-2"}]
+    monkeypatch.setattr(NodePairing, "paired", classmethod(lambda cls: paired))
+    assert role.listed("new-node", None) is False
+    assert provisioner.results["new-node"]["failed"] == "node list"
+    paired.append({"node": "n-new", "name": "new-node"})
+    provisioner.results["new-node"] = {"host": "new-node", "done": [], "node": "n-new"}
+    assert role.listed("new-node", None) is True
+    assert "failed" not in provisioner.results["new-node"]
