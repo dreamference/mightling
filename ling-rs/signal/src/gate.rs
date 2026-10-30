@@ -247,6 +247,17 @@ mod tests {
     }
 
     #[test]
+    fn a_message_is_late_only_after_a_full_day_in_either_mode() {
+        let mut gate = owned();
+        let day = NOW - STALE_MS;
+        assert!(matches!(gate.check(&direct("owner", "a day", day), &Mode::Dedicated, Some("fp1"), NOW), Verdict::Accept(_)));
+        assert_eq!(gate.check(&direct("owner", "a day and 1 ms", day - 1), &Mode::Dedicated, Some("fp1"), NOW), Verdict::Late { hours: 24 });
+        let (mut gate, mode) = linked();
+        assert!(matches!(gate.check(&note("a day", day, 1), &mode, None, NOW), Verdict::Accept(_)));
+        assert_eq!(gate.check(&note("old", NOW - 30 * 3_600_000, 1), &mode, None, NOW), Verdict::Late { hours: 30 });
+    }
+
+    #[test]
     fn the_seen_list_is_bounded_and_restorable() {
         let mut gate = owned();
         for t in 0..(SEEN_LIMIT as u64 + 10) {
