@@ -351,6 +351,18 @@ def test_the_client_is_installed_from_the_release_checked_and_linked(tmp_path, r
     assert not (tmp_path / ".local/share/dreamference/venv").exists()
 
 
+def test_the_link_folder_is_named_when_it_is_not_on_the_path(tmp_path, release_server):
+    result = run_install(tmp_path, release_server(binaries()), "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"{tmp_path / '.local/bin'} is not on your PATH" in result.stdout
+    home = tmp_path / "on-path"
+    home.mkdir()
+    path = f"{home / 'fakebin'}:{home / '.local/bin'}:/usr/bin:/bin"
+    result = run_install(home, release_server(binaries()), "--role", "client", env_extra={"PATH": path})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "is not on your PATH" not in result.stdout
+
+
 def test_a_release_with_the_code_index_installs_it_too(tmp_path, release_server):
     names = ("ling", "codex-code-mode-host", "ling-search", "ling-fetch", "ling-code")
     result = run_install(tmp_path, release_server(binaries(names)), "--role", "client")
