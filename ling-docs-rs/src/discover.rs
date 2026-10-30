@@ -720,6 +720,24 @@ mod tests {
     }
 
     #[test]
+    fn a_followed_link_to_a_file_inside_a_hidden_folder_is_skipped() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let root = home.join("docs");
+        write(&root.join("in.md"), b"x");
+        write(&root.join(".private/saved.md"), b"x");
+        std::os::unix::fs::symlink(root.join(".private/saved.md"), root.join("notes.md")).unwrap();
+        let mut collection = Collection::new("docs", root.clone());
+        collection.follow_symlinks = true;
+        let rels: Vec<_> = walk(&collection, &home, true)
+            .candidates
+            .iter()
+            .map(|c| c.rel.clone())
+            .collect();
+        assert_eq!(rels, ["in.md"]);
+    }
+
+    #[test]
     fn a_followed_link_is_kept_out_by_a_lingignore_naming_it_or_its_target() {
         let home = tempfile::tempdir().unwrap();
         let home = home.path().canonicalize().unwrap();
