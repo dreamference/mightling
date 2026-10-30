@@ -170,6 +170,32 @@ def test_an_id_with_no_known_cgroup_layout_is_kept_for_the_socket(tmp_path, monk
     assert wd._direct_kill_ok is None
 
 
+@pytest.mark.parametrize(
+    "layout",
+    [
+        "/sys/fs/cgroup/system.slice/docker-abc123.scope/cgroup.procs",  # v2, systemd driver
+        "/sys/fs/cgroup/docker/abc123/cgroup.procs",  # v2, cgroupfs driver
+        "/sys/fs/cgroup/memory/docker/abc123/cgroup.procs",  # v1
+    ],
+)
+def test_each_known_cgroup_layout_is_found(monkeypatch, layout):
+    exists = psi_watchdog.os.path.exists
+    monkeypatch.setattr(
+        psi_watchdog.os.path,
+        "exists",
+        lambda path: path == layout if path.startswith("/sys/fs/cgroup/") else exists(path),
+    )
+    monkeypatch.setattr(
+        psi_watchdog.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="abc123\n", stderr=""),
+    )
+    monkeypatch.setattr(MemoryPressureWatchdog, "_read_cgroup_pids", lambda self: [])
+    wd = MemoryPressureWatchdog("test-container")
+    wd._ensure_cgroup_resolved()
+    assert wd._cgroup_procs == layout
+
+
 def test_the_probe_skips_a_pid_that_has_exited(monkeypatch):
     probed = []
 
