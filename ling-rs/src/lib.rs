@@ -1665,6 +1665,20 @@ mod tests {
     }
 
     #[test]
+    fn every_entry_is_told_of_the_read_only_network_only_when_it_is_open() {
+        let body = gate_models();
+        let model = parse_served_model(&body).unwrap();
+        let catalog = model_catalog_with_adapters(&model, &adapter::listed(&body, &model.id), "x");
+        let open = with_read_only_network(catalog.clone(), true);
+        let entries = open["models"].as_array().unwrap();
+        assert_eq!(entries.len(), 3);
+        for entry in entries {
+            assert_eq!(entry["model_messages"]["permissions"]["read_only"], json!(airgapped::READ_ONLY_SANDBOX_TEXT));
+        }
+        assert_eq!(with_read_only_network(catalog.clone(), false), catalog);
+    }
+
+    #[test]
     fn app_server_is_given_the_model_as_configuration() {
         let args: Vec<OsString> = ["ling", "--oss", "app-server"].iter().map(OsString::from).collect();
         let out: Vec<String> = with_configured_model(args, "qwen3.8-27b")
