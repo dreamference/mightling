@@ -7,6 +7,7 @@ no model server. `start` (systemd-run, the worktree checkout) is never run here.
 
 import os
 import pathlib
+import shutil
 import stat
 import subprocess
 
@@ -1493,3 +1494,35 @@ def test_a_local_arms_night_unit_gets_an_hour_to_stop_and_others_the_default(tmp
     result, _, _, units, _ = start(plain, "default tests-v2", free_gb=500)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "TimeoutStopSec" not in units[0]
+
+
+def test_start_refuses_a_worktree_without_the_drop_flag(tmp_path):
+    # A worktree pinned before --drop-old-outputs: start stops before it looks at the installed ling.
+    worktree = tmp_path / "wt"
+    shutil.copytree(pathlib.Path(ROOT) / "dreamference" / "swe_bench", worktree / "dreamference" / "swe_bench")
+    command = worktree / "dreamference" / "swe_bench" / "swe_bench_command.py"
+    command.write_text(command.read_text().replace('"--drop-old-outputs"', '"--other-flag"'))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in (("systemctl", "exit 1"), ("git", "exit 0")):
+        tool = bin_dir / name
+        tool.write_text(f"#!/bin/bash\n{body}\n")
+        tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "WT": str(worktree),
+        "PY": "false",
+        "D": str(tmp_path / "night7"),
+        "NIGHT": "7",
+        "UNIT": "ling-swe-night7-test",
+        "LIVE_UNIT": "ling-swe-night6-test",
+        "ARMS": "default drop-outputs",
+        "LIST": str(tmp_path / "list.txt"),
+    }
+    result = subprocess.run(
+        ["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60
+    )
+    assert result.returncode == 1
+    assert f"{worktree} does not have --drop-old-outputs: pin REF to a commit that has it." in result.stdout
+    assert not (tmp_path / "night7").exists()
