@@ -12,6 +12,7 @@ import pytest
 from dreamference.forge.forge_accounts import ForgeAccounts
 from dreamference.forge.forge_anonymity import SCOPE_FULL, SCOPE_OFF, ForgeAnonymity
 from dreamference.forge.forge_container import ForgeContainer
+from dreamference.forge.forge_github_mirror import ForgeGithubMirror
 from dreamference.forge.forge_repositories import ForgeRepositories
 from dreamference.forge.forge_settings import ForgeSettings
 
@@ -216,3 +217,130 @@ def test_a_private_push_that_git_refuses_fails(api, git, tmp_path, capsys):
     assert ForgeRepositories.push_private(tmp_path, "owner/archive") is False
     assert api.calls == [("PATCH", "/repos/owner/archive", {"private": True})]
     assert "push broke" in capsys.readouterr().out
+
+
+@pytest.fixture
+def bundles(monkeypatch, tmp_path):
+    init_bare_only(monkeypatch)
+    files = [tmp_path / "one.bundle", tmp_path / "two.bundle"]
+    for file in files:
+        file.write_text("bundle")
+    return files
+
+
+def test_bundles_go_into_a_private_archived_repository_that_is_never_mirrored(api, git, bundles):
+    api.answers[("POST", "/admin/users/owner/repos")] = (201, {})
+    api.answers[("PATCH", "/repos/owner/archive")] = (200, {})
+    ForgeRepositories.set_settings("owner/archive", scope=SCOPE_FULL, github=GITHUB)
+
+    assert ForgeRepositories.import_bundles(bundles, "owner/archive") is True
+
+    fetches = [arguments for verb, arguments, _ in git["calls"] if verb == "fetch"]
+    assert [a[-2:] for a in fetches] == [
+        ["refs/heads/*:refs/heads/one/*", "refs/tags/*:refs/tags/one/*"],
+        ["refs/heads/*:refs/heads/two/*", "refs/tags/*:refs/tags/two/*"],
+    ]
+    patches = [body for method, _, body in api.calls if method == "PATCH"]
+    assert patches == [{"private": True}, {"archived": True, "private": True}]
+    assert ForgeRepositories.settings("owner/archive") == {
+        "scope": SCOPE_OFF,
+        "exempt": [],
+        "github": None,
+    }
+
+
+def test_a_bundle_git_cannot_read_stops_the_archive_before_any_push(api, git, bundles):
+    api.answers[("POST", "/admin/users/owner/repos")] = (201, {})
+    git["codes"]["fetch"] = 1
+    assert ForgeRepositories.import_bundles(bundles, "owner/archive") is False
+    assert [verb for verb, _, _ in git["calls"]] == ["fetch"]
+    assert not any(method == "PATCH" for method, _, _ in api.calls)
+
+
+def test_an_archive_the_forge_does_not_mark_archived_fails(api, git, bundles, capsys):
+    api.answers[("POST", "/admin/users/owner/repos")] = (201, {})
+    api.answers[("PATCH", "/repos/owner/archive")] = (200, {})
+    api.refused.append(({"archived": True, "private": True}, (422, None)))
+
+    assert ForgeRepositories.import_bundles(bundles, "owner/archive") is False
+
+    assert [verb for verb, _, _ in git["calls"]] == ["fetch", "fetch", "push"]
+    assert "did not make it private and archived (422)" in capsys.readouterr().out
+
+
+def test_an_archive_for_an_organisation_that_cannot_be_made_creates_nothing(api, git, bundles):
+    assert ForgeRepositories.import_bundles(bundles, "team/archive") is False
+    assert [method for method, _, _ in api.calls] == ["GET", "POST"]
+    assert git["calls"] == []
+
+
+def test_an_archive_repository_that_cannot_be_created_fetches_nothing(api, git, bundles):
+    assert ForgeRepositories.import_bundles(bundles, "owner/archive") is False
+    assert git["calls"] == []
+
+
+@pytest.fixture
+def github(monkeypatch):
+    monkeypatch.setattr(ForgeGithubMirror, "github_environment", classmethod(lambda cls: {}))
+    monkeypatch.setattr(
+        ForgeGithubMirror, "github_credential_arguments", classmethod(lambda cls: [])
+    )
+
+
+@pytest.mark.parametrize("mirror", [True, False])
+def test_an_import_keeps_its_scope_and_names_github_only_when_mirrored(
+    monkeypatch, api, git, github, mirror
+):
+    made = init_bare_only(monkeypatch)
+    api.answers[("POST", "/admin/users/owner/repos")] = (201, {})
+
+    assert ForgeRepositories.import_github(GITHUB, "owner/tools", SCOPE_FULL, ["docs"], mirror)
+
+    assert made and made[0][:4] == ["git", "init", "-q", "--bare"]
+    assert [verb for verb, _, _ in git["calls"]] == ["fetch", "push"]
+    push_environment = git["calls"][1][2]
+    assert push_environment["MIGHTLING_FORGE_TOKEN"] == "admin-token"
+    assert "admin-token" not in " ".join(git["calls"][1][1]), "the token is never an argument"
+    assert ForgeRepositories.settings("owner/tools") == {
+        "scope": SCOPE_FULL,
+        "exempt": ["docs"],
+        "github": GITHUB if mirror else None,
+    }
+
+
+@pytest.mark.parametrize("failing", ["fetch", "push"])
+def test_an_import_git_cannot_fetch_or_push_keeps_no_settings(
+    monkeypatch, api, git, github, failing
+):
+    init_bare_only(monkeypatch)
+    api.answers[("POST", "/admin/users/owner/repos")] = (201, {})
+    git["codes"][failing] = 1
+
+    assert ForgeRepositories.import_github(GITHUB, "owner/tools", SCOPE_FULL, [], True) is False
+
+    assert "owner/tools" not in ForgeRepositories.config()["repositories"]
+    if failing == "fetch":
+        assert [verb for verb, _, _ in git["calls"]] == ["fetch"]
+
+
+def test_an_import_into_an_organisation_that_cannot_be_made_creates_no_repository(
+    api, git, github, capsys
+):
+    assert ForgeRepositories.import_github(GITHUB, "team/tools", SCOPE_FULL, [], True) is False
+    assert not any(path.endswith("/repos") for _, path, _ in api.calls)
+    assert git["calls"] == []
+    assert "Could not create the organisation team" in capsys.readouterr().out
+
+
+def test_an_import_whose_repository_cannot_be_created_fetches_nothing(api, git, github):
+    assert ForgeRepositories.import_github(GITHUB, "owner/tools", SCOPE_FULL, [], True) is False
+    assert git["calls"] == []
+
+
+def test_git_that_cannot_run_reads_as_exit_127(monkeypatch, tmp_path):
+    def broken(*_, **__):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr("dreamference.forge.forge_repositories.subprocess.run", broken)
+    result = ForgeRepositories.git(tmp_path, ["status"])
+    assert result.returncode == 127 and "git" in result.stderr
