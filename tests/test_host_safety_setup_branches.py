@@ -154,3 +154,15 @@ def test_a_swaps_line_that_is_short_or_not_numbers_is_skipped(monkeypatch):
 
     assert HostSafetySetup.swap_areas() == [
         {"name": "/swapfile", "type": "file", "size_gb": 16.0, "used_gb": 1.0}]
+
+
+def test_available_memory_is_read_from_its_own_line(monkeypatch):
+    _files(monkeypatch, {"/proc/meminfo": "MemTotal: 134217728 kB\nMemAvailable: 67108864 kB\n"})
+
+    assert HostSafetySetup._mem_available_gb() == 64.0
+
+
+def test_meminfo_without_available_memory_counts_as_none(monkeypatch):
+    _files(monkeypatch, {"/proc/meminfo": "MemTotal: 134217728 kB\n"})
+
+    assert HostSafetySetup._mem_available_gb() == 0.0
