@@ -640,4 +640,22 @@ mod tests {
         assert_eq!(exit_code("Process exited with code 1  \nOutput:\n"), Some(1));
         assert_eq!(exit_code("Wall time: 0.1 seconds\nOutput:\nProcess exited with code 3\n"), None);
     }
+
+    #[test]
+    fn each_attempt_logs_its_numbers() {
+        let scratch = Scratch::new("log");
+        let mut items = history(60, 20);
+        let values: Vec<Value> = items.iter().map(|e| e.item.clone()).collect();
+        let plan = plan_drop(&policy(), &values, &DropState::default(), 44_000);
+        assert!(drop_with(&policy(), &scratch.0, &mut items, 44_000, |e| &mut e.item));
+        let log = std::fs::read_to_string(scratch.0.join("log.jsonl")).unwrap_or_default();
+        let line: Value = serde_json::from_str(log.lines().next().unwrap_or_default()).unwrap_or_default();
+        assert_eq!(line["key"], json!("call_000"));
+        assert_eq!(line["size"], json!(44_000));
+        assert_eq!(line["limit"], json!(44_000));
+        assert_eq!(line["saving"], json!(plan.saving));
+        assert_eq!(line["after"], json!(plan.after));
+        assert_eq!(line["outputs"], json!(50));
+        assert_eq!(line["accepted"], json!(true));
+    }
 }
