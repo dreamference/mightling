@@ -3631,10 +3631,10 @@ def test_a_pause_that_ends_before_it_begins_or_is_withdrawn_before_it_begins_is_
     FakeGate.pause = {"since": time.time() - 10, "until": time.time() - 20}
     hold.tick()
     assert gate_record()["pauses"] == []
-    FakeGate.pause = {"since": time.time() + 0.05, "until": time.time() + 100}
+    FakeGate.pause = {"since": time.time() + 0.5, "until": time.time() + 100}
     hold.tick()
     FakeGate.pause = None
-    time.sleep(0.1)
+    time.sleep(0.6)
     hold.tick()
     assert gate_record()["pauses"] == []
 
