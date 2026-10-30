@@ -1641,3 +1641,19 @@ def test_a_codex_build_installs_every_binary_under_its_name_and_stamps_the_key(t
     assert (tmp_path / "install" / "build-key").read_text() == "k\n"
     assert linked == [1]
     assert CodexBrandedBuilder.is_current() is True
+
+
+@pytest.mark.parametrize(
+    "step, value",
+    [
+        ("install_rust", False),
+        ("build_key", None),
+        ("prepare_source", False),
+        ("fetch_rusty_v8", None),
+    ],
+)
+def test_a_codex_build_stops_before_cargo_when_a_step_fails(tmp_path, monkeypatch, step, value):
+    calls, linked = _codex_build(tmp_path, monkeypatch, **{step: value})
+    assert CodexBrandedBuilder._build_locked() is False
+    assert calls == [] and linked == []
+    assert not (tmp_path / "install" / "build-key").exists()
