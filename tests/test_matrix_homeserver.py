@@ -259,6 +259,8 @@ def test_stop_turns_it_off_until_the_next_start(machine):
     assert MatrixHomeserver.stop() == 0
     assert machine.argv("tailscale", "serve", "--https=443", "off")
     assert machine.argv("systemctl", "--user", "disable", "--now", mh.PROXY_SOCKET_UNIT)
+    # A proxy the socket already started keeps serving until it is stopped too.
+    assert machine.argv("systemctl", "--user", "stop", mh.PROXY_SERVICE_UNIT)
     assert machine.argv("docker", "stop", mh.MATRIX_CONTAINER)
     assert not any("volume" in argv for argv in machine.runs)
     assert pathlib.Path(MatrixHomeserver._path("matrix-admin.json")).exists()
