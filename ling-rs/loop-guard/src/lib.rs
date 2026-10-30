@@ -549,4 +549,18 @@ mod tests {
         assert_eq!(pieces("call(arg)"), vec!["call", "(arg"]);
         assert_eq!(pieces("x ,y"), vec!["x", " ,"]);
     }
+
+    #[test]
+    fn a_count_below_two_counts_as_two() {
+        let block = "Wait, let me reconsider the approach. Actually the function returns early when the list is \
+            empty, so the second branch never runs, which means the test cannot reach it either; ";
+        let prose = "The function reads the configuration once, at start, and keeps it in a field. A later \
+            change to the file is therefore not seen until the next start, which is what the tests expect.";
+        for text in [format!("Intro. {}", block.repeat(3)), prose.to_string()] {
+            let two = scan(&text, &Thresholds { min_count: 2, ..defaults() });
+            for min_count in [0, 1] {
+                assert_eq!(scan(&text, &Thresholds { min_count, ..defaults() }), two, "{min_count}: {text}");
+            }
+        }
+    }
 }
