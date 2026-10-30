@@ -2309,6 +2309,18 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_config_gets_the_launchers_defaults() {
+        let text = updated_config("", Path::new("/h/c.json"), "http://x:8000").unwrap_or_default();
+        let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+        let features = &parsed["features"];
+        assert_eq!(features.get("code_mode").and_then(toml::Value::as_bool), Some(true), "{text}");
+        assert_eq!(features.get("enable_mcp_apps").and_then(toml::Value::as_bool), Some(false));
+        assert_eq!(parsed["sandbox_workspace_write"].get("network_access").and_then(toml::Value::as_bool), Some(true));
+        // The providers table holds only the provider's table, so it gets no header of its own.
+        assert!(!text.lines().any(|line| line == "[model_providers]"), "{text}");
+    }
+
+    #[test]
     fn user_choices_in_config_are_kept() {
         // Preferences only: the update check reaches api.github.com and is forced off instead
         // (settings_that_reach_openai_are_overridden_not_just_defaulted).
