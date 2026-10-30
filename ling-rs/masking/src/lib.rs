@@ -926,4 +926,15 @@ mod tests {
         assert!(!dropped.join("call_first.json").exists());
         assert!(dropped.join("log.jsonl").exists(), "the log is not a segment");
     }
+
+    #[test]
+    fn a_segment_exactly_the_days_kept_old_stays() {
+        let scratch = Scratch::new("prune-edge");
+        let dir = scratch.0.join("masking");
+        State::default().save(&dir, "call_first").unwrap_or_default();
+        let written = std::fs::metadata(dir.join("call_first.json")).and_then(|meta| meta.modified()).unwrap_or(SystemTime::now());
+        let kept = Duration::from_secs(KEEP_DAYS * 86_400);
+        assert_eq!(prune(&scratch.0, written + kept), 0);
+        assert_eq!(prune(&scratch.0, written + kept + Duration::from_secs(1)), 1);
+    }
 }
