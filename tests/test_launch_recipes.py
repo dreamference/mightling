@@ -348,3 +348,11 @@ def test_only_a_checkpoint_whose_every_precision_declares_itself_skips_the_guess
         spec = dataclasses.replace(base, supported_precisions=precisions)
         monkeypatch.setitem(ModelMatrixRegistry.MATRIX, "test-precisions", spec)
         assert ModelMatrixRegistry.declares_own_quantization("test-precisions") is declares
+
+
+def test_the_tool_call_parser_follows_request_recipe_then_family(vllm_recipes):
+    resolve = VLLMServerManager().resolve_tool_call_parser
+    assert resolve("test-vllm-nvfp4", "hermes") == "hermes"
+    assert resolve("test-vllm-nvfp4", "auto") == "qwen3_xml"
+    assert resolve("example/Mistral-Small-Instruct") == "mistral"
+    assert resolve("example/unknown-model") == "hermes"
