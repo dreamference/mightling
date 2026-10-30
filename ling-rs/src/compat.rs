@@ -627,10 +627,27 @@ mod tests {
         assert_eq!((r.mode, r.source), (Mode::Claude, Source::Variable));
         let r = resolve_from(Some(""), Some((user, &on)), &[]).unwrap();
         assert_eq!((r.mode, r.source), (Mode::Claude, Source::UserFile(user.to_path_buf())));
+        let r = resolve_from(None, Some((user, &off)), &[]).unwrap();
+        assert_eq!((r.mode, r.source), (Mode::Off, Source::UserFile(user.to_path_buf())));
         let r = resolve_from(None, Some((user, "other = 1\n")), &[]).unwrap();
         assert_eq!((r.mode, r.source, r.ignored.len()), (Mode::Off, Source::Default, 0));
         let r = resolve_from(None, None, &[]).unwrap();
         assert_eq!(r.mode, Mode::Off);
+    }
+
+    #[test]
+    fn the_same_file_is_found_under_another_name_and_a_missing_one_by_its_name() {
+        let root = std::env::temp_dir().join(format!("mightling-compat-same-file-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let file = root.join("config.toml");
+        std::fs::write(&file, "").unwrap();
+        assert!(same_file(&file, &root.join("sub").join("..").join("config.toml")));
+        assert!(!same_file(&file, &root.join("sub")));
+        // Neither exists, so the names decide.
+        let missing = root.join("missing.toml");
+        assert!(same_file(&missing, &missing));
+        assert!(!same_file(&missing, &root.join("other.toml")));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
