@@ -272,6 +272,8 @@ impl Installed {
 /// `<!-- ling: blocks=web,email,code -->` (any subset); without it no block is appended.
 /// Returns the block names it did not know, which are ignored.
 fn parse_custom(text: &str) -> Result<(String, Blocks, Vec<String>), &'static str> {
+    // An editor may start a UTF-8 file with a byte-order mark, which is not whitespace.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let (first, rest) = text.split_once('\n').unwrap_or((text, ""));
     let mut blocks = Blocks::default();
     let mut unknown = Vec::new();
@@ -888,5 +890,24 @@ mod tests {
             let line = read_here(here, text);
             assert!(line.contains("dreamference.toml") && line.contains("the default"), "{line}");
         }
+    }
+
+    #[test]
+    fn the_blocks_line_is_read_from_any_editor() {
+        let all = Blocks { web: true, email: true, code: true };
+        for text in [
+            "<!-- ling: blocks=web,email,code -->\nBe brief.\n",
+            "<!-- ling: blocks=web,email,code -->\r\nBe brief.\n",
+            "\u{feff}<!-- ling: blocks=web,email,code -->\nBe brief.\n",
+            "  <!-- ling: blocks= web ,email,code,-->\nBe brief.\n",
+        ] {
+            let (core, blocks, unknown) = parse_custom(text).unwrap();
+            assert_eq!((core.trim(), blocks, unknown.len()), ("Be brief.", all, 0), "{text:?}");
+        }
+        // Without the line the whole text is the core, and no block follows it.
+        let (core, blocks, _) = parse_custom("<!-- a note -->\nBe brief.\n").unwrap();
+        assert_eq!((core.as_str(), blocks), ("<!-- a note -->\nBe brief.\n", Blocks::default()));
+        assert!(parse_custom("<!-- ling: blocks=web -->").is_err());
+        assert!(parse_custom(" \n\t").is_err());
     }
 }
