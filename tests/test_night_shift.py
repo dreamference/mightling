@@ -1558,6 +1558,28 @@ def test_a_silent_metrics_endpoint_holds_the_next_start_back(fake_host):
     assert "/metrics does not answer" in NightShiftRunner.start_blocker("http://x", "p", [], NightShiftSettings({}))
 
 
+def test_each_running_task_keeps_its_memory_allowance_and_no_more(fake_host, monkeypatch):
+    # task_memory 8G and an 8 GiB reserve: one more task needs 16 GiB beyond what the running ones may still take.
+    class Running:
+        in_model = False
+        lane_host = "http://x"
+        current_unit = "night-t"
+    settings = NightShiftSettings({"task_memory": "8G"})
+    gib = 1024 ** 3
+    used = {"bytes": 0}
+    monkeypatch.setattr(FakeHost, "scope_memory_current", classmethod(lambda cls, unit: used["bytes"]))
+    active = [(None, Running())]
+    # A task that has used nothing yet may still take all 8 GiB.
+    monkeypatch.setattr(FakeHost, "available", 23 * gib)
+    assert "GiB is free" in NightShiftRunner.start_blocker("http://x", "p", active, settings)
+    monkeypatch.setattr(FakeHost, "available", 24 * gib)
+    assert NightShiftRunner.start_blocker("http://x", "p", active, settings) is None
+    # One past its allowance frees none of the others' memory.
+    used["bytes"] = 12 * gib
+    monkeypatch.setattr(FakeHost, "available", 15 * gib)
+    assert "GiB is free" in NightShiftRunner.start_blocker("http://x", "p", active, settings)
+
+
 @pytest.fixture
 def two_nodes(setup, fake_host, monkeypatch):
     """This machine as both sender and node: the pairing reaches `serve-job` in this process, and
