@@ -101,3 +101,14 @@ def test_a_chunked_bodys_trailers_go_to_the_engine_with_it():
     )
 
     assert sink.data == body
+
+
+# -- the loop guard ------------------------------------------------------------------------------------
+
+
+def test_a_sampling_arm_whose_every_value_the_client_set_changes_nothing():
+    name, arm = next(iter(SAMPLING_ARMS.items()))
+    record = {"client_metadata": {SAMPLING_KEY: name}, **dict.fromkeys(arm, 0.1)}
+    body = json.dumps(record).encode()
+
+    assert ModelGateGuard.rewrite(body) == (body, None)
