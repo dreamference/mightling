@@ -37,11 +37,9 @@ def test_mcp_call_tool():
 
 def test_stdio_loop_follows_json_rpc(tmp_path):
     # Drives the real loop. Notifications used to be answered with -32601, and a failing tool was
-    # reported as a parse error with no id, which left the client waiting forever.
-    import json
-    import subprocess
-    import sys
-
+    # reported as a parse error with no id, which left the client waiting forever. Through
+    # `_stdio_replies`: from `tmp_path` alone the subprocess imported the editable install, so this
+    # test checked the main checkout's server instead of this one.
     lines = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
@@ -52,11 +50,7 @@ def test_stdio_loop_follows_json_rpc(tmp_path):
          "params": {"name": "ide_apply_diff", "arguments": {"file_path": "a.py", "diff_content": "-x\n+y"}}},
     ]
     stdin = "\n".join(json.dumps(line) for line in lines) + "\n{not json\n"
-    out = subprocess.run(
-        [sys.executable, "-c", "from dreamference.mcp_server import main; main()"],
-        input=stdin, capture_output=True, text=True, timeout=60, cwd=tmp_path,
-    ).stdout
-    replies = [json.loads(line) for line in out.splitlines()]
+    replies = _stdio_replies(tmp_path, stdin.encode())
 
     assert [r.get("id") for r in replies] == [1, 2, 3, 4, None]  # nothing for the notification
     assert replies[1]["result"] == {}
