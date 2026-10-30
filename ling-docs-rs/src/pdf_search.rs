@@ -824,6 +824,21 @@ mod tests {
     }
 
     #[test]
+    fn a_workspace_reached_through_a_link_is_judged_where_it_leads() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().canonicalize().unwrap().join("home");
+        let work = home.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join("a.pdf"), b"%PDF-1.4").unwrap();
+        let work_link = dir.path().join("work-link");
+        std::os::unix::fs::symlink(&work, &work_link).unwrap();
+        assert_eq!(
+            resolve_local("a.pdf", &work_link, &[], &home).unwrap(),
+            work.join("a.pdf")
+        );
+    }
+
+    #[test]
     fn only_a_pdf_within_the_cap_is_copied_and_it_is_hashed() {
         let dir = tempfile::tempdir().unwrap();
         let pdf = dir.path().join("a.pdf");
