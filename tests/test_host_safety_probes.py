@@ -51,3 +51,33 @@ def test_a_sandbox_probe_that_cannot_start_reports_nothing(monkeypatch, error):
     monkeypatch.setattr(host_safety_setup.shutil, "which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
     assert HostSafetySetup.sandbox_works() is None
+
+
+@pytest.fixture
+def no_fstab(monkeypatch, tmp_path):
+    monkeypatch.setattr(host_safety_setup, "FSTAB", str(tmp_path / "missing"))
+    monkeypatch.setattr(host_safety_setup.shutil, "which", lambda name: "/usr/sbin/" + name)
+
+
+@pytest.mark.parametrize(("blkid", "expected"), [("swap\n", True), ("ext4\n", False), ("", False)])
+def test_without_fstab_only_blkid_naming_swap_makes_a_file_the_swap_file(
+    monkeypatch, no_fstab, blkid, expected
+):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=blkid)
+
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
+    assert HostSafetySetup.is_swap_file("/swap.img") is expected
+    assert calls == [["blkid", "-p", "-o", "value", "-s", "TYPE", "/swap.img"]]
+
+
+@pytest.mark.parametrize("error", [OSError("no blkid"), subprocess.TimeoutExpired(["blkid"], 10)])
+def test_a_blkid_that_fails_does_not_make_a_file_the_swap_file(monkeypatch, no_fstab, error):
+    def run(command, **kwargs):
+        raise error
+
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", run)
+    assert HostSafetySetup.is_swap_file("/swap.img") is False
