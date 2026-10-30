@@ -222,6 +222,23 @@ def test_a_worktree_git_cannot_read_has_no_changes(setup, tmp_path):
     assert run._has_changes() is False
 
 
+def test_a_task_from_another_machine_never_gets_the_owners_test(setup, monkeypatch):
+    seen = []
+
+    def detect(cls, worktree, override, configured, repo, base=None):
+        seen.append(configured)
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(NightShiftTaskRun, "detect_test_command", classmethod(detect))
+    monkeypatch.setattr(NightShiftTaskRun, "_prepare_worktree", lambda self: None)
+    record = queue(setup["night"], setup["repo"])
+    settings = NightShiftSettings({"test": "the-owners-test"})
+    for task in (record, dict(record, remote={"sender": "x"})):
+        with pytest.raises(RuntimeError):
+            NightShiftTaskRun(setup["night"], task, settings, setup["ling"], time.time() + 60)._run()
+    assert seen == ["the-owners-test", None]
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
