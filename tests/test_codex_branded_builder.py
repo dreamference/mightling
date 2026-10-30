@@ -1404,3 +1404,17 @@ def test_ling_without_a_runnable_code_mode_host_is_not_current(tmp_path, monkeyp
     else:
         host.chmod(0o644)
     assert CodexBrandedBuilder.is_current() is False
+
+
+def test_a_release_install_is_current_only_with_both_binaries_runnable(tmp_path, monkeypatch):
+    # Without a checkout there is no stamp to compare, so the installed binaries are all there is.
+    monkeypatch.setattr(CodexBrandedBuilder, "has_source", classmethod(lambda cls: False))
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path))
+    assert CodexBrandedBuilder.is_current() is False
+    (tmp_path / "bin").mkdir()
+    for name in ("ling", "codex-code-mode-host"):
+        (tmp_path / "bin" / name).write_text("#!/bin/sh\n")
+        (tmp_path / "bin" / name).chmod(0o755)
+        assert CodexBrandedBuilder.is_current() is (name == "codex-code-mode-host")
+    (tmp_path / "bin" / "codex-code-mode-host").chmod(0o644)
+    assert CodexBrandedBuilder.is_current() is False
