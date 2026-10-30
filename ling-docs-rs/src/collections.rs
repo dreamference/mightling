@@ -634,6 +634,24 @@ mod tests {
     }
 
     #[test]
+    fn a_default_folder_around_a_collection_or_in_a_secret_folder_is_not_added() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::create_dir_all(home.join("Documents/work")).unwrap();
+        std::fs::create_dir_all(home.join(".ssh/downloads")).unwrap();
+        std::fs::create_dir_all(home.join(".config")).unwrap();
+        std::fs::write(
+            home.join(".config/user-dirs.dirs"),
+            "XDG_DOWNLOAD_DIR=\"$HOME/.ssh/downloads\"\n",
+        )
+        .unwrap();
+        let mut docs = DocsToml::default();
+        docs.add(&home.join("Documents/work"), Some("work"), &home)
+            .unwrap();
+        assert!(docs.ensure_defaults(&home).is_empty(), "{docs:?}");
+    }
+
+    #[test]
     fn two_writers_at_once_keep_both_changes() {
         // One writer holds the lock while it saves; the other, started first, waits and then
         // reads the file afresh, so neither change is lost.
