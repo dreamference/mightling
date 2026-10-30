@@ -597,6 +597,15 @@ def test_a_node_that_is_not_advertised_has_nothing_to_report(capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_searxng_is_neither_restarted_nor_advertised_when_its_container_is_missing(monkeypatch, ling_web):
+    started = []
+    monkeypatch.setattr(SidecarNetwork, "network_mode", classmethod(lambda cls, name: None))
+    monkeypatch.setattr(SearxngSidecar, "start", classmethod(lambda cls: started.append("searxng")))
+    assert NodeAdvertiser.search_port() is None
+    NodeAdvertiser.apply_binds()
+    assert started == []
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
