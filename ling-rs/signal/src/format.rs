@@ -120,8 +120,12 @@ pub fn render(markdown: &str) -> Styled {
             continue;
         }
         if trimmed.starts_with('|') {
+            // A table row keeps its pipes in a monospace range, but its cells' inline Markdown is
+            // read first (`**bold**` would otherwise reach the phone with its asterisks).
+            let mut cells = Builder::default();
+            inline(line, &mut cells);
             let start = out.units;
-            out.push(line);
+            out.push(&cells.text);
             out.style(start, StyleKind::Monospace);
             continue;
         }
@@ -514,6 +518,14 @@ mod tests {
         assert_eq!(covered(&s, title), "Title");
         let tables: Vec<_> = s.styles.iter().filter(|st| st.kind == StyleKind::Monospace).skip(1).collect();
         assert_eq!(tables.len(), 2);
+    }
+
+    #[test]
+    fn markers_in_a_table_row_are_read_not_left_as_asterisks() {
+        let s = render("| **Feature** | `ext4` | *xfs* |\n|---|---|---|\n| **Journal** | yes | yes |");
+        assert_eq!(s.text, "| Feature | ext4 | xfs |\n|---|---|---|\n| Journal | yes | yes |");
+        assert!(!s.text.contains('*'));
+        assert_eq!(s.styles.iter().filter(|st| st.kind == StyleKind::Monospace).count(), 3);
     }
 
     #[test]
