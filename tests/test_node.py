@@ -169,6 +169,11 @@ def test_an_update_that_changes_nothing_needs_no_write(monkeypatch):
     assert NodeServiceFile.update(state="ready") is True
 
 
+def test_a_port_that_is_not_a_number_is_refused():
+    with pytest.raises(ValueError):
+        NodeServiceFile.render("8000</port><port>9", NODE_ID, "1.3.0")
+
+
 def test_a_node_that_was_never_enabled_is_never_advertised_by_a_side_effect():
     assert not NodeServiceFile.service_path.exists()
     assert NodeServiceFile.update(state="ready") is None
