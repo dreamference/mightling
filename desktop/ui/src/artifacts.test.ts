@@ -46,6 +46,8 @@ describe("the artifacts viewer", () => {
     ] };
     expect(createdArtifacts(item, "/w")).toEqual(["/w/report.pdf", "/w/notes.md"]);
     expect(createdArtifacts({ ...item, status: "inProgress" }, "/w")).toEqual([]);
+    // A Windows path is absolute too: the thread folder is not put in front of it.
+    expect(createdArtifacts({ ...item, changes: [{ path: "C:\\w\\report.pdf", kind: { type: "add" } }] }, "C:\\w")).toEqual(["C:\\w\\report.pdf"]);
   });
 });
 

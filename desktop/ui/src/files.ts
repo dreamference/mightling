@@ -64,6 +64,11 @@ export function joinPath(dir: string, child: string): string {
   return `${dir.replace(/[\\/]+$/, "")}/${child}`;
 }
 
+/** `path` as an absolute one: as it is when it is already (`/…`, `C:\…`, `\\host\…`), else inside `dir`. */
+export function resolvedPath(dir: string | null | undefined, path: string): string {
+  return !dir || /^([\\/]|[A-Za-z]:[\\/])/.test(path) ? path : joinPath(dir, path);
+}
+
 /** `path` relative to `root` when it is inside it, else the path as it is. */
 export function relativeTo(root: string | null, path: string): string {
   if (!root) return path;

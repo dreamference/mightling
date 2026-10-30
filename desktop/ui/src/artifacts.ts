@@ -4,7 +4,7 @@
 // PDFs from bytes the server read, HTML sanitised into a shadow root with no script, no form and
 // no navigation. A page that should run for real goes to the preview tab (item 4).
 
-import { parentOf } from "./files";
+import { parentOf, resolvedPath } from "./files";
 
 export type ArtifactKind = "markdown" | "image" | "pdf" | "html" | "latex" | "table" | "office";
 
@@ -125,7 +125,7 @@ export function createdArtifacts(item: { type: string; status?: string; changes?
   if (item.type !== "fileChange" || item.status !== "completed" || !item.changes) return [];
   return item.changes
     .filter((change) => change.kind.type === "add" && AUTO_OPENED.has(artifactKind(change.path) as ArtifactKind))
-    .map((change) => (change.path.startsWith("/") || !cwd ? change.path : `${cwd.replace(/\/+$/, "")}/${change.path}`));
+    .map((change) => resolvedPath(cwd, change.path));
 }
 
 /** The most rows and columns a CSV tab shows (DESKTOP §16 B27); the rest is counted, not drawn. */

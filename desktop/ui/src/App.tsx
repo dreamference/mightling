@@ -21,7 +21,7 @@ import { Icon, MightlingMark } from "./icons";
 import { revertQuestion, underDirectory } from "./diff";
 import { draftKeyOf, withDraft } from "./drafts";
 import { ThreadLoader } from "./loader";
-import { inGitInternals } from "./files";
+import { inGitInternals, resolvedPath } from "./files";
 import { effectiveKeymap, keyAction, keyLabel, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
 import { APPEARANCE_TOKENS, DEFAULT_PREFS, appearanceFor, loadPrefs, savePrefs, type Prefs, type WorktreeLink } from "./prefs";
@@ -3892,7 +3892,7 @@ function Item({ item, folded, progress, onOpenOutput }: { item: ThreadItem; fold
         </details>
       );
     case "fileChange": {
-      const at = (path: string) => (path.startsWith("/") || !files?.cwd ? path : `${files.cwd.replace(/\/+$/, "")}/${path}`);
+      const at = (path: string) => resolvedPath(files?.cwd, path);
       // In Ask, a file the answer made is a card, as the compared app shows what it made (§4.1); edits stay diffs.
       const made = files?.ask ? item.changes.filter((change) => change.kind.type === "add") : [];
       const edited = files?.ask ? item.changes.filter((change) => change.kind.type !== "add") : item.changes;
