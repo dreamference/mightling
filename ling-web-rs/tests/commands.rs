@@ -1117,3 +1117,22 @@ fn a_search_over_another_time_range_is_not_answered_from_the_cache() {
     assert_eq!(server.requests().len(), 2, "{:?}", server.requests());
     let _ = std::fs::remove_dir_all(cache);
 }
+
+#[cfg(unix)]
+#[test]
+fn searches_that_reach_searxng_are_spaced_apart() {
+    let server =
+        Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
+    let cache = fresh_cache_dir();
+    let cache = cache.to_str().unwrap();
+    let env = [
+        ("DREAMFERENCE_SEARXNG_URL", server.base.as_str()),
+        (ling_web::cache::CACHE_DIR_ENV, cache),
+    ];
+    let started = std::time::Instant::now();
+    assert!(search(&["first"], &env).status.success());
+    assert!(search(&["second"], &env).status.success());
+    assert!(started.elapsed() >= ling_web::cache::MIN_INTERVAL);
+    assert_eq!(server.requests().len(), 2);
+    let _ = std::fs::remove_dir_all(cache);
+}
