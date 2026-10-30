@@ -244,7 +244,8 @@ echo "gh $*" >> "$HOME/gh.log"
 exit 1
 ''',
     # `-m venv DIR` makes a virtualenv whose pip installs a ling-admin that records its arguments
-    # ($HOME/admin.log) and fails the commands FAKE_ADMIN_FAIL names; FAKE_NO_VENV is a python3
+    # ($HOME/admin.log), fails the commands FAKE_ADMIN_FAIL names and hangs up the script (SIGHUP) on
+    # the one FAKE_ADMIN_HANGUP names; FAKE_NO_VENV is a python3
     # without ensurepip until python3-venv is installed.
     "python3": r'''
 if [ "$1 $2" = "-m venv" ]; then
@@ -259,6 +260,7 @@ cat > "$3/bin/ling-admin" <<'ADMIN'
 #!/bin/sh
 echo "\$*" >> "\$HOME/admin.log"
 case ",\${FAKE_ADMIN_FAIL:-}," in *",\$1 \$2,"*) echo "ling-admin \$1 \$2 failed"; exit 1;; esac
+[ "\$1 \$2" = "\${FAKE_ADMIN_HANGUP:-}" ] && kill -HUP \$PPID
 [ "\$1 \$2" = "node id" ] && echo 0123456789abcdef
 [ -t 0 ] && echo "ling-admin had a terminal on its standard input" >> "\$HOME/admin.log"
 exit 0
@@ -961,6 +963,15 @@ def test_a_failed_step_is_named_in_the_summary_and_the_exit_code(tmp_path, relea
     assert "❌ model server: `ling-admin server start` failed, see" in out
     assert "❌ host settings" in out and "✅ advertised on the local network" in out
     assert "docker group: tester is in it" in out and not logged(tmp_path, "sg.log")
+
+
+def test_a_hangup_does_not_stop_the_node_install_halfway(tmp_path, release_server):
+    # From the virtualenv on, an ssh session that drops leaves the install to run to its summary.
+    env = {**fresh_gb10(tmp_path), "FAKE_ADMIN_HANGUP": "host setup"}
+    result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10", env_extra=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert logged(tmp_path, "admin.log").splitlines()[-1] == "server start"
+    assert "✅ model server started" in result.stdout
 
 
 def test_opt_outs_are_said_as_such_and_need_no_root(tmp_path, release_server):
