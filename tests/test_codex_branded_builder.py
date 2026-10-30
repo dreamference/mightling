@@ -1429,3 +1429,21 @@ def test_a_checkout_needs_both_the_patch_series_and_the_launcher_crate(tmp_path,
     assert CodexBrandedBuilder.has_source() is True
     (tmp_path / "patches").rmdir()
     assert CodexBrandedBuilder.has_source() is False
+
+
+@pytest.mark.parametrize(
+    "returncode, codex_rs", [(0, False), (128, True)], ids=["no-codex-rs", "no-commit"]
+)
+def test_the_submodule_is_checked_out_only_with_a_commit_and_codex_rs(
+    tmp_path, monkeypatch, returncode, codex_rs
+):
+    if codex_rs:
+        (tmp_path / "codex-rs").mkdir()
+    monkeypatch.setattr(builder_module, "CODEX_SUBMODULE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        builder_module.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, returncode, "a" * 40 + "\n", ""),
+    )
+    assert CodexBrandedBuilder.source_commit() is None
+    assert CodexBrandedBuilder.build_key() is None
