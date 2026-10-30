@@ -657,6 +657,13 @@ def test_a_transition_to_the_same_status_is_written_only_with_a_note(setup):
     assert [(entry["status"], entry.get("note")) for entry in history[1:]] == [("queued", "node spark-2 gone")]
 
 
+def test_a_task_file_that_holds_no_record_is_skipped(setup):
+    record = queue(setup["night"], setup["repo"])
+    (setup["night"] / "tasks" / "broken.json").write_text("[1, 2]")
+    assert NightShiftQueue.read(setup["night"], "broken") is None
+    assert [task["id"] for task in NightShiftQueue.tasks(setup["night"])] == [record["id"]]
+
+
 def test_a_vanished_base_commit_fails_the_task(setup, monkeypatch):
     record = queue(setup["night"], setup["repo"])
     record["base"] = "0" * 40
