@@ -2295,6 +2295,18 @@ mod tests {
     }
 
     #[test]
+    fn a_write_through_that_fails_leaves_no_staging_file() {
+        let dir = std::env::temp_dir().join(format!("mightling-through-fails-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A folder where the file should be: the staging file is written, and the rename fails.
+        let path = dir.join("config.toml");
+        std::fs::create_dir_all(path.join("inside")).unwrap_or_default();
+        assert!(write_through(&path, b"new = 2\n").is_err());
+        assert_eq!(std::fs::read_dir(&dir).map(Iterator::count).unwrap_or_default(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn user_choices_in_config_are_kept() {
         // Preferences only: the update check reaches api.github.com and is forced off instead
         // (settings_that_reach_openai_are_overridden_not_just_defaulted).
