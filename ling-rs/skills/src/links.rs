@@ -425,5 +425,114 @@ mod tests {
         assert!(!holds("/w/r/.claude/x"));
         assert!(!holds("/w/r/.claude/skills/../../etc"));
         assert!(!holds("relative/.claude/skills/x"));
+        assert!(!Source::AnyRepository("").holds(Path::new("/w/r/x")));
+    }
+
+    #[test]
+    fn an_empty_set_with_no_folder_changes_nothing() {
+        let root = scratch("links-empty-set");
+        let (skills, claude) = (root.join("ling/skills"), root.join("claude/skills"));
+        std::fs::create_dir_all(claude.join("a")).unwrap_or_default();
+        let wanted = [set("claude", &claude, &["a"]), set("gemini", &root.join("gemini/skills"), &[])];
+        rebuild(&skills, &wanted, "t1").unwrap_or_default();
+        assert_eq!(rebuild(&skills, &wanted, "t2").unwrap_or_default(), Rebuilt::default());
+        assert!(!skills.join("from-gemini").exists());
+    }
+
+    #[test]
+    fn a_from_name_linked_to_a_folder_holding_the_right_links_is_still_replaced() {
+        // A session that points `from-claude` at a folder of its own, filled with exactly the
+        // launcher's links, must not keep that folder: it could add to it later.
+        let root = scratch("links-linked-right");
+        let (skills, claude) = (root.join("ling/skills"), root.join("claude/skills"));
+        std::fs::create_dir_all(claude.join("a")).unwrap_or_default();
+        let own = root.join("own");
+        std::fs::create_dir_all(&own).unwrap_or_default();
+        symlink_dir(&claude.join("a"), &own.join("a")).unwrap_or_default();
+        std::fs::create_dir_all(&skills).unwrap_or_default();
+        symlink_dir(&own, &skills.join("from-claude")).unwrap_or_default();
+
+        let rebuilt = rebuild(&skills, &[set("claude", &claude, &["a"])], "t1").unwrap_or_default();
+        assert_eq!(rebuilt.changed, vec!["from-claude".to_string()]);
+        assert!(skills.join("from-claude").symlink_metadata().is_ok_and(|metadata| metadata.is_dir()));
+        assert_eq!(rebuilt.quarantined, vec![skills.join(".quarantine/t1/from-claude")]);
+        assert_eq!(listing(&own), vec!["a"]);
+    }
+
+    #[test]
+    fn a_link_of_the_right_name_pointing_elsewhere_is_quarantined_and_rewritten() {
+        let root = scratch("links-wrong-target");
+        let (skills, claude) = (root.join("ling/skills"), root.join("claude/skills"));
+        std::fs::create_dir_all(claude.join("a")).unwrap_or_default();
+        let elsewhere = root.join("elsewhere/evil");
+        std::fs::create_dir_all(&elsewhere).unwrap_or_default();
+        rebuild(&skills, &[set("claude", &claude, &["a"])], "t1").unwrap_or_default();
+        std::fs::remove_file(skills.join("from-claude/a")).unwrap_or_default();
+        symlink_dir(&elsewhere, &skills.join("from-claude/a")).unwrap_or_default();
+
+        let rebuilt = rebuild(&skills, &[set("claude", &claude, &["a"])], "t2").unwrap_or_default();
+        assert_eq!(std::fs::read_link(skills.join("from-claude/a")).ok(), Some(claude.join("a")));
+        assert_eq!(rebuilt.quarantined, vec![skills.join(".quarantine/t2/from-claude/a")]);
+        assert!(elsewhere.is_dir());
+    }
+
+    #[test]
+    fn a_link_under_an_unknown_from_name_is_quarantined() {
+        let root = scratch("links-unknown-link");
+        let (skills, claude) = (root.join("ling/skills"), root.join("claude/skills"));
+        std::fs::create_dir_all(claude.join("a")).unwrap_or_default();
+        std::fs::create_dir_all(skills.join("from-mallory")).unwrap_or_default();
+        symlink_dir(&claude.join("a"), &skills.join("from-mallory/a")).unwrap_or_default();
+
+        let rebuilt = rebuild(&skills, &[set("claude", &claude, &["a"])], "t1").unwrap_or_default();
+        assert!(!skills.join("from-mallory").exists());
+        assert_eq!(rebuilt.quarantined, vec![skills.join(".quarantine/t1/from-mallory/a")]);
+    }
+
+    #[test]
+    fn a_second_thing_of_one_name_in_one_quarantine_keeps_both() {
+        let root = scratch("links-same-stamp");
+        let (skills, claude) = (root.join("ling/skills"), root.join("claude/skills"));
+        std::fs::create_dir_all(claude.join("a")).unwrap_or_default();
+        for _ in 0..2 {
+            std::fs::create_dir_all(skills.join("from-claude/planted")).unwrap_or_default();
+            std::fs::write(skills.join("from-claude/planted/SKILL.md"), "x").unwrap_or_default();
+            assert!(rebuild(&skills, &[set("claude", &claude, &["a"])], "t1").is_ok());
+        }
+        assert_eq!(listing(&skills.join(".quarantine/t1/from-claude")), vec!["planted", "planted.2"]);
+    }
+
+    #[test]
+    fn a_staging_folder_or_file_left_by_a_crashed_run_is_cleared() {
+        let root = scratch("links-staging-left");
+        let (skills, claude) = (root.join("ling/skills"), root.join("claude/skills"));
+        std::fs::create_dir_all(claude.join("a")).unwrap_or_default();
+        let staging = skills.join(format!(".from-claude.{}.tmp", std::process::id()));
+        std::fs::create_dir_all(staging.join("old")).unwrap_or_default();
+        assert!(rebuild(&skills, &[set("claude", &claude, &["a"])], "t1").is_ok());
+        assert_eq!(listing(&skills.join("from-claude")), vec!["a"]);
+
+        std::fs::write(&staging, "x").unwrap_or_default();
+        assert!(rebuild(&skills, &[set("claude", &claude, &["b"])], "t2").is_ok());
+        assert_eq!(listing(&skills.join("from-claude")), vec!["b"]);
+        assert!(staging.symlink_metadata().is_err());
+    }
+
+    #[test]
+    fn a_rebuild_waits_for_the_lock() {
+        let root = scratch("links-lock");
+        let (skills, claude) = (root.join("ling/skills"), root.join("claude/skills"));
+        std::fs::create_dir_all(claude.join("a")).unwrap_or_default();
+        std::fs::create_dir_all(&skills).unwrap_or_default();
+        let held = File::options().create(true).truncate(false).write(true).open(skills.join(LOCK_FILE));
+        assert!(held.as_ref().is_ok_and(|file| file.lock().is_ok()));
+
+        let (thread_skills, thread_claude) = (skills.clone(), claude.clone());
+        let other = std::thread::spawn(move || rebuild(&thread_skills, &[set("claude", &thread_claude, &["a"])], "t1").is_ok());
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!skills.join("from-claude").exists(), "rebuilt while another held the lock");
+        drop(held);
+        assert!(other.join().unwrap_or(false));
+        assert_eq!(listing(&skills.join("from-claude")), vec!["a"]);
     }
 }
