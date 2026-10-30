@@ -1894,6 +1894,57 @@ mod tests {
     }
 
     #[test]
+    fn an_extraction_reads_its_roots_and_writes_only_its_scratch() {
+        let dir = tempfile::tempdir().unwrap();
+        const MIB: u64 = 1 << 20;
+        let mut host = crate::host::fake::FakeHost::new(dir.path(), 0);
+        host.available = host::reserve(&host) + Kind::Extract.ceiling() - 64 * MIB;
+        let env = sandboxed(&host, dir.path());
+        let root = dir.path().join("home/Documents");
+        let scratch = dir.path().join("s");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&scratch).unwrap();
+        std::fs::write(scratch.join("events"), "").unwrap();
+        let phase = Phase {
+            worker: vec!["extract-worker".into()],
+            extra: Vec::new(),
+            kind: Kind::Extract,
+            letter: "x",
+            what: "the extractor",
+            timeout: Duration::from_secs(5),
+            read_only: vec![dir.path().join("ocr")],
+            failed: |id, error| Event::Failed { id, error },
+        };
+        // The stand-in exits without reading anything, so the run fails; its scope is what counts.
+        let _ = run_phase(
+            &env,
+            &phase,
+            "documents",
+            std::slice::from_ref(&root),
+            &scratch,
+            &[(1, "{}".into())],
+            &scratch.join("events"),
+            0,
+        )
+        .unwrap();
+        let (_, cap, argv) = host.started.lock().unwrap()[0].clone();
+        assert_eq!(cap, Kind::Extract.ceiling() - 64 * MIB, "the cap admitted");
+        let home = env.user_home.to_string_lossy().into_owned();
+        assert!(
+            argv.windows(2).any(|w| w[0] == "--tmpfs" && w[1] == home),
+            "the home folder is hidden: {argv:?}"
+        );
+        let (rw, ro) = binds(&argv);
+        assert_eq!(rw, [scratch.to_string_lossy().into_owned()]);
+        for path in [&root, &dir.path().join("ocr")] {
+            assert!(
+                ro.contains(&path.to_string_lossy().into_owned()),
+                "{path:?} not readable: {ro:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_night_shift_lock_is_seen_without_taking_it() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!night_shift_active(dir.path()));
