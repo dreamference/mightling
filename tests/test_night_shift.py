@@ -205,6 +205,14 @@ def test_a_task_whose_branch_is_left_from_an_earlier_night_carries_on_from_it(se
     assert git(setup["repo"], "show", "night/20261001-0100-abc:earlier.txt").stdout == "from the first night\n"
 
 
+def test_a_worktree_that_cannot_be_added_fails_the_task_and_says_why(setup, monkeypatch):
+    (setup["night"] / "worktrees").mkdir(parents=True, exist_ok=True)
+    (setup["night"] / "worktrees" / "20261001-0100-abc").write_text("in the way\n")
+    status, record, _ = run_task(setup, monkeypatch, "change", test="test -f hello.txt")
+    assert status == "failed"
+    assert record["result"]["last_message"].startswith("git worktree add failed: ")
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
