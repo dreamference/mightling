@@ -56,3 +56,9 @@ def test_a_patched_chat_template_needs_a_pinned_revision():
     assert "--chat-template" not in _args({"chat_template_patches": patches})
     pinned = _args({"chat_template_patches": patches, "revision": "0" * 40})
     assert _flag(pinned, "--chat-template").startswith(CONTAINER_TEMPLATE_DIR + "/")
+
+
+def test_a_recipe_without_a_drafter_gets_no_speculative_flags():
+    # Self-speculation (a method and a depth, no draft model) is vLLM's; SGLang is given none of it.
+    args = _args({"speculative_config": {"method": "mtp", "num_speculative_tokens": 3}})
+    assert not any(a.startswith("--speculative") for a in args)
