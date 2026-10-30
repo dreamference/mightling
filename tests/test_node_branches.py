@@ -668,3 +668,52 @@ def test_the_latest_release_tag_must_be_a_plain_version(monkeypatch, code, stdou
     with pytest.raises(OSError, match="Could not find the latest release") as raised:
         FleetBundle.latest_tag()
     assert shown in str(raised.value)
+
+
+# -- node provisioner [key]
+
+
+def no_copy(*_args, **_kwargs):
+    pytest.fail("copied to the node")
+
+
+def test_models_that_do_not_fit_the_nodes_disk_fail_the_step_before_any_copy(monkeypatch, tmp_path):
+    from dreamference.node.fleet_model_plan import GIB, FleetModelPlan
+    from dreamference.node.fleet_probe import FleetProbe
+
+    provisioner, _ = role_steps()
+    provisioner.plan = {"folders": ["m"]}
+    provisioner.results["new-node"] = {"probe": {"free_gb": "10"}}
+    monkeypatch.setattr(
+        FleetProbe, "missing_models", classmethod(lambda cls, state, folders: ["m"])
+    )
+    monkeypatch.setattr(
+        FleetModelPlan, "local_folders", classmethod(lambda cls, folders: [tmp_path / "m"])
+    )
+    monkeypatch.setattr(FleetModelPlan, "bytes_needed", classmethod(lambda cls, folders: 500 * GIB))
+    session = SimpleNamespace(rsync=no_copy, run=no_copy, run_admin=no_copy)
+    assert provisioner._step_models("new-node", session) is False
+    assert provisioner.results["new-node"]["failed"] == "copy the model"
+    assert (
+        "not enough disk: 500 GiB to copy, 10 GiB free" in provisioner.results["new-node"]["reason"]
+    )
+
+
+def test_models_from_the_hub_are_fetched_by_the_node_and_never_copied_from_here():
+    from dreamference.node.node_provisioner import HUB_SOURCE, NodeProvisioner
+
+    provisioner = NodeProvisioner(["new-node"], {"user": "user", "model_source": HUB_SOURCE})
+    asked = []
+    provisioner._models_from_hub = lambda host, session, missing: asked.append(missing) or False
+    session = SimpleNamespace(rsync=no_copy)
+    assert provisioner._fetch_models("new-node", session, ["m"]) is False
+    assert asked == [["m"]]
+
+
+def test_a_jump_address_is_used_only_for_a_single_machine():
+    from dreamference.node.node_provisioner import NodeProvisioner
+
+    one = NodeProvisioner(["new-node"], {"user": "user", "via": "jump-name"})
+    assert one._address("new-node") == "jump-name"
+    two = NodeProvisioner(["node-a", "node-b"], {"user": "user", "via": "jump-name"})
+    assert two._address("node-a") == "node-a" and two._address("node-b") == "node-b"
