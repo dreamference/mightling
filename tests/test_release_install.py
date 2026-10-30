@@ -991,6 +991,7 @@ def test_opt_outs_are_said_as_such_and_need_no_root(tmp_path, release_server):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "node enable" not in logged(tmp_path, "admin.log")
     assert "⚪ advertising: --no-advertise" in result.stdout
+    assert "🎉 Done. `ling` is the terminal agent." in result.stdout and "other computers" not in result.stdout
     # What `node provision` runs: no root at all, so no password and no update check, and no model.
     home = tmp_path / "provisioned"
     home.mkdir()
