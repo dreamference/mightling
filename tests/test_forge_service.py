@@ -14,8 +14,11 @@ from dreamference.forge import forge_service
 from dreamference.forge.forge_accounts import ForgeAccounts
 from dreamference.forge.forge_bind import ForgeBind
 from dreamference.forge.forge_container import ForgeContainer
+from dreamference.forge.forge_github_mirror import ForgeGithubMirror
+from dreamference.forge.forge_mirrors import ForgeMirrors
 from dreamference.forge.forge_repositories import ForgeRepositories
 from dreamference.forge.forge_service import (
+    MIRROR_SYNC_INTERVAL_S,
     TIMERS,
     UNIT,
     ForgeService,
@@ -173,3 +176,84 @@ def test_housekeeping_reports_the_pruned_storage_and_the_old_data_removed(monkey
     ForgeService.housekeeping()
     out = capsys.readouterr().out
     assert "pruned a dump" in out and "Removed data-old" in out
+
+
+# -- the tick
+
+
+@pytest.fixture
+def tick(monkeypatch):
+    """A tick on a running forge that did not restart; records the work it does."""
+    seen = {"restarts": 0, "hooks": 0, "github": 0, "phone": 0, "syncs": []}
+    monkeypatch.setattr(ForgeService, "housekeeping", classmethod(lambda cls: None))
+    monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: True))
+    monkeypatch.setattr(ForgeService, "rebind", classmethod(lambda cls: False))
+    monkeypatch.setattr(ForgeRepositories, "remove_push_mirrors", classmethod(lambda cls: []))
+
+    def count(key):
+        return classmethod(lambda cls, *a, **k: seen.__setitem__(key, seen[key] + 1))
+
+    monkeypatch.setattr(ForgeService, "restart", count("restarts"))
+    monkeypatch.setattr(ForgeRepositories, "install_hooks", count("hooks"))
+    monkeypatch.setattr(ForgeGithubMirror, "run", count("github"))
+    monkeypatch.setattr(ForgeService, "ensure_phone", count("phone"))
+    monkeypatch.setattr(
+        ForgeMirrors, "sync", classmethod(lambda cls, quiet=False: seen["syncs"].append(quiet))
+    )
+    return seen
+
+
+def test_push_mirrors_that_cannot_be_listed_are_reported_and_the_tick_goes_on(
+    tick, monkeypatch, capsys
+):
+    def unreadable(cls):
+        raise RuntimeError("the forge did not list /repos/search (HTTP 500)")
+
+    monkeypatch.setattr(ForgeRepositories, "remove_push_mirrors", classmethod(unreadable))
+    ForgeSettings.update_state(role="record", mirrors_synced_at=0)
+    assert ForgeService.tick() == 0
+    assert "Push mirrors not checked: the forge did not list" in capsys.readouterr().out
+    assert tick["hooks"] == 1 and tick["github"] == 1
+
+
+@pytest.mark.parametrize(("address", "restarts"), [("record-new", 1), ("record-old", 0), (None, 0)])
+def test_a_mirror_restarts_only_when_the_record_address_moved(tick, monkeypatch, address, restarts):
+    monkeypatch.setattr(ForgeService, "record_address", classmethod(lambda cls: address))
+    ForgeSettings.update_state(role="mirror", record_address_at_start="record-old")
+    assert ForgeService.tick() == 0
+    assert tick["restarts"] == restarts
+    assert tick["hooks"] == tick["github"] == 0 and tick["syncs"] == [], "no record work"
+
+
+def test_a_mirror_the_tick_already_restarted_is_not_restarted_again(tick, monkeypatch):
+    monkeypatch.setattr(ForgeService, "rebind", classmethod(lambda cls: True))
+    monkeypatch.setattr(ForgeService, "record_address", classmethod(lambda cls: "record-new"))
+    ForgeSettings.update_state(role="mirror", record_address_at_start="record-old")
+    ForgeService.tick()
+    assert tick["restarts"] == 0
+
+
+def test_hooks_that_cannot_be_refreshed_do_not_stop_the_github_mirror(tick, monkeypatch, capsys):
+    def unreadable(cls, mirror_trigger):
+        raise RuntimeError("the forge did not list /repos/search (HTTP 0)")
+
+    monkeypatch.setattr(ForgeRepositories, "install_hooks", classmethod(unreadable))
+    ForgeSettings.update_state(role="record", mirrors_synced_at=0)
+    ForgeService.tick()
+    assert "Hooks not refreshed" in capsys.readouterr().out
+    assert tick["github"] == 1 and tick["phone"] == 1
+
+
+def test_the_record_syncs_its_mirrors_once_an_hour(tick, monkeypatch):
+    now = [10_000.0]
+    monkeypatch.setattr(forge_service.time, "time", lambda: now[0])
+    ForgeSettings.update_state(role="record", mirrors_synced_at=now[0] - MIRROR_SYNC_INTERVAL_S)
+    ForgeService.tick()
+    assert tick["syncs"] == [], "not more than an hour yet"
+
+    now[0] += 1
+    ForgeService.tick()
+    assert tick["syncs"] == [True]
+    assert ForgeSettings.state()["mirrors_synced_at"] == int(now[0])
+    ForgeService.tick()
+    assert tick["syncs"] == [True]
