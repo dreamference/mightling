@@ -617,6 +617,21 @@ def test_discovery_matches_a_gb10_name_in_any_case_in_the_host_or_the_service_na
     assert _discover(monkeypatch, [], [_ssh_host("Laptop", "laptop.local")], match="^LAP") == ["Laptop"]
 
 
+def test_discovery_leaves_out_a_node_by_its_host_its_short_name_or_its_service_name(monkeypatch):
+    nodes = [
+        {"host": "spark-7.local", "name": "node seven"},
+        {"host": "a.local", "name": "spark-5"},
+        {"host": "Spark-9.local", "name": "Spark-9"},
+    ]
+    ssh = [
+        _ssh_host("spark-7 ssh", "spark-7.local"),  # the node's host
+        _ssh_host("spark-5", "spark-5x.local"),  # the node's name
+        _ssh_host("Spark 9", "spark-9.lan"),  # the node's name as the host's first label
+        _ssh_host("spark-1a2b", "spark-1a2b.local"),
+    ]
+    assert _discover(monkeypatch, nodes, ssh) == ["spark-1a2b"]
+
+
 def test_a_browse_runs_avahi_browse_for_the_service_asked_and_returns_nothing_without_it(monkeypatch):
     from dreamference.node import node_browser
 
