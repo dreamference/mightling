@@ -1274,8 +1274,9 @@ def test_build_index_and_server_start_refuse_during_a_night_run(tmp_path, monkey
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))
     with NightShiftQueue.runner_lock(tmp_path / "night") as held:
         assert held
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as refused:
             DreamferenceCLIController._refuse_during_night_run("codex build")
+        assert refused.value.code == 1  # a failure, which a script running the build must see
     DreamferenceCLIController._refuse_during_night_run("codex build")  # free again: no exit
 
 
