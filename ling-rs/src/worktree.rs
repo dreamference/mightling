@@ -1452,4 +1452,14 @@ mod tests {
         assert_eq!(git_text(&repo, &["for-each-ref", SNAPSHOTS]).as_deref(), Some(""));
         assert!(session.checkout.is_dir());
     }
+
+    #[test]
+    fn the_list_leaves_out_the_sessions_of_another_repository() {
+        let fixture = Fixture::new("list-other");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let other = other_repository(&fixture, "other");
+        create(&home, &other).unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(list(&home, &repo), vec!["No worktree sessions for this repository.".to_string()]);
+        assert_eq!(list(&home, &other).len(), 3);
+    }
 }
