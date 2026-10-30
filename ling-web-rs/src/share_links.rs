@@ -593,4 +593,23 @@ mod tests {
             found.text
         );
     }
+
+    #[test]
+    fn the_page_leaves_out_coordinates_that_are_the_name() {
+        let at = page(
+            "u",
+            "f".into(),
+            302,
+            &Target::Place {
+                name: "38.7, -9.1".into(),
+                coordinates: Some("38.7, -9.1".into()),
+            },
+        );
+        assert!(!at.text.contains("at coordinates"), "{}", at.text);
+        assert!(
+            at.text.contains("the place \"38.7, -9.1\". "),
+            "{}",
+            at.text
+        );
+    }
 }
