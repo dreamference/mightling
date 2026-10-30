@@ -233,3 +233,13 @@ def test_an_exact_repository_or_display_name_wins_over_a_loose_match(monkeypatch
 def test_an_engine_is_named_in_any_case():
     recipe = ModelMatrixRegistry.get_launch_overrides("qwen3.8-27b-nvfp4-dflash2", "LING")
     assert ModelMatrixRegistry.engine_of(recipe) == "ling"
+
+
+def _flag(cmd, name):
+    return cmd[cmd.index(name) + 1] if name in cmd else None
+
+
+def test_a_caller_value_wins_over_the_recipe_even_when_it_is_empty(vllm_recipes):
+    build = VLLMServerManager().build_launch_command
+    assert _flag(build(model="test-vllm-nvfp4"), "--reasoning-parser") == "qwen3"
+    assert "--reasoning-parser" not in build(model="test-vllm-nvfp4", reasoning_parser="")
