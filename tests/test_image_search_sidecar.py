@@ -708,6 +708,16 @@ def test_a_seal_folder_that_is_not_there_seals_nothing(monkeypatch, tmp_path):
     assert ImageSearchMcp.sealed_by(os.getppid()) is False
 
 
+def test_without_a_usable_runtime_folder_the_seals_are_looked_for_where_rust_puts_them(monkeypatch, tmp_path):
+    # ling-rs/airgapped's runtime_dir: XDG_RUNTIME_DIR if absolute and a folder, else /run/user/<uid>.
+    real = os.path.isdir
+    monkeypatch.setattr(image_search_mcp.os, "getuid", lambda: 4000000000)
+    monkeypatch.setattr(image_search_mcp.os.path, "isdir", lambda p: p == "/run/user/4000000000" or real(p))
+    for runtime in ("run", str(tmp_path / "missing")):
+        monkeypatch.setenv("XDG_RUNTIME_DIR", runtime)
+        assert ImageSearchMcp.seal_dir() == "/run/user/4000000000/ling-airgapped"
+
+
 def test_an_unreadable_seal_does_not_hide_the_sessions_own(monkeypatch, tmp_path):
     seals = tmp_path / "ling-airgapped"
     (seals / "a-folder").mkdir(parents=True)
