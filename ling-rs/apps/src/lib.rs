@@ -388,4 +388,15 @@ mod tests {
         assert!(ours && other);
         assert!(!prefix && !longer);
     }
+
+    #[test]
+    fn status_addresses_are_trimmed_and_blank_ones_dropped() {
+        let body = json!({"accounts": [
+            {"email": " a@x.com ", "scopes": [App::Gmail.scope()]},
+            {"email": "  ", "scopes": [App::Gmail.scope()]},
+        ]});
+        assert_eq!(parse_status(&body), vec![account("a@x.com", &[App::Gmail])]);
+        let old = json!({"connected": true, "email": "a@x.com, ,b@y.com,"});
+        assert_eq!(parse_status(&old).iter().map(|account| account.email.as_str()).collect::<Vec<_>>(), ["a@x.com", "b@y.com"]);
+    }
 }
