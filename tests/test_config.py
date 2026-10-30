@@ -143,13 +143,18 @@ def test_unpinned_diffusion_model_is_not_fossilised_into_the_config(tmp_path):
 
 
 def test_saving_keeps_tables_other_readers_own(tmp_path):
-    # `[night]` is read by Night Shift, not by DreamferenceConfig; a save used to drop it.
+    # `[night]` is read by Night Shift and `[swe_bench]` by SweBenchSettings, not by
+    # DreamferenceConfig; a save used to drop them.
     from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
     path = tmp_path / "dreamference.toml"
-    path.write_text('agent_runner = "codex"\n\n[night]\nwindow = "02:00-05:00"\n')
+    path.write_text(
+        'agent_runner = "codex"\n\n[night]\nwindow = "02:00-05:00"\n\n[swe_bench]\nmax_parallel = 2\n'
+    )
     ConfigFileStorageManager.save_config_dict(path, {"agent_runner": "cline"})
     saved = ConfigFileStorageManager.load_config_dict(path)
-    assert saved == {"agent_runner": "cline", "night": {"window": "02:00-05:00"}}
+    assert saved == {
+        "agent_runner": "cline", "night": {"window": "02:00-05:00"}, "swe_bench": {"max_parallel": 2},
+    }
 
 
 def test_a_default_host_and_agent_are_not_fossilised_into_the_config(tmp_path):
