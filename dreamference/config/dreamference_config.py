@@ -639,10 +639,11 @@ class DreamferenceConfig:
             value = data.pop(key, None)
             if key in self._repository_network:
                 data[key] = self._repository_network[key]
-            elif value is not None and value != self.file_data.get(key):
+            elif value != self.file_data.get(key):
                 sys.stderr.write(
                     f"⚠️  {key} not saved in {out_path}: a repository's own file may not choose a network "
-                    "address. Set it in ~/.config/dreamference/config.toml.\n"
+                    "address, so a change (or a reset to the default) is not kept while it is in use. "
+                    "Set it in ~/.config/dreamference/config.toml.\n"
                 )
 
     def resolve_tool_call_parser(self) -> str:
