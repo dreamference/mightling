@@ -2,6 +2,7 @@
 desktop` builds and installs, and what the Electron project must keep.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -892,3 +893,189 @@ def test_a_launcher_left_by_an_earlier_name_that_cannot_be_removed_does_not_fail
         patch.object(desktop_runner.os, "remove", side_effect=PermissionError(13, "denied")),
     ):
         assert DesktopRunner.install_desktop_entry() is True
+
+
+def test_run_without_a_checkout_or_an_installed_app_fails_and_says_why(capsys):
+    with (
+        patch.object(DesktopRunner, "has_source", return_value=False),
+        patch("shutil.which", return_value=None),
+        patch("subprocess.call") as call,
+    ):
+        assert DesktopRunner.run() == 1
+        call.assert_not_called()
+    assert "release install does not have" in capsys.readouterr().out
+
+
+def test_run_opens_nothing_when_a_step_before_the_window_fails(capsys):
+    for failing in ({"copy_bundled_binaries": False}, {"_npm": False}, {"binary_path": None}):
+        values = {
+            "has_source": True,
+            "_ensure_toolchain": True,
+            "install_packages": True,
+            "copy_bundled_binaries": True,
+            "_npm": True,
+            "binary_path": "/opt/Mightling",
+        } | failing
+        with contextlib.ExitStack() as stack:
+            for name, value in values.items():
+                stack.enter_context(patch.object(DesktopRunner, name, return_value=value))
+            entry = stack.enter_context(patch.object(DesktopRunner, "install_desktop_entry"))
+            call = stack.enter_context(patch("subprocess.call"))
+            assert DesktopRunner.run() == 1, failing
+            call.assert_not_called()
+            entry.assert_not_called()
+    assert "The package step wrote no app" in capsys.readouterr().out
+
+
+def test_build_fails_without_a_checkout_or_when_forge_fails():
+    with (
+        patch.object(DesktopRunner, "has_source", return_value=False),
+        patch.object(DesktopRunner, "_ensure_toolchain") as toolchain,
+    ):
+        assert DesktopRunner.build() == 1
+        toolchain.assert_not_called()
+    with (
+        patch.object(DesktopRunner, "has_source", return_value=True),
+        patch.object(DesktopRunner, "_ensure_toolchain", return_value=True),
+        patch.object(DesktopRunner, "install_packages", return_value=True),
+        patch.object(DesktopRunner, "copy_bundled_binaries", return_value=True),
+        patch.object(DesktopRunner, "_npm", return_value=False),
+        patch.object(DesktopRunner, "install_desktop_entry") as entry,
+    ):
+        assert DesktopRunner.build() == 1
+        entry.assert_not_called()
+    with (
+        patch.object(DesktopRunner, "has_source", return_value=True),
+        patch.object(DesktopRunner, "_ensure_toolchain", return_value=False),
+        patch.object(DesktopRunner, "install_packages") as packages,
+    ):
+        assert DesktopRunner.build() == 1
+        packages.assert_not_called()
+
+
+def test_install_fails_without_a_checkout_a_toolchain_or_the_profile_it_needs():
+    with (
+        patch.object(DesktopRunner, "has_source", return_value=False),
+        patch.object(DesktopRunner, "_ensure_toolchain") as toolchain,
+    ):
+        assert DesktopRunner.install() == 1
+        toolchain.assert_not_called()
+    with (
+        patch.object(DesktopRunner, "has_source", return_value=True),
+        patch.object(DesktopRunner, "_ensure_toolchain", return_value=False),
+        patch.object(DesktopInstaller, "install_apparmor_profile") as profile,
+    ):
+        assert DesktopRunner.install() == 1
+        profile.assert_not_called()
+    with (
+        patch.object(DesktopRunner, "has_source", return_value=True),
+        patch.object(DesktopRunner, "_ensure_toolchain", return_value=True),
+        patch.object(DesktopRunner, "install_packages", return_value=True),
+        patch.object(DesktopRunner, "dev_binaries", return_value=["/opt/electron"]),
+        patch.object(DesktopInstaller, "uncovered", return_value=["/opt/electron"]),
+        patch.object(DesktopInstaller, "covering_profile", return_value=None),
+        patch.object(DesktopInstaller, "install_apparmor_profile", return_value=False),
+        patch.object(DesktopRunner, "install_desktop_entry") as entry,
+    ):
+        assert DesktopRunner.install() == 1
+        entry.assert_not_called()
+
+
+def test_install_registers_an_app_already_built_and_not_one_that_is_not():
+    for built, registered in (("/opt/Mightling", True), (None, False)):
+        with (
+            patch.object(DesktopRunner, "has_source", return_value=True),
+            patch.object(DesktopRunner, "_ensure_toolchain", return_value=True),
+            patch.object(DesktopRunner, "install_packages", return_value=True),
+            patch.object(DesktopRunner, "dev_binaries", return_value=["/opt/electron"]),
+            patch.object(DesktopInstaller, "uncovered", return_value=[]),
+            patch.object(DesktopRunner, "binary_path", return_value=built),
+            patch.object(DesktopRunner, "install_desktop_entry") as entry,
+        ):
+            assert DesktopRunner.install() == 0
+            assert entry.called is registered
+
+
+def test_status_is_ready_only_with_ling_built_the_toolchain_complete_and_the_sandbox_covered(
+    tmp_path, capsys
+):
+    from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+
+    ling = tmp_path / "ling"
+    ling.write_text("")
+    cases = [
+        (str(ling), True, True, True, 0),
+        (str(tmp_path / "missing"), True, True, True, 1),
+        (str(ling), False, True, True, 1),
+        (str(ling), True, False, True, 1),
+        (str(ling), True, True, False, 0),  # a release install has no checkout binaries to cover
+    ]
+    for path, complete, covered, source, expected in cases:
+        with (
+            patch.object(CodexBrandedBuilder, "executable_path", return_value=path),
+            patch.object(DesktopInstaller, "report", return_value=(complete, [])),
+            patch.object(DesktopRunner, "has_source", return_value=source),
+            patch.object(DesktopRunner, "dev_binaries", return_value=[]),
+            patch.object(DesktopRunner, "warn_uncovered", return_value=covered),
+        ):
+            assert DesktopRunner.status() == expected, (path, complete, covered, source)
+    assert "build it with: ling-admin codex build" in capsys.readouterr().out
+
+
+def test_the_binary_is_an_executable_file_in_the_package_output_or_none(tmp_path):
+    from dreamference.chat import desktop_runner
+
+    electron = tmp_path / "electron"
+    with (
+        patch.object(desktop_runner, "ELECTRON_DIR", electron),
+        patch.object(desktop_runner, "APP_CONFIG", electron / "app.json"),
+    ):
+        assert DesktopRunner.binary_path() is None  # nothing packaged yet
+        (electron / "out" / "Mightling-linux-arm64").mkdir(parents=True)
+        plain = electron / "out" / "Mightling-linux-arm64" / "Mightling"
+        plain.write_text("")
+        assert DesktopRunner.binary_path() is None  # a file that cannot run is not the app
+        runnable = electron / "out" / "Mightling-linux-x64" / "Mightling"
+        runnable.parent.mkdir()
+        runnable.write_text("")
+        runnable.chmod(0o755)
+        assert DesktopRunner.binary_path() == str(runnable)
+
+
+def test_a_broken_app_config_reads_as_empty_and_the_defaults_apply(tmp_path):
+    from dreamference.chat import desktop_runner
+
+    config = tmp_path / "app.json"
+    config.write_text("{not json")
+    with patch.object(desktop_runner, "APP_CONFIG", config):
+        assert DesktopRunner._app_config() == {}
+    with patch.object(desktop_runner, "APP_CONFIG", tmp_path / "missing.json"):
+        assert DesktopRunner._app_config() == {}
+
+
+def test_registration_that_cannot_write_its_folders_or_entry_reports_false(tmp_path, capsys):
+    from dreamference.chat import desktop_runner
+
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    with (
+        patch.object(desktop_runner, "DESKTOP_ENTRY_DIR", str(blocker / "applications")),
+        patch.object(desktop_runner, "ICON_DIR", str(tmp_path / "icons")),
+        patch.object(DesktopRunner, "binary_path", return_value="/opt/Mightling"),
+        patch("subprocess.run") as run,
+    ):
+        assert DesktopRunner.install_desktop_entry() is False
+        run.assert_not_called()
+    assert "Could not create the XDG directories" in capsys.readouterr().out
+
+    entries = tmp_path / "applications"
+    (entries / desktop_runner.DESKTOP_ENTRY_NAME).mkdir(parents=True)  # the entry's name is taken
+    with (
+        patch.object(desktop_runner, "DESKTOP_ENTRY_DIR", str(entries)),
+        patch.object(desktop_runner, "ICON_DIR", str(tmp_path / "icons")),
+        patch.object(DesktopRunner, "binary_path", return_value="/opt/Mightling"),
+        patch("subprocess.run") as run,
+    ):
+        assert DesktopRunner.install_desktop_entry() is False
+        run.assert_not_called()
+    assert "Could not write the desktop entry" in capsys.readouterr().out
