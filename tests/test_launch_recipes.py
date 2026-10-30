@@ -250,3 +250,27 @@ def test_an_auto_attention_backend_leaves_the_choice_to_the_recipe(vllm_recipes)
         model="test-vllm-nvfp4", attention_backend="auto"
     )
     assert _flag(cmd, "--attention-backend") == "flashinfer"
+
+
+def test_a_70b_checkpoint_that_declares_its_quantization_gets_no_guess(vllm_recipes, monkeypatch):
+    from dreamference.hardware.model_spec import ModelSpec
+
+    for key, precision in (("test-vllm-70b-awq", "AWQ"), ("test-vllm-70b-bf16", "BF16")):
+        monkeypatch.setitem(
+            ModelMatrixRegistry.MATRIX,
+            key,
+            ModelSpec(
+                name=f"Test 70B {precision}",
+                params_b=70.0,
+                supported_precisions=[precision],
+                min_memory_gb=40.0,
+                max_memory_gb=80.0,
+                compatible_gb10=True,
+                notes="Test only.",
+                hf_repo_id=f"example/vllm-70B-{precision}",
+            ),
+        )
+    build = VLLMServerManager().build_launch_command
+    assert "--quantization" not in build(model="test-vllm-70b-awq")
+    # The same name in BF16 is the one the guess exists for.
+    assert _flag(build(model="test-vllm-70b-bf16"), "--quantization") == "fp8"
