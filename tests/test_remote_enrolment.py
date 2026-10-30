@@ -101,6 +101,30 @@ def test_a_malformed_enrolment_request_is_refused_not_raised(request_):
     assert RemoteEnrolment.answer(CODE, request_, lambda c: pytest.fail("minted")) is None
 
 
+@pytest.mark.parametrize("nonce", ["a" * 31, "a" * 33, "g" * 32, "A" * 32, "a" * 31 + " "])
+def test_a_malformed_nonce_is_refused_even_with_the_right_proof_for_it(nonce):
+    request = {"nonce": nonce, "proof": RemoteEnrolment.client_proof(CODE, nonce)}
+    assert RemoteEnrolment.answer(CODE, request, lambda c: pytest.fail("minted")) is None
+
+
+def test_the_bundle_text_is_canonical_json_with_sorted_keys():
+    answer = RemoteEnrolment.answer(CODE, _good(), lambda c: {"b": 1, "a": 2})
+    assert answer["bundle"] == '{"a": 2, "b": 1}'
+    assert answer["mac"] == RemoteEnrolment.server_mac(CODE, NONCE, answer["bundle"])
+
+
+def test_the_code_is_always_eight_digits(monkeypatch):
+    monkeypatch.setattr(module.secrets, "randbelow", lambda bound: 42)
+    assert RemoteEnrolment.new_code() == "00000042"
+
+
+@pytest.mark.parametrize("address", ["10.1.2.3", "::ffff:10.1.2.3"])
+def test_an_overlay_address_is_refused_as_overlay_not_as_public(monkeypatch, address):
+    monkeypatch.setattr(module, "OVERLAY_RANGE", module.ipaddress.ip_network("10.0.0.0/8"))
+    assert not RemoteEnrolment.lan_address(address)
+    assert RemoteEnrolment.lan_address("192.168.1.2")
+
+
 def test_a_proof_in_capitals_is_accepted_and_a_long_client_name_is_cut():
     request = _good("x" * 100)
     request["proof"] = request["proof"].upper()
@@ -139,6 +163,14 @@ def test_wrong_proofs_count_down_and_the_tenth_withdraws_the_code():
         assert status == 401
         lefts.append(body["attempts_left"])
     assert lefts == list(range(9, -1, -1)) and state["outcome"] == "withdrawn"
+    status, body = RemoteEnrolment.respond(CODE, bad, lambda c: pytest.fail("minted"), state)
+    assert status == 401 and body["attempts_left"] == 0, "never a negative count"
+
+
+def test_the_outcome_names_the_client_by_one_dns_label_at_most():
+    state = {"failures": 0, "outcome": None}
+    status, _ = RemoteEnrolment.respond(CODE, _good("x" * 100), lambda c: {"k": 1}, state)
+    assert status == 200 and state["outcome"] == "enrolled:" + "x" * module.MAX_LABEL
 
 
 def test_a_proof_with_letters_outside_ascii_is_one_wrong_attempt_not_a_crash():
