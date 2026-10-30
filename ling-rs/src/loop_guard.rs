@@ -1193,4 +1193,14 @@ mod tests {
         assert!(line("exec").contains("detector off"), "{lines:?}");
         assert!(line("work").contains("detector on "), "{lines:?}");
     }
+
+    #[test]
+    fn an_unknown_argument_is_a_usage_error_and_help_is_not() {
+        let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert_eq!(run_cli(&args(&["bogus"])), 2);
+        assert_eq!(run_cli(&args(&["status", "extra"])), 2);
+        for help in ["-h", "--help", "help"] {
+            assert_eq!(run_cli(&args(&[help])), 0, "{help}");
+        }
+    }
 }
