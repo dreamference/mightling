@@ -184,6 +184,36 @@ mod tests {
     }
 
     #[test]
+    fn every_namespace_and_every_hidden_folder_is_set_up_before_the_binds() {
+        let args = bwrap_args(&spec());
+        assert_eq!(
+            args[..14],
+            [
+                "bwrap",
+                "--die-with-parent",
+                "--new-session",
+                "--unshare-net",
+                "--unshare-pid",
+                "--unshare-ipc",
+                "--unshare-uts",
+                "--ro-bind",
+                "/",
+                "/",
+                "--dev",
+                "/dev",
+                "--proc",
+                "/proc",
+            ]
+        );
+        let tmpfs: Vec<&str> = args
+            .windows(2)
+            .filter(|w| w[0] == "--tmpfs")
+            .map(|w| w[1].as_str())
+            .collect();
+        assert_eq!(tmpfs, ["/tmp", "/run", "/var/tmp", "/dev/shm", "/home/u"]);
+    }
+
+    #[test]
     fn binds_are_sorted_by_depth_deduplicated_and_checked_only_before_double_dash() {
         let mut s = spec();
         s.read_only = vec![
