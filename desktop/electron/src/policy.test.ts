@@ -227,3 +227,43 @@ describe("the policy", () => {
     expect(levelMatters({ method: "thread/start", params: {} })).toBe(false);
   });
 });
+
+describe("what the policy refuses or pins without a conformance case", () => {
+  it("refuses a message that is neither a request, a notification nor an answer, and an answer to no id", () => {
+    for (const message of [{}, { id: 1 }, { id: 1, method: 7 }, { id: 1, params: {} }, { result: {} }, { error: { code: 1 } }]) {
+      expect(() => vetOutgoing(message, new Set(["1", "undefined"]), PLAIN), JSON.stringify(message)).toThrow(/^not a request, a notification or an answer$/);
+    }
+  });
+
+  it("refuses an import item that is not an object naming its type, and an import with no params", () => {
+    const vet = (message: Record<string, unknown>) => vetOutgoing({ id: 1, method: POLICY.importRequest, ...message }, new Set(), PLAIN);
+    for (const item of ["PLUGINS", null, ["PLUGINS"], { itemType: 3 }]) {
+      expect(() => vet({ params: { migrationItems: [{ itemType: "SKILLS" }, item] } }), JSON.stringify(item)).toThrow(/^every migration item must name its itemType$/);
+    }
+    expect(() => vet({})).toThrow(/^an import must list its migrationItems$/);
+    expect(() => vet({ params: null })).toThrow(/^an import must list its migrationItems$/);
+  });
+
+  it("does not take a turn that names no thread for a repository thread with Full Access", () => {
+    const repo: PromptSource = { ...PLAIN, repoThreadCwd: () => "WORK/repo", repoCheckout: () => false, repoThreadFullAccess: () => true };
+    const sandboxPolicy = { type: "workspaceWrite", writableRoots: ["/"], networkAccess: true };
+    const out = vetOutgoing({ id: 1, method: "turn/start", params: { input: [], sandboxPolicy } }, new Set(), repo);
+    expect((out.params as Record<string, unknown>).sandboxPolicy).toEqual(sandboxPolicy);
+    // From a phone bridge the pinned fields still go, thread or not.
+    const bridged = vetOutgoing({ id: 1, method: "turn/start", params: { input: [], sandboxPolicy, cwd: "/", approvalPolicy: "never" } }, new Set(), { ...repo, isBridge: () => true });
+    expect(bridged.params).toEqual({ input: [] });
+  });
+
+  it("gives a repository turn the bare workspace sandbox when the user's own is unknown, whatever the page asked", () => {
+    const repo: PromptSource = { ...PLAIN, repoThreadCwd: () => "WORK/repo", repoCheckout: () => false };
+    const out = vetOutgoing({ id: 1, method: "turn/start", params: { threadId: "w1", input: [], sandboxPolicy: { type: "dangerFullAccess" } } }, new Set(), repo);
+    expect((out.params as Record<string, unknown>).sandboxPolicy).toEqual({ type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false });
+    const readOnly = vetOutgoing({ id: 1, method: "turn/start", params: { threadId: "w1", input: [] } }, new Set(), { ...repo, repoCheckout: () => true, repoThreadFullAccess: () => true });
+    expect((readOnly.params as Record<string, unknown>).sandboxPolicy).toEqual({ type: "readOnly", networkAccess: false });
+  });
+
+  it("will not load a policy.json whose phone bridge may send a request the page may not", () => {
+    const file = JSON.parse(fs.readFileSync(path.join(WEB, "policy.json"), "utf8"));
+    expect(() => parsePolicy({ ...file, bridgeAllowedRequests: [...file.bridgeAllowedRequests, "account/login/start"] })).toThrow(/every request a phone bridge may send must be allowed/);
+  });
+});
