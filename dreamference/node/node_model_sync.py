@@ -50,12 +50,15 @@ class NodeModelSync:
 
         Returns:
             List[str]: The Hugging Face repositories the model is served from: the checkpoint,
-            the drafter its recipe names, if any, and the assets its engine reads (get_engine_assets).
+            the drafter its recipe names, if any, and the assets of every engine it can be served with
+            (get_engine_assets), without duplicates: a node may be started with any of them.
         """
         from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
-        repos = [ModelMatrixRegistry.resolve_hf_repo(model_key), ModelMatrixRegistry.get_speculative_draft_repo(model_key)]
-        repos += [asset["repo"] for asset in ModelMatrixRegistry.get_engine_assets(model_key)]
-        return [repo for repo in repos if repo and "/" in repo]
+        repos: list[str | None] = [ModelMatrixRegistry.resolve_hf_repo(model_key), ModelMatrixRegistry.get_speculative_draft_repo(model_key)]
+        engines: list[str | None] = [*ModelMatrixRegistry.engines(model_key)] or [None]
+        for engine in engines:
+            repos += [asset["repo"] for asset in ModelMatrixRegistry.get_engine_assets(model_key, engine)]
+        return [repo for repo in dict.fromkeys(repos) if repo and "/" in repo]
 
     @classmethod
     def folder_name(cls, repo: str) -> str:
