@@ -928,4 +928,10 @@ mod tests {
         let resolved = Resolved { prompt, source: Source::Environment, skipped: Vec::new() };
         assert_eq!(startup_lines(&resolved, true), vec![format!("Prompt: default-2 ({ENV_VAR}).")]);
     }
+
+    #[test]
+    fn a_name_is_at_most_64_bytes() {
+        assert!(valid_name(&"a".repeat(64)));
+        assert!(!valid_name(&"a".repeat(65)));
+    }
 }
