@@ -35,6 +35,12 @@ const EPHEMERAL: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1e9e9";
 /// Threads not loaded, which the server describes on `thread/read`: one in an excluded folder, one not.
 const UNLOADED_HIDDEN: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1b0b0";
 const UNLOADED: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1c0c0";
+/// Not loaded either: a subagent's thread, one the server answers about with another thread, an
+/// Ask thread, and one with no folder.
+const SUBAGENT: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1d1d1";
+const MISLABELED: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1d2d2";
+const ASKED: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1d3d3";
+const NO_FOLDER: &str = "01a0f1ae-2da4-7942-99ae-c3151dc1d4d4";
 
 /// What the stand-in server says about a thread, as `thread/resume` and `thread/read` answer it.
 fn described(thread: &str) -> Option<Value> {
@@ -43,6 +49,10 @@ fn described(thread: &str) -> Option<Value> {
         HIDDEN => Some(json!({ "id": thread, "cwd": "/home/user/secret/x" })),
         UNLOADED_HIDDEN => Some(json!({ "id": thread, "cwd": "/home/user/secret/y" })),
         EPHEMERAL => Some(json!({ "id": thread, "cwd": "/home/user/app", "ephemeral": true })),
+        SUBAGENT => Some(json!({ "id": thread, "cwd": "/home/user/app", "parentThreadId": T })),
+        MISLABELED => Some(json!({ "id": T, "cwd": "/home/user/app" })),
+        ASKED => Some(json!({ "id": thread, "cwd": "/home/user/ask/q" })),
+        NO_FOLDER => Some(json!({ "id": thread })),
         _ => None,
     }
 }
@@ -341,4 +351,87 @@ async fn a_folder_excluded_while_its_thread_is_followed_is_let_go() {
     assert!(!connection.holds(HIDDEN), "its events no longer reach the hub");
     let refused = connection.carry_out(&Policy::embedded(), &scratch.0.join("home"), &json!({ "kind": "send", "thread": HIDDEN, "text": "hi" })).await;
     assert_eq!(refused, Err("this thread is kept on this device".to_string()));
+}
+
+#[tokio::test]
+async fn a_subagents_thread_and_one_the_server_answers_about_as_another_are_kept() {
+    let scratch = scratch("subagent");
+    let socket = scratch.0.join("s.sock");
+    let (mut heard_rx, _say) = fake_app_server(&socket).await;
+    let (events, _asked) = mpsc::unbounded_channel();
+    let connection = Connection::open(&socket, events).await.unwrap();
+    // With a folder excluded, a thread whose folder is unknown is kept: an answer about another
+    // thread says nothing of this one's.
+    let settings = Settings { exclude: vec![PathBuf::from("/home/user/secret")], ..Settings::default() };
+    connection.attach_loaded(&settings).await;
+    heard_so_far(&mut heard_rx);
+    for thread in [SUBAGENT, MISLABELED] {
+        let refused = connection.carry_out(&Policy::embedded(), &scratch.0.join("home"), &json!({ "kind": "send", "thread": thread, "text": "hi" })).await;
+        assert_eq!(refused, Err("this thread is kept on this device".to_string()), "send to {thread}");
+    }
+    let methods: Vec<Value> = heard_so_far(&mut heard_rx).iter().map(|v| v["method"].clone()).collect();
+    assert!(methods.iter().all(|m| m == "thread/read"), "only reads: {methods:?}");
+}
+
+#[tokio::test]
+async fn the_host_offers_no_ask_folder_or_none_and_sends_as_the_policy_vets() {
+    let scratch = scratch("offers");
+    let socket = scratch.0.join("s.sock");
+    let (mut heard_rx, _say) = fake_app_server(&socket).await;
+    let (events, _asked) = mpsc::unbounded_channel();
+    let connection = Connection::open(&socket, events).await.unwrap();
+    connection.attach_loaded(&Settings::default()).await;
+    let (policy, home) = (Policy::embedded(), scratch.0.join("home"));
+    let folder = home.join("ask").join(ASKED);
+    std::fs::create_dir_all(&folder).unwrap();
+    heard_so_far(&mut heard_rx);
+    for thread in [ASKED, NO_FOLDER] {
+        assert_eq!(connection.carry_out(&policy, &home, &json!({ "kind": "send", "thread": thread, "text": "hi" })).await, Ok(Some(thread.to_string())));
+    }
+    // The resume went through the policy as the page's would: an Ask thread stays in its folder.
+    let resumed = heard_so_far(&mut heard_rx).into_iter().find(|v| v["method"] == "thread/resume" && v["params"]["threadId"] == ASKED).unwrap();
+    assert_eq!(resumed["params"]["cwd"], json!(std::fs::canonicalize(&folder).unwrap().to_string_lossy()));
+    assert_eq!(resumed["params"]["sandbox"], "workspace-write");
+    // Both are followed now, yet neither folder is offered for a new thread.
+    assert!(connection.holds(ASKED) && connection.holds(NO_FOLDER));
+    assert_eq!(connection.projects(), vec!["/home/user/app".to_string(), "/home/user/secret/x".to_string()]);
+    for cwd in ["/home/user/ask/q", ""] {
+        assert_eq!(
+            connection.carry_out(&policy, &home, &json!({ "kind": "start", "cwd": cwd, "text": "no" })).await,
+            Err("a new thread starts in one of the folders this device offers".to_string())
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_approval_is_accept_or_decline_of_a_command_or_a_file_change_and_answered_once() {
+    let scratch = scratch("answer");
+    let socket = scratch.0.join("s.sock");
+    let (mut heard_rx, say) = fake_app_server(&socket).await;
+    let (events, mut asked) = mpsc::unbounded_channel();
+    let connection = Connection::open(&socket, events).await.unwrap();
+    connection.attach_loaded(&Settings::default()).await;
+    let (policy, home) = (Policy::embedded(), scratch.0.join("home"));
+    say.send(json!({ "id": 60, "method": "item/commandExecution/requestApproval", "params": { "threadId": T, "command": "make" } })).unwrap();
+    say.send(json!({ "id": 61, "method": "item/tool/requestUserInput", "params": { "threadId": T, "questions": [] } })).unwrap();
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(10), asked.recv()).await.expect("asked in time").unwrap();
+    }
+    let carry = |command: Value| {
+        let (connection, policy, home) = (connection.clone(), &policy, &home);
+        async move { connection.carry_out(policy, home, &command).await }
+    };
+    for decision in ["acceptForSession", "cancel"] {
+        assert_eq!(carry(json!({ "kind": "approve", "request": 60, "decision": decision })).await, Err("an approval is accept or decline".to_string()));
+    }
+    assert_eq!(carry(json!({ "kind": "approve", "request": 61, "decision": "accept" })).await, Err("this question is answered on the device itself".to_string()));
+    assert_eq!(carry(json!({ "kind": "approve", "request": 60, "decision": "decline" })).await, Ok(Some(T.to_string())));
+    // A second answer before the server says the request is resolved is refused, not sent.
+    assert!(carry(json!({ "kind": "approve", "request": 60, "decision": "accept" })).await.unwrap_err().contains("no server request 60"));
+    let answer = heard(&mut heard_rx, |v| v.get("result").is_some()).await;
+    assert_eq!(answer, json!({ "id": 60, "result": { "decision": "decline" } }));
+    // A message after it: once its turn is answered, the server has heard everything sent before.
+    assert_eq!(carry(json!({ "kind": "send", "thread": T, "text": "go on" })).await, Ok(Some(T.to_string())));
+    let after: Vec<Value> = heard_so_far(&mut heard_rx);
+    assert!(after.iter().all(|v| v.get("result").is_none()), "answered once: {after:?}");
 }
