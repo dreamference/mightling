@@ -725,6 +725,9 @@ mod tests {
         assert_eq!(plan.find("b").map(|entry| entry.status.clone()), Some(Status::SourceOff));
         let linked: Vec<String> = plan.link_sets(&fixture.home).into_iter().flat_map(|set| set.links.into_keys()).collect();
         assert_eq!(linked, vec!["a".to_string()]);
+        // A home agent's links may point only into its own folder.
+        let claude = plan.link_sets(&fixture.home).into_iter().find(|set| set.agent == "claude").map(|set| set.source);
+        assert_eq!(claude, Some(Source::Folder(fixture.home.join(".claude/skills"))));
     }
 
     #[test]
@@ -761,6 +764,43 @@ mod tests {
         let tiny = plan(&machine, &Settings::default());
         assert_eq!(tiny.offered().map(|entry| entry.skill.name.clone()).collect::<Vec<_>>(), vec!["mine".to_string()]);
         assert!(tiny.used() > tiny.limit.unwrap_or(0));
+    }
+
+    #[test]
+    fn the_budget_stops_dropping_once_the_catalogue_fits_exactly() {
+        let fixture = Fixture::new("catalog-budget-exact");
+        fixture.skill(".mightling/skills/mine", "mine", "");
+        for index in 0..4 {
+            fixture.skill(&format!(".claude/skills/c{index}"), &format!("c{index}"), "");
+            fixture.skill(&format!(".hermes/skills/cat/h{index}"), &format!("h{index}"), "");
+        }
+        // Last of all: a linked skill that is not offered, so neither counted nor dropped.
+        fixture.skill(".hermes/skills/cat/hz", "hz", "");
+        let settings = Settings { disabled: ["hz".to_string()].into(), ..Settings::default() };
+        let mut machine = fixture.machine();
+        let unlimited = plan(&machine, &settings);
+        let cost = |name: &str| unlimited.find(name).map(|entry| entry.cost).unwrap_or_default();
+        let hermes: usize = (0..4).map(|index| cost(&format!("h{index}"))).sum();
+        let limit = unlimited.used() - hermes - cost("c3");
+
+        // The window whose 2% is exactly `limit`: hermes goes, then c3, and the rest fits to the token.
+        machine.context_window = Some(limit as u64 * 50);
+        let fitted = plan(&machine, &settings);
+        assert_eq!(fitted.limit, Some(limit));
+        assert_eq!(fitted.used(), limit);
+        let status = |name: &str| fitted.find(name).map(|entry| entry.status.clone());
+        for name in ["h0", "h1", "h2", "h3", "c3"] {
+            assert_eq!(status(name), Some(Status::OverBudget), "{name}");
+        }
+        for name in ["mine", "c0", "c1", "c2"] {
+            assert_eq!(status(name), Some(Status::Offered), "{name}");
+        }
+        assert_eq!(status("hz"), Some(Status::Disabled));
+        assert_eq!(fitted.left_out(), vec![("hermes", 4), ("claude", 1)]);
+
+        // A window that fits everything drops nothing.
+        machine.context_window = Some(unlimited.used() as u64 * 50);
+        assert!(plan(&machine, &settings).entries.iter().all(|entry| entry.status != Status::OverBudget));
     }
 
     #[cfg(unix)]
@@ -816,6 +856,11 @@ mod tests {
         assert!(untrusted.find("review").is_none(), "an untrusted repository's skills are not read");
         assert_eq!(untrusted.find("release").map(|entry| entry.skill.origin.label()), Some("Claude Code".to_string()));
         assert!(untrusted.link_sets(&fixture.home).iter().all(|set| !set.agent.starts_with("repo-") || set.links.is_empty()));
+
+        // Any other trust level is not trust.
+        let config = format!("[projects.'{}']\ntrust_level = \"untrusted\"\n", fixture.cwd.display());
+        std::fs::write(fixture.codex_home.join("config.toml"), config).unwrap_or_default();
+        assert!(plan(&fixture.machine(), &Settings::default()).find("review").is_none());
 
         trust(&fixture, &fixture.cwd);
         let trusted = plan(&fixture.machine(), &Settings::default());
@@ -878,6 +923,19 @@ mod tests {
             machine.cwd = forged;
             assert!(plan(&machine, &Settings::default()).find("planted").is_none(), "{name}");
         }
+
+        // Nor a gitdir that names the folder back but is not `<main>/.git/worktrees/<name>`.
+        for (name, gitdir) in [("not-worktrees", ".git/other/odd"), ("not-dot-git", "notgit/worktrees/odd")] {
+            let odd = fixture.cwd.join(name);
+            let gitdir = main.join(gitdir);
+            std::fs::create_dir_all(&odd).unwrap_or_default();
+            std::fs::create_dir_all(&gitdir).unwrap_or_default();
+            std::fs::write(odd.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap_or_default();
+            std::fs::write(gitdir.join("gitdir"), format!("{}\n", odd.join(".git").display())).unwrap_or_default();
+            write_skill(&odd.join(".claude/skills/planted"), "planted", "");
+            machine.cwd = odd;
+            assert!(plan(&machine, &Settings::default()).find("planted").is_none(), "{name}");
+        }
     }
 
     #[test]
@@ -889,18 +947,31 @@ mod tests {
             built.find("delegate").map(|entry| entry.status.clone()),
             Some(Status::Unavailable("for Claude Code only (delegates to ling)".to_string()))
         );
+        // `ling skill enable delegate` overrides the exclusion.
+        let settings = Settings { enabled: ["delegate".to_string()].into(), ..Settings::default() };
+        let enabled = plan(&fixture.machine(), &settings);
+        assert_eq!(enabled.find("delegate").map(|entry| entry.status.clone()), Some(Status::Offered));
+    }
+
+    #[test]
+    fn a_delegate_skill_that_is_not_linked_is_offered() {
+        let fixture = Fixture::new("catalog-delegate-installed");
+        fixture.skill(".mightling/skills/delegate", "delegate", "");
+        let built = plan(&fixture.machine(), &Settings::default());
+        assert_eq!(built.find("delegate").map(|entry| entry.status.clone()), Some(Status::Offered));
     }
 
     #[test]
     fn a_link_is_named_by_its_folder_when_the_frontmatter_name_is_not_a_plain_name() {
         let fixture = Fixture::new("catalog-link-names");
-        for (folder, name) in [("up", "../escape"), ("hid", ".hidden"), ("nest", "a/b"), ("back", "a\\b"), ("drive", "C:evil"), ("plain", "plain-name")] {
+        let cases = [("up", "../escape"), ("hid", ".hidden"), ("nest", "a/b"), ("back", "a\\b"), ("drive", "C:evil")];
+        for (folder, name) in cases.into_iter().chain([("nul", "\"a\\0b\""), ("plain", "plain-name")]) {
             fixture.skill(&format!(".claude/skills/{folder}"), name, "");
         }
         let sets = plan(&fixture.machine(), &Settings::default()).link_sets(&fixture.home);
         let claude = sets.iter().find(|set| set.agent == "claude").map(|set| set.links.clone()).unwrap_or_default();
         let names: Vec<&str> = claude.keys().map(String::as_str).collect();
-        assert_eq!(names, vec!["back", "drive", "hid", "nest", "plain-name", "up"]);
+        assert_eq!(names, vec!["back", "drive", "hid", "nest", "nul", "plain-name", "up"]);
         assert_eq!(claude.get("up"), Some(&fixture.home.join(".claude/skills/up")));
     }
 
@@ -924,6 +995,13 @@ mod tests {
         // The loop is followed only to the depth: `group/loop/top` is one more route to a known skill.
         assert!(relative.iter().all(|dir| dir.split('/').count() <= 3), "{relative:?}");
         assert!(skill_dirs(&root.join("missing"), 3).is_empty());
+
+        // The plan walks another agent's folder three levels deep: Claude Code's `synced/<account>/`
+        // folders are reached, a fourth level is not.
+        write_skill(&root.join("synced/acct/shared"), "shared", "");
+        let plan = plan(&fixture.machine(), &Settings::default());
+        assert_eq!(plan.find("shared").map(|entry| entry.status.clone()), Some(Status::Offered));
+        assert!(plan.find("deep").is_none());
     }
 
     #[test]
