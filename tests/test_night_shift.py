@@ -1012,6 +1012,20 @@ def test_a_window_that_closes_while_waiting_reports_it(fake_host):
     assert "until the window closed" in NightShiftRunner.wait_for_idle("http://x", "ling", 10, past)
 
 
+def test_one_steady_request_keeps_the_model_busy(fake_host, monkeypatch):
+    # The served counter never moves, but a request is running all along: nobody has been idle.
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
+
+    def advance(seconds):
+        clock["now"] += seconds
+        if clock["now"] >= 1000.0 + 600:
+            FakeHost.sessions = [1]
+    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(advance))
+    FakeHost.samples = [{"running": 1.0, "served": 1.0, "kv_pool": 1.0}]
+    assert "session is open" in NightShiftRunner.wait_for_idle("http://x", "ling", 1, far_end())
+
+
 def test_round_robin_alternates_repositories():
     tasks = [{"id": i, "repo": repo} for i, repo in enumerate("AAAB")]
     assert [task["id"] for task in NightShiftRunner.round_robin(tasks)] == [0, 3, 1, 2]
