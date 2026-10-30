@@ -543,4 +543,10 @@ mod tests {
         assert_eq!(pieces("Done.\r\nNext"), vec!["Done", ".\r\n"]);
         assert_eq!(pieces("Done.\nNext"), vec!["Done", ".\n"]);
     }
+
+    #[test]
+    fn a_mark_joins_the_word_after_it_and_no_piece_is_empty() {
+        assert_eq!(pieces("call(arg)"), vec!["call", "(arg"]);
+        assert_eq!(pieces("x ,y"), vec!["x", " ,"]);
+    }
 }
