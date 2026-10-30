@@ -1211,4 +1211,15 @@ mod tests {
         let rewrite = |list: &[&str]| with_cd(args(list).into_iter(), |arg| Some(arg.clone()), |arg| arg, "/w");
         assert_eq!(rewrite(&["-c", "model=x", "-cmodel=y", "hi"]), args(&["-c", "model=x", "-cmodel=y", "hi"]));
     }
+
+    #[test]
+    fn a_folder_the_base_commit_lacks_starts_the_session_at_the_top() {
+        let fixture = Fixture::new("untracked-dir");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        std::fs::create_dir_all(repo.join("scratch")).unwrap_or_default();
+        std::fs::write(repo.join("scratch/notes.txt"), "wip\n").unwrap_or_default();
+        let (session, cwd, dirty) = create(&home, &repo.join("scratch")).unwrap_or_else(|err| panic!("{err}"));
+        assert!(dirty);
+        assert_eq!(cwd, session.checkout);
+    }
 }
