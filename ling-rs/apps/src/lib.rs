@@ -405,4 +405,12 @@ mod tests {
         assert!(parse_status(&json!({"connected": false, "email": "a@x.com"})).is_empty());
         assert!(parse_status(&json!({"email": "a@x.com"})).is_empty());
     }
+
+    #[test]
+    fn a_narrower_scope_that_starts_like_the_apps_does_not_connect_it() {
+        let scopes = vec![format!("{}.readonly", App::Drive.scope()), format!("{}.readonly", App::Calendar.scope())];
+        let accounts = vec![Account { email: "a@x.com".into(), scopes }];
+        assert!(holders(&accounts, App::Drive).is_empty());
+        assert!(holders(&accounts, App::Calendar).is_empty());
+    }
 }
