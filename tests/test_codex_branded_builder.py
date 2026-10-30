@@ -1496,3 +1496,23 @@ def test_an_export_whose_version_cannot_be_stamped_is_not_built(stand_in_codex, 
         CodexBrandedBuilder, "stamp_version", classmethod(lambda cls, manifest, version: False)
     )
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "export")) is False
+
+
+def test_git_apply_drops_an_inherited_repository_and_stops_at_the_export(tmp_path, monkeypatch):
+    # A hook or a `git` alias that exported GIT_DIR would point every patch at another repository.
+    seen = {}
+
+    def run(command, cwd=None, env=None, check=False):
+        seen.update(command=command, cwd=cwd, env=env)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "other" / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "other"))
+    monkeypatch.setattr(builder_module.subprocess, "run", run)
+    export = tmp_path / "work" / "export"
+    export.mkdir(parents=True)
+    CodexBrandedBuilder.git_apply(str(export), "--check", "0001.patch")
+    assert seen["command"] == ["git", "apply", "--check", "0001.patch"]
+    assert seen["cwd"] == str(export)
+    assert "GIT_DIR" not in seen["env"] and "GIT_WORK_TREE" not in seen["env"]
+    assert seen["env"]["GIT_CEILING_DIRECTORIES"] == str((tmp_path / "work").resolve())
