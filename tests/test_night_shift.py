@@ -1536,6 +1536,23 @@ def test_the_nodes_are_asked_only_when_one_is_paired_and_wanted(fake_host, monke
     assert [lane["host"] for lane in lanes] == ["http://x"] and notes == []
 
 
+def test_a_running_request_on_a_lane_is_the_nights_only_if_its_task_is_on_that_lane_and_in_the_model(fake_host, monkeypatch):
+    class Running:
+        current_unit = None
+
+        def __init__(self, lane_host, in_model):
+            self.lane_host, self.in_model = lane_host, in_model
+    settings = NightShiftSettings({})
+    monkeypatch.setattr(FakeHost, "samples", [{"running": 1.0, "served": 1.0, "kv_pool": 1.0}])
+    blocker = lambda *runs: NightShiftRunner.start_blocker(REPLICA["host"], "p", [(None, run) for run in runs],
+                                                           settings, local=False)
+    assert blocker(Running(REPLICA["host"], True)) is None
+    # A task on this machine's lane does not account for a request on the replica.
+    assert "not the night run's" in blocker(Running("http://x", True))
+    # Nor does a task on the replica's lane that is running its tests, not asking the model.
+    assert "not the night run's" in blocker(Running(REPLICA["host"], False))
+
+
 @pytest.fixture
 def two_nodes(setup, fake_host, monkeypatch):
     """This machine as both sender and node: the pairing reaches `serve-job` in this process, and
