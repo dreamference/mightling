@@ -447,7 +447,7 @@ def test_a_base_mismatch_stops_the_install_before_any_adapter_file_is_fetched(
     ],
 )
 def test_only_a_dreamference_signature_installs_without_third_party(keys, remote, kind, reason):
-    source, _ = remote
+    source, fetched = remote
     if kind == "stranger":
         make_adapter(source, keys, key="stranger")
     elif kind == "release-namespace":
@@ -457,7 +457,18 @@ def test_only_a_dreamference_signature_installs_without_third_party(keys, remote
         (source / "manifest.json.sig").unlink()
     with pytest.raises(ValueError, match=reason):
         AdapterInstaller.install(None, f"{ADAPTER_REPO}@{COMMIT}", served(base_snapshot()))
+    # Refused on the manifest alone: the weights are never asked for.
+    assert len(fetched) == 1
     assert AdapterStore.entries() == {}
+
+
+def test_a_name_an_adapter_of_another_repository_holds_here_is_refused(keys, remote):
+    source, _ = remote
+    make_adapter(source, keys)
+    AdapterStore.put({"name": "rust", "repo": "someone/rust", "snapshot": "elsewhere"})
+    with pytest.raises(ValueError, match="installed from someone/rust"):
+        AdapterInstaller.install(None, f"{ADAPTER_REPO}@{COMMIT}", served(base_snapshot()))
+    assert AdapterStore.get("rust")["repo"] == "someone/rust"
 
 
 def test_a_third_party_adapter_installs_only_with_its_name_typed(keys, remote):
