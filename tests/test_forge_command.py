@@ -293,3 +293,30 @@ def test_a_stopped_or_failing_github_mirror_says_so(monkeypatch):
     )
     last = {"at": 990, "repositories": {"o/a": {"ok": True}, "o/b": {"ok": False}}}
     assert ForgeCommand.github_summary(last) == "last run 10 s ago, problems in o/b"
+
+
+# Ages and times
+
+
+@pytest.mark.parametrize(
+    ("at", "shown"),
+    [
+        (None, "never"),
+        ("soon", "never"),
+        ([], "never"),
+        (10_000 - 119, "119 s ago"),
+        ("9880", "2 min ago"),
+        (10_000 - 7199, "119 min ago"),
+        (10_000 - 9000, "2.5 h ago"),
+    ],
+)
+def test_an_age_is_shown_in_seconds_minutes_or_hours_and_never_when_unknown(monkeypatch, at, shown):
+    monkeypatch.setattr(forge_command.time, "time", lambda: 10_000.0)
+    assert ForgeCommand.age(at) == shown
+
+
+def test_a_time_is_read_in_iso_form_with_z_for_utc_and_none_otherwise():
+    assert ForgeCommand.parse_time("1970-01-01T00:01:40Z") == 100.0
+    assert ForgeCommand.parse_time("1970-01-01T00:01:40+00:00") == 100.0
+    assert ForgeCommand.parse_time("yesterday") is None
+    assert ForgeCommand.parse_time(None) is None
