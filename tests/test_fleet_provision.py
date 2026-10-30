@@ -722,6 +722,11 @@ def test_a_bundle_file_that_fails_its_checksum_installs_nothing(tmp_path):
     assert not (tmp_path / ".local/share/dreamference/mightling/bin/ling").exists()
 
 
+def test_a_from_that_is_not_a_folder_is_named(tmp_path):
+    result = run_install_from(tmp_path, tmp_path / "no-such-bundle")
+    assert result.returncode == 1 and "--from:" in result.stderr and "is not a directory" in result.stderr
+
+
 def test_install_help_documents_from_and_no_host_setup():
     result = subprocess.run(["bash", str(ROOT / "install.sh"), "--help"], capture_output=True, text=True, check=False)
     assert "--from <dir>" in result.stdout and "--no-host-setup" in result.stdout
