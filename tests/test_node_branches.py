@@ -33,6 +33,7 @@ from dreamference.node import (
 )
 from dreamference.node.fleet_askpass import FleetAskpass
 from dreamference.node.fleet_session import FleetSession
+from tests.test_fleet_hub_fetch import FOLDER, authorised_lines, completed, lan_sessions
 
 SECRET = "pa55-for-the-test"
 
@@ -524,3 +525,47 @@ def test_an_adapter_whose_manifest_names_another_is_refused(monkeypatch, tmp_pat
     monkeypatch.setattr(AdapterVerifier, "check_files", classmethod(check_files))
     assert NodeAdapterSync._check(tmp_path, "style") == "the manifest names other, not style"
     assert NodeAdapterSync._check(tmp_path, "other") is None
+
+
+# -- the LAN copy's key: never authorised unless it was made, is removable, and took
+
+
+def test_a_lan_copy_whose_key_was_not_made_asks_the_donor_for_nothing(tmp_path):
+    for made in (completed(1), completed(0, "/tmp/work\n")):
+        fetch, recipient, donor = lan_sessions(tmp_path)
+        answer = recipient.run
+        recipient.run = lambda script, made=made, answer=answer, **kwargs: (
+            made if "ssh-keygen" in script else answer(script, **kwargs)
+        )
+        assert not fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
+        assert authorised_lines(donor) == []
+        assert not any("ssh_host_ed25519" in command for command in donor.commands)
+
+
+def test_a_lan_copy_key_with_another_comment_is_never_authorised(tmp_path, caplog):
+    fetch, recipient, donor = lan_sessions(tmp_path)
+    answer = recipient.run
+    recipient.run = lambda script, **kwargs: (
+        completed(0, "/tmp/work\nssh-ed25519 AAAAkey someone-else\n")
+        if "ssh-keygen" in script
+        else answer(script, **kwargs)
+    )
+    with caplog.at_level("WARNING"):
+        assert not fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
+    assert "not one it can remove" in caplog.text
+    assert authorised_lines(donor) == []
+    assert any("sed -i" in command for command in donor.commands)
+
+
+def test_a_lan_copy_whose_key_the_donor_did_not_take_copies_nothing_and_cleans_up(tmp_path):
+    fetch, recipient, donor = lan_sessions(tmp_path)
+    answer = donor.run
+    donor.run = lambda script, **kwargs: (
+        completed(1)
+        if "printf" in script and "authorized_keys" in script
+        else answer(script, **kwargs)
+    )
+    assert not fetch.lan_copy(FOLDER, donor, "spark-1a2b.local", "owner", "/donor/hub")
+    assert not any("rsync" in command for command in recipient.commands)
+    assert any("sed -i" in command for command in donor.commands)
+    assert any(command.startswith("rm -rf") for command in recipient.commands)
