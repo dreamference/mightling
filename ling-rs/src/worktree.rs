@@ -1106,4 +1106,15 @@ mod tests {
         assert_eq!(prune(&home, &repo), 0, "a running session is never pruned");
         assert!(session.checkout.is_dir());
     }
+
+    #[test]
+    fn a_setting_is_read_trimmed_and_an_empty_key_means_in_place() {
+        let fixture = Fixture::new("parse");
+        let home = fixture.home();
+        assert_eq!(Mode::parse(" Worktree\n"), Some(Mode::Worktree));
+        assert_eq!(Mode::parse(" off "), Some(Mode::Local));
+        std::fs::write(home.join("config.toml"), "[desktop]\nmightling-worktree-mode = \"\"\n").unwrap_or_default();
+        assert_eq!(configured(&home), Some(Mode::Local));
+        assert_eq!(mode_now(&home).1, format!("{KEY} in {}", home.join("config.toml").display()));
+    }
 }
