@@ -1565,3 +1565,9 @@ def test_the_export_keeps_its_symbolic_links_except_on_windows(tmp_path, monkeyp
     assert CodexBrandedBuilder.extract_archive(stream, str(tmp_path)) is True
     assert (tmp_path / "codex-rs" / "LICENSE.txt").read_text() == "text"
     assert (tmp_path / "codex-rs" / "LICENSE").is_symlink() is not windows
+
+
+def test_an_export_that_cannot_be_written_is_reported_not_raised(tmp_path, capsys):
+    (tmp_path / "codex-rs").write_text("a file where the tree's directory goes")
+    assert CodexBrandedBuilder.extract_archive(_tar(("codex-rs/main.rs", None)), str(tmp_path)) is False
+    assert "Could not unpack the exported source" in capsys.readouterr().out
