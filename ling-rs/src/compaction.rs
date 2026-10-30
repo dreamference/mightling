@@ -644,6 +644,15 @@ mod tests {
     }
 
     #[test]
+    fn the_limit_lies_strictly_between_zero_and_the_window() {
+        // A pool of one token is a share of none: a limit of 0 would compact at every turn.
+        assert_eq!(limit_for(262_144, Some(1)), None);
+        // 60% of 50,000 is exactly the window: the catalog's limit already says that.
+        assert_eq!(limit_for(30_000, Some(50_000)), None);
+        assert_eq!(limit_for(30_001, Some(50_000)), Some(30_000));
+    }
+
+    #[test]
     fn the_limit_goes_first_on_the_command_line() {
         assert_eq!(
             with_limit(args(&["ling", "exec", "hi"]), Some(94_144), ""),
