@@ -18,6 +18,7 @@ TIER_VARIABLES = (
     "DREAMFERENCE_MIGHTLING_AIRGAPPED",
     "DREAMFERENCE_VLLM_HOST",
     "DREAMFERENCE_DIFFUSION_MODEL",
+    "DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER",
 )
 
 
@@ -97,6 +98,7 @@ def test_a_depth_from_the_environment_is_saved_only_when_it_is_not_the_default(
     [
         ("DREAMFERENCE_USE_TENSORIZER", "use_tensorizer"),
         ("DREAMFERENCE_MIGHTLING_GMAIL", "mightling_gmail"),
+        ("DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER", "mightling_compaction_ledger"),
     ],
 )
 def test_boolean_switches_take_the_argument_over_the_environment_over_the_file(
@@ -280,3 +282,10 @@ def test_the_server_tuning_keys_are_read_from_the_file_and_saved_back(tmp_path):
     assert {key: getattr(config, key) for key in tuning} == tuning
     config.save_config()
     assert _saved(path) == tuning
+
+
+def test_the_compaction_ledger_also_takes_on_from_the_environment(tmp_path, monkeypatch):
+    path = tmp_path / "dreamference.toml"
+    path.write_text("mightling_compaction_ledger = false\n")
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER", "On")
+    assert DreamferenceConfig(config_file=str(path)).mightling_compaction_ledger is True
