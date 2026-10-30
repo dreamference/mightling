@@ -115,6 +115,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_planted_symlink_is_neither_read_nor_written_through() {
         let dir = tempfile::tempdir().unwrap();
