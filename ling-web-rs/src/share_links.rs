@@ -506,4 +506,13 @@ mod tests {
             at.text
         );
     }
+
+    #[test]
+    fn a_google_host_has_at_most_two_labels_after_google() {
+        assert_eq!(classify("https://google.com.ab.cd/search?q=x"), None);
+        assert_eq!(
+            classify("https://www.google.co.uk/search?q=x"),
+            search("x", None)
+        );
+    }
 }
