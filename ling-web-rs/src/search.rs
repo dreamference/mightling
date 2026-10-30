@@ -1100,4 +1100,10 @@ mod tests {
         assert!(SearchOptions::new(None, None, Some("e-ch")).is_err());
         assert!(SearchOptions::new(None, None, Some("deu")).is_ok());
     }
+
+    #[test]
+    fn social_media_is_the_social_category() {
+        let options = SearchOptions::new(Some(" Social Media "), None, None).unwrap();
+        assert_eq!(options.searxng_category(), "social media");
+    }
 }
