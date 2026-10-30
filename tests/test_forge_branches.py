@@ -575,3 +575,72 @@ def test_serving_a_promotion_answers_the_restores_result_and_its_exit_code(
     state["result"] = {"ok": ok}
     assert ForgeMove.serve_promote() == code
     assert json.loads(capsys.readouterr().out) == {"ok": ok}
+
+
+# -- forge move restore here [key]
+
+
+@pytest.fixture
+def restore_here(monkeypatch):
+    """`restore_here` over stand-ins: the unit's commands are recorded, docker never runs."""
+    from dreamference.forge.forge_container import ForgeContainer
+    from dreamference.forge.forge_repositories import ForgeRepositories
+    from dreamference.forge.forge_service import ForgeService
+
+    seen = {"systemctl": [], "freeze": [], "forgejo": [], "hooks": 0}
+    state = {"manifest": {"refs": {}}, "restart": 0, "answering": True}
+
+    def systemctl(cls, *arguments):
+        seen["systemctl"].append(arguments)
+        code = state["restart"] if arguments[0] == "restart" else 0
+        return subprocess.CompletedProcess(arguments, code, "", "")
+
+    monkeypatch.setattr(ForgeService, "systemctl", classmethod(systemctl))
+    monkeypatch.setattr(ForgeService, "install_units", classmethod(lambda cls: None))
+    monkeypatch.setattr(
+        ForgeBackup, "install_data", classmethod(lambda cls, folder: (state["manifest"], None))
+    )
+    monkeypatch.setattr(ForgeMove, "freeze", classmethod(lambda cls, on: seen["freeze"].append(on)))
+    monkeypatch.setattr(
+        ForgeContainer, "wait_until_answering", classmethod(lambda cls, _t: state["answering"])
+    )
+    monkeypatch.setattr(
+        ForgeContainer, "forgejo", classmethod(lambda cls, argv, **_: seen["forgejo"].append(argv))
+    )
+    monkeypatch.setattr(
+        ForgeRepositories,
+        "install_hooks",
+        classmethod(lambda cls, **_: seen.update(hooks=seen["hooks"] + 1)),
+    )
+    return state, seen
+
+
+def test_a_set_that_does_not_restore_starts_the_old_forge_again_and_stays_frozen(
+    restore_here, tmp_path
+):
+    from dreamference.forge.forge_settings import ForgeSettings
+
+    state, seen = restore_here
+    state["manifest"] = None
+    before = ForgeSettings.state()
+    assert ForgeMove.restore_here(tmp_path, None) == {
+        "ok": False,
+        "error": "the set did not restore",
+    }
+    assert seen["systemctl"] == [
+        ("stop", "mightling-forge.service"),
+        ("start", "mightling-forge.service"),
+    ]
+    assert seen["freeze"] == [] and seen["forgejo"] == []
+    assert ForgeSettings.state() == before, "the role is not claimed"
+
+
+@pytest.mark.parametrize(("restart", "answering"), [(1, True), (0, False)])
+def test_a_restored_forge_that_does_not_start_regenerates_no_hooks(
+    restore_here, tmp_path, restart, answering
+):
+    state, seen = restore_here
+    state.update(restart=restart, answering=answering)
+    result = ForgeMove.restore_here(tmp_path, None)
+    assert result == {"ok": False, "error": "the restored forge did not start"}
+    assert seen["forgejo"] == [] and seen["hooks"] == 0
