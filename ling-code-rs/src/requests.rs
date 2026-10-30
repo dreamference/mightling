@@ -128,4 +128,12 @@ mod tests {
         assert_eq!(drain(&state), None);
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "index\n");
     }
+
+    #[test]
+    fn a_queue_past_a_mebibyte_is_dropped_unread() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(path(dir.path()), "index\n".repeat(200_000)).unwrap();
+        assert_eq!(drain(dir.path()), None);
+        assert!(!path(dir.path()).exists());
+    }
 }
