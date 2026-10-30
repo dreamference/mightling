@@ -498,6 +498,16 @@ mod tests {
     }
 
     #[test]
+    fn every_word_for_off_keeps_a_scratch_home_from_indexing() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("user");
+        let scratch = dir.path().join("scratch/codexhome");
+        for off in ["0", "false", "FALSE", "no", "No", "off", " off "] {
+            assert!(!indexes_unasked_for(&scratch, &user, Some(off)), "{off:?}");
+        }
+    }
+
+    #[test]
     fn defaults_are_the_specs() {
         let s = Settings::default();
         assert_eq!(
