@@ -122,3 +122,32 @@ def test_weights_that_fill_the_recipes_arena_are_refused(launch, capsys):
     out = capsys.readouterr().out
     assert "Model weights do not fit the configured memory arena for 'model'." in out
     assert launch.seen["downloads"] == []
+
+
+# -- what decides the rest of the gate --------------------------------------------------------------
+
+
+def test_the_memory_gate_scores_what_is_free_after_the_cache_eviction(launch):
+    # A 60.8 GB arena: 50 GB free before the eviction would be refused, 70 GB after it is not.
+    launch.state["evicted"] = 20.0
+    launch.seen["readings"] = [_telemetry(50.0), _telemetry(70.0)]
+
+    with pytest.raises(Stop):
+        launch.go()
+    assert launch.seen["downloads"] == [("model", False)]
+
+
+def test_without_an_eviction_the_first_reading_is_the_one_scored(launch, capsys):
+    launch.seen["readings"] = [_telemetry(50.0), _telemetry(70.0)]
+
+    with pytest.raises(SystemExit):
+        launch.go()
+    assert "Not enough memory to start vLLM." in capsys.readouterr().out
+
+
+def test_the_callers_tensorizer_choice_overrides_the_recipe_and_reaches_the_drafter(launch):
+    launch.state["recipe"] = {"gpu_memory_utilization": 0.5, "use_tensorizer": True}
+
+    with pytest.raises(Stop):
+        launch.go(use_tensorizer=False, draft_model="drafter")
+    assert launch.seen["downloads"] == [("model", False), ("drafter", False)]
