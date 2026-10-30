@@ -379,3 +379,17 @@ describe("RpcClient and window/IPC bridge routes", () => {
     }
   });
 });
+
+describe("a web link from an answer (PARITY_CLAUDE §4.5)", () => {
+  it("goes to the main process in the app, and to a new tab with no opener in a browser", async () => {
+    const { sent } = stubWindow("electron");
+    await openWebLink("https://example.com/a", "t1");
+    expect(sent).toEqual([{ type: "open/url", url: "https://example.com/a", thread: "t1" }]);
+
+    stubWindow(undefined);
+    const opened: unknown[][] = [];
+    (globalThis as { window: { open?: unknown } }).window.open = (...args: unknown[]) => opened.push(args);
+    await expect(openWebLink("https://example.com/b", null)).resolves.toBeNull();
+    expect(opened).toEqual([["https://example.com/b", "_blank", "noopener,noreferrer"]]);
+  });
+});
