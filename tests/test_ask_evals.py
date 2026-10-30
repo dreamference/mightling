@@ -166,6 +166,33 @@ def test_search_faults_look_like_searxng_when_every_engine_refuses():
     assert "CAPTCHA" in CAPTCHA_PAGE
 
 
+def _raw(port: int, request: bytes) -> bytes:
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as s:
+        s.sendall(request)
+        return s.recv(4096)
+
+
+def test_the_stand_ins_reset_stall_and_rate_limit_as_the_scenario_says(tmp_path):
+    found = [{"title": "T", "url": "http://a.example.test/p", "content": "c"}]
+    web = {
+        "search": {"fault": "stall", "delay_s": 0.2, "results": found},
+        "pages": {"http://a.example.test/slow": {"fault": "stall", "delay_s": 0.2}},
+        "other": {"fault": "rate_limited"},
+        "connect": {"fault": "reset"},
+    }
+    with StandIns(web, tmp_path / "web.jsonl") as stand:
+        status, body = _get(stand.searxng_url + "/search?q=x&format=json")
+        assert status == 200 and json.loads(body)["results"][0]["url"] == found[0]["url"]
+        assert _get("http://a.example.test/slow", stand.proxy_url)[0] == 403  # then forbidden
+        answer = _raw(stand.proxy.server_address[1], b"GET http://b.example.test/ HTTP/1.0\r\n\r\n")
+        assert b" 429 " in answer and b"Retry-After: 60" in answer
+        tunnel = b"CONNECT www.search.example:443 HTTP/1.1\r\nHost: x\r\n\r\n"
+        assert _raw(stand.proxy.server_address[1], tunnel) == b""
+    web["search"] = {"fault": "reset"}
+    with StandIns(web, tmp_path / "web2.jsonl") as stand:
+        assert _raw(stand.search.server_address[1], b"GET /search?q=x HTTP/1.0\r\n\r\n") == b""
+
+
 def test_with_one_engine_down_the_others_still_answer():
     found = {"results": [{"title": "T", "url": "http://a.example.test/p", "content": "c"}]}
     status, body = search_answer("q", {**found, "fault": "one_down"})
