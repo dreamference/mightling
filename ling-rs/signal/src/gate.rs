@@ -271,6 +271,18 @@ mod tests {
     }
 
     #[test]
+    fn a_pairing_code_binds_once() {
+        let mut gate = Gate::new(None);
+        gate.binding = Some(Binding { code: "123456".to_string(), expires_ms: NOW + BINDING_MS });
+        assert!(matches!(gate.check(&direct("b", "123456", NOW), &Mode::Dedicated, Some("fb"), NOW), Verdict::Bound(_)));
+        assert!(gate.binding.is_none());
+        // Even with the owner gone again, the used code binds no one else.
+        gate.owner = None;
+        assert_eq!(gate.check(&direct("c", "123456", NOW + 1), &Mode::Dedicated, Some("fc"), NOW), Verdict::Ignored);
+        assert!(gate.owner.is_none());
+    }
+
+    #[test]
     fn an_expired_code_binds_no_one() {
         let mut gate = Gate::new(None);
         gate.binding = Some(Binding { code: "654321".to_string(), expires_ms: NOW });
