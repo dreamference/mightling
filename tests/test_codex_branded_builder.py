@@ -1309,3 +1309,16 @@ def test_a_v8_file_that_does_not_match_its_pin_is_discarded(tmp_path, monkeypatc
     assert CodexBrandedBuilder.fetch_rusty_v8(export) is None
     assert tampered in downloaded
     assert not (tmp_path / "cache" / "rusty_v8" / "146.4.0" / tampered).exists()
+
+
+def test_a_cached_v8_file_is_reused_only_while_it_still_matches(tmp_path, monkeypatch):
+    export, _, downloaded = _v8_release(tmp_path, monkeypatch)
+    first = CodexBrandedBuilder.fetch_rusty_v8(export)
+    assert CodexBrandedBuilder.fetch_rusty_v8(export) == first
+    assert downloaded == [V8_CHECKSUMS, V8_ARCHIVE, V8_BINDING]
+
+    # A cached archive changed on disk is fetched again, never handed to Cargo as it is.
+    Path(first["RUSTY_V8_ARCHIVE"]).write_bytes(b"changed on disk")
+    assert CodexBrandedBuilder.fetch_rusty_v8(export) == first
+    assert downloaded[3:] == [V8_ARCHIVE]
+    assert Path(first["RUSTY_V8_ARCHIVE"]).read_bytes() == b"v8 archive"
