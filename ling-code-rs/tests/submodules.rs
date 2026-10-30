@@ -1175,3 +1175,31 @@ fn a_nested_relative_url_is_resolved_against_its_parents_remote() {
         Some("example.com/other-org")
     );
 }
+
+#[test]
+fn a_dot_slash_url_stays_with_the_superprojects_owner() {
+    let f = fixture();
+    let root = f.repo.root.clone();
+    git(
+        &root,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://example.com/acme/super.git",
+        ],
+    );
+    let lib = library(
+        f.dir.path(),
+        "lib",
+        "t@localhost",
+        &[("a.py", "x = 1\n")],
+        2,
+    );
+    add_submodule(&root, &lib, "lib", Some("./lib.git"));
+    let all = decisions(&f.repo);
+    assert_eq!(
+        (all[0].indexed, all[0].namespace, all[0].inherits_trust),
+        (true, Namespace::Same, true)
+    );
+}
