@@ -663,6 +663,46 @@ def test_the_advert_takes_its_records_from_the_machine(monkeypatch):
     assert NodeAdvertiser.is_main_model("no-such-model") is False
 
 
+def test_a_probe_that_fails_says_no(monkeypatch, tmp_path):
+    import urllib.request
+
+    from dreamference.hardware.hardware_manager import HardwareManager
+    from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+
+    class Answer:
+        def __init__(self, status):
+            self.status = status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: Answer(200))
+    assert NodeAdvertiser.model_answers(8000) is True
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: Answer(503))
+    assert NodeAdvertiser.model_answers(8000) is False
+
+    def bad_url(url, timeout):
+        raise ValueError("unknown url type")
+
+    monkeypatch.setattr(urllib.request, "urlopen", bad_url)
+    assert NodeAdvertiser.model_answers(8000) is False
+
+    def no_hardware(cls):
+        raise RuntimeError("no nvidia-smi")
+
+    monkeypatch.setattr(HardwareManager, "detect_gb10_hardware", classmethod(no_hardware))
+    assert NodeAdvertiser.is_gb10() is False
+    ling = tmp_path / "ling"
+    ling.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(ling)))
+    assert NodeAdvertiser.ling_executable() is None  # there, but not executable
+    ling.chmod(0o755)
+    assert NodeAdvertiser.ling_executable() == str(ling)
+
+
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join(
         [
