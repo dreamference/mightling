@@ -60,3 +60,14 @@ def test_a_head_that_is_not_http_is_refused_without_reaching_the_engine(monkeypa
     assert sink.data.startswith(b"HTTP/1.1 400 Bad Request\r\n")
     assert b"Not an HTTP/1.x request." in sink.data
     assert sink.closed
+
+
+# -- watch_client --------------------------------------------------------------------------------------
+
+
+def test_what_a_client_sends_after_its_request_is_read_and_dropped():
+    async def watch(reader):
+        await ModelGateService.watch_client(reader)
+        return await reader.read()
+
+    assert _run(b"GET /v1/models HTTP/1.1\r\n\r\n", watch) == b""
