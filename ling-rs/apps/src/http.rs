@@ -142,4 +142,14 @@ mod tests {
         drop(listener);
         assert!(get(&addr, "/status", None, Duration::from_millis(500)).is_err());
     }
+
+    #[test]
+    fn only_a_chunked_transfer_encoding_is_dechunked() {
+        let plain = b"HTTP/1.0 200 OK\r\nX-Note: chunked\r\nContent-Length: 2\r\n\r\n{}";
+        assert_eq!(parse_response(plain), Ok((200, "{}".to_string())));
+        let extension = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3;name=value\r\nabc\r\n0\r\n\r\n";
+        assert_eq!(parse_response(extension), Ok((200, "abc".to_string())));
+        let truncated = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nab";
+        assert_eq!(parse_response(truncated), Err("truncated chunk".to_string()));
+    }
 }
