@@ -249,6 +249,27 @@ def test_tests_the_window_cut_off_leave_the_task_interrupted_not_committed(setup
     assert "night:" not in git(setup["repo"], "log", "--format=%s", "night/20261001-0100-abc").stdout
 
 
+def test_a_task_runs_in_a_scope_with_a_hard_memory_cap_and_no_swap(setup, monkeypatch):
+    import dreamference.night_shift.night_shift_task_run as task_run_module
+
+    started = []
+
+    def popen(argv, **kwargs):
+        started.append(argv)
+        raise RuntimeError("not started")
+
+    record = queue(setup["night"], setup["repo"])
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({"task_memory": "8G"}), setup["ling"],
+                            time.time() + 60)
+    run.USE_SCOPE = True
+    monkeypatch.setattr(task_run_module.subprocess, "Popen", popen)
+    with pytest.raises(RuntimeError):
+        run._run_capped(["true"], setup["repo"], setup["night"] / "out.log", None)
+    argv = started[0]
+    assert argv[:3] == ["systemd-run", "--user", "--scope"]
+    assert argv[argv.index("MemoryMax=8G") - 1] == "-p" and argv[argv.index("MemorySwapMax=0") - 1] == "-p"
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
