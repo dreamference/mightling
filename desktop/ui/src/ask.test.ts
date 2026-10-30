@@ -165,6 +165,8 @@ describe("Ask's files beside the answer (DESKTOP_PARITY_CLAUDE §4.1)", () => {
   it("names a file's kind and its name", () => {
     expect(fileKindLabel("markdown")).toBe("Document");
     expect(fileKindLabel("html")).toBe("Web page");
+    expect(fileKindLabel("pdf")).toBe("PDF");
+    expect(fileKindLabel("image")).toBe("Image");
     expect(fileKindLabel(null)).toBe("File");
     expect(baseName(`${folder}/sub/chart.svg`)).toBe("chart.svg");
     expect(baseName("C:\\Users\\u\\a.pdf")).toBe("a.pdf");
