@@ -364,6 +364,31 @@ def test_a_command_that_ignores_the_stop_is_killed(setup, monkeypatch):
             pass
 
 
+def test_stopping_a_command_stops_the_processes_it_started(setup):
+    import signal
+
+    record = queue(setup["night"], setup["repo"])
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() - 1)
+    pid_file = setup["night"] / "pid"
+    command = ["sh", "-c", f"sleep 60 & echo $! > {pid_file}; wait"]
+    assert run._run_capped(command, setup["repo"], setup["night"] / "out.log", None) == "timeout"
+    pid = int(pid_file.read_text())
+    try:
+        for _ in range(50):  # the child is reaped by whoever adopted it
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+    finally:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def test_a_task_cannot_write_the_skills_the_users_next_session_reads(setup, monkeypatch):
     # A local task runs with the user's CODEX_HOME, and the launcher makes `$CODEX_HOME/skills`
     # writable unless the config names `writable_roots`: a hostile task could plant a skill there
