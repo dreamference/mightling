@@ -375,6 +375,13 @@ def test_project_markers_in_the_temporary_root_are_reported(tmp_path, monkeypatc
     assert CodexTestRunner.stray_project_markers() == [str(tmp_path / ".git")]
 
 
+def test_a_temporary_root_other_than_tmp_is_named(tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    assert CodexTestRunner.unusual_temp_root() == str(tmp_path)
+    monkeypatch.setattr(tempfile, "tempdir", "/tmp/")
+    assert CodexTestRunner.unusual_temp_root() is None
+
+
 def test_the_temporary_directory_keeps_png_off_a_base64_boundary():
     import base64
 

@@ -95,6 +95,8 @@ PROJECT_MARKERS: Final[tuple] = (".git", ".agents", ".codex")
 TEST_BUILD_DISK_GIB: Final[int] = 40
 DEFAULT_BUILD_JOBS: Final[int] = 6
 DEFAULT_TEST_THREADS: Final[int] = 8
+# The temporary root upstream's tests are written for (see `make_temp_dir`).
+UPSTREAM_TEMP_ROOT: Final[str] = "/tmp"
 
 
 class CodexTestRunner:
@@ -381,6 +383,21 @@ class CodexTestRunner:
         return [os.path.join(root, name) for name in PROJECT_MARKERS if os.path.lexists(os.path.join(root, name))]
 
     @classmethod
+    def unusual_temp_root(cls) -> str | None:
+        """Names the temporary root the tests' own directory goes under, when it is not `/tmp`.
+
+        `make_temp_dir` keeps its name safe but not its parent's. A longer root (a `TMPDIR` such as
+        `~/.cache/x-y/tmp`) pushes the app-server's Unix sockets past the 108-byte limit, puts a
+        `-` in the paths the external-agent migration tests decode, and moves the pet-image path
+        onto a `cG5n` boundary: about seventeen upstream tests fail for it alone.
+
+        Returns:
+            str | None: The root, or None when it is `/tmp`.
+        """
+        root = tempfile.gettempdir()
+        return None if os.path.normpath(root) == UPSTREAM_TEMP_ROOT else root
+
+    @classmethod
     def make_temp_dir(cls) -> str:
         """
         Creates the tests' private temporary directory.
@@ -631,9 +648,15 @@ class CodexTestRunner:
         if not cls.has_disk_space():
             return 1
         markers_before = cls.stray_project_markers()
-        for marker in markers_before:
-            print(f"⚠️ {marker} makes {tempfile.gettempdir()} a project root to the upstream tests; "
-                  "the skills tests will fail until it is removed.")
+        warnings = [f"⚠️ {marker} makes {tempfile.gettempdir()} a project root to the upstream tests; "
+                    "the skills tests will fail until it is removed." for marker in markers_before]
+        temp_root = cls.unusual_temp_root()
+        if temp_root is not None:
+            warnings.append(f"⚠️ The tests' temporary directory goes under {temp_root}, not /tmp; about "
+                            "seventeen upstream tests (Unix socket paths, path decoding) fail there. "
+                            "Run with TMPDIR=/tmp.")
+        for warning in warnings:
+            print(warning)
         with open(os.path.join(BUILD_CACHE_DIR, ".test.lock"), "w") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

@@ -133,3 +133,5 @@ Even `cargo tree` rewrites the submodule's `Cargo.lock`. The launcher's unit tes
 ## Codex's own tests
 
 `ling-admin codex test` (`runner/codex_test_runner.py`) runs Codex's own tests on the patched tree. `codex-tests/` holds what it needs: `mightling-skips.toml` (each skipped test with its reason), `snapshots/` (Mightling's accepted versions of upstream's `.snap` files) and `patches/` (test-only diffs); none of it reaches the build `ling` comes from.
+
+Run it with `TMPDIR` unset (or `/tmp`). The tests' private temporary directory goes under the caller's temporary root, and upstream's tests are written for `/tmp`: on 2026-10-30 a run under a longer root with `-` in it failed 17 tests for that alone (the app-server's Unix sockets past the 108-byte path limit, the external-agent migration tests' path decoding). The run warns before it starts when the root is not `/tmp`.
