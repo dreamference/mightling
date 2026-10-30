@@ -1164,6 +1164,12 @@ def test_earlyoom_absolute_swap_floor_counts_as_ungated(monkeypatch):
     assert opened is None
     assert gated is not None and "swap" in gated
 
+def test_earlyoom_absolute_swap_floor_at_total_swap_counts_as_ungated(monkeypatch):
+    # earlyoom acts once free swap is at or below the floor, so a floor equal to total swap is
+    # `-s 100` in absolute form.
+    monkeypatch.setattr(VLLMServerManager, "_swap_total_gb", staticmethod(lambda: 64.0))
+    assert VLLMServerManager._earlyoom_fault(["earlyoom", "-m", "5", "-S", str(64 * 1024 ** 2)]) is None
+
 def test_shipped_earlyoom_args_pass_the_check():
     # The arguments the hint tells the operator to install must themselves satisfy the check, or
     # following the instructions leaves the gate failing.
