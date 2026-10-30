@@ -59,3 +59,38 @@ def test_a_build_that_leaves_no_image_behind_is_a_failure(docker, monkeypatch, c
     assert mgr.ensure_docker_image(DEFAULT_VLLM_IMAGE) is False
     assert [argv[:2] for argv in state["commands"]] == [["docker", "build"]]
     assert "is missing locally and could not be built" in capsys.readouterr().out
+
+
+# -- probe_image ---------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def probe(monkeypatch):
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(VLLMServerManager, "_image_probe_cache", {})
+    monkeypatch.setattr(mgr, "is_image_present", lambda image: True)
+    runs = []
+
+    def answer(code, stdout):
+        def run(argv, **kwargs):
+            runs.append(argv)
+            return subprocess.CompletedProcess(argv, code, stdout=stdout, stderr="")
+        monkeypatch.setattr(vllm_server_manager.subprocess, "run", run)
+
+    return mgr, runs, answer
+
+
+def test_a_probe_container_that_fails_is_not_read_and_its_unknown_is_kept(probe):
+    mgr, runs, answer = probe
+    answer(1, "vllm=0.12.1\ntensorizer=True\n")
+
+    assert mgr.probe_image("img:1") == {"vllm_version": None, "has_tensorizer": False}
+    assert mgr.probe_image("img:1") == {"vllm_version": None, "has_tensorizer": False}
+    assert len(runs) == 1
+
+
+def test_lines_the_probe_did_not_write_are_passed_over(probe):
+    mgr, runs, answer = probe
+    answer(0, "WARNING: the requested image's platform\nvllm=0.11.0rc1+cu129\ntensorizer=True\n")
+
+    assert mgr.probe_image("img:1") == {"vllm_version": (0, 11), "has_tensorizer": True}
