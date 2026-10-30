@@ -824,6 +824,10 @@ def _watchdog_with_readings(monkeypatch, readings):
     monkeypatch.setattr(
         psi_watchdog.MemoryPressureWatchdog, "_kill_via_docker_socket", _fake_socket_kill
     )
+    # `_keep_down` speaks to the socket itself, after a direct kill; that must not reach it either.
+    monkeypatch.setattr(
+        psi_watchdog.MemoryPressureWatchdog, "_docker_api", lambda self, action, body=b"": False
+    )
     wd = psi_watchdog.MemoryPressureWatchdog(
         "test-container", limit_pct=60.0, trip_duration_s=0.05,
         sustained_pct=25.0, sample_interval_s=0.01,
@@ -1026,6 +1030,9 @@ def test_watchdog_survives_a_raising_sample(monkeypatch):
     )
     monkeypatch.setattr(psi_watchdog.subprocess, "run",
                         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr=""))
+    monkeypatch.setattr(
+        psi_watchdog.MemoryPressureWatchdog, "_docker_api", lambda self, action, body=b"": False
+    )
     assert wd.start() is True
     monkeypatch.setattr(psi_watchdog, "read_memory_pressure_full", _flaky)
     wd._thread.join(timeout=5)
