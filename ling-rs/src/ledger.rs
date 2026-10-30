@@ -559,4 +559,10 @@ mod tests {
         let ledger = Ledger::from_rollout(&rollout, &dir, Some(""));
         assert_eq!(ledger.last_test, Some(("3 passed in 0.3s".to_string(), "pytest b".to_string())));
     }
+
+    #[test]
+    fn a_list_at_its_cap_has_no_more_line() {
+        let ledger = Ledger { changed: (0..MAX_CHANGED).map(|index| format!(" M {index}")).collect(), ..Ledger::default() };
+        assert!(!ledger.render().contains("more"));
+    }
 }
