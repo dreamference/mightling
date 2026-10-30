@@ -297,6 +297,13 @@ class DreamferenceConfig:
             else self.file_data.get("guided_decoding_backend", DEFAULT_GUIDED_DECODING_BACKEND)
         )
 
+        # File only, and None when the file is silent: `server start` then takes the model
+        # recipe's value, else hermes and 8192. A default here would override every recipe.
+        file_parser = self.file_data.get("tool_call_parser")
+        self.tool_call_parser: str | None = str(file_parser) if file_parser else None
+        file_batched = self.file_data.get("max_num_batched_tokens")
+        self.max_num_batched_tokens: int | None = int(file_batched) if file_batched is not None else None
+
         # The model server's engine, through the same tiers; an unknown name is skipped, so a typo
         # falls through to the model's default instead of stopping `server start`.
         self.server_engine: str | None = DEFAULT_SERVER_ENGINE

@@ -327,3 +327,46 @@ def test_web_api_status_answers_hardware_vllm_and_context(monkeypatch):
     assert sent == [200]
     assert json.loads(handler.wfile.getvalue()) == {
         "hardware": {"gpu": "stub"}, "vllm": {"running": False}, "context": {"total_indexed_files": 0}}
+
+
+def server_start_arguments(monkeypatch, argv):
+    from dreamference.vllm_server import VLLMServerManager
+
+    class Monitor:
+        server_ready = False
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    passed = {}
+
+    def captured(self, **kwargs):
+        passed.update(kwargs)
+        raise SystemExit(1)
+
+    monkeypatch.setattr(controller, "create_model_loading_monitor", lambda *a, **k: Monitor())
+    monkeypatch.setattr(VLLMServerManager, "start_server", captured)
+    monkeypatch.setattr(DiffusionServerManager, "remove_leftover", classmethod(lambda cls, port=8001: None))
+    with pytest.raises(SystemExit):
+        DreamferenceCLIController.run_cli(argv)
+    return passed
+
+
+def test_the_tool_call_parser_and_batch_size_are_config_file_keys(clean_env, monkeypatch):
+    """§6 tuning keys: config file or flag; with neither, None reaches the launcher, which then
+    takes the model recipe's value."""
+    path = clean_env / "d.toml"
+    path.write_text('tool_call_parser = "qwen3_xml"\nmax_num_batched_tokens = 4096\n', encoding="utf-8")
+    config = DreamferenceConfig(config_file=str(path))
+    assert (config.tool_call_parser, config.max_num_batched_tokens) == ("qwen3_xml", 4096)
+    passed = server_start_arguments(monkeypatch, ["--config", str(path), "server", "start"])
+    assert (passed["tool_call_parser"], passed["max_num_batched_tokens"]) == ("qwen3_xml", 4096)
+    passed = server_start_arguments(monkeypatch, ["--config", str(path), "server", "start",
+                                                  "--tool-call-parser", "hermes", "--max-num-batched-tokens", "2048"])
+    assert (passed["tool_call_parser"], passed["max_num_batched_tokens"]) == ("hermes", 2048)
+    silent = clean_env / "silent.toml"
+    passed = server_start_arguments(monkeypatch, ["--config", str(silent), "server", "start"])
+    assert (passed["tool_call_parser"], passed["max_num_batched_tokens"]) == (None, None)
