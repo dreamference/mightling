@@ -21,20 +21,45 @@ INSTANCES = [
 PATCH = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"
 # instance -> (status, patch, grading result); None: the instance was not graded.
 RUN = {
-    "acme__widget-1": ("done", PATCH, dict(resolved=True, applied=True, f2p=2, f2p_failed=0, p2p=5, p2p_failed=0)),
-    "acme__widget-2": ("done", PATCH, dict(resolved=True, applied=True, f2p=1, f2p_failed=0, p2p=3, p2p_failed=0)),
-    "acme__widget-3": ("done", PATCH, dict(resolved=False, applied=True, f2p=2, f2p_failed=1, p2p=4, p2p_failed=0)),
-    "acme__widget-4": ("done", PATCH, dict(resolved=False, applied=True, f2p=1, f2p_failed=0, p2p=6, p2p_failed=2)),
-    "acme__widget-5": ("done", PATCH, dict(resolved=False, applied=True, f2p=1, f2p_failed=1, p2p=6, p2p_failed=3)),
+    "acme__widget-1": (
+        "done",
+        PATCH,
+        {"resolved": True, "applied": True, "f2p": 2, "f2p_failed": 0, "p2p": 5, "p2p_failed": 0},
+    ),
+    "acme__widget-2": (
+        "done",
+        PATCH,
+        {"resolved": True, "applied": True, "f2p": 1, "f2p_failed": 0, "p2p": 3, "p2p_failed": 0},
+    ),
+    "acme__widget-3": (
+        "done",
+        PATCH,
+        {"resolved": False, "applied": True, "f2p": 2, "f2p_failed": 1, "p2p": 4, "p2p_failed": 0},
+    ),
+    "acme__widget-4": (
+        "done",
+        PATCH,
+        {"resolved": False, "applied": True, "f2p": 1, "f2p_failed": 0, "p2p": 6, "p2p_failed": 2},
+    ),
+    "acme__widget-5": (
+        "done",
+        PATCH,
+        {"resolved": False, "applied": True, "f2p": 1, "f2p_failed": 1, "p2p": 6, "p2p_failed": 3},
+    ),
     "beta__gadget-6": ("timeout", "", None),
-    "beta__gadget-7": ("empty", "", dict(resolved=False, applied=True, empty=True)),
+    "beta__gadget-7": ("empty", "", {"resolved": False, "applied": True, "empty": True}),
 }
 
 
 def write_run(directory: Path) -> None:
     """Lays a run out on disk by hand, without the code that normally writes it."""
     directory.mkdir(parents=True)
-    manifest = {"name": directory.name, "dataset": "d/d", "model_name_or_path": MODEL, "instances": INSTANCES}
+    manifest = {
+        "name": directory.name,
+        "dataset": "d/d",
+        "model_name_or_path": MODEL,
+        "instances": INSTANCES,
+    }
     (directory / "manifest.json").write_text(json.dumps(manifest))
     (directory / "instances").mkdir()
     lines = []
@@ -42,11 +67,19 @@ def write_run(directory: Path) -> None:
         (directory / "instances" / f"{instance_id}.json").write_text(
             json.dumps({"instance_id": instance_id, "status": status, "wall_s": 60})
         )
-        lines.append(json.dumps({"instance_id": instance_id, "model_name_or_path": MODEL, "model_patch": patch}))
+        lines.append(
+            json.dumps(
+                {"instance_id": instance_id, "model_name_or_path": MODEL, "model_patch": patch}
+            )
+        )
     (directory / "predictions.jsonl").write_text("\n".join(lines) + "\n")
-    graded = {i: dict(result, test_patch_failed=False) for i, (_, _, result) in RUN.items() if result}
+    graded = {
+        i: dict(result, test_patch_failed=False) for i, (_, _, result) in RUN.items() if result
+    }
     (directory / "eval" / "1").mkdir(parents=True)
-    (directory / "eval" / "1" / "grading.json").write_text(json.dumps({"grader": {}, "results": graded}))
+    (directory / "eval" / "1" / "grading.json").write_text(
+        json.dumps({"grader": {}, "results": graded})
+    )
 
 
 def recount(directory: Path) -> dict:
@@ -69,7 +102,9 @@ def recount(directory: Path) -> dict:
         "resolved": sum(1 for i in graded if results[i]["resolved"]),
         "graded": len(graded),
         "finished": sum(1 for i in manifest["instances"] if i in predictions),
-        "timeouts": sum(1 for i in manifest["instances"] if i in predictions and states[i] == "timeout"),
+        "timeouts": sum(
+            1 for i in manifest["instances"] if i in predictions and states[i] == "timeout"
+        ),
         "empty": sum(1 for i in manifest["instances"] if i in predictions and states[i] == "empty"),
         "empty_patches": sum(1 for p in predictions.values() if not p["model_patch"].strip()),
         "broke": broke,
@@ -113,7 +148,9 @@ def test_the_report_counts_match_a_recount_of_the_raw_files(results_dir):
     write_run(directory)
     text = check_against_recount(directory)
     assert "Resolved            2 / 7 validated" in text
-    assert "Broke a passing test 2 of 6 graded (33.3%), 1 of them not fixing the issue either" in text
+    assert (
+        "Broke a passing test 2 of 6 graded (33.3%), 1 of them not fixing the issue either" in text
+    )
     assert "acme__widget-4 (2 PASS_TO_PASS), acme__widget-5 (3 PASS_TO_PASS)" in text
     assert "Did not fix          1:" in text
     assert "Timeout 1" in text
