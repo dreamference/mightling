@@ -132,3 +132,14 @@ def test_a_commented_out_fstab_line_does_not_make_a_swap_file(monkeypatch):
     monkeypatch.setattr(host_safety_setup.shutil, "which", _which())
 
     assert HostSafetySetup.is_swap_file("/swapfile") is False
+
+
+# -- what the checks read --------------------------------------------------------------------------
+
+
+def test_the_sandbox_is_not_judged_without_bubblewrap_or_user_systemd(monkeypatch):
+    monkeypatch.setattr(host_safety_setup.subprocess, "run",
+                        lambda *a, **k: pytest.fail("nothing can be tried"))
+    for present in [("systemd-run",), ("bwrap",)]:
+        monkeypatch.setattr(host_safety_setup.shutil, "which", _which(*present))
+        assert HostSafetySetup.sandbox_works() is None
