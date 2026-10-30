@@ -677,6 +677,23 @@ mod tests {
     }
 
     #[test]
+    fn an_executing_run_waits_for_the_one_already_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = FakeHost::new(dir.path(), 100);
+        let _running = host::executing_lock(&host).unwrap().unwrap();
+        let mut plan = repo_and_plan(dir.path(), Kind::Executing, 1);
+        plan.runs[0].ceiling = 40 << 30;
+        let out = execute(
+            &plan,
+            &host,
+            &FixedProbe(ModelState::Absent),
+            Duration::from_millis(1),
+        );
+        assert_eq!(out[0].1, Outcome::Deferred("busy"));
+        assert!(host.started.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn a_peak_within_ten_percent_of_the_cap_is_marked_cap_bounded() {
         // A universal run gets the 4 GiB small ceiling here; 90% of it is 3686 MiB (§6.4).
         for (peak_mb, bounded) in [(3700u64, true), (3600, false)] {
