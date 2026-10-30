@@ -606,4 +606,9 @@ mod tests {
             .collect();
         assert_eq!(urls, ["https://three.example/", "https://four.example/"]);
     }
+
+    #[test]
+    fn a_closing_tag_with_a_space_after_its_slash_is_neutralized() {
+        assert_eq!(neutralize("a </ untrusted> b"), "a &lt;/ untrusted> b");
+    }
 }
