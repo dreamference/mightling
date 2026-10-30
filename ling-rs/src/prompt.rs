@@ -947,4 +947,15 @@ mod tests {
         assert_eq!(custom, vec!["a", "b", "c", "d", "e", "f", "g", "h"]);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    #[test]
+    fn a_file_that_cannot_be_read_gets_a_note() {
+        let home = scratch("unreadable");
+        // Not UTF-8: saved in another encoding.
+        std::fs::write(home.join(CUSTOM_DIR).join("latin.md"), b"caf\xe9\n").unwrap();
+        let installed = Installed::load(&home);
+        assert!(installed.get("latin").is_none());
+        assert!(installed.notes.iter().any(|note| note.contains("latin.md could not be read")), "{:?}", installed.notes);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
