@@ -1222,4 +1222,38 @@ mod tests {
         assert!(dirty);
         assert_eq!(cwd, session.checkout);
     }
+
+    /// A second repository beside the fixture's, with one commit.
+    fn other_repository(fixture: &Fixture, name: &str) -> PathBuf {
+        let other = fixture.root.join(name);
+        std::fs::create_dir_all(&other).unwrap_or_default();
+        for args in [vec!["init", "-q", "-b", "main"], vec!["config", "user.name", "t"], vec!["config", "user.email", "t@t"]] {
+            git(&other, &args, None);
+        }
+        std::fs::write(other.join("other.txt"), "other\n").unwrap_or_default();
+        git(&other, &["add", "-A"], None);
+        git(&other, &["commit", "-qm", "init"], None);
+        other
+    }
+
+    #[test]
+    fn prune_drops_a_session_whose_folder_is_gone_and_counts_only_this_repository() {
+        let fixture = Fixture::new("gone");
+        let (home, repo) = (fixture.home(), fixture.repo());
+        let (mut gone, _, _) = create(&home, &repo).unwrap_or_else(|err| panic!("{err}"));
+        gone.pid = u32::MAX - 1;
+        gone.write().unwrap_or_default();
+        std::fs::remove_dir_all(&gone.checkout).unwrap_or_default();
+        // A finished session of another repository that holds changes.
+        let other = other_repository(&fixture, "other");
+        let (mut elsewhere, _, _) = create(&home, &other).unwrap_or_else(|err| panic!("{err}"));
+        std::fs::write(elsewhere.checkout.join("other.txt"), "changed\n").unwrap_or_default();
+        elsewhere.pid = u32::MAX - 1;
+        elsewhere.write().unwrap_or_default();
+        assert_eq!(prune(&home, &repo), 0);
+        assert!(!gone.home.exists());
+        assert!(git_text(&repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{}", gone.branch)]).is_none());
+        assert!(elsewhere.checkout.is_dir());
+        assert_eq!(prune(&home, &other), 1);
+    }
 }
