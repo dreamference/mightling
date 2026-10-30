@@ -577,10 +577,17 @@ pub fn level_files_exposed() -> bool {
 /// (specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md §7.3).
 #[cfg(windows)]
 fn runtime_dir() -> Option<PathBuf> {
-    let base = PathBuf::from(std::env::var_os("LOCALAPPDATA").filter(|dir| !dir.is_empty())?);
-    let dir = base.join("Mightling");
+    let dir = windows_runtime_dir_from(std::env::var_os("LOCALAPPDATA"))?;
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
+}
+
+/// The Windows runtime directory for a given `LOCALAPPDATA`: `<it>\Mightling`, none when it is unset
+/// or empty. Apart from [`runtime_dir`] so that any machine's tests check it.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_runtime_dir_from(local_app_data: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    let base = PathBuf::from(local_app_data.filter(|dir| !dir.is_empty())?);
+    Some(base.join("Mightling"))
 }
 
 #[cfg(not(windows))]
@@ -1594,6 +1601,21 @@ mod tests {
         );
         assert_eq!(home_from(None, Some(OsString::new())), None);
         assert_eq!(home_from(None, None), None);
+    }
+
+    #[test]
+    fn windows_seals_are_kept_under_local_app_data() {
+        use std::ffi::OsString;
+        // The sandbox's own accounts cannot write the user's profile (WINDOWS_ARM §7.3).
+        let local = r"C:\Users\Jane Doe\AppData\Local";
+        let dir = windows_runtime_dir_from(Some(OsString::from(local))).unwrap();
+        assert_eq!(dir, Path::new(local).join("Mightling"));
+        assert_eq!(
+            dir.join(SEAL_DIR),
+            Path::new(local).join("Mightling").join("ling-airgapped")
+        );
+        assert_eq!(windows_runtime_dir_from(Some(OsString::new())), None);
+        assert_eq!(windows_runtime_dir_from(None), None);
     }
 
     #[test]
