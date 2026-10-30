@@ -15,7 +15,6 @@ a push bringing a root commit the repository does not have (a branch of an old, 
 history).
 """
 
-import ipaddress
 import os
 import re
 import subprocess
