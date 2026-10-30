@@ -38,3 +38,9 @@ def _option(prefix, name):
 def test_a_reckless_headroom_cannot_raise_the_memory_cap_into_the_host_reserve(host):
     prefix = _prefix({"container_headroom_gb": 100.0})
     assert _option(prefix, "--memory") == f"{TOTAL_GB - HOST_MEMORY_RESERVE_GB:.0f}g"
+
+
+def test_the_container_gets_no_swap_beyond_its_memory_cap(host):
+    prefix = _prefix({"container_headroom_gb": 4.0})
+    assert _option(prefix, "--memory") == f"{TOTAL_GB * 0.5 + 4.0:.0f}g"
+    assert _option(prefix, "--memory-swap") == _option(prefix, "--memory")
