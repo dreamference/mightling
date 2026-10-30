@@ -214,6 +214,37 @@ mod tests {
     }
 
     #[test]
+    fn writable_paths_are_bound_read_write_after_a_read_only_bind_of_the_same_path() {
+        let mut s = spec();
+        s.read_only.push("/home/u/.mightling/docs".into());
+        s.writable_outside_scratch = vec![(
+            "/home/u/.mightling/docs".into(),
+            "the collection's database".into(),
+        )];
+        let args = bwrap_args(&s);
+        let at = |flag: &str, path: &str| {
+            args.windows(3)
+                .position(|w| w[0] == flag && w[1] == path && w[2] == path)
+        };
+        for path in [
+            "/tmp/mightling-index-x",
+            "/tmp/mightling-index-x/out",
+            "/home/u/.mightling/docs",
+        ] {
+            assert!(
+                at("--bind", path).is_some(),
+                "{path} not writable: {args:?}"
+            );
+        }
+        // The later mount wins: the read-only one first, so the database stays writable.
+        assert!(
+            at("--ro-bind", "/home/u/.mightling/docs") < at("--bind", "/home/u/.mightling/docs"),
+            "{args:?}"
+        );
+        assert!(at("--ro-bind", "/home/u/.mightling/docs").is_some());
+    }
+
+    #[test]
     fn binds_are_sorted_by_depth_deduplicated_and_checked_only_before_double_dash() {
         let mut s = spec();
         s.read_only = vec![
