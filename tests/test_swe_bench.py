@@ -3652,6 +3652,14 @@ def test_a_hold_keeps_the_sessions_and_pauses_of_the_runs_earlier_starts(hold):
     assert record["pauses"] == earlier["pauses"]
 
 
+def test_a_hold_on_a_run_without_a_manifest_writes_nothing_to_disk(hold):
+    from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
+
+    refused = SweBenchGateHold(SweBenchRunStore("refused"), "http://localhost:8000", "172.30.0.0/16")
+    refused.tick()
+    assert not SweBenchRunStore("refused").directory.exists()
+
+
 def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
     from dreamference.vllm_server.model_gate import ModelGate
 
