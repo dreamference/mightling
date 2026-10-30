@@ -241,6 +241,8 @@ def test_push_moves_the_container_to_the_sidecar_network(machine, capsys):
 
 def test_remove_needs_yes_and_then_deletes_everything(machine):
     assert MatrixHomeserver.start() == 0
+    # The bridge's sync position and rooms, written by `ling chat`.
+    pathlib.Path(MatrixHomeserver._path("matrix-state.json")).write_text("{}")
     machine.runs.clear()
     assert MatrixHomeserver.remove(False) == 1
     assert not machine.runs
@@ -253,6 +255,9 @@ def test_remove_needs_yes_and_then_deletes_everything(machine):
     assert machine.argv("docker", "network", "rm", mh.MATRIX_NETWORK)
     assert not pathlib.Path(MatrixHomeserver._path("matrix.json")).exists()
     assert not pathlib.Path(MatrixHomeserver._path("matrix-admin.json")).exists()
+    assert not pathlib.Path(MatrixHomeserver._path("matrix-state.json")).exists()
+    for unit in (mh.PROXY_SOCKET_UNIT, mh.PROXY_SERVICE_UNIT):
+        assert not pathlib.Path(MatrixHomeserver.unit_dir(), unit).exists()
 
 
 def test_stop_turns_it_off_until_the_next_start(machine):
