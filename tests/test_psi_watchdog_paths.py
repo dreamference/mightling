@@ -481,6 +481,9 @@ def test_a_direct_kill_turns_off_the_restart_policy_over_the_socket(
     head, _, body = received[0].partition(b"\r\n\r\n")
     assert head.startswith(b"POST /containers/abc123/update HTTP/1.1\r\n")
     assert body == b'{"RestartPolicy": {"Name": "no"}}'
+    # dockerd reads exactly Content-Length bytes of JSON; without them the update is refused.
+    assert b"\r\nContent-Type: application/json\r\n" in head
+    assert b"\r\nContent-Length: %d\r\n" % len(body) in head
     assert no_docker_cli == []
 
 
