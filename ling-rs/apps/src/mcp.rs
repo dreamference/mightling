@@ -598,4 +598,14 @@ mod tests {
         assert_eq!(asked[1], "/calendar/events?limit=25&from=a&to=b&calendar=primary");
         assert_eq!(asked[2], "/calendar/events?limit=25&calendar=primary&q=x", "a search never reads one event");
     }
+
+    #[test]
+    fn a_service_that_is_down_or_answers_garbage_is_a_tool_error() {
+        let down = Stub { answer: Err("connection refused".into()), air_gapped: false, asked: RefCell::new(Vec::new()) };
+        assert_eq!(call(App::Drive, &down, "drive_search", &json!({"query": "x"}))["isError"], true);
+        let garbage = Stub { answer: Ok((200, "<html>".into())), air_gapped: false, asked: RefCell::new(Vec::new()) };
+        let result = call(App::Drive, &garbage, "drive_search", &json!({"query": "x"}));
+        assert_eq!(result["isError"], true);
+        assert!(text(&result).contains("HTTP 200 with something that is not JSON"));
+    }
 }
