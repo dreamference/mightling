@@ -6,6 +6,8 @@ a rollback that puts the box back. Nothing here reaches a real box, Docker, syst
 network: every class's seam is replaced, as in the other remote tests.
 """
 
+import subprocess
+
 import pytest
 
 from dreamference.remote import (
@@ -415,3 +417,50 @@ def test_a_caa_record_that_cannot_be_deleted_fails_after_the_new_ones_went_in(mo
         assert RemotePublicCertificate.ensure_caa(BOX, [ACCOUNT]) is False
     assert [method for method, *_ in calls[2:]] == ["POST", "POST", "DELETE"]
     assert "kept an old CAA record" in caplog.text
+
+
+# -- the control plane ------------------------------------------------------------------------------
+
+
+def test_a_config_is_written_again_from_the_secret_and_the_store_key_on_disk():
+    RemoteSettings.write_private("relay-secret", "the-secret")
+    RemoteSettings.write_private("store-key", "the-store-key")
+    assert RemoteControlPlane.rewrite_config(BOX) is True
+    config = RemoteSettings.path("server", "config.yaml").read_text()
+    assert "the-secret" in config and "the-store-key" in config
+
+
+def test_a_new_internal_network_is_made_before_the_container_is_run(monkeypatch):
+    calls = []
+
+    def run(cls, argv, timeout=120):
+        calls.append(argv[:3])
+        return subprocess.CompletedProcess(argv, 1 if argv[2:3] == ["inspect"] else 0, "", "")
+
+    monkeypatch.setattr(RemoteControlPlane, "_run", classmethod(run))
+    monkeypatch.setattr(RemoteControlPlane, "geolocation_ready", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        RemoteControlPlane, "run_command", classmethod(lambda cls, pat: ["docker", "run"])
+    )
+    monkeypatch.setattr(RemoteControlPlane, "install_proxy", classmethod(lambda cls: False))
+    assert RemoteControlPlane.start() is False, "the proxy is the last step and fails here"
+    assert calls[:3] == [
+        ["docker", "network", "inspect"],
+        ["docker", "network", "create"],
+        ["docker", "rm", "-f"],
+    ]
+    assert ["docker", "run"] in calls
+
+
+def test_a_renewal_mints_the_token_for_the_owner_in_the_user_list(monkeypatch):
+    calls = []
+
+    def request(cls, dns_name, method, path, body=None, token=None):
+        calls.append((method, path))
+        if method == "GET":
+            return 200, [{"id": "u2", "role": "admin"}, {"id": "u1", "role": "owner"}]
+        return 200, {"plain_token": "new-token"}
+
+    monkeypatch.setattr(RemoteControlPlane, "_request", classmethod(request))
+    assert RemoteControlPlane.renew_token(BOX, "tok") == "new-token"
+    assert calls == [("GET", "/api/users"), ("POST", "/api/users/u1/tokens")]
