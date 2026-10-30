@@ -975,6 +975,7 @@ mod tests {
         assert_eq!(claude.get("up"), Some(&fixture.home.join(".claude/skills/up")));
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_walk_skips_hidden_folders_stops_at_its_depth_and_survives_a_link_loop() {
         let fixture = Fixture::new("catalog-walk");
@@ -1004,6 +1005,7 @@ mod tests {
         assert!(plan.find("deep").is_none());
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_skill_linked_twice_inside_one_agents_folder_is_offered_once() {
         let fixture = Fixture::new("catalog-twice");
