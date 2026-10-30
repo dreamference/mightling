@@ -1381,6 +1381,24 @@ def test_the_node_sets_the_ceilings_and_refuses_what_came_from_outside_malformed
         NodeJob.validate(["not", "an", "object"])
 
 
+def test_a_job_at_the_ceiling_is_accepted_and_one_past_it_or_malformed_is_not():
+    from dreamference.node import NodeJob
+
+    accepted = NodeJob.validate(job_request(memory="32G", time="8h"))
+    assert (accepted["memory_bytes"], accepted["time_s"]) == (32 * 1024**3, 8 * 3600)
+    with pytest.raises(ValueError, match="at most 8h"):
+        NodeJob.validate(job_request(time="481m"))
+    for changes in (
+        {"commit": "a" * 41},  # the whole field is a hash, not one that starts with one
+        {"command": ["python", ""]},
+        {"gpu": "yes"},
+        {"gpu": 1},
+        {"setup": "  "},
+    ):
+        with pytest.raises(ValueError):
+            NodeJob.validate(job_request(**changes))
+
+
 def test_the_stricter_of_the_two_airgap_levels_applies(monkeypatch):
     from dreamference.node import NodeJob
 
