@@ -556,6 +556,22 @@ mod state_file_tests {
             Some("fn main() {}\n")
         );
     }
+
+    #[test]
+    fn a_linked_state_directory_is_refused_unless_the_user_named_it() {
+        // Unnamed, the state directory is the repository's own `.dreamference`, which a clone can
+        // commit as a symlink.
+        if std::env::var_os("MIGHTLING_CODE_STATE_DIR").is_some() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        std::fs::create_dir(&state).unwrap();
+        let linked = dir.path().join("linked");
+        std::os::unix::fs::symlink(&state, &linked).unwrap();
+        assert!(state_file_in(&linked, "code_index.building").is_err());
+        assert!(!state.join("code_index.building").exists());
+    }
 }
 
 #[cfg(test)]
