@@ -877,4 +877,10 @@ mod tests {
         let text = placeholder("\n\n  \nfirst line\n\nlast line\n\n", Path::new("/m/outputs/c.txt"));
         assert_eq!(text.lines().skip(1).collect::<Vec<_>>(), ["first line", "… last line"]);
     }
+
+    #[test]
+    fn a_tools_exit_code_line_is_the_first_line_kept() {
+        let text = placeholder("Exit code: 2\nWall time: 1.0 seconds\nOutput:\nerror: no such file\ndone", Path::new("/m/outputs/c.txt"));
+        assert_eq!(text.lines().skip(1).collect::<Vec<_>>(), ["Exit code: 2", "… done"]);
+    }
 }
