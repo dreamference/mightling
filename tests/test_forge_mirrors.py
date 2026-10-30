@@ -78,3 +78,30 @@ def test_an_answer_that_is_not_json_is_no_plan(monkeypatch):
         classmethod(lambda cls, *a, **k: subprocess.CompletedProcess([], 0, "{not json", "")),
     )
     assert ForgeMirrors.fetch_plan() is None
+
+
+# A sync
+
+
+def test_a_sync_without_a_plan_fails_and_hands_nothing_on(monkeypatch, capsys):
+    monkeypatch.setattr(ForgeMirrors, "fetch_plan", classmethod(lambda cls: None))
+    monkeypatch.setattr(ForgeMirrors, "apply", classmethod(never))
+    monkeypatch.setattr(NodePairing, "paired", classmethod(never))
+    assert ForgeMirrors.sync() == 1
+    assert "No mirror plan" in capsys.readouterr().out
+
+
+def test_a_quiet_sync_where_every_node_took_the_plan_prints_nothing(monkeypatch, capsys):
+    ForgeSettings.update_state(role="mirror", record_node="rec-1")
+    monkeypatch.setattr(ForgeMirrors, "fetch_plan", classmethod(lambda cls: PLAN))
+    monkeypatch.setattr(ForgeMirrors, "apply", classmethod(lambda cls, plan: ["o/r: mirrored"]))
+    monkeypatch.setattr(
+        NodePairing, "paired", classmethod(lambda cls: [{"node": "rec-1"}, {"node": "m-2"}])
+    )
+    monkeypatch.setattr(
+        NodePairing,
+        "run",
+        classmethod(lambda cls, *a, **k: subprocess.CompletedProcess([], 0, "o/r: mirrored\n", "")),
+    )
+    assert ForgeMirrors.sync(quiet=True) == 0
+    assert capsys.readouterr().out == ""
