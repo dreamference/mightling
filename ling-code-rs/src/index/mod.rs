@@ -446,9 +446,25 @@ mod tests {
             is_git: false,
         };
         assert!(!supervisor_busy(&repo));
-        let held = claim_supervisor(&repo.state_dir()).unwrap().unwrap();
+        // A process another test spawns at that moment shares the lock `supervisor_busy` took
+        // until it execs; the claim waits that out.
+        let held = (0..100)
+            .find_map(|_| {
+                let lock = claim_supervisor(&repo.state_dir()).unwrap();
+                if lock.is_none() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                lock
+            })
+            .expect("the lock is free again");
         assert!(supervisor_busy(&repo));
         drop(held);
-        assert!(!supervisor_busy(&repo));
+        assert!((0..100).any(|_| {
+            let busy = supervisor_busy(&repo);
+            if busy {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            !busy
+        }));
     }
 }
