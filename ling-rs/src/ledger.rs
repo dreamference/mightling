@@ -622,4 +622,13 @@ mod tests {
         assert!(is_test_summary("2 failed in 0.31s"));
         assert!(is_test_summary("1 error in 0.20s"));
     }
+
+    #[test]
+    fn a_long_command_is_cut_to_the_limit_with_an_ellipsis() {
+        let exact = "x".repeat(MAX_COMMAND_CHARS);
+        assert_eq!(first_line(&exact), exact);
+        let cut = first_line(&"x".repeat(MAX_COMMAND_CHARS + 40));
+        assert_eq!(cut.chars().count(), MAX_COMMAND_CHARS);
+        assert!(cut.ends_with('…'));
+    }
 }
