@@ -48,3 +48,22 @@ def test_a_file_docker_cannot_copy_out_stops_the_launch(docker):
         SGLangRuntimePatcher.prepare(IMAGE, [PATCH])
         == f"could not copy /sgl/srt/server.py out of {IMAGE}"
     )
+
+
+# -- SGLangRuntimePatcher.extract ------------------------------------------------------------------------
+
+
+def test_an_image_docker_cannot_create_a_container_from_gives_nothing_and_leaves_nothing(docker):
+    seen, codes = docker
+    codes["create"] = 125
+
+    assert SGLangRuntimePatcher.extract(IMAGE, "/sgl/srt/server.py") is None
+    assert seen == [["docker", "create", IMAGE]]
+
+
+def test_a_failed_copy_still_removes_the_container_it_made(docker):
+    seen, codes = docker
+    codes["cp"] = 1
+
+    assert SGLangRuntimePatcher.extract(IMAGE, "/sgl/srt/server.py") is None
+    assert seen[-1] == ["docker", "rm", "-f", "c0ffee"]
