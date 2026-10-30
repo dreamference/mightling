@@ -2433,6 +2433,8 @@ mod tests {
             (Some("http://gb10:9000".into()), None)
         );
         assert_eq!(vllm_host_from_files(None, false, None), (None, None));
+        // No file found: no host. The user's file stands in only for a repository's file.
+        assert_eq!(vllm_host_from_files(None, false, Some(user)), (None, None));
         assert_eq!(NETWORK_KEYS, ["vllm_host"]);
     }
 
