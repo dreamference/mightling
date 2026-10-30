@@ -1829,3 +1829,8 @@ def test_a_missing_ling_is_built_and_its_build_decides(monkeypatch):
     monkeypatch.setattr(CodexInstaller, "is_installed", classmethod(lambda cls: False))
     monkeypatch.setattr(CodexBrandedBuilder, "build", classmethod(lambda cls, force=False: False))
     assert CodexInstaller.install_if_missing() is False
+
+
+def test_without_a_patch_directory_there_is_no_patch_series(tmp_path):
+    with patch.object(builder_module, "CODEX_PATCH_DIR", str(tmp_path / "no-patches")):
+        assert CodexBrandedBuilder.patches() == []
