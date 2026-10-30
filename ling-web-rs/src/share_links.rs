@@ -531,4 +531,10 @@ mod tests {
         );
         assert!(is_share_link("https://SHARE.GOOGLE/AbC"));
     }
+
+    #[test]
+    fn only_the_search_path_itself_is_a_search() {
+        assert_eq!(classify("https://www.google.com/searchfoo?q=x"), None);
+        assert_eq!(classify("https://www.google.com/search/x?q=x"), None);
+    }
 }
