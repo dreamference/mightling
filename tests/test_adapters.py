@@ -622,6 +622,25 @@ def test_verify_catches_a_file_changed_after_the_install(keys, remote, catalogue
     assert "does not match" in AdapterInstaller.verify(entry, served(base_snapshot()))
 
 
+def test_verify_catches_a_signature_pin_name_or_base_that_changed_after_the_install(
+    keys, remote
+):
+    source, _ = remote
+    make_adapter(source, keys)
+    base = served(base_snapshot())
+    entry = AdapterInstaller.install(None, f"{ADAPTER_REPO}@{COMMIT}", base)
+    assert AdapterInstaller.verify(entry, base) is None
+    assert "names rust, not other" in AdapterInstaller.verify({**entry, "name": "other"}, base)
+    pinned = {**entry, "manifest_sha256": "sha256:" + "0" * 64}
+    assert AdapterInstaller.verify(pinned, base) is not None
+    assert "base mismatch" in AdapterInstaller.verify(entry, {**base, "revision": "f" * 40})
+    folder = AdapterInstaller.folder_of(entry)
+    signature = folder / "manifest.json.sig"
+    signature.unlink()
+    signature.write_bytes(sign(keys, (folder / "manifest.json").read_bytes(), key="stranger"))
+    assert "not a Dreamference" in AdapterInstaller.verify(entry, base)
+
+
 # -- the base digest and the served id ---------------------------------------------------------------
 
 
