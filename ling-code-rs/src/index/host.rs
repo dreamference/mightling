@@ -520,6 +520,14 @@ mod tests {
     }
 
     #[test]
+    fn a_ceiling_that_just_covers_the_need_is_admitted() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = FakeHost::new(dir.path(), 100);
+        let admitted = admit(&host, 4 * GIB, 4 * GIB).unwrap().unwrap();
+        assert_eq!(admitted.cap, 4 * GIB);
+    }
+
+    #[test]
     fn first_runs_use_the_floor() {
         assert_eq!(need(Kind::Universal, 0), 512 * MIB);
         assert_eq!(need(Kind::Static, 0), 3 * GIB);
