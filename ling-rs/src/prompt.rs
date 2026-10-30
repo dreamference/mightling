@@ -913,4 +913,10 @@ mod tests {
         assert!(parse_custom("<!-- ling: blocks=web -->").is_err());
         assert!(parse_custom(" \n\t").is_err());
     }
+
+    #[test]
+    fn a_prompt_with_no_block_says_none() {
+        assert_eq!(Blocks::default().names(), "none");
+        assert_eq!(Blocks::ALL.names(), "web, email, code");
+    }
 }
