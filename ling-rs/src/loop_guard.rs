@@ -846,6 +846,15 @@ mod tests {
         assert_eq!(exec.sampling.as_deref(), Some(NONTHINKING));
         let env = |name: &str| (name == BUDGET_ENV).then(|| "2048".to_string());
         assert_eq!(settings_for(Surface::Phone, Some(&table), &env).budget, Some(2_048));
+        // The file can also turn a guard off, and set each threshold.
+        let table: toml::Table =
+            "work_guard = false\nmax_pattern_size = 1000\nmin_pattern_size = 7\nmax_run = 50\nmax_char_run = 300\ncompression_window = 4096\n"
+                .parse()
+                .expect("toml");
+        let work = settings_for(Surface::Work, Some(&table), &no_env);
+        assert!(!work.guard);
+        let t = work.thresholds;
+        assert_eq!((t.max_pattern_size, t.min_pattern_size, t.max_run, t.max_char_run, t.compression_window), (1000, 7, 50, 300, 4096));
     }
 
     #[test]
