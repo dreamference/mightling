@@ -233,7 +233,10 @@ export function ReviewPane(props: ReviewPaneProps) {
       setAgainst(answer.against);
       setStatus(now);
       setShown({ cwd, root });
-      if (scope === "commit" && commits.length === 0) setCommits(await bridge.git.log(root));
+      if (scope === "commit" && commits.length === 0) {
+        const log = await bridge.git.log(root);
+        if (loads.current === ask && rootRef.current === root) setCommits(log);
+      }
     } catch (failure) {
       if (loads.current !== ask) return;
       setDiff("");
