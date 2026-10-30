@@ -1651,6 +1651,171 @@ def test_a_sync_whose_own_mirrors_failed_says_so(monkeypatch, capsys):
     assert "not mirrored (HTTP 500: boom)" in capsys.readouterr().out
 
 
+def test_the_plan_comes_only_from_a_running_record_with_a_token_and_names_shared_repositories(
+    monkeypatch,
+):
+    token = ["t" * 40]
+    monkeypatch.setattr(ForgeContainer, "running", classmethod(lambda cls: True))
+    monkeypatch.setattr(ForgeAccounts, "mirror_token", classmethod(lambda cls: token[0]))
+    monkeypatch.setattr(ForgeBackup, "node_id", classmethod(lambda cls: "rec-1"))
+    monkeypatch.setattr(ForgeBackup, "host_name", classmethod(lambda cls: "gx10-1a2b"))
+    monkeypatch.setattr(
+        ForgeRepositories,
+        "all",
+        classmethod(
+            lambda cls, token=None: [
+                {"full_name": "dreamference/mightling", "name": "mightling", "private": False},
+                {"full_name": "dreamference/secret", "name": "secret", "private": True},
+                {"full_name": "dreamference/memos", "name": "memos", "private": False},
+                {"full_name": "dreamference/unknown", "name": "unknown"},
+            ]
+        ),
+    )
+    ForgeSettings.update_state(role="mirror")
+    assert ForgeMirrors.plan() is None
+    ForgeSettings.update_state(role="record")
+    assert ForgeMirrors.plan() == {
+        "record_node": "rec-1",
+        "record_name": "gx10-1a2b",
+        "token": "t" * 40,
+        "repositories": ["dreamference/mightling"],
+    }
+    token[0] = None
+    assert ForgeMirrors.plan() is None
+
+
+def test_the_record_given_its_own_plan_changes_nothing(monkeypatch):
+    monkeypatch.setattr(ForgeBackup, "node_id", classmethod(lambda cls: "rec-1"))
+    monkeypatch.setattr(ForgeService, "restart", classmethod(lambda cls: pytest.fail("restarted")))
+    monkeypatch.setattr(
+        ForgeContainer, "api", classmethod(lambda cls, *a, **k: pytest.fail("asked the forge"))
+    )
+    plan = {"record_node": "rec-1", "token": "t" * 40, "repositories": ["o/r"]}
+    assert ForgeMirrors.apply(plan) == ["this node is the forge of record"]
+    assert ForgeSettings.state() == {} and ForgeSettings.read_secret("record-mirror-token") is None
+
+
+def test_a_new_record_restarts_the_forge_once_and_each_mirror_reads_with_its_token(monkeypatch):
+    ForgeSettings.update_state(role="mirror", record_node="rec-old")
+    monkeypatch.setattr(ForgeBackup, "node_id", classmethod(lambda cls: "me-1"))
+    monkeypatch.setattr(ForgeAccounts, "admin_token", classmethod(lambda cls: "a" * 40))
+    restarts, organisations, migrations = [], [], []
+    monkeypatch.setattr(ForgeService, "restart", classmethod(lambda cls: restarts.append(1)))
+    monkeypatch.setattr(
+        ForgeContainer, "wait_until_answering", classmethod(lambda cls, seconds=120.0: True)
+    )
+    monkeypatch.setattr(
+        ForgeRepositories,
+        "ensure_organisation",
+        classmethod(lambda cls, owner: organisations.append(owner)),
+    )
+
+    def api(cls, method, path, token, body=None, timeout=30):
+        if method == "GET":
+            return 404, None
+        migrations.append(body)
+        return (500, {"message": "boom"}) if body["repo_name"] == "bad" else (201, {})
+
+    monkeypatch.setattr(ForgeContainer, "api", classmethod(api))
+    plan = {
+        "record_node": "rec-2",
+        "record_name": "gx10-1a2b",
+        "token": "t" * 40,
+        "repositories": ["owner/a", "team/b", "team/bad"],
+    }
+    assert ForgeMirrors.apply(plan) == [
+        "owner/a: mirror created",
+        "team/b: mirror created",
+        "team/bad: not mirrored (HTTP 500: boom)",
+    ]
+    assert restarts == [1] and organisations == ["team", "team"]
+    assert ForgeSettings.state()["record_node"] == "rec-2"
+    assert ForgeSettings.read_secret("record-mirror-token") == "t" * 40
+    assert all(body["private"] is False and body["auth_token"] == "t" * 40 for body in migrations)
+    ForgeMirrors.apply(plan)
+    assert restarts == [1], "the same record again restarts nothing"
+
+
+def test_a_plan_took_only_when_every_repository_is_mirrored():
+    assert ForgeMirrors.took(["o/a: mirrored", "o/b: mirror created"])
+    assert not ForgeMirrors.took(["o/a: mirrored", "o/b: not mirrored (HTTP 500: boom)"])
+
+
+@pytest.mark.parametrize(
+    "text, forge, lines, code",
+    [
+        ('{"record_node": "rec-1"}', "on", None, 2),
+        ("[]", "on", None, 2),
+        ('{"repositories": []}', "off", None, 1),
+        ('{"repositories": ["o/a"]}', "on", ["o/a: not mirrored (HTTP 500: boom)"], 1),
+        ('{"repositories": ["o/a"]}', "on", ["o/a: mirrored"], 0),
+    ],
+)
+def test_a_mirror_node_applies_only_a_readable_plan_with_its_forge_on(
+    monkeypatch, text, forge, lines, code
+):
+    monkeypatch.setenv("DREAMFERENCE_FORGE", forge)
+    monkeypatch.setattr(
+        ForgeMirrors, "apply", classmethod(lambda cls, plan: lines or pytest.fail("applied"))
+    )
+    assert ForgeMirrors.serve_apply(text) == code
+
+
+@pytest.mark.parametrize(
+    "code, stdout, plan",
+    [
+        (1, '{"record_node": "rec-1"}', None),
+        (0, '["rec-1"]', None),
+        (0, '{"record_node": "rec-1"}', {"record_node": "rec-1"}),
+    ],
+)
+def test_a_mirror_takes_the_plan_only_from_a_record_that_answered_with_one(
+    monkeypatch, code, stdout, plan
+):
+    from dreamference.node.node_pairing import NodePairing
+
+    ForgeSettings.update_state(role="mirror", record_node="rec-1")
+    monkeypatch.setattr(
+        NodePairing, "find", classmethod(lambda cls, name, browse=True: {"node": name})
+    )
+    monkeypatch.setattr(
+        NodePairing,
+        "run",
+        classmethod(
+            lambda cls, record, request, **k: subprocess.CompletedProcess([], code, stdout, "")
+        ),
+    )
+    assert ForgeMirrors.fetch_plan() == plan
+
+
+def test_the_record_hands_its_plan_to_every_other_node_and_a_silent_one_fails(monkeypatch, capsys):
+    from dreamference.node.node_pairing import NodePairing
+
+    ForgeSettings.update_state(role="record")
+    plan = {"record_node": "rec-1", "repositories": ["o/r"]}
+    monkeypatch.setattr(ForgeMirrors, "fetch_plan", classmethod(lambda cls: plan))
+    monkeypatch.setattr(
+        ForgeMirrors, "apply", classmethod(lambda cls, p: pytest.fail("applied on the record"))
+    )
+    monkeypatch.setattr(
+        NodePairing,
+        "paired",
+        classmethod(lambda cls: [{"node": "rec-1"}, {"node": "m-1", "name": "a"}, {"node": "m-2"}]),
+    )
+    asked = []
+
+    def run(cls, record, request, input_text=None, **k):
+        asked.append((record["node"], request, json.loads(input_text)))
+        code = 0 if record["node"] == "m-1" else 1
+        return subprocess.CompletedProcess([], code, "o/r: mirrored\n" if code == 0 else "", "")
+
+    monkeypatch.setattr(NodePairing, "run", classmethod(run))
+    assert ForgeMirrors.sync() == 1
+    assert asked == [("m-1", "forge-mirror-apply", plan), ("m-2", "forge-mirror-apply", plan)]
+    out = capsys.readouterr().out
+    assert "a: o/r: mirrored" in out and "m-2: no answer" in out
+
+
 def test_the_forced_command_takes_only_the_forges_operations(monkeypatch):
     from dreamference.forge.forge_serve import ForgeServe
 
