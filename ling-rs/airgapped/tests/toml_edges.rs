@@ -71,3 +71,12 @@ fn text_not_toml_finds_an_indented_key() {
         Some("on")
     );
 }
+
+#[test]
+fn a_blank_tier_is_unset_not_invalid() {
+    let resolved = resolve_from(Some("  "), Some("on"), &[]);
+    assert_eq!(
+        (resolved.level, resolved.source, resolved.invalid),
+        (Level::On, Source::Environment, Vec::<String>::new())
+    );
+}
