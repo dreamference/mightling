@@ -273,8 +273,12 @@ export const git = {
     const thread = webRepoThread(root);
     if (!thread) throw new Error("This folder is not a checked-out repository.");
     const repoScope: "uncommitted" | "branch" = scope === "branch" ? "branch" : "uncommitted";
-    const diff = await chatRepos().diff(thread, repoScope);
-    return { scope, diff, against: repoScope === "branch" ? "main" : null };
+    // The branch scope is against the checkout's own base, as the server diffs it.
+    const [diff, against] = await Promise.all([
+      chatRepos().diff(thread, repoScope),
+      repoScope === "branch" ? chatRepos().state(thread).then((state) => state.base || null) : null,
+    ]);
+    return { scope, diff, against };
   },
   log: async (root: string): Promise<GitCommit[]> => {
     if (host() === "electron") return send<GitCommit[]>({ type: "git/log", root });
