@@ -934,4 +934,17 @@ mod tests {
         assert!(valid_name(&"a".repeat(64)));
         assert!(!valid_name(&"a".repeat(65)));
     }
+
+    #[test]
+    fn custom_prompts_are_listed_by_name() {
+        let home = scratch("order");
+        let names = ["h", "c", "f", "a", "g", "d", "b", "e"];
+        for name in names {
+            std::fs::write(home.join(CUSTOM_DIR).join(format!("{name}.md")), "Text.").unwrap();
+        }
+        let installed = Installed::load(&home);
+        let custom: Vec<&str> = installed.prompts.iter().skip(Installed::built_in().prompts.len()).map(|prompt| prompt.name.as_str()).collect();
+        assert_eq!(custom, vec!["a", "b", "c", "d", "e", "f", "g", "h"]);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
