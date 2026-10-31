@@ -158,7 +158,11 @@ jobs:
           "$MIGHTLING_BIN/codex-code-mode-host" --help | head -3
       - name: Test the web commands
         working-directory: ling-web-rs
-        run: ~/.cargo/bin/cargo test --release --locked
+        # rustup's shims sit in ~/.cargo/bin when the build installed it, elsewhere when the
+        # runner image ships it (macos-15-arm64 since the 2026-10-28 image).
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo test --release --locked
       - name: Smoke test
         run: |
           "$MIGHTLING_BIN/ling" --version
