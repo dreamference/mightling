@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mightling — तुमच्या डेस्कवर वेगवान AI कोडिंग</title>
-<meta name="description" content="एका NVIDIA DGX Spark वर ऑफलाइन SWE-bench Verified चे 100 पैकी 68 टास्क सोडवणारा कोडिंग एजंट (संपूर्ण सेटवर अंदाजे सुमारे 69%), सुमारे 48 टोकन प्रति सेकंद वेगाने. क्लाउड नाही, अकाउंट नाही, API बिल नाही, टेलिमेट्री नाही.">
+<title>Mightling — तुमच्या टेबलावरील मशीनवर चालणारा कोडिंग सहाय्यक</title>
+<meta name="description" content="एका NVIDIA DGX Spark वर चालणारा आणि बाहेर काहीही न पाठवणारा कोडिंग सहाय्यक. प्रोग्रामिंगच्या 100 खऱ्या समस्यांच्या चाचणीत त्याने 68 सोडवल्या, सुमारे 48 टोकन (शब्दाचे तुकडे) प्रति सेकंद वेगाने. क्लाउड नाही, अकाउंट नाही, प्रत्येक वापराचे बिल नाही, ट्रॅकिंग नाही.">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="referrer" content="no-referrer">
 <link rel="canonical" href="https://mightling.dreamference.ai/mr/">
@@ -35,8 +35,8 @@
 <meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Mightling">
-<meta property="og:title" content="Mightling — तुमच्या डेस्कवर वेगवान AI कोडिंग. SWE-bench Verified वर सुमारे 69%.">
-<meta property="og:description" content="SWE-bench Verified चे 100 पैकी 68 टास्क, ऑफलाइन, एका DGX Spark वर, सुमारे 48 टोकन प्रति सेकंद वेगाने. क्लाउड नाही, अकाउंट नाही, API बिल नाही, टेलिमेट्री नाही.">
+<meta property="og:title" content="Mightling — तुमच्या टेबलावरील मशीनवर चालणारा कोडिंग सहाय्यक. चाचणीतल्या 100 पैकी 68 समस्या सोडवल्या.">
+<meta property="og:description" content="त्याने SWE-bench Verified मधील प्रोग्रामिंगच्या 100 खऱ्या समस्यांपैकी 68 सोडवल्या, एका DGX Spark वर, नेटवर्कशिवाय, सुमारे 48 टोकन प्रति सेकंद वेगाने. क्लाउड नाही, अकाउंट नाही, प्रत्येक वापराचे बिल नाही, ट्रॅकिंग नाही.">
 <meta property="og:url" content="https://mightling.dreamference.ai/mr/">
 <meta property="og:locale" content="mr_IN">
 <meta property="og:image" content="https://mightling.dreamference.ai/assets/og.png">
@@ -71,15 +71,15 @@
 <div class="hero" id="hero">
 <img alt="Mightling" class="logo logo-light" height="181" src="/assets/mightling-logo-light.svg" width="300"/>
 <img alt="Mightling" class="logo logo-dark" height="181" src="/assets/mightling-logo-dark.svg" width="300"/>
-<h1>तुमच्या डेस्कवर वेगवान AI कोडिंग.<br/>SWE‑bench Verified वर सुमारे 69%.</h1>
-<p class="lede"><strong>SWE-bench Verified चे 100 पैकी 68 टास्क, एका DGX Spark वर ऑफलाइन सोडवले</strong>, सुमारे 48 टोकन प्रति सेकंद वेगाने. एक कोडिंग एजंट, एक चॅट असिस्टंट आणि एक डेस्कटॉप ॲप, सगळे पूर्णपणे तुमच्या स्वतःच्या GB10 वर चालतात. क्लाउड नाही. अकाउंट नाही. API बिल नाही. टेलिमेट्री नाही. <a href="#benchmark">हे कसे मोजले</a></p>
+<h1>तुमच्या स्वतःच्या मशीनवर चालणारा कोडिंग सहाय्यक.<br/>चाचणीतल्या प्रत्येक 100 पैकी सुमारे 69 समस्या त्याने सोडवल्या.</h1>
+<p class="lede"><strong>SWE-bench Verified मधील प्रोग्रामिंगच्या 100 खऱ्या समस्यांपैकी 68, एका DGX Spark वर इंटरनेटशिवाय सोडवल्या</strong>, सुमारे 48 टोकन प्रति सेकंद वेगाने. (टोकन म्हणजे शब्दाचा एक छोटा तुकडा; हे मशीन दर सेकंदाला असे सुमारे 48 तुकडे लिहिते.) Mightling हा कोडिंग सहाय्यक आहे, चॅट सहाय्यक आहे आणि डेस्कटॉप ॲपही आहे, आणि हे सगळे तुमच्या स्वतःच्या GB10 वर चालते. क्लाउडला काहीही पाठवले जात नाही. अकाउंट नाही, प्रत्येक वापराचे बिल नाही आणि ट्रॅकिंग नाही. <a href="#benchmark">आम्ही हे कसे मोजले</a></p>
 <div class="buttons hero-btns">
 <a class="btn primary" href="#install">इन्स्टॉल</a>
 <a class="btn ghost" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">डॉक्स</a>
 <a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">नवीनतम रिलीझ</a>
 </div>
 <div class="surface-strip">
-<a href="#surface-terminal">🖥️ <code>ling</code>, टर्मिनल एजंट</a>
+<a href="#surface-terminal">🖥️ <code>ling</code>, तुमच्या टर्मिनलमधील सहाय्यक</a>
 <a href="#surface-desktop">🪟 डेस्कटॉप ॲप <span class="tag">प्रिव्ह्यू</span></a>
 <a href="#surface-web">💬 Ask, ब्राउझरमध्ये</a>
 <a href="#surface-editor">🧩 JetBrains आणि VS Code (MCP)</a>
@@ -106,14 +106,14 @@
 <div class="mock-node">GB10 · ~48 tok/s · 0 egress</div>
 </aside>
 <div class="mock-main">
-<div class="mock-msg user">रिकाम्या ईमेल पत्त्यांवर साइनअप चाचण्या अयशस्वी होत आहेत. कारण शोधा आणि दुरुस्त करा.</div>
+<div class="mock-msg user">ईमेल रिकामा असताना साइनअपच्या चाचण्या अयशस्वी होतात. कारण शोध, आणि दुरुस्त कर.</div>
 <div class="mock-tools">
 <div class="mock-tool"><span class="ok">✔</span> <code>ling-code def validate_signup</code> <span class="c">→ src/auth/signup.py:42</span></div>
 <div class="mock-tool"><span class="ok">✔</span> <code>pytest tests/test_signup.py -q</code> <span class="c">→ 1 failed, 14 passed</span></div>
 <div class="mock-tool"><span class="ok">✔</span> <code>apply_patch src/auth/signup.py</code> <span class="diff-add">+12</span> <span class="diff-del">-2</span> · <code>tests/test_signup.py</code> <span class="diff-add">+8</span></div>
 <div class="mock-tool"><span class="ok">✔</span> <code>pytest tests/test_signup.py -q</code> <span class="c">→ 15 passed in 0.41s</span></div>
 </div>
-<div class="mock-msg agent">फक्त स्पेस असलेल्या स्ट्रिंग्स नॉर्मलायझेशनपूर्वीची तपासणी चुकवत होत्या. <code>src/auth/signup.py</code> मध्ये आधी इनपुट ट्रिम केले आणि रिग्रेशन चाचणी जोडली.</div>
+<div class="mock-msg agent">फक्त मोकळ्या जागांची एक स्ट्रिंग तपासणीतून सुटली, कारण मोकळ्या जागा काढण्याआधी तपासणी चालत होती. आता मी आधी मोकळ्या जागा काढतो, <code>src/auth/signup.py</code> मध्ये, आणि दुरुस्ती टिकावी म्हणून एक चाचणी जोडली आहे.</div>
 <div class="mock-composer">
 <span class="mock-files">src/auth/signup.py (+12 -2) · tests/test_signup.py (+8 -0)</span>
 </div>
@@ -121,10 +121,10 @@
 </div>
 </div>
 <div class="numbers">
-<div><b>68/100</b><span>SWE-bench Verified टास्क, एका DGX Spark वर ऑफलाइन</span></div>
-<div><b>~48 tok/s</b><span>एजंटच्या कामातील जनरेशन, एक स्ट्रीम</span></div>
-<div><b>0</b><span>फोन-होम कनेक्शन, egress ऑडिटने पडताळलेले</span></div>
-<div><b>$0</b><span>प्रति टोकन, कायमचे</span></div>
+<div><b>68/100</b><span>SWE-bench Verified च्या समस्या सोडवल्या, इंटरनेटशिवाय, एका DGX Spark वर</span></div>
+<div><b>~48 tok/s</b><span>शब्द प्रति सेकंद, कोडवर काम करताना, एका वेळी एक काम</span></div>
+<div><b>0</b><span>बाहेर संपर्क साधणारी कनेक्शन्स, egress ऑडिटने तपासलेली</span></div>
+<div><b>$0</b><span>प्रति टोकन, तुम्ही जोपर्यंत वापरता तोपर्यंत</span></div>
 </div>
 </div>
 </div>
@@ -137,24 +137,24 @@
 <div class="news-cards">
 <article class="news-card">
 <div class="news-meta"><span class="tag">v1.7.2</span><time datetime="2026-10-28">2026-10-28</time></div>
-<h3>ling-serve इंजिन, ScaleSearch ड्राफ्टर आणि नोड Forgejo</h3>
-<p>ऐच्छिक <code>ling-serve</code> GB10 वर 262K संदर्भासह Qwen3.8-27B चालवते, प्रत्येक नोडला खाजगी Forgejo मिळते आणि Telegram Mini App थेट तुमच्या रिपॉझिटरीवर काम करते.</p>
+<h3>ling-serve इंजिन, ScaleSearch ड्राफ्टर, आणि प्रत्येक नोडवर एक Forgejo</h3>
+<p>पर्यायी <code>ling-serve</code> GB10 वर Qwen3.8-27B ला 262K टोकनच्या आठवणीसह चालवते. प्रत्येक नोडला स्वतःचे खाजगी Forgejo मिळते (git रिपॉझिटरी ठेवण्याची जागा), आणि Telegram Mini App थेट तुमच्या रिपॉझिटरीवर काम करते.</p>
 <a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.2">v1.7.2 →</a>
 </article>
 <article class="news-card">
 <div class="news-meta"><span class="tag">v1.7.1</span><time datetime="2026-10-26">2026-10-26</time></div>
-<h3>होस्ट सॉकेट्स बंद, स्थानिक फाइल इंडेक्स आणि LoRA अ‍ॅडॉप्टर्स</h3>
-<p>कमांड सँडबॉक्समध्ये Docker, containerd, D-Bus आणि systemd सॉकेट्स बंद करते, <code>ling-docs</code> मध्ये OCR व ऑफिस दस्तऐवज जोडते आणि स्वाक्षरी केलेले LoRA अ‍ॅडॉप्टर्स पुरवते.</p>
+<h3>होस्ट सॉकेट बंद, स्थानिक फाइल इंडेक्स, आणि LoRA अडॅप्टर</h3>
+<p>कमांड सँडबॉक्सच्या आत Docker, containerd, D-Bus आणि systemd चे सॉकेट बंद आहेत (सॉकेट म्हणजे एक दार ज्यातून प्रोग्राम सिस्टीमला आज्ञा देऊ शकतो). <code>ling-docs</code> आता स्कॅन केलेली पाने आणि ऑफिस दस्तऐवजही वाचते, आणि सर्व्हर सही केलेले LoRA अडॅप्टर (मॉडेलला जोडायचे छोटे अतिरिक्त भाग) देऊ शकतो.</p>
 <a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.1">v1.7.1 →</a>
 </article>
 <article class="news-card">
 <div class="news-meta"><span class="tag">v1.7.0</span><time datetime="2026-10-20">2026-10-20</time></div>
-<h3>macOS, Linux आणि Windows वर डेस्कटॉप अ‍ॅप आणि Night Shift best-of-N</h3>
-<p>Ask आणि Work एकाच विंडोमध्ये रिव्ह्यू पेन, वर्क्री आणि टर्मिनल टॅबसह येतात; <code>/night add --best-of N</code> काम N वेळा चालवून सर्वोत्तम प्रयत्न ठेवते.</p>
+<h3>macOS, Linux आणि Windows वर डेस्कटॉप ॲप, आणि Night Shift best-of-N</h3>
+<p>Ask आणि Work एकच डेस्कटॉप विंडो वाटून घेतात, ज्यात तपासणी पॅनेल, worktrees आणि टर्मिनल टॅब आहेत. <code>/night add --best-of N</code> एक काम N वेळा चालवते आणि सर्वोत्तम प्रयत्न ठेवते.</p>
 <a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">v1.7.0 →</a>
 </article>
 </div>
-<p class="sub after">1.7.0 मध्ये आणखी: Night Shift एखादा टास्क अनेक वेळा करून पाहून सर्वोत्तम प्रयत्न ठेवू शकतो (<code>/night add --best-of N</code>), एक मशीन अनेक Signal ब्रिज चालवू शकते, आणि क्लायंट एकाच नेटवर्कवरील दोन नोडमधून निवडू शकतो, आधीपासून माहीत असलेला नोड न गमावता. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">रिलीझ नोट्स आणि डाउनलोड</a>.</p>
+<p class="sub after">1.7.0 मध्ये हेही आहे: Night Shift एका कामाचा अनेक वेळा प्रयत्न करू शकते आणि सर्वोत्तम प्रयत्न ठेवू शकते (<code>/night add --best-of N</code>). एक मशीन अनेक Signal ब्रिज चालवू शकते. आणि एका नेटवर्कवर दोन GB10 दिसणारा संगणक त्यांच्यातून एक निवडू शकतो, आणि आधीपासून ओळखीचा असलेला विसरत नाही. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">रिलीझ नोट्स आणि डाउनलोड</a>.</p>
 </div>
 </section>
 <section id="install">
@@ -164,25 +164,25 @@
 <div class="cmd has-copy"><button class="copy" data-done="कॉपी झाले" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">कॉपी करा</button>
 <pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
 <div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># मॉडेल एकदाच डाउनलोड होते (~20 GB), मग सुरू होते</span>
-<span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># झाले, एवढेच</span></pre></div>
-<p class="note">NVIDIA DGX Spark आणि प्रत्येक GB10 मशीनवर चालते. स्क्रिप्ट प्रत्येक डाउनलोड रिलीझच्या चेकसमशी पडताळते आणि प्रत्येक <code>sudo</code> कमांड चालवण्यापूर्वी ती दाखवते. हवे असल्यास आधी <a href="https://github.com/dreamference/mightling/blob/main/install.sh">ती वाचा</a>.</p>
+<span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># एवढेच</span></pre></div>
+<p class="note">हे NVIDIA DGX Spark वर चालते आणि इतर प्रत्येक GB10 मशीनवरही. स्क्रिप्ट प्रत्येक डाउनलोड रिलीझच्या चेकसमशी पडताळून पाहते, आणि प्रत्येक <code>sudo</code> कमांड चालवण्याआधी तुम्हाला दाखवते. तुम्ही <a href="https://github.com/dreamference/mightling/blob/main/install.sh">आधी स्क्रिप्ट वाचू शकता</a>.</p>
 <div class="clients">
 <div class="client">
 <h3>Mac आणि Linux क्लायंट</h3>
-<p>तुमचे इतर कॉम्प्युटर लोकल नेटवर्कवरून GB10 चे मॉडेल वापरतात. Mac किंवा दुसऱ्या Linux मशीनवर वरचीच कमांड <code>ling</code> क्लायंट इन्स्टॉल करते; तो GB10 स्वतःहून शोधतो.</p>
-<p>1.7.2 पासून ती Mac वर डेस्कटॉप ॲपही Applications मध्ये ठेवते, उघडायला तयार (<code>--no-app</code> ने ते वगळता येते).</p>
+<p>तुमचे इतर संगणक घरच्या किंवा ऑफिसच्या नेटवर्कवरून GB10 चे मॉडेल उसने घेतात. Mac किंवा दुसऱ्या Linux मशीनवर हीच कमांड <code>ling</code> बसवते, म्हणजे तुम्ही जिथे टाइप करता तो भाग. तो GB10 आपोआप शोधतो.</p>
+<p>1.7.2 पासून हे Mac वर डेस्कटॉप ॲपही Applications मध्ये ठेवते, उघडायला तयार. नको असल्यास <code>--no-app</code> जोडा.</p>
 </div>
 <div class="client">
 <h3>Windows क्लायंट <span class="tag">प्रिव्ह्यू</span></h3>
 <div class="cmd has-copy"><button class="copy" data-done="कॉपी झाले" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">कॉपी करा</button>
 <pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
-<p>PowerShell मध्ये. प्रशासक अधिकारांशिवाय इन्स्टॉल होते (1.7.2 पासून डेस्कटॉप ॲपही), मग Windows एकदा एजंटचा सँडबॉक्स सेट करायला सांगते. अजून साइन केलेले नाही, म्हणून Smart App Control बंद असायला हवे. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">स्क्रिप्ट वाचा</a>.</p>
+<p>हे PowerShell मध्ये टाइप करा. यासाठी प्रशासकाचे (administrator) अधिकार लागत नाहीत (1.7.2 पासून डेस्कटॉप ॲपसाठीही हेच). मग Windows तुम्हाला एकदा विचारते की सहाय्यक जिथे कमांड चालवतो ती भिंतींनी वेढलेली जागा तयार करायची का. इंस्टॉलरवर अजून सही नाही, म्हणून Smart App Control बंद असले पाहिजे. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">स्क्रिप्ट वाचा</a>.</p>
 </div>
 </div>
 <details class="other"><summary>इन्स्टॉल करण्याचे इतर मार्ग</summary>
-<p>रिलीझ पेजवर Mac चे dmg (<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>, Intel साठी <code>x64</code>) आणि Windows इन्स्टॉलर (<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>, किंवा <code>arm64</code>) देखील आहेत. हे साइन न केलेले प्रिव्ह्यू आहेत: ब्राउझरमधून डाउनलोड केल्यास पहिल्यांदा थांबवले जातात. आधी प्रत्येक फाइल रिलीझच्या साइन केलेल्या <code>SHA256SUMS</code> शी तपासा.</p>
+<p>रिलीझ पानावर Mac ची डिस्क इमेज (<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>, किंवा Intel साठी <code>x64</code>) आणि Windows इंस्टॉलर (<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>, किंवा <code>arm64</code>) हेही आहेत. ही सही नसलेली प्रीव्ह्यू आहेत, म्हणून ब्राउझरमधून डाउनलोड केल्यावर तुमची सिस्टीम पहिल्यांदा त्यांना थांबवते. उघडण्याआधी त्यांना रिलीझच्या सही केलेल्या <code>SHA256SUMS</code> फाइलशी पडताळून पाहा.</p>
 <ul>
-<li>macOS 15 आणि नंतरचे: Mightling ला Applications मध्ये ओढा आणि एकदा उघडा, मग System Settings › Privacy & Security › <b>Open Anyway</b>. macOS 14 आणि जुन्यामध्ये ॲपवर Control-क्लिक करा › Open.</li>
+<li>macOS 15 आणि नंतरचे: Mightling ला Applications मध्ये ओढा आणि एकदा उघडा. मग System Settings › Privacy & Security मध्ये जा आणि <b>Open Anyway</b> दाबा. macOS 14 आणि आधीच्यामध्ये ॲपवर Control दाबून क्लिक करा आणि Open निवडा.</li>
 <li>Windows: SmartScreen › <b>More info</b> › <b>Run anyway</b>. Smart App Control बंद असायला हवे.</li>
 </ul>
 </details>
@@ -193,19 +193,19 @@
 <li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
 <li>Gigabyte TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
 </ul>
-<p class="sub flush">त्यांच्यात तीच चिप, 128 GB युनिफाइड मेमरी आणि DGX OS 7 आहे, म्हणून एकच इन्स्टॉलर सर्वांसाठी पुरेसा आहे. Mightling चा विकास आणि चाचणी रोज ASUS Ascent GX10 वर होते; इतरांसाठी टेस्टने खात्री केली जाते.</p>
+<p class="sub flush">या सगळ्यांत एकच चिप आहे, प्रोसेसर आणि ग्राफिक्स यांची वाटून घेतलेली तीच 128 GB मेमरी आहे, आणि DGX OS 7 आहे, म्हणून एक इंस्टॉलर सर्वांसाठी पुरतो. आम्ही Mightling रोज ASUS Ascent GX10 वर बनवतो आणि तपासतो. बाकीची आमच्या स्वयंचलित चाचण्यांत येतात, पण आम्ही ती हाताने चालवत नाही.</p>
 </div>
 </div>
 </section>
 <section id="workflows">
 <div class="wrap">
 <h2>आधी हे करून पहा</h2>
-<p class="sub">किंवा आज रात्रीसाठी काम रांगेत लावा: <code>/night add &lt;task&gt;</code>. तुम्ही झोपलेले असताना Mightling रांग संपवते, प्रत्येक टास्क स्वतःच्या git ब्रांचवर, आणि सकाळी चहा पिताना तुम्ही ब्रांच तपासता.</p>
+<p class="sub">किंवा आज रात्रीसाठी काम ठेवा: <code>/night add &lt;task&gt;</code>. तुम्ही झोपलेले असताना Mightling यादीवर काम करते, प्रत्येक काम स्वतःच्या वेगळ्या git ब्रांचवर, आणि सकाळी तुम्ही त्या ब्रांच तपासता.</p>
 <div class="tabs-box">
 <div class="tab-bar" role="tablist">
-<button class="tab-btn active" type="button" role="tab" aria-selected="true" data-tab="tab-onboard">कोडबेस समजून घ्या</button>
+<button class="tab-btn active" type="button" role="tab" aria-selected="true" data-tab="tab-onboard">प्रोजेक्ट समजून घेणे</button>
 <button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-fix">अयशस्वी चाचण्या दुरुस्त करा</button>
-<button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-night">Night Shift रांगेत लावा</button>
+<button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-night">Night Shift साठी कामे रांगेत लावणे</button>
 </div>
 <div class="cmd tab-panel active" id="tab-onboard" role="tabpanel"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
 <span class="c"># reads the code index (ling-code outline, def, refs, callers) instead of grepping,</span>
@@ -222,15 +222,15 @@
 <div class="pillars workflow-cards">
 <div class="pillar">
 <h3>🧭 कोड इंडेक्स</h3>
-<p>तुमच्या रिपॉझिटरीत डेफिनिशन्स, कॉलर आणि परिणाम, म्हणजे एजंट कोडसाठी grep करण्याऐवजी तो थेट शोधतो.</p>
+<p>तुमच्या सगळ्या प्रोजेक्टमध्ये गोष्टी कुठे ठरवल्या आहेत आणि त्या कोण वापरते याची यादी, म्हणजे सहाय्यक कोड अंदाजाने शोधण्याऐवजी थेट पाहू शकतो.</p>
 </div>
 <div class="pillar">
-<h3>🔎 वेब सर्च आणि फेच</h3>
-<p>तुमच्या स्वतःच्या मशीनवरील खाजगी SearXNG मार्फत: सर्च अकाउंट नाही, API की नाही.</p>
+<h3>🔎 वेब सर्च आणि पेज आणणे</h3>
+<p>सर्च तुमच्या स्वतःच्या मशीनवरील खाजगी SearXNG मार्फत होते, म्हणून सर्च अकाउंट नाही आणि मिळवायला कोणती किल्ली नाही. प्रश्न तरीही उत्तरासाठी वेबपर्यंत जातात.</p>
 </div>
 <div class="pillar">
 <h3>🌙 Night Shift</h3>
-<p>झोपण्यापूर्वी <code>/night add &lt;task&gt;</code>; सकाळपर्यंत प्रत्येक टास्क स्वतःच्या git ब्रांचवर पूर्ण. तुमच्याशिवाय काहीही मर्ज किंवा पुश होत नाही.</p>
+<p>झोपण्यापूर्वी <code>/night add &lt;task&gt;</code> टाइप करा. सकाळपर्यंत प्रत्येक काम स्वतःच्या वेगळ्या git ब्रांचवर झालेले असते. तुम्ही स्वतः केल्याशिवाय काहीही मर्ज किंवा पुश होत नाही.</p>
 </div>
 </div>
 </div>
@@ -238,13 +238,13 @@
 <section id="surfaces">
 <div class="wrap">
 <h2>तुम्हाला काय मिळते</h2>
-<p class="sub">Mightling 1.7.0 चे डेस्कटॉप ॲप Ask आणि Work एकाच विंडोत ठेवते. Work म्हणजे एजंट सेशनसाठी पूर्ण वर्कबेंच: फाइल, स्किल आणि कमांड असलेला कंपोझर, स्टेज, रिव्हर्ट आणि कमिट करण्यासाठी रिव्ह्यू पेन, वर्कट्री, टर्मिनल टॅब, आणि थ्रेडच्या शेजारी फाइल ट्री व फाइल टॅब. तुमच्या इतर कॉम्प्युटरवर ते तुमच्या GB10 चे क्लायंट म्हणून चालते आणि त्याला लोकल नेटवर्कवर शोधते.</p>
+<p class="sub">1.7.0 मधील डेस्कटॉप ॲप Mightling वापरण्याचे दोन्ही मार्ग एकाच विंडोत आणते: Ask, जिथे तुम्ही प्रश्न विचारता, आणि Work, जिथे सहाय्यक तुमचा कोड बदलतो. Work मध्ये कामे लिहिण्याचा एक बॉक्स आहे (तुम्ही फाइल्स, स्किल्स आणि कमांड्स जोडू शकता), बदल ठेवण्याआधी किंवा मागे घेण्याआधी ते तपासायला एक पॅनेल आहे, तुमच्या कोडच्या वेगवेगळ्या कामाच्या प्रती (worktrees) आहेत, टर्मिनल टॅब आहेत, आणि संभाषणाशेजारी फाइल्सचे झाड आहे. तुमच्या इतर संगणकांवर हे ॲप तुमच्या GB10 शी बोलते, जो ते तुमच्या नेटवर्कवर शोधते.</p>
 <div class="surface-rows">
 <div class="surface-row" id="surface-terminal">
 <div class="surf-copy">
 <div class="eyebrow"><code>ling</code> · <code>ling-code</code> · <code>ling-docs</code></div>
-<h3>🖥️ <code>ling</code>, टर्मिनल एजंट</h3>
-<p>तुमची रिपॉझिटरी वाचतो, कमांड आणि टेस्ट चालवतो, कोड एडिट करतो, आणि जोखमीच्या कोणत्याही गोष्टीआधी विचारतो.</p>
+<h3>🖥️ <code>ling</code>, तुमच्या टर्मिनलमधील सहाय्यक</h3>
+<p>तो तुमचा प्रोजेक्ट वाचतो, कमांड्स आणि चाचण्या चालवतो, कोड बदलतो, आणि धोकादायक काही करण्याआधी तुम्हाला आधी विचारतो.</p>
 <div class="surf-actions"><a class="btn ghost sm" href="#install">इन्स्टॉल →</a></div>
 </div>
 <div class="surf-media">
@@ -252,7 +252,7 @@
 <span class="p">$ </span>cd ~/your-project &amp;&amp; ling
 <span class="p">&gt; </span>/airgapped on      <span class="c"># no network for any command it runs</span>
 <span class="p">&gt; </span>/worktree apply    <span class="c"># bring the changes back to your checkout</span></pre></div>
-<div class="feature single-feature"><h3>🧩 तुमच्या आधीच्या स्किल</h3><p>Claude Code, Gemini CLI, OpenClaw किंवा Hermes साठी तुम्ही आधीच लिहिलेल्या स्किल बदलाशिवाय चालतात.</p></div>
+<div class="feature single-feature"><h3>🧩 तुमच्याकडे आधीच असलेली स्किल्स</h3><p>Claude Code, Gemini CLI, OpenClaw किंवा Hermes साठी तुम्ही लिहिलेली स्किल्स इथे आहेत तशीच चालतात.</p></div>
 </div>
 </div>
 <div class="surface-row reverse" id="surface-desktop">
@@ -260,25 +260,25 @@
 <span id="surface-web"></span>
 <div class="eyebrow"><code>ling app</code> · <code>ling web</code></div>
 <h3>🪟 डेस्कटॉप ॲप <span class="tag">प्रिव्ह्यू</span></h3>
-<p>Ask आणि Work एका विंडोत, GB10, Mac, Linux किंवा Windows वर: मंजुरीसह एजंट सेशन, रिव्ह्यू पेन, वर्कट्री आणि अनडू. <a href="#new">1.7 मध्ये नवे</a>.</p>
-<p>वेब सर्च, इमेज सर्च आणि डिक्टेशनसह प्रश्न, आणि तुमचे एजंट सेशन, याच मशीनवरून किंवा जोडलेल्या फोनवरून, त्याच लोकल मॉडेलवर.</p>
+<p>Ask आणि Work एकाच विंडोत, GB10, Mac, Linux किंवा Windows वर. सहाय्यकाची सेशन्स तुमची मंजुरी मागतात, आणि बदल तपासण्याचे पॅनेल, वेगवेगळ्या कामाच्या प्रती आणि पूर्ववत करण्याची सोय आहे. <a href="#new">1.7 मध्ये नवे</a>.</p>
+<p>वेब सर्च, इमेज सर्च आणि टाइप करण्याऐवजी बोलून प्रश्न, आणि तुमची सहाय्यक सेशनही, या मशीनवरून किंवा तुम्ही त्याच्याशी जोडलेल्या फोनवरून. हे सगळे तुमच्या मशीनवरील त्याच मॉडेलचा वापर करते.</p>
 <div class="surf-actions"><a class="btn ghost sm" href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">डॉक्स →</a></div>
 </div>
 <div class="surf-media">
 <div class="pillars os-cards">
 <div class="pillar">
 <h3>macOS <span class="tag">प्रिव्ह्यू</span></h3>
-<p>1.7.2 पासून <a href="#install">इन्स्टॉल कमांड</a> Mightling ला <code>ling</code> सोबत Applications मध्ये ठेवते, आणि ते इतर कोणत्याही ॲपप्रमाणे उघडते. Apple silicon आणि Intel, macOS 12 किंवा नंतरचे. <code>ling update</code> ते अपडेट करते.</p>
+<p>1.7.2 पासून <a href="#install">इन्स्टॉल कमांड</a> Mightling ला <code>ling</code> सोबत Applications मध्ये ठेवते, आणि तुम्ही ते इतर कोणत्याही ॲपप्रमाणे उघडता. ते Apple silicon आणि Intel दोन्हीवर चालते, macOS 12 किंवा नंतरच्या आवृत्तीसह. <code>ling update</code> ते अपडेट करते.</p>
 </div>
 <div class="pillar">
 <h3>Linux</h3>
-<p>GB10 वर <code>mightling_1.7.0_arm64.deb</code> ॲप, त्याची लाँचर एंट्री आणि <code>ling-app</code> कमांड इन्स्टॉल करते, सोबत त्याला लागणारा सँडबॉक्स प्रोफाइल:</p>
+<p>GB10 वर <code>mightling_1.7.0_arm64.deb</code> ही फाइल ॲप, त्याची मेनू एंट्री आणि <code>ling-app</code> कमांड बसवते, तसेच त्याला लागणारी सँडबॉक्स प्रोफाइलही. (सँडबॉक्स म्हणजे कमांड चालवण्याची एक बंद खोली, म्हणजे त्या मशीनच्या बाकीच्या भागाला हात लावू शकत नाहीत.)</p>
 <div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
-<p>मग ते ॲप्लिकेशन मेनूमधून उघडा, किंवा <code>ling app</code> ने. <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">अधिक</a>.</p>
+<p>मग ते ॲप्लिकेशन मेनूमधून उघडा, किंवा <code>ling app</code> टाइप करा. <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">अधिक माहिती</a>.</p>
 </div>
 <div class="pillar">
 <h3>Windows 11 <span class="tag">प्रिव्ह्यू</span></h3>
-<p>1.7.2 पासून <a href="#install">PowerShell ची ओळ</a> ॲपही इन्स्टॉल करते, फक्त तुमच्यासाठी आणि प्रशासक अधिकारांशिवाय, Start मेनू एंट्रीसह; Settings → Apps मधून ते काढता येते; <code>ling update</code> ते अपडेट करते. Smart App Control बंद असायला हवे.</p>
+<p>1.7.2 पासून <a href="#install">PowerShell ची ओळ</a> ॲपही बसवते, फक्त तुमच्यासाठी आणि प्रशासकाच्या अधिकारांशिवाय, Start मेनूमध्ये एका एंट्रीसह. Settings → Apps ते काढून टाकते, आणि <code>ling update</code> ते अपडेट करते. Smart App Control बंद असले पाहिजे.</p>
 </div>
 </div>
 </div>
@@ -288,14 +288,14 @@
 <span id="surface-phone"></span>
 <div class="eyebrow"><code>ling-admin mcp</code> · <code>ling signal</code> · <code>ling chat</code></div>
 <h3>JetBrains, VS Code आणि तुमचा फोन</h3>
-<p>stdio MCP (<code>ling-admin mcp</code>) द्वारे JetBrains किंवा VS Code जोडा, किंवा Signal (Note to Self), Telegram (Mini App रिपॉझिटरी वर्कबेंचसह) आणि Tailscale वरील Matrix वरून तुमच्या GB10 ला संदेश पाठवा. तुम्ही चालू करेपर्यंत प्रत्येक फोन ब्रिज बंद राहतो.</p>
+<p>तुम्ही JetBrains किंवा VS Code ला stdio MCP (<code>ling-admin mcp</code>) मार्फत जोडू शकता. तुम्ही तुमच्या GB10 ला Signal वरून (स्वतःलाच, Note to Self मध्ये), Telegram वरून (रिपॉझिटरीवर काम करणाऱ्या Mini App सह) आणि Tailscale वरील Matrix वरूनही संदेश पाठवू शकता. फोनचा प्रत्येक दुवा तुम्ही चालू करेपर्यंत बंद असतो. Signal एंड-टू-एंड एन्क्रिप्टेड आहे, आणि Matrix तुमच्या स्वतःच्या सर्व्हरवर चालते. Telegram चे संदेश एन्क्रिप्शनशिवाय Telegram च्या सर्व्हरमधून जातात, म्हणून ते फक्त अशा गोष्टींसाठी वापरा ज्या अशा प्रकारे शेअर करायला तुमची हरकत नाही.</p>
 <div class="surf-actions"><a class="btn ghost sm" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">डॉक्स →</a></div>
 </div>
 <div class="surf-media">
 <div class="cmd"><pre><span class="p">$ </span>ling-admin mcp            <span class="c"># stdio MCP for JetBrains and VS Code</span>
 <span class="p">$ </span>ling signal setup         <span class="c"># Note to Self only, off until linked</span>
 <span class="p">$ </span>ling chat telegram setup  <span class="c"># topics and the Mini App</span></pre></div>
-<div class="feature single-feature"><h3>📬 Gmail, Drive, Calendar <span class="tag">प्रिव्ह्यू</span></h3><p>रीड-ओन्ली, तुमच्या मशीनवरच राहणाऱ्या साइन-इनमधून. <code>/airgapped on</code> वर पूर्णपणे बंद.</p></div>
+<div class="feature single-feature"><h3>📬 Gmail, Drive, Calendar <span class="tag">प्रिव्ह्यू</span></h3><p>फक्त वाचनासाठी, तुमच्या मशीनवरच राहणाऱ्या साइन-इनमार्फत. <code>/airgapped on</code> ने ते पूर्णपणे बंद होते.</p></div>
 </div>
 </div>
 </div>
@@ -303,11 +303,11 @@
 </section>
 <section class="band-full" id="proof">
 <div class="wrap">
-<h2>तुमचा कोड तुमच्या डेस्कबाहेर जात नाही, आणि तुम्ही ते सिद्ध करू शकता</h2>
-<p class="sub">क्लाउड कोडिंग एजंट तुमचा सोर्स कोड दुसऱ्याच्या सर्व्हरवर पाठवतात. Mightling तो कुठेही पाठवत नाही: मॉडेल तुमच्या GB10 वर चालते, आणि Mightling मधले काहीही बाहेर संपर्क साधत नाही. वापराचे विश्लेषण नाही, मेट्रिक्स नाहीत, साइन-इन नाही, "अनामिक" क्रॅश रिपोर्ट नाहीत. त्यामुळे अपलोड करण्याची परवानगी नसलेल्या कोडसाठी ते वापरता येते: क्लायंटचे काम, नियंत्रित डेटा, अप्रकाशित उत्पादने.</p>
+<h2>तुमचा कोड तुमच्या टेबलावरच राहतो, आणि तसे आहे हे तुम्ही स्वतः तपासू शकता</h2>
+<p class="sub">क्लाउड कोडिंग सहाय्यक तुमचा सोर्स कोड दुसऱ्या कोणाच्या संगणकांवर पाठवतो. Mightling तो कुठेच पाठवत नाही. मॉडेल तुमच्या GB10 वर चालते, आणि Mightling मधील काहीही बाहेर संपर्क साधत नाही: वापराची मोजणी नाही, मापे नाहीत, साइन-इन नाही, "अनामिक" क्रॅश रिपोर्टही नाहीत. म्हणून तुम्ही ते अशा कोडवर वापरू शकता जो अपलोड करायला तुम्हाला परवानगी नाही, जसे की ग्राहकाचे काम, संरक्षित डेटा किंवा अजून प्रसिद्ध न झालेले उत्पादन.</p>
 <div class="proof">
 <div>
-<p>एक कमांड <code>strace</code> खाली खऱ्या Mightling सेशनला चालवते आणि त्याने केलेल्या प्रत्येक नेटवर्क कनेक्शनची यादी देते:</p>
+<p>एक कमांड Mightling चे खरे सेशन <code>strace</code> खाली चालवते, जे प्रोग्रामने केलेल्या प्रत्येक कॉलवर लक्ष ठेवणारे साधन आहे, आणि मग सेशनने उघडलेल्या प्रत्येक नेटवर्क कनेक्शनची यादी देते:</p>
 <div class="cmd"><pre><span class="p">$ </span>ling-admin audit egress
 <span class="ok">✔ Egress audit: pass</span>
 Network destinations:
@@ -315,13 +315,13 @@ Network destinations:
    127.0.0.1:8767      1x  Gmail search service
 DNS queries: none
 Networked git commands: none</pre></div>
-<p>सगळे काही <code>127.0.0.1</code> वरच राहिले. एकही DNS लुकअप नाही.</p>
+<p>सर्व काही <code>127.0.0.1</code> वरच राहिले, म्हणजे मशीन स्वतःशीच बोलत होते. एकही DNS लुकअप झाला नाही (DNS लुकअप म्हणजे एखाद्या नावाचा पत्ता इंटरनेटला विचारणे).</p>
 </div>
 <div>
 <h3>पक्की हमी हवी?</h3>
-<p><code>/airgapped on</code> लिहा, आणि एजंट चालवत असलेल्या प्रत्येक कमांडला Linux कर्नलकडून रिकामा नेटवर्क नेमस्पेस मिळतो. ही मॉडेलला केलेली नम्र विनंती नाही: पोहोचायला नेटवर्कच नाही. सँडबॉक्स टाळणारे Full Access त्याच वेळी नाकारले जाते.</p>
+<p><code>/airgapped on</code> टाइप करा. मग सहाय्यक जी कमांड चालवतो तिला Linux कर्नलकडून रिकामे नेटवर्क मिळते. ही मॉडेलला केलेली नम्र विनंती नाही. पोहोचायला नेटवर्कच नाही. त्याच वेळी Full Access, जे सँडबॉक्सला बगल देईल, ते नाकारले जाते.</p>
 <h3>काय बाहेर जाऊ शकते, आणि कधी</h3>
-<p>फक्त तुम्ही किंवा एजंट जे मागतो तेच: वेब सर्च (तुमच्या स्वतःच्या मशीनवरील खाजगी SearXNG मार्फत), पेज फेच, तुम्ही जोडलेल्या Google अकाउंटला रीड-ओन्ली विनंती, किंवा अपडेट तपासणी. <code>/airgapped on</code> वर यापैकी काहीही नाही.</p>
+<p>फक्त तेच जे तुम्ही किंवा सहाय्यक मागता: वेब सर्च (तुमच्या स्वतःच्या मशीनवर चालणाऱ्या खाजगी SearXNG मार्फत, तरी सर्च स्वतः वेबपर्यंत जाते), एखादे वेब पेज आणणे, तुम्ही जोडलेल्या Google अकाउंटला फक्त-वाचनासाठीची विनंती, किंवा अपडेट तपासणे. <code>/airgapped on</code> सोबत यांपैकी काहीही होत नाही.</p>
 </div>
 </div>
 </div>
@@ -331,47 +331,47 @@ Networked git commands: none</pre></div>
 <h2>Mightling का</h2>
 <div class="pillars">
 <div class="pillar">
-<h3>🔒 गोपनीय</h3>
-<p>मॉडेल, तुमचा कोड, तुमचे प्रॉम्प्ट आणि तुमची उत्तरे ज्या मशीनवर आहेत त्याच मशीनवर राहतात.</p>
+<h3>🔒 खाजगी</h3>
+<p>मॉडेल, तुमचा कोड, तुमचे प्रश्न आणि त्यांची उत्तरे ज्या मशीनवर आहेत त्यावरच राहतात.</p>
 <ul>
-<li>अकाउंट नाही, टेलिमेट्री नाही</li>
-<li>तुम्ही पुन्हा चालवू शकता असे egress ऑडिट</li>
+<li>अकाउंट नाही, ट्रॅकिंग नाही</li>
+<li>egress ऑडिट, जे तुम्ही पुन्हा चालवू शकता</li>
 <li><code>/airgapped on</code>, कर्नलकडून लागू</li>
 </ul>
 </div>
 <div class="pillar">
 <h3>⚡ वेगवान, आणि बिल नाही</h3>
 <table>
-<tr><td>एजंटचे काम</td><td class="num">~48 tok/s</td></tr>
-<tr><td>कोड</td><td class="num">69 tok/s</td></tr>
+<tr><td>कोडवर काम</td><td class="num">~48 tok/s</td></tr>
+<tr><td>कोड लिहिणे</td><td class="num">69 tok/s</td></tr>
 <tr><td>JSON</td><td class="num">84 tok/s</td></tr>
 <tr><td>गद्य</td><td class="num">32 tok/s</td></tr>
 <tr><td>कोड वाचणे</td><td class="num">~1,800 tok/s</td></tr>
-<tr><td>कॉन्टेक्स्ट</td><td class="num">262K</td></tr>
+<tr><td>संभाषणाची आठवण</td><td class="num">262K</td></tr>
 </table>
-<p class="note-small">स्पेक्युलेटिव्ह डिकोडिंगसह GB10 वर एक स्ट्रीम. एजंटचे काम खऱ्या एजंट सेशनवर मोजले आहे; कोड, JSON आणि गद्य आउटपुटच्या प्रकारानुसार, ग्रीडी डिकोडिंगसह. चार एजंट एकाच वेळी चालवा: कोटा नाही, "कृपया थांबा" नाही.</p>
+<p class="note-small">हे GB10 वर एका वेळी एका कामाचे वेग आहेत. मॉडेल स्पेक्युलेटिव्ह डिकोडिंग नावाची युक्ती वापरते: एक छोटा सहाय्यक काही शब्द पुढचे अंदाजाने सांगतो आणि मोठे मॉडेल सगळे अंदाज एकदम तपासते. "कोडवर काम" खऱ्या सहाय्यक सेशनवर मोजले आहे. कोड, JSON आणि गद्य लिहिणे हे प्रत्येक त्या प्रकारच्या आउटपुटवर मोजले आहे. शेवटची ओळ म्हणजे ते एका वेळी किती मजकूर लक्षात ठेवू शकते, 262K टोकन, जे काही शे पाने आहेत. हवे असल्यास चार सहाय्यक एकदम चालवा. कोटा नाही आणि "कृपया थांबा" नाही.</p>
 </div>
 <div class="pillar">
-<h3>✨ काहीही कॉन्फिगर करायचे नाही</h3>
+<h3>✨ सेट करायला फार थोडे</h3>
 <ul>
-<li><b>ट्यूनिंग नाही:</b> मॉडेल, कॉन्टेक्स्ट, कर्नल आणि स्पेक्युलेटिव्ह डिकोडिंग GB10 साठी निवडले आहेत.</li>
-<li><b>ते तुमची मशीन फ्रीज करणार नाही:</b> होस्ट तपासला जातो आणि लोड दरम्यान मेमरी प्रेशरवर लक्ष ठेवले जाते.</li>
-<li><b>तुमच्या इतर मशीन ते शोधतात</b>, लोकल नेटवर्कवर.</li>
-<li><b>अपडेट एका कमांडमध्ये:</b> <code>ling update</code>.</li>
+<li><b>ट्यूनिंग नाही:</b> मॉडेल, मेमरीचा आकार, खालच्या पातळीचा कोड आणि स्पेक्युलेटिव्ह डिकोडिंग आम्ही GB10 साठी निवडले आहेत.</li>
+<li><b>ते तुमचे मशीन गोठवू नये:</b> मॉडेल लोड करण्याआधी ते मशीन तपासते, आणि लोड होताना मेमरीवर लक्ष ठेवते.</li>
+<li><b>तुमचे इतर संगणक ते शोधतात</b>, तुमच्या नेटवर्कवर.</li>
+<li><b>अपडेट म्हणजे एक कमांड:</b> <code>ling update</code>.</li>
 </ul>
 </div>
 </div>
 <div class="compare-block" id="compare">
-<h3>Mightling आणि क्लाउड कोडिंग एजंट</h3>
+<h3>Mightling आणि क्लाउड कोडिंग सहाय्यक</h3>
 <div class="tablewrap">
 <table>
-<tr><th></th><th>क्लाउड कोडिंग एजंट</th><th>Mightling</th></tr>
-<tr><td>तुमचा कोड कुठे जातो</td><td>त्यांचे सर्व्हर</td><td class="yes">कुठेही नाही</td></tr>
+<tr><th></th><th>क्लाउड कोडिंग सहाय्यक</th><th>Mightling</th></tr>
+<tr><td>तुमचा कोड कुठे जातो</td><td>त्यांचे संगणक</td><td class="yes">कुठेही नाही</td></tr>
 <tr><td>अकाउंट लागते</td><td>हो</td><td class="yes">नाही</td></tr>
-<tr><td>प्रति टोकन खर्च</td><td>वापरानुसार मोजलेला</td><td class="yes">शून्य</td></tr>
-<tr><td>रेट लिमिट</td><td>हो</td><td class="yes">नाही</td></tr>
-<tr><td>नेटवर्क काढलेले असतानाही चालते</td><td>नाही</td><td class="yes">हो</td></tr>
-<tr><td>काय बाहेर जाते ते तुम्ही पडताळू शकता</td><td>नाही</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
+<tr><td>प्रत्येक टोकनची किंमत</td><td>तुम्ही प्रत्येकासाठी पैसे देता</td><td class="yes">काही नाही</td></tr>
+<tr><td>तुम्ही किती वापरू शकता याच्या मर्यादा</td><td>हो</td><td class="yes">नाही</td></tr>
+<tr><td>नेटवर्कची तार काढली तरी चालते (पहिल्या डाउनलोडनंतर)</td><td>नाही</td><td class="yes">हो</td></tr>
+<tr><td>काय बाहेर जाते ते तुम्ही स्वतः तपासू शकता</td><td>तुमच्या बाजूने नाही</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
 </table>
 </div>
 </div>
@@ -380,7 +380,7 @@ Networked git commands: none</pre></div>
 <section id="benchmark">
 <div class="wrap">
 <h2>SWE-bench Verified, एका DGX Spark वर मोजलेले</h2>
-<p class="sub">2026-10-08 रोजी Mightling 1.5.1 च्या एजंटने Qwen3.8-27B सह एका DGX Spark वर, ऑफलाइन, SWE-bench Verified चे <b>100 पैकी 68</b> टास्क सोडवले: 100 टास्कचा एक ठरावीक नमुना, प्रत्येक टास्कला एक प्रयत्न, डीफॉल्ट मोड. सर्व 500 टास्कवर स्केल केल्यास हे अंदाजे <b>≈69%</b> आहे (95% पट्टा 63.9–73.4%). हे आमचे स्वतःचे मोजमाप आहे, आमच्या स्वतःच्या मशीनवर आणि एका उपसंचावर, लीडरबोर्ड एंट्री नाही.</p>
+<p class="sub">SWE-bench Verified हा ओपन-सोर्स प्रोग्राम्समधून घेतलेल्या 500 खऱ्या समस्यांचा संच आहे. प्रत्येक समस्येत सहाय्यकाला कोड असा बदलावा लागतो की चाचण्या पास होतील. 2026-10-08 रोजी आम्ही त्यांपैकी 100 Mightling 1.5.1 ला दिल्या, Qwen3.8-27B मॉडेलसह, इंटरनेटशिवाय एका DGX Spark वर. प्रत्येक समस्येवर त्याला त्याच्या डीफॉल्ट मोडमध्ये एकच प्रयत्न मिळाला, आणि त्याने <b>100 पैकी 68</b> सोडवल्या. हे सर्व 500 पर्यंत वाढवले तर आमचा अंदाज सुमारे <b>69%</b> आहे, काही गुणांच्या कमी-जास्तपणासह (95% ची श्रेणी 63.9 ते 73.4% आहे). हे आम्ही स्वतः मोजले आहे, आमच्या स्वतःच्या मशीनवर, समस्यांच्या एका नमुन्यावर. ही अधिकृत लीडरबोर्डवरील नोंद नाही.</p>
 <div class="tablewrap">
 <table class="bench">
 <tr><th>सिस्टम</th><th>तेच 100<br/>टास्क</th><th>सर्व 500<br/>टास्क</th></tr>
@@ -402,13 +402,13 @@ Networked git commands: none</pre></div>
 <tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">प्रकाशित नाही</td><td class="ns"><a href="https://cursor.com/blog/composer">प्रकाशित नाही</a></td></tr>
 </table>
 </div>
-<p class="sub after">याकडे समकक्ष मॉडेल्सची तुलना म्हणून पहा, क्रमवारी म्हणून नव्हे. त्याच 100 टास्कवर Mightling ने Qwen3-Coder-480B आणि GLM-4.6 इतके टास्क सोडवले, जी त्याच्यापेक्षा कितीतरी पट मोठी मॉडेल आहेत, पण प्रत्येक ओळीत वेगळा एजंट आणि वेगळे हार्डवेयर आहे, आणि लीडरबोर्डच्या ओळींसाठी अधिकृत x86 टेस्ट इमेज आहेत, तर आमचा रन कम्युनिटी arm64 इमेजवर झाला. refine मोडमध्ये पहिले सेशन काहीही न बदलता टास्क समजून घेते आणि नवे सेशन ते करते: याने डीफॉल्टपेक्षा एक टास्क जास्त सोडवला (68 च्या तुलनेत 69, प्रत्येक मोडने काही असे टास्क जिंकले जे दुसऱ्याने गमावले), प्रति टास्क सुमारे 2.2 पट वेळेत, म्हणून तो ऐच्छिकच आहे (<code>ling --refine</code>).</p>
-<details class="method"><summary>≈69% चा अंदाज कसा काढला</summary>
-<p>100 टास्क म्हणजे Verified चा पाचवा भाग, म्हणून संपूर्ण सेटचा आकडा हा अंदाज आहे. सर्व 175 सार्वजनिक Verified सबमिशनच्या प्रति-टास्क निकालांवर एक एक-पॅरामीटर आयटम-रिस्पॉन्स (Rasch) मॉडेल बसवले आहे: प्रत्येक टास्कला एक काठिण्य आणि प्रत्येक सिस्टमला एक क्षमता. Mightling ची क्षमता ती आहे जी या 100 टास्कवर 68 सोडवले जाणे स्पष्ट करते; ≈69% म्हणजे त्या क्षमतेचा सर्व 500 वर अपेक्षित स्कोअर (प्रकाशित स्कोअरवरचे साधे रिग्रेशन एका गुणाच्या आत सहमत आहे). तपासण्यासाठी प्रत्येक सार्वजनिक सबमिशन फक्त याच 100 टास्कवर स्कोअर केले आणि त्याच पद्धतीने त्याचा एकूण स्कोअर वर्तवला: त्रुटी 2.4 गुण (RMSE) होती, आणि वरचा पट्टा त्याच्या ±1.96 पट आहे. तक्त्यातील प्रत्येक आकडा <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> ने <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> च्या सार्वजनिक प्रति-टास्क डेटावरून पुन्हा मिळवता येतो.</p>
-<p>हे 100 टास्क Verified च्या रिपॉझिटरींमध्ये संपूर्ण सेटच्या प्रमाणात पसरलेले आहेत, अशा टास्कमधून ज्यांचे टेस्ट एनव्हायरनमेंट arm64 वर चालते आणि पडताळले जाते (गोल्ड पॅच पास होतो, रिकामा बदल फेल होतो). प्रकाशित सिस्टम या 100 वर सर्व 500 पेक्षा 1.0 ते 1.5 गुण कमी मिळवतात, म्हणून हा नमुना सोपा नाही. ही लीडरबोर्ड एंट्री नाही: त्यांचे ग्रेडिंग SWE-bench टीम स्वतःच्या इन्फ्रास्ट्रक्चरवर करते.</p>
+<p class="sub after">ही तालिका आसपास कोण आहे हे पाहण्यासाठी वाचा, क्रमवारी म्हणून नाही. याच 100 समस्यांवर Mightling ने तितक्या सोडवल्या जितक्या Qwen3-Coder-480B आणि GLM-4.6 ने, जी त्याच्यापेक्षा कितीतरी पट मोठी मॉडेल आहेत. पण प्रत्येक ओळीत सहाय्यक प्रोग्राम आणि हार्डवेअर वेगळे आहे, आणि लीडरबोर्डच्या ओळींनी x86 संगणकांसाठीच्या अधिकृत चाचणी इमेज वापरल्या, तर आमच्या चाचण्या arm64 च्या कम्युनिटी इमेजवर चालल्या. refine नावाचा दुसरा मोडही आहे. पहिले सेशन समस्येचा अभ्यास करते आणि काहीही बदलत नाही, मग नवे सेशन काम करते. त्याने डीफॉल्टपेक्षा एक समस्या जास्त सोडवली (68 च्या तुलनेत 69, आणि प्रत्येक मोडने काही अशा समस्या सोडवल्या ज्या दुसऱ्याने सोडल्या), आणि प्रत्येक समस्येला सुमारे 2.2 पट वेळ घेतला. म्हणून तुम्ही <code>ling --refine</code> ने मागितल्याशिवाय तो बंद असतो.</p>
+<details class="method"><summary>आम्ही 69% चा अंदाज कसा लावतो</summary>
+<p>100 समस्या म्हणजे Verified चा पाचवा भाग, म्हणून सर्व 500 चा आकडा हा अंदाज आहे. आम्ही तो असा बनवला. सर्व 175 सार्वजनिक Verified सबमिशनचे निकाल घ्या, समस्येनुसार. प्रत्येक समस्येला एक काठिण्य आणि प्रत्येक सिस्टीमला एक क्षमता द्या, एक-पॅरामीटर आयटम-रिस्पॉन्स (Rasch) मॉडेलने. Mightling ची क्षमता अशी आहे जी या 100 समस्यांपैकी 68 सोडवेल, आणि सुमारे 69% म्हणजे तीच क्षमता सर्व 500 वर मिळवेल तो गुण. प्रकाशित गुणांवरील साधे रिग्रेशन एका गुणाच्या आत याच्याशी सहमत आहे. आम्ही ही पद्धत इतरांवरही तपासली: प्रत्येक सार्वजनिक सबमिशनसाठी आम्ही फक्त या 100 समस्यांवरील त्याचा गुण घेऊन सर्व 500 वरील त्याच्या गुणाचा अंदाज लावला. त्रुटी 2.4 गुण होती (RMSE), आणि वरची श्रेणी प्रत्येक बाजूला त्याच्या 1.96 पट आहे. तालिकेतील प्रत्येक आकडा <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> ने पुन्हा तयार करता येतो, <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> मधील सार्वजनिक समस्येनुसार डेटावरून.</p>
+<p>आम्ही 100 समस्या Verified मधील प्रोग्राम्समध्ये पूर्ण संचाप्रमाणेच प्रमाणात वाटल्या. आम्ही त्या अशा समस्यांमधून निवडल्या ज्यांची चाचणी-मांडणी arm64 वर चालते आणि बरोबर ठरते (योग्य दुरुस्ती पास होते, आणि काहीच न करणे अयशस्वी होते). प्रकाशित सिस्टीम्सना या 100 वर सर्व 500 पेक्षा 1.0 ते 1.5 गुण कमी मिळतात, म्हणून हा नमुना सोपा नाही. तरीही ही लीडरबोर्डवरील नोंद नाही, कारण SWE-bench चमू त्या स्वतःच्या मशीनवर तपासतो.</p>
 </details>
 <ol class="footnotes">
-<li id="fn1">Mightling: 100 टास्क, प्रत्येकाला एक प्रयत्न; एक DGX Spark (GB10, 128 GB), मॉडेल लोकल सर्व्ह केले, क्लाउड नाही; डीफॉल्ट मोड 2026-10-08 रोजी मोजला, refine मोड 2026-10-09 रोजी. अंदाज <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> च्या प्रति-टास्क डेटावरून.</li>
+<li id="fn1">Mightling: 100 समस्या, प्रत्येकीवर एक प्रयत्न; एक DGX Spark (GB10, 128 GB), मॉडेल मशीनवरच चालते, क्लाउड नाही; डीफॉल्ट मोड 2026-10-08 रोजी मोजला, refine मोड 2026-10-09 रोजी. अंदाजात <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> मधील समस्येनुसार डेटा वापरला आहे.</li>
 <li id="fn2">500 टास्क, एक प्रयत्न; हार्डवेयर सांगितलेले नाही. स्रोत: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>. तेच मॉडेल mini-SWE-agent सह: 57/100, 55.4%.</li>
 <li id="fn3">500 टास्क, एक प्रयत्न, एजंट उघड केलेला नाही; हार्डवेयर सांगितलेले नाही. स्रोत: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>.</li>
 <li id="fn4">500 टास्क, एक प्रयत्न; हार्डवेयर सांगितलेले नाही. स्रोत: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>.</li>
@@ -432,19 +432,19 @@ Networked git commands: none</pre></div>
 <span class="tag">PDF</span>
 <h3><a href="/paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
 <p class="note-small">dgxcoder · ऑक्टोबर 2026</p>
-<p>आम्ही Mightling Desktop चे आर्किटेक्चर डिझाइन, औपचारिक क्षमता मॉडेल आणि प्रायोगिक मूल्यमापन सादर करतो. हे एक ओपन-सोर्स डेस्कटॉप एनव्हायरनमेंट आहे जे अपस्ट्रीम विक्रेत्याच्या डेस्कटॉप क्लायंटसारखाच app-server प्रोटोकॉल बोलते, Codex-सुसंगत डीफॉल्ट ठेवते, इन्फरन्स वापरकर्त्याच्या स्वतःच्या हार्डवेयरवर चालवते, आणि वापरकर्त्याने <code>/airgapped on</code> केल्यावर प्रत्येक सँडबॉक्स्ड कमांडला वर्कस्टेशनमध्येच मर्यादित ठेवते.</p>
+<p>आम्ही Mightling Desktop ची रचना सांगतो, जो ओपन सोर्स डेस्कटॉप प्रोग्राम आहे. तो काय करू शकतो आणि काय नाही याची औपचारिक यादी आम्ही देतो, आणि त्याचे मापन करतो. तो अपस्ट्रीम विक्रेत्याच्या डेस्कटॉप क्लायंटसारखाच app-server प्रोटोकॉल बोलतो, Codex सारखेच डीफॉल्ट ठेवतो, मॉडेल वापरकर्त्याच्या स्वतःच्या हार्डवेअरवर चालवतो, आणि वापरकर्त्याने <code>/airgapped on</code> टाइप केल्यावर सँडबॉक्समधील प्रत्येक कमांड वर्कस्टेशनवरच ठेवतो.</p>
 <p><a href="/paper/desktop-architecture.pdf">पेपर वाचा (PDF)</a></p>
 </div>
 <div class="pillar resource-card">
 <span class="tag">डॉक्स</span>
-<h3>सुरुवात आणि दस्तऐवजीकरण</h3>
-<p>GB10 वर होस्ट सुरक्षा सेटअप, मॉडेल सर्व्हर सुरू करणे, macOS, Linux व Windows क्लायंट जोडणे आणि इग्रेस ऑडिट चालवणे.</p>
+<h3>सुरुवात कशी करावी, आणि दस्तऐवज</h3>
+<p>GB10 लोड करण्यासाठी सुरक्षित कसा बनवावा, मॉडेल सर्व्हर कसा सुरू करावा, Mac, Linux आणि Windows संगणक त्याच्याशी कसे जोडावेत, आणि egress ऑडिट कसे चालवावे.</p>
 <p><a href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">डॉक्स →</a></p>
 </div>
 <div class="pillar resource-card">
 <span class="tag">बेंचमार्क</span>
-<h3>SWE-bench तुलना पुन्हा तपासा</h3>
-<p>सार्वजनिक SWE-bench प्रयोगांच्या डेटामधून Rasch मॉडेल बसवा आणि तक्त्यातील प्रत्येक आकडा स्वतः पडताळून पहा.</p>
+<h3>SWE-bench ची तुलना पुन्हा करा</h3>
+<p>Rasch आयटम-रिस्पॉन्स मॉडेल स्वतः फिट करा आणि बेंचमार्क तालिकेतील समस्येनुसार प्रत्येक आकडा सार्वजनिक SWE-bench प्रयोगांच्या डेटावरून पुन्हा तयार करा.</p>
 <p><a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>swe_bench_compare.py</code> →</a></p>
 </div>
 </div>
@@ -454,23 +454,23 @@ Networked git commands: none</pre></div>
 <div class="wrap">
 <h2>FAQ</h2>
 <details><summary>मला GB10 लागेल का?</summary>
-<p>हो, मॉडेल चालवण्यासाठी. तुमचे इतर कॉम्प्युटर त्याचे क्लायंट म्हणून चालतात: Linux (Arm किंवा x86) आणि macOS त्याच इन्स्टॉल कमांडने, Windows (Arm किंवा x86, प्रिव्ह्यू) <a href="#install">PowerShell च्या ओळीने</a>.</p></details>
-<details><summary>मी Puffin इन्स्टॉल केले होते. हेच ते आहे का?</summary>
-<p>हो: 1.5 मध्ये Puffin चे नाव बदलून Mightling झाले. एकदा <code>puffin update</code> चालवा, मग शेवटचे एकदा <code>puffin</code>. ते तुमचे सेशन, सेटिंग आणि लिंक नव्या नावाखाली हलवते, आणि त्यानंतर कमांड <code>ling</code> आहे.</p></details>
-<details><summary>ते खरंच मोफत आहे का?</summary>
-<p>हो. Mightling AGPL अंतर्गत ओपन सोर्स आहे, आणि मॉडेलचे वेट्स मोफत आहेत. तुमचा एकमेव चालू खर्च वीज आहे.</p></details>
+<p>हो, मॉडेल चालवण्यासाठी. तुमचे इतर संगणक क्लायंट आहेत जे ते उसने घेतात: Linux (Arm किंवा x86) आणि macOS त्याच इन्स्टॉल कमांडने, आणि Windows (Arm किंवा x86, प्रीव्ह्यू) <a href="#install">PowerShell च्या ओळीने</a>.</p></details>
+<details><summary>मी Puffin इन्स्टॉल केले होते. हा तोच प्रोग्राम आहे का?</summary>
+<p>हो. 1.5 मध्ये Puffin चे नाव बदलून Mightling केले. एकदा <code>puffin update</code> चालवा, मग शेवटचे एकदा <code>puffin</code> चालवा. ते तुमची सेशन्स, सेटिंग्ज आणि लिंक्स पुढे नेते, आणि त्यानंतर कमांड <code>ling</code> आहे.</p></details>
+<details><summary>खरंच काहीच खर्च येत नाही का?</summary>
+<p>प्रोग्रामसाठी काही नाही आणि मॉडेलसाठीही काही नाही. Mightling AGPL अंतर्गत ओपन सोर्स आहे, आणि मॉडेलचे वेट वापरायला मोफत आहेत. तुम्ही मशीनचे आणि त्याच्या विजेचे पैसे देता.</p></details>
 <details><summary>मशीनशिवाय आणखी काय लागते?</summary>
-<p>त्यासोबत येणारी OS (DGX OS 7, किंवा जिथे विक्रेता देतो तिथे Ubuntu 24.04), NVIDIA Container Toolkit सह Docker, Python 3 आणि Git. साध्या Ubuntu वर <code>ling-admin host check</code> काय कमी आहे ते सांगते.</p></details>
-<details><summary>काही कधी इंटरनेटपर्यंत पोहोचते का?</summary>
-<p>फक्त तुम्ही किंवा एजंट जे मागता तेच, जसे तुमच्या स्वतःच्या मशीनवरील SearXNG मार्फत वेब सर्च, आणि पहिल्यांदाचे डाउनलोड. <code>/airgapped on</code> हे सगळे बंद करते.</p></details>
+<p>त्यासोबत येणारी ऑपरेटिंग सिस्टीम (DGX OS 7, किंवा जिथे NVIDIA देते तिथे Ubuntu 24.04), NVIDIA Container Toolkit सह Docker, Python 3 आणि Git. साध्या Ubuntu वर <code>ling-admin host check</code> काय कमी आहे ते सांगते.</p></details>
+<details><summary>कधी काही इंटरनेटवर बाहेर जाते का?</summary>
+<p>फक्त तेच जे तुम्ही किंवा सहाय्यक मागता, जसे वेब सर्च (तुमच्या स्वतःच्या मशीनवर चालणाऱ्या SearXNG मार्फत) आणि पहिल्या वापरातील डाउनलोड. <code>/airgapped on</code> ने हे सगळे बंद होते.</p></details>
 <details><summary>ते कोणते मॉडेल चालवते?</summary>
-<p>NVIDIA च्या 4-बिट NVFP4 फॉरमॅटमधील Qwen3.8-27B, SGLang वर DFlash2 ड्राफ्टरसह, GB10 साठी निवडलेले आणि ट्यून केलेले. सुमारे 20 GB चे वेट्स; सर्व्ह करताना मशीनची सुमारे 38 GB मेमरी मोकळी राहते.</p></details>
+<p>Qwen3.8-27B, NVIDIA च्या 4-बिट फॉरमॅट NVFP4 मध्ये, SGLang कडून चालवलेले, आणि DFlash2 ड्राफ्टर नावाच्या छोट्या अंदाज लावणाऱ्या सहाय्यकासह. हे सगळे आम्ही GB10 साठी निवडले आणि ट्यून केले. वेट सुमारे 20 GB घेतात, आणि चालू असताना मशीनची सुमारे 38 GB मेमरी मोकळी राहते.</p></details>
 </div>
 </section>
 <section class="cta">
 <div class="wrap">
 <h2>तुमचा कोड तुमच्या डेस्कवरच ठेवा</h2>
-<p class="sub centered">कोड ज्या डेस्कवर लिहिला गेला तिथेच राहिला पाहिजे असे तुम्हाला वाटत असेल, तर रिपॉझिटरीला स्टार द्या: अशा प्रकारे इतर GB10 मालकांना Mightling सापडते.</p>
+<p class="sub centered">कोड जिथे लिहिला गेला त्याच टेबलावर राहिला पाहिजे असे तुम्हाला वाटत असेल, तर GitHub वर रिपॉझिटरीला स्टार द्या. अशाच प्रकारे इतर GB10 मालकांना Mightling सापडते.</p>
 <div class="cmd has-copy cta-cmd"><button class="copy" data-done="कॉपी झाले" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">कॉपी करा</button>
 <pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
 <div class="buttons">
@@ -486,8 +486,8 @@ Networked git commands: none</pre></div>
 <div class="footer-grid">
 <div class="footer-brand">
 <a class="brand" href="#"><img alt="" height="28" src="/assets/favicon.svg" width="28"/>Mightling</a>
-<p><b>Dreamference चे Mightling.</b> Dreamference तुमच्या स्वतःच्या हार्डवेयरवर चालणारे गोपनीय AI बनवते.</p>
-<p>ही साइट कोणतीही तृतीय-पक्ष विनंती करत नाही: ट्रॅकर नाहीत, ॲनालिटिक्स नाही, बाह्य फॉन्ट नाहीत.</p>
+<p><b>Dreamference चे Mightling.</b> Dreamference खाजगी AI बनवते जे तुमच्या स्वतःच्या हार्डवेअरवर चालते.</p>
+<p>ही साइट इतर कोणत्याही साइटकडे काहीही मागत नाही: ट्रॅकर नाहीत, अभ्यागतांची मोजणी नाही, इतर ठिकाणाहून फॉन्ट नाहीत.</p>
 </div>
 <div class="footer-col">
 <h4>तुम्हाला काय मिळते</h4>
@@ -504,7 +504,7 @@ Networked git commands: none</pre></div>
 <ul>
 <li><a href="#proof">पुरावा</a></li>
 <li><a href="#why">Mightling का</a></li>
-<li><a href="#compare">Mightling आणि क्लाउड कोडिंग एजंट</a></li>
+<li><a href="#compare">Mightling आणि क्लाउड कोडिंग सहाय्यक</a></li>
 <li><a href="#benchmark">बेंचमार्क</a></li>
 </ul>
 </div>

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mightling – schnelles KI-Coding auf deinem Schreibtisch</title>
-<meta name="description" content="Ein Coding-Agent, der offline auf einem NVIDIA DGX Spark 68 von 100 SWE-bench-Verified-Aufgaben löste (geschätzt etwa 69 % auf dem ganzen Set), mit rund 48 Tokens pro Sekunde. Keine Cloud, kein Konto, keine API-Rechnung, keine Telemetrie.">
+<title>Mightling — ein Coding-Helfer, der auf dem Rechner auf deinem Schreibtisch läuft</title>
+<meta name="description" content="Ein Coding-Helfer, der auf einem einzigen NVIDIA DGX Spark läuft und nichts nach draußen schickt. In einem Test mit 100 echten Programmieraufgaben hat er 68 gelöst, mit etwa 48 Tokens (Wortstücken) pro Sekunde. Keine Cloud, kein Konto, keine Kosten pro Nutzung, kein Tracking.">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="referrer" content="no-referrer">
 <link rel="canonical" href="https://mightling.dreamference.ai/de/">
@@ -35,8 +35,8 @@
 <meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Mightling">
-<meta property="og:title" content="Mightling – schnelles KI-Coding auf deinem Schreibtisch. Rund 69 % auf SWE-bench Verified.">
-<meta property="og:description" content="68 von 100 SWE-bench-Verified-Aufgaben, offline, auf einem DGX Spark, mit rund 48 Tokens pro Sekunde. Keine Cloud, kein Konto, keine API-Rechnung, keine Telemetrie.">
+<meta property="og:title" content="Mightling — ein Coding-Helfer, der auf dem Rechner auf deinem Schreibtisch läuft. 68 von 100 Testaufgaben gelöst.">
+<meta property="og:description" content="Er hat 68 von 100 echten Programmieraufgaben aus SWE-bench Verified gelöst, auf einem einzigen DGX Spark, ganz ohne Netzwerk, mit etwa 48 Tokens pro Sekunde. Keine Cloud, kein Konto, keine Kosten pro Nutzung, kein Tracking.">
 <meta property="og:url" content="https://mightling.dreamference.ai/de/">
 <meta property="og:locale" content="de_DE">
 <meta property="og:image" content="https://mightling.dreamference.ai/assets/og.png">
@@ -71,15 +71,15 @@
 <div class="hero" id="hero">
 <img alt="Mightling" class="logo logo-light" height="181" src="/assets/mightling-logo-light.svg" width="300"/>
 <img alt="Mightling" class="logo logo-dark" height="181" src="/assets/mightling-logo-dark.svg" width="300"/>
-<h1>Schnelles KI-Coding auf deinem Schreibtisch.<br/>Rund 69 % auf SWE‑bench Verified.</h1>
-<p class="lede"><strong>68 von 100 SWE-bench-Verified-Aufgaben, offline auf einem DGX Spark gelöst</strong>, mit rund 48 Tokens pro Sekunde. Ein Coding-Agent, ein Chat-Assistent und eine Desktop-App, die komplett auf deinem eigenen GB10 laufen. Keine Cloud. Kein Konto. Keine API-Rechnung. Keine Telemetrie. <a href="#benchmark">So wurde gemessen</a></p>
+<h1>Ein Coding-Helfer, der auf deinem eigenen Rechner läuft.<br/>Er hat etwa 69 von 100 Testaufgaben gelöst.</h1>
+<p class="lede"><strong>68 von 100 echten Programmieraufgaben aus SWE-bench Verified, gelöst ohne Internet auf einem einzigen DGX Spark</strong>, mit etwa 48 Tokens pro Sekunde. (Ein Token ist ein kleines Stück eines Wortes; der Rechner schreibt etwa 48 davon pro Sekunde.) Mightling ist ein Coding-Helfer, ein Chat-Assistent und eine Desktop-App, und alles läuft auf deinem eigenen GB10. Nichts geht an eine Cloud. Es gibt kein Konto, keine Kosten für jede Nutzung und kein Tracking. <a href="#benchmark">So haben wir gemessen</a></p>
 <div class="buttons hero-btns">
 <a class="btn primary" href="#install">Installation</a>
 <a class="btn ghost" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">Doku</a>
 <a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">Neuestes Release</a>
 </div>
 <div class="surface-strip">
-<a href="#surface-terminal">🖥️ <code>ling</code>, der Terminal-Agent</a>
+<a href="#surface-terminal">🖥️ <code>ling</code>, der Helfer in deinem Terminal</a>
 <a href="#surface-desktop">🪟 Desktop-App <span class="tag">Vorschau</span></a>
 <a href="#surface-web">💬 Ask, im Browser</a>
 <a href="#surface-editor">🧩 JetBrains &amp; VS Code (MCP)</a>
@@ -106,14 +106,14 @@
 <div class="mock-node">GB10 · ~48 tok/s · 0 egress</div>
 </aside>
 <div class="mock-main">
-<div class="mock-msg user">Die Signup-Tests schlagen bei leeren E-Mail-Adressen fehl. Finde heraus warum und behebe es.</div>
+<div class="mock-msg user">Die Anmeldetests schlagen fehl, wenn die E-Mail leer ist. Finde heraus, warum, und behebe es.</div>
 <div class="mock-tools">
 <div class="mock-tool"><span class="ok">✔</span> <code>ling-code def validate_signup</code> <span class="c">→ src/auth/signup.py:42</span></div>
 <div class="mock-tool"><span class="ok">✔</span> <code>pytest tests/test_signup.py -q</code> <span class="c">→ 1 failed, 14 passed</span></div>
 <div class="mock-tool"><span class="ok">✔</span> <code>apply_patch src/auth/signup.py</code> <span class="diff-add">+12</span> <span class="diff-del">-2</span> · <code>tests/test_signup.py</code> <span class="diff-add">+8</span></div>
 <div class="mock-tool"><span class="ok">✔</span> <code>pytest tests/test_signup.py -q</code> <span class="c">→ 15 passed in 0.41s</span></div>
 </div>
-<div class="mock-msg agent">Strings nur aus Leerzeichen umgingen die Prüfung vor der Normalisierung. Eingabe in <code>src/auth/signup.py</code> zuerst getrimmt und einen Regressionstest ergänzt.</div>
+<div class="mock-msg agent">Eine Zeichenfolge nur aus Leerzeichen kam durch die Prüfung, weil die Prüfung lief, bevor die Leerzeichen entfernt wurden. Jetzt entferne ich die Leerzeichen zuerst, in <code>src/auth/signup.py</code>, und habe einen Test ergänzt, damit es behoben bleibt.</div>
 <div class="mock-composer">
 <span class="mock-files">src/auth/signup.py (+12 -2) · tests/test_signup.py (+8 -0)</span>
 </div>
@@ -121,10 +121,10 @@
 </div>
 </div>
 <div class="numbers">
-<div><b>68/100</b><span>SWE-bench-Verified-Aufgaben, offline auf einem DGX Spark</span></div>
-<div><b>~48 tok/s</b><span>Generierung bei Agentenarbeit, ein Stream</span></div>
-<div><b>0</b><span>Verbindungen nach Hause, bestätigt durch das Egress-Audit</span></div>
-<div><b>$0</b><span>pro Token, für immer</span></div>
+<div><b>68/100</b><span>SWE-bench-Verified-Aufgaben gelöst, ohne Internet, auf einem einzigen DGX Spark</span></div>
+<div><b>~48 tok/s</b><span>Wörter pro Sekunde bei der Arbeit am Code, eine Aufgabe nach der anderen</span></div>
+<div><b>0</b><span>Verbindungen nach Hause, geprüft mit dem Egress-Audit</span></div>
+<div><b>$0</b><span>pro Token, so lange du es benutzt</span></div>
 </div>
 </div>
 </div>
@@ -137,24 +137,24 @@
 <div class="news-cards">
 <article class="news-card">
 <div class="news-meta"><span class="tag">v1.7.2</span><time datetime="2026-10-28">2026-10-28</time></div>
-<h3>ling-serve-Engine, ScaleSearch-Drafter und Forgejo pro Node</h3>
-<p>Optionales <code>ling-serve</code> bedient Qwen3.8-27B auf dem GB10 mit 262K Kontext, jeder Node erhält ein privates Forgejo und die Telegram Mini App arbeitet direkt auf deinen Repositories.</p>
+<h3>Die ling-serve-Engine, der ScaleSearch-Drafter und ein Forgejo auf jedem Knoten</h3>
+<p>Das optionale <code>ling-serve</code> betreibt Qwen3.8-27B auf dem GB10 mit einem Gedächtnis von 262K Tokens. Jeder Knoten bekommt sein eigenes privates Forgejo (ein Ort für Git-Repositories), und die Telegram Mini App arbeitet direkt an deinen Repositories.</p>
 <a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.2">v1.7.2 →</a>
 </article>
 <article class="news-card">
 <div class="news-meta"><span class="tag">v1.7.1</span><time datetime="2026-10-26">2026-10-26</time></div>
-<h3>Host-Sockets maskiert, lokaler Dateiindex und LoRA-Adapter</h3>
-<p>Sperrt Docker-, containerd-, D-Bus- und systemd-Sockets in der Befehls-Sandbox, ergänzt OCR und Office-Dokumente in <code>ling-docs</code> und liefert signierte LoRA-Adapter aus.</p>
+<h3>Host-Sockets geschlossen, ein lokaler Dateiindex und LoRA-Adapter</h3>
+<p>In der Befehls-Sandbox sind die Sockets von Docker, containerd, D-Bus und systemd geschlossen (ein Socket ist eine Tür, über die ein Programm dem System Befehle geben kann). <code>ling-docs</code> liest jetzt auch gescannte Seiten und Office-Dokumente, und der Server kann signierte LoRA-Adapter bereitstellen (kleine Zusätze, die ändern, worin ein Modell gut ist).</p>
 <a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.1">v1.7.1 →</a>
 </article>
 <article class="news-card">
 <div class="news-meta"><span class="tag">v1.7.0</span><time datetime="2026-10-20">2026-10-20</time></div>
-<h3>Desktop-App für macOS, Linux und Windows sowie Night Shift best-of-N</h3>
-<p>Ask und Work teilen sich ein Fenster mit Review-Bereich, Worktrees und Terminal-Tabs; <code>/night add --best-of N</code> führt eine Aufgabe N-mal aus und behält den besten Versuch.</p>
+<h3>Die Desktop-App auf macOS, Linux und Windows, und Best-of-N bei Night Shift</h3>
+<p>Ask und Work teilen sich ein Desktop-Fenster, mit Prüfbereich, Worktrees und Terminal-Tabs. <code>/night add --best-of N</code> führt eine Aufgabe N-mal aus und behält den besten Versuch.</p>
 <a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">v1.7.0 →</a>
 </article>
 </div>
-<p class="sub after">Ebenfalls in 1.7.0: Night Shift kann eine Aufgabe mehrmals versuchen und den besten Versuch behalten (<code>/night add --best-of N</code>), eine Maschine kann mehrere Signal-Bridges betreiben, und ein Client wählt zwischen zwei Nodes im selben Netzwerk, ohne den ihm bekannten zu verlieren. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">Release Notes und Downloads</a>.</p>
+<p class="sub after">Außerdem neu in 1.7.0: Night Shift kann eine Aufgabe mehrmals versuchen und den besten Versuch behalten (<code>/night add --best-of N</code>). Ein Rechner kann mehrere Signal-Brücken betreiben. Und ein Computer, der zwei GB10 in einem Netz sieht, kann zwischen ihnen wählen, ohne den zu vergessen, den er schon kennt. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">Release-Notes und Downloads</a>.</p>
 </div>
 </section>
 <section id="install">
@@ -163,26 +163,26 @@
 <div class="install">
 <div class="cmd has-copy"><button class="copy" data-done="Kopiert" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">Kopieren</button>
 <pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
-<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># lädt das Modell einmalig herunter (~20 GB) und stellt es bereit</span>
-<span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># das war's</span></pre></div>
-<p class="note">Läuft auf dem NVIDIA DGX Spark und jedem GB10-Rechner. Das Skript prüft jeden Download gegen die Prüfsummen des Releases und zeigt jeden <code>sudo</code>-Befehl an, bevor es ihn ausführt. <a href="https://github.com/dreamference/mightling/blob/main/install.sh">Lies es vorher durch</a>, wenn du magst.</p>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># lädt das Modell einmal herunter (~20 GB) und startet es dann</span>
+<span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># das war alles</span></pre></div>
+<p class="note">Das funktioniert auf dem NVIDIA DGX Spark und auf jedem anderen GB10-Rechner. Das Skript prüft jeden Download anhand der Prüfsummen des Releases und zeigt dir jeden <code>sudo</code>-Befehl, bevor es ihn ausführt. Du kannst das <a href="https://github.com/dreamference/mightling/blob/main/install.sh">Skript vorher lesen</a>.</p>
 <div class="clients">
 <div class="client">
 <h3>Mac- und Linux-Clients</h3>
-<p>Deine anderen Rechner nutzen das Modell des GB10 über das lokale Netzwerk. Auf einem Mac oder einem anderen Linux-Rechner installiert derselbe Befehl von oben den Client <code>ling</code>; er findet den GB10 von selbst.</p>
-<p>Ab 1.7.2 legt er auf dem Mac auch die Desktop-App in Programme, startbereit (<code>--no-app</code> lässt sie weg).</p>
+<p>Deine anderen Computer leihen sich das Modell des GB10 über dein Heim- oder Büronetz. Auf einem Mac oder einem anderen Linux-Rechner installiert derselbe Befehl <code>ling</code>, den Teil, in den du tippst. Er findet den GB10 von selbst.</p>
+<p>Ab 1.7.2 legt er auf einem Mac auch die Desktop-App in den Ordner „Programme“, fertig zum Öffnen. Mit <code>--no-app</code> lässt du sie weg.</p>
 </div>
 <div class="client">
 <h3>Windows-Client <span class="tag">Vorschau</span></h3>
 <div class="cmd has-copy"><button class="copy" data-done="Kopiert" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">Kopieren</button>
 <pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
-<p>In PowerShell. Die Installation braucht keine Administratorrechte (ab 1.7.2 gilt das auch für die Desktop-App); danach fragt Windows einmal, ob die Sandbox des Agenten eingerichtet werden soll. Noch nicht signiert, daher muss die intelligente App-Steuerung (Smart App Control) ausgeschaltet sein. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">Skript lesen</a>.</p>
+<p>Gib das in PowerShell ein. Du brauchst dafür keine Administratorrechte (ab 1.7.2 gilt das auch für die Desktop-App). Windows fragt dich dann einmal, ob es einen abgeschotteten Raum einrichten soll, in dem der Helfer Befehle ausführt. Der Installer ist noch nicht signiert, deshalb muss die intelligente App-Steuerung (Smart App Control) aus sein. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">Skript lesen</a>.</p>
 </div>
 </div>
 <details class="other"><summary>Weitere Installationswege</summary>
-<p>Auf der Release-Seite liegen außerdem das Mac-dmg (<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>, für Intel <code>x64</code>) und der Windows-Installer (<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>, oder <code>arm64</code>). Es sind unsignierte Vorschauen: Im Browser heruntergeladen, werden sie beim ersten Mal blockiert. Prüfe jede Datei vorher gegen die signierte <code>SHA256SUMS</code> des Releases.</p>
+<p>Auf der Release-Seite gibt es außerdem das Mac-Disk-Image (<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>, für Intel <code>x64</code>) und den Windows-Installer (<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>, oder <code>arm64</code>). Das sind unsignierte Vorschauen. Wenn du sie im Browser herunterlädst, hält dein System sie beim ersten Mal an. Prüfe sie vor dem Öffnen anhand der signierten Datei <code>SHA256SUMS</code> des Releases.</p>
 <ul>
-<li>macOS 15 und neuer: Ziehe Mightling in Programme und öffne es einmal, dann Systemeinstellungen › Datenschutz & Sicherheit › <b>Trotzdem öffnen</b>. Unter macOS 14 und älter: App mit gedrückter Control-Taste anklicken › Öffnen.</li>
+<li>macOS 15 und neuer: Ziehe Mightling in „Programme“ und öffne es einmal. Gehe dann zu Systemeinstellungen › Datenschutz & Sicherheit und klicke auf <b>Dennoch öffnen</b>. Unter macOS 14 und älter klickst du die App mit gedrückter Control-Taste an und wählst „Öffnen“.</li>
 <li>Windows: SmartScreen › <b>Weitere Informationen</b> › <b>Trotzdem ausführen</b>. Die intelligente App-Steuerung muss ausgeschaltet sein.</li>
 </ul>
 </details>
@@ -193,19 +193,19 @@
 <li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
 <li>Gigabyte TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
 </ul>
-<p class="sub flush">Sie teilen sich den Chip, die 128 GB Unified Memory und DGX OS 7, deshalb deckt ein Installer alle ab. Mightling wird täglich auf dem ASUS Ascent GX10 entwickelt und getestet; die anderen sind durch Tests abgedeckt.</p>
+<p class="sub flush">Alle haben denselben Chip, dieselben 128 GB Speicher, den sich Prozessor und Grafik teilen, und DGX OS 7, ein Installer deckt also alle ab. Wir entwickeln und testen Mightling jeden Tag auf dem ASUS Ascent GX10. Die anderen decken unsere automatischen Tests ab, aber wir probieren sie nicht von Hand aus.</p>
 </div>
 </div>
 </section>
 <section id="workflows">
 <div class="wrap">
 <h2>Probier zuerst diese</h2>
-<p class="sub">Oder stell Arbeit für heute Nacht in die Warteschlange mit <code>/night add &lt;task&gt;</code>: Mightling arbeitet die Warteschlange ab, während du schläfst, jede Aufgabe auf einem eigenen Git-Branch, und du prüfst die Branches bei einem Kaffee.</p>
+<p class="sub">Oder lass Arbeit für heute Nacht da mit <code>/night add &lt;task&gt;</code>. Mightling arbeitet die Liste ab, während du schläfst, jede Aufgabe auf einem eigenen Git-Branch, und am Morgen siehst du die Branches durch.</p>
 <div class="tabs-box">
 <div class="tab-bar" role="tablist">
-<button class="tab-btn active" type="button" role="tab" aria-selected="true" data-tab="tab-onboard">Codebasis verstehen</button>
+<button class="tab-btn active" type="button" role="tab" aria-selected="true" data-tab="tab-onboard">Ein Projekt verstehen</button>
 <button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-fix">Fehlgeschlagene Tests beheben</button>
-<button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-night">Night Shift einreihen</button>
+<button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-night">Arbeit für Night Shift vormerken</button>
 </div>
 <div class="cmd tab-panel active" id="tab-onboard" role="tabpanel"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
 <span class="c"># reads the code index (ling-code outline, def, refs, callers) instead of grepping,</span>
@@ -222,15 +222,15 @@
 <div class="pillars workflow-cards">
 <div class="pillar">
 <h3>🧭 Ein Code-Index</h3>
-<p>Definitionen, Aufrufer und Auswirkungen über dein ganzes Repository, damit der Agent Code findet, statt danach zu greppen.</p>
+<p>Eine Liste, wo Dinge definiert sind und wer sie benutzt, über dein ganzes Projekt, damit der Helfer Code nachschlagen kann, statt ihn zu erraten.</p>
 </div>
 <div class="pillar">
-<h3>🔎 Websuche und Abruf</h3>
-<p>Über ein privates SearXNG auf deinem eigenen Rechner: kein Suchkonto, kein API-Schlüssel.</p>
+<h3>🔎 Websuche und Seitenabruf</h3>
+<p>Die Suche läuft über ein privates SearXNG auf deinem eigenen Rechner, du brauchst also kein Suchkonto und keinen Schlüssel. Die Fragen gehen trotzdem ins Web, damit sie beantwortet werden.</p>
 </div>
 <div class="pillar">
 <h3>🌙 Night Shift</h3>
-<p><code>/night add &lt;task&gt;</code> vor dem Schlafengehen; bis zum Morgen ist jede Aufgabe auf einem eigenen Git-Branch erledigt. Ohne dich wird nichts gemergt oder gepusht.</p>
+<p>Tippe vor dem Schlafengehen <code>/night add &lt;task&gt;</code>. Bis zum Morgen ist jede Aufgabe auf einem eigenen Git-Branch erledigt. Nichts wird zusammengeführt oder gepusht, wenn du es nicht tust.</p>
 </div>
 </div>
 </div>
@@ -238,13 +238,13 @@
 <section id="surfaces">
 <div class="wrap">
 <h2>Was du bekommst</h2>
-<p class="sub">Die Desktop-App von Mightling 1.7.0 vereint Ask und Work in einem Fenster. Work ist eine vollständige Werkbank für Agentensitzungen: ein Eingabefeld mit Dateien, Skills und Befehlen, ein Review-Bereich zum Stagen, Zurücksetzen und Committen, Worktrees, Terminal-Tabs sowie Dateibaum und Datei-Tabs neben dem Thread. Auf deinen anderen Rechnern ist sie ein Client deines GB10, den sie im lokalen Netzwerk findet.</p>
+<p class="sub">Die Desktop-App in 1.7.0 vereint beide Arten, Mightling zu nutzen, in einem Fenster: Ask, wo du Fragen stellst, und Work, wo der Helfer deinen Code ändert. Work hat ein Eingabefeld für Aufgaben (du kannst Dateien, Skills und Befehle anhängen), einen Bereich, in dem du Änderungen prüfst, bevor du sie behältst oder zurücknimmst, getrennte Arbeitskopien deines Codes (Worktrees), Terminal-Tabs und einen Dateibaum neben dem Gespräch. Auf deinen anderen Computern spricht die App mit deinem GB10, den sie in deinem Netz findet.</p>
 <div class="surface-rows">
 <div class="surface-row" id="surface-terminal">
 <div class="surf-copy">
 <div class="eyebrow"><code>ling</code> · <code>ling-code</code> · <code>ling-docs</code></div>
-<h3>🖥️ <code>ling</code>, der Terminal-Agent</h3>
-<p>Liest dein Repository, führt Befehle und Tests aus, bearbeitet Code und fragt nach, bevor etwas riskant wird.</p>
+<h3>🖥️ <code>ling</code>, der Helfer in deinem Terminal</h3>
+<p>Er liest dein Projekt, führt Befehle und Tests aus, ändert Code und fragt dich vorher, bevor etwas Riskantes passiert.</p>
 <div class="surf-actions"><a class="btn ghost sm" href="#install">Installation →</a></div>
 </div>
 <div class="surf-media">
@@ -252,7 +252,7 @@
 <span class="p">$ </span>cd ~/your-project &amp;&amp; ling
 <span class="p">&gt; </span>/airgapped on      <span class="c"># no network for any command it runs</span>
 <span class="p">&gt; </span>/worktree apply    <span class="c"># bring the changes back to your checkout</span></pre></div>
-<div class="feature single-feature"><h3>🧩 Deine vorhandenen Skills</h3><p>Skills, die du bereits für Claude Code, Gemini CLI, OpenClaw oder Hermes geschrieben hast, funktionieren unverändert.</p></div>
+<div class="feature single-feature"><h3>🧩 Die Skills, die du schon hast</h3><p>Skills, die du für Claude Code, Gemini CLI, OpenClaw oder Hermes geschrieben hast, funktionieren hier unverändert.</p></div>
 </div>
 </div>
 <div class="surface-row reverse" id="surface-desktop">
@@ -260,25 +260,25 @@
 <span id="surface-web"></span>
 <div class="eyebrow"><code>ling app</code> · <code>ling web</code></div>
 <h3>🪟 Desktop-App <span class="tag">Vorschau</span></h3>
-<p>Ask und Work in einem Fenster, auf dem GB10, einem Mac, Linux oder Windows: Agentensitzungen mit Freigaben, Review-Bereich, Worktrees und Rückgängig. <a href="#new">Neu in 1.7</a>.</p>
-<p>Fragen mit Websuche, Bildersuche und Diktat sowie deine Agentensitzungen, von diesem Rechner oder einem gekoppelten Smartphone, auf demselben lokalen Modell.</p>
+<p>Ask und Work in einem Fenster, auf dem GB10, einem Mac, Linux oder Windows. Die Sitzungen des Helfers fragen um deine Zustimmung, und es gibt einen Bereich zum Prüfen von Änderungen, getrennte Arbeitskopien und Rückgängigmachen. <a href="#new">Neu in 1.7</a>.</p>
+<p>Fragen mit Websuche, Bildersuche und Sprechen statt Tippen, und auch deine Helfer-Sitzungen, von diesem Rechner oder von einem Handy, das du mit ihm gekoppelt hast. Alles nutzt dasselbe Modell auf deinem Rechner.</p>
 <div class="surf-actions"><a class="btn ghost sm" href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">Doku →</a></div>
 </div>
 <div class="surf-media">
 <div class="pillars os-cards">
 <div class="pillar">
 <h3>macOS <span class="tag">Vorschau</span></h3>
-<p>Ab 1.7.2 legt <a href="#install">der Installationsbefehl</a> Mightling neben <code>ling</code> in Programme, und es öffnet sich wie jede andere App. Apple Silicon und Intel, ab macOS 12. <code>ling update</code> aktualisiert es.</p>
+<p>Ab 1.7.2 legt <a href="#install">der Installationsbefehl</a> Mightling neben <code>ling</code> in den Ordner „Programme“, und du öffnest die App wie jede andere. Sie läuft auf Apple Silicon und Intel, mit macOS 12 oder neuer. <code>ling update</code> aktualisiert sie.</p>
 </div>
 <div class="pillar">
 <h3>Linux</h3>
-<p>Auf dem GB10 installiert <code>mightling_1.7.0_arm64.deb</code> die App, ihren Starter-Eintrag und den Befehl <code>ling-app</code>, samt dem Sandbox-Profil, das sie braucht:</p>
+<p>Auf dem GB10 installiert die Datei <code>mightling_1.7.0_arm64.deb</code> die App, ihren Menüeintrag und den Befehl <code>ling-app</code>, dazu das Sandbox-Profil, das sie braucht. (Eine Sandbox ist ein abgeschlossener Raum für Befehle, damit sie den Rest des Rechners nicht berühren können.)</p>
 <div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
-<p>Öffne sie dann über das Anwendungsmenü oder mit <code>ling app</code>. <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">Mehr</a>.</p>
+<p>Öffne sie dann im Anwendungsmenü oder tippe <code>ling app</code>. <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">Mehr dazu</a>.</p>
 </div>
 <div class="pillar">
 <h3>Windows 11 <span class="tag">Vorschau</span></h3>
-<p>Ab 1.7.2 installiert <a href="#install">die PowerShell-Zeile</a> auch die App, nur für dich und ohne Administratorrechte, mit Eintrag im Startmenü; unter Einstellungen → Apps wird sie wieder entfernt; <code>ling update</code> aktualisiert sie. Die intelligente App-Steuerung muss ausgeschaltet sein.</p>
+<p>Ab 1.7.2 installiert auch <a href="#install">die PowerShell-Zeile</a> die App, nur für dich und ohne Administratorrechte, mit einem Eintrag im Startmenü. Unter Einstellungen → Apps entfernst du sie, und <code>ling update</code> aktualisiert sie. Die intelligente App-Steuerung (Smart App Control) muss aus sein.</p>
 </div>
 </div>
 </div>
@@ -288,14 +288,14 @@
 <span id="surface-phone"></span>
 <div class="eyebrow"><code>ling-admin mcp</code> · <code>ling signal</code> · <code>ling chat</code></div>
 <h3>JetBrains, VS Code und dein Telefon</h3>
-<p>Verbinde JetBrains oder VS Code über stdio-MCP (<code>ling-admin mcp</code>) oder schreibe deinem GB10 über Signal (Notiz an mich), Telegram (mit Mini-App-Werkbank) und Matrix über Tailscale. Jede Telefonbrücke bleibt aus, bis du sie einschaltest.</p>
+<p>Du kannst JetBrains oder VS Code über stdio-MCP anbinden (<code>ling-admin mcp</code>). Du kannst deinem GB10 auch Nachrichten schicken: von Signal (an dich selbst, in „Note to Self“), von Telegram (mit der Mini App für die Arbeit an Repositories) und von Matrix über Tailscale. Jede Handy-Verbindung ist aus, bis du sie einschaltest. Signal ist Ende-zu-Ende-verschlüsselt, und Matrix läuft auf einem Server, der dir selbst gehört. Telegram-Nachrichten laufen unverschlüsselt über die Server von Telegram, nutze es also nur für Dinge, die du auf diesem Weg teilen würdest.</p>
 <div class="surf-actions"><a class="btn ghost sm" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">Doku →</a></div>
 </div>
 <div class="surf-media">
 <div class="cmd"><pre><span class="p">$ </span>ling-admin mcp            <span class="c"># stdio MCP for JetBrains and VS Code</span>
 <span class="p">$ </span>ling signal setup         <span class="c"># Note to Self only, off until linked</span>
 <span class="p">$ </span>ling chat telegram setup  <span class="c"># topics and the Mini App</span></pre></div>
-<div class="feature single-feature"><h3>📬 Gmail, Drive, Calendar <span class="tag">Vorschau</span></h3><p>Nur lesend, über eine Anmeldung, die auf deinem Rechner bleibt. Bei <code>/airgapped on</code> komplett abgeschaltet.</p></div>
+<div class="feature single-feature"><h3>📬 Gmail, Drive, Calendar <span class="tag">Vorschau</span></h3><p>Nur lesend, über eine Anmeldung, die auf deinem Rechner bleibt. Mit <code>/airgapped on</code> ist sie ganz abgeschaltet.</p></div>
 </div>
 </div>
 </div>
@@ -303,11 +303,11 @@
 </section>
 <section class="band-full" id="proof">
 <div class="wrap">
-<h2>Dein Code verlässt nie deinen Schreibtisch – und du kannst es beweisen</h2>
-<p class="sub">Cloud-Coding-Agenten schicken deinen Quellcode an die Server anderer. Mightling schickt ihn nirgendwohin: Das Modell läuft auf deinem GB10, und nichts an Mightling telefoniert nach Hause. Keine Nutzungsanalyse, keine Metriken, keine Anmeldung, keine „anonymen“ Absturzberichte. Damit ist es auch für Code geeignet, den du nicht hochladen darfst: Kundenprojekte, regulierte Daten, unveröffentlichte Produkte.</p>
+<h2>Dein Code bleibt auf deinem Schreibtisch, und du kannst das nachprüfen</h2>
+<p class="sub">Ein Cloud-Coding-Helfer schickt deinen Quellcode an Computer, die jemand anderem gehören. Mightling schickt ihn nirgendwohin. Das Modell läuft auf deinem GB10, und nichts in Mightling meldet sich zu Hause: keine Nutzungszähler, keine Messungen, keine Anmeldung, nicht einmal „anonyme“ Absturzberichte. So kannst du es für Code nutzen, den du nicht hochladen darfst, etwa die Arbeit eines Kunden, geschützte Daten oder ein noch unveröffentlichtes Produkt.</p>
 <div class="proof">
 <div>
-<p>Ein Befehl startet eine echte Mightling-Sitzung unter <code>strace</code> und listet jede Netzwerkverbindung auf, die sie aufgebaut hat:</p>
+<p>Ein Befehl startet eine echte Mightling-Sitzung unter <code>strace</code>, einem Werkzeug, das jeden Aufruf eines Programms beobachtet, und listet dann jede Netzwerkverbindung auf, die die Sitzung geöffnet hat:</p>
 <div class="cmd"><pre><span class="p">$ </span>ling-admin audit egress
 <span class="ok">✔ Egress audit: pass</span>
 Network destinations:
@@ -315,13 +315,13 @@ Network destinations:
    127.0.0.1:8767      1x  Gmail search service
 DNS queries: none
 Networked git commands: none</pre></div>
-<p>Alles blieb auf <code>127.0.0.1</code>. Keine einzige DNS-Abfrage.</p>
+<p>Alles blieb auf <code>127.0.0.1</code>, das heißt, der Rechner hat nur mit sich selbst gesprochen. Es gab keine einzige DNS-Anfrage (eine DNS-Anfrage fragt das Internet nach der Adresse zu einem Namen).</p>
 </div>
 <div>
-<h3>Du brauchst eine harte Garantie?</h3>
-<p>Tippe <code>/airgapped on</code>, und jeder Befehl, den der Agent ausführt, bekommt vom Linux-Kernel einen leeren Netzwerk-Namespace. Das ist keine höfliche Bitte an das Modell: Es gibt schlicht kein Netzwerk, das sich erreichen ließe. Full Access, der die Sandbox umgehen würde, wird gleichzeitig abgelehnt.</p>
+<h3>Du willst eine feste Garantie?</h3>
+<p>Tippe <code>/airgapped on</code>. Jeder Befehl, den der Helfer ausführt, bekommt dann vom Linux-Kernel ein leeres Netzwerk. Das ist keine höfliche Bitte an das Modell. Es gibt einfach kein Netzwerk, das man erreichen könnte. Gleichzeitig wird Full Access abgelehnt, das die Sandbox umgehen würde.</p>
 <h3>Was hinaus darf, und wann</h3>
-<p>Nur, was du oder der Agent anfordert: eine Websuche (über ein privates SearXNG auf deinem eigenen Rechner), ein Seitenabruf, eine schreibgeschützte Anfrage an ein verbundenes Google-Konto oder eine Update-Prüfung. Bei <code>/airgapped on</code> nichts davon.</p>
+<p>Nur das, was du oder der Helfer verlangen: eine Websuche (über ein privates SearXNG, das auf deinem eigenen Rechner läuft; die Suche selbst geht aber ins Web), das Abrufen einer Webseite, eine Leseanfrage an ein Google-Konto, das du verbunden hast, oder die Suche nach Updates. Mit <code>/airgapped on</code> passiert nichts davon.</p>
 </div>
 </div>
 </div>
@@ -331,47 +331,47 @@ Networked git commands: none</pre></div>
 <h2>Warum Mightling</h2>
 <div class="pillars">
 <div class="pillar">
-<h3>🔒 Vertraulich</h3>
-<p>Das Modell, dein Code, deine Prompts und die Antworten bleiben auf dem Rechner, auf dem sie sind.</p>
+<h3>🔒 Privat</h3>
+<p>Das Modell, dein Code, deine Fragen und seine Antworten bleiben auf dem Rechner, auf dem sie sind.</p>
 <ul>
-<li>Kein Konto, keine Telemetrie</li>
-<li>Egress-Audit, das du wiederholen kannst</li>
+<li>Kein Konto, kein Tracking</li>
+<li>Ein Egress-Audit, das du jederzeit wiederholen kannst</li>
 <li><code>/airgapped on</code>, vom Kernel durchgesetzt</li>
 </ul>
 </div>
 <div class="pillar">
-<h3>⚡ Schnell, ohne Rechnung</h3>
+<h3>⚡ Schnell, und ohne Rechnung</h3>
 <table>
-<tr><td>Agentenarbeit</td><td class="num">~48 tok/s</td></tr>
-<tr><td>Code</td><td class="num">69 tok/s</td></tr>
+<tr><td>Arbeit am Code</td><td class="num">~48 tok/s</td></tr>
+<tr><td>Code schreiben</td><td class="num">69 tok/s</td></tr>
 <tr><td>JSON</td><td class="num">84 tok/s</td></tr>
 <tr><td>Prosa</td><td class="num">32 tok/s</td></tr>
 <tr><td>Code lesen</td><td class="num">~1,800 tok/s</td></tr>
-<tr><td>Kontext</td><td class="num">262K</td></tr>
+<tr><td>Gedächtnis des Gesprächs</td><td class="num">262K</td></tr>
 </table>
-<p class="note-small">Ein Stream auf einem GB10 mit spekulativem Decoding. Agentenarbeit wird über echte Agentensitzungen gemessen; Code, JSON und Prosa nach Art der Ausgabe, mit Greedy Decoding. Lass vier Agenten gleichzeitig laufen: kein Kontingent, kein „bitte warten“.</p>
+<p class="note-small">Das sind Geschwindigkeiten für eine einzelne Aufgabe auf einem GB10. Das Modell nutzt einen Trick namens Speculative Decoding: Ein kleiner Helfer rät mehrere Wörter voraus, und das große Modell prüft alle Vermutungen auf einmal. „Arbeit am Code“ ist über echte Helfer-Sitzungen gemessen. Code, JSON und Fließtext wurden jeweils an dieser Art von Ausgabe gemessen. Die letzte Zeile zeigt, wie viel Text es auf einmal im Kopf behalten kann: 262K Tokens, das sind einige hundert Seiten. Lass gern vier Helfer gleichzeitig laufen. Es gibt kein Kontingent und kein „bitte warten“.</p>
 </div>
 <div class="pillar">
-<h3>✨ Nichts zu konfigurieren</h3>
+<h3>✨ Kaum Einrichtung</h3>
 <ul>
-<li><b>Kein Tuning:</b> Modell, Kontext, Kernel und spekulatives Decoding sind auf den GB10 abgestimmt.</li>
-<li><b>Es friert deinen Rechner nicht ein:</b> Der Host wird geprüft, und der Speicherdruck wird beim Laden überwacht.</li>
-<li><b>Deine anderen Rechner finden es</b> im lokalen Netzwerk.</li>
-<li><b>Updates sind ein Befehl:</b> <code>ling update</code>.</li>
+<li><b>Kein Feintuning nötig:</b> Wir haben das Modell, die Speichergröße, den Low-Level-Code und das Speculative Decoding für den GB10 ausgewählt.</li>
+<li><b>Es soll deinen Rechner nicht einfrieren:</b> Es prüft den Rechner, bevor es das Modell lädt, und beobachtet beim Laden den Speicher.</li>
+<li><b>Deine anderen Computer finden es</b> in deinem Netz.</li>
+<li><b>Ein Update ist ein Befehl:</b> <code>ling update</code>.</li>
 </ul>
 </div>
 </div>
 <div class="compare-block" id="compare">
-<h3>Mightling und Cloud-Coding-Agenten</h3>
+<h3>Mightling und Cloud-Coding-Helfer</h3>
 <div class="tablewrap">
 <table>
-<tr><th></th><th>Cloud-Coding-Agenten</th><th>Mightling</th></tr>
-<tr><td>Wohin dein Code geht</td><td>Auf deren Server</td><td class="yes">Nirgendwohin</td></tr>
+<tr><th></th><th>Cloud-Coding-Helfer</th><th>Mightling</th></tr>
+<tr><td>Wohin dein Code geht</td><td>Ihre Computer</td><td class="yes">Nirgendwohin</td></tr>
 <tr><td>Konto nötig</td><td>Ja</td><td class="yes">Nein</td></tr>
-<tr><td>Kosten pro Token</td><td>Nach Verbrauch</td><td class="yes">Null</td></tr>
-<tr><td>Rate Limits</td><td>Ja</td><td class="yes">Nein</td></tr>
-<tr><td>Funktioniert ohne Netzwerkkabel</td><td>Nein</td><td class="yes">Ja</td></tr>
-<tr><td>Du kannst prüfen, was hinausgeht</td><td>Nein</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
+<tr><td>Preis pro Token</td><td>Du zahlst für jedes einzelne</td><td class="yes">Nichts</td></tr>
+<tr><td>Grenzen, wie viel du nutzen darfst</td><td>Ja</td><td class="yes">Nein</td></tr>
+<tr><td>Funktioniert auch mit gezogenem Netzwerkkabel (nach dem ersten Download)</td><td>Nein</td><td class="yes">Ja</td></tr>
+<tr><td>Du kannst selbst prüfen, was nach draußen geht</td><td>Nicht von deiner Seite aus</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
 </table>
 </div>
 </div>
@@ -380,7 +380,7 @@ Networked git commands: none</pre></div>
 <section id="benchmark">
 <div class="wrap">
 <h2>SWE-bench Verified, gemessen auf einem DGX Spark</h2>
-<p class="sub">Am 2026-10-08 löste der Agent von Mightling 1.5.1 mit Qwen3.8-27B <b>68 von 100</b> SWE-bench-Verified-Aufgaben auf einem DGX Spark, offline: eine feste Stichprobe von 100 Aufgaben, ein Versuch pro Aufgabe, Standardmodus. Hochgerechnet auf alle 500 Aufgaben sind das geschätzt <b>≈69 %</b> (95-%-Band 63,9–73,4 %). Das ist unsere eigene Messung, auf unserer eigenen Maschine und an einer Teilmenge, kein Leaderboard-Eintrag.</p>
+<p class="sub">SWE-bench Verified ist eine Sammlung von 500 echten Problemen aus Open-Source-Programmen. Bei jedem muss der Helfer den Code so ändern, dass die Tests bestehen. Am 08.10.2026 haben wir 100 davon Mightling 1.5.1 gegeben, mit dem Modell Qwen3.8-27B, auf einem einzigen DGX Spark ohne Internet. Er hatte pro Aufgabe einen Versuch, im Standardmodus, und hat <b>68 der 100</b> gelöst. Rechnen wir das auf alle 500 hoch, schätzen wir etwa <b>69 %</b>, plus/minus ein paar Punkte (der 95-%-Bereich geht von 63,9 bis 73,4 %). Das haben wir selbst gemessen, auf unserem eigenen Rechner, an einer Stichprobe der Aufgaben. Es ist kein Eintrag in der offiziellen Bestenliste.</p>
 <div class="tablewrap">
 <table class="bench">
 <tr><th>System</th><th>Dieselben 100<br/>Aufgaben</th><th>Alle 500<br/>Aufgaben</th></tr>
@@ -402,13 +402,13 @@ Networked git commands: none</pre></div>
 <tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">nicht veröffentlicht</td><td class="ns"><a href="https://cursor.com/blog/composer">nicht veröffentlicht</a></td></tr>
 </table>
 </div>
-<p class="sub after">Versteh das als Einordnung, nicht als Rangliste. Auf denselben 100 Aufgaben löste Mightling so viele wie Qwen3-Coder-480B und GLM-4.6, Modelle, die um ein Vielfaches größer sind. Aber jede Zeile nutzt einen anderen Agenten, andere Hardware und, bei den Leaderboard-Zeilen, die offiziellen x86-Testimages, während unsere auf Community-arm64-Images liefen. Im Refine-Modus untersucht eine erste Sitzung die Aufgabe, ohne etwas zu ändern, und eine frische Sitzung setzt sie um: Er löste eine Aufgabe mehr als der Standardmodus (69 gegen 68, wobei jede Variante Aufgaben gewann, die die andere verlor), bei etwa dem 2,2-Fachen der Zeit pro Aufgabe, und bleibt deshalb optional (<code>ling --refine</code>).</p>
-<details class="method"><summary>Wie die ≈69 % geschätzt werden</summary>
-<p>100 Aufgaben sind ein Fünftel von Verified, die Zahl für das ganze Set ist also eine Schätzung. Ein Item-Response-Modell mit einem Parameter (Rasch) wird an die Ergebnisse pro Aufgabe aller 175 öffentlichen Verified-Einreichungen angepasst: Jede Aufgabe erhält eine Schwierigkeit, jedes System eine Fähigkeit. Die Fähigkeit von Mightling ist diejenige, die 68 gelöste Aufgaben bei diesen 100 erklärt; ≈69 % ist der erwartete Wert dieser Fähigkeit auf allen 500 (eine einfache Regression auf die veröffentlichten Werte stimmt auf einen Punkt genau überein). Zur Kontrolle wurde jede öffentliche Einreichung allein auf diesen 100 Aufgaben bewertet und ihr Gesamtergebnis auf dieselbe Weise vorhergesagt: Der Fehler betrug 2,4 Punkte (RMSE), und das Band oben ist ±1,96-mal so breit. Jede Zahl in der Tabelle lässt sich mit <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> aus den öffentlichen Daten pro Aufgabe von <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> reproduzieren.</p>
-<p>Die 100 Aufgaben verteilen sich im Verhältnis zum ganzen Set auf die Repositories von Verified, und zwar unter den Aufgaben, deren Testumgebung auf arm64 läuft und validiert (der Gold-Patch besteht, eine leere Änderung scheitert). Veröffentlichte Systeme erzielen auf diesen 100 Aufgaben 1,0 bis 1,5 Punkte weniger als auf allen 500, die Stichprobe ist also keine leichte. Es ist kein Leaderboard-Eintrag: Diese werden vom SWE-bench-Team auf dessen eigener Infrastruktur bewertet.</p>
+<p class="sub after">Lies diese Tabelle als Hilfe, um zu sehen, wer in der Nähe liegt, nicht als Rangliste. Bei denselben 100 Aufgaben hat Mightling so viele gelöst wie Qwen3-Coder-480B und GLM-4.6, Modelle, die um ein Vielfaches größer sind. Aber jede Zeile benutzt ein anderes Helferprogramm und andere Hardware, und die Zeilen der Bestenliste nutzten die offiziellen Test-Images für x86-Rechner, unsere liefen auf Community-Images für arm64. Es gibt auch einen zweiten Modus namens refine. Eine erste Sitzung untersucht das Problem und ändert nichts, dann erledigt eine frische Sitzung die Arbeit. Er hat eine Aufgabe mehr gelöst als der Standard (69 gegen 68, und jeder Modus hat einige Aufgaben gelöst, die der andere verfehlt hat), und er brauchte pro Aufgabe etwa 2,2-mal so lange. Deshalb ist er aus, außer du verlangst ihn mit <code>ling --refine</code>.</p>
+<details class="method"><summary>So schätzen wir die 69 %</summary>
+<p>100 Aufgaben sind ein Fünftel von Verified, die Zahl für alle 500 ist also eine Schätzung. So sind wir vorgegangen. Wir nehmen die Ergebnisse aller 175 öffentlichen Verified-Einreichungen, Aufgabe für Aufgabe. Mit einem Item-Response-Modell mit einem Parameter (Rasch) geben wir jeder Aufgabe eine Schwierigkeit und jedem System eine Fähigkeit. Die Fähigkeit von Mightling ist die, die bei diesen 100 Aufgaben 68 lösen würde, und etwa 69 % ist das, was diese Fähigkeit bei allen 500 erreichen würde. Eine einfache Regression über die veröffentlichten Werte stimmt bis auf einen Punkt überein. Wir haben die Methode auch an anderen geprüft: Für jede öffentliche Einreichung haben wir nur ihr Ergebnis bei diesen 100 Aufgaben genutzt, um ihr Ergebnis bei allen 500 vorherzusagen. Der Fehler lag bei 2,4 Punkten (RMSE), und der Bereich oben ist das 1,96-Fache davon nach jeder Seite. Jede Zahl in der Tabelle lässt sich mit <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> nachrechnen, aus den öffentlichen Daten pro Aufgabe in <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
+<p>Wir haben die 100 Aufgaben im selben Verhältnis wie im vollen Set auf die Programme in Verified verteilt. Wir haben sie aus den Aufgaben gezogen, deren Testaufbau auf arm64 funktioniert und stimmt (die richtige Korrektur besteht, und nichts zu tun fällt durch). Veröffentlichte Systeme erreichen bei diesen 100 Aufgaben 1,0 bis 1,5 Punkte weniger als bei allen 500, die Stichprobe ist also nicht leicht. Ein Eintrag in der Bestenliste ist sie trotzdem nicht, denn das SWE-bench-Team bewertet diese auf seinen eigenen Rechnern.</p>
 </details>
 <ol class="footnotes">
-<li id="fn1">Mightling: 100 Aufgaben, je ein Versuch; ein DGX Spark (GB10, 128 GB), Modell lokal bereitgestellt, keine Cloud; Standardmodus gemessen am 2026-10-08, Refine-Modus am 2026-10-09. Schätzung aus den Daten pro Aufgabe von <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a>.</li>
+<li id="fn1">Mightling: 100 Aufgaben, je ein Versuch; ein DGX Spark (GB10, 128 GB), Modell läuft auf dem Rechner, keine Cloud; Standardmodus gemessen am 08.10.2026, refine-Modus am 09.10.2026. Die Schätzung nutzt die Daten pro Aufgabe aus <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a>.</li>
 <li id="fn2">500 Aufgaben, ein Versuch; Hardware nicht angegeben. Quelle: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>. Dasselbe Modell mit mini-SWE-agent: 57/100, 55,4 %.</li>
 <li id="fn3">500 Aufgaben, ein Versuch, Agent nicht offengelegt; Hardware nicht angegeben. Quelle: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>.</li>
 <li id="fn4">500 Aufgaben, ein Versuch; Hardware nicht angegeben. Quelle: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>.</li>
@@ -432,19 +432,19 @@ Networked git commands: none</pre></div>
 <span class="tag">PDF</span>
 <h3><a href="/paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
 <p class="note-small">dgxcoder · Oktober 2026</p>
-<p>Wir stellen Architektur, formales Fähigkeitsmodell und empirische Auswertung von Mightling Desktop vor, einer quelloffenen Desktop-Umgebung, die dasselbe App-Server-Protokoll spricht wie der Desktop-Client des Upstream-Herstellers, Codex-kompatible Voreinstellungen beibehält, Inferenz auf der eigenen Hardware des Nutzers ausführt und jeden Sandbox-Befehl auf die Workstation beschränkt, wenn der Nutzer <code>/airgapped on</code> einschaltet.</p>
+<p>Wir beschreiben den Aufbau von Mightling Desktop, einem Desktop-Programm mit offenem Quellcode. Wir geben eine formale Liste dessen an, was es kann und was nicht, und wir messen es. Es spricht dasselbe App-Server-Protokoll wie der Desktop-Client des Herstellers des Originals, behält dieselben Standardeinstellungen wie Codex, lässt das Modell auf der eigenen Hardware des Nutzers laufen und hält jeden Befehl in der Sandbox auf der Workstation, wenn der Nutzer <code>/airgapped on</code> tippt.</p>
 <p><a href="/paper/desktop-architecture.pdf">Paper lesen (PDF)</a></p>
 </div>
 <div class="pillar resource-card">
 <span class="tag">Doku</span>
-<h3>Erste Schritte und Dokumentation</h3>
-<p>Host-Sicherheit auf dem GB10 einrichten, Modellserver starten, macOS-, Linux- und Windows-Clients koppeln und das Egress-Audit ausführen.</p>
+<h3>Erste Schritte und die Dokumentation</h3>
+<p>Wie du einen GB10 sicher zum Laden machst, wie du den Modellserver startest, wie du Mac-, Linux- und Windows-Computer mit ihm koppelst und wie du das Egress-Audit ausführst.</p>
 <p><a href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">Doku →</a></p>
 </div>
 <div class="pillar resource-card">
 <span class="tag">Benchmark</span>
-<h3>SWE-bench-Vergleich reproduzieren</h3>
-<p>Das Rasch-Item-Response-Modell anpassen und jede Zahl der Benchmark-Tabelle aus den öffentlichen SWE-bench-Daten reproduzieren.</p>
+<h3>Den SWE-bench-Vergleich wiederholen</h3>
+<p>Passe das Rasch-Item-Response-Modell selbst an und reproduziere jede Zahl pro Aufgabe in der Benchmark-Tabelle aus den öffentlichen SWE-bench-Experimentdaten.</p>
 <p><a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>swe_bench_compare.py</code> →</a></p>
 </div>
 </div>
@@ -454,23 +454,23 @@ Networked git commands: none</pre></div>
 <div class="wrap">
 <h2>FAQ</h2>
 <details><summary>Brauche ich einen GB10?</summary>
-<p>Ja, um das Modell auszuführen. Deine anderen Rechner nutzen ihn als Clients: Linux (Arm oder x86) und macOS mit demselben Installationsbefehl, Windows (Arm oder x86, Vorschau) mit <a href="#install">der PowerShell-Zeile</a>.</p></details>
-<details><summary>Ich habe Puffin installiert. Ist das dasselbe?</summary>
-<p>Ja: Puffin wurde in 1.5 in Mightling umbenannt. Führe einmal <code>puffin update</code> aus, dann ein letztes Mal <code>puffin</code>. Das überträgt deine Sitzungen, Einstellungen und Verknüpfungen, und der Befehl lautet danach <code>ling</code>.</p></details>
-<details><summary>Ist es wirklich kostenlos?</summary>
-<p>Ja. Mightling ist Open Source unter der AGPL, und die Gewichte des Modells sind frei. Deine einzigen laufenden Kosten sind der Strom.</p></details>
+<p>Ja, um das Modell auszuführen. Deine anderen Computer sind Clients, die es sich leihen: Linux (Arm oder x86) und macOS mit demselben Installationsbefehl, und Windows (Arm oder x86, Vorschau) mit <a href="#install">der PowerShell-Zeile</a>.</p></details>
+<details><summary>Ich habe Puffin installiert. Ist das dasselbe Programm?</summary>
+<p>Ja. Puffin wurde in 1.5 in Mightling umbenannt. Führe einmal <code>puffin update</code> aus und danach ein letztes Mal <code>puffin</code>. Das überträgt deine Sitzungen, Einstellungen und Verknüpfungen, und danach heißt der Befehl <code>ling</code>.</p></details>
+<details><summary>Kostet es wirklich nichts?</summary>
+<p>Nichts für das Programm und nichts für das Modell. Mightling ist Open Source unter der AGPL, und die Gewichte des Modells sind frei nutzbar. Du bezahlst den Rechner und den Strom, den er braucht.</p></details>
 <details><summary>Was brauche ich außer der Maschine?</summary>
-<p>Das mitgelieferte Betriebssystem (DGX OS 7 oder Ubuntu 24.04, wo der Hersteller es anbietet), Docker mit dem NVIDIA Container Toolkit, Python 3 und Git. Auf einem normalen Ubuntu sagt dir <code>ling-admin host check</code>, was fehlt.</p></details>
-<details><summary>Gelangt jemals etwas ins Internet?</summary>
-<p>Nur, was du oder der Agent anfordert, etwa eine Websuche über SearXNG auf deinem eigenen Rechner, sowie die Downloads beim ersten Mal. <code>/airgapped on</code> schaltet alles davon ab.</p></details>
+<p>Das mitgelieferte Betriebssystem (DGX OS 7, oder Ubuntu 24.04, wo NVIDIA es anbietet), Docker mit dem NVIDIA Container Toolkit, Python 3 und Git. Auf einem normalen Ubuntu sagt dir <code>ling-admin host check</code>, was fehlt.</p></details>
+<details><summary>Geht jemals etwas ins Internet?</summary>
+<p>Nur das, was du oder der Helfer verlangen, etwa eine Websuche (über ein SearXNG, das auf deinem eigenen Rechner läuft) und die Downloads bei der ersten Nutzung. Mit <code>/airgapped on</code> ist das alles aus.</p></details>
 <details><summary>Welches Modell läuft darauf?</summary>
-<p>Qwen3.8-27B im 4-Bit-Format NVFP4 von NVIDIA, bereitgestellt von SGLang mit einem DFlash2-Drafter, für den GB10 ausgewählt und abgestimmt. Etwa 20 GB Gewichte; rund 38 GB des Maschinenspeichers bleiben frei, während es läuft.</p></details>
+<p>Qwen3.8-27B im 4-Bit-Format von NVIDIA namens NVFP4, bereitgestellt von SGLang mit einem kleinen Rate-Helfer, dem DFlash2-Drafter. Wir haben alles für den GB10 ausgewählt und abgestimmt. Die Gewichte brauchen etwa 20 GB, und während es läuft, bleiben etwa 38 GB des Speichers frei.</p></details>
 </div>
 </section>
 <section class="cta">
 <div class="wrap">
 <h2>Behalte deinen Code auf deinem Schreibtisch</h2>
-<p class="sub centered">Wenn du glaubst, dass Code auf dem Schreibtisch bleiben sollte, an dem er entstanden ist, gib dem Repository einen Stern: So finden andere GB10-Besitzer Mightling.</p>
+<p class="sub centered">Wenn du findest, dass Code dort bleiben sollte, wo er geschrieben wurde, gib dem Repository auf GitHub einen Stern. So finden andere GB10-Besitzer Mightling.</p>
 <div class="cmd has-copy cta-cmd"><button class="copy" data-done="Kopiert" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">Kopieren</button>
 <pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
 <div class="buttons">
@@ -486,8 +486,8 @@ Networked git commands: none</pre></div>
 <div class="footer-grid">
 <div class="footer-brand">
 <a class="brand" href="#"><img alt="" height="28" src="/assets/favicon.svg" width="28"/>Mightling</a>
-<p><b>Mightling von Dreamference.</b> Dreamference baut vertrauliche KI, die auf deiner eigenen Hardware läuft.</p>
-<p>Diese Seite stellt keine Anfragen an Dritte: keine Tracker, keine Analysen, keine externen Schriftarten.</p>
+<p><b>Mightling von Dreamference.</b> Dreamference baut private KI, die auf deiner eigenen Hardware läuft.</p>
+<p>Diese Seite fragt keine andere Seite nach irgendetwas: keine Tracker, keine Besucherzählung, keine Schriften von woanders.</p>
 </div>
 <div class="footer-col">
 <h4>Was du bekommst</h4>
@@ -504,7 +504,7 @@ Networked git commands: none</pre></div>
 <ul>
 <li><a href="#proof">Nachweis</a></li>
 <li><a href="#why">Warum Mightling</a></li>
-<li><a href="#compare">Mightling und Cloud-Coding-Agenten</a></li>
+<li><a href="#compare">Mightling und Cloud-Coding-Helfer</a></li>
 <li><a href="#benchmark">Benchmark</a></li>
 </ul>
 </div>
