@@ -60,7 +60,13 @@ slowest of four streams no slower, the pooled rate not materially lower): ling-s
 decoding conversation the same share of passes; `--fair-pairing 0` or `LING_FAIR_PAIRING=0` turns it
 off. If 1.8.0's image did not contain it, it is new in 1.8.1.}}
 
-**Also:** {{TBD the merges since v1.8.0}}
+**Signal tables.** A bold cell (or other Markdown) in a table row is now read, so it no longer reaches the phone
+with its asterisks.
+
+**Short memory cuts sessions.** `ling-serve start` counts the engine's host reserve and, when four sessions do not
+fit, starts with three, two or one and prints a warning.
+
+**Also:** {{TBD the other merges since v1.8.0}}
 
 ## Known issues
 
