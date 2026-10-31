@@ -203,6 +203,7 @@ def test_code_owners_name_only_the_teams_and_every_team_owns_something():
         ("specs/DREAMFERENCE_RELEASE_1.7.0.md", {"release"}),
         ("specs/DREAMFERENCE_MODELS.md", {"docs"}),
         ("scripts/swe_bench_compare.py", {"benchmarks"}),
+        ("scripts/release_benchmark.py", {"release"}),
         ("scripts/as_team.py", {"quality"}),
         (".github/apps/engine.json", {"quality"}),
         (".github/workflows/release.yml", {"release", "security"}),
