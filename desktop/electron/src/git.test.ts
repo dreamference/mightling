@@ -367,7 +367,7 @@ describe("editors", () => {
     expect(systemDataDirs().length).toBeGreaterThan(0);
   });
 
-  // Windows folds README.TXT and readme.txt into one file, and a symlink needs a privilege there.
+  // Windows and a Mac fold names that differ only in case into one file, so no file here is README.TXT beside the link readme.txt; a symlink needs a privilege on Windows.
   it.skipIf(process.platform === "win32")("hand the system only a document type, and show anything else in its folder (editor/open and docs/open with no editor chosen)", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-runs-"));
     const file = (name: string, mode = 0o644) => {
@@ -376,7 +376,7 @@ describe("editors", () => {
       fs.chmodSync(at, mode);
       return at;
     };
-    const kinds = ["notes.md", "README.TXT", "data.csv", "out.json", "report.pdf", "photo.png", "shot.JPEG", "memo.docx", "sheet.xlsx", "deck.pptx", "letter.odt"];
+    const kinds = ["notes.md", "GUIDE.TXT", "data.csv", "out.json", "report.pdf", "photo.png", "shot.JPEG", "memo.docx", "sheet.xlsx", "deck.pptx", "letter.odt"];
     const refused = [
       // What a system runs, mounts or installs, whatever the deny-lists knew: Windows, then a Mac, then Linux.
       "setup.bat", "SETUP.EXE", "go.lnk", "x.url", "a.hta", "s.js", "fix.py", "deploy.sh", "app.jar", "help.chm", "disk.iso", "disk.img", "disk.vhd", "disk.vhdx", "job.ws", "page.mht",
