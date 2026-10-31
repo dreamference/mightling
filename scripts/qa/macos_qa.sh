@@ -186,6 +186,8 @@ else
         answer="$(tr -d '[:space:][:punct:]' < "$dir/answer.txt" 2>/dev/null | tr '[:upper:]' '[:lower:]')"
         if [[ $code -eq 0 && "$answer" == *pong* ]]; then
             result "ling exec over the LAN" pass "answered '$(head -c 80 "$dir/answer.txt")'" "$(since "$t")"
+        elif [[ $code -ne 0 && "$out" == *"503"*"running a benchmark"* ]]; then
+            result "ling exec over the LAN" skip "model busy (benchmark)" "$(since "$t")"
         else
             result "ling exec over the LAN" fail "exit $code, answer '$(head -c 80 "$dir/answer.txt" 2>/dev/null)': $(echo "$out" | tail -3)" "$(since "$t")"
         fi

@@ -174,6 +174,8 @@ exec_leg() {
         result "$name" pass "answered pong ($which_ling)" "$(since "$t")"
     elif [[ $code -eq 0 && "$answer" == *pong* ]]; then
         result "$name" pass "answered '$(head -c 80 "$dir/answer.txt")'" "$(since "$t")"
+    elif [[ $code -ne 0 && "$out" == *"503"*"running a benchmark"* ]]; then
+        result "$name" skip "model busy (benchmark)" "$(since "$t")"
     else
         result "$name" fail "exit $code, answer '$(head -c 80 "$dir/answer.txt" 2>/dev/null)' ($which_ling): $(echo "$out" | tail -3)" "$(since "$t")"
     fi
