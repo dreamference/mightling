@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mightling — uandishi wa msimbo wa AI wa haraka mezani kwako</title>
-<meta name="description" content="Wakala wa uandishi wa msimbo aliyetatua kazi 68 kati ya 100 za SWE-bench Verified nje ya mtandao kwenye NVIDIA DGX Spark moja (takriban 69% kwa seti nzima), kwa karibu tokeni 48 kwa sekunde. Bila cloud, akaunti, bili ya API wala telemetry.">
+<title>Mightling — msaidizi wa kuandika msimbo anayefanya kazi kwenye mashine iliyo mezani kwako</title>
+<meta name="description" content="Msaidizi wa kuandika msimbo anayefanya kazi kwenye NVIDIA DGX Spark moja na hatumi chochote nje. Kwenye jaribio la matatizo 100 halisi ya programu, alitatua 68, kwa kasi ya takriban tokeni (vipande vya maneno) 48 kwa sekunde. Hakuna wingu, hakuna akaunti, hakuna malipo kwa kila matumizi, hakuna ufuatiliaji.">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="referrer" content="no-referrer">
 <link rel="canonical" href="https://mightling.dreamference.ai/sw/">
@@ -35,8 +35,8 @@
 <meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Mightling">
-<meta property="og:title" content="Mightling — uandishi wa msimbo wa AI wa haraka mezani kwako. Takriban 69% kwenye SWE-bench Verified.">
-<meta property="og:description" content="Kazi 68 kati ya 100 za SWE-bench Verified, nje ya mtandao, kwenye DGX Spark moja, kwa karibu tokeni 48 kwa sekunde. Bila cloud, akaunti, bili ya API wala telemetry.">
+<meta property="og:title" content="Mightling — msaidizi wa kuandika msimbo anayefanya kazi kwenye mashine iliyo mezani kwako. Matatizo 68 kati ya 100 ya jaribio yametatuliwa.">
+<meta property="og:description" content="Alitatua matatizo 68 kati ya 100 halisi ya programu kutoka SWE-bench Verified, kwenye DGX Spark moja bila kuhitaji mtandao, kwa kasi ya takriban tokeni 48 kwa sekunde. Hakuna wingu, hakuna akaunti, hakuna malipo kwa kila matumizi, hakuna ufuatiliaji.">
 <meta property="og:url" content="https://mightling.dreamference.ai/sw/">
 <meta property="og:locale" content="sw_KE">
 <meta property="og:image" content="https://mightling.dreamference.ai/assets/og.png">
@@ -71,15 +71,15 @@
 <div class="hero" id="hero">
 <img alt="Mightling" class="logo logo-light" height="181" src="/assets/mightling-logo-light.svg" width="300"/>
 <img alt="Mightling" class="logo logo-dark" height="181" src="/assets/mightling-logo-dark.svg" width="300"/>
-<h1>Uandishi wa msimbo wa AI wa haraka mezani kwako.<br/>Takriban 69% kwenye SWE‑bench Verified.</h1>
-<p class="lede"><strong>Kazi 68 kati ya 100 za SWE-bench Verified, zimetatuliwa nje ya mtandao kwenye DGX Spark moja</strong>, kwa karibu tokeni 48 kwa sekunde. Wakala wa uandishi wa msimbo, msaidizi wa mazungumzo na programu ya desktop, vyote vikifanya kazi kikamilifu kwenye GB10 yako mwenyewe. Bila cloud. Bila akaunti. Bila bili ya API. Bila telemetry. <a href="#benchmark">Jinsi ilivyopimwa</a></p>
+<h1>Msaidizi wa kuandika msimbo anayefanya kazi kwenye mashine yako mwenyewe.<br/>Alitatua takriban 69 kati ya kila matatizo 100 ya jaribio.</h1>
+<p class="lede"><strong>Matatizo 68 kati ya 100 halisi ya programu kutoka SWE-bench Verified, yametatuliwa bila intaneti kwenye DGX Spark moja</strong>, kwa kasi ya takriban tokeni 48 kwa sekunde. (Tokeni ni kipande kidogo cha neno; mashine huandika takriban 48 kati ya hivyo kila sekunde.) Mightling ni msaidizi wa kuandika msimbo, msaidizi wa mazungumzo na programu ya desktop, na vyote vinafanya kazi kwenye GB10 yako mwenyewe. Hakuna kinachotumwa kwenye wingu. Hakuna akaunti, hakuna malipo kwa kila matumizi, na hakuna ufuatiliaji. <a href="#benchmark">Jinsi tulivyopima</a></p>
 <div class="buttons hero-btns">
 <a class="btn primary" href="#install">Sakinisha</a>
 <a class="btn ghost" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">Nyaraka</a>
 <a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">Toleo la hivi karibuni</a>
 </div>
 <div class="surface-strip">
-<a href="#surface-terminal">🖥️ <code>ling</code>, wakala wa terminal</a>
+<a href="#surface-terminal">🖥️ <code>ling</code>, msaidizi kwenye terminal yako</a>
 <a href="#surface-desktop">🪟 Programu ya desktop <span class="tag">onyesho</span></a>
 <a href="#surface-web">💬 Ask, kwenye kivinjari</a>
 <a href="#surface-editor">🧩 JetBrains na VS Code (MCP)</a>
@@ -106,14 +106,14 @@
 <div class="mock-node">GB10 · ~48 tok/s · 0 egress</div>
 </aside>
 <div class="mock-main">
-<div class="mock-msg user">Majaribio ya kujisajili yanashindwa kwenye anwani tupu za barua pepe. Tafuta sababu na urekebishe.</div>
+<div class="mock-msg user">Majaribio ya kujisajili yanashindwa barua pepe inapokuwa tupu. Tafuta sababu, na urekebishe.</div>
 <div class="mock-tools">
 <div class="mock-tool"><span class="ok">✔</span> <code>ling-code def validate_signup</code> <span class="c">→ src/auth/signup.py:42</span></div>
 <div class="mock-tool"><span class="ok">✔</span> <code>pytest tests/test_signup.py -q</code> <span class="c">→ 1 failed, 14 passed</span></div>
 <div class="mock-tool"><span class="ok">✔</span> <code>apply_patch src/auth/signup.py</code> <span class="diff-add">+12</span> <span class="diff-del">-2</span> · <code>tests/test_signup.py</code> <span class="diff-add">+8</span></div>
 <div class="mock-tool"><span class="ok">✔</span> <code>pytest tests/test_signup.py -q</code> <span class="c">→ 15 passed in 0.41s</span></div>
 </div>
-<div class="mock-msg agent">Mifuatano yenye nafasi tupu pekee ilipita ukaguzi kabla ya kusawazishwa. Nimeondoa nafasi kwanza katika <code>src/auth/signup.py</code> na kuongeza jaribio la uthibitisho.</div>
+<div class="mock-msg agent">Maandishi yenye nafasi tupu pekee yalipita ukaguzi, kwa sababu ukaguzi uliendeshwa kabla nafasi hazijaondolewa. Sasa naondoa nafasi kwanza, katika <code>src/auth/signup.py</code>, na nimeongeza jaribio ili libaki limerekebishwa.</div>
 <div class="mock-composer">
 <span class="mock-files">src/auth/signup.py (+12 -2) · tests/test_signup.py (+8 -0)</span>
 </div>
@@ -121,10 +121,10 @@
 </div>
 </div>
 <div class="numbers">
-<div><b>68/100</b><span>kazi za SWE-bench Verified, nje ya mtandao kwenye DGX Spark moja</span></div>
-<div><b>~48 tok/s</b><span>uzalishaji kwenye kazi ya wakala, mtiririko mmoja</span></div>
-<div><b>0</b><span>miunganisho ya phone-home, imethibitishwa na egress audit</span></div>
-<div><b>$0</b><span>kwa kila tokeni, milele</span></div>
+<div><b>68/100</b><span>matatizo ya SWE-bench Verified yametatuliwa, bila intaneti, kwenye DGX Spark moja</span></div>
+<div><b>~48 tok/s</b><span>maneno kwa sekunde anapofanya kazi kwenye msimbo, kazi moja kwa wakati</span></div>
+<div><b>0</b><span>miunganisho inayopiga simu nyumbani, iliyokaguliwa na ukaguzi wa egress</span></div>
+<div><b>$0</b><span>kwa kila tokeni, kwa muda wote unaoitumia</span></div>
 </div>
 </div>
 </div>
@@ -137,24 +137,24 @@
 <div class="news-cards">
 <article class="news-card">
 <div class="news-meta"><span class="tag">v1.7.2</span><time datetime="2026-10-28">2026-10-28</time></div>
-<h3>Injini ya ling-serve, ScaleSearch drafter, na Forgejo kwenye kila nodi</h3>
-<p><code>ling-serve</code> ya hiari inaendesha Qwen3.8-27B kwenye GB10 kwa muktadha wa 262K, kila nodi inapata Forgejo ya faragha, na Telegram Mini App inafanya kazi moja kwa moja kwenye hazina zako.</p>
+<h3>Injini ya ling-serve, drafter ya ScaleSearch, na Forgejo kwenye kila nodi</h3>
+<p><code>ling-serve</code> ya hiari huendesha Qwen3.8-27B kwenye GB10 yenye kumbukumbu ya tokeni 262K. Kila nodi hupata Forgejo yake ya faragha (mahali pa kuhifadhi hazina za git), na Telegram Mini App inafanya kazi moja kwa moja kwenye hazina zako.</p>
 <a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.2">v1.7.2 →</a>
 </article>
 <article class="news-card">
 <div class="news-meta"><span class="tag">v1.7.1</span><time datetime="2026-10-26">2026-10-26</time></div>
 <h3>Soketi za mwenyeji zimefungwa, faharasa ya faili za ndani, na adapta za LoRA</h3>
-<p>Inafunga soketi za Docker, containerd, D-Bus na systemd ndani ya sandbox ya amri, inaongeza OCR na hati za ofisi kwenye <code>ling-docs</code>, na kutoa adapta za LoRA zilizotiwa saini.</p>
+<p>Ndani ya sandbox ya amri, soketi za Docker, containerd, D-Bus na systemd zimefungwa (soketi ni mlango ambao programu inaweza kutumia kutoa amri kwa mfumo). <code>ling-docs</code> sasa husoma pia kurasa zilizoskaniwa na hati za ofisi, na seva inaweza kuhudumia adapta za LoRA zilizosainiwa (viongezo vidogo vinavyobadilisha modeli inachoweza kufanya vizuri).</p>
 <a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.1">v1.7.1 →</a>
 </article>
 <article class="news-card">
 <div class="news-meta"><span class="tag">v1.7.0</span><time datetime="2026-10-20">2026-10-20</time></div>
-<h3>Programu ya mezani kwa macOS, Linux na Windows, na Night Shift best-of-N</h3>
-<p>Ask na Work zinashiriki dirisha moja lenye sehemu ya ukaguzi, worktrees na vichupo vya terminal; <code>/night add --best-of N</code> huendesha kazi mara N na kuhifadhi jaribio bora.</p>
+<h3>Programu ya desktop kwenye macOS, Linux na Windows, na best-of-N ya Night Shift</h3>
+<p>Ask na Work hushiriki dirisha moja la desktop, lenye kidirisha cha kupitia, worktree na tabo za terminal. <code>/night add --best-of N</code> huendesha kazi mara N na kubakiza jaribio bora.</p>
 <a class="card-cta" href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">v1.7.0 →</a>
 </article>
 </div>
-<p class="sub after">Pia katika 1.7.0: Night Shift inaweza kujaribu kazi mara kadhaa na kuhifadhi jaribio bora (<code>/night add --best-of N</code>), mashine moja inaweza kuendesha madaraja kadhaa ya Signal, na client inachagua kati ya node mbili kwenye mtandao mmoja bila kupoteza ile inayoijua. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">Maelezo ya toleo na vipakuliwa</a>.</p>
+<p class="sub after">Pia kwenye 1.7.0: Night Shift inaweza kujaribu kazi moja mara kadhaa na kubakiza jaribio bora (<code>/night add --best-of N</code>). Mashine moja inaweza kuendesha madaraja kadhaa ya Signal. Na kompyuta inayoona GB10 mbili kwenye mtandao mmoja inaweza kuchagua kati yake bila kusahau ile inayoijua tayari. <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">Maelezo ya toleo na upakuaji</a>.</p>
 </div>
 </section>
 <section id="install">
@@ -163,26 +163,26 @@
 <div class="install">
 <div class="cmd has-copy"><button class="copy" data-done="Imenakiliwa" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">Nakili</button>
 <pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
-<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># inapakua modeli mara moja (~20 GB), kisha inaihudumia</span>
+<div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># hupakua modeli mara moja (~GB 20), kisha huianzisha</span>
 <span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># ndiyo yote</span></pre></div>
-<p class="note">Inafanya kazi kwenye NVIDIA DGX Spark na kila mashine ya GB10. Hati hii inakagua kila upakuaji kwa checksum za toleo na inaonyesha kila amri ya <code>sudo</code> kabla ya kuiendesha. <a href="https://github.com/dreamference/mightling/blob/main/install.sh">Isome kwanza</a> ukipenda.</p>
+<p class="note">Hii inafanya kazi kwenye NVIDIA DGX Spark na kwenye kila mashine nyingine ya GB10. Skripti hukagua kila upakuaji dhidi ya checksum za toleo, na hukuonyesha kila amri ya <code>sudo</code> kabla ya kuiendesha. Unaweza <a href="https://github.com/dreamference/mightling/blob/main/install.sh">kusoma skripti kwanza</a>.</p>
 <div class="clients">
 <div class="client">
 <h3>Clients za Mac na Linux</h3>
-<p>Kompyuta zako nyingine zinatumia modeli ya GB10 kupitia mtandao wa ndani. Kwenye Mac au mashine nyingine ya Linux, amri ile ile hapo juu inasakinisha client ya <code>ling</code>; inaipata GB10 yenyewe.</p>
-<p>Kuanzia 1.7.2 pia inaweka programu ya desktop kwenye Applications kwenye Mac, tayari kufunguliwa (<code>--no-app</code> inaiacha).</p>
+<p>Kompyuta zako nyingine hukopa modeli ya GB10 kupitia mtandao wa nyumbani au ofisini. Kwenye Mac au mashine nyingine ya Linux, amri ile ile husakinisha <code>ling</code>, sehemu unayoiandikia. Inaipata GB10 yenyewe.</p>
+<p>Kuanzia 1.7.2 pia huweka programu ya desktop kwenye Applications kwenye Mac, tayari kufunguliwa. Ongeza <code>--no-app</code> usipoitaka.</p>
 </div>
 <div class="client">
 <h3>Client ya Windows <span class="tag">onyesho</span></h3>
 <div class="cmd has-copy"><button class="copy" data-done="Imenakiliwa" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">Nakili</button>
 <pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
-<p>Kwenye PowerShell. Inasakinisha bila haki za msimamizi (kuanzia 1.7.2 hata programu ya desktop), kisha Windows inauliza mara moja kuandaa sandbox ya wakala. Bado haijatiwa saini, kwa hivyo Smart App Control lazima izimwe. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">Soma hati</a>.</p>
+<p>Andika hii kwenye PowerShell. Haihitaji haki za msimamizi (kuanzia 1.7.2 hilo ni kweli pia kwa programu ya desktop). Kisha Windows itakuomba mara moja uandae mahali palipotengwa ambapo msaidizi huendesha amri. Kisakinishi bado hakijasainiwa, kwa hiyo Smart App Control lazima izimwe. <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">Soma skripti</a>.</p>
 </div>
 </div>
 <details class="other"><summary>Njia nyingine za kusakinisha</summary>
-<p>Ukurasa wa toleo pia una dmg ya Mac (<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>, au <code>x64</code> kwa Intel) na kisakinishi cha Windows (<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>, au <code>arm64</code>). Ni matoleo ya onyesho yasiyotiwa saini: yakipakuliwa kwenye kivinjari, yanazuiwa mara ya kwanza. Kagua kila moja kwa <code>SHA256SUMS</code> iliyotiwa saini ya toleo kwanza.</p>
+<p>Ukurasa wa toleo pia una picha ya diski ya Mac (<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>, au <code>x64</code> kwa Intel) na kisakinishi cha Windows (<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>, au <code>arm64</code>). Ni matoleo ya awali yasiyosainiwa, kwa hiyo unapoyapakua kwenye kivinjari, mfumo wako huyazuia mara ya kwanza. Kabla ya kufungua moja, liangalie dhidi ya faili ya <code>SHA256SUMS</code> iliyosainiwa ya toleo.</p>
 <ul>
-<li>macOS 15 na mpya zaidi: buruta Mightling hadi Applications na uifungue mara moja, kisha System Settings › Privacy & Security › <b>Open Anyway</b>. Kwenye macOS 14 na ya zamani zaidi, bofya programu huku umeshika Control › Open.</li>
+<li>macOS 15 na mpya zaidi: buruta Mightling hadi Applications na uifungue mara moja. Kisha nenda System Settings › Privacy & Security na ubonyeze <b>Open Anyway</b>. Kwenye macOS 14 na ya zamani zaidi, bonyeza programu huku umeshikilia Control kisha uchague Open.</li>
 <li>Windows: SmartScreen › <b>More info</b> › <b>Run anyway</b>. Smart App Control lazima izimwe.</li>
 </ul>
 </details>
@@ -193,19 +193,19 @@
 <li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
 <li>Gigabyte TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
 </ul>
-<p class="sub flush">Zinashiriki chipu, kumbukumbu iliyounganishwa ya 128 GB na DGX OS 7, kwa hivyo kisakinishi kimoja kinazihudumia zote. Mightling inatengenezwa na kujaribiwa kila siku kwenye ASUS Ascent GX10; zilizobaki zinashughulikiwa na majaribio.</p>
+<p class="sub flush">Zote zina chipu ile ile, GB 128 zile zile za kumbukumbu zinazoshirikiwa na prosesa na michoro, na DGX OS 7, kwa hiyo kisakinishi kimoja kinatosha. Tunaunda na kujaribu Mightling kila siku kwenye ASUS Ascent GX10. Nyingine zinafunikwa na majaribio yetu ya kiotomatiki, lakini hatuziendeshi kwa mkono.</p>
 </div>
 </div>
 </section>
 <section id="workflows">
 <div class="wrap">
 <h2>Jaribu hizi kwanza</h2>
-<p class="sub">Au panga kazi za usiku wa leo kwa <code>/night add &lt;task&gt;</code>: Mightling inafanya kazi za foleni wakati unalala, kila kazi kwenye git branch yake, na wewe unapitia branch hizo ukinywa kahawa.</p>
+<p class="sub">Au acha kazi kwa usiku huu kwa <code>/night add &lt;task&gt;</code>. Mightling hupitia orodha wakati umelala, kila kazi kwenye tawi lake la git, na asubuhi unapitia matawi hayo.</p>
 <div class="tabs-box">
 <div class="tab-bar" role="tablist">
-<button class="tab-btn active" type="button" role="tab" aria-selected="true" data-tab="tab-onboard">Elewa msingi wa msimbo</button>
+<button class="tab-btn active" type="button" role="tab" aria-selected="true" data-tab="tab-onboard">Elewa mradi</button>
 <button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-fix">Rekebisha majaribio yanayofeli</button>
-<button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-night">Panga foleni ya Night Shift</button>
+<button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="tab-night">Weka kazi kwenye foleni ya Night Shift</button>
 </div>
 <div class="cmd tab-panel active" id="tab-onboard" role="tabpanel"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
 <span class="c"># reads the code index (ling-code outline, def, refs, callers) instead of grepping,</span>
@@ -222,15 +222,15 @@
 <div class="pillars workflow-cards">
 <div class="pillar">
 <h3>🧭 Faharasa ya msimbo</h3>
-<p>Ufafanuzi, wanaoita na athari kote kwenye repositori yako, ili wakala apate msimbo badala ya kuutafuta kwa grep.</p>
+<p>Orodha ya mahali vitu vilipofafanuliwa na nani anavitumia kote kwenye mradi wako, ili msaidizi atafute msimbo kwenye orodha badala ya kubahatisha.</p>
 </div>
 <div class="pillar">
-<h3>🔎 Utafutaji na uletaji wa wavuti</h3>
-<p>Kupitia SearXNG ya faragha kwenye mashine yako mwenyewe: bila akaunti ya utafutaji, bila API key.</p>
+<h3>🔎 Utafutaji wa wavuti na uletaji wa kurasa</h3>
+<p>Utafutaji hupitia SearXNG ya faragha kwenye mashine yako mwenyewe, kwa hiyo hakuna akaunti ya utafutaji wala ufunguo wa kupata. Maswali bado hutoka kwenda wavuti ili yajibiwe.</p>
 </div>
 <div class="pillar">
 <h3>🌙 Night Shift</h3>
-<p><code>/night add &lt;task&gt;</code> kabla ya kulala; kila kazi inakamilika kwenye git branch yake kufikia asubuhi. Hakuna kinachounganishwa (merge) wala kusukumwa (push) bila wewe.</p>
+<p>Andika <code>/night add &lt;task&gt;</code> kabla ya kulala. Asubuhi kila kazi imekamilika kwenye tawi lake la git. Hakuna kinachounganishwa wala kutumwa isipokuwa ufanye wewe.</p>
 </div>
 </div>
 </div>
@@ -238,13 +238,13 @@
 <section id="surfaces">
 <div class="wrap">
 <h2>Unachopata</h2>
-<p class="sub">Programu ya desktop ya Mightling 1.7.0 inaweka Ask na Work katika dirisha moja. Work ni meza kamili ya kazi kwa vikao vya wakala: composer yenye faili, skill na amri, kidirisha cha review cha kuweka stage, kurudisha nyuma na kufanya commit, worktree, tabo za terminal, na mti wa faili na tabo za faili kando ya thread. Kwenye kompyuta zako nyingine ni client ya GB10 yako, ambayo inaipata kwenye mtandao wa ndani.</p>
+<p class="sub">Programu ya desktop ya 1.7.0 inaweka njia zote mbili za kutumia Mightling katika dirisha moja: Ask, ambapo unauliza maswali, na Work, ambapo msaidizi anahariri msimbo wako. Work ina kisanduku cha kuandikia kazi (unaweza kuambatisha faili, skill na amri), kidirisha cha kupitia mabadiliko kabla ya kuyabakiza au kuyatengua, nakala tofauti za kufanyia kazi za msimbo wako (worktree), tabo za terminal, na mti wa faili kando ya mazungumzo. Kwenye kompyuta zako nyingine programu huzungumza na GB10 yako, ambayo inaipata kwenye mtandao wako.</p>
 <div class="surface-rows">
 <div class="surface-row" id="surface-terminal">
 <div class="surf-copy">
 <div class="eyebrow"><code>ling</code> · <code>ling-code</code> · <code>ling-docs</code></div>
-<h3>🖥️ <code>ling</code>, wakala wa terminal</h3>
-<p>Inasoma repositori yako, inaendesha amri na majaribio, inahariri msimbo, na inauliza kabla ya jambo lolote lenye hatari.</p>
+<h3>🖥️ <code>ling</code>, msaidizi kwenye terminal yako</h3>
+<p>Husoma mradi wako, huendesha amri na majaribio, huhariri msimbo, na hukuuliza kwanza kabla ya kufanya jambo lolote lenye hatari.</p>
 <div class="surf-actions"><a class="btn ghost sm" href="#install">Sakinisha →</a></div>
 </div>
 <div class="surf-media">
@@ -252,7 +252,7 @@
 <span class="p">$ </span>cd ~/your-project &amp;&amp; ling
 <span class="p">&gt; </span>/airgapped on      <span class="c"># no network for any command it runs</span>
 <span class="p">&gt; </span>/worktree apply    <span class="c"># bring the changes back to your checkout</span></pre></div>
-<div class="feature single-feature"><h3>🧩 Skill ulizonazo tayari</h3><p>Skill ulizoandika tayari kwa Claude Code, Gemini CLI, OpenClaw au Hermes zinafanya kazi bila mabadiliko.</p></div>
+<div class="feature single-feature"><h3>🧩 Skill ulizo nazo tayari</h3><p>Skill ulizoandika kwa ajili ya Claude Code, Gemini CLI, OpenClaw au Hermes zinafanya kazi hapa kama zilivyo.</p></div>
 </div>
 </div>
 <div class="surface-row reverse" id="surface-desktop">
@@ -260,25 +260,25 @@
 <span id="surface-web"></span>
 <div class="eyebrow"><code>ling app</code> · <code>ling web</code></div>
 <h3>🪟 Programu ya desktop <span class="tag">onyesho</span></h3>
-<p>Ask na Work katika dirisha moja, kwenye GB10, Mac, Linux au Windows: vikao vya wakala vyenye idhini, kidirisha cha review, worktree na kutendua. <a href="#new">Mpya katika 1.7</a>.</p>
-<p>Maswali yenye utafutaji wa wavuti, utafutaji wa picha na kuandika kwa sauti, pamoja na vikao vya wakala wako, kutoka mashine hii au simu iliyooanishwa, kwenye modeli ileile ya ndani.</p>
+<p>Ask na Work katika dirisha moja, kwenye GB10, Mac, Linux au Windows. Vikao vya msaidizi huomba idhini yako, na kuna kidirisha cha kupitia mabadiliko, nakala tofauti za kufanyia kazi, na kutengua. <a href="#new">Mapya katika 1.7</a>.</p>
+<p>Maswali yenye utafutaji wa wavuti, utafutaji wa picha na kuzungumza badala ya kuandika, na vikao vya msaidizi pia, kutoka mashine hii au kutoka simu uliyoiunganisha nayo. Vyote vinatumia modeli ile ile kwenye mashine yako.</p>
 <div class="surf-actions"><a class="btn ghost sm" href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">Nyaraka →</a></div>
 </div>
 <div class="surf-media">
 <div class="pillars os-cards">
 <div class="pillar">
 <h3>macOS <span class="tag">onyesho</span></h3>
-<p>Kuanzia 1.7.2, <a href="#install">amri ya usakinishaji</a> inaweka Mightling kwenye Applications kando ya <code>ling</code>, na inafunguka kama programu nyingine yoyote. Apple silicon na Intel, macOS 12 au mpya zaidi. <code>ling update</code> inaisasisha.</p>
+<p>Kuanzia 1.7.2, <a href="#install">amri ya kusakinisha</a> huweka Mightling kwenye Applications kando ya <code>ling</code>, na unaifungua kama programu nyingine yoyote. Inafanya kazi kwenye Apple silicon na Intel, na macOS 12 au mpya zaidi. <code>ling update</code> huisasisha.</p>
 </div>
 <div class="pillar">
 <h3>Linux</h3>
-<p>Kwenye GB10, <code>mightling_1.7.0_arm64.deb</code> inasakinisha programu, kiingilio chake cha kuzindua na amri ya <code>ling-app</code>, pamoja na wasifu wa sandbox unaohitajika:</p>
+<p>Kwenye GB10, faili <code>mightling_1.7.0_arm64.deb</code> husakinisha programu, kipengele chake kwenye menyu na amri ya <code>ling-app</code>, pamoja na wasifu wa sandbox inaouhitaji. (Sandbox ni chumba kilichofungwa cha kuendeshea amri, ili zisiguse sehemu nyingine ya mashine.)</p>
 <div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
-<p>Kisha ifungue kutoka menyu ya programu, au kwa <code>ling app</code>. <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">Zaidi</a>.</p>
+<p>Kisha ifungue kutoka menyu ya programu, au andika <code>ling app</code>. <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">Zaidi</a>.</p>
 </div>
 <div class="pillar">
 <h3>Windows 11 <span class="tag">onyesho</span></h3>
-<p>Kuanzia 1.7.2, <a href="#install">mstari wa PowerShell</a> unasakinisha programu pia, kwa ajili yako peke yako na bila haki za msimamizi, ukiwa na kiingilio kwenye menyu ya Start; Settings → Apps inaiondoa; <code>ling update</code> inaisasisha. Smart App Control lazima izimwe.</p>
+<p>Kuanzia 1.7.2, <a href="#install">mstari wa PowerShell</a> husakinisha programu pia, kwa ajili yako peke yako na bila haki za msimamizi, na kipengele kwenye menyu ya Start. Settings → Apps huiondoa, na <code>ling update</code> huisasisha. Smart App Control lazima izimwe.</p>
 </div>
 </div>
 </div>
@@ -288,14 +288,14 @@
 <span id="surface-phone"></span>
 <div class="eyebrow"><code>ling-admin mcp</code> · <code>ling signal</code> · <code>ling chat</code></div>
 <h3>JetBrains, VS Code, na simu yako</h3>
-<p>Unganisha JetBrains au VS Code kupitia stdio MCP (<code>ling-admin mcp</code>), au tuma ujumbe kwa GB10 yako kutoka Signal (Ujumbe Kwangu), Telegram (pamoja na Mini App) na Matrix kupitia Tailscale. Kila daraja la simu hubaki limezimwa hadi ulianzishe.</p>
+<p>Unaweza kuunganisha JetBrains au VS Code kupitia stdio MCP (<code>ling-admin mcp</code>). Unaweza pia kutuma ujumbe kwa GB10 yako kutoka Signal (kwako mwenyewe, kwenye Note to Self), kutoka Telegram (pamoja na Mini App ya kufanya kazi kwenye hazina), na kutoka Matrix kupitia Tailscale. Kila kiungo cha simu kimezimwa hadi uwashe. Signal imesimbwa kwa njia fiche kutoka mwanzo hadi mwisho, na Matrix inaendeshwa kwenye seva yako mwenyewe. Ujumbe wa Telegram hupitia seva za Telegram bila usimbaji fiche, kwa hiyo itumie tu kwa mambo ambayo hungejali kuyashiriki hivyo.</p>
 <div class="surf-actions"><a class="btn ghost sm" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">Nyaraka →</a></div>
 </div>
 <div class="surf-media">
 <div class="cmd"><pre><span class="p">$ </span>ling-admin mcp            <span class="c"># stdio MCP for JetBrains and VS Code</span>
 <span class="p">$ </span>ling signal setup         <span class="c"># Note to Self only, off until linked</span>
 <span class="p">$ </span>ling chat telegram setup  <span class="c"># topics and the Mini App</span></pre></div>
-<div class="feature single-feature"><h3>📬 Gmail, Drive, Calendar <span class="tag">onyesho</span></h3><p>Kusoma tu, kupitia kuingia kunakobaki kwenye mashine yako. Kumezimwa kabisa kwenye <code>/airgapped on</code>.</p></div>
+<div class="feature single-feature"><h3>📬 Gmail, Drive, Calendar <span class="tag">onyesho</span></h3><p>Kusoma tu, kupitia kuingia kunakobaki kwenye mashine yako. Huzimwa kabisa kwa <code>/airgapped on</code>.</p></div>
 </div>
 </div>
 </div>
@@ -303,11 +303,11 @@
 </section>
 <section class="band-full" id="proof">
 <div class="wrap">
-<h2>Msimbo wako haondoki mezani kwako — na unaweza kuthibitisha</h2>
-<p class="sub">Mawakala wa uandishi wa msimbo wa cloud hutuma msimbo wako wa chanzo kwenye seva za mtu mwingine. Mightling haupeleki popote: modeli inaendeshwa kwenye GB10 yako, na hakuna kitu ndani ya Mightling kinachowasiliana na seva za nje. Hakuna uchanganuzi wa matumizi, hakuna metriki, hakuna kuingia, hakuna ripoti za hitilafu za "bila jina". Hivyo inaweza kutumika kwa msimbo usioruhusiwa kuupakia: kazi za wateja, data iliyodhibitiwa, bidhaa ambazo hazijatolewa.</p>
+<h2>Msimbo wako unabaki mezani kwako, na unaweza kuthibitisha hilo</h2>
+<p class="sub">Msaidizi wa msimbo wa wingu hutuma msimbo wako chanzo kwenye kompyuta zinazomilikiwa na mtu mwingine. Mightling hautumi popote. Modeli inafanya kazi kwenye GB10 yako, na hakuna chochote ndani ya Mightling kinachopiga simu nyumbani: hakuna hesabu za matumizi, hakuna vipimo, hakuna kuingia, hata ripoti za hitilafu za “kutokujulikana” hakuna. Kwa hiyo unaweza kuutumia kwenye msimbo ambao huruhusiwi kuupakia, kama kazi ya mteja, data iliyolindwa au bidhaa ambayo bado haijatoka.</p>
 <div class="proof">
 <div>
-<p>Amri moja inaendesha kikao halisi cha Mightling chini ya <code>strace</code> na kuorodhesha kila muunganisho wa mtandao uliofanywa:</p>
+<p>Amri moja huendesha kikao halisi cha Mightling chini ya <code>strace</code>, zana inayotazama kila simu ambayo programu hufanya, kisha huorodhesha kila muunganisho wa mtandao ambao kikao kilifungua:</p>
 <div class="cmd"><pre><span class="p">$ </span>ling-admin audit egress
 <span class="ok">✔ Egress audit: pass</span>
 Network destinations:
@@ -315,13 +315,13 @@ Network destinations:
    127.0.0.1:8767      1x  Gmail search service
 DNS queries: none
 Networked git commands: none</pre></div>
-<p>Kila kitu kilibaki kwenye <code>127.0.0.1</code>. Hakuna hata ombi moja la DNS.</p>
+<p>Yote yalibaki kwenye <code>127.0.0.1</code>, yaani mashine ikizungumza na yenyewe. Hakukuwa na ombi la DNS hata moja (ombi la DNS ni kuuliza intaneti anwani ya jina).</p>
 </div>
 <div>
-<h3>Unahitaji hakikisho kamili?</h3>
-<p>Andika <code>/airgapped on</code> na kila amri anayoendesha wakala inapewa network namespace tupu kutoka kwenye kernel ya Linux. Si ombi la heshima kwa modeli: hakuna mtandao wa kufikia kabisa. Full Access, ambayo ingeruka sandbox, inakataliwa wakati huo huo.</p>
+<h3>Unataka dhamana thabiti?</h3>
+<p>Andika <code>/airgapped on</code>. Kila amri anayoendesha msaidizi hupewa mtandao tupu na kernel ya Linux. Huo si ombi la heshima kwa modeli. Hakuna tu mtandao wa kufikia. Wakati huo huo, Full Access, ambayo ingepita sandbox, inakataliwa.</p>
 <h3>Nini kinaweza kutoka, na lini</h3>
-<p>Ni kile tu unachoomba wewe au wakala: utafutaji wa wavuti (kupitia SearXNG ya faragha kwenye mashine yako mwenyewe), kuleta ukurasa, ombi la kusoma tu kwa akaunti ya Google uliyounganisha, au ukaguzi wa masasisho. Kwenye <code>/airgapped on</code>, hakuna chochote kati ya hivyo.</p>
+<p>Ni kile tu unachoomba wewe au msaidizi: utafutaji wa wavuti (kupitia SearXNG ya faragha inayofanya kazi kwenye mashine yako, ingawa utafutaji wenyewe bado hutoka kwenda wavuti), kuleta ukurasa wa wavuti, ombi la kusoma tu kwa akaunti ya Google uliyoiunganisha, au ukaguzi wa masasisho. Kwa <code>/airgapped on</code>, hakuna kati ya haya kinachotokea.</p>
 </div>
 </div>
 </div>
@@ -331,47 +331,47 @@ Networked git commands: none</pre></div>
 <h2>Kwa nini Mightling</h2>
 <div class="pillars">
 <div class="pillar">
-<h3>🔒 Siri</h3>
-<p>Modeli, msimbo wako, maelekezo yako na majibu yako vinabaki kwenye mashine vilipo.</p>
+<h3>🔒 Faragha</h3>
+<p>Modeli, msimbo wako, maswali yako na majibu yake hubaki kwenye mashine yaliyopo.</p>
 <ul>
-<li>Bila akaunti, bila telemetry</li>
-<li>Egress audit unayoweza kuirudia</li>
+<li>Hakuna akaunti, hakuna ufuatiliaji</li>
+<li>Ukaguzi wa egress unaoweza kuurudia</li>
 <li><code>/airgapped on</code>, inayotekelezwa na kernel</li>
 </ul>
 </div>
 <div class="pillar">
-<h3>⚡ Haraka, bila bili</h3>
+<h3>⚡ Haraka, na bila bili</h3>
 <table>
-<tr><td>Kazi ya wakala</td><td class="num">~48 tok/s</td></tr>
-<tr><td>Msimbo</td><td class="num">69 tok/s</td></tr>
+<tr><td>Kufanya kazi kwenye msimbo</td><td class="num">~48 tok/s</td></tr>
+<tr><td>Kuandika msimbo</td><td class="num">69 tok/s</td></tr>
 <tr><td>JSON</td><td class="num">84 tok/s</td></tr>
 <tr><td>Nathari</td><td class="num">32 tok/s</td></tr>
 <tr><td>Kusoma msimbo</td><td class="num">~1,800 tok/s</td></tr>
-<tr><td>Muktadha</td><td class="num">262K</td></tr>
+<tr><td>Kumbukumbu ya mazungumzo</td><td class="num">262K</td></tr>
 </table>
-<p class="note-small">Mtiririko mmoja kwenye GB10 na speculative decoding. Kazi ya wakala imepimwa kwenye vikao halisi vya wakala; msimbo, JSON na nathari kwa aina ya matokeo, kwa greedy decoding. Endesha mawakala wanne kwa wakati mmoja: bila kiwango, bila "tafadhali subiri".</p>
+<p class="note-small">Hizi ni kasi za kazi moja kwa wakati kwenye GB10. Modeli hutumia mbinu inayoitwa speculative decoding: msaidizi mdogo hukisia maneno kadhaa mbele na modeli kubwa hukagua makisio yote kwa mara moja. “Kufanya kazi kwenye msimbo” hupimwa kwenye vikao halisi vya msaidizi. Kuandika msimbo, JSON na maandishi hupimwa kila kimoja kwenye matokeo ya aina hiyo. Mstari wa mwisho ni kiasi cha maandishi anachoweza kukumbuka kwa wakati mmoja, tokeni 262K, ambazo ni kurasa mia kadhaa. Endesha wasaidizi wanne kwa wakati mmoja ukitaka. Hakuna kikomo wala “tafadhali subiri”.</p>
 </div>
 <div class="pillar">
-<h3>✨ Hakuna cha kusanidi</h3>
+<h3>✨ Kuna kidogo cha kuweka</h3>
 <ul>
-<li><b>Bila tuning:</b> modeli, muktadha, kernel na speculative decoding vimechaguliwa kwa ajili ya GB10.</li>
-<li><b>Haitagandisha mashine yako:</b> mashine mwenyeji (host) inakaguliwa na shinikizo la kumbukumbu linatazamwa wakati wa kupakia.</li>
-<li><b>Mashine zako nyingine zinaipata</b> kwenye mtandao wa ndani.</li>
-<li><b>Masasisho ni amri moja:</b> <code>ling update</code>.</li>
+<li><b>Hakuna kurekebisha:</b> tulichagua modeli, ukubwa wa kumbukumbu, msimbo wa kiwango cha chini na speculative decoding kwa ajili ya GB10.</li>
+<li><b>Haipaswi kuganda mashine yako:</b> hukagua mashine kabla ya kupakia modeli, na hutazama kumbukumbu inapopakia.</li>
+<li><b>Kompyuta zako nyingine zinaipata</b> kwenye mtandao wako.</li>
+<li><b>Kusasisha ni amri moja:</b> <code>ling update</code>.</li>
 </ul>
 </div>
 </div>
 <div class="compare-block" id="compare">
-<h3>Mightling na mawakala wa uandishi wa msimbo wa cloud</h3>
+<h3>Mightling na wasaidizi wa msimbo wa wingu</h3>
 <div class="tablewrap">
 <table>
-<tr><th></th><th>Mawakala wa cloud</th><th>Mightling</th></tr>
-<tr><td>Msimbo wako unaenda wapi</td><td>Seva zao</td><td class="yes">Haendi popote</td></tr>
+<tr><th></th><th>Wasaidizi wa msimbo wa wingu</th><th>Mightling</th></tr>
+<tr><td>Msimbo wako unaenda wapi</td><td>Kompyuta zao</td><td class="yes">Haendi popote</td></tr>
 <tr><td>Akaunti inahitajika</td><td>Ndiyo</td><td class="yes">Hapana</td></tr>
-<tr><td>Gharama kwa tokeni</td><td>Inapimwa na kutozwa</td><td class="yes">Sifuri</td></tr>
-<tr><td>Vikomo vya matumizi</td><td>Ndiyo</td><td class="yes">Hapana</td></tr>
-<tr><td>Inafanya kazi mtandao ukiwa umeondolewa</td><td>Hapana</td><td class="yes">Ndiyo</td></tr>
-<tr><td>Unaweza kuthibitisha kinachotoka</td><td>Hapana</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
+<tr><td>Bei kwa kila tokeni</td><td>Unalipa kwa kila moja</td><td class="yes">Hakuna</td></tr>
+<tr><td>Vikomo vya kiasi unachoweza kutumia</td><td>Ndiyo</td><td class="yes">Hapana</td></tr>
+<tr><td>Inafanya kazi hata kebo ya mtandao ikiwa imeondolewa (baada ya upakuaji wa kwanza)</td><td>Hapana</td><td class="yes">Ndiyo</td></tr>
+<tr><td>Unaweza kujikagulia mwenyewe kinachotoka</td><td>Si kutoka upande wako</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
 </table>
 </div>
 </div>
@@ -380,7 +380,7 @@ Networked git commands: none</pre></div>
 <section id="benchmark">
 <div class="wrap">
 <h2>SWE-bench Verified, imepimwa kwenye DGX Spark moja</h2>
-<p class="sub">Tarehe 2026-10-08, wakala wa Mightling 1.5.1 akiwa na Qwen3.8-27B alitatua <b>kazi 68 kati ya 100</b> za SWE-bench Verified kwenye DGX Spark moja, nje ya mtandao: sampuli maalum ya kazi 100, jaribio moja kwa kila kazi, hali ya kawaida. Ikikadiriwa kwa kazi zote 500, ni makadirio ya <b>≈69%</b> (bendi ya 95% 63.9–73.4%). Hiki ni kipimo chetu wenyewe, kwenye mashine yetu wenyewe na kwenye sehemu ya seti, si ingizo la leaderboard.</p>
+<p class="sub">SWE-bench Verified ni seti ya matatizo 500 halisi yaliyochukuliwa kutoka programu huria. Kwa kila moja, msaidizi lazima abadilishe msimbo ili majaribio yapite. Tarehe 2026-10-08 tulimpa Mightling 1.5.1 matatizo 100 kati ya hayo, akitumia modeli ya Qwen3.8-27B, kwenye DGX Spark moja bila intaneti. Alikuwa na jaribio moja kwa kila tatizo, katika hali yake ya kawaida, na alitatua <b>68 kati ya 100</b>. Tukiyakuza hadi yote 500, tunakadiria takriban <b>69%</b>, pungufu au zaidi kwa pointi chache (kiwango cha 95% ni 63.9 hadi 73.4%). Tulipima haya sisi wenyewe, kwenye mashine yetu wenyewe, kwenye sampuli ya matatizo. Si ingizo kwenye leaderboard rasmi.</p>
 <div class="tablewrap">
 <table class="bench">
 <tr><th>Mfumo</th><th>Kazi 100<br/>zilezile</th><th>Kazi zote<br/>500</th></tr>
@@ -402,13 +402,13 @@ Networked git commands: none</pre></div>
 <tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">haijachapishwa</td><td class="ns"><a href="https://cursor.com/blog/composer">haijachapishwa</a></td></tr>
 </table>
 </div>
-<p class="sub after">Isome kama ulinganisho wa mazingira, si orodha ya nafasi. Kwenye kazi zilezile 100 Mightling ilitatua kazi nyingi kama Qwen3-Coder-480B na GLM-4.6, modeli kubwa mara nyingi zaidi, lakini kila safu inatumia wakala tofauti, maunzi tofauti na, kwa safu za leaderboard, image rasmi za majaribio za x86, ilhali zetu zilitumia image za arm64 za jamii. Katika hali ya refine kikao cha kwanza kinaichunguza kazi bila kubadilisha chochote na kikao kipya kinaifanya: ilitatua kazi moja zaidi ya hali ya kawaida (69 dhidi ya 68, kila upande ukishinda kazi ambazo upande mwingine ulishindwa), kwa takriban mara 2.2 ya muda kwa kila kazi, kwa hivyo inabaki ya hiari (<code>ling --refine</code>).</p>
-<details class="method"><summary>Jinsi ≈69% inavyokadiriwa</summary>
-<p>Kazi 100 ni moja ya tano ya Verified, kwa hivyo namba ya seti nzima ni makadirio. Modeli ya item-response (Rasch) yenye kigezo kimoja inafuatishwa kwa matokeo ya kila kazi ya mawasilisho yote 175 ya umma ya Verified: kila kazi ina ugumu wake na kila mfumo una uwezo wake. Uwezo wa Mightling ndio unaoeleza kazi 68 zilizotatuliwa kwenye kazi hizi 100; ≈69% ni alama inayotarajiwa ya uwezo huo kwenye zote 500 (regression ya kawaida kwenye alama zilizochapishwa inakubaliana ndani ya pointi moja). Kuikagua, kila uwasilishaji wa umma ulipewa alama kwenye kazi hizi 100 pekee na alama yake ya jumla ikatabiriwa vivyo hivyo: kosa lilikuwa pointi 2.4 (RMSE), na bendi ya hapo juu ni ±1.96 mara hiyo. Kila namba kwenye jedwali inatolewa tena na <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a> kutoka data ya umma ya kila kazi ya <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
-<p>Kazi 100 zimesambazwa kwenye repositori za Verified sawia na seti nzima, miongoni mwa kazi ambazo mazingira yake ya majaribio yanaendeshwa na kuthibitishwa kwenye arm64 (patch ya dhahabu inapita, badiliko tupu linashindwa). Mifumo iliyochapishwa inapata alama chini ya pointi 1.0 hadi 1.5 kwenye kazi hizi 100 kuliko kwenye zote 500, kwa hivyo sampuli si nyepesi. Si ingizo la leaderboard: hizo hupimwa na timu ya SWE-bench kwenye miundombinu yao wenyewe.</p>
+<p class="sub after">Soma jedwali hili kama njia ya kuona nani yuko karibu, si kama orodha ya nafasi. Kwenye matatizo yale yale 100, Mightling alitatua kiasi sawa na Qwen3-Coder-480B na GLM-4.6, modeli kubwa mara nyingi zaidi yake. Lakini kila safu hutumia programu ya msaidizi tofauti na vifaa tofauti, na safu za leaderboard zilitumia picha rasmi za majaribio za kompyuta za x86, ilhali zetu ziliendeshwa kwenye picha za jamii za arm64. Pia kuna hali ya pili, inayoitwa refine. Kikao cha kwanza husoma tatizo na hakibadilishi chochote, kisha kikao kipya hufanya kazi. Ilitatua tatizo moja zaidi ya hali ya kawaida (69 dhidi ya 68, na kila hali ilitatua baadhi ya matatizo ambayo nyingine iliyakosa), na ilichukua takriban mara 2.2 ya muda kwa kila tatizo. Kwa hiyo imezimwa isipokuwa uiombe kwa <code>ling --refine</code>.</p>
+<details class="method"><summary>Jinsi tunavyokadiria 69%</summary>
+<p>Matatizo 100 ni moja ya tano ya Verified, kwa hiyo namba ya yote 500 ni makadirio. Hivi ndivyo tulivyoyapata. Chukua matokeo ya mawasilisho yote 175 ya umma ya Verified, tatizo kwa tatizo. Kila tatizo lipe ugumu na kila mfumo uupe uwezo, kwa modeli ya majibu ya vipengele yenye kigezo kimoja (Rasch). Uwezo wa Mightling ni ule ambao ungetatua 68 kwenye matatizo haya 100, na takriban 69% ndiyo ambayo uwezo huo ungepata kwenye yote 500. Rejeshi rahisi kwenye alama zilizochapishwa linakubaliana ndani ya pointi moja. Pia tulijaribu njia hii kwa wengine: kwa kila wasilisho la umma tulitumia alama yake kwenye matatizo haya 100 tu kukisia alama yake kwenye yote 500. Kosa lilikuwa pointi 2.4 (RMSE), na kiwango kilicho juu ni mara 1.96 ya hilo kila upande. Kila namba kwenye jedwali inaweza kuzalishwa upya na <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a>, kutoka data ya umma ya kila tatizo iliyo kwenye <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
+<p>Tuligawa matatizo 100 kwenye programu za Verified kwa uwiano ule ule wa seti kamili. Tuliyachagua kutoka matatizo ambayo mpangilio wake wa majaribio unafanya kazi na kuthibitika kwenye arm64 (marekebisho sahihi hupita, na kutofanya chochote hushindwa). Mifumo iliyochapishwa hupata pointi 1.0 hadi 1.5 chini kwenye haya 100 kuliko kwenye yote 500, kwa hiyo sampuli si nyepesi. Bado si ingizo la leaderboard, kwa sababu timu ya SWE-bench huyakagua hayo kwenye mashine zake yenyewe.</p>
 </details>
 <ol class="footnotes">
-<li id="fn1">Mightling: kazi 100, jaribio moja kila moja; DGX Spark moja (GB10, 128 GB), modeli inahudumiwa ndani ya mashine, bila cloud; hali ya kawaida ilipimwa 2026-10-08, hali ya refine 2026-10-09. Makadirio kutoka data ya kila kazi ya <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a>.</li>
+<li id="fn1">Mightling: matatizo 100, jaribio moja kila moja; DGX Spark moja (GB10, GB 128), modeli inaendeshwa kwenye mashine, bila wingu; hali ya kawaida ilipimwa 2026-10-08, hali ya refine 2026-10-09. Makadirio hutumia data ya kila tatizo kwenye <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a>.</li>
 <li id="fn2">Kazi 500, jaribio moja; maunzi hayajatajwa. Chanzo: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>. Modeli ileile na mini-SWE-agent: 57/100, 55.4%.</li>
 <li id="fn3">Kazi 500, jaribio moja, wakala hajatajwa; maunzi hayajatajwa. Chanzo: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>.</li>
 <li id="fn4">Kazi 500, jaribio moja; maunzi hayajatajwa. Chanzo: <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>.</li>
@@ -432,19 +432,19 @@ Networked git commands: none</pre></div>
 <span class="tag">PDF</span>
 <h3><a href="/paper/desktop-architecture.pdf">Architecting Local, Air-Gap-Capable Desktop Clients for Agentic AI Pair Programmers: Protocol Compatibility, Process Isolation, and Host Memory Safety</a></h3>
 <p class="note-small">dgxcoder · Oktoba 2026</p>
-<p>Tunawasilisha muundo wa usanifu, modeli rasmi ya uwezo, na tathmini ya kimajaribio ya Mightling Desktop, mazingira ya desktop ya chanzo huria yanayotumia itifaki ileile ya app-server kama desktop client ya muuzaji wa awali, yanayodumisha chaguo-msingi zinazoendana na Codex, yanayoendesha inference kwenye maunzi ya mtumiaji mwenyewe, na yanayofungia kila amri iliyo kwenye sandbox ndani ya kituo cha kazi mtumiaji anapowasha <code>/airgapped on</code>.</p>
+<p>Tunaeleza muundo wa Mightling Desktop, programu ya desktop huria. Tunatoa orodha rasmi ya kile inachoweza na isichoweza kufanya, na tunaipima. Inatumia itifaki ile ile ya app-server kama mteja wa desktop wa muuzaji wa awali, inabakiza chaguo-msingi vile vile vya Codex, inaendesha modeli kwenye vifaa vya mtumiaji mwenyewe, na inaweka kila amri ndani ya sandbox kwenye kompyuta ya kazi mtumiaji anapoandika <code>/airgapped on</code>.</p>
 <p><a href="/paper/desktop-architecture.pdf">Soma makala (PDF)</a></p>
 </div>
 <div class="pillar resource-card">
 <span class="tag">Nyaraka</span>
-<h3>Kuanza na nyaraka</h3>
-<p>Usanidi wa usalama wa mwenyeji kwenye GB10, kuanzisha seva ya modeli, kuunganisha wateja wa macOS, Linux na Windows, na kukagua mtandao.</p>
+<h3>Kuanza, na nyaraka</h3>
+<p>Jinsi ya kufanya GB10 iwe salama kupakia, jinsi ya kuanzisha seva ya modeli, jinsi ya kuoanisha kompyuta za Mac, Linux na Windows nayo, na jinsi ya kuendesha ukaguzi wa egress.</p>
 <p><a href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">Nyaraka →</a></p>
 </div>
 <div class="pillar resource-card">
 <span class="tag">Benchmark</span>
 <h3>Rudia ulinganisho wa SWE-bench</h3>
-<p>Tumia modeli ya Rasch na urudie kila nambari kwenye jedwali kutoka kwa data ya umma ya majaribio ya SWE-bench.</p>
+<p>Weka mwenyewe modeli ya Rasch ya majibu ya vipengele na uzalishe upya kila namba ya kila tatizo kwenye jedwali la benchmark kutoka data ya umma ya majaribio ya SWE-bench.</p>
 <p><a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>swe_bench_compare.py</code> →</a></p>
 </div>
 </div>
@@ -454,23 +454,23 @@ Networked git commands: none</pre></div>
 <div class="wrap">
 <h2>Maswali yanayoulizwa mara kwa mara</h2>
 <details><summary>Je, ninahitaji GB10?</summary>
-<p>Ndiyo, ili kuendesha modeli. Kompyuta zako nyingine zinaitumia kama clients: Linux (Arm au x86) na macOS kwa amri ileile ya usakinishaji, Windows (Arm au x86, onyesho) kwa <a href="#install">mstari wa PowerShell</a>.</p></details>
-<details><summary>Nilisakinisha Puffin. Je, hii ndiyo?</summary>
-<p>Ndiyo: Puffin ilibadilishwa jina kuwa Mightling katika 1.5. Endesha <code>puffin update</code> mara moja, kisha <code>puffin</code> mara ya mwisho. Inahamisha vikao, mipangilio na viungo vyako, na kuanzia hapo amri ni <code>ling</code>.</p></details>
-<details><summary>Je, ni bure kweli?</summary>
-<p>Ndiyo. Mightling ni chanzo huria chini ya AGPL, na weights za modeli ni bure. Gharama yako pekee ya kuendelea ni umeme.</p></details>
+<p>Ndiyo, ili kuendesha modeli. Kompyuta zako nyingine ni wateja wanaoikopa: Linux (Arm au x86) na macOS kwa amri ile ile ya kusakinisha, na Windows (Arm au x86, toleo la awali) kwa <a href="#install">mstari wa PowerShell</a>.</p></details>
+<details><summary>Nimesakinisha Puffin. Je, ni programu ile ile?</summary>
+<p>Ndiyo. Puffin ilipewa jina jipya Mightling katika 1.5. Endesha <code>puffin update</code> mara moja, kisha endesha <code>puffin</code> mara ya mwisho. Huhamisha vikao, mipangilio na viungo vyako, na baada ya hapo amri ni <code>ling</code>.</p></details>
+<details><summary>Je, kweli haigharimu chochote?</summary>
+<p>Hakuna kwa programu wala kwa modeli. Mightling ni huria chini ya AGPL, na uzito wa modeli ni huru kutumia. Unalipia mashine na umeme inaotumia.</p></details>
 <details><summary>Ninahitaji nini mbali na mashine?</summary>
-<p>Mfumo wa uendeshaji unaokuja nao (DGX OS 7, au Ubuntu 24.04 pale muuzaji anapoutoa), Docker na NVIDIA Container Toolkit, Python 3 na Git. Kwenye Ubuntu ya kawaida, <code>ling-admin host check</code> inakuambia kinachokosekana.</p></details>
-<details><summary>Je, kuna kitu kinafika mtandaoni?</summary>
-<p>Ni kile tu unachoomba wewe au wakala, kama utafutaji wa wavuti kupitia SearXNG kwenye mashine yako mwenyewe, na upakuaji wa mara ya kwanza. <code>/airgapped on</code> inazima yote.</p></details>
+<p>Mfumo wa uendeshaji unaokuja nayo (DGX OS 7, au Ubuntu 24.04 mahali NVIDIA inapoutoa), Docker na NVIDIA Container Toolkit, Python 3 na Git. Kwenye Ubuntu ya kawaida, <code>ling-admin host check</code> inakuambia kipi kinakosekana.</p></details>
+<details><summary>Je, kuna kitu kinachotoka kwenda intaneti?</summary>
+<p>Ni kile tu unachoomba wewe au msaidizi, kama utafutaji wa wavuti (kupitia SearXNG inayofanya kazi kwenye mashine yako mwenyewe) na upakuaji wa mara ya kwanza. Kwa <code>/airgapped on</code>, yote hayo yamezimwa.</p></details>
 <details><summary>Inaendesha modeli gani?</summary>
-<p>Qwen3.8-27B katika umbizo la NVFP4 la biti 4 la NVIDIA, inayohudumiwa na SGLang pamoja na drafter ya DFlash2, iliyochaguliwa na kuboreshwa kwa GB10. Weights za takriban 20 GB; karibu 38 GB za kumbukumbu ya mashine zinabaki huru inapohudumia.</p></details>
+<p>Qwen3.8-27B, katika muundo wa biti 4 wa NVIDIA unaoitwa NVFP4, inayohudumiwa na SGLang pamoja na msaidizi mdogo wa kukisia anayeitwa DFlash2 drafter. Tulichagua na kurekebisha yote kwa ajili ya GB10. Uzito unachukua takriban GB 20, na inapofanya kazi, takriban GB 38 za kumbukumbu ya mashine hubaki huru.</p></details>
 </div>
 </section>
 <section class="cta">
 <div class="wrap">
 <h2>Weka msimbo wako mezani kwako</h2>
-<p class="sub centered">Ukiamini msimbo unapaswa kubaki kwenye meza ulikoandikwa, weka nyota kwenye repositori: ndivyo wamiliki wengine wa GB10 wanavyoigundua Mightling.</p>
+<p class="sub centered">Ukiamini kwamba msimbo unapaswa kubaki mezani ulipoandikwa, mpe hazina nyota kwenye GitHub. Ndivyo wamiliki wengine wa GB10 wanavyompata Mightling.</p>
 <div class="cmd has-copy cta-cmd"><button class="copy" data-done="Imenakiliwa" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">Nakili</button>
 <pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
 <div class="buttons">
@@ -486,8 +486,8 @@ Networked git commands: none</pre></div>
 <div class="footer-grid">
 <div class="footer-brand">
 <a class="brand" href="#"><img alt="" height="28" src="/assets/favicon.svg" width="28"/>Mightling</a>
-<p><b>Mightling na Dreamference.</b> Dreamference inajenga AI ya siri inayoendeshwa kwenye maunzi yako mwenyewe.</p>
-<p>Tovuti hii haitoi maombi yoyote ya mtu wa tatu: bila vifuatiliaji, bila uchanganuzi, bila fonti za nje.</p>
+<p><b>Mightling na Dreamference.</b> Dreamference hujenga AI ya faragha inayofanya kazi kwenye vifaa vyako mwenyewe.</p>
+<p>Tovuti hii haiombi chochote kwa tovuti nyingine: hakuna vifuatiliaji, hakuna kuhesabu wageni, hakuna fonti kutoka kwingine.</p>
 </div>
 <div class="footer-col">
 <h4>Unachopata</h4>
@@ -504,7 +504,7 @@ Networked git commands: none</pre></div>
 <ul>
 <li><a href="#proof">Uthibitisho</a></li>
 <li><a href="#why">Kwa nini Mightling</a></li>
-<li><a href="#compare">Mightling na mawakala wa uandishi wa msimbo wa cloud</a></li>
+<li><a href="#compare">Mightling na wasaidizi wa msimbo wa wingu</a></li>
 <li><a href="#benchmark">Benchmark</a></li>
 </ul>
 </div>
@@ -521,7 +521,7 @@ Networked git commands: none</pre></div>
 </div>
 <div class="row footer-bottom">
 <div>
-<p>Chanzo huria chini ya GNU AGPL v3. NVIDIA, GB10, DGX na DGX Spark ni alama za biashara za NVIDIA Corporation; majina mengine ni alama za biashara za wamiliki wake. Mightling na Dreamference hazihusiani nao.</p>
+<p>Huria chini ya GNU AGPL v3. NVIDIA, GB10, DGX na DGX Spark ni alama za biashara za NVIDIA Corporation; majina mengine ni alama za biashara za wamiliki wake. Mightling na Dreamference hazihusiani nazo.</p>
 </div>
 <div>
 <p><a href="https://github.com/dreamference/mightling">GitHub</a> · <a href="https://github.com/dreamference/mightling/issues">Issues</a> · <a href="https://github.com/dreamference/mightling/blob/main/LICENSE">Leseni</a></p>
